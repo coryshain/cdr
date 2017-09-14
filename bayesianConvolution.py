@@ -59,16 +59,6 @@ def get_X(df, window=inf):
         else:
             i += 1
 
-#def get_X(df, window=inf):
-#    i = 1
-#    first_row = 0
-#    while i <= len(df):
-#        yield np.array(df[max(first_row,i-window):i][features]).astype('float32')
-#        if i == len(df):
-#            i = 1
-#        else:
-#            i += 1
-
 def get_t(df, window=inf):
     i = 1
     subj_cur = df.iloc[0].subject
@@ -89,16 +79,6 @@ def get_t(df, window=inf):
             first_row = 0
         else:
             i += 1
-
-#def get_t(df, window=inf):
-#    i = 1
-#    first_row = 0
-#    while i <= len(df):
-#        yield np.expand_dims(np.array(df.iloc[i-1]['time'] - df[max(first_row,i-window):i]['time']).astype('float32'), -1) + 1
-#        if i == len(df):
-#            i = 1
-#        else:
-#            i += 1
 
 n_subj = len(inp['subject'].unique())
 features = ['sentpos', 'nItem']
@@ -122,7 +102,7 @@ with pm.Model() as model:
     fdur = pm.Normal('fdur', mu = intercept + pm.math.sum(pm.math.dot(X,beta), 0), sd = sigma, observed=inp['fdur'])
 
     trace = pm.sample(100, tune=5)
-    print(trace)
+    
     fig, ax = plt.subplots(5, 2)
     pm.traceplot(trace, ax=ax)
     plt.savefig('trace.jpg')
