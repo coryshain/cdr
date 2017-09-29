@@ -1,6 +1,7 @@
 from __future__ import print_function
 import sys
 import os
+import shutil
 import yaml
 import math
 import time
@@ -9,14 +10,14 @@ import numpy as np
 from numpy import inf, nan
 import scipy
 import pandas as pd
-import statsmodels.api as sm
+import configparser
 import statsmodels.formula.api as smf
 import seaborn as sns
 import matplotlib.pyplot as plt
 sns.set(style="white", rc={"axes.facecolor": (0, 0, 0, 0)})
 
 
-def bootstrap(true, preds_1, preds_2, err_type='mse', n_iter=10000):
+def bootstrap(true, preds_1, preds_2, err_type='mse', n_iter=10000, n_tails=2):
     pb = tf.contrib.keras.utils.Progbar(n_iter)
     err_table = np.stack([preds_1, preds_2], 1)
     err_table -= np.expand_dims(true, -1)
@@ -31,12 +32,18 @@ def bootstrap(true, preds_1, preds_2, err_type='mse', n_iter=10000):
         m1 = err_table[np.arange(len(err_table)),shuffle]
         m2 = err_table[np.arange(len(err_table)),1-shuffle]
         cur_diff = m1.mean() - m2.mean()
-        if base_diff < 0 and cur_diff <= base_diff:
-            hits += 1
-        elif base_diff > 0 and cur_diff >= base_diff:
-            hits += 1
-        elif base_diff == 0:
-            hits += 1
+        if n_tails == 1:
+            if base_diff < 0 and cur_diff <= base_diff:
+                hits += 1
+            elif base_diff > 0 and cur_diff >= base_diff:
+                hits += 1
+            elif base_diff == 0:
+                hits += 1
+        elif n_tails == 2:
+            if math.fabs(cur_diff) > math.fabs(base_diff):
+                hits += 1
+        else:
+            raise ValueError('Invalid bootstrap parameter n_tails: %s. Must be in {0, 1}.' %n_tails)
         pb.update(i+1, force=True)
 
     p = float(hits+1)/(n_iter+1)
@@ -56,7 +63,7 @@ def c(df):
     return df-df.mean(axis=0)
 
 
-def plot_convolutions(plot_x, plot_y, features, dir='log', filename='convolution_plot.jpg'):
+def plot_convolutions(plot_x, plot_y, features, dir, filename='convolution_plot.jpg'):
     n_feat = plot_y.shape[-1]
     for i in range(n_feat):
         plt.plot(plot_x, plot_y[:,i], label=features[i])
@@ -92,56 +99,45 @@ def accumulate_column(X, col, fdur):
     X['cum' + col] = X.apply(accumulate_row, axis=1, args=(col,fdur))
     return X
 
-modality = 'ET'
-network_type = 'mle'
-data_rep = 'conv'
-conv_func = 'gamma'
-window = 100
-partition = 'train'
-loss = 'MSE'
-modulus = 3
-cv_modulus = 5
-small = sys.float_info.min
-baseline_LM = True
-baseline_LME = True
-attribution_model = False
-random_subjects_model = True
-random_subjects_conv_params = True
-log_random = False
-log_histogram = False
-compute_signif = False
-n_epoch = 100
+config = configparser.ConfigParser()
+config.read(sys.argv[1])
 
-features = [
-    'sentpos',
-    'wlen',
-    'fwprob5surp',
-    'totsurp'
-]
+## Required
+data_path = config.get('settings', 'data_path')
+features = config.get('settings', 'features')
 
-if modality == 'SPR':
-    lme_baseline_spillover = [
-        'totsurp'
-    ]
-    bform = 'scale(fdur, center=TRUE, scale=FALSE) ~ sentpos + wlen + fwprob5surp + totsurpS1 + (1 + sentpos + wlen + fwprob5surp + totsurpS1 | subject)'
-elif modality == 'ET':
-    features += [
-        'wdelta',
-        'cumfwprob5surp',
-        'cumtotsurp'
-    ]
-    lme_baseline_spillover = [
-        'fwprob5surp',
-        'totsurp',
-        'wdelta'
-    ]
-    lme_baseline_cum = [
-        'fwprob5surp',
-        'totsurp'
-    ]
-    # bform = 'scale(fdur, center=TRUE, scale=FALSE) ~ sentpos + wlen + wdelta + prevwasfix + fwprob5surp + totsurp + (1 + sentpos + wlen + wdelta + prevwasfix + fwprob5surp + totsurp | subject)'
-    # bform = 'scale(fdur, center=TRUE, scale=FALSE) ~ sentpos + wlen + wdelta + fwprob5surp + totsurp + (1 + sentpos + wlen + wdelta + fwprob5surp + totsurp | subject)'
-    bform = 'scale(fdur, center=TRUE, scale=FALSE) ~ sentpos + wlen + wdelta + fwprob5surp + cumfwprob5surp + totsurp + cumtotsurp + (1 + sentpos + wlen + wdelta + fwprob5surp + cumfwprob5surp + totsurp + cumtotsurp | subject)'
+## Optional
+logdir = config.get('settings', 'logdir', fallback='log')
+if not os.path.exists(logdir):
+    os.makedirs(logdir)
+shutil.copy2(sys.argv[1], logdir + '/config.ini')
+modality = config.get('settings', 'modality', fallback='ET')
+network_type = config.get('settings', 'network_type', fallback='mle')
+data_rep = config.get('settings', 'data_rep', fallback='conv')
+conv_func = config.get('settings', 'conv_func', fallback='gamma')
+partition = config.get('settings', 'partition', fallback='train')
+loss = config.get('settings', 'loss', fallback='MSE')
+window_length = int(config.get('settings', 'window_length', fallback=100))
+modulus = config.getint('settings', 'modulus', fallback=3)
+cv_modulus = config.getint('settings', 'cv_modulus', fallback=5)
+bform_LM = config.get('settings', 'bform_LM', fallback='')
+baseline_LM = len(bform_LM) > 0
+bform_LME = config.get('settings', 'bform_LME', fallback='')
+baseline_LME = len(bform_LME) > 0
+lme_baseline_spillover = config.get('settings', 'lme_baseline_spillover', fallback=features)
+lme_baseline_spillover = lme_baseline_spillover.strip().split()
+lme_baseline_cum = config.get('settings', 'lme_baseline_cum', fallback=features)
+lme_baseline_cum = lme_baseline_cum.strip().split()
+features = features.strip().split()
+attribution_model = config.getboolean('settings', 'attribution_model', fallback=False)
+random_subjects_model = config.getboolean('settings', 'random_subjects_model', fallback=True)
+random_subjects_conv_params = config.getboolean('settings', 'random_subjects_conv_params', fallback=False)
+log_random = config.getboolean('settings', 'log_random', fallback=False)
+log_convolution_plots = config.getboolean('settings', 'log_convolution_plots', fallback=False)
+compute_signif = config.getboolean('settings', 'compute_signif', fallback=False)
+n_epoch_train = config.getint('settings', 'n_epoch_train', fallback=50)
+n_epoch_finetune = config.getint('settings', 'n_epoch_finetune', fallback=250)
+
 other_full = [
         'word',
         'onset_time',
@@ -161,30 +157,8 @@ other_full = [
         'endofline'
     ]
 
-if not os.path.exists('log'):
-    os.mkdir('log')
-
-with open('log/params.txt', 'w') as f:
-    print('='*50, file=f)
-    print('Parameter summary:', file=f)
-    print('='*50, file=f)
-    print('', file=f)
-    print('Network type: %s' %network_type, file=f)
-    print('Data rep: %s' %data_rep, file=f)
-    print('Convolution function: %s' %conv_func, file=f)
-    print('Window length: %d' %window, file=f)
-    print('Partition: %s' %partition, file=f)
-    print('Loss function: %s' %loss, file=f)
-    print('Train/dev/test modulus: %d' %modulus, file=f)
-    print('Tran/crossval modulus: %d' %cv_modulus, file=f)
-    print('Shared weight attribution: %s' %attribution_model, file=f)
-    print('Random subjects model: %s' %random_subjects_model, file=f)
-    print('Random subjects convolution parameters: %s' %random_subjects_conv_params, file=f)
-
-
-
 sys.stderr.write('Loading data...\n')
-X = pd.read_csv(sys.argv[1], sep=' ', skipinitialspace=True)
+X = pd.read_csv(data_path, sep=' ', skipinitialspace=True)
 
 sys.stderr.write('Pre-processing data...\n')
 if modality == 'ET':
@@ -215,7 +189,7 @@ for col in lme_baseline_spillover:
         X[s_name].fillna(0, inplace=True)
 
 X = [X]
-for i in range(1,window+1):
+for i in range(1, window_length+1):
     X.append(X[0].groupby(['subject', 'docid'], as_index=False).shift(i)[['onset_time', 'offset_time']+features])
     X[i].fillna(value=0, inplace=True)
 
@@ -283,13 +257,13 @@ if partition == 'train':
 
         with open('baselines/LM/summary.txt', 'w') as f:
             print()
-            feats_train = sm.add_constant(X[0][0][features])
-            feats_cv = sm.add_constant(X[0][1][features])
+            feats_train = smf.add_constant(X[0][0][['fdur'] + features])
+            feats_cv = smf.add_constant(X[0][1][['fdur'] + features])
             if os.path.exists('baselines/LM/lm_fit.obj'):
                 with open('baselines/LM/lm_fit.obj', 'rb') as f2:
                     lm = pickle.load(f2)
             else:
-                lm = sm.OLS(y[0], feats_train)
+                lm = smf.ols(formula=bform_lm, df=feats_train)
                 with open('baselines/LM/lm_fit.obj', 'wb') as f2:
                     pickle.dump(lm, f2)
             lm_results = lm.fit()
@@ -353,7 +327,7 @@ if partition == 'train':
                 with open('baselines/LME/lme_fit.obj', 'rb') as f2:
                     lme = pickle.load(f2)
             else:
-                lme = regress_lme(bform, X_lme)
+                lme = regress_lme(bform_lme, X_lme)
                 with open('baselines/LME/lme_fit.obj', 'wb') as f2:
                     pickle.dump(lme, f2)
 
@@ -527,7 +501,7 @@ elif network_type == 'mle':
             conv_coef = conv(tf.expand_dims(t_delta, -1))
             X_conv = conv_coef * X_raw[0][:, 2:]
 
-            for i in range(1, window+1):
+            for i in range(1, window_length+1):
                 t_delta = X_raw[0][:,0] - X_raw[i][:,0]
                 conv_coef = conv(tf.expand_dims(t_delta, -1))
                 weighted = conv_coef*X_raw[i][:,2:]
@@ -592,10 +566,10 @@ elif network_type == 'mle':
         #optim = tf.contrib.opt.NadamOptimizer()
         train_op = optim.minimize(loss_func, global_step=global_batch_step, name='optim')
     
-        train_writer = tf.summary.FileWriter('log/train')
-        cv_writer = tf.summary.FileWriter('log/cv')
+        train_writer = tf.summary.FileWriter(logdir + '/train')
+        cv_writer = tf.summary.FileWriter(logdir + '/cv')
         if random_subjects_model and log_random:
-            subject_writers = [tf.summary.FileWriter('log/subjects/%d'%i) for i in range(n_subj)]
+            subject_writers = [tf.summary.FileWriter(logdir + '/subjects/%d'%i) for i in range(n_subj)]
             subject_indexer = tf.placeholder(dtype=tf.int32)
             tf.summary.scalar('by_subject/Intercept', intercept_correction_by_subject[subject_indexer], collections=['by_subject'])
         tf.summary.scalar('Intercept', intercept_global[0], collections=['params'])
@@ -609,18 +583,18 @@ elif network_type == 'mle':
                     tf.summary.scalar('by_subject/beta/%s'%features[i], subject_beta[subject_indexer,i], collections=['by_subject'])
             if data_rep == 'conv':
                 if conv_func == 'exp':
-                    tf.summary.scalar('log_lambda/%s' % features[i], L_global[0, i], collections=['params'])
+                    tf.summary.scalar(logdir + '_lambda/%s' % features[i], L_global[0, i], collections=['params'])
                     if random_subjects_model and random_subjects_conv_params and log_random:
                         tf.summary.scalar('by_subject/log_lambda/%s' % features[i], L_correction_by_subject[subject_indexer, i], collections=['by_subject'])
                 elif conv_func == 'gamma':
-                    tf.summary.scalar('log_k/%s' % features[i], K_global[0, i], collections=['params'])
-                    tf.summary.scalar('log_theta/%s' % features[i], theta_global[0, i], collections=['params'])
-                    tf.summary.scalar('log_neg_delta/%s' % features[i], delta_global[0, i], collections=['params'])
+                    tf.summary.scalar(logdir + '_k/%s' % features[i], K_global[0, i], collections=['params'])
+                    tf.summary.scalar(logdir + '_theta/%s' % features[i], theta_global[0, i], collections=['params'])
+                    tf.summary.scalar(logdir + '_neg_delta/%s' % features[i], delta_global[0, i], collections=['params'])
                     if random_subjects_model and random_subjects_conv_params and log_random:
                         tf.summary.scalar('by_subject/log_k/%s' % features[i], K_correction_by_subject[subject_indexer, i], collections=['by_subject'])
                         tf.summary.scalar('by_subject/log_theta/%s' % features[i], theta_correction_by_subject[subject_indexer, i], collections=['by_subject'])
                         tf.summary.scalar('by_subject/log_delta/%s' % features[i], delta_correction_by_subject[subject_indexer, i], collections=['by_subject'])
-                if log_histogram:
+                if log_convolution_plots:
                     tf.summary.histogram('conv/%s' % features[i], conv_global(support)[:,i], collections=['params'])
         if attribution_model:
             for i in range(len(feature_powset)):
@@ -650,13 +624,13 @@ elif network_type == 'mle':
                     if parent not in s_dict_grouped:
                         s_dict_grouped[parent] = {}
                     s_dict_grouped[parent][key] = val
-                    if parent.startswith('log_neg_'):
+                    if parent.startswith(logdir + '_neg_'):
                         unlog_name = parent[8:]
                         if unlog_name not in s_dict_grouped:
                             s_dict_grouped[unlog_name] = {}
                         unlog_val = -math.exp(val)
                         s_dict_grouped[unlog_name][key] = unlog_val
-                    elif parent.startswith('log_'):
+                    elif parent.startswith(logdir + '_'):
                         unlog_name = parent[4:]
                         if unlog_name not in s_dict_grouped:
                             s_dict_grouped[unlog_name] = {}
@@ -673,8 +647,8 @@ elif network_type == 'mle':
                     yaml.dump(s_dict, default_flow_style=False, stream=F)
 
         saver = tf.train.Saver()
-        if os.path.exists('log/checkpoint'):
-            saver.restore(sess, 'log/model.ckpt')
+        if os.path.exists(logdir + '/checkpoint'):
+            saver.restore(sess, logdir + '/model.ckpt')
         else:
             sess.run(tf.global_variables_initializer())
 
@@ -705,11 +679,15 @@ elif network_type == 'mle':
         print('Initial CV loss: %.4f'%loss_cv)
         print()
 
-        while global_step.eval(session=sess) < n_epoch:
-            if global_step.eval(session=sess) < n_epoch / 2:
+        X_range = np.arange(len(X[0][0]))
+
+        while global_step.eval(session=sess) < n_epoch_train + n_epoch_finetune:
+            if global_step.eval(session=sess) < n_epoch_train:
                 minibatch_size = 128
+                p, p_inv = getRandomPermutation(len(X[0][0]))
             else:
                 minibatch_size = len(X[0][0])
+                p = X_range
             n_minibatch = math.ceil(float(len(X[0][0])) / minibatch_size)
 
             t0_iter = time.time()
@@ -717,7 +695,6 @@ elif network_type == 'mle':
             print('Iteration %d' %int(global_step.eval(session=sess)+1))
             print()
 
-            p, p_inv = getRandomPermutation(len(X[0][0]))
             pb = tf.contrib.keras.utils.Progbar(n_minibatch)
 
             for j in range(0, len(X[0][0]), minibatch_size):
@@ -745,14 +722,14 @@ elif network_type == 'mle':
             print_summary(s)
             print()
 
-            print_summary(s, f='log/parameter_summary.txt')
+            print_summary(s, f=logdir + '/parameter_summary.txt')
 
             loss_minibatch, preds_train = sess.run([loss_func, out], feed_dict=fd_train)
             summary_cv_losses_batch, loss_cv, preds_cv = sess.run([summary_losses, loss_func, out], feed_dict=fd_cv)
             mae_train = mae(y[0], preds_train)
             mae_cv = mae(y[1], preds_cv)
             cv_writer.add_summary(summary_cv_losses_batch, global_batch_step.eval(session=sess))
-            with open('log/train/results.txt', 'w') as f:
+            with open(logdir + '/train/results.txt', 'w') as f:
                 f.write('='*50 + '\n')
                 print_tee('Train loss: %.4f' % loss_minibatch, [sys.stdout, f])
                 print_tee('Train MAE loss: %.4f' % mae_train, [sys.stdout, f])
@@ -788,14 +765,14 @@ elif network_type == 'mle':
                 plot_x = support.eval(session=sess)
                 plot_y = (beta_global * conv_global(support)).eval(session=sess)
 
-                plot_convolutions(plot_x, plot_y, features, dir='log', filename='convolution_plot.jpg')
+                plot_convolutions(plot_x, plot_y, features, dir=logdir, filename='convolution_plot.jpg')
                 if attribution_model:
                     plot_y = (beta_global_marginal * conv_global(support)).eval(session=sess)
-                    plot_convolutions(plot_x, plot_y, features, dir='log', filename='marginal_convolution_plot.jpg')
+                    plot_convolutions(plot_x, plot_y, features, dir=logdir, filename='marginal_convolution_plot.jpg')
 
 
 
-            saver.save(sess, 'log/model.ckpt')
+            saver.save(sess, logdir + '/model.ckpt')
             t1_iter = time.time()
             print('Iteration time: %.2fs' %(t1_iter-t0_iter))
 
