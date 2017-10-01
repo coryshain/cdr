@@ -12,9 +12,15 @@ import scipy
 import pandas as pd
 import configparser
 import statsmodels.formula.api as smf
+import patsy
 import seaborn as sns
 import matplotlib.pyplot as plt
 sns.set(style="white", rc={"axes.facecolor": (0, 0, 0, 0)})
+
+import tensorflow as tf
+from tensorflow.python.platform.test import is_gpu_available
+
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 
 def bootstrap(true, preds_1, preds_2, err_type='mse', n_iter=10000, n_tails=2):
@@ -99,6 +105,67 @@ def accumulate_column(X, col, fdur):
     X['cum' + col] = X.apply(accumulate_row, axis=1, args=(col,fdur))
     return X
 
+def get_input_range_inner(y, X):
+    condition = X.subject == y.subject
+    condition &= X.docid == y.docid
+    condition &= X.time <= y.time
+    matching_indices = np.where(condition)[0]
+    lower_bound = matching_indices[0]
+    upper_bound = matching_indices[-1]+1
+    return lower_bound, upper_bound
+
+def get_history_intervals(y, X):
+    pb = tf.contrib.keras.utils.Progbar(len(y))
+
+    lower_bounds = np.zeros(len(y)).astype('int32')
+    upper_bounds = np.zeros(len(y)).astype('int32')
+
+    for i in range(len(y)):
+        lower_bounds[i], upper_bounds[i] = get_input_range_inner(y.iloc[i], X)
+        pb.update(i, force=True)
+    return lower_bounds, upper_bounds
+
+def compute_history_intervals(y, X, check_output=False):
+    pb = tf.contrib.keras.utils.Progbar(len(y))
+
+    subject_y = np.array(y.subject.cat.codes)
+    docid_y = np.array(y.docid.cat.codes)
+    time_y = np.array(y.time)
+
+    subject_X = np.array(X.subject.cat.codes)
+    docid_X = np.array(X.docid.cat.codes)
+    time_X = np.array(X.time)
+
+    subject = subject_y[0]
+    docid = docid_y[0]
+
+    first_obs = np.zeros(len(y)).astype('int32')
+    last_obs = np.zeros(len(y)).astype('int32')
+
+    i = j = 0
+    start = 0
+    end = 0
+    while i < len(y) and j < len(X):
+        if subject_y[i] != subject or docid_y[i] != docid:
+            start = end = i
+            subject = subject_y[i]
+            docid = docid_y[i]
+        while j < len(X) and time_X[j] <= time_y[i] and subject_X[j] == subject and docid_X[j] == docid:
+            end += 1
+            j += 1
+        if check_output:
+            assert subject_X[start] == subject_y[i], 'Subject mismatch at start: y = %s, X = %s at y index %d' %(subject_X[start], subject_y[i], i)
+            assert docid_X[start] == docid_y[i], 'Docid mismatch at start: y = %s, X = %s at y index %d' %(docid_X[start], docid_y[i], i)
+            assert subject_X[end-1] == subject_y[i], 'Subject mismatch at end: y = %s, X = %s at y index %d' % (subject_X[end-1], subject_y[i], i)
+            assert docid_X[end-1] == docid_y[i], 'Docid mismatch at end: y = %s, X = %s at y index %d' % (docid_X[end-1], docid_y[i], i)
+            assert start < end, 'Start == end disallowed. Both had value %d at y index %d' %(start, i)
+        first_obs[i] = start
+        last_obs[i] = end
+        pb.update(i, force=True)
+
+        i += 1
+    return first_obs, last_obs
+
 config = configparser.ConfigParser()
 config.read(sys.argv[1])
 
@@ -140,8 +207,7 @@ n_epoch_finetune = config.getint('settings', 'n_epoch_finetune', fallback=250)
 
 other_full = [
         'word',
-        'onset_time',
-        'offset_time',
+        'time',
         'fdur',
         'subject',
         'docid',
@@ -171,9 +237,8 @@ X.subject = X.subject.astype('category')
 X.docid = X.docid.astype('category')
 X.sentid = X.sentid.astype('category')
 
-X['onset_time'] = X.groupby(['subject', 'docid']).fdur.shift(1).fillna(value=0)
-X['onset_time'] = X.groupby(['subject', 'docid']).onset_time.cumsum() / 1000 # Convert ms to s
-X['offset_time'] = X.groupby(['subject', 'docid']).fdur.cumsum() / 1000 # Convert ms to s
+X['time'] = X.groupby(['subject', 'docid']).fdur.shift(1).fillna(value=0)
+X.time = X.groupby(['subject', 'docid']).time.cumsum() / 1000 # Convert ms to s
 other_relevant = set(other_full).intersection(set(X.columns))
 other_relevant = list(other_relevant)
 X._get_numeric_data().fillna(value=0, inplace=True)
@@ -188,50 +253,54 @@ for col in lme_baseline_spillover:
     else:
         X[s_name].fillna(0, inplace=True)
 
-X = [X]
-for i in range(1, window_length+1):
-    X.append(X[0].groupby(['subject', 'docid'], as_index=False).shift(i)[['onset_time', 'offset_time']+features])
-    X[i].fillna(value=0, inplace=True)
+y = X[other_relevant]
 
-n_subj = len(X[0]['subject'].unique())
+print('Computing history intervals for each regression target sample...')
+first_obs, last_obs = compute_history_intervals(y, X)
+y['first_obs'] = first_obs
+y['last_obs'] = last_obs
+sample = np.random.randint(0, len(y), 10)
+if False:
+    for i in sample:
+        print(i)
+        row = y.iloc[i]
+        print(row)
+        print(X[row.first_obs:row.last_obs])
+
+n_subj = len(X.subject.unique())
 n_feat = len(features)
 
-select = X[0].fdur > 100
-select &= X[0].fdur < 3000
-if 'correct' in X[0].columns:
-    select &= X[0].correct > 4
+select = y.fdur > 100
+select &= y.fdur < 3000
+if 'correct' in y.columns:
+    select &= y.correct > 4
 
-if 'startofsentence' in X[0].columns:
-    select &= X[0].startofsentence != 1
-if 'endofsentence' in X[0].columns:
-    select &= X[0].endofsentence != 1
+if 'startofsentence' in y.columns:
+    select &= y.startofsentence != 1
+if 'endofsentence' in y.columns:
+    select &= y.endofsentence != 1
 if partition == 'test':
-    select &= ((X[0].subject.cat.codes+1)+X[0].sentid.cat.codes) % modulus == modulus-1
+    select &= ((y.subject.cat.codes+1)+y.sentid.cat.codes) % modulus == modulus-1
 elif partition == 'dev':
-    select &= ((X[0].subject.cat.codes+1)+X[0].sentid.cat.codes) % modulus == modulus-2
+    select &= ((y.subject.cat.codes+1)+y.sentid.cat.codes) % modulus == modulus-2
+elif partition == 'train':
+    select &= ((y.subject.cat.codes+1)+y.sentid.cat.codes) % modulus < modulus-2
+    select_train = select & (((y.subject.cat.codes+1)+y.sentid.cat.codes) % cv_modulus < cv_modulus-1)
+    select_cv = select & (((y.subject.cat.codes+1)+y.sentid.cat.codes) % cv_modulus == cv_modulus-1)
 else:
-    select &= ((X[0].subject.cat.codes+1)+X[0].sentid.cat.codes) % modulus < modulus-2
-    select_cv = select & (((X[0].subject.cat.codes+1)+X[0].sentid.cat.codes) % cv_modulus == cv_modulus-1)
-    select_train = select & (((X[0].subject.cat.codes+1)+X[0].sentid.cat.codes) % cv_modulus < cv_modulus-1)
-#    mean_train = X[0][features][select_train].mean(axis=0)
-#    std_train = X[0][features][select_train].mean(axis=0)
-#    mean_cv = X[0][features][select_cv].mean(axis=0)
-#    std_cv = X[0][features][select_cv].mean(axis=0)
+    raise ValueError('Partition type %s not supported (must be one of ["train", "dev", "test"]')
 
-for i in range(len(X)):
-    if partition == 'train':
-        X[i] = [X[i][select_train], X[i][select_cv]]
-        #X[i] = [X[i][select]]
-    else:
-        X[i] = X[i][select]
 if partition == 'train':
-    y = [c(X[0][0].fdur), c(X[0][1].fdur)]
-    #y = [X[0][0].fdur]
-    n_train_sample = len(X[0][0])
-    n_cv_sample = len(X[0][1])
+    y_train = y[select_train]
+    y_train.fdur = c(y_train.fdur)
+    y_cv = y[select_cv]
+    y_cv.fdur = c(y_cv.fdur)
+
+    n_train_sample = len(y_train)
+    n_cv_sample = len(y_cv)
 else:
-    y = c(X[0].fdur)
-    n_train_sample = len(X[0])
+    y.fdur = c(y.fdur)
+    n_train_sample = len(y)
 
 print()
 print('Evaluating on %s partition' %partition)
@@ -242,11 +311,16 @@ if partition == 'train':
 print()
 
 print('Correlation matrix (training data only):')
-rho = X[0][0][features].corr()
+rho = X[features].corr()
 print(rho)
 print()
 
 if partition == 'train':
+    if baseline_LM or baseline_LME:
+        X_train = X[select_train]
+        X_train.fdur = y_train.fdur
+        X_cv = X[select_cv]
+        X_cv.fdur = y_cv.fdur
     if baseline_LM:
         if not os.path.exists('baselines'):
             os.makedirs('baselines')
@@ -257,16 +331,13 @@ if partition == 'train':
 
         with open('baselines/LM/summary.txt', 'w') as f:
             print()
-            feats_train = smf.add_constant(X[0][0][['fdur'] + features])
-            feats_cv = smf.add_constant(X[0][1][['fdur'] + features])
-            if os.path.exists('baselines/LM/lm_fit.obj'):
-                with open('baselines/LM/lm_fit.obj', 'rb') as f2:
-                    lm = pickle.load(f2)
-            else:
-                lm = smf.ols(formula=bform_lm, df=feats_train)
-                with open('baselines/LM/lm_fit.obj', 'wb') as f2:
-                    pickle.dump(lm, f2)
+
+            _, X_LM_train = patsy.dmatrices(bform_LM, X_train, return_type='dataframe')
+            _, X_LM_cv = patsy.dmatrices(bform_LM, X_cv, return_type='dataframe')
+
+            lm = smf.ols(formula=bform_LM, data=X_train)
             lm_results = lm.fit()
+
             print_tee('='*50, [sys.stdout, f])
             print_tee('Linear regression baseline results summary', [sys.stdout, f])
             print_tee('Results summary:', [sys.stdout, f])
@@ -275,17 +346,17 @@ if partition == 'train':
             print_tee(lm_results.params, [sys.stdout, f])
             print_tee('', [sys.stdout, f])
 
-            lm_preds_train = lm.predict(lm_results.params, feats_train)
-            lm_mse_train = mse(y[0], lm_preds_train)
-            lm_mae_train = mae(y[0], lm_preds_train)
+            lm_preds_train = lm.predict(lm_results.params, X_LM_train)
+            lm_mse_train = mse(y_train.fdur, lm_preds_train)
+            lm_mae_train = mae(y_train.fdur, lm_preds_train)
             print_tee('Training set loss:', [sys.stdout, f])
             print_tee('  MSE: %.4f' % lm_mse_train, [sys.stdout, f])
             print_tee('  MAE: %.4f' % lm_mae_train, [sys.stdout, f])
             print_tee('', [sys.stdout, f])
 
-            lm_preds_cv = lm.predict(lm_results.params, feats_cv)
-            lm_mse_cv = mse(y[1], lm_preds_cv)
-            lm_mae_cv = mae(y[1], lm_preds_cv)
+            lm_preds_cv = lm.predict(lm_results.params, X_LM_cv)
+            lm_mse_cv = mse(y_cv.fdur, lm_preds_cv)
+            lm_mae_cv = mae(y_cv.fdur, lm_preds_cv)
             print_tee('Cross-validation set loss:', [sys.stdout, f])
             print_tee('  MSE: %.4f' % lm_mse_cv, [sys.stdout, f])
             print_tee('  MAE: %.4f' % lm_mae_cv, [sys.stdout, f])
@@ -322,12 +393,11 @@ if partition == 'train':
 
             regress_lme = robjects.r(rstring)
 
-            X_lme = X[0][0]
             if os.path.exists('baselines/LME/lme_fit.obj'):
                 with open('baselines/LME/lme_fit.obj', 'rb') as f2:
                     lme = pickle.load(f2)
             else:
-                lme = regress_lme(bform_lme, X_lme)
+                lme = regress_lme(bform_LME, X_train)
                 with open('baselines/LME/lme_fit.obj', 'wb') as f2:
                     pickle.dump(lme, f2)
 
@@ -365,16 +435,16 @@ if partition == 'train':
             print_tee(s.rx2('convWarn'), [sys.stdout, f])
             print_tee('', [sys.stdout, f])
 
-            lme_preds_train = predict(lme, X[0][0])
-            lme_mse_train = mse(y[0], lme_preds_train)
-            lme_mae_train = mae(y[0], lme_preds_train)
+            lme_preds_train = predict(lme, X_train)
+            lme_mse_train = mse(y_train.fdur, lme_preds_train)
+            lme_mae_train = mae(y_train.fdur, lme_preds_train)
             print_tee('Training set loss:', [sys.stdout, f])
             print_tee('  MSE: %.4f' % lme_mse_train, [sys.stdout, f])
             print_tee('  MAE: %.4f' % lme_mae_train, [sys.stdout, f])
 
-            lme_preds_cv = predict(lme, X[0][1])
-            lme_mse_cv = mse(y[1], lme_preds_cv)
-            lme_mae_cv = mae(y[1], lme_preds_cv)
+            lme_preds_cv = predict(lme, X_cv)
+            lme_mse_cv = mse(y_cv.fdur, lme_preds_cv)
+            lme_mae_cv = mae(y_cv.fdur, lme_preds_cv)
             print_tee('Cross-validation set loss:', [sys.stdout, f])
             print_tee('  MSE: %.4f' % lme_mse_cv, [sys.stdout, f])
             print_tee('  MAE: %.4f' % lme_mae_cv, [sys.stdout, f])
@@ -405,9 +475,9 @@ if network_type == 'bayesian':
         sigma = pm.HalfNormal('sigma', sd=1)
         intercept = pm.Normal('Intercept', y.mean(), sd=y.std())
       
-        X_conv = conv(X[0].offset_time - X[0].onset_time, K, rate) * X[0][features]
+        X_conv = conv(X[0].time - X[0].time, K, rate) * X[0][features]
         for i in range(1, len(X)):
-            t_delta = X[0].offset_time-X[i].onset_time
+            t_delta = X[0].time-X[i].time
             X_conv += conv(t_delta, K, rate) * X[i][features]
         E_fdur = intercept + pm.math.dot(X_conv, beta)
      
@@ -419,12 +489,9 @@ if network_type == 'bayesian':
         pm.traceplot(trace, ax=ax)
         plt.savefig('trace.jpg')
 
-elif network_type == 'mle':
+elif network_type.lower() == 'mle':
     print()
     print('Fitting parameters using maximum likelihood...')
-    import tensorflow as tf
-    from tensorflow.python.platform.test import is_gpu_available
-    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
     learning_rate = 0.01
 
@@ -436,9 +503,18 @@ elif network_type == 'mle':
         if attribution_model:
             feature_powset = powerset(n_feat)
 
+        X_raw = tf.placeholder(shape=[None, n_feat], dtype=tf.float32, name='X_raw')
+        subject_id_X = tf.placeholder(shape=[None], dtype=tf.int32, name='subject_id_X')
+        doc_id_X = tf.placeholder(shape=[None], dtype=tf.float32, name='doc_id_X')
+        time_X = tf.placeholder(shape=[None], dtype=tf.float32, name='time_X')
 
-        X_raw = [tf.placeholder(shape=[None, 2+n_feat], dtype=tf.float32, name='input_%d'%i) for i in range(len(X))]
-        subjects_raw = tf.placeholder(shape=[None], dtype=tf.int32, name='subject_ids')
+        y_ = tf.placeholder(shape=[None], dtype=tf.float32, name='y_')
+        subject_id_y = tf.placeholder(shape=[None], dtype=tf.int32, name='subject_id_y')
+        doc_id_y = tf.placeholder(shape=[None], dtype=tf.float32, name='doc_id_y')
+        time_y = tf.placeholder(shape=[None], dtype=tf.float32, name='time_y')
+        first_obs = tf.placeholder(shape=[None], dtype=tf.int32, name='first_obs')
+        last_obs = tf.placeholder(shape=[None], dtype=tf.int32, name='last_obs')
+
         if data_rep == 'conv':
             if conv_func == 'exp':
                 L_global = tf.Variable(tf.truncated_normal(shape=[1, n_feat], mean=0., stddev=.1, dtype=tf.float32), name='lambda')
@@ -447,15 +523,15 @@ elif network_type == 'mle':
                 theta_global = tf.Variable(tf.truncated_normal(shape=[1, n_feat], mean=0., stddev=.1, dtype=tf.float32), name='theta')
                 delta_global = tf.Variable(tf.truncated_normal(shape=[1, n_feat], mean=0., stddev=.1, dtype=tf.float32), name='loc')
 
-        intercept_global = tf.Variable(tf.constant(float(y[0].mean()), shape=[1]), name='intercept')
+        intercept_global = tf.Variable(tf.constant(float(y_train.fdur.mean()), shape=[1]), name='intercept')
 
         if random_subjects_model:
-            subject_ids = subjects_raw
+            subject_y_ix = subject_id_y
             intercept_correction_by_subject = tf.Variable(tf.truncated_normal(shape=[n_subj], mean=1., stddev=.1, dtype=tf.float32), name='subject_intercept_coef')
             intercept_correction_by_subject -= tf.reduce_mean(intercept_correction_by_subject, axis=0)
             intercept = intercept_global + intercept_correction_by_subject
         else:
-            subject_ids = tf.constant(0, shape=[1])
+            subject_y_ix = tf.constant(0, shape=[1])
             intercept = intercept_global
 
         if data_rep == 'conv':
@@ -467,7 +543,7 @@ elif network_type == 'mle':
                     L_correction_by_subject = tf.Variable(tf.truncated_normal(shape=[n_subj, n_feat], mean=0., stddev=.1, dtype=tf.float32), name='L_correction_by_subject')
                     L_correction_by_subject -= tf.reduce_mean(L_correction_by_subject, axis=0)
                     L = L_global + L_correction_by_subject
-                    L = tf.gather(L, subject_ids)
+                    L = tf.gather(L, subject_y_ix)
                     conv = lambda x: tf.exp(L) * tf.exp(-tf.exp(L) * x)
                 else:
                     conv = conv_global
@@ -491,21 +567,21 @@ elif network_type == 'mle':
                     delta_correction_by_subject -= tf.reduce_mean(delta_correction_by_subject, axis=0)
                     delta = delta_global + delta_correction_by_subject
 
-                    conv_delta_zero = tf.contrib.distributions.Gamma(concentration=tf.gather(tf.exp(K), subject_ids), rate=tf.gather(tf.exp(theta), subject_ids), validate_args=True).prob
-                    conv = lambda x: conv_delta_zero(x + tf.gather(tf.exp(delta), subject_ids))
+                    conv_delta_zero = tf.contrib.distributions.Gamma(concentration=tf.gather(tf.exp(K), subject_y_ix), rate=tf.gather(tf.exp(theta), subject_y_ix), validate_args=True).prob
+                    conv = lambda x: conv_delta_zero(x + tf.gather(tf.exp(delta), subject_y_ix))
                 else:
                     conv_delta_zero = conv_global_delta_zero
                     conv = conv_global
 
-            t_delta = 0.
-            conv_coef = conv(tf.expand_dims(t_delta, -1))
-            X_conv = conv_coef * X_raw[0][:, 2:]
-
-            for i in range(1, window_length+1):
-                t_delta = X_raw[0][:,0] - X_raw[i][:,0]
+            def convolve_events(time_target, first_obs, last_obs):
+                input_rows = X_raw[first_obs:last_obs]
+                input_times = time_X[first_obs:last_obs]
+                t_delta = time_target - input_times
                 conv_coef = conv(tf.expand_dims(t_delta, -1))
-                weighted = conv_coef*X_raw[i][:,2:]
-                X_conv += weighted
+
+                return tf.reduce_sum(conv_coef * input_rows, 0)
+
+            X_conv = tf.map_fn(lambda x: convolve_events(*x), [time_y, first_obs, last_obs], dtype=tf.float32, parallel_iterations=1)
 
 
         if attribution_model:
@@ -525,7 +601,7 @@ elif network_type == 'mle':
             for i in range(len(feature_powset)):
                 indices = np.where(feature_powset[i])[0].astype('int32')
                 vals = tf.gather(X_conv, indices, axis=1)
-                vals *= tf.expand_dims(tf.gather(phi, subject_ids)[:,i], -1) / feature_powset[i].sum()
+                vals *= tf.expand_dims(tf.gather(phi, subject_y_ix)[:, i], -1) / feature_powset[i].sum()
                 vals = tf.reduce_sum(vals, axis=1)
                 out += vals
 
@@ -539,14 +615,12 @@ elif network_type == 'mle':
                 subject_beta = tf.Variable(tf.truncated_normal(shape=[n_subj, n_feat], mean=0., stddev=.1, dtype=tf.float32), name='subject_beta_coef')
                 subject_beta -= tf.reduce_mean(subject_beta, axis=0)
                 beta = beta_global + subject_beta
-                out = X_conv * tf.gather(beta, subject_ids)
+                out = X_conv * tf.gather(beta, subject_y_ix)
                 out = tf.reduce_sum(out, 1)
             else:
-                out = tf.squeeze(tf.matmul(X_conv, tf.transpose(tf.gather(beta_global, subject_ids))), -1)
+                out = tf.squeeze(tf.matmul(X_conv, tf.transpose(tf.gather(beta_global, subject_y_ix))), -1)
 
-        out += tf.gather(intercept, subject_ids)
-
-        y_ = tf.placeholder(tf.float32, shape=[None])
+        out += tf.gather(intercept, subject_y_ix)
 
         mae_loss = tf.losses.absolute_difference(y_, out)
         mse_loss = tf.losses.mean_squared_error(y_, out)
@@ -662,16 +736,28 @@ elif network_type == 'mle':
         print()
 
         fd_train = {}
-        fd_train[subjects_raw] = X[0][0].subject.cat.codes
-        for k in range(len(X)):
-            fd_train[X_raw[k]] = X[k][0][['onset_time', 'offset_time'] + features]
-        fd_train[y_] = y[0]
+        fd_train[subject_id_X] = X.subject.cat.codes
+        fd_train[subject_id_y] = y_train.subject.cat.codes
+        fd_train[doc_id_X] = X.docid.cat.codes
+        fd_train[doc_id_y] = y_train.docid.cat.codes
+        fd_train[time_X] = X.time
+        fd_train[time_y] = y_train.time
+        fd_train[first_obs] = y_train.first_obs
+        fd_train[last_obs] = y_train.last_obs
+        fd_train[X_raw] = X[features]
+        fd_train[y_] = y_train.fdur
 
         fd_cv = {}
-        fd_cv[subjects_raw] = X[0][1].subject.cat.codes
-        for k in range(len(X)):
-            fd_cv[X_raw[k]] = X[k][1][['onset_time', 'offset_time']+features]
-        fd_cv[y_] = y[1]
+        fd_cv[subject_id_X] = X.subject.cat.codes
+        fd_cv[subject_id_y] = y_cv.subject.cat.codes
+        fd_cv[doc_id_X] = X.docid.cat.codes
+        fd_cv[doc_id_y] = y_cv.docid.cat.codes
+        fd_cv[time_X] = X.time
+        fd_cv[time_y] = y_cv.time
+        fd_cv[first_obs] = y_cv.first_obs
+        fd_cv[last_obs] = y_cv.last_obs
+        fd_cv[X_raw] = X[features]
+        fd_cv[y_] = y_cv.fdur
 
             
         summary_cv_losses_batch, loss_cv = sess.run([summary_losses, loss_func], feed_dict=fd_cv)
@@ -679,16 +765,16 @@ elif network_type == 'mle':
         print('Initial CV loss: %.4f'%loss_cv)
         print()
 
-        X_range = np.arange(len(X[0][0]))
+        y_range = np.arange(len(y_train))
 
         while global_step.eval(session=sess) < n_epoch_train + n_epoch_finetune:
             if global_step.eval(session=sess) < n_epoch_train:
                 minibatch_size = 128
-                p, p_inv = getRandomPermutation(len(X[0][0]))
+                p, p_inv = getRandomPermutation(len(y_train))
             else:
-                minibatch_size = len(X[0][0])
-                p = X_range
-            n_minibatch = math.ceil(float(len(X[0][0])) / minibatch_size)
+                minibatch_size = len(y_train)
+                p = y_range
+            n_minibatch = math.ceil(float(len(y_train)) / minibatch_size)
 
             t0_iter = time.time()
             print('-'*50)
@@ -697,12 +783,18 @@ elif network_type == 'mle':
 
             pb = tf.contrib.keras.utils.Progbar(n_minibatch)
 
-            for j in range(0, len(X[0][0]), minibatch_size):
+            for j in range(0, len(y_train), minibatch_size):
                 fd_minibatch = {}
-                fd_minibatch[subjects_raw] = X[0][0].subject.cat.codes.iloc[p[j:j + minibatch_size]]
-                for k in range(len(X)):
-                    fd_minibatch[X_raw[k]] = X[k][0][['onset_time', 'offset_time'] + features].iloc[p[j:j + minibatch_size]]
-                fd_minibatch[y_] = y[0].iloc[p[j:j + minibatch_size]]
+                fd_minibatch[subject_id_X] = X.subject.cat.codes
+                fd_minibatch[subject_id_y] = y_train.subject.cat.codes.iloc[p[j:j + minibatch_size]]
+                fd_minibatch[doc_id_X] = X.docid.cat.codes
+                fd_minibatch[doc_id_y] = y_train.docid.cat.codes.iloc[p[j:j + minibatch_size]]
+                fd_minibatch[time_X] = X.time
+                fd_minibatch[time_y] = y_train.time.iloc[p[j:j + minibatch_size]]
+                fd_minibatch[first_obs] = y_train.first_obs.iloc[p[j:j + minibatch_size]]
+                fd_minibatch[last_obs] = y_train.last_obs.iloc[p[j:j + minibatch_size]]
+                fd_minibatch[X_raw] = X[features]
+                fd_minibatch[y_] = y_train.fdur.iloc[p[j:j + minibatch_size]]
 
                 summary_params_batch, summary_train_losses_batch, _, loss_minibatch = sess.run([summary_params, summary_losses, train_op, loss_func], feed_dict=fd_minibatch)
                 train_writer.add_summary(summary_params_batch, global_batch_step.eval(session=sess))
@@ -724,15 +816,15 @@ elif network_type == 'mle':
 
             print_summary(s, f=logdir + '/parameter_summary.txt')
 
-            loss_minibatch, preds_train = sess.run([loss_func, out], feed_dict=fd_train)
+            # loss_minibatch, preds_train = sess.run([loss_func, out], feed_dict=fd_train)
             summary_cv_losses_batch, loss_cv, preds_cv = sess.run([summary_losses, loss_func, out], feed_dict=fd_cv)
-            mae_train = mae(y[0], preds_train)
-            mae_cv = mae(y[1], preds_cv)
+            # mae_train = mae(y_train.fdur, preds_train)
+            mae_cv = mae(y_cv.fdur, preds_cv)
             cv_writer.add_summary(summary_cv_losses_batch, global_batch_step.eval(session=sess))
-            with open(logdir + '/train/results.txt', 'w') as f:
+            with open(logdir + '/results.txt', 'w') as f:
                 f.write('='*50 + '\n')
-                print_tee('Train loss: %.4f' % loss_minibatch, [sys.stdout, f])
-                print_tee('Train MAE loss: %.4f' % mae_train, [sys.stdout, f])
+                # print_tee('Train loss: %.4f' % loss_minibatch, [sys.stdout, f])
+                # print_tee('Train MAE loss: %.4f' % mae_train, [sys.stdout, f])
                 print_tee('CV loss: %.4f'%loss_cv, [sys.stdout, f])
                 print_tee('CV MAE loss: %.4f'%mae_cv, [sys.stdout, f])
                 print()
@@ -744,8 +836,8 @@ elif network_type == 'mle':
                     print('Bootstrap significance testing')
                     print('Model vs. LM baseline on CV data')
                     print()
-                    print('MSE loss improvement: %.4f' %(lm_mse_cv-mse(y[1], preds_cv)))
-                    p_cv = bootstrap(y[1], lm_preds_cv, preds_cv, err_type=loss)
+                    print('MSE loss improvement: %.4f' %(lm_mse_cv-mse(y_cv.fdur, preds_cv)))
+                    p_cv = bootstrap(y_cv.fdur, lm_preds_cv, preds_cv, err_type=loss)
                     print('p = %.4e' %p_cv)
                     print('.' * 50)
                     print()
@@ -754,8 +846,8 @@ elif network_type == 'mle':
                     print('Bootstrap significance testing')
                     print('Model vs. LME baseline on CV data')
                     print()
-                    print('MSE loss improvement: %.4f' %(lme_mse_cv-mse(y[1], preds_cv)))
-                    p_cv = bootstrap(y[1], lme_preds_cv, preds_cv, err_type=loss)
+                    print('MSE loss improvement: %.4f' %(lme_mse_cv-mse(y_cv.fdur, preds_cv)))
+                    p_cv = bootstrap(y_cv.fdur, lme_preds_cv, preds_cv, err_type=loss)
                     print('p = %.4e' % p_cv)
                     print('.' * 50)
                     print()
@@ -785,8 +877,8 @@ elif network_type == 'mle':
             print('Bootstrap significance testing')
             print('Model vs. LM baseline on CV data')
             print()
-            print('MSE loss improvement: %.4f' % (lm_mse_cv - mse(y[1], preds_cv)))
-            p_cv = bootstrap(y[1], lm_preds_cv, preds_cv, err_type=loss)
+            print('MSE loss improvement: %.4f' % (lm_mse_cv - mse(y_cv.fdur, preds_cv)))
+            p_cv = bootstrap(y_cv.fdur, lm_preds_cv, preds_cv, err_type=loss)
             print('p = %.4e' % p_cv)
             print('.' * 50)
             print()
@@ -795,8 +887,8 @@ elif network_type == 'mle':
             print('Bootstrap significance testing')
             print('Model vs. LME baseline on CV data')
             print()
-            print('MSE loss improvement: %.4f' % (lme_mse_cv - mse(y[1], preds_cv)))
-            p_cv = bootstrap(y[1], lme_preds_cv, preds_cv, err_type=loss)
+            print('MSE loss improvement: %.4f' % (lme_mse_cv - mse(y_cv.fdur, preds_cv)))
+            p_cv = bootstrap(y_cv.fdur, lme_preds_cv, preds_cv, err_type=loss)
             print('p = %.4e' % p_cv)
             print('.' * 50)
             print()
