@@ -1,2 +1,2 @@
-# Psycholinguistic-temporal-convolution-modeling
-Tools for modeling diffuse temporal effects in sequential psycholinguistic measures
+# Deconvolutional time series regression (DTSR)
+Tools for modeling diffuse temporal effects in time series data
