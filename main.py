@@ -10,6 +10,7 @@ import numpy as np
 from numpy import inf, nan
 import scipy
 import pandas as pd
+pd.options.mode.chained_assignment = None
 import configparser
 import statsmodels.formula.api as smf
 import patsy
@@ -55,6 +56,188 @@ def bootstrap(true, preds_1, preds_2, err_type='mse', n_iter=10000, n_tails=2):
     p = float(hits+1)/(n_iter+1)
     print()
     return p
+
+def parse_var_inner(var):
+    if var.strip().endswith(')'):
+        op = ''
+        inp = ''
+        inside_var = False
+        for i in var[:-1]:
+            if inside_var:
+                inp += i
+            else:
+                if i == '(':
+                    inside_var = True
+                else:
+                    op += i
+    else:
+        op = ''
+        inp = var
+    return op, inp
+
+def parse_var(var):
+    n_lp = var.count('(')
+    n_rp = var.count(')')
+    assert n_lp == n_rp, 'Unmatched parens in formula variable "%s".' %var
+    ops = [[], var.strip()]
+    while ops[1].endswith(')'):
+        op, inp = parse_var_inner(ops[1])
+        ops[0].insert(0, op)
+        ops[1] = inp.strip()
+    return ops
+
+def extract_cross(var):
+    vars = var.split(':')
+    if len(vars) > 1:
+        vars = [v.strip() for v in vars]
+    return vars
+
+def extract_interaction(var):
+    vars = var.split('*')
+    if len(vars) > 1:
+        vars = [v.strip() for v in vars]
+    return vars
+
+def process_interactions(vars):
+    new_vars = []
+    interactions = []
+    for v1 in vars:
+        new_v = extract_cross(v1)
+        if len(new_v) > 0:
+            interactions.append(new_v)
+        new_v = extract_interaction(v1)
+        if len(new_v) > 0:
+            interactions.append(new_v)
+            for v2 in new_v:
+                if v2 not in new_vars:
+                    new_vars.append(v2)
+    return new_vars, interactions
+
+def apply_op(op, arr):
+    if op == 'c':
+        out = c(arr)
+    elif op == 'z':
+        out = z(arr)
+    elif op == 'log':
+        out = np.log(arr)
+    elif op == 'log1p':
+        out = np.log(arr + 1)
+    elif op.startswith('pow'):
+        exponent = float(op[3:])
+        out = arr ** exponent
+    elif op.startswith('bc'):
+        L = float(op[2:])
+        if L == 0:
+            out = np.log(arr)
+        else:
+            out = (arr ** L - 1) / L
+    else:
+        sys.stderr.write('Ignoring unrecognized op "%s" for column "%s".\n' %(op, col))
+        out = arr
+    return out
+
+def apply_ops(ops, col, df):
+    if len(ops[0]) > 0:
+        new_col = ops[-1]
+        for op in ops[0]:
+            new_col = op + '(' + new_col + ')'
+        df[new_col] = df[col]
+        for op in ops[0]:
+            df[new_col] = apply_op(op, df[new_col])
+
+def apply_ops_from_str(s, df):
+    ops = parse_var(s)
+    col = ops[1]
+    apply_ops(ops, col, df)
+
+def parse_formula(s):
+    n_lp = s.count('(')
+    n_rp = s.count(')')
+    assert n_lp == n_rp, 'Unmatched parens in formula "%s".' %s
+
+    m = {'dv': '', 'fixed': [''], 'random': []}
+    dv, s = s.strip().split('~')
+    m['dv'] = dv.strip()
+
+    in_random_term = False
+    in_grouping_factor = False
+    for c in s.strip():
+        if c == '(' and m['fixed'][-1] == '':
+            in_random_term = True
+            if m['fixed'][-1] == '':
+                m['fixed'].pop(-1)
+            m['random'].append({'vars': [''], 'grouping_factor': ''})
+        elif c == ')' and in_random_term:
+            n_lb = m['random'][-1]['vars'][-1].count('(')
+            n_rb = m['random'][-1]['vars'][-1].count(')')
+            if n_lb == n_rb:
+                in_random_term = False
+                in_grouping_factor = False
+            else:
+                m['random'][-1]['vars'][-1] += c
+        elif c in [' ', '+', '|']:
+            if c == '+':
+                if in_random_term:
+                    m['random'][-1]['vars'].append('')
+                else:
+                    m['fixed'].append('')
+            elif c == '|':
+                in_grouping_factor = True
+        else:
+            if in_random_term:
+                if in_grouping_factor:
+                    m['random'][-1]['grouping_factor'] += c
+                else:
+                    m['random'][-1]['vars'][-1] += c
+            else:
+                m['fixed'][-1] += c
+    for i in range(len(m['random'])):
+        if '0' in m['random'][i]['vars']:
+            m['random'][i]['Intercept'] = False
+        else:
+            m['random'][i]['Intercept'] = True
+        m['random'][i]['vars'] = [v for v in m['random'][i]['vars'] if v not in ['0', '1']]
+
+
+
+    ## Random effects sanity check
+    weird_random = []
+    for r in m['random']:
+        if r['grouping_factor'] != 'subject' and len(r['vars']) > 0:
+            weird_random.append(r['grouping_factor'])
+    if len(weird_random) > 0:
+        sys.stderr.write('\nWARNING: Model contains random slopes for one or more grouping factors other than "subject".\n' +
+            'Since independent variables in DTSR are temporally convolved, this means that the model will\n' +
+            'learn group-specific coefficients on the history of the independent variable(s) with random\n' +
+            'slope(s). This is almost never what you want. Make sure your model is specified as intended.\n\n'
+        )
+    return m
+
+def apply_formula(bform_parsed, df):
+    apply_ops_from_str(bform_parsed['dv'], df)
+    for f in bform_parsed['fixed']:
+        apply_ops_from_str(f, df)
+    for r in bform_parsed['random']:
+        for v in r['vars']:
+            apply_ops_from_str(v, df)
+
+def names2ix(names, ref):
+    if type(names) is not list:
+        names = [names]
+    ix = []
+    for n in names:
+        ix.append(ref.index(n))
+    if len(ix) > 1:
+        return np.array(ix)
+    return ix[0]
+
+def names2mask(names, ref):
+    mask = np.zeros((1,len(ref)))
+    if type(names) is not list:
+        names = [names]
+    for n in names:
+        mask[0,ref.index(n)] = 1.
+    return mask.astype('int32')
 
 def getRandomPermutation(n):
     p = np.random.permutation(np.arange(n))
@@ -105,26 +288,6 @@ def accumulate_column(X, col, fdur):
     X['cum' + col] = X.apply(accumulate_row, axis=1, args=(col,fdur))
     return X
 
-def get_input_range_inner(y, X):
-    condition = X.subject == y.subject
-    condition &= X.docid == y.docid
-    condition &= X.time <= y.time
-    matching_indices = np.where(condition)[0]
-    lower_bound = matching_indices[0]
-    upper_bound = matching_indices[-1]+1
-    return lower_bound, upper_bound
-
-def get_history_intervals(y, X):
-    pb = tf.contrib.keras.utils.Progbar(len(y))
-
-    lower_bounds = np.zeros(len(y)).astype('int32')
-    upper_bounds = np.zeros(len(y)).astype('int32')
-
-    for i in range(len(y)):
-        lower_bounds[i], upper_bounds[i] = get_input_range_inner(y.iloc[i], X)
-        pb.update(i, force=True)
-    return lower_bounds, upper_bounds
-
 def compute_history_intervals(y, X, check_output=False):
     pb = tf.contrib.keras.utils.Progbar(len(y))
 
@@ -171,7 +334,7 @@ config.read(sys.argv[1])
 
 ## Required
 data_path = config.get('settings', 'data_path')
-features = config.get('settings', 'features')
+bform = config.get('settings', 'bform')
 
 ## Optional
 logdir = config.get('settings', 'logdir', fallback='log')
@@ -180,7 +343,6 @@ if not os.path.exists(logdir):
 shutil.copy2(sys.argv[1], logdir + '/config.ini')
 modality = config.get('settings', 'modality', fallback='ET')
 network_type = config.get('settings', 'network_type', fallback='mle')
-data_rep = config.get('settings', 'data_rep', fallback='conv')
 conv_func = config.get('settings', 'conv_func', fallback='gamma')
 partition = config.get('settings', 'partition', fallback='train')
 loss = config.get('settings', 'loss', fallback='MSE')
@@ -191,37 +353,24 @@ bform_LM = config.get('settings', 'bform_LM', fallback='')
 baseline_LM = len(bform_LM) > 0
 bform_LME = config.get('settings', 'bform_LME', fallback='')
 baseline_LME = len(bform_LME) > 0
-lme_baseline_spillover = config.get('settings', 'lme_baseline_spillover', fallback=features)
+bform_GAM = config.get('settings', 'bform_GAM', fallback='')
+baseline_GAM = len(bform_GAM) > 0
+lme_baseline_spillover = config.get('settings', 'lme_baseline_spillover', fallback='')
 lme_baseline_spillover = lme_baseline_spillover.strip().split()
-lme_baseline_cum = config.get('settings', 'lme_baseline_cum', fallback=features)
+baseline_spillover_window = config.getint('settings', 'baseline_spillover_window', fallback=2)
+filter_sents = config.getboolean('settings', 'filter_sents', fallback=False)
+filter_lines = config.getboolean('settings', 'filter_lines', fallback=False)
+filter_screens = config.getboolean('settings', 'filter_screens', fallback=False)
+filter_files = config.getboolean('settings', 'filter_files', fallback=False)
+lme_baseline_cum = config.get('settings', 'lme_baseline_cum', fallback='')
 lme_baseline_cum = lme_baseline_cum.strip().split()
-features = features.strip().split()
 attribution_model = config.getboolean('settings', 'attribution_model', fallback=False)
 random_subjects_model = config.getboolean('settings', 'random_subjects_model', fallback=True)
 random_subjects_conv_params = config.getboolean('settings', 'random_subjects_conv_params', fallback=False)
 log_random = config.getboolean('settings', 'log_random', fallback=False)
 log_convolution_plots = config.getboolean('settings', 'log_convolution_plots', fallback=False)
-compute_signif = config.getboolean('settings', 'compute_signif', fallback=False)
 n_epoch_train = config.getint('settings', 'n_epoch_train', fallback=50)
 n_epoch_finetune = config.getint('settings', 'n_epoch_finetune', fallback=250)
-
-other_full = [
-        'word',
-        'time',
-        'fdur',
-        'subject',
-        'docid',
-        'sentid',
-        'correct',
-        'startoffile',
-        'endoffile',
-        'startofscreen',
-        'endofscreen',
-        'startofsentence',
-        'endofsentence',
-        'startofline',
-        'endofline'
-    ]
 
 sys.stderr.write('Loading data...\n')
 X = pd.read_csv(data_path, sep=' ', skipinitialspace=True)
@@ -236,26 +385,76 @@ X = X[X.fdur.notnull() & (X.fdur > 0)]
 X.subject = X.subject.astype('category')
 X.docid = X.docid.astype('category')
 X.sentid = X.sentid.astype('category')
+#X.wdelta = X.wdelta.log()
 
 X['time'] = X.groupby(['subject', 'docid']).fdur.shift(1).fillna(value=0)
 X.time = X.groupby(['subject', 'docid']).time.cumsum() / 1000 # Convert ms to s
-other_relevant = set(other_full).intersection(set(X.columns))
-other_relevant = list(other_relevant)
 X._get_numeric_data().fillna(value=0, inplace=True)
-X = X[other_relevant + features]
-X[features] = z(X[features])
 
-for col in lme_baseline_spillover:
-    s_name = col + 'S1'
-    X[s_name] = X.groupby(['subject', 'docid'])[col].shift(1)
-    if X[s_name].dtype == object:
-        X[s_name].fillna('null', inplace=True)
-    else:
-        X[s_name].fillna(0, inplace=True)
+bform_parsed = parse_formula(bform)
+dv = bform_parsed['dv']
+fixef = bform_parsed['fixed']
+ransl = []
+for f in bform_parsed['random']:
+    for v in f['vars']:
+        if f not in ransl:
+            ransl.append(v)
+rangf = []
+for f in bform_parsed['random']:
+    if f['grouping_factor'] not in rangf:
+        rangf.append(f['grouping_factor'])
+allsl = fixef[:]
+for f in ransl:
+    if f not in allsl:
+        allsl.append(f)
+allvar = allsl[:]
+for gf in rangf:
+    if gf not in allvar:
+        allvar.append(gf)
 
-y = X[other_relevant]
+if len(lme_baseline_spillover) == 0:
+    lme_baseline_spillover = allsl
+for i in range(1, baseline_spillover_window):
+    for col in lme_baseline_spillover:
+        s_name = col + 'S%d' %i
+        X[s_name] = X.groupby(['subject', 'docid'])[col].shift(i)
+        if X[s_name].dtype == object:
+            X[s_name].fillna('null', inplace=True)
+        else:
+            X[s_name].fillna(0, inplace=True)
 
-print('Computing history intervals for each regression target sample...')
+apply_formula(bform_parsed, X)
+
+X_features = ['time'] + allvar
+y_features = [dv] + ['time', 'first_obs', 'last_obs', 'subject', 'docid', 'sentid']
+if 'correct' in X.columns:
+    y_features.append('correct')
+if filter_sents and 'startofsentence' in X.columns and 'endofsentence' in X.columns:
+    y_features += ['startofsentence', 'endofsentence']
+if filter_lines and 'startofline' in X.columns and 'endofline' in X.columns:
+    y_features += ['startofline', 'endofline']
+if filter_screens and 'startofscreen' in X.columns and 'endofscreen' in X.columns:
+    y_features += ['startofscreen', 'endofscreen']
+if filter_files and 'startoffile' in X.columns and 'endoffile' in X.columns:
+    y_features += ['startoffile', 'endoffile']
+
+for f in ransl:
+    if f not in y_features:
+        y_features.append(f)
+for gf in rangf:
+    if gf not in y_features:
+        y_features.append(gf)
+
+for gf in rangf:
+    X[gf] = X[gf].astype('category')
+
+y = X[[f for f in y_features if f not in ['first_obs', 'last_obs']]]
+gf_y = y[rangf]
+for r in rangf:
+    gf_y[r] = gf_y[r].cat.codes
+X[allsl] = z(X[allsl])
+
+print('Computing history intervals for each regression target...')
 first_obs, last_obs = compute_history_intervals(y, X)
 y['first_obs'] = first_obs
 y['last_obs'] = last_obs
@@ -267,18 +466,38 @@ if False:
         print(row)
         print(X[row.first_obs:row.last_obs])
 
-n_subj = len(X.subject.unique())
-n_feat = len(features)
+if len(bform_parsed['random']) > 0:
+    n_level = []
+    for t in bform_parsed['random']:
+        gf = t['grouping_factor']
+        n_level.append(len(y[gf].cat.categories))
 
-select = y.fdur > 100
-select &= y.fdur < 3000
+select = y[dv] > 100
+select &= y[dv] < 3000
 if 'correct' in y.columns:
     select &= y.correct > 4
 
-if 'startofsentence' in y.columns:
-    select &= y.startofsentence != 1
-if 'endofsentence' in y.columns:
-    select &= y.endofsentence != 1
+if filter_sents:
+    if 'startofsentence' in y.columns:
+        select &= y.startofsentence != 1
+    if 'endofsentence' in y.columns:
+        select &= y.endofsentence != 1
+if filter_sents:
+    if 'startofline' in y.columns:
+        select &= y.startofline != 1
+    if 'endofline' in y.columns:
+        select &= y.endofline != 1
+if filter_screens:
+    if 'startofscreen' in y.columns:
+        select &= y.startofscreen != 1
+    if 'endofscreen' in y.columns:
+        select &= y.endofscreen != 1
+if filter_files:
+    if 'startoffile' in y.columns:
+        select &= y.startoffile != 1
+    if 'endoffile' in y.columns:
+        select &= y.endoffile != 1
+
 if partition == 'test':
     select &= ((y.subject.cat.codes+1)+y.sentid.cat.codes) % modulus == modulus-1
 elif partition == 'dev':
@@ -292,14 +511,17 @@ else:
 
 if partition == 'train':
     y_train = y[select_train]
-    y_train.fdur = c(y_train.fdur)
+    y_train[dv] = c(y_train[dv])
+    gf_y_train = gf_y[select_train]
     y_cv = y[select_cv]
-    y_cv.fdur = c(y_cv.fdur)
+    y_cv[dv] = c(y_cv[dv])
+    gf_y_cv = gf_y[select_cv]
+
 
     n_train_sample = len(y_train)
     n_cv_sample = len(y_cv)
 else:
-    y.fdur = c(y.fdur)
+    y[dv] = c(y[dv])
     n_train_sample = len(y)
 
 print()
@@ -311,16 +533,16 @@ if partition == 'train':
 print()
 
 print('Correlation matrix (training data only):')
-rho = X[features].corr()
+rho = X[allsl].corr()
 print(rho)
 print()
 
 if partition == 'train':
-    if baseline_LM or baseline_LME:
+    if baseline_LM or baseline_LME or baseline_GAM:
         X_train = X[select_train]
-        X_train.fdur = y_train.fdur
+        X_train[dv] = y_train[dv]
         X_cv = X[select_cv]
-        X_cv.fdur = y_cv.fdur
+        X_cv[dv] = y_cv[dv]
     if baseline_LM:
         if not os.path.exists('baselines'):
             os.makedirs('baselines')
@@ -328,6 +550,7 @@ if partition == 'train':
             os.makedirs('baselines/LM')
 
         print('Getting linear regression baseline...')
+        print()
 
         with open('baselines/LM/summary.txt', 'w') as f:
             print()
@@ -347,16 +570,16 @@ if partition == 'train':
             print_tee('', [sys.stdout, f])
 
             lm_preds_train = lm.predict(lm_results.params, X_LM_train)
-            lm_mse_train = mse(y_train.fdur, lm_preds_train)
-            lm_mae_train = mae(y_train.fdur, lm_preds_train)
+            lm_mse_train = mse(y_train[dv], lm_preds_train)
+            lm_mae_train = mae(y_train[dv], lm_preds_train)
             print_tee('Training set loss:', [sys.stdout, f])
             print_tee('  MSE: %.4f' % lm_mse_train, [sys.stdout, f])
             print_tee('  MAE: %.4f' % lm_mae_train, [sys.stdout, f])
             print_tee('', [sys.stdout, f])
 
             lm_preds_cv = lm.predict(lm_results.params, X_LM_cv)
-            lm_mse_cv = mse(y_cv.fdur, lm_preds_cv)
-            lm_mae_cv = mae(y_cv.fdur, lm_preds_cv)
+            lm_mse_cv = mse(y_cv[dv], lm_preds_cv)
+            lm_mae_cv = mae(y_cv[dv], lm_preds_cv)
             print_tee('Cross-validation set loss:', [sys.stdout, f])
             print_tee('  MSE: %.4f' % lm_mse_cv, [sys.stdout, f])
             print_tee('  MAE: %.4f' % lm_mae_cv, [sys.stdout, f])
@@ -365,90 +588,166 @@ if partition == 'train':
             print()
 
 
-    if baseline_LME:
-        if not os.path.exists('baselines'):
-            os.makedirs('baselines')
-        if not os.path.exists('baselines/LME'):
-            os.makedirs('baselines/LME')
-
+    if baseline_LME or baseline_GAM:
         import rpy2.robjects as robjects
         from rpy2.robjects.packages import importr
         from rpy2.robjects import pandas2ri
         import rpy2
         pandas2ri.activate()
 
-        print('Getting linear mixed-effects regression baseline...')
-        print()
+        if baseline_LME:
+            if not os.path.exists('baselines'):
+                os.makedirs('baselines')
+            if not os.path.exists('baselines/LME'):
+                os.makedirs('baselines/LME')
 
-        with open('baselines/LME/summary.txt', 'w') as f:
-            lmer = importr('lme4')
+            print('Getting linear mixed-effects regression baseline...')
+            print()
 
-            rstring = '''
-                function(bform, df) {
-                    data_frame = df
-                    m = lmer(bform, data=data_frame, REML=FALSE)
-                    return(m)
-                }
-            '''
+            with open('baselines/LME/summary.txt', 'w') as f:
+                lmer = importr('lme4')
 
-            regress_lme = robjects.r(rstring)
-
-            if os.path.exists('baselines/LME/lme_fit.obj'):
-                with open('baselines/LME/lme_fit.obj', 'rb') as f2:
-                    lme = pickle.load(f2)
-            else:
-                lme = regress_lme(bform_LME, X_train)
-                with open('baselines/LME/lme_fit.obj', 'wb') as f2:
-                    pickle.dump(lme, f2)
-
-            rstring = '''
-                function(model) {
-                    s = summary(model)
-                    convWarn <- model@optinfo$conv$lme4$messages
-                    if (is.null(convWarn)) {
-                        convWarn <- 'No convergence warnings.'
+                rstring = '''
+                    function(bform, df) {
+                        data_frame = df
+                        m = lmer(bform, data=data_frame, REML=FALSE)
+                        return(m)
                     }
-                    s$convWarn = convWarn
-                    return(s)
-                }
-            '''
+                '''
 
-            get_model_summary = robjects.r(rstring)
+                regress_lme = robjects.r(rstring)
 
-            rstring = '''
-                function(model, df) {
-                    preds <- predict(model, df, allow.new.levels=TRUE)
-                    return(preds)
-                }
-            '''
+                rstring = '''
+                    function(model) {
+                        s = summary(model)
+                        convWarn <- model@optinfo$conv$lme4$messages
+                        if (is.null(convWarn)) {
+                            convWarn <- 'No convergence warnings.'
+                        }
+                        s$convWarn = convWarn
+                        return(s)
+                    }
+                '''
 
-            predict = robjects.r(rstring)
+                get_model_summary = robjects.r(rstring)
 
-            print_tee('='*50, [sys.stdout, f])
-            print_tee('Linear mixed-effects regression baseline results summary', [sys.stdout, f])
-            print_tee('', [sys.stdout, f])
+                rstring = '''
+                    function(model, df) {
+                        preds <- predict(model, df, allow.new.levels=TRUE)
+                        return(preds)
+                    }
+                '''
 
-            s = get_model_summary(lme)
+                predict = robjects.r(rstring)
 
-            print_tee(s, [sys.stdout, f])
-            print_tee('Convergence warnings:', [sys.stdout, f])
-            print_tee(s.rx2('convWarn'), [sys.stdout, f])
-            print_tee('', [sys.stdout, f])
+                if os.path.exists('baselines/LME/lme_fit.obj'):
+                    with open('baselines/LME/lme_fit.obj', 'rb') as f2:
+                        lme = pickle.load(f2)
+                else:
+                    lme = regress_lme(bform_LME, X_train)
+                    with open('baselines/LME/lme_fit.obj', 'wb') as f2:
+                        pickle.dump(lme, f2)
 
-            lme_preds_train = predict(lme, X_train)
-            lme_mse_train = mse(y_train.fdur, lme_preds_train)
-            lme_mae_train = mae(y_train.fdur, lme_preds_train)
-            print_tee('Training set loss:', [sys.stdout, f])
-            print_tee('  MSE: %.4f' % lme_mse_train, [sys.stdout, f])
-            print_tee('  MAE: %.4f' % lme_mae_train, [sys.stdout, f])
+                print_tee('='*50, [sys.stdout, f])
+                print_tee('Linear mixed-effects regression baseline results summary', [sys.stdout, f])
+                print_tee('', [sys.stdout, f])
 
-            lme_preds_cv = predict(lme, X_cv)
-            lme_mse_cv = mse(y_cv.fdur, lme_preds_cv)
-            lme_mae_cv = mae(y_cv.fdur, lme_preds_cv)
-            print_tee('Cross-validation set loss:', [sys.stdout, f])
-            print_tee('  MSE: %.4f' % lme_mse_cv, [sys.stdout, f])
-            print_tee('  MAE: %.4f' % lme_mae_cv, [sys.stdout, f])
-            print_tee('='*50, [sys.stdout, f])
+                s = get_model_summary(lme)
+
+                print_tee(s, [sys.stdout, f])
+                print_tee('Convergence warnings:', [sys.stdout, f])
+                print_tee(s.rx2('convWarn'), [sys.stdout, f])
+                print_tee('', [sys.stdout, f])
+
+                lme_preds_train = predict(lme, X_train)
+                lme_mse_train = mse(y_train[dv], lme_preds_train)
+                lme_mae_train = mae(y_train[dv], lme_preds_train)
+                print_tee('Training set loss:', [sys.stdout, f])
+                print_tee('  MSE: %.4f' % lme_mse_train, [sys.stdout, f])
+                print_tee('  MAE: %.4f' % lme_mae_train, [sys.stdout, f])
+
+                lme_preds_cv = predict(lme, X_cv)
+                lme_mse_cv = mse(y_cv[dv], lme_preds_cv)
+                lme_mae_cv = mae(y_cv[dv], lme_preds_cv)
+                print_tee('Cross-validation set loss:', [sys.stdout, f])
+                print_tee('  MSE: %.4f' % lme_mse_cv, [sys.stdout, f])
+                print_tee('  MAE: %.4f' % lme_mae_cv, [sys.stdout, f])
+                print_tee('='*50, [sys.stdout, f])
+
+        if baseline_GAM:
+            if not os.path.exists('baselines'):
+                os.makedirs('baselines')
+            if not os.path.exists('baselines/GAM'):
+                os.makedirs('baselines/GAM')
+
+            print('Getting GAM regression baseline...')
+            print()
+
+            with open('baselines/GAM/summary.txt', 'w') as f:
+                mgcv = importr('mgcv')
+
+                rstring = '''
+                    function(bform, df) {
+                        data_frame = df
+                        m = gam(as.formula(bform), data=data_frame, drop.unused.levels=FALSE)
+                        return(m)
+                    }
+                '''
+
+                regress_gam = robjects.r(rstring)
+
+                rstring = '''
+                    function(model) {10000
+                        s = summary(model)
+                        return(s)
+                    }
+                '''
+
+                get_model_summary = robjects.r(rstring)
+
+                rstring = '''
+                    function(model, df) {
+                        preds <- predict(model, df)
+                        return(preds)
+                    }
+                '''
+
+                predict = robjects.r(rstring)
+
+                if os.path.exists('baselines/GAM/gam_fit.obj'):
+                    with open('baselines/GAM/gam_fit.obj', 'rb') as f2:
+                        gam = pickle.load(f2)
+                else:
+                    gam = regress_gam(bform_GAM, X_train)
+                    with open('baselines/GAM/gam_fit.obj', 'wb') as f2:
+                        pickle.dump(gam, f2)
+
+                print_tee('='*50, [sys.stdout, f])
+                print_tee('GAM regression baseline results summary', [sys.stdout, f])
+                print_tee('', [sys.stdout, f])
+
+                s = get_model_summary(gam)
+                print_tee(s, [sys.stdout, f])
+
+                gam_preds_train = predict(gam, X_train)
+                gam_mse_train = mse(y_train[dv], gam_preds_train)
+                gam_mae_train = mae(y_train[dv], gam_preds_train)
+                print_tee('Training set loss:', [sys.stdout, f])
+                print_tee('  MSE: %.4f' % gam_mse_train, [sys.stdout, f])
+                print_tee('  MAE: %.4f' % gam_mae_train, [sys.stdout, f])
+
+                ## MGCV can't handle subjects that were unseen in training, so we filter them out from the CV eval
+                select_gam_cv = y_cv.subject.isin(y_train.subject.unique())
+                X_gam_cv = X_cv[select_gam_cv]
+                y_gam_cv = y_cv[select_gam_cv]
+                gam_preds_cv = predict(gam, X_gam_cv)
+                gam_mse_cv = mse(y_gam_cv[dv], gam_preds_cv)
+                gam_mae_cv = mae(y_gam_cv[dv], gam_preds_cv)
+                print_tee('Cross-validation set loss:', [sys.stdout, f])
+                print_tee('  MSE: %.4f' % gam_mse_cv, [sys.stdout, f])
+                print_tee('  MAE: %.4f' % gam_mae_cv, [sys.stdout, f])
+                print_tee('='*50, [sys.stdout, f])
+
 
 
 
@@ -475,10 +774,10 @@ if network_type == 'bayesian':
         sigma = pm.HalfNormal('sigma', sd=1)
         intercept = pm.Normal('Intercept', y.mean(), sd=y.std())
       
-        X_conv = conv(X[0].time - X[0].time, K, rate) * X[0][features]
+        X_conv = conv(X[0].time - X[0].time, K, rate) * X[0][fixef]
         for i in range(1, len(X)):
             t_delta = X[0].time-X[i].time
-            X_conv += conv(t_delta, K, rate) * X[i][features]
+            X_conv += conv(t_delta, K, rate) * X[i][fixef]
         E_fdur = intercept + pm.math.dot(X_conv, beta)
      
         fdur = pm.Normal('fdur', mu = E_fdur, sd = sigma, observed=y)
@@ -501,88 +800,49 @@ elif network_type.lower() == 'mle':
     print('Using GPU: %s' %usingGPU)
     with sess.graph.as_default():
         if attribution_model:
-            feature_powset = powerset(n_feat)
+            feature_powset = powerset(len(fixef))
 
-        X_raw = tf.placeholder(shape=[None, n_feat], dtype=tf.float32, name='X_raw')
-        subject_id_X = tf.placeholder(shape=[None], dtype=tf.int32, name='subject_id_X')
-        doc_id_X = tf.placeholder(shape=[None], dtype=tf.float32, name='doc_id_X')
+        X_iv = tf.placeholder(shape=[None, len(allsl)], dtype=tf.float32, name='X_raw')
         time_X = tf.placeholder(shape=[None], dtype=tf.float32, name='time_X')
 
         y_ = tf.placeholder(shape=[None], dtype=tf.float32, name='y_')
-        subject_id_y = tf.placeholder(shape=[None], dtype=tf.int32, name='subject_id_y')
-        doc_id_y = tf.placeholder(shape=[None], dtype=tf.float32, name='doc_id_y')
         time_y = tf.placeholder(shape=[None], dtype=tf.float32, name='time_y')
+        gf_y_ = tf.placeholder(shape=[None, len(rangf)], dtype=tf.int32, name='y_gf')
         first_obs = tf.placeholder(shape=[None], dtype=tf.int32, name='first_obs')
         last_obs = tf.placeholder(shape=[None], dtype=tf.int32, name='last_obs')
 
-        if data_rep == 'conv':
-            if conv_func == 'exp':
-                L_global = tf.Variable(tf.truncated_normal(shape=[1, n_feat], mean=0., stddev=.1, dtype=tf.float32), name='lambda')
-            elif conv_func == 'gamma':
-                K_global = tf.Variable(tf.truncated_normal(shape=[1, n_feat], mean=0., stddev=.1, dtype=tf.float32), name='K')
-                theta_global = tf.Variable(tf.truncated_normal(shape=[1, n_feat], mean=0., stddev=.1, dtype=tf.float32), name='theta')
-                delta_global = tf.Variable(tf.truncated_normal(shape=[1, n_feat], mean=0., stddev=.1, dtype=tf.float32), name='loc')
+        if conv_func == 'exp':
+            L_global = tf.Variable(tf.truncated_normal(shape=[1, len(allsl)], mean=0., stddev=.1, dtype=tf.float32), name='lambda')
+        elif conv_func == 'gamma':
+            print(len(allsl))
+            log_k_global = tf.Variable(tf.truncated_normal(shape=[1, len(allsl)], mean=0., stddev=.1, dtype=tf.float32), name='log_k')
+            log_theta_global = tf.Variable(tf.truncated_normal(shape=[1, len(allsl)], mean=0., stddev=.1, dtype=tf.float32), name='log_theta')
+            log_neg_delta_global = tf.Variable(tf.truncated_normal(shape=[1, len(allsl)], mean=0., stddev=.1, dtype=tf.float32), name='log_neg_delta')
 
-        intercept_global = tf.Variable(tf.constant(float(y_train.fdur.mean()), shape=[1]), name='intercept')
+        intercept_global = tf.Variable(tf.constant(float(y_train[dv].mean()), shape=[1]), name='intercept')
+        out = intercept_global
 
-        if random_subjects_model:
-            subject_y_ix = subject_id_y
-            intercept_correction_by_subject = tf.Variable(tf.truncated_normal(shape=[n_subj], mean=1., stddev=.1, dtype=tf.float32), name='subject_intercept_coef')
-            intercept_correction_by_subject -= tf.reduce_mean(intercept_correction_by_subject, axis=0)
-            intercept = intercept_global + intercept_correction_by_subject
-        else:
-            subject_y_ix = tf.constant(0, shape=[1])
-            intercept = intercept_global
+        ## Exponential convolution function
+        if conv_func == 'exp':
+            conv_global = lambda x: tf.exp(L_global) * tf.exp(-tf.exp(L_global) * x)
+            conv = conv_global
+        ## Gamma convolution function
+        elif conv_func == 'gamma':
+            conv_global_delta_zero = tf.contrib.distributions.Gamma(concentration=tf.exp(log_k_global[0]), rate=tf.exp(log_theta_global[0]), validate_args=True).prob
+            conv_global = lambda x: conv_global_delta_zero(x + tf.exp(log_neg_delta_global)[0])
+            conv_delta_zero = conv_global_delta_zero
+            conv = conv_global
 
-        if data_rep == 'conv':
-            ## Exponential distribution convolution function
-            if conv_func == 'exp':
-                conv_global = lambda x: tf.exp(L_global) * tf.exp(-tf.exp(L_global) * x)
-                if random_subjects_model and random_subjects_conv_params:
-                    ## By-subject correction terms to rate parameter lambda
-                    L_correction_by_subject = tf.Variable(tf.truncated_normal(shape=[n_subj, n_feat], mean=0., stddev=.1, dtype=tf.float32), name='L_correction_by_subject')
-                    L_correction_by_subject -= tf.reduce_mean(L_correction_by_subject, axis=0)
-                    L = L_global + L_correction_by_subject
-                    L = tf.gather(L, subject_y_ix)
-                    conv = lambda x: tf.exp(L) * tf.exp(-tf.exp(L) * x)
-                else:
-                    conv = conv_global
-            ## Gamma distribution convolution function
-            elif conv_func == 'gamma':
-                conv_global_delta_zero = tf.contrib.distributions.Gamma(concentration=tf.exp(K_global[0]), rate=tf.exp(theta_global[0]), validate_args=True).prob
-                conv_global = lambda x: conv_global_delta_zero(x + tf.exp(delta_global)[0])
-                if random_subjects_model and random_subjects_conv_params:
-                    ## By-subject correction terms to shape parameter K
-                    K_correction_by_subject = tf.Variable(tf.truncated_normal(shape=[n_subj, n_feat], mean=0., stddev=.1, dtype=tf.float32), name='K_correction_by_subject')
-                    K_correction_by_subject -= tf.reduce_mean(K_correction_by_subject, axis=0)
-                    K = K_global + K_correction_by_subject
+        def convolve_events(time_target, first_obs, last_obs):
+            col_ix = names2ix(allsl, allsl)
+            input_rows = tf.gather(X_iv[first_obs:last_obs], col_ix, axis=1)
+            input_times = time_X[first_obs:last_obs]
+            t_delta = time_target - input_times
+            conv_coef = conv(tf.expand_dims(t_delta, -1))
 
-                    ## By-subject correction terms to scale parameter theta
-                    theta_correction_by_subject = tf.Variable(tf.truncated_normal(shape=[n_subj, n_feat], mean=0., stddev=.1, dtype=tf.float32), name='theta_correction_by_subject')
-                    theta_correction_by_subject -= tf.reduce_mean(theta_correction_by_subject, axis=0)
-                    theta = theta_global + theta_correction_by_subject
+            return tf.reduce_sum(conv_coef * input_rows, 0)
 
-                    ## By-subject correction terms to location parameter delta
-                    delta_correction_by_subject = tf.Variable(tf.truncated_normal(shape=[n_subj, n_feat], mean=0., stddev=.1, dtype=tf.float32), name='loc_correction_by_subject')
-                    delta_correction_by_subject -= tf.reduce_mean(delta_correction_by_subject, axis=0)
-                    delta = delta_global + delta_correction_by_subject
-
-                    conv_delta_zero = tf.contrib.distributions.Gamma(concentration=tf.gather(tf.exp(K), subject_y_ix), rate=tf.gather(tf.exp(theta), subject_y_ix), validate_args=True).prob
-                    conv = lambda x: conv_delta_zero(x + tf.gather(tf.exp(delta), subject_y_ix))
-                else:
-                    conv_delta_zero = conv_global_delta_zero
-                    conv = conv_global
-
-            def convolve_events(time_target, first_obs, last_obs):
-                input_rows = X_raw[first_obs:last_obs]
-                input_times = time_X[first_obs:last_obs]
-                t_delta = time_target - input_times
-                conv_coef = conv(tf.expand_dims(t_delta, -1))
-
-                return tf.reduce_sum(conv_coef * input_rows, 0)
-
-            X_conv = tf.map_fn(lambda x: convolve_events(*x), [time_y, first_obs, last_obs], dtype=tf.float32, parallel_iterations=1)
-
+        X_conv = tf.map_fn(lambda x: convolve_events(*x), [time_y, first_obs, last_obs], dtype=tf.float32)
 
         if attribution_model:
             phi_global = tf.Variable(tf.truncated_normal(shape=[1, len(feature_powset)], stddev=0.1, dtype=tf.float32), name='phi')
@@ -593,15 +853,15 @@ elif network_type.lower() == 'mle':
             else:
                 phi = phi_global
             out = tf.constant(0.)
-            beta_global = tf.constant(0., shape=[1, n_feat])
-            beta_global_marginal = tf.constant(0., shape=[1, n_feat])
+            beta_global = tf.constant(0., shape=[1, len(allsl)])
+            beta_global_marginal = tf.constant(0., shape=[1, len(allsl)])
 
             sess.run(tf.global_variables_initializer())
 
             for i in range(len(feature_powset)):
                 indices = np.where(feature_powset[i])[0].astype('int32')
                 vals = tf.gather(X_conv, indices, axis=1)
-                vals *= tf.expand_dims(tf.gather(phi, subject_y_ix)[:, i], -1) / feature_powset[i].sum()
+                vals *= tf.expand_dims(tf.gather(phi, subject_ix)[:, i], -1) / feature_powset[i].sum()
                 vals = tf.reduce_sum(vals, axis=1)
                 out += vals
 
@@ -610,17 +870,30 @@ elif network_type.lower() == 'mle':
                 beta_global += phi_global[0, i] * mask / feature_powset[i].sum()
                 beta_global_marginal += phi_global[0, i] * mask
         else:
-            beta_global = tf.Variable(tf.truncated_normal(shape=[1, n_feat], mean=0., stddev=0.1, dtype=tf.float32), name='beta')
-            if random_subjects_model:
-                subject_beta = tf.Variable(tf.truncated_normal(shape=[n_subj, n_feat], mean=0., stddev=.1, dtype=tf.float32), name='subject_beta_coef')
-                subject_beta -= tf.reduce_mean(subject_beta, axis=0)
-                beta = beta_global + subject_beta
-                out = X_conv * tf.gather(beta, subject_y_ix)
-                out = tf.reduce_sum(out, 1)
-            else:
-                out = tf.squeeze(tf.matmul(X_conv, tf.transpose(tf.gather(beta_global, subject_y_ix))), -1)
+            beta_global = tf.Variable(tf.truncated_normal(shape=[1, len(fixef)], mean=0., stddev=0.1, dtype=tf.float32), name='beta')
+            fixef_ix = names2ix(fixef, allsl)
+            out += tf.squeeze(tf.matmul(tf.gather(X_conv, fixef_ix, axis=1), tf.transpose(beta_global)), axis=-1)
+            random_intercepts = []
+            Z = []
+            for i in range(len(rangf)):
+                r = bform_parsed['random'][i]
+                vars = r['vars']
+                n_var = len(vars)
 
-        out += tf.gather(intercept, subject_y_ix)
+                if r['Intercept']:
+                    random_intercept = tf.Variable(tf.truncated_normal(shape=[n_level[i]], mean=0., stddev=.1, dtype=tf.float32), name='intercept_by_%s' % r['grouping_factor'])
+                    random_intercept -= tf.reduce_mean(random_intercept, axis=0)
+                    random_intercepts.append(random_intercept)
+                    out += tf.gather(random_intercept, gf_y_[:, i])
+
+                if len(vars) > 0:
+                    random_effects_matrix = tf.Variable(tf.truncated_normal(shape=[n_level[i], n_var], mean=0., stddev=.1, dtype=tf.float32), name='random_slopes_by_%s' % (r['grouping_factor']))
+                    random_effects_matrix -= tf.reduce_mean(random_effects_matrix, axis=0)
+                    Z.append(random_effects_matrix)
+
+                    ransl_ix = names2ix(vars, allsl)
+
+                    out += tf.reduce_sum(tf.gather(X_conv, ransl_ix, axis=1) * tf.gather(random_effects_matrix, gf_y_[:, i]), axis=1)
 
         mae_loss = tf.losses.absolute_difference(y_, out)
         mse_loss = tf.losses.mean_squared_error(y_, out)
@@ -642,40 +915,24 @@ elif network_type.lower() == 'mle':
     
         train_writer = tf.summary.FileWriter(logdir + '/train')
         cv_writer = tf.summary.FileWriter(logdir + '/cv')
-        if random_subjects_model and log_random:
-            subject_writers = [tf.summary.FileWriter(logdir + '/subjects/%d'%i) for i in range(n_subj)]
-            subject_indexer = tf.placeholder(dtype=tf.int32)
-            tf.summary.scalar('by_subject/Intercept', intercept_correction_by_subject[subject_indexer], collections=['by_subject'])
         tf.summary.scalar('Intercept', intercept_global[0], collections=['params'])
         support = tf.expand_dims(tf.lin_space(0., 2.5, 1000), -1)
-        for i in range(len(features)):
-            tf.summary.scalar('beta/%s'%features[i], beta_global[0,i], collections=['params'])
+        for i in range(len(fixef)):
+            tf.summary.scalar('beta/%s' % fixef[i], beta_global[0, i], collections=['params'])
             if attribution_model:
-                tf.summary.scalar('beta_marginal/%s' % features[i], beta_global_marginal[0, i], collections=['params'])
-            if random_subjects_model and log_random:
-                if not attribution_model:
-                    tf.summary.scalar('by_subject/beta/%s'%features[i], subject_beta[subject_indexer,i], collections=['by_subject'])
-            if data_rep == 'conv':
-                if conv_func == 'exp':
-                    tf.summary.scalar(logdir + '_lambda/%s' % features[i], L_global[0, i], collections=['params'])
-                    if random_subjects_model and random_subjects_conv_params and log_random:
-                        tf.summary.scalar('by_subject/log_lambda/%s' % features[i], L_correction_by_subject[subject_indexer, i], collections=['by_subject'])
-                elif conv_func == 'gamma':
-                    tf.summary.scalar(logdir + '_k/%s' % features[i], K_global[0, i], collections=['params'])
-                    tf.summary.scalar(logdir + '_theta/%s' % features[i], theta_global[0, i], collections=['params'])
-                    tf.summary.scalar(logdir + '_neg_delta/%s' % features[i], delta_global[0, i], collections=['params'])
-                    if random_subjects_model and random_subjects_conv_params and log_random:
-                        tf.summary.scalar('by_subject/log_k/%s' % features[i], K_correction_by_subject[subject_indexer, i], collections=['by_subject'])
-                        tf.summary.scalar('by_subject/log_theta/%s' % features[i], theta_correction_by_subject[subject_indexer, i], collections=['by_subject'])
-                        tf.summary.scalar('by_subject/log_delta/%s' % features[i], delta_correction_by_subject[subject_indexer, i], collections=['by_subject'])
-                if log_convolution_plots:
-                    tf.summary.histogram('conv/%s' % features[i], conv_global(support)[:,i], collections=['params'])
+                tf.summary.scalar('beta_marginal/%s' % fixef[i], beta_global_marginal[0, i], collections=['params'])
+            if conv_func == 'exp':
+                tf.summary.scalar(logdir + '_lambda/%s' % fixef[i], L_global[0, i], collections=['params'])
+            elif conv_func == 'gamma':
+                tf.summary.scalar(logdir + '_k/%s' % fixef[i], log_k_global[0, i], collections=['params'])
+                tf.summary.scalar(logdir + '_theta/%s' % fixef[i], log_theta_global[0, i], collections=['params'])
+                tf.summary.scalar(logdir + '_neg_delta/%s' % fixef[i], log_neg_delta_global[0, i], collections=['params'])
+            if log_convolution_plots:
+                tf.summary.histogram('conv/%s' % fixef[i], conv_global(support)[:, i], collections=['params'])
         if attribution_model:
             for i in range(len(feature_powset)):
-                name = 'phi_' + '_'.join([features[j] for j in range(len(features)) if feature_powset[i,j] == 1])
+                name = 'phi_' + '_'.join([fixef[j] for j in range(len(fixef)) if feature_powset[i, j] == 1])
                 tf.summary.scalar('phi/' + name, phi_global[0,i], collections=['params'])
-                if random_subjects_model and random_subjects_conv_params and log_random:
-                    tf.summary.scalar('by_subject/phi/' + name, phi_correction_by_subject[subject_indexer, i], collections=['by_subject'])
 
 
         tf.summary.scalar('loss/%s'%loss, loss_func, collections=['loss'])
@@ -698,13 +955,13 @@ elif network_type.lower() == 'mle':
                     if parent not in s_dict_grouped:
                         s_dict_grouped[parent] = {}
                     s_dict_grouped[parent][key] = val
-                    if parent.startswith(logdir + '_neg_'):
+                    if parent.startswith('log_neg_'):
                         unlog_name = parent[8:]
                         if unlog_name not in s_dict_grouped:
                             s_dict_grouped[unlog_name] = {}
                         unlog_val = -math.exp(val)
                         s_dict_grouped[unlog_name][key] = unlog_val
-                    elif parent.startswith(logdir + '_'):
+                    elif parent.startswith('log_'):
                         unlog_name = parent[4:]
                         if unlog_name not in s_dict_grouped:
                             s_dict_grouped[unlog_name] = {}
@@ -736,28 +993,22 @@ elif network_type.lower() == 'mle':
         print()
 
         fd_train = {}
-        fd_train[subject_id_X] = X.subject.cat.codes
-        fd_train[subject_id_y] = y_train.subject.cat.codes
-        fd_train[doc_id_X] = X.docid.cat.codes
-        fd_train[doc_id_y] = y_train.docid.cat.codes
+        fd_train[X_iv] = X[allsl]
         fd_train[time_X] = X.time
+        fd_train[y_] = y_train[dv]
         fd_train[time_y] = y_train.time
+        fd_train[gf_y_] = gf_y_train
         fd_train[first_obs] = y_train.first_obs
         fd_train[last_obs] = y_train.last_obs
-        fd_train[X_raw] = X[features]
-        fd_train[y_] = y_train.fdur
 
         fd_cv = {}
-        fd_cv[subject_id_X] = X.subject.cat.codes
-        fd_cv[subject_id_y] = y_cv.subject.cat.codes
-        fd_cv[doc_id_X] = X.docid.cat.codes
-        fd_cv[doc_id_y] = y_cv.docid.cat.codes
+        fd_cv[X_iv] = X[allsl]
         fd_cv[time_X] = X.time
+        fd_cv[y_] = y_cv[dv]
         fd_cv[time_y] = y_cv.time
+        fd_cv[gf_y_] = gf_y_cv
         fd_cv[first_obs] = y_cv.first_obs
         fd_cv[last_obs] = y_cv.last_obs
-        fd_cv[X_raw] = X[features]
-        fd_cv[y_] = y_cv.fdur
 
             
         summary_cv_losses_batch, loss_cv = sess.run([summary_losses, loss_func], feed_dict=fd_cv)
@@ -785,16 +1036,13 @@ elif network_type.lower() == 'mle':
 
             for j in range(0, len(y_train), minibatch_size):
                 fd_minibatch = {}
-                fd_minibatch[subject_id_X] = X.subject.cat.codes
-                fd_minibatch[subject_id_y] = y_train.subject.cat.codes.iloc[p[j:j + minibatch_size]]
-                fd_minibatch[doc_id_X] = X.docid.cat.codes
-                fd_minibatch[doc_id_y] = y_train.docid.cat.codes.iloc[p[j:j + minibatch_size]]
+                fd_minibatch[X_iv] = X[allsl]
                 fd_minibatch[time_X] = X.time
+                fd_minibatch[y_] = y_train[dv].iloc[p[j:j + minibatch_size]]
                 fd_minibatch[time_y] = y_train.time.iloc[p[j:j + minibatch_size]]
+                fd_minibatch[gf_y_] = gf_y_train.iloc[p[j:j + minibatch_size]]
                 fd_minibatch[first_obs] = y_train.first_obs.iloc[p[j:j + minibatch_size]]
                 fd_minibatch[last_obs] = y_train.last_obs.iloc[p[j:j + minibatch_size]]
-                fd_minibatch[X_raw] = X[features]
-                fd_minibatch[y_] = y_train.fdur.iloc[p[j:j + minibatch_size]]
 
                 summary_params_batch, summary_train_losses_batch, _, loss_minibatch = sess.run([summary_params, summary_losses, train_op, loss_func], feed_dict=fd_minibatch)
                 train_writer.add_summary(summary_params_batch, global_batch_step.eval(session=sess))
@@ -818,8 +1066,7 @@ elif network_type.lower() == 'mle':
 
             # loss_minibatch, preds_train = sess.run([loss_func, out], feed_dict=fd_train)
             summary_cv_losses_batch, loss_cv, preds_cv = sess.run([summary_losses, loss_func, out], feed_dict=fd_cv)
-            # mae_train = mae(y_train.fdur, preds_train)
-            mae_cv = mae(y_cv.fdur, preds_cv)
+            mae_cv = mae(y_cv[dv], preds_cv)
             cv_writer.add_summary(summary_cv_losses_batch, global_batch_step.eval(session=sess))
             with open(logdir + '/results.txt', 'w') as f:
                 f.write('='*50 + '\n')
@@ -830,37 +1077,13 @@ elif network_type.lower() == 'mle':
                 print()
                 f.write('='*50 + '\n')
 
-            if compute_signif:
-                if baseline_LM:
-                    print('.'*50)
-                    print('Bootstrap significance testing')
-                    print('Model vs. LM baseline on CV data')
-                    print()
-                    print('MSE loss improvement: %.4f' %(lm_mse_cv-mse(y_cv.fdur, preds_cv)))
-                    p_cv = bootstrap(y_cv.fdur, lm_preds_cv, preds_cv, err_type=loss)
-                    print('p = %.4e' %p_cv)
-                    print('.' * 50)
-                    print()
-                if baseline_LME:
-                    print('.' * 50)
-                    print('Bootstrap significance testing')
-                    print('Model vs. LME baseline on CV data')
-                    print()
-                    print('MSE loss improvement: %.4f' %(lme_mse_cv-mse(y_cv.fdur, preds_cv)))
-                    p_cv = bootstrap(y_cv.fdur, lme_preds_cv, preds_cv, err_type=loss)
-                    print('p = %.4e' % p_cv)
-                    print('.' * 50)
-                    print()
-            print()
+            plot_x = support.eval(session=sess)
+            plot_y = (beta_global * conv_global(support)).eval(session=sess)
 
-            if data_rep == 'conv':
-                plot_x = support.eval(session=sess)
-                plot_y = (beta_global * conv_global(support)).eval(session=sess)
-
-                plot_convolutions(plot_x, plot_y, features, dir=logdir, filename='convolution_plot.jpg')
-                if attribution_model:
-                    plot_y = (beta_global_marginal * conv_global(support)).eval(session=sess)
-                    plot_convolutions(plot_x, plot_y, features, dir=logdir, filename='marginal_convolution_plot.jpg')
+            plot_convolutions(plot_x, plot_y, fixef, dir=logdir, filename='convolution_plot.jpg')
+            if attribution_model:
+                plot_y = (beta_global_marginal * conv_global(support)).eval(session=sess)
+                plot_convolutions(plot_x, plot_y, fixef, dir=logdir, filename='marginal_convolution_plot.jpg')
 
 
 
@@ -877,8 +1100,8 @@ elif network_type.lower() == 'mle':
             print('Bootstrap significance testing')
             print('Model vs. LM baseline on CV data')
             print()
-            print('MSE loss improvement: %.4f' % (lm_mse_cv - mse(y_cv.fdur, preds_cv)))
-            p_cv = bootstrap(y_cv.fdur, lm_preds_cv, preds_cv, err_type=loss)
+            print('MSE loss improvement: %.4f' % (lm_mse_cv - mse(y_cv[dv], preds_cv)))
+            p_cv = bootstrap(y_cv[dv], lm_preds_cv, preds_cv, err_type=loss)
             print('p = %.4e' % p_cv)
             print('.' * 50)
             print()
@@ -887,8 +1110,18 @@ elif network_type.lower() == 'mle':
             print('Bootstrap significance testing')
             print('Model vs. LME baseline on CV data')
             print()
-            print('MSE loss improvement: %.4f' % (lme_mse_cv - mse(y_cv.fdur, preds_cv)))
-            p_cv = bootstrap(y_cv.fdur, lme_preds_cv, preds_cv, err_type=loss)
+            print('MSE loss improvement: %.4f' % (lme_mse_cv - mse(y_cv[dv], preds_cv)))
+            p_cv = bootstrap(y_cv[dv], lme_preds_cv, preds_cv, err_type=loss)
+            print('p = %.4e' % p_cv)
+            print('.' * 50)
+            print()
+        if baseline_GAM:
+            print('.' * 50)
+            print('Bootstrap significance testing')
+            print('Model vs. GAM baseline on CV data')
+            print()
+            print('MSE loss improvement: %.4f' % (gam_mse_cv - mse(y_cv[select_gam_cv][dv], preds_cv[select_gam_cv])))
+            p_cv = bootstrap(y_cv[select_gam_cv][dv], gam_preds_cv, preds_cv[select_gam_cv], err_type=loss)
             print('p = %.4e' % p_cv)
             print('.' * 50)
             print()
