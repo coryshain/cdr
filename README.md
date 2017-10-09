@@ -1,2 +1,2 @@
 # Deconvolutional time series regression (DTSR)
-Tools for modeling diffuse temporal effects in time series data
+A regression technique for modeling temporally diffuse effects
