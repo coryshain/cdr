@@ -6,7 +6,7 @@ import pandas as pd
 
 pd.options.mode.chained_assignment = None
 
-from dtsr import Config, read_data, DTSR, Formula, preprocess_data, print_tee, mse, mae, c
+from dtsr import Config, read_data, Formula, preprocess_data, print_tee, mse, mae
 
 if __name__ == '__main__':
 
@@ -165,10 +165,43 @@ if __name__ == '__main__':
                 print_tee(summary, [sys.stdout, f_out])
             sys.stderr.write('\n\n')
         elif m.startswith('DTSR'):
-            model = DTSR(formula,
-                         X,
-                         y,
-                         outdir=p.logdir + '/' + m,
-                         fixef_name_map=p.fixef_name_map)
+            from dtsr import DTSR
+
+            dv = formula.strip().split('~')[0].strip()
+
+            if os.path.exists(p.logdir + '/' + m + '/m.obj'):
+                sys.stderr.write('Retrieving saved model %s...\n\n' % m)
+                with open(p.logdir + '/' + m + '/m.obj', 'rb') as m_file:
+                    dtsr_model = pickle.load(m_file)
+            else:
+                sys.stderr.write('Fitting model %s...\n\n' % m)
+                dtsr_model = DTSR(formula,
+                             X,
+                             y,
+                             outdir=p.logdir + '/' + m)
+                with open(p.logdir + '/' + m + '/m.obj', 'wb') as m_file:
+                    pickle.dump(dtsr_model, m_file)
+            dtsr_model.train(X,
+                             y,
+                             n_epoch_train=p.n_epoch_train,
+                             n_epoch_tune=p.n_epoch_tune,
+                             minibatch_size=p.minibatch_size,
+                             fixef_name_map=p.fixef_name_map)
+
+            dtsr_preds = dtsr_model.predict(X, y.time, y[dtsr_model.form.rangf], y.first_obs, y.last_obs)
+            dtsr_mse = mse(y[dv], dtsr_preds)
+            dtsr_mae = mae(y[dv], dtsr_preds)
+            summary = '=' * 50 + '\n'
+            summary += 'DTSR regression\n\n'
+            summary += 'Model name: %s\n\n' % m
+            summary += 'Formula:\n'
+            summary += '  ' + formula + '\n'
+            summary += 'Training set loss:\n'
+            summary += '  MSE: %.4f\n' % dtsr_mse
+            summary += '  MAE: %.4f\n' % dtsr_mae
+            summary += '=' * 50 + '\n'
+            with open(p.logdir + '/' + m + '/summary.txt', 'w') as f_out:
+                print_tee(summary, [sys.stdout, f_out])
+            sys.stderr.write('\n\n')
 
 

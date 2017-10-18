@@ -10,6 +10,8 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 from tensorflow.python.platform.test import is_gpu_available
 usingGPU = is_gpu_available()
 sys.stderr.write('Using GPU: %s\n' % usingGPU)
+tf_config = tf.ConfigProto()
+tf_config.gpu_options.allow_growth = True
 from .formula import *
 from .util import *
 from .plot import *
@@ -73,16 +75,10 @@ class DTSR(object):
                  optim='Adam',
                  learning_rate=0.01,
                  loss='mse',
-                 n_epoch_train=100,
-                 n_epoch_tune=100,
-                 minibatch_size=128,
-                 log_convolution_plots=False,
-                 fixef_name_map=None
+                 log_convolution_plots=False
                  ):
 
-        config = tf.ConfigProto()
-        config.gpu_options.allow_growth = True
-        self.sess = tf.Session(config=config)
+        self.sess = tf.Session(config=tf_config)
 
         if isinstance(form, Formula):
             self.form = form
@@ -96,7 +92,19 @@ class DTSR(object):
         self.conv_func_str = conv_func
         self.optim_name = optim
         self.learning_rate = learning_rate
+        self.loss_name = loss
+        self.log_convolution_plots = log_convolution_plots
+        self.rangf_unique = []
+        self.n_levels = []
+        for i in range(len(f.rangf)):
+            self.rangf_unique.append(y[f.rangf[i]].unique())
+            self.n_levels.append(len(self.rangf_unique[i]) + 1)
+        self.intercept_init = float(y[f.dv].mean())
 
+        self.construct_network()
+
+    def construct_network(self):
+        f = self.form
         with self.sess.graph.as_default():
             self.optim = self.optim_init(self.optim_name, self.learning_rate)
 
@@ -111,10 +119,8 @@ class DTSR(object):
             self.gf_y_raw = tf.placeholder(shape=[None, len(f.rangf)], dtype=tf.string, name='y_gf')
             self.gf_table = []
             self.gf_y = []
-            self.n_levels = []
             for i in range(len(f.rangf)):
-                unique = y[f.rangf[i]].unique()
-                self.n_levels.append(len(unique)+1)
+                unique = self.rangf_unique[i]
                 keys = tf.constant(np.asarray(unique, dtype=np.str))
                 values = tf.constant(np.arange(len(unique), dtype=np.int32))
                 self.gf_table.append(tf.contrib.lookup.HashTable(tf.contrib.lookup.KeyValueTensorInitializer(keys, values), self.n_levels[i]-1))
@@ -133,15 +139,15 @@ class DTSR(object):
                 self.log_theta_global = tf.Variable(tf.truncated_normal(shape=[1, len(f.allsl)], mean=0., stddev=.1, dtype=tf.float32), name='log_theta')
                 self.log_neg_delta_global = tf.Variable(tf.truncated_normal(shape=[1, len(f.allsl)], mean=0., stddev=.1, dtype=tf.float32), name='log_neg_delta')
 
-            intercept_global = tf.Variable(tf.constant(float(y[f.dv].mean()), shape=[1]), name='intercept')
+            intercept_global = tf.Variable(tf.constant(self.intercept_init, shape=[1]), name='intercept')
             self.out = intercept_global
 
             ## Exponential convolution function
-            if conv_func == 'exp':
+            if self.conv_func_str == 'exp':
                 self.conv_global = lambda x: tf.exp(self.L_global) * tf.exp(-tf.exp(self.L_global) * x)
                 conv = self.conv_global
             ## Gamma convolution function
-            elif conv_func == 'gamma':
+            elif self.conv_func_str == 'gamma':
                 conv_global_delta_zero = tf.contrib.distributions.Gamma(concentration=tf.exp(self.log_k_global[0]),
                                                                         rate=tf.exp(self.log_theta_global[0]),
                                                                         validate_args=True).prob
@@ -195,8 +201,8 @@ class DTSR(object):
 
             self.mae_loss = tf.losses.absolute_difference(self.y, self.out)
             self.mse_loss = tf.losses.mean_squared_error(self.y, self.out)
-            if loss.lower() == 'mae':
-                loss_func = self.mae_loss
+            if self.loss_name.lower() == 'mae':
+                self.loss_func = self.mae_loss
             else:
                 self.loss_func = self.mse_loss
 
@@ -216,10 +222,10 @@ class DTSR(object):
                     tf.summary.scalar('log_k/%s' % f.fixed[i], self.log_k_global[0, i], collections=['params'])
                     tf.summary.scalar('log_theta/%s' % f.fixed[i], self.log_theta_global[0, i], collections=['params'])
                     tf.summary.scalar('log_neg_delta/%s' % f.fixed[i], self.log_neg_delta_global[0, i], collections=['params'])
-                if log_convolution_plots:
+                if self.log_convolution_plots:
                     tf.summary.histogram('conv/%s' % f.fixed[i], self.conv_global(self.support)[:, i], collections=['params'])
 
-            tf.summary.scalar('loss/%s' % loss, self.loss_func, collections=['loss'])
+            tf.summary.scalar('loss/%s' % self.loss_name, self.loss_func, collections=['loss'])
             self.summary_params = tf.summary.merge_all(key='params')
             self.summary_losses = tf.summary.merge_all(key='loss')
 
@@ -231,13 +237,6 @@ class DTSR(object):
                 n_params += np.prod(np.array(v).shape)
             sys.stderr.write('Network contains %d trainable parameters\n' % n_params)
 
-            self.train(X,
-                       y,
-                       n_epoch_train=n_epoch_train,
-                       n_epoch_tune=n_epoch_tune,
-                       minibatch_size=minibatch_size,
-                       fixef_name_map=fixef_name_map)
-
     def train(self, X, y, n_epoch_train=100, n_epoch_tune=100, minibatch_size=128, fixef_name_map=None):
 
             f = self.form
@@ -247,11 +246,6 @@ class DTSR(object):
                 y_rangf[c] = y_rangf[c].astype(str)
 
             y_range = np.arange(len(y))
-
-            sys.stderr.write('\n')
-            sys.stderr.write('=' * 50 + '\n')
-            sys.stderr.write('Starting training\n')
-            sys.stderr.write('\n')
 
             fd_minibatch = {}
             fd_minibatch[self.X_iv] = X[f.allsl]
@@ -309,7 +303,7 @@ class DTSR(object):
         fd[self.X_iv] = X[f.allsl]
         fd[self.time_X] = X.time
         fd[self.time_y] = y_time
-        fd[self.gf_y] = y_rangf
+        fd[self.gf_y_raw] = y_rangf
         fd[self.first_obs] = first_obs
         fd[self.last_obs] = last_obs
 
@@ -327,7 +321,7 @@ class DTSR(object):
         fd[self.time_X] = X.time
         fd[self.y] = y[f.dv]
         fd[self.time_y] = y.time
-        fd[self.gf_y] = y_rangf
+        fd[self.gf_y_raw] = y_rangf
         fd[self.first_obs] = y.first_obs
         fd[self.last_obs] = y.last_obs
 
@@ -351,3 +345,33 @@ class DTSR(object):
             self.saver.restore(self.sess, self.outdir + '/model.ckpt')
         else:
             self.sess.run(tf.global_variables_initializer())
+
+    def __getstate__(self):
+        return (
+            self.form,
+            self.outdir,
+            self.conv_func_str,
+            self.optim_name,
+            self.learning_rate,
+            self.loss_name,
+            self.log_convolution_plots,
+            self.rangf_unique,
+            self.n_levels,
+            self.intercept_init
+        )
+
+    def __setstate__(self, state):
+        self.sess = tf.Session(config=tf_config)
+        self.form, \
+        self.outdir, \
+        self.conv_func_str, \
+        self.optim_name, \
+        self.learning_rate, \
+        self.loss_name, \
+        self.log_convolution_plots, \
+        self.rangf_unique, \
+        self.n_levels, \
+        self.intercept_init = state
+
+        self.construct_network()
+        self.load()

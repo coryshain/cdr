@@ -36,8 +36,9 @@ class Config(object):
         self.modulus = settings.getint('modulus', 4)
         self.log_random = settings.getboolean('log_random', False)
         self.log_convolution_plots = settings.getboolean('log_convolution_plots', False)
-        self.n_epoch_train = settings.getint('n_epoch_train', 50)
-        self.n_epoch_finetune = settings.getint('n_epoch_finetune', 250)
+        self.n_epoch_train = settings.getint('n_epoch_train', 100)
+        self.n_epoch_tune = settings.getint('n_epoch_tune', 100)
+        self.minibatch_size = settings.getint('minibatch_size', 128)
 
         ## Filters (optional)
         self.filter_map = {}
