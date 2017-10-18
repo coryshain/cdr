@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+plt.gcf().set_size_inches(4, 3)
 import seaborn as sns
 sns.set(style="white", rc={"axes.facecolor": (0, 0, 0, 0)})
 

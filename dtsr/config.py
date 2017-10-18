@@ -13,19 +13,21 @@ class Config(object):
         settings = config['settings']
         filters = config['filters']
 
-        ## Data (Required)
-        self.X_train = data.get('X_train')
-        self.X_dev = data.get('X_dev')
-        self.X_test = data.get('X_test')
+        ## Data
+        self.X_train = data.get('X_train', None)
+        self.X_dev = data.get('X_dev', None)
+        self.X_test = data.get('X_test', None)
 
-        self.y_train = data.get('y_train')
-        self.y_dev = data.get('y_dev')
-        self.y_test = data.get('y_test')
+        self.y_train = data.get('y_train', None)
+        self.y_dev = data.get('y_dev', None)
+        self.y_test = data.get('y_test', None)
 
+        split_ids = data.get('split_ids')
+        self.split_ids = split_ids.strip().split()
         series_ids = data.get('series_ids')
         self.series_ids = series_ids.strip().split()
 
-        ## Settings (Required)
+        ## Settings
         self.logdir = settings.get('logdir', 'log')
         if not os.path.exists(self.logdir):
             os.makedirs(self.logdir)
@@ -40,12 +42,12 @@ class Config(object):
         self.n_epoch_tune = settings.getint('n_epoch_tune', 100)
         self.minibatch_size = settings.getint('minibatch_size', 128)
 
-        ## Filters (optional)
+        ## Filters
         self.filter_map = {}
         for f in filters:
             self.filter_map[f] = [x.strip() for x in filters[f].strip().split(',')]
 
-        ## Model(s) (at least one required)
+        ## Model(s)
         self.models = {}
         self.model_list = [m[6:] for m in config.sections() if m.startswith('model_')]
         for model_field in [m for m in config.keys() if m.startswith('model_')]:

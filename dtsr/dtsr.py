@@ -53,6 +53,7 @@ def compute_history_intervals(y, X, series_ids, cutoff=100):
         pb.update(i, force=True)
 
         i += 1
+
     return first_obs, last_obs
 
 class DTSR(object):
@@ -68,7 +69,6 @@ class DTSR(object):
 
     def __init__(self,
                  form,
-                 X,
                  y,
                  outdir,
                  conv_func='gamma',
@@ -94,11 +94,13 @@ class DTSR(object):
         self.learning_rate = learning_rate
         self.loss_name = loss
         self.log_convolution_plots = log_convolution_plots
-        self.rangf_unique = []
-        self.n_levels = []
+        self.rangf_keys = []
+        self.rangf_values = []
+        self.rangf_n_levels = []
         for i in range(len(f.rangf)):
-            self.rangf_unique.append(y[f.rangf[i]].unique())
-            self.n_levels.append(len(self.rangf_unique[i]) + 1)
+            self.rangf_keys.append(y[f.rangf[i]].unique().astype('str'))
+            self.rangf_values.append(np.arange(len(self.rangf_keys[i]), dtype=np.int32))
+            self.rangf_n_levels.append(len(self.rangf_keys[i]) + 1)
         self.intercept_init = float(y[f.dv].mean())
 
         self.construct_network()
@@ -108,7 +110,7 @@ class DTSR(object):
         with self.sess.graph.as_default():
             self.optim = self.optim_init(self.optim_name, self.learning_rate)
 
-            self.X_iv = tf.placeholder(shape=[None, len(f.allsl)], dtype=tf.float32, name='X_raw')
+            self.X = tf.placeholder(shape=[None, len(f.allsl)], dtype=tf.float32, name='X_raw')
             self.time_X = tf.placeholder(shape=[None], dtype=tf.float32, name='time_X')
 
             self.y = tf.placeholder(shape=[None], dtype=tf.float32, name='y_')
@@ -120,13 +122,11 @@ class DTSR(object):
             self.gf_table = []
             self.gf_y = []
             for i in range(len(f.rangf)):
-                unique = self.rangf_unique[i]
-                keys = tf.constant(np.asarray(unique, dtype=np.str))
-                values = tf.constant(np.arange(len(unique), dtype=np.int32))
-                self.gf_table.append(tf.contrib.lookup.HashTable(tf.contrib.lookup.KeyValueTensorInitializer(keys, values), self.n_levels[i]-1))
+                self.gf_table.append(tf.contrib.lookup.HashTable(tf.contrib.lookup.KeyValueTensorInitializer(tf.constant(np.asarray(self.rangf_keys[i])), tf.constant(np.asarray(self.rangf_values[i]))), self.rangf_n_levels[i] - 1))
                 self.gf_table[i].init.run(session=self.sess)
                 self.gf_y.append(self.gf_table[i].lookup(self.gf_y_raw[:,i]))
-            self.gf_y = tf.stack(self.gf_y, axis=1)
+            if len(self.gf_y) > 0:
+                self.gf_y = tf.stack(self.gf_y, axis=1)
 
             self.first_obs = tf.placeholder(shape=[None], dtype=tf.int32, name='first_obs')
             self.last_obs = tf.placeholder(shape=[None], dtype=tf.int32, name='last_obs')
@@ -157,7 +157,7 @@ class DTSR(object):
 
             def convolve_events(time_target, first_obs, last_obs):
                 col_ix = names2ix(f.allsl, f.allsl)
-                input_rows = tf.gather(self.X_iv[first_obs:last_obs], col_ix, axis=1)
+                input_rows = tf.gather(self.X[first_obs:last_obs], col_ix, axis=1)
                 input_times = self.time_X[first_obs:last_obs]
                 t_delta = time_target - input_times
                 conv_coef = conv(tf.expand_dims(t_delta, -1))
@@ -178,26 +178,26 @@ class DTSR(object):
                 r = f.random[i]
                 vars = r.vars
                 n_var = len(vars)
-                mask = np.ones(self.n_levels[i], dtype=np.float32)
-                mask[self.n_levels[i]-1] = 0
+                mask = np.ones(self.rangf_n_levels[i], dtype=np.float32)
+                mask[self.rangf_n_levels[i] - 1] = 0
                 mask = tf.constant(mask)
 
                 if r.intercept:
-                    random_intercept = tf.Variable(tf.truncated_normal(shape=[self.n_levels[i]], mean=0., stddev=.1, dtype=tf.float32), name='intercept_by_%s' % r.grouping_factor)
+                    random_intercept = tf.Variable(tf.truncated_normal(shape=[self.rangf_n_levels[i]], mean=0., stddev=.1, dtype=tf.float32), name='intercept_by_%s' % r.grouping_factor)
                     random_intercept *= mask
                     random_intercept -= tf.reduce_mean(random_intercept, axis=0)
                     self.zeta.append(random_intercept)
                     self.out += tf.gather(random_intercept, self.gf_y[:, i])
 
                 if len(vars) > 0:
-                    random_effects_matrix = tf.Variable(tf.truncated_normal(shape=[self.n_levels[i], n_var], mean=0., stddev=.1, dtype=tf.float32), name='random_slopes_by_%s' % (r.grouping_factor))
+                    random_effects_matrix = tf.Variable(tf.truncated_normal(shape=[self.rangf_n_levels[i], n_var], mean=0., stddev=.1, dtype=tf.float32), name='random_slopes_by_%s' % (r.grouping_factor))
                     random_effects_matrix *= tf.expand_dims(mask, -1)
                     random_effects_matrix -= tf.reduce_mean(random_effects_matrix, axis=0)
                     self.Z.append(random_effects_matrix)
 
                     ransl_ix = names2ix(vars, f.allsl)
 
-                    self.out += tf.reduce_sum(tf.gather(self.X_conv, ransl_ix, axis=1) * tf.gather(random_effects_matrix, tf.clip_by_value(self.gf_y[:, i], 0, self.n_levels[i] - 1)), axis=1)
+                    self.out += tf.reduce_sum(tf.gather(self.X_conv, ransl_ix, axis=1) * tf.gather(random_effects_matrix, self.gf_y[:, i]), axis=1)
 
             self.mae_loss = tf.losses.absolute_difference(self.y, self.out)
             self.mse_loss = tf.losses.mean_squared_error(self.y, self.out)
@@ -248,7 +248,7 @@ class DTSR(object):
             y_range = np.arange(len(y))
 
             fd_minibatch = {}
-            fd_minibatch[self.X_iv] = X[f.allsl]
+            fd_minibatch[self.X] = X[f.allsl]
             fd_minibatch[self.time_X] = X.time
 
             while self.global_step.eval(session=self.sess) < n_epoch_train + n_epoch_tune:
@@ -300,7 +300,7 @@ class DTSR(object):
             y_rangf[c] = y_rangf[c].astype(str)
 
         fd = {}
-        fd[self.X_iv] = X[f.allsl]
+        fd[self.X] = X[f.allsl]
         fd[self.time_X] = X.time
         fd[self.time_y] = y_time
         fd[self.gf_y_raw] = y_rangf
@@ -317,7 +317,7 @@ class DTSR(object):
             y_rangf[c] = y_rangf[c].astype(str)
 
         fd = {}
-        fd[self.X_iv] = X[f.allsl]
+        fd[self.X] = X[f.allsl]
         fd[self.time_X] = X.time
         fd[self.y] = y[f.dv]
         fd[self.time_y] = y.time
@@ -355,8 +355,9 @@ class DTSR(object):
             self.learning_rate,
             self.loss_name,
             self.log_convolution_plots,
-            self.rangf_unique,
-            self.n_levels,
+            self.rangf_keys,
+            self.rangf_values,
+            self.rangf_n_levels,
             self.intercept_init
         )
 
@@ -369,8 +370,9 @@ class DTSR(object):
         self.learning_rate, \
         self.loss_name, \
         self.log_convolution_plots, \
-        self.rangf_unique, \
-        self.n_levels, \
+        self.rangf_keys, \
+        self.rangf_values, \
+        self.rangf_n_levels, \
         self.intercept_init = state
 
         self.construct_network()

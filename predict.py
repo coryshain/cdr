@@ -6,7 +6,7 @@ import pandas as pd
 
 pd.options.mode.chained_assignment = None
 
-from dtsr import Config, read_data, DTSR, Formula, preprocess_data, print_tee, mse, mae, c
+from dtsr import Config, read_data, Formula, preprocess_data, print_tee, mse, mae, compute_splitID, compute_partition
 
 if __name__ == '__main__':
 
@@ -15,7 +15,7 @@ if __name__ == '__main__':
     ''')
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='Path to configuration (*.ini) file')
-    argparser.add_argument('-p', '--partition', type='str', default='dev', help='Name of partition to use (one of "train", "dev", "test")')
+    argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
     args, unknown = argparser.parse_known_args()
 
     p = Config(args.config_path)
@@ -46,10 +46,17 @@ if __name__ == '__main__':
     X, y, select = preprocess_data(X, y, p, dtsr_formula_list, compute_history=run_dtsr)
 
     if run_baseline:
-        X_baseline = X[select]
-
-    if run_baseline:
         from dtsr.baselines import py2ri
+        X['splitID'] = compute_splitID(X, p.split_ids)
+        part = compute_partition(X, p.modulus, 3)
+        if args.partition == 'train':
+            part_select = part[0]
+        elif args.partition == 'dev':
+            part_select = part[1]
+        elif args.partition == 'test':
+            part_select = part[2]
+        X_baseline = X[part_select]
+        X_baseline = X_baseline.reset_index(drop=True)[select]
         X_baseline = py2ri(X_baseline)
 
     for m in models:
@@ -66,9 +73,24 @@ if __name__ == '__main__':
                 lme = pickle.load(m_file)
 
             lme_preds = lme.predict(X_baseline)
-            with open(p.logdir + '/' + m + '/preds.txt', 'w') as p_file:
+            with open(p.logdir + '/' + m + '/preds_%s.txt'%args.partition, 'w') as p_file:
                 for i in range(len(lme_preds)):
-                    p_file.write(str(lme_preds[i]))
+                    p_file.write(str(lme_preds[i]) + '\n')
+            lme_mse = mse(y[dv], lme_preds)
+            lme_mae = mae(y[dv], lme_preds)
+            summary = '=' * 50 + '\n'
+            summary += 'LME regression\n\n'
+            summary += 'Model name: %s\n\n' % m
+            summary += 'Formula:\n'
+            summary += '  ' + formula + '\n'
+            summary += str(lme.summary()) + '\n'
+            summary += 'Loss (%s set):\n' % args.partition
+            summary += '  MSE: %.4f\n' % lme_mse
+            summary += '  MAE: %.4f\n' % lme_mae
+            summary += '=' * 50 + '\n'
+            with open(p.logdir + '/' + m + '/eval_%s.txt'%args.partition, 'w') as f_out:
+                print_tee(summary, [sys.stdout, f_out])
+            sys.stderr.write('\n\n')
         elif m.startswith('LM'):
             from dtsr.baselines import LM
 
@@ -79,9 +101,24 @@ if __name__ == '__main__':
                 lm = pickle.load(m_file)
 
             lm_preds = lm.predict(X_baseline)
-            with open(p.logdir + '/' + m + '/preds.txt', 'w') as p_file:
+            with open(p.logdir + '/' + m + '/preds_%s.txt'%args.partition, 'w') as p_file:
                 for i in range(len(lm_preds)):
-                    p_file.write(str(lm_preds[i]))
+                    p_file.write(str(lm_preds[i]) + '\n')
+            lm_mse = mse(y[dv], lm_preds)
+            lm_mae = mae(y[dv], lm_preds)
+            summary = '=' * 50 + '\n'
+            summary += 'Linear regression\n\n'
+            summary += 'Model name: %s\n\n' % m
+            summary += 'Formula:\n'
+            summary += '  ' + formula + '\n'
+            summary += str(lm.summary()) + '\n'
+            summary += 'Loss (%s set):\n' % args.partition
+            summary += '  MSE: %.4f\n' % lm_mse
+            summary += '  MAE: %.4f\n' % lm_mae
+            summary += '=' * 50 + '\n'
+            with open(p.logdir + '/' + m + '/eval_%s.txt' % args.partition, 'w') as f_out:
+                print_tee(summary, [sys.stdout, f_out])
+            sys.stderr.write('\n\n')
         elif m.startswith('GAM'):
             import re
             from dtsr.baselines import GAM
@@ -103,12 +140,48 @@ if __name__ == '__main__':
             gam_preds = gam.predict(X_baseline)
             with open(p.logdir + '/' + m + '/preds.txt', 'w') as p_file:
                 for i in range(len(gam_preds)):
-                    p_file.write(str(gam_preds[i]))
+                    p_file.write(str(gam_preds[i]) + '\n')
+            gam_mse = mse(y[dv], gam_preds)
+            gam_mae = mae(y[dv], gam_preds)
+            summary = '=' * 50 + '\n'
+            summary += 'GAM regression\n\n'
+            summary += 'Model name: %s\n\n' % m
+            summary += 'Formula:\n'
+            summary += '  ' + formula + '\n'
+            summary += str(lm.summary()) + '\n'
+            summary += 'Loss (%s set):\n' % args.partition
+            summary += '  MSE: %.4f\n' % gam_mse
+            summary += '  MAE: %.4f\n' % gam_mae
+            summary += '=' * 50 + '\n'
+            with open(p.logdir + '/' + m + '/eval_%s.txt' % args.partition, 'w') as f_out:
+                print_tee(summary, [sys.stdout, f_out])
+            sys.stderr.write('\n\n')
         elif m.startswith('DTSR'):
-            model = DTSR(formula,
-                         X,
-                         y,
-                         outdir=p.logdir + '/' + m,
-                         fixef_name_map=p.fixef_name_map)
+            from dtsr import DTSR
+
+            dv = formula.strip().split('~')[0].strip()
+
+            sys.stderr.write('Retrieving saved model %s...\n\n' % m)
+            with open(p.logdir + '/' + m + '/m.obj', 'rb') as m_file:
+                dtsr_model = pickle.load(m_file)
+
+            dtsr_preds = dtsr_model.predict(X, y.time, y[dtsr_model.form.rangf], y.first_obs, y.last_obs)
+            with open(p.logdir + '/' + m + '/preds_%s.txt'%args.partition, 'w') as p_file:
+                for i in range(len(dtsr_preds)):
+                    p_file.write(str(dtsr_preds[i]) + '\n')
+            dtsr_mse = mse(y[dv], dtsr_preds)
+            dtsr_mae = mae(y[dv], dtsr_preds)
+            summary = '=' * 50 + '\n'
+            summary += 'DTSR regression\n\n'
+            summary += 'Model name: %s\n\n' % m
+            summary += 'Formula:\n'
+            summary += '  ' + formula + '\n'
+            summary += 'Loss (%s set):\n' % args.partition
+            summary += '  MSE: %.4f\n' % dtsr_mse
+            summary += '  MAE: %.4f\n' % dtsr_mae
+            summary += '=' * 50 + '\n'
+            with open(p.logdir + '/' + m + '/eval_%s.txt'%args.partition, 'w') as f_out:
+                print_tee(summary, [sys.stdout, f_out])
+            sys.stderr.write('\n\n')
 
 

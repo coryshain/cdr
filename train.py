@@ -55,6 +55,17 @@ if __name__ == '__main__':
 
     if run_baseline:
         from dtsr.baselines import py2ri
+        from dtsr import compute_splitID, compute_partition
+        X['splitID'] = compute_splitID(X, p.split_ids)
+        part = compute_partition(X, p.modulus, 3)
+        if args.partition == 'train':
+            part_select = part[0]
+        elif args.partition == 'dev':
+            part_select = part[1]
+        elif args.partition == 'test':
+            part_select = part[2]
+        X_baseline = X[part_select]
+        X_baseline = X_baseline.reset_index(drop=True)[select]
         X_baseline = py2ri(X_baseline)
 
     for m in models:
@@ -176,7 +187,6 @@ if __name__ == '__main__':
             else:
                 sys.stderr.write('Fitting model %s...\n\n' % m)
                 dtsr_model = DTSR(formula,
-                             X,
                              y,
                              outdir=p.logdir + '/' + m)
                 with open(p.logdir + '/' + m + '/m.obj', 'wb') as m_file:

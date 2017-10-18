@@ -40,18 +40,11 @@ def compute_splitID(y, split_fields):
         splitID += y[col].cat.codes
     return splitID
 
-def compute_partition(y, partition_name, modulus):
-    if partition_name == 'test':
-        return ((y.splitID) % modulus) == (modulus - 1)
-    if partition_name == 'dev':
-        return ((y.splitID) % modulus) == (modulus - 2)
-    if partition_name == 'train':
-        return ((y.splitID) % modulus) < (modulus - 2)
-    if partition_name == 'full':
-        return ((y.splitID) % modulus) >= (modulus - 2)
-    if partition_name == 'all':
-        return np.ones(len(y), dtype=bool)
-    raise ValueError('Unsupported partition name: %s' %partition_name)
+def compute_partition(y, modulus, n):
+    partition = [((y.splitID) % modulus) <= (modulus - n)]
+    for i in range(n-1, 0, -1):
+        partition.append(((y.splitID) % modulus) == (modulus - i))
+    return partition
 
 def preprocess_data(X, y, p, formula_list, compute_history=True):
     sys.stderr.write('Pre-processing data...\n')
@@ -79,7 +72,7 @@ def preprocess_data(X, y, p, formula_list, compute_history=True):
             for i in sample:
                 print(i)
                 row = y.iloc[i]
-                print(row)
-                print(X[row.first_obs:row.last_obs])
+                print(row[['subject', 'docid', 'sentid', 'word']])
+                print(X[['subject', 'docid', 'sentid', 'word']][row.first_obs:row.last_obs])
     return X, y, select
 
