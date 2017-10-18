@@ -2,7 +2,6 @@ import sys
 import os
 import math
 import time
-import numpy as np
 import pandas as pd
 pd.options.mode.chained_assignment = None
 import tensorflow as tf
@@ -15,46 +14,6 @@ tf_config.gpu_options.allow_growth = True
 from .formula import *
 from .util import *
 from .plot import *
-
-def compute_history_intervals(y, X, series_ids, cutoff=100):
-    pb = tf.contrib.keras.utils.Progbar(len(y))
-
-    id_vectors_X = np.zeros((len(X), len(series_ids))).astype('int32')
-    id_vectors_y = np.zeros((len(y), len(series_ids))).astype('int32')
-
-    time_X = np.array(X.time)
-    time_y = np.array(y.time)
-
-    for i in range(len(series_ids)):
-        col = series_ids[i]
-        id_vectors_X[:, i] = np.array(X[col].cat.codes)
-        id_vectors_y[:, i] = np.array(y[col].cat.codes)
-    cur_ids = id_vectors_y[0]
-
-    first_obs = np.zeros(len(y)).astype('int32')
-    last_obs = np.zeros(len(y)).astype('int32')
-
-    i = j = 0
-    start = 0
-    end = 0
-    while i < len(y) and j < len(X):
-        if (id_vectors_y[i] != cur_ids).any():
-            start = end = j
-            cur_ids = id_vectors_y[i]
-        while j < len(X) and not (id_vectors_X[j] == cur_ids).all():
-            start += 1
-            end += 1
-            j += 1
-        while j < len(X) and time_X[j] <= time_y[i] and (id_vectors_X[j] == cur_ids).all():
-            end += 1
-            j += 1
-        first_obs[i] = start
-        last_obs[i] = end
-        pb.update(i, force=True)
-
-        i += 1
-
-    return first_obs, last_obs
 
 class DTSR(object):
     """Deconvolutional Time Series Regression (DTSR) class

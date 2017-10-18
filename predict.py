@@ -2,6 +2,7 @@ import argparse
 import os
 import sys
 import pickle
+import numpy as np
 import pandas as pd
 
 pd.options.mode.chained_assignment = None
@@ -31,7 +32,6 @@ if __name__ == '__main__':
             run_baseline = True
         elif not run_dtsr and m.startswith('DTSR'):
             run_dtsr = True
-            break
 
     dtsr_formula_list = [Formula(p.models[m]['formula']) for m in p.model_list if m.startswith('DTSR')]
     dtsr_formula_name_list = [m for m in p.model_list if m.startswith('DTSR')]
@@ -76,6 +76,13 @@ if __name__ == '__main__':
             with open(p.logdir + '/' + m + '/preds_%s.txt'%args.partition, 'w') as p_file:
                 for i in range(len(lme_preds)):
                     p_file.write(str(lme_preds[i]) + '\n')
+            if p.loss.lower() == 'mae':
+                losses = np.array(y[dv] - lme_preds).abs()
+            else:
+                losses = np.array(y[dv] - lme_preds) ** 2
+            with open(p.logdir + '/' + m + '/%s_losses_%s.txt'%(p.loss, args.partition), 'w') as p_file:
+                for i in range(len(losses)):
+                    p_file.write(str(losses[i]) + '\n')
             lme_mse = mse(y[dv], lme_preds)
             lme_mae = mae(y[dv], lme_preds)
             summary = '=' * 50 + '\n'
@@ -104,6 +111,13 @@ if __name__ == '__main__':
             with open(p.logdir + '/' + m + '/preds_%s.txt'%args.partition, 'w') as p_file:
                 for i in range(len(lm_preds)):
                     p_file.write(str(lm_preds[i]) + '\n')
+            if p.loss.lower() == 'mae':
+                losses = np.array(y[dv] - lm_preds).abs()
+            else:
+                losses = np.array(y[dv] - lm_preds) ** 2
+            with open(p.logdir + '/' + m + '/%s_losses_%s.txt'%(p.loss, args.partition), 'w') as p_file:
+                for i in range(len(losses)):
+                    p_file.write(str(losses[i]) + '\n')
             lm_mse = mse(y[dv], lm_preds)
             lm_mae = mae(y[dv], lm_preds)
             summary = '=' * 50 + '\n'
@@ -141,6 +155,13 @@ if __name__ == '__main__':
             with open(p.logdir + '/' + m + '/preds.txt', 'w') as p_file:
                 for i in range(len(gam_preds)):
                     p_file.write(str(gam_preds[i]) + '\n')
+            if p.loss.lower() == 'mae':
+                losses = np.array(y[dv] - gam_preds).abs()
+            else:
+                losses = np.array(y[dv] - gam_preds) ** 2
+            with open(p.logdir + '/' + m + '/%s_losses_%s.txt'%(p.loss, args.partition), 'w') as p_file:
+                for i in range(len(losses)):
+                    p_file.write(str(losses[i]) + '\n')
             gam_mse = mse(y[dv], gam_preds)
             gam_mae = mae(y[dv], gam_preds)
             summary = '=' * 50 + '\n'
@@ -169,6 +190,13 @@ if __name__ == '__main__':
             with open(p.logdir + '/' + m + '/preds_%s.txt'%args.partition, 'w') as p_file:
                 for i in range(len(dtsr_preds)):
                     p_file.write(str(dtsr_preds[i]) + '\n')
+            if p.loss.lower() == 'mae':
+                losses = np.array(y[dv] - dtsr_preds).abs()
+            else:
+                losses = np.array(y[dv] - dtsr_preds) ** 2
+            with open(p.logdir + '/' + m + '/%s_losses_%s.txt'%(p.loss, args.partition), 'w') as l_file:
+                for i in range(len(losses)):
+                    l_file.write(str(losses[i]) + '\n')
             dtsr_mse = mse(y[dv], dtsr_preds)
             dtsr_mae = mae(y[dv], dtsr_preds)
             summary = '=' * 50 + '\n'

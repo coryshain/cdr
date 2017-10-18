@@ -2,7 +2,6 @@ import sys
 import os
 import shutil
 import configparser
-from numpy import inf
 
 class Config(object):
     def __init__(self, path):

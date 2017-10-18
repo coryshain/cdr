@@ -30,7 +30,6 @@ if __name__ == '__main__':
             run_baseline = True
         elif not run_dtsr and m.startswith('DTSR'):
             run_dtsr = True
-            break
 
     dtsr_formula_list = [Formula(p.models[m]['formula']) for m in p.model_list if m.startswith('DTSR')]
     dtsr_formula_name_list = [m for m in p.model_list if m.startswith('DTSR')]
@@ -176,7 +175,7 @@ if __name__ == '__main__':
                 print_tee(summary, [sys.stdout, f_out])
             sys.stderr.write('\n\n')
         elif m.startswith('DTSR'):
-            from dtsr import DTSR
+            from dtsr.dtsr import DTSR
 
             dv = formula.strip().split('~')[0].strip()
 
