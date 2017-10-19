@@ -40,6 +40,9 @@ class Config(object):
         self.n_epoch_train = settings.getint('n_epoch_train', 100)
         self.n_epoch_tune = settings.getint('n_epoch_tune', 100)
         self.minibatch_size = settings.getint('minibatch_size', 128)
+        self.plot_x_inches = settings.getfloat('plot_x_inches', 7)
+        self.plot_y_inches = settings.getfloat('plot_y_inches', 5)
+        self.cmap = settings.get('cmap', 'gist_earth')
 
         ## Filters
         self.filter_map = {}

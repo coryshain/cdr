@@ -7,7 +7,11 @@ from dtsr import Config, bootstrap
 if __name__ == '__main__':
 
     argparser = argparse.ArgumentParser('''
-        Computes pairwise significance of error statistics between models
+        Computes pairwise significance of error differences between DTSR models and competitors.
+        Assumes models are named using the template <MODELNAME>_<TASKNAME>, where <TASKNAME> is
+        shared between models that should be compared. For example, if the config file contains
+        4 models --- DTSR_TASK1, DTSR_TASK2, COMPETITOR_TASK1, and COMPETITOR_TASK2 --- the script
+        will perform 2 comparisons: DTSR_TASK1 vs COMPETITOR_TASK1 and DTSR_TASK2 vs. COMPETITOR_TASK2.
     ''')
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='Path to configuration (*.ini) file')
@@ -33,7 +37,7 @@ if __name__ == '__main__':
     for m1 in dtsr_models:
         trial_name = m1.strip().split()[1]
         print(trial_name)
-        competitors = [x for x in models if x.endswith(trial_name)]
+        competitors = [x for x in models if not x == m1 and x.endswith(trial_name)]
         print(competitors)
         for m2 in competitors:
             a = pd.read_csv(p.logdir + '/' + m1 + '/%s_losses_%s.txt'%(p.loss, args.partition), sep=' ', header=None, skipinitialspace=True)

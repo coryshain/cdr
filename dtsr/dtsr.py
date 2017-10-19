@@ -37,7 +37,8 @@ class DTSR(object):
                  log_convolution_plots=False
                  ):
 
-        self.sess = tf.Session(config=tf_config)
+        self.g = tf.Graph()
+        self.sess = tf.Session(graph=self.g, config=tf_config)
 
         if isinstance(form, Formula):
             self.form = form
@@ -196,9 +197,11 @@ class DTSR(object):
                 n_params += np.prod(np.array(v).shape)
             sys.stderr.write('Network contains %d trainable parameters\n' % n_params)
 
-    def train(self, X, y, n_epoch_train=100, n_epoch_tune=100, minibatch_size=128, fixef_name_map=None):
+    def train(self, X, y, n_epoch_train=100, n_epoch_tune=100, minibatch_size=128, fixef_name_map=None, plot_x_inches=7, plot_y_inches=5, cmap='gist_earth'):
 
-            f = self.form
+        f = self.form
+
+        with self.sess.graph.as_default():
 
             y_rangf = y[f.rangf]
             for c in f.rangf:
@@ -243,7 +246,15 @@ class DTSR(object):
                 plot_x = self.support.eval(session=self.sess)
                 plot_y = (self.beta_global * self.conv_global(self.support)).eval(session=self.sess)
 
-                plot_convolutions(plot_x, plot_y, f.fixed, dir=self.outdir, filename='convolution_plot.jpg', fixef_name_map=fixef_name_map)
+                plot_convolutions(plot_x,
+                                  plot_y,
+                                  f.fixed,
+                                  dir=self.outdir,
+                                  filename='convolution_plot.jpg',
+                                  fixef_name_map=fixef_name_map,
+                                  plot_x_inches=plot_x_inches,
+                                  plot_y_inches=plot_y_inches,
+                                  cmap = cmap)
 
                 self.save()
                 t1_iter = time.time()
@@ -254,56 +265,63 @@ class DTSR(object):
     def predict(self, X, y_time, y_rangf, first_obs, last_obs):
         f = self.form
 
-        y_rangf = y_rangf[y_rangf.columns]
-        for c in f.rangf:
-            y_rangf[c] = y_rangf[c].astype(str)
+        with self.sess.graph.as_default():
 
-        fd = {}
-        fd[self.X] = X[f.allsl]
-        fd[self.time_X] = X.time
-        fd[self.time_y] = y_time
-        fd[self.gf_y_raw] = y_rangf
-        fd[self.first_obs] = first_obs
-        fd[self.last_obs] = last_obs
+            y_rangf = y_rangf[y_rangf.columns]
+            for c in f.rangf:
+                y_rangf[c] = y_rangf[c].astype(str)
 
-        return self.sess.run(self.out, feed_dict=fd)
+            fd = {}
+            fd[self.X] = X[f.allsl]
+            fd[self.time_X] = X.time
+            fd[self.time_y] = y_time
+            fd[self.gf_y_raw] = y_rangf
+            fd[self.first_obs] = first_obs
+            fd[self.last_obs] = last_obs
+
+            return self.sess.run(self.out, feed_dict=fd)
 
     def eval(self, X, y):
         f = self.form
 
-        y_rangf = y[f.rangf]
-        for c in f.rangf:
-            y_rangf[c] = y_rangf[c].astype(str)
+        with self.sess.graph.as_default():
 
-        fd = {}
-        fd[self.X] = X[f.allsl]
-        fd[self.time_X] = X.time
-        fd[self.y] = y[f.dv]
-        fd[self.time_y] = y.time
-        fd[self.gf_y_raw] = y_rangf
-        fd[self.first_obs] = y.first_obs
-        fd[self.last_obs] = y.last_obs
+            y_rangf = y[f.rangf]
+            for c in f.rangf:
+                y_rangf[c] = y_rangf[c].astype(str)
 
-        return self.sess.run(self.loss_func, feed_dict=fd)
+            fd = {}
+            fd[self.X] = X[f.allsl]
+            fd[self.time_X] = X.time
+            fd[self.y] = y[f.dv]
+            fd[self.time_y] = y.time
+            fd[self.gf_y_raw] = y_rangf
+            fd[self.first_obs] = y.first_obs
+            fd[self.last_obs] = y.last_obs
+
+            return self.sess.run(self.loss_func, feed_dict=fd)
 
     def optim_init(self, name, learning_rate):
-        return {
-            'Adagrad': lambda x: tf.train.AdagradOptimizer(x),
-            'Adadelta': lambda x: tf.train.AdadeltaOptimizer(x),
-            'Adam': lambda x: tf.train.AdamOptimizer(x),
-            'FTRL': lambda x: tf.train.FtrlOptimizer(x),
-            'RMSProp': lambda x: tf.train.RMSPropOptimizer(x),
-            'Nadam': lambda x: tf.contrib.opt.NadamOptimizer()
-        }[name](learning_rate)
+        with self.sess.graph.as_default():
+            return {
+                'Adagrad': lambda x: tf.train.AdagradOptimizer(x),
+                'Adadelta': lambda x: tf.train.AdadeltaOptimizer(x),
+                'Adam': lambda x: tf.train.AdamOptimizer(x),
+                'FTRL': lambda x: tf.train.FtrlOptimizer(x),
+                'RMSProp': lambda x: tf.train.RMSPropOptimizer(x),
+                'Nadam': lambda x: tf.contrib.opt.NadamOptimizer()
+            }[name](learning_rate)
 
     def save(self):
-        self.saver.save(self.sess, self.outdir + '/model.ckpt')
+        with self.sess.graph.as_default():
+            self.saver.save(self.sess, self.outdir + '/model.ckpt')
 
     def load(self):
-        if os.path.exists(self.outdir + '/checkpoint'):
-            self.saver.restore(self.sess, self.outdir + '/model.ckpt')
-        else:
-            self.sess.run(tf.global_variables_initializer())
+        with self.sess.graph.as_default():
+            if os.path.exists(self.outdir + '/checkpoint'):
+                self.saver.restore(self.sess, self.outdir + '/model.ckpt')
+            else:
+                self.sess.run(tf.global_variables_initializer())
 
     def __getstate__(self):
         return (
@@ -321,7 +339,8 @@ class DTSR(object):
         )
 
     def __setstate__(self, state):
-        self.sess = tf.Session(config=tf_config)
+        self.g = tf.Graph()
+        self.sess = tf.Session(graph=self.g, config=tf_config)
         self.form, \
         self.outdir, \
         self.conv_func_str, \

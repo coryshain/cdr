@@ -1,10 +1,10 @@
 import matplotlib.pyplot as plt
-plt.gcf().set_size_inches(4, 3)
 import seaborn as sns
 sns.set(style="white", rc={"axes.facecolor": (0, 0, 0, 0)})
 
-def plot_convolutions(plot_x, plot_y, features, dir, filename='convolution_plot.jpg', fixef_name_map=None):
-    cm = plt.get_cmap('gist_earth')
+def plot_convolutions(plot_x, plot_y, features, dir, filename='convolution_plot.jpg', fixef_name_map=None, plot_x_inches=4, plot_y_inches=3, cmap='gist_earth'):
+    plt.gcf().set_size_inches(plot_x_inches, plot_y_inches)
+    cm = plt.get_cmap(cmap)
     plt.gca().set_prop_cycle(color=[cm(1. * i / len(features)) for i in range(len(features))])
     n_feat = plot_y.shape[-1]
     feats = features[:]
