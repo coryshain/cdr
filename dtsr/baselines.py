@@ -1,3 +1,4 @@
+import pandas as pd
 import rpy2.robjects as robjects
 from rpy2.robjects.packages import importr
 from rpy2.robjects import pandas2ri
@@ -15,10 +16,10 @@ center = robjects.r(rstring)
 robjects.globalenv["c."] = center
 
 rstring = '''
-             function(x) {
-                 return(scale(x, scale=TRUE))
-             }
-        '''
+     function(x) {
+         return(scale(x, scale=TRUE))
+     }
+'''
 
 z_score = robjects.r(rstring)
 robjects.globalenv["z."] = z_score
@@ -41,27 +42,27 @@ class LM(object):
 
     def instance_methods(self):
         rstring = '''
-                    function(bform, df) {
-                        return(lm(bform, data=df, REML=FALSE))
-                    }
-                '''
+            function(bform, df) {
+                return(lm(bform, data=df, REML=FALSE))
+            }
+        '''
 
         fit = robjects.r(rstring)
 
         rstring = '''
-                    function(model) {
-                        s = summary(model)
-                        return(s)
-                    }
-                '''
+            function(model) {
+                s = summary(model)
+                return(s)
+            }
+        '''
 
         summary = robjects.r(rstring)
 
         rstring = '''
-                    function(model, df) {
-                        return(predict(model, df, allow.new.levels=TRUE))
-                    }
-                '''
+            function(model, df) {
+                return(predict(model, df, allow.new.levels=TRUE))
+            }
+        '''
 
         predict = robjects.r(rstring)
 
@@ -122,47 +123,78 @@ class LME(object):
 class GAM(object):
     def __init__(self, formula, X):
         mgcv = importr('mgcv')
-        fit, summary, predict = self.instance_methods()
+        fit, summary, predict, unique = self.instance_methods()
+        self.formula = formula
+        rstring = '''
+            function() numeric()
+        '''
+        empty = robjects.r(rstring)
+        if 'subject' in self.formula:
+            self.subject = unique(X, 'subject')
+        else:
+            self.subject = empty
+        if 'word' in self.formula:
+            self.word = unique(X, 'word')
+        else:
+            self.word = empty()
         self.m = fit(formula, X)
         self.summary = lambda: summary(self.m)
-        self.predict = lambda x: predict(self.m, x)
+        self.predict = lambda x: predict(self.m, self.formula, x, self.subject, self.word)
 
     def __getstate__(self):
-        return self.m
+        return (self.m, self.subject, self.word, self.formula)
 
     def __setstate__(self, state):
         mgcv = importr('mgcv')
-        self.m = state
-        fit, summary, predict = self.instance_methods()
+        self.m, self.subject, self.word, self.formula = state
+        fit, summary, predict, unique = self.instance_methods()
         self.summary = lambda: summary(self.m)
-        self.predict = lambda x: predict(self.m, x)
+        self.predict = lambda x: predict(self.m, self.formula, x, self.subject, self.word)
 
     def instance_methods(self):
         rstring = '''
-                    function(bform, df) {
-                        return(gam(as.formula(bform), data=df, drop.unused.levels=FALSE))
-                    }
-                '''
+            function(bform, df) {
+                return(gam(as.formula(bform), data=df, drop.unused.levels=FALSE))
+            }
+        '''
 
         fit = robjects.r(rstring)
 
         rstring = '''
-                    function(model) {10000
-                        return(summary(model))
-                    }
-                '''
+            function(model) {10000
+                return(summary(model))
+            }
+        '''
 
         summary = robjects.r(rstring)
 
         rstring = '''
-                    function(model, df) {
-                        return(predict(model, df))
-                    }
-                '''
+            function(model, bform, df, subjects=NULL, words=NULL) {
+                if (grepl('subject', bform) & !is.null(subjects)) {
+                    select = df$subject %in% subjects
+                }
+                grepl('word', bform)
+                if (grepl('word', bform) & !is.null(words)) {
+                    select = select & (word %in% words)
+                }
+                preds = predict(model, df[select,])
+                df$preds = NA
+                df[select,]$preds = preds
+                return(df$preds)
+            }
+        '''
 
         predict = robjects.r(rstring)
 
-        return fit, summary, predict
+        rstring = '''
+            function(df, col) {
+                return(unique(df[[col]]))
+            }
+        '''
+
+        unique = robjects.r(rstring)
+
+        return fit, summary, predict, unique
 
 def py2ri(x):
     return pandas2ri.py2ri(x)

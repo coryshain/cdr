@@ -1,5 +1,6 @@
 import sys
 import argparse
+import numpy as np
 import pandas as pd
 from dtsr import Config, bootstrap
 
@@ -30,15 +31,19 @@ if __name__ == '__main__':
     sys.stderr.write('\n')
     for i in range(len(models)):
         for j in range(i+1, len(models)):
-            a = pd.read_csv(p.logdir + '/' + models[i] + '/%s_losses_%s.txt'%(p.loss, args.partition))
-            b = pd.read_csv(p.logdir + '/' + models[j] + '/%s_losses_%s.txt'%(p.loss, args.partition))
-            p_value, base_diff = bootstrap(a, b, n_iter=10000)
+            a = pd.read_csv(p.logdir + '/' + models[i] + '/%s_losses_%s.txt'%(p.loss, args.partition), sep=' ', header=None, skipinitialspace=True)
+            b = pd.read_csv(p.logdir + '/' + models[j] + '/%s_losses_%s.txt'%(p.loss, args.partition), sep=' ', header=None, skipinitialspace=True)
+            select = np.logical_and(np.isfinite(np.array(a)), np.isfinite(np.array(b)))
+            diff = float(len(a) - select.sum())
+            p_value, base_diff = bootstrap(a[select], b[select], n_iter=1000)
             sys.stderr.write('\n')
             print('='*50)
             print('Model comparison: %s vs %s' %(models[i], models[j]))
+            if diff > 0:
+                print('%d NaN rows filtered out (out of %d)' %(diff, len(a)))
             print('Partition: %s' %args.partition)
             print('Loss difference: %.4f' %base_diff)
-            print('p: %.4f' %p_value)
+            print('p: %.4e' %p_value)
             print('='*50)
             print()
             print()

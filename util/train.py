@@ -6,7 +6,7 @@ import pandas as pd
 
 pd.options.mode.chained_assignment = None
 
-from dtsr import Config, read_data, Formula, preprocess_data, print_tee, mse, mae
+from dtsr import Config, read_data, Formula, preprocess_data, print_tee, mse, mae, compute_splitID, compute_partition
 
 if __name__ == '__main__':
 
@@ -37,11 +37,16 @@ if __name__ == '__main__':
     X, y, select = preprocess_data(X, y, p, dtsr_formula_list, compute_history=run_dtsr)
 
     if run_baseline:
-        X_baseline = X[select]
+        from dtsr.baselines import py2ri
+        X['splitID'] = compute_splitID(X, p.split_ids)
+        part = compute_partition(X, p.modulus, 3)
+        part_select = part[0]
+        X_baseline = X[part_select]
+        X_baseline = X_baseline.reset_index(drop=True)[select]
 
     n_train_sample = len(y)
 
-    sys.stderr.write('\nNumber of training samples: %d\n\n' %n_train_sample)
+    sys.stderr.write('\nNumber of training samples: %d\n' %n_train_sample)
 
     for i in range(len(dtsr_formula_list)):
         x = dtsr_formula_list[i]
@@ -53,18 +58,9 @@ if __name__ == '__main__':
         sys.stderr.write(str(rho) + '\n\n')
 
     if run_baseline:
-        from dtsr.baselines import py2ri
-        from dtsr import compute_splitID, compute_partition
-        X['splitID'] = compute_splitID(X, p.split_ids)
-        part = compute_partition(X, p.modulus, 3)
-        if args.partition == 'train':
-            part_select = part[0]
-        elif args.partition == 'dev':
-            part_select = part[1]
-        elif args.partition == 'test':
-            part_select = part[2]
-        X_baseline = X[part_select]
-        X_baseline = X_baseline.reset_index(drop=True)[select]
+        for c in X_baseline.columns:
+            if X_baseline[c].dtype.name == 'category':
+                X_baseline[c] = X_baseline[c].astype(str)
         X_baseline = py2ri(X_baseline)
 
     for m in models:
@@ -77,11 +73,11 @@ if __name__ == '__main__':
             dv = formula.strip().split('~')[0].strip()
 
             if os.path.exists(p.logdir + '/' + m + '/m.obj'):
-                sys.stderr.write('Retrieving saved model %s...\n\n' % m)
+                sys.stderr.write('Retrieving saved model %s...\n' % m)
                 with open(p.logdir + '/' + m + '/m.obj', 'rb') as m_file:
                     lme = pickle.load(m_file)
             else:
-                sys.stderr.write('Fitting model %s...\n\n' % m)
+                sys.stderr.write('Fitting model %s...\n' % m)
                 lme = LME(formula, X_baseline)
                 with open(p.logdir + '/' + m + '/m.obj', 'wb') as m_file:
                     pickle.dump(lme, m_file)
@@ -108,11 +104,11 @@ if __name__ == '__main__':
             dv = formula.strip().split('~')[0].strip()
 
             if os.path.exists(p.logdir + '/' + m + '/m.obj'):
-                sys.stderr.write('Retrieving saved model %s...\n\n' % m)
+                sys.stderr.write('Retrieving saved model %s...\n' % m)
                 with open(p.logdir + '/' + m + '/m.obj', 'rb') as m_file:
                     lm = pickle.load(m_file)
             else:
-                sys.stderr.write('Fitting model %s...\n\n' % m)
+                sys.stderr.write('Fitting model %s...\n' % m)
                 lm = LM(formula, X_baseline)
                 with open(p.logdir + '/' + m + '/m.obj', 'wb') as m_file:
                     pickle.dump(lm, m_file)
@@ -149,11 +145,11 @@ if __name__ == '__main__':
             formula = ' '.join(formula)
 
             if os.path.exists(p.logdir + '/' + m + '/m.obj'):
-                sys.stderr.write('Retrieving saved model %s...\n\n' % m)
+                sys.stderr.write('Retrieving saved model %s...\n' % m)
                 with open(p.logdir + '/' + m + '/m.obj', 'rb') as m_file:
                     gam = pickle.load(m_file)
             else:
-                sys.stderr.write('Fitting model %s...\n\n' % m)
+                sys.stderr.write('Fitting model %s...\n' % m)
                 gam = GAM(formula, X_baseline)
                 with open(p.logdir + '/' + m + '/m.obj', 'wb') as m_file:
                     pickle.dump(gam, m_file)

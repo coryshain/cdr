@@ -57,6 +57,17 @@ if __name__ == '__main__':
             part_select = part[2]
         X_baseline = X[part_select]
         X_baseline = X_baseline.reset_index(drop=True)[select]
+
+    for i in range(len(dtsr_formula_list)):
+        x = dtsr_formula_list[i]
+        name = dtsr_formula_name_list[i]
+        if run_baseline and x.dv not in X_baseline.columns:
+            X_baseline[x.dv] = y[x.dv]
+
+    if run_baseline:
+        for c in X_baseline.columns:
+            if X_baseline[c].dtype.name == 'category':
+                X_baseline[c] = X_baseline[c].astype(str)
         X_baseline = py2ri(X_baseline)
 
     for m in models:
@@ -68,7 +79,7 @@ if __name__ == '__main__':
 
             dv = formula.strip().split('~')[0].strip()
 
-            sys.stderr.write('Retrieving saved model %s...\n\n' % m)
+            sys.stderr.write('Retrieving saved model %s...\n' % m)
             with open(p.logdir + '/' + m + '/m.obj', 'rb') as m_file:
                 lme = pickle.load(m_file)
 
@@ -103,7 +114,7 @@ if __name__ == '__main__':
 
             dv = formula.strip().split('~')[0].strip()
 
-            sys.stderr.write('Retrieving saved model %s...\n\n' % m)
+            sys.stderr.write('Retrieving saved model %s...\n' % m)
             with open(p.logdir + '/' + m + '/m.obj', 'rb') as m_file:
                 lm = pickle.load(m_file)
 
@@ -148,11 +159,11 @@ if __name__ == '__main__':
                 formula[i] = c_term.sub(r'scale(\1, scale=FALSE)', formula[i])
             formula = ' '.join(formula)
 
-            sys.stderr.write('Retrieving saved model %s...\n\n' % m)
+            sys.stderr.write('Retrieving saved model %s...\n' % m)
             with open(p.logdir + '/' + m + '/m.obj', 'rb') as m_file:
                 gam = pickle.load(m_file)
             gam_preds = gam.predict(X_baseline)
-            with open(p.logdir + '/' + m + '/preds.txt', 'w') as p_file:
+            with open(p.logdir + '/' + m + '/preds_%s.txt'%args.partition, 'w') as p_file:
                 for i in range(len(gam_preds)):
                     p_file.write(str(gam_preds[i]) + '\n')
             if p.loss.lower() == 'mae':
@@ -169,7 +180,7 @@ if __name__ == '__main__':
             summary += 'Model name: %s\n\n' % m
             summary += 'Formula:\n'
             summary += '  ' + formula + '\n'
-            summary += str(lm.summary()) + '\n'
+            summary += str(gam.summary()) + '\n'
             summary += 'Loss (%s set):\n' % args.partition
             summary += '  MSE: %.4f\n' % gam_mse
             summary += '  MAE: %.4f\n' % gam_mae
@@ -178,11 +189,11 @@ if __name__ == '__main__':
                 print_tee(summary, [sys.stdout, f_out])
             sys.stderr.write('\n\n')
         elif m.startswith('DTSR'):
-            from dtsr import DTSR
+            from dtsr.dtsr import DTSR
 
             dv = formula.strip().split('~')[0].strip()
 
-            sys.stderr.write('Retrieving saved model %s...\n\n' % m)
+            sys.stderr.write('Retrieving saved model %s...\n' % m)
             with open(p.logdir + '/' + m + '/m.obj', 'rb') as m_file:
                 dtsr_model = pickle.load(m_file)
 
