@@ -170,8 +170,10 @@ class GAM(object):
 
         rstring = '''
             function(model, bform, df, subjects=NULL, words=NULL) {
+                select = logical(nrow(df))
+                select = !select
                 if (grepl('subject', bform) & !is.null(subjects)) {
-                    select = df$subject %in% subjects
+                    select = select & df$subject %in% subjects
                 }
                 grepl('word', bform)
                 if (grepl('word', bform) & !is.null(words)) {

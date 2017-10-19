@@ -29,16 +29,21 @@ if __name__ == '__main__':
             run_dtsr = True
 
     sys.stderr.write('\n')
-    for i in range(len(models)):
-        for j in range(i+1, len(models)):
-            a = pd.read_csv(p.logdir + '/' + models[i] + '/%s_losses_%s.txt'%(p.loss, args.partition), sep=' ', header=None, skipinitialspace=True)
-            b = pd.read_csv(p.logdir + '/' + models[j] + '/%s_losses_%s.txt'%(p.loss, args.partition), sep=' ', header=None, skipinitialspace=True)
+    dtsr_models = [x for x in models if x.startswith('DTSR')]
+    for m1 in dtsr_models:
+        trial_name = m1.strip().split()[1]
+        print(trial_name)
+        competitors = [x for x in models if x.endswith(trial_name)]
+        print(competitors)
+        for m2 in competitors:
+            a = pd.read_csv(p.logdir + '/' + m1 + '/%s_losses_%s.txt'%(p.loss, args.partition), sep=' ', header=None, skipinitialspace=True)
+            b = pd.read_csv(p.logdir + '/' + m2 + '/%s_losses_%s.txt'%(p.loss, args.partition), sep=' ', header=None, skipinitialspace=True)
             select = np.logical_and(np.isfinite(np.array(a)), np.isfinite(np.array(b)))
             diff = float(len(a) - select.sum())
             p_value, base_diff = bootstrap(a[select], b[select], n_iter=1000)
             sys.stderr.write('\n')
             print('='*50)
-            print('Model comparison: %s vs %s' %(models[i], models[j]))
+            print('Model comparison: %s vs %s' %(m1, m2))
             if diff > 0:
                 print('%d NaN rows filtered out (out of %d)' %(diff, len(a)))
             print('Partition: %s' %args.partition)
