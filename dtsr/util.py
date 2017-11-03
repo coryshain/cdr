@@ -1,4 +1,5 @@
 from __future__ import print_function
+import math
 import numpy as np
 
 def names2ix(names, l):
@@ -29,3 +30,8 @@ def getRandomPermutation(n):
 def print_tee(s, file_list):
     for f in file_list:
         print(s, file=f)
+
+def logLik(res):
+    N = len(res)
+    val = - 0.5* N * (np.log(2*math.pi) + 1 - math.log(N) + np.log((res**2).sum()))
+    return val

@@ -191,7 +191,10 @@ if __name__ == '__main__':
                              n_epoch_train=p.n_epoch_train,
                              n_epoch_tune=p.n_epoch_tune,
                              minibatch_size=p.minibatch_size,
-                             fixef_name_map=p.fixef_name_map)
+                             fixef_name_map=p.fixef_name_map,
+                             plot_x_inches=p.plot_x_inches,
+                             plot_y_inches=p.plot_y_inches,
+                             cmap=p.cmap)
 
             dtsr_preds = dtsr_model.predict(X, y.time, y[dtsr_model.form.rangf], y.first_obs, y.last_obs)
             dtsr_mse = mse(y[dv], dtsr_preds)

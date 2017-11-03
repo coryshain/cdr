@@ -6,6 +6,7 @@ import configparser
 class Config(object):
     def __init__(self, path):
         config = configparser.ConfigParser()
+        config.optionxform = str
         config.read(path)
 
         data = config['data']
@@ -30,7 +31,8 @@ class Config(object):
         self.logdir = settings.get('logdir', 'log')
         if not os.path.exists(self.logdir):
             os.makedirs(self.logdir)
-        shutil.copy2(sys.argv[1], self.logdir + '/config.ini')
+        if not os.path.exists(self.logdir + '/config.ini'):
+            shutil.copy2(path, self.logdir + '/config.ini')
         self.network_type = settings.get('network_type', 'mle')
         self.conv_func = settings.get('conv_func', 'gamma')
         self.loss = settings.get('loss', 'MSE')
@@ -43,6 +45,7 @@ class Config(object):
         self.plot_x_inches = settings.getfloat('plot_x_inches', 7)
         self.plot_y_inches = settings.getfloat('plot_y_inches', 5)
         self.cmap = settings.get('cmap', 'gist_earth')
+        self.use_gpu_if_available = settings.getboolean('use_gpu_if_available', True)
 
         ## Filters
         self.filter_map = {}

@@ -35,16 +35,14 @@ if __name__ == '__main__':
     sys.stderr.write('\n')
     dtsr_models = [x for x in models if x.startswith('DTSR')]
     for m1 in dtsr_models:
-        trial_name = m1.strip().split()[1]
-        print(trial_name)
-        competitors = [x for x in models if not x == m1 and x.endswith(trial_name)]
-        print(competitors)
+        trial_name = m1.strip().split('_')[1]
+        competitors = [x for x in models if not x == m1 and x.split('_')[1] == trial_name]
         for m2 in competitors:
             a = pd.read_csv(p.logdir + '/' + m1 + '/%s_losses_%s.txt'%(p.loss, args.partition), sep=' ', header=None, skipinitialspace=True)
             b = pd.read_csv(p.logdir + '/' + m2 + '/%s_losses_%s.txt'%(p.loss, args.partition), sep=' ', header=None, skipinitialspace=True)
             select = np.logical_and(np.isfinite(np.array(a)), np.isfinite(np.array(b)))
             diff = float(len(a) - select.sum())
-            p_value, base_diff = bootstrap(a[select], b[select], n_iter=1000)
+            p_value, base_diff = bootstrap(a[select], b[select], n_iter=10000)
             sys.stderr.write('\n')
             print('='*50)
             print('Model comparison: %s vs %s' %(m1, m2))

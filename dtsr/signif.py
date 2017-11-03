@@ -28,4 +28,7 @@ def bootstrap(err_1, err_2, n_iter=10000, n_tails=2):
             raise ValueError('Invalid bootstrap parameter n_tails: %s. Must be in {0, 1}.' %n_tails)
 
     p = float(hits+1)/(n_iter+1)
+
+    sys.stderr.write('\n')
+
     return p, base_diff

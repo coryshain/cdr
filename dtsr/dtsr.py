@@ -7,8 +7,6 @@ pd.options.mode.chained_assignment = None
 import tensorflow as tf
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 from tensorflow.python.platform.test import is_gpu_available
-usingGPU = is_gpu_available()
-sys.stderr.write('Using GPU: %s\n' % usingGPU)
 tf_config = tf.ConfigProto()
 tf_config.gpu_options.allow_growth = True
 from .formula import *
@@ -34,8 +32,14 @@ class DTSR(object):
                  optim='Adam',
                  learning_rate=0.01,
                  loss='mse',
-                 log_convolution_plots=False
+                 log_convolution_plots=False,
+                 use_gpu_if_available=True
                  ):
+
+        if not use_gpu_if_available:
+            os.environ['CUDA_VISIBLE_DEVICES='] = ''
+        usingGPU = is_gpu_available()
+        sys.stderr.write('Using GPU: %s\n' % usingGPU)
 
         self.g = tf.Graph()
         self.sess = tf.Session(graph=self.g, config=tf_config)
@@ -94,7 +98,7 @@ class DTSR(object):
             if self.conv_func_str == 'exp':
                 self.L_global = tf.Variable(tf.truncated_normal(shape=[1, len(f.allsl)], mean=0., stddev=.1, dtype=tf.float32),
                                        name='lambda')
-            elif self.conv_func_str == 'gamma':
+            elif self.conv_func_str in ['gamma', 'gammak1']:
                 self.log_k_global = tf.Variable(tf.truncated_normal(shape=[1, len(f.allsl)], mean=0., stddev=.1, dtype=tf.float32), name='log_k')
                 self.log_theta_global = tf.Variable(tf.truncated_normal(shape=[1, len(f.allsl)], mean=0., stddev=.1, dtype=tf.float32), name='log_theta')
                 self.log_neg_delta_global = tf.Variable(tf.truncated_normal(shape=[1, len(f.allsl)], mean=0., stddev=.1, dtype=tf.float32), name='log_neg_delta')
@@ -114,6 +118,19 @@ class DTSR(object):
                 self.conv_global = lambda x: conv_global_delta_zero(x + tf.exp(self.log_neg_delta_global)[0])
                 conv_delta_zero = conv_global_delta_zero
                 conv = self.conv_global
+            elif self.conv_func_str == 'gammak1':
+                conv_global_delta_zero = tf.contrib.distributions.Gamma(concentration=tf.exp(self.log_k_global[0])+1,
+                                                                        rate=tf.exp(self.log_theta_global[0]),
+                                                                        validate_args=True).prob
+                self.conv_global = lambda x: conv_global_delta_zero(x + tf.exp(self.log_neg_delta_global)[0])
+                conv_delta_zero = conv_global_delta_zero
+                conv = self.conv_global
+            elif self.conv_func_str == 'composite_gamma_hrf':
+                conv_global_delta_zero = tf.contrib.distributions.Gamma(concentration=tf.exp(self.log_k_global[0]) + 1,
+                                                                        rate=tf.exp(self.log_theta_global[0]),
+                                                                        validate_args=True).prob
+                self.conv_global = lambda x: conv_global_delta_zero(x + tf.exp(self.log_neg_delta_global)[0])
+                conv_delta_zero = conv_global_delta_zero
 
             def convolve_events(time_target, first_obs, last_obs):
                 col_ix = names2ix(f.allsl, f.allsl)
@@ -178,7 +195,7 @@ class DTSR(object):
                 tf.summary.scalar('beta/%s' % f.fixed[i], self.beta_global[0, i], collections=['params'])
                 if self.conv_func_str == 'exp':
                     tf.summary.scalar('log_lambda/%s' % f.fixed[i], self.L_global[0, i], collections=['params'])
-                elif self.conv_func_str == 'gamma':
+                elif self.conv_func_str in ['gamma', 'gammak1']:
                     tf.summary.scalar('log_k/%s' % f.fixed[i], self.log_k_global[0, i], collections=['params'])
                     tf.summary.scalar('log_theta/%s' % f.fixed[i], self.log_theta_global[0, i], collections=['params'])
                     tf.summary.scalar('log_neg_delta/%s' % f.fixed[i], self.log_neg_delta_global[0, i], collections=['params'])
@@ -202,7 +219,6 @@ class DTSR(object):
         f = self.form
 
         with self.sess.graph.as_default():
-
             y_rangf = y[f.rangf]
             for c in f.rangf:
                 y_rangf[c] = y_rangf[c].astype(str)
@@ -266,7 +282,6 @@ class DTSR(object):
         f = self.form
 
         with self.sess.graph.as_default():
-
             y_rangf = y_rangf[y_rangf.columns]
             for c in f.rangf:
                 y_rangf[c] = y_rangf[c].astype(str)
@@ -285,7 +300,6 @@ class DTSR(object):
         f = self.form
 
         with self.sess.graph.as_default():
-
             y_rangf = y[f.rangf]
             for c in f.rangf:
                 y_rangf[c] = y_rangf[c].astype(str)

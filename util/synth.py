@@ -62,7 +62,7 @@ if __name__ == '__main__':
     else:
         delta = np.ones(args.n)*args.delta
     if args.beta is None:
-        beta = np.random.random(args.n)*10-5
+        beta = np.random.random(args.n)*100-50
     else:
         beta = np.ones(args.n)*args.beta
     X = np.random.normal(0, 1, (args.x, args.n))
@@ -76,8 +76,8 @@ if __name__ == '__main__':
         delta_t = np.expand_dims(time_y[i] - time_X[0:i+1], -1)
         X_conv = np.sum(conv(delta_t, k, theta, delta) * X[0:i+1], axis=0, keepdims=True)
         y_pred[i] = np.dot(X_conv, np.expand_dims(beta, 1))
-        if (i+1) % 10000 == 0:
-            sys.stderr.write('%d training samples generated...\n' %(i+1))
+        sys.stderr.write('\r%d/%d' %(i+1, args.y))
+    sys.stderr.write('\n')
 
     if args.error is not None:
         y = y_pred + np.random.normal(0, args.error, args.y)
@@ -106,8 +106,12 @@ if __name__ == '__main__':
     df_params.to_csv(args.outdir + '/' + exp_name + '/params.evmeasures', ' ', index=True, na_rep='nan')
 
     names = ['true', 'preds']
-    df_preds = pd.DataFrame(np.stack([y, y_pred], axis=1), columns=names)
-    df_preds.to_csv(args.outdir + '/' + exp_name + '/preds.evmeasures', ' ', index=False, na_rep='nan')
+    df_preds = pd.Series(y_pred)
+    df_preds.to_csv(args.outdir + '/' + exp_name + '/preds_full.txt', index=False, na_rep='nan')
+
+    names = ['mse']
+    df_err = pd.Series((y-y_pred)**2)
+    df_err.to_csv(args.outdir + '/' + exp_name + '/MSE_losses_full.txt', index=False, na_rep='nan')
 
     plot_x = np.expand_dims(np.linspace(0., 2.5, 1000), -1)
     plot_y = conv(plot_x, k, theta, delta)*beta
