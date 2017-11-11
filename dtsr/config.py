@@ -34,7 +34,8 @@ class Config(object):
         if not os.path.exists(self.logdir + '/config.ini'):
             shutil.copy2(path, self.logdir + '/config.ini')
         self.network_type = settings.get('network_type', 'mle')
-        self.conv_func = settings.get('conv_func', 'gamma')
+        self.irf = settings.get('irf', 'gamma')
+        self.learning_rate = settings.getfloat('learning_rate', 0.01)
         self.loss = settings.get('loss', 'MSE')
         self.modulus = settings.getint('modulus', 4)
         self.log_random = settings.getboolean('log_random', False)
@@ -45,7 +46,8 @@ class Config(object):
         self.plot_x_inches = settings.getfloat('plot_x_inches', 7)
         self.plot_y_inches = settings.getfloat('plot_y_inches', 5)
         self.cmap = settings.get('cmap', 'gist_earth')
-        self.use_gpu_if_available = settings.getboolean('use_gpu_if_available', True)
+        self.use_gpu_if_available = settings.getboolean('use_gpu_if_available', False)
+        self.validate_delta_t = settings.getboolean('validate_delta_t', True)
 
         ## Filters
         self.filter_map = {}

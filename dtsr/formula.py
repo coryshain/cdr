@@ -7,6 +7,9 @@ def z(df):
 def c(df):
     return df-df.mean(axis=0)
 
+def s(df):
+    return df/df.std(axis=0)
+
 class Formula(object):
     """
     A class for parsing R-style mixed-effects model formula strings and applying them to DTSR design matrices.
@@ -141,6 +144,8 @@ class Formula(object):
             out = c(arr)
         elif op in ['z', 'z.']:
             out = z(arr)
+        elif op in ['s', 's.']:
+            out = s(arr)
         elif op == 'log':
             out = np.log(arr)
         elif op == 'log1p':

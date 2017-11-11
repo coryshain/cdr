@@ -173,8 +173,12 @@ if __name__ == '__main__':
         elif m.startswith('DTSR'):
             from dtsr.dtsr import DTSR
 
+            if not p.use_gpu_if_available:
+                os.environ['CUDA_VISIBLE_DEVICES'] = ''
+
             dv = formula.strip().split('~')[0].strip()
 
+            print(p.irf)
             if os.path.exists(p.logdir + '/' + m + '/m.obj'):
                 sys.stderr.write('Retrieving saved model %s...\n\n' % m)
                 with open(p.logdir + '/' + m + '/m.obj', 'rb') as m_file:
@@ -182,8 +186,11 @@ if __name__ == '__main__':
             else:
                 sys.stderr.write('Fitting model %s...\n\n' % m)
                 dtsr_model = DTSR(formula,
-                             y,
-                             outdir=p.logdir + '/' + m)
+                                  y,
+                                  outdir=p.logdir + '/' + m,
+                                  irf=p.irf,
+                                  learning_rate=p.learning_rate
+                                  )
                 with open(p.logdir + '/' + m + '/m.obj', 'wb') as m_file:
                     pickle.dump(dtsr_model, m_file)
             dtsr_model.train(X,
@@ -194,7 +201,8 @@ if __name__ == '__main__':
                              fixef_name_map=p.fixef_name_map,
                              plot_x_inches=p.plot_x_inches,
                              plot_y_inches=p.plot_y_inches,
-                             cmap=p.cmap)
+                             cmap=p.cmap
+                             )
 
             dtsr_preds = dtsr_model.predict(X, y.time, y[dtsr_model.form.rangf], y.first_obs, y.last_obs)
             dtsr_mse = mse(y[dv], dtsr_preds)
