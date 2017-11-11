@@ -110,35 +110,36 @@ class DTSR(object):
                 self.conv_param_names = ['L']
                 log_L = tf.Variable(tf.truncated_normal(shape=[1, dim], mean=0., stddev=.1, dtype=self.FLOAT), name='log_L')
                 self.L = tf.exp(log_L, name='L') + epsilon
-                self.irf_global = tf.contrib.distributions.Exponential(rate=self.L).prob
+                irf = tf.contrib.distributions.Exponential(rate=self.L).prob
+                self.irf_global = lambda x: irf(x + epsilon)
             elif self.irf_str == 'shifted_exp':
                 self.conv_param_names = ['L', 'delta']
                 log_L = tf.Variable(tf.truncated_normal(shape=[1, dim], mean=0., stddev=.1, dtype=self.FLOAT), name='log_L')
                 log_neg_delta = tf.Variable(tf.truncated_normal(shape=[1, dim], mean=0., stddev=.1, dtype=self.FLOAT), name='log_neg_delta')
                 self.L = tf.exp(log_L, name='L') + epsilon
-                self.delta = -(tf.exp(log_neg_delta, name='delta') + epsilon)
-                irf_global_delta_zero = tf.contrib.distributions.Exponential(rate=self.L).prob
-                self.irf_global = lambda x: irf_global_delta_zero(x - self.delta)
+                self.delta = -tf.exp(log_neg_delta, name='delta')
+                irf = tf.contrib.distributions.Exponential(rate=self.L).prob
+                self.irf_global = lambda x: irf(x - self.delta + epsilon)
             elif self.irf_str == 'gamma':
                 self.conv_param_names = ['k', 'theta']
                 log_k = tf.Variable(tf.truncated_normal(shape=[1, dim], mean=0., stddev=.1, dtype=self.FLOAT), name='log_k')
                 log_theta = tf.Variable(tf.truncated_normal(shape=[1, dim], mean=0., stddev=.1, dtype=self.FLOAT), name='log_theta')
                 self.k = tf.exp(log_k, name='k') + epsilon
                 self.theta = tf.exp(log_theta, name='theta') + epsilon
-                irf_global_delta_zero = tf.contrib.distributions.Gamma(concentration=self.k,
+                irf = tf.contrib.distributions.Gamma(concentration=self.k,
                                                                         rate=self.theta,
                                                                         validate_args=False).prob
-                self.irf_global = lambda x: irf_global_delta_zero(x)
+                self.irf_global = lambda x: irf(x + epsilon)
             elif self.irf_str == 'gamma_kgt1':
                 self.conv_param_names = ['k', 'theta']
                 log_k = tf.Variable(tf.truncated_normal(shape=[1, dim], mean=0., stddev=.1, dtype=self.FLOAT), name='log_k')
                 log_theta = tf.Variable(tf.truncated_normal(shape=[1, dim], mean=0., stddev=.1, dtype=self.FLOAT), name='log_theta')
                 self.k = tf.exp(log_k, name='k') + epsilon + 1.
                 self.theta = tf.exp(log_theta, name='theta') + epsilon
-                irf_global_delta_zero = tf.contrib.distributions.Gamma(concentration=self.k,
+                irf = tf.contrib.distributions.Gamma(concentration=self.k,
                                                                         rate=self.theta,
                                                                         validate_args=False).prob
-                self.irf_global = lambda x: irf_global_delta_zero(x)
+                self.irf_global = lambda x: irf(x + epsilon)
             elif self.irf_str == 'shifted_gamma':
                 self.conv_param_names = ['k', 'theta', 'delta']
                 log_k = tf.Variable(tf.truncated_normal(shape=[1, dim], mean=0., stddev=.1, dtype=self.FLOAT), name='log_k')
@@ -146,11 +147,11 @@ class DTSR(object):
                 log_neg_delta = tf.Variable(tf.truncated_normal(shape=[1, dim], mean=0., stddev=.1, dtype=self.FLOAT), name='log_neg_delta')
                 self.k = tf.exp(log_k, name='k') + epsilon
                 self.theta = tf.exp(log_theta, name='theta') + epsilon
-                self.delta = -(tf.exp(log_neg_delta, name='delta') + epsilon)
-                irf_global_delta_zero = tf.contrib.distributions.Gamma(concentration=self.k,
+                self.delta = -tf.exp(log_neg_delta, name='delta')
+                irf = tf.contrib.distributions.Gamma(concentration=self.k,
                                                                         rate=self.theta,
                                                                         validate_args=False).prob
-                self.irf_global = lambda x: irf_global_delta_zero(x - self.delta)
+                self.irf_global = lambda x: irf(x - self.delta + epsilon)
             elif self.irf_str == 'shifted_gamma_kgt1':
                 self.conv_param_names = ['k', 'theta', 'delta']
                 log_k = tf.Variable(tf.truncated_normal(shape=[1, dim], mean=0., stddev=.1, dtype=self.FLOAT), name='log_k')
@@ -158,19 +159,19 @@ class DTSR(object):
                 log_neg_delta = tf.Variable(tf.truncated_normal(shape=[1, dim], mean=0., stddev=.1, dtype=self.FLOAT), name='log_neg_delta')
                 self.k = tf.exp(log_k, name='k') + epsilon + 1.
                 self.theta = tf.exp(log_theta, name='theta') + epsilon
-                self.delta = -(tf.exp(log_neg_delta, name='delta') + epsilon)
-                irf_global_delta_zero = tf.contrib.distributions.Gamma(concentration=self.k,
+                self.delta = -tf.exp(log_neg_delta, name='delta')
+                irf = tf.contrib.distributions.Gamma(concentration=self.k,
                                                                         rate=self.theta,
                                                                         validate_args=False).prob
-                self.irf_global = lambda x: irf_global_delta_zero(x - self.delta)
+                self.irf_global = lambda x: irf(x - self.delta + epsilon)
             elif self.irf_str == 'normal':
                 self.conv_param_names = ['mu', 'sigma']
                 log_sigma = tf.Variable(tf.truncated_normal(shape=[1, dim], mean=0., stddev=.1, dtype=self.FLOAT, name='log_sigma'))
                 self.mu = tf.Variable(tf.truncated_normal(shape=[1, dim], mean=0., stddev=.1, dtype=self.FLOAT, name='mu'))
                 self.sigma = tf.exp(log_sigma, name='sigma')
-                irf_global = tf.contrib.distributions.Normal(loc=self.mu,
+                irf = tf.contrib.distributions.Normal(loc=self.mu,
                                                               scale=self.sigma).prob
-                self.irf_global = lambda x: irf_global(x)
+                self.irf_global = lambda x: irf(x)
             elif self.irf_str == 'skew_normal':
                 self.conv_param_names = ['mu', 'sigma', 'alpha']
                 log_sigma = tf.Variable(tf.truncated_normal(shape=[1, dim], mean=0., stddev=.1, dtype=self.FLOAT, name='log_sigma'))
@@ -181,7 +182,8 @@ class DTSR(object):
                 stdnorm_pdf = stdnorm.prob
                 stdnorm_cdf = stdnorm.cdf
                 Z = lambda x: (x-self.mu)/self.sigma
-                self.irf_global = lambda x: 2/self.sigma * stdnorm_pdf(Z(x)) * stdnorm_cdf(self.alpha * Z(x))
+                irf = lambda x: 2/self.sigma * stdnorm_pdf(Z(x)) * stdnorm_cdf(self.alpha * Z(x))
+                self.irf_global = lambda x: irf(x)
             elif self.irf_str == 'emg':
                 self.conv_param_names = ['mu', 'sigma', 'L']
                 log_sigma = tf.Variable(tf.truncated_normal(shape=[1, dim], mean=0., stddev=.1, dtype=self.FLOAT, name='log_sigma'))
@@ -189,14 +191,16 @@ class DTSR(object):
                 self.mu = tf.Variable(tf.truncated_normal(shape=[1, dim], mean=0., stddev=.1, dtype=self.FLOAT, name='mu'))
                 self.sigma = tf.exp(log_sigma, name='sigma') + epsilon
                 self.L = tf.exp(log_L, name='L') + epsilon
-                self.irf_global = lambda x: self.L/2 * tf.exp(0.5*self.L*(2.*self.mu + self.L*self.sigma**2. - 2.*x)) * tf.erfc((self.mu + self.L*self.sigma**2 - x)/(tf.sqrt(2.)*self.sigma))
+                irf = lambda x: self.L/2 * tf.exp(0.5*self.L*(2.*self.mu + self.L*self.sigma**2. - 2.*x)) * tf.erfc((self.mu + self.L*self.sigma**2 - x)/(tf.sqrt(2.)*self.sigma))
+                self.irf_global = lambda x: irf(x)
             elif self.irf_str == 'beta_prime':
                 self.conv_param_names = ['alpha', 'beta']
                 log_alpha = tf.Variable(tf.truncated_normal(shape=[1, dim], mean=0., stddev=.1, dtype=self.FLOAT, name='log_alpha'))
                 log_beta = tf.Variable(tf.truncated_normal(shape=[1, dim], mean=0., stddev=.1, dtype=self.FLOAT, name='log_beta'))
                 self.alpha = tf.exp(log_alpha, name='alpha') + epsilon
                 self.beta = tf.exp(log_beta, name='beta') + epsilon
-                self.irf_global = lambda x: x**(self.alpha-1.)*(1.+x)**(-self.alpha - self.beta) / tf.exp(tf.lbeta(tf.transpose(tf.concat([self.alpha, self.beta], axis=0))))
+                irf = lambda x: x**(self.alpha-1.)*(1.+x)**(-self.alpha - self.beta) / tf.exp(tf.lbeta(tf.transpose(tf.concat([self.alpha, self.beta], axis=0))))
+                self.irf_global = lambda x: irf(x + epsilon)
             elif self.irf_str == 'shifted_beta_prime':
                 self.conv_param_names = ['alpha', 'beta', 'delta']
                 log_alpha = tf.Variable(tf.truncated_normal(shape=[1, dim], mean=0., stddev=.1, dtype=self.FLOAT, name='log_alpha'))
@@ -204,9 +208,9 @@ class DTSR(object):
                 log_neg_delta = tf.Variable(tf.truncated_normal(shape=[1, dim], mean=0., stddev=.1, dtype=self.FLOAT), name='log_neg_delta')
                 self.alpha = tf.exp(log_alpha, name='alpha') + epsilon
                 self.beta = tf.exp(log_beta, name='beta') + epsilon
-                self.delta = -(tf.exp(log_neg_delta, name='delta') + epsilon)
-                irf_global_delta_zero = lambda x: x**(self.alpha-1)*(1+x)**(-self.alpha - self.beta) / tf.exp(tf.lbeta(tf.transpose(tf.concat([self.alpha, self.beta], axis=0))))
-                self.irf_global = lambda x: irf_global_delta_zero(x - self.delta)
+                self.delta = -tf.exp(log_neg_delta, name='delta')
+                irf = lambda x: x**(self.alpha-1)*(1+x)**(-self.alpha - self.beta) / tf.exp(tf.lbeta(tf.transpose(tf.concat([self.alpha, self.beta], axis=0))))
+                self.irf_global = lambda x: irf(x - self.delta + epsilon)
             else:
                 raise ValueError('Impulse response function "%s" is not currently supported.' %self.irf_str)
 
