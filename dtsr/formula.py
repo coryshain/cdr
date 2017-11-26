@@ -1,5 +1,10 @@
 import sys
+import re
+import ast
+import itertools
 import numpy as np
+
+interact = re.compile('([^ ]+):([^ ]+)')
 
 def z(df):
     return (df-df.mean(axis=0))/df.std(axis=0)
@@ -18,126 +23,167 @@ class Formula(object):
         bform_str: String. An R-style mixed-effects model formula string
     """
     def __init__(self, bform_str):
-        n_lp = bform_str.count('(')
-        n_rp = bform_str.count(')')
-        assert n_lp == n_rp, 'Unmatched parens in formula "%s".' % bform_str
+        self.bform_str = bform_str
 
-        self.dv = ''
-        self.fixed = ['']
-        self.random = []
-        self.dv, bform_str = bform_str.strip().split('~')
-        self.dv = self.dv.strip()
+        lhs, rhs = bform_str.strip().split('~')
 
-        in_random_term = False
-        in_grouping_factor = False
-        for c in bform_str.strip():
-            if c == '(' and self.fixed[-1] == '':
-                in_random_term = True
-                if self.fixed[-1] == '':
-                    self.fixed.pop(-1)
-                self.random.append(RandomTerm())
-            elif c == ')' and in_random_term:
-                self.n_lb = self.random[-1].vars[-1].count('(')
-                self.n_rb = self.random[-1].vars[-1].count(')')
-                if self.n_lb == self.n_rb:
-                    in_random_term = False
-                    in_grouping_factor = False
-                else:
-                    self.random[-1].vars[-1] += c
-            elif c in [' ', '+', '|']:
-                if c == '+':
-                    if in_random_term:
-                        self.random[-1].vars.append('')
+        self.terminals = {}
+        self.preterminals = {}
+        self.preterminals_tmp = {}
+        self.irf_tree = IRFTreeNode()
+        self.atomic_irf_by_family = {}
+        self.fixed_coefficients = {}
+        self.coefficients = {}
+        self.random = {}
+
+        dv = ast.parse(lhs.strip().replace('.(', '(').replace(':','%'))
+        self.dv_term = self.process_ast(dv.body[0].value)[0]
+        self.dv = self.dv_term.name
+
+        rhs = ast.parse(rhs.strip().replace('.(', '(').replace(':','%'))
+        terms = self.process_ast(rhs.body[0].value)
+
+        self.intercept = True
+        for t in terms:
+            if t.name == '0':
+                self.intercept = False
+            elif t.name == '1':
+                self.intercept = True
+            elif not type(t).__name__ in ['IRFTreeNode', 'RandomTerm']:
+                raise ValueError('All top-level terms in a DTSR model must be either IRF terms or random terms.')
+
+        self.fixed_coefficient_names = sorted(self.fixed_coefficients.keys())
+        self.coefficient_names = sorted(self.coefficients.keys())
+        self.preterminal_names = sorted(self.preterminals.keys())
+        self.terminal_names = sorted(self.terminals.keys())
+        self.ran_names = sorted(self.random.keys())
+        self.rangf = [self.random[r].gf for r in self.ran_names]
+
+        del self.preterminals_tmp
+
+    def process_ast(self, t, ops=None, under_IRF=False, suppress_update=False, random_coefficients=None):
+        if ops is None:
+            ops = []
+        s = []
+        if type(t).__name__ == 'BinOp':
+            if type(t.op).__name__ == 'Add':
+                assert len(ops) == 0, 'Transformation of multiple terms is not supported in DTSR formula strings'
+                s += self.process_ast(t.left, ops=ops, under_IRF=under_IRF, random_coefficients=random_coefficients)
+                s += self.process_ast(t.right, ops=ops, under_IRF=under_IRF, random_coefficients=random_coefficients)
+            elif type(t.op).__name__ == 'BitOr':
+                assert len(ops) == 0, 'Transformation of random terms is not supported in DTSR formula strings'
+                assert not under_IRF, 'Random terms may not be embedded under IRF terms in DTSR formula strings'
+                assert random_coefficients is None, 'Random terms may not be embedded under other random terms in DTSR formula strings'
+                random_coefficients = {}
+                s = self.process_ast(t.left, random_coefficients=random_coefficients)
+                new = RandomTerm(s, t.right.id)
+                new.coefficients = random_coefficients
+                self.random[new.name] = new
+            elif type(t.op).__name__ == 'Mod':
+                terms = self.process_ast(t.left, under_IRF=under_IRF, random_coefficients=random_coefficients) + self.process_ast(t.right, under_IRF=under_IRF, random_coefficients=random_coefficients)
+                for x in terms:
+                    if type(x).__name__ == 'IRFTreeNode':
+                        raise ValueError('Interaction terms may not dominate IRF terms in DTSR formula strings')
+                new = InteractionTerm(terms=terms, ops=ops)
+                s.append(new)
+            elif type(t.op).__name__ == 'Mult':
+                assert len(ops) == 0, 'Transformation of term expansions is not supported in DTSR formula strings'
+                left = self.process_ast(t.left, random_coefficients=random_coefficients)
+                right = self.process_ast(t.right, random_coefficients=random_coefficients)
+                terms = left + right
+                for x in terms:
+                    if type(x).__name__ == 'IRFTreeNode':
+                        raise ValueError('Term expansions may not dominate IRF terms in DTSR formula strings')
+                new = InteractionTerm(terms=terms, ops=ops)
+                s += left + right + [new]
+            elif type(t.op).__name__ == 'Pow':
+                assert len(ops) == 0, 'Transformation of term expansions is not supported in DTSR formula strings'
+                terms = self.process_ast(t.left, random_coefficients=random_coefficients)
+                for x in terms:
+                    if type(x).__name__ == 'IRFTreeNode':
+                        raise ValueError('Term expansions may not dominate IRF terms in DTSR formula strings')
+                order = min(int(t.right.n), len(terms))
+                for i in range(1, order + 1):
+                    collections = itertools.combinations(terms, i)
+                    for tup in collections:
+                        if i > 1:
+                            new = InteractionTerm(list(tup), ops=ops)
+                            s.append(new)
+                        else:
+                            s.append(tup[0])
+        elif type(t).__name__ == 'Call':
+            if t.func.id in Formula.IRF:
+                terms = []
+                for x in t.args:
+                    terms += self.process_ast(x, under_IRF=True, random_coefficients=random_coefficients)
+                    if type(terms[-1]).__name__ == 'IRFTreeNode' and len(terms[-1].ops) > 0:
+                        raise ValueError('Transformation of sub-IRF is not supported in DTSR formula strings')
+                irf_id = None
+                coef_id = None
+                if len(t.keywords) > 0:
+                    for k in t.keywords:
+                        if k.arg == 'irf_id':
+                            if type(k.value).__name__ == 'Str':
+                                irf_id = k.value.s
+                            elif type(k.value).__name__ == 'Name':
+                                irf_id = k.value.id
+                            elif type(k.value).__name__ == 'Num':
+                                irf_id = str(k.value.n)
+                        elif k.arg == 'coef_id':
+                            if type(k.value).__name__ == 'Str':
+                                coef_id = k.value.s
+                            elif type(k.value).__name__ == 'Name':
+                                coef_id = k.value.id
+                            elif type(k.value).__name__ == 'Num':
+                                coef_id = str(k.value.n)
+                for x in terms:
+                    new = IRFTreeNode(basename=x.name, family=t.func.id, irf_id=irf_id, coef_id=coef_id, ops=ops)
+                    if new.family not in self.atomic_irf_by_family:
+                        self.atomic_irf_by_family[new.family] = []
+                    if new.irf_id not in self.atomic_irf_by_family[new.family]:
+                        self.atomic_irf_by_family[new.family].append(new.irf_id)
+                    if type(x).__name__ == 'IRFTreeNode':
+                        p = x
+                        if new.name not in self.preterminals:
+                            self.preterminals_tmp[new.name] = self.preterminals_tmp[p.name]
                     else:
-                        self.fixed.append('')
-                elif c == '|':
-                    in_grouping_factor = True
+                        p = self.irf_tree
+                        self.preterminals_tmp[new.name] = x.name
+                        self.terminals[x.name] = x
+                    new.p = p
+                    if new.family not in p.children:
+                        p.children[new.family] = {}
+                    if new.name not in p.children[new.family]:
+                        p.children[new.family][new.name] = new
+                    else:
+                        new.merge_children(p.children[new.family][new.name])
+                        p.children[new.family][new.name] = new
+                    if not under_IRF:
+                        self.preterminals[new.name] = self.preterminals_tmp[new.name]
+                        new.terminal = self.preterminals[new.name]
+                    if not suppress_update:
+                        if new.coef_id not in self.coefficients:
+                            self.coefficients[new.coef_id] = new
+                        if random_coefficients is not None and new.coef_id not in random_coefficients:
+                            random_coefficients[new.coef_id] = new
+                        if random_coefficients is None and new.coef_id not in self.fixed_coefficients:
+                            self.fixed_coefficients[new.coef_id] = new
+                    s.append(new)
             else:
-                if in_random_term:
-                    if in_grouping_factor:
-                        self.random[-1].grouping_factor += c
-                    else:
-                        self.random[-1].vars[-1] += c
-                else:
-                    self.fixed[-1] += c
-        for i in range(len(self.random)):
-            if '0' in self.random[i].vars:
-                self.random[i].intercept = False
-            self.random[i].vars = [v for v in self.random[i].vars if v not in ['0', '1']]
-
-        self.ransl = []
-        for f in self.random:
-            for v in f.vars:
-                if f not in self.ransl:
-                    self.ransl.append(v)
-        self.rangf = []
-        for f in self.random:
-            if f.grouping_factor not in self.rangf:
-                self.rangf.append(f.grouping_factor)
-        self.allsl = self.fixed[:]
-        for f in self.ransl:
-            if f not in self.allsl:
-                self.allsl.append(f)
-        self.allvar = self.allsl[:]
-        for gf in self.rangf:
-            if gf not in self.allvar:
-                self.allvar.append(gf)
-
-    def parse_var(self, var):
-        n_lp = var.count('(')
-        n_rp = var.count(')')
-        assert n_lp == n_rp, 'Unmatched parens in formula variable "%s".' % var
-        ops = [[], var.strip()]
-        while ops[1].endswith(')'):
-            op, inp = self.parse_var_inner(ops[1])
-            ops[0].insert(0, op)
-            ops[1] = inp.strip()
-        return ops
-
-    def parse_var_inner(self, var):
-        if var.strip().endswith(')'):
-            op = ''
-            inp = ''
-            inside_var = False
-            for i in var[:-1]:
-                if inside_var:
-                    inp += i
-                else:
-                    if i == '(':
-                        inside_var = True
-                    else:
-                        op += i
+                assert len(t.args) <= 1, 'Only unary ops on variables supported in DTSR formula strings'
+                s += self.process_ast(t.args[0], ops=ops + [t.func.id], under_IRF=under_IRF, random_coefficients=random_coefficients)
+        elif type(t).__name__ == 'Name':
+            new = Term(t.id, ops=ops)
+            s.append(new)
+        elif type(t).__name__ == 'NameConstant':
+            new = Term(t.value, ops=ops)
+            s.append(new)
+        elif type(t).__name__ == 'Num':
+            new = Term(str(t.n), ops=ops)
+            s.append(new)
         else:
-            op = ''
-            inp = var
-        return op, inp
-
-    def extract_cross(self, var):
-        vars = var.split(':')
-        if len(vars) > 1:
-            vars = [v.strip() for v in vars]
-        return vars
-
-    def extract_interaction(var):
-        vars = var.split('*')
-        if len(vars) > 1:
-            vars = [v.strip() for v in vars]
-        return vars
-
-    def process_interactions(self, vars):
-        new_vars = []
-        interactions = []
-        for v1 in vars:
-            new_v = self.extract_cross(v1)
-            if len(new_v) > 0:
-                interactions.append(new_v)
-            new_v = self.extract_interaction(v1)
-            if len(new_v) > 0:
-                interactions.append(new_v)
-                for v2 in new_v:
-                    if v2 not in new_vars:
-                        new_vars.append(v2)
-        return new_vars, interactions
+            raise ValueError('Operation "%s" is not supported in DTSR formula strings' %type(t).__name___)
+        return s
 
     def apply_op(self, op, arr):
         if op in ['c', 'c.']:
@@ -150,69 +196,83 @@ class Formula(object):
             out = np.log(arr)
         elif op == 'log1p':
             out = np.log(arr + 1)
-        elif op.startswith('pow'):
-            exponent = float(op[3:])
-            out = arr ** exponent
-        elif op.startswith('bc'):
-            L = float(op[2:])
-            if L == 0:
-                out = np.log(arr)
-            else:
-                out = (arr ** L - 1) / L
         else:
             raise ValueError('Unrecognized op: "%s".' % op)
         return out
 
-    def apply_ops(self, ops, col, df):
-        if len(ops[0]) > 0:
-            new_col = ops[-1]
-            for op in ops[0]:
-                new_col = op + '(' + new_col + ')'
-            df[new_col] = df[col]
-            for op in ops[0]:
-                df[new_col] = self.apply_op(op, df[new_col])
-        return df
-
-    def apply_ops_from_str(self, s, df):
-        ops = self.parse_var(s)
-        col = ops[1]
-        df = self.apply_ops(ops, col, df)
+    def apply_ops(self, term, df):
+        ops = term.ops
+        if term.name not in df.columns:
+            if term.id not in df.columns:
+                if type(term).__name__ == 'InteractionTerm':
+                    for t in term.terms:
+                        df = self.apply_ops(t, df)
+                    df[term.id] = df[[x.name for x in term.terms]].product(axis=1)
+                else:
+                    raise ValueError('Unrecognized term "%s" in model formula' %term.id)
+            else:
+                df[term.name] = df[term.id]
+            for i in range(len(ops)):
+                op = ops[i]
+                df[term.name] = self.apply_op(op, df[term.name])
         return df
 
     def apply_formula(self, y, X):
         if self.dv not in y.columns:
-            y = self.apply_ops_from_str(self.dv, y)
-        for f in self.fixed:
-            if f not in X.columns:
-                X = self.apply_ops_from_str(f, X)
-        for r in self.random:
-            for v in r.vars:
-                if f not in X.columns:
-                    X = self.apply_ops_from_str(v, X)
+            y = self.apply_ops(self.dv_term, y)
+        for t in self.terminals:
+            X = self.apply_ops(self.terminals[t], X)
         return y, X
 
-    def variables(self):
-        dv = self.dv
-        fixef = self.fixed[:]
-        ransl = []
-        for f in self['random']:
-            for v in f['vars']:
-                if f not in ransl:
-                    ransl.append(v)
-        rangf = []
-        for f in self['random']:
-            if f['grouping_factor'] not in rangf:
-                rangf.append(f['grouping_factor'])
-        allsl = fixef[:]
-        for f in ransl:
-            if f not in allsl:
-                allsl.append(f)
-        allvar = allsl[:]
-        for gf in rangf:
-            if gf not in allvar:
-                allvar.append(gf)
+    IRF = [
+        'DiracDelta',
+        'Exp',
+        'ShiftedExp',
+        'Gamma',
+        'ShiftedGamma',
+        'GammKgt1',
+        'ShiftedGammaKgt1',
+        'Normal',
+        'SkewNormal',
+        'EMG',
+        'BetaPrime',
+        'ShiftedBetaPrime',
+    ]
 
-        return ransl, rangf, allsl, allvar
+    def __str__(self):
+        return self.dv + ' ~ ' + ' + '.join([t.name for t in self.terms])
+
+class Term(object):
+    def __init__(self, name, ops=None):
+        if ops is None:
+            ops = []
+        self.ops = ops[:]
+        self.name = name
+        for op in self.ops:
+            self.name = op + '(' + self.name + ')'
+        self.id = name
+
+    def __str__(self):
+        return self.name
+
+class InteractionTerm(object):
+    def __init__(self, terms, ops=None):
+        if ops is None:
+            ops = []
+        self.ops = ops[:]
+        self.terms = []
+        names = set()
+        for t in terms:
+            if t.name not in names:
+                names.add(t.name)
+                self.terms.append(t)
+        self.name = ':'.join([t.name for t in terms])
+        for op in self.ops:
+            self.name = op + '(' + self.name + ')'
+        self.id = ':'.join([x.name for x in self.terms])
+
+    def __str__(self):
+        return self.name
 
 class RandomTerm(object):
     """
@@ -223,10 +283,76 @@ class RandomTerm(object):
         vars: List of String. A list of fields for the random term
         intercept: Boolean. Whether to include an intercept for the random term
     """
-    def __init__(self, grouping_factor='', vars=None, intercept=True):
-        self.grouping_factor = grouping_factor
-        if vars is None:
-            self.vars = ['']
+    def __init__(self, terms, gf):
+        self.intercept = True
+        self.terms = []
+        while len(terms) > 0:
+            if terms[0].name == '0':
+                self.intercept = False
+            elif terms[0].name == '1':
+                self.intercept = True
+            else:
+                self.terms.append(terms[0])
+            terms.pop(0)
+        self.gf = gf
+        self.name = '(' + ' + '.join([str(int(self.intercept))] + [t.name for t in self.terms]) + ' | ' + self.gf + ')'
+        self.id = self.name
+        self.coefficients = {}
+
+class IRFTreeNode(object):
+    def __init__(self, basename=None, family=None, irf_id=None, coef_id=None, ops=None, cont=False):
+        assert not cont, 'Responses to continuous input variables are not currently supported'
+        if basename is None:
+            self.ops = []
+            self.cont = False
+            self.family = None
+            self.name = 'ROOT'
+            self.irf_id = self.name
+            self.coef_id = self.name
+            self.children = {}
+            self.p = None
+            self.terminal = None
         else:
-            self.vars = vars
-        self.intercept = intercept
+            if ops is None:
+                ops = []
+            self.ops = ops[:]
+            self.cont = cont
+            self.family = family
+            self.name = self.family + '(' + basename
+            self.irf_id = irf_id
+            if self.irf_id is not None:
+                self.name += ', irf_id="%s"'%self.irf_id
+            self.coef_id = coef_id
+            if self.coef_id is not None:
+                self.name += ', coef_id="%s"'%self.coef_id
+            self.name += ')'
+            for op in self.ops:
+                self.name = op + '(' + self.name + ')'
+            if self.irf_id is None:
+                self.irf_id = self.name
+            if self.coef_id is None:
+                self.coef_id = self.name
+            self.children = {}
+            self.p = None
+            self.terminal = None
+
+
+    def __str__(self):
+        s = self.name
+        for f in self.children:
+            s += '\n  %s'%f
+            indent = '    '
+            for c in self.children[f]:
+                s += '\n%s' % indent + str(self.children[f][c]).replace('\n', '\n%s' % indent)
+        if self.terminal is not None:
+            s += '\n  - %s' %self.terminal
+
+        return s
+
+    def merge_children(self, new):
+        for f in new.children:
+            if f not in self.children:
+                self.children[f] = {}
+            for c in new.children[f]:
+                if c not in self.children[f]:
+                    self.children[f][c] = new.children[f][c]

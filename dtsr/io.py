@@ -15,5 +15,10 @@ def read_data(path_X, path_y, series_ids, categorical_columns=None):
             X[col] = X[col].astype('category')
             y[col] = y[col].astype('category')
 
+    X['rate'] = 1.
+    X['trial'] = X.groupby(series_ids).rate.cumsum()
+    X_groups = X.groupby(series_ids)
+    X['percentTrialsComplete'] = X_groups['trial'].apply(lambda x: x / max(x))
+    X['percentTimeComplete'] = X_groups['time'].apply(lambda x: x / max(x))
     X._get_numeric_data().fillna(value=0, inplace=True)
     return X, y

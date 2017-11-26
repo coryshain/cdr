@@ -93,7 +93,7 @@ def preprocess_data(X, y, p, formula_list, compute_history=True):
         if len(x.random) > 0:
             n_level = []
             for r in x.random:
-                gf = r.grouping_factor
+                gf = x.random[r].gf
                 n_level.append(len(y[gf].cat.categories))
 
     select = compute_filters(y, p.filter_map)

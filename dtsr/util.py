@@ -8,9 +8,7 @@ def names2ix(names, l):
     ix = []
     for n in names:
         ix.append(l.index(n))
-    if len(ix) > 1:
-        return np.array(ix)
-    return ix[0]
+    return np.array(ix)
 
 def mse(true, preds):
     return ((true-preds)**2).mean()

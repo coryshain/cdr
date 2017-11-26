@@ -33,8 +33,15 @@ if __name__ == '__main__':
 
     dtsr_formula_list = [Formula(p.models[m]['formula']) for m in p.model_list if m.startswith('DTSR')]
     dtsr_formula_name_list = [m for m in p.model_list if m.startswith('DTSR')]
-    X, y = read_data(p.X_train, p.y_train, p.series_ids, categorical_columns=list(set(p.series_ids + [v for x in dtsr_formula_list for v in x.rangf])))
+    X, y = read_data(p.X_train, p.y_train, p.series_ids, categorical_columns=list(set(p.series_ids + [x.random[v].gf for x in dtsr_formula_list for v in x.random])))
     X, y, select = preprocess_data(X, y, p, dtsr_formula_list, compute_history=run_dtsr)
+    #
+    # from matplotlib import pyplot as plt
+    # plt.scatter(X.totsurp, X.fwprob5surp)
+    # plt.show()
+    # print(X.totsurp.std())
+    # print(X.fwprob5surp.std())
+    # exit()
 
     if run_baseline:
         from dtsr.baselines import py2ri
@@ -54,7 +61,7 @@ if __name__ == '__main__':
         if run_baseline and x.dv not in X_baseline.columns:
             X_baseline[x.dv] = y[x.dv]
         sys.stderr.write('Correlation matrix for DTSR model %s:\n' %name)
-        rho = X[x.allsl].corr()
+        rho = X[x.terminal_names].corr()
         sys.stderr.write(str(rho) + '\n\n')
 
     if run_baseline:
@@ -189,7 +196,9 @@ if __name__ == '__main__':
                                   y,
                                   outdir=p.logdir + '/' + m,
                                   irf=p.irf,
-                                  learning_rate=p.learning_rate
+                                  optim=p.optim,
+                                  learning_rate=p.learning_rate,
+                                  log_random=p.log_random
                                   )
                 with open(p.logdir + '/' + m + '/m.obj', 'wb') as m_file:
                     pickle.dump(dtsr_model, m_file)
@@ -198,7 +207,7 @@ if __name__ == '__main__':
                              n_epoch_train=p.n_epoch_train,
                              n_epoch_tune=p.n_epoch_tune,
                              minibatch_size=p.minibatch_size,
-                             fixef_name_map=p.fixef_name_map,
+                             irf_name_map=p.fixef_name_map,
                              plot_x_inches=p.plot_x_inches,
                              plot_y_inches=p.plot_y_inches,
                              cmap=p.cmap
