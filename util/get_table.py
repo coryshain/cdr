@@ -8,14 +8,14 @@ loss_val = re.compile('  MSE: (.+)')
 dir = sys.argv[1]
 
 systems = ['LMEnoS', 'LMEoptS', 'LMEfullS', 'GAMnoS', 'GAMoptS', 'GAMfullS', 'DTSR']
-tasks = ['noRE', 'si', 'ss', 'sswi', 'sswisi']
+tasks = ['noRE', 'si', 'ss']
 
 table_str = '''
 \\begin{table}
-\\begin{tabular}{r|cc|cc|cc|cc|cc}
-& \\multicolumn{10}{c}{Random effects structure} \\\\
-& \\multicolumn{2}{c}{$\\emptyset$} & \\multicolumn{2}{c}{I\\textsubscript{subj}} & \\multicolumn{2}{c}{S\\textsubscript{subj}} & \\multicolumn{2}{c}{S\\textsubscript{subj}+I\\textsubscript{wrd}} & \\multicolumn{2}{c}{S\\textsubscript{subj}+I\\textsubscript{wrd}+I\\textsubscript{sent}} \\\\
-System & Train & Test & Train & Test & Train & Test & Train & Test & Train & Test\\\\
+\\begin{tabular}{r|cc|cc|cc}
+& \\multicolumn{6}{c}{Random effects structure} \\\\
+& \\multicolumn{2}{c}{$\\emptyset$} & \\multicolumn{2}{c}{I\\textsubscript{subj}} & \\multicolumn{2}{c}{S\\textsubscript{subj}} \\\\
+System & Train & Test & Train & Test & Train & Test \\\\
 \\hline
 '''
 

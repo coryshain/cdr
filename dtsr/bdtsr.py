@@ -1,0 +1,666 @@
+import os
+import math
+import pandas as pd
+from numpy import inf
+
+pd.options.mode.chained_assignment = None
+import tensorflow as tf
+
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+from tensorflow.python.platform.test import is_gpu_available
+
+tf_config = tf.ConfigProto()
+tf_config.gpu_options.allow_growth = True
+from .formula import *
+from .util import *
+from .plot import *
+from .dtsr import sn, DTSR_kernel
+
+import edward as ed
+from edward.models import Normal, Gamma, Empirical
+
+
+class BDTSR(DTSR_kernel):
+    def __init__(self,
+                 form_str,
+                 y,
+                 outdir,
+                 history_length=100,
+                 low_memory=False,
+                 float_type='float32',
+                 int_type='int32',
+                 log_random=False,
+                 inference_name='KLqp',
+                 n_samples=1,
+                 n_iter=1000,
+                 logging_freq = 1,
+                 n_samples_eval=100,
+                 ):
+
+        super(BDTSR, self).__init__(
+            form_str,
+            y,
+            outdir,
+            history_length=history_length,
+            low_memory=low_memory,
+            float_type=float_type,
+            int_type=int_type,
+            log_random=log_random
+        )
+
+        assert not self.low_memory, 'Because Edward does not support Tensorflow control ops, low_memory is not supported in BDTSR'
+        try:
+            float(self.history_length)
+        except:
+            raise ValueError('Because Edward does not support Tensorflow control ops, finite history_length must be specified in BDTSR')
+
+        self.inference_name = inference_name
+
+        self.n_samples = n_samples
+        self.n_iter = n_iter
+        self.logging_freq = logging_freq
+        self.n_samples_eval = n_samples_eval
+
+        self.inference_map = {}
+
+        self.build()
+
+    def variational(self):
+        return self.inference_name in [
+            'KLpq',
+            'KLqp',
+            'ImplicitKLqp',
+            'ReparameterizationEntropyKLqp',
+            'ReparameterizationKLKLqp',
+            'ReparameterizationKLqp'
+            'ScoreEntropyKLqp',
+            'ScoreKLKLqp',
+            'ScoreKLqp',
+            'ScoreRBKLqp',
+            'WakeSleep'
+
+        ]
+
+    def build(self):
+        sys.stderr.write('Constructing network from model tree:\n')
+        sys.stdout.write(str(self.irf_tree))
+        sys.stdout.write('\n')
+
+        self.initialize_inputs()
+        self.initialize_intercepts_coefficients()
+        # with self.sess.as_default():
+        #     with self.sess.graph.as_default():
+        #         self.out = self.X[:,-1,:]
+        #         self.out = self.intercept + tf.squeeze(tf.matmul(self.out, tf.expand_dims(self.coefficient[0], -1)), -1)
+        #         self.out = Normal(loc=self.out, scale=1., name='output')
+        self.initialize_irf_lambdas()
+        self.initialize_irf_params()
+        self.initialize_irfs(self.irf_tree)
+        self.construct_network()
+        with self.sess.as_default():
+            self.out = Normal(loc=self.out, scale=1., name='output')
+        self.initialize_objective()
+        self.start_logging()
+        self.initialize_saver()
+        self.load()
+        self.report_n_params()
+
+    def initialize_intercepts_coefficients(self):
+        f = self.form
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if f.intercept:
+                    self.intercept_fixed = Normal(
+                        loc=tf.constant(self.y_mu_init, shape=[1]),
+                        scale=tf.ones([1]),
+                        name='intercept'
+                    )
+                    if self.variational():
+                        self.intercept_fixed_q_loc = tf.Variable(
+                            tf.random_normal([1], mean=self.y_mu_init),
+                            dtype=self.FLOAT,
+                            name='intercept_q_loc'
+                        )
+                        self.intercept_fixed_q_scale = tf.Variable(
+                            tf.random_normal([1]),
+                            dtype=self.FLOAT,
+                            name='intercept_q_scale'
+                        )
+                        self.intercept_fixed_q = Normal(
+                            loc=self.intercept_fixed_q_loc,
+                            scale=tf.nn.softplus(self.intercept_fixed_q_scale),
+                            name='intercept_q'
+                        )
+                    else:
+                        self.intercept_fixed_q = Empirical(
+                            params=tf.Variable(tf.zeros((self.n_samples,1)), name='intercept_q'),
+                            name='intercept_q'
+                        )
+                    self.inference_map[self.intercept_fixed] = self.intercept_fixed_q
+                else:
+                    self.intercept_fixed = tf.constant(0., dtype=self.FLOAT, name='intercept')
+                self.intercept = self.intercept_fixed
+                # tf.summary.scalar('intercept', self.intercept[0], collections=['params'])
+
+                self.coefficient_fixed = Normal(
+                    loc=tf.zeros([len(f.coefficient_names)]),
+                    scale=tf.ones([len(f.coefficient_names)]),
+                    name='coefficient_fixed'
+                )
+                if self.variational():
+                    self.coefficient_fixed_q_loc = tf.Variable(
+                        tf.random_normal([len(f.coefficient_names)]),
+                        dtype=self.FLOAT,
+                        name='coefficient_fixed_q_loc'
+                    )
+                    self.coefficient_fixed_q_scale = tf.Variable(
+                            tf.random_normal([len(f.coefficient_names)]),
+                            dtype=self.FLOAT,
+                            name='coefficient_fixed_q_scale'
+                        )
+                    self.coefficient_fixed_q = Normal(
+                        loc=self.coefficient_fixed_q_loc,
+                        scale=tf.nn.softplus(self.coefficient_fixed_q_scale),
+                        name='coefficient_fixed_q'
+                    )
+                else:
+                    self.coefficient_fixed_q = Empirical(
+                        params=tf.Variable(tf.zeros((self.n_samples, len(f.coefficient_names)))),
+                        name='coefficient_fixed_q'
+                    )
+                for i in range(len(f.coefficient_names)):
+                    tf.summary.scalar('coefficient' + '/%s' % f.coefficient_names[i],
+                                      self.coefficient_fixed_q.mean()[i],
+                                      collections=['params'])
+                self.coefficient_fixed_means = self.coefficient_fixed_q.mean()
+                self.inference_map[self.coefficient_fixed] = self.coefficient_fixed_q
+                fixef_ix = names2ix(f.fixed_coefficient_names, f.coefficient_names)
+                coefficient_fixed_mask = np.zeros(len(f.coefficient_names), dtype=getattr(np, self.float_type))
+                coefficient_fixed_mask[fixef_ix] = 1.
+                coefficient_fixed_mask = tf.constant(coefficient_fixed_mask)
+                self.coefficient_fixed *= coefficient_fixed_mask
+                self.coefficient_fixed_means *= coefficient_fixed_mask
+                self.coefficient = tf.expand_dims(self.coefficient_fixed, 0)
+                self.ransl = False
+                if self.log_random:
+                    writers = {}
+                for i in range(len(f.ran_names)):
+                    r = f.random[f.ran_names[i]]
+                    coefs = r.coefficient_names
+                    mask_col_indices = np.zeros((self.rangf_n_levels[i], len(f.coefficient_names)))
+                    for j in range(len(f.coefficient_names)):
+                        if f.coefficient_names[j] in coefs:
+                            mask_col_indices[:, j] = 1
+                    mask_col_indices = tf.constant(mask_col_indices, dtype=self.FLOAT)
+                    mask = np.ones(self.rangf_n_levels[i], dtype=getattr(np, self.float_type))
+                    mask[self.rangf_n_levels[i] - 1] = 0
+                    mask = tf.constant(mask)
+
+                    if r.intercept:
+                        intercept_random = Normal(
+                            loc=tf.zeros([self.rangf_n_levels[i]], dtype=self.FLOAT),
+                            scale=tf.ones([self.rangf_n_levels[i]], dtype=self.FLOAT),
+                            name='intercept_by_%s' % r.gf
+                        )
+                        if self.variational():
+                            intercept_random_q = Normal(
+                                loc=tf.Variable(
+                                    tf.random_normal([self.rangf_n_levels[i]]),
+                                    dtype=self.FLOAT,
+                                    name='intercept_q_loc_by_%s' % r.gf
+                                ),
+                                scale=tf.nn.softplus(
+                                    tf.Variable(
+                                        tf.random_normal([self.rangf_n_levels[i]]),
+                                        dtype=self.FLOAT,
+                                        name='intercept_q_scale_by_%s' % r.gf
+                                    )
+                                ),
+                                name='intercept_q_by_%s' % r.gf
+                            )
+                        else:
+                            intercept_random_q = Empirical(
+                                params=tf.Variable(tf.zeros((self.n_samples, self.rangf_n_levels[i]))),
+                                name='intercept_q_by_%s' % r.gf
+                            )
+                        self.inference_map[intercept_random] = intercept_random_q
+                        intercept_random *= mask
+                        intercept_random -= tf.reduce_mean(intercept_random, axis=0)
+                        self.intercept += tf.gather(intercept_random, self.gf_y[:, i])
+                        if self.log_random:
+                            self.summary_random_writers[r.name()] = [tf.summary.FileWriter(self.outdir + '/tensorboard/by_' + r.gf + '/%d' % j) for j in range(min(10, self.rangf_n_levels[i]))]
+                            self.summary_random_indexers[r.name()] = tf.placeholder(dtype=tf.int32)
+                            tf.summary.scalar('by_' + r.gf + '/intercept', intercept_random[self.summary_random_indexers[r.name()]], collections=['by_' + r.gf])
+                    if len(coefs) > 0:
+                        self.ransl = True
+                        coefficient_random = Normal(
+                            loc=tf.zeros([self.rangf_n_levels[i], len(f.coefficient_names)], dtype=self.FLOAT),
+                            scale=tf.ones([self.rangf_n_levels[i], len(f.coefficient_names)], dtype=self.FLOAT),
+                            name='coefficient_by_%s' % (r.gf)
+                        )
+                        if self.variational():
+                            coefficient_random_q = Normal(
+                                loc=tf.Variable(
+                                    tf.random_normal([self.rangf_n_levels[i], len(f.coefficient_names)]),
+                                    dtype=self.FLOAT,
+                                    name='coefficient_q_loc_by_%s' % r.gf
+                                ),
+                                scale = tf.nn.softplus(
+                                    tf.Variable(
+                                        tf.random_normal([self.rangf_n_levels[i], len(f.coefficient_names)]),
+                                        dtype=self.FLOAT,
+                                        name='coefficient_q_scale_by_%s' % r.gf
+                                    )
+                                ),
+                                name = 'coefficient_q_by_%s' % (r.gf)
+                            )
+                        else:
+                            coefficient_random_q = Empirical(
+                                params=tf.Variable(tf.zeros((self.n_samples, self.rangf_n_levels[i], len(f.coefficient_names)))),
+                                name='coefficient_q_by_%s' % (r.gf)
+                            )
+                        self.inference_map[coefficient_random] = coefficient_random_q
+                        coefficient_random *= mask_col_indices
+                        coefficient_random *= tf.expand_dims(mask, -1)
+                        coefficient_random -= tf.reduce_mean(coefficient_random, axis=0)
+                        if self.log_random:
+                            coef_names = sorted(coefs.keys())
+                            coef_ix = names2ix(coef_names, f.coefficient_names)
+                            for k in coef_ix:
+                                tf.summary.scalar('by_' + r.gf + '/' + coef_names[k], coefficient_random[self.summary_random_indexers[r.name()],k], collections=['by_' + r.gf])
+
+                        self.coefficient += tf.gather(coefficient_random, self.gf_y[:, i], axis=0)
+
+    def initialize_irf_params(self):
+        f = self.form
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                for x in f.atomic_irf_by_family:
+                    p, q = self.initialize_irf_params_inner(x, sorted(f.atomic_irf_by_family[x]))
+                    self.atomic_irf_by_family[x] = tf.stack(p, axis=0)
+                    self.atomic_irf_means_by_family[x] = tf.stack(q, axis=0)
+
+    def initialize_irf_params_inner(self, family, ids):
+        ## Infinitessimal value to add to bounded parameters
+        epsilon = 1e-35  # np.nextafter(0, 1, dtype=getattr(np, self.float_type)) * 10
+        dim = len(ids)
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if family == 'DiracDelta':
+                    filler = tf.expand_dims(tf.constant(1., shape=[1, dim]), -1)
+                    return (filler,), (filler,)
+                if family == 'Exp':
+                    log_L = tf.get_variable(sn('log_L_%s' % '-'.join(ids)), shape=[1, dim],
+                                            initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                    L = tf.exp(log_L, name=sn('L_%s' % '-'.join(ids))) + epsilon
+                    for i in range(dim):
+                        tf.summary.scalar('L' + '/%s' % ids[i], L[i], collections=['params'])
+                    return L
+                if family == 'ShiftedExp':
+                    log_L = tf.get_variable(sn('log_L_%s' % '-'.join(ids)), shape=[dim],
+                                            initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                    log_neg_delta = tf.get_variable(sn('log_neg_delta_%s' % '-'.join(ids)), shape=[dim],
+                                                    initializer=tf.truncated_normal_initializer(stddev=.1),
+                                                    dtype=self.FLOAT)
+                    L = tf.exp(log_L, name=sn('L_%s' % '-'.join(ids))) + epsilon
+                    delta = -tf.exp(log_neg_delta, name=sn('delta_%s' % '-'.join(ids)))
+                    for i in range(dim):
+                        tf.summary.scalar('L' + '/%s' % ids[i], L[i], collections=['params'])
+                        tf.summary.scalar('delta' + '/%s' % ids[i], delta[i], collections=['params'])
+                    return tf.stack([L, delta], axis=0)
+                if family == 'Gamma':
+                    log_k = tf.get_variable(sn('log_k_%s' % '-'.join(ids)), shape=[dim],
+                                            initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                    log_theta = tf.get_variable(sn('log_theta_%s' % '-'.join(ids)), shape=[dim],
+                                                initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                    k = tf.exp(log_k, name=sn('k_%s' % '-'.join(ids))) + epsilon
+                    theta = tf.exp(log_theta, name=sn('theta_%s' % '-'.join(ids))) + epsilon
+                    for i in range(dim):
+                        tf.summary.scalar('k' + '/%s' % ids[i], k[i], collections=['params'])
+                        tf.summary.scalar('theta' + '/%s' % ids[i], theta[i], collections=['params'])
+                    return tf.stack([k, theta])
+                if family == 'GammaKgt1':
+                    log_k = tf.get_variable(sn('log_k_%s' % '-'.join(ids)), shape=[dim],
+                                            initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                    log_theta = tf.get_variable(sn('log_theta_%s' % '-'.join(ids)), shape=[dim],
+                                                initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                    k = tf.exp(log_k, name=sn('k_%s' % '-'.join(ids))) + epsilon + 1.
+                    theta = tf.exp(log_theta, name=sn('theta_%s' % '-'.join(ids))) + epsilon
+                    for i in range(dim):
+                        tf.summary.scalar('k' + '/%s' % ids[i], k[i], collections=['params'])
+                        tf.summary.scalar('theta' + '/%s' % ids[i], theta[i], collections=['params'])
+                    return tf.stack([k, theta])
+                if family == 'ShiftedGamma':
+                    log_k = tf.get_variable(sn('log_k_%s' % '-'.join(ids)), shape=[dim],
+                                            initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                    log_theta = tf.get_variable(sn('log_theta_%s' % '-'.join(ids)), shape=[dim],
+                                                initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                    log_neg_delta = tf.get_variable(sn('log_neg_delta_%s' % '-'.join(ids)), shape=[dim],
+                                                    initializer=tf.truncated_normal_initializer(stddev=.1),
+                                                    dtype=self.FLOAT)
+                    k = tf.exp(log_k, name=sn('k')) + epsilon
+                    theta = tf.exp(log_theta, name=sn('theta_%s' % '-'.join(ids))) + epsilon
+                    delta = -tf.exp(log_neg_delta, name=sn('delta_%s' % '-'.join(ids)))
+                    for i in range(dim):
+                        tf.summary.scalar('k' + '/%s' % ids[i], k[i], collections=['params'])
+                        tf.summary.scalar('theta' + '/%s' % ids[i], theta[i], collections=['params'])
+                        tf.summary.scalar('delta' + '/%s' % ids[i], delta[i], collections=['params'])
+                    return tf.stack([k, theta, delta], axis=0)
+                if family == 'ShiftedGammaKgt1':
+                    log_k = tf.get_variable(sn('log_k_%s' % '-'.join(ids)), shape=[dim],
+                                            initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                    log_theta = tf.get_variable(sn('log_theta_%s' % '-'.join(ids)), shape=[dim],
+                                                initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                    log_neg_delta = tf.get_variable(sn('log_neg_delta_%s' % '-'.join(ids)), shape=[dim],
+                                                    initializer=tf.truncated_normal_initializer(stddev=.1),
+                                                    dtype=self.FLOAT)
+                    k = tf.nn.softplus(log_k, name=sn('k_%s' % '-'.join(ids))) + 1. + epsilon
+                    theta = tf.exp(log_theta, name=sn('theta_%s' % '-'.join(ids))) + epsilon
+                    delta = -tf.exp(log_neg_delta, name=sn('delta_%s' % '-'.join(ids)))
+                    for i in range(dim):
+                        tf.summary.scalar('k' + '/%s' % ids[i], k[i], collections=['params'])
+                        tf.summary.scalar('theta' + '/%s' % ids[i], theta[i], collections=['params'])
+                        tf.summary.scalar('delta' + '/%s' % ids[i], delta[i], collections=['params'])
+                    return tf.stack([k, theta, delta], axis=0)
+                if family == 'Normal':
+                    mu = Normal(
+                        loc=tf.zeros([dim]),
+                        scale=tf.ones([dim]),
+                        name=sn('mu_%s' % '-'.join(ids))
+                    )
+                    sigma = Normal(
+                        loc=tf.zeros([dim]),
+                        scale=tf.ones([dim]),
+                        name=sn('sigma_%s' % '-'.join(ids))
+                    )
+                    if self.variational():
+                        mu_q = Normal(
+                            loc=tf.Variable(
+                                tf.random_normal([dim], dtype=self.FLOAT),
+                                name=sn('mu_q_loc_%s' % '-'.join(ids))
+                            ),
+                            scale=tf.nn.softplus(
+                                tf.Variable(
+                                    tf.random_normal([dim], dtype=self.FLOAT),
+                                    name=sn('mu_q_scale_%s' % '-'.join(ids)))
+                            ),
+                            name=sn('mu_q_%s' % '-'.join(ids))
+                        )
+                        sigma_q = Normal(
+                            loc=tf.Variable(
+                                tf.random_normal([dim], dtype=self.FLOAT),
+                                name=sn('sigma_q_loc_%s' % '-'.join(ids))
+                            ),
+                            scale=tf.nn.softplus(
+                                tf.Variable(
+                                    tf.random_normal([dim], dtype=self.FLOAT),
+                                    name=sn('sigma_q_scale_%s' % '-'.join(ids))
+                                )
+                            ),
+                            name=sn('sigma_q_%s' % '-'.join(ids))
+                        )
+                    else:
+                        mu_q = Empirical(
+                            params=tf.Variable(tf.zeros((self.n_samples, dim))),
+                            name=sn('mu_q_%s' % '-'.join(ids))
+                        )
+                        sigma_q = Empirical(
+                            params=tf.Variable(tf.zeros((self.n_samples, dim))),
+                            name=sn('sigma_q_%s' % '-'.join(ids))
+                        )
+                    for i in range(dim):
+                        tf.summary.scalar('mu' + '/%s' % ids[i], mu_q.mean()[i], collections=['params'])
+                        tf.summary.scalar('sigma' + '/%s' % ids[i], tf.nn.softplus(sigma_q.mean()[i]), collections=['params'])
+                    self.inference_map[mu] = mu_q
+                    self.inference_map[sigma] = sigma_q
+                    return (mu, tf.nn.softplus(sigma)), (mu_q.mean(), tf.nn.softplus(sigma_q.mean()))
+                if family == 'SkewNormal':
+                    log_sigma = tf.get_variable(sn('log_sigma_%s' % '-'.join(ids)), shape=[dim],
+                                                initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                    mu = tf.get_variable(sn('mu_%s' % '-'.join(ids)), shape=[dim],
+                                         initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                    alpha = tf.get_variable(sn('alpha_%s' % '-'.join(ids)), shape=[dim],
+                                            initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                    sigma = tf.exp(log_sigma, name=sn('sigma_%s' % '-'.join(ids))) + epsilon
+                    for i in range(dim):
+                        tf.summary.scalar('mu' + '/%s' % ids[i], mu[i], collections=['params'])
+                        tf.summary.scalar('sigma' + '/%s' % ids[i], sigma[i], collections=['params'])
+                        tf.summary.scalar('alpha' + '/%s' % ids[i], alpha[i], collections=['params'])
+                    return tf.stack([mu, sigma, alpha], axis=1)
+                if family == 'EMG':
+                    log_sigma = tf.get_variable(sn('log_sigma_%s' % '-'.join(ids)), shape=[dim],
+                                                initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                    mu = tf.get_variable(sn('mu_%s' % '-'.join(ids)), shape=[dim],
+                                         initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                    log_L = tf.get_variable(sn('log_L_%s' % '-'.join(ids)), shape=[dim],
+                                            initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                    sigma = tf.exp(log_sigma, name=sn('sigma_%s' % '-'.join(ids))) + epsilon
+                    L = tf.exp(log_L, name=sn('L_%s' % '-'.join(ids))) + epsilon
+                    for i in range(dim):
+                        tf.summary.scalar('mu' + '/%s' % ids[i], mu[i], collections=['params'])
+                        tf.summary.scalar('sigma' + '/%s' % ids[i], sigma[i], collections=['params'])
+                        tf.summary.scalar('L' + '/%s' % ids[i], L[i], collections=['params'])
+                    return tf.stack([mu, sigma, L], axis=0)
+                if family == 'BetaPrime':
+                    log_alpha = tf.get_variable(sn('log_alpha_%s' % '-'.join(ids)), shape=[dim],
+                                                initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                    log_beta = tf.get_variable(sn('log_beta_%s' % '-'.join(ids)), shape=[dim],
+                                               initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                    alpha = tf.exp(log_alpha, name=sn('alpha_%s' % '-'.join(ids))) + epsilon
+                    beta = tf.exp(log_beta, name=sn('beta_%s' % '-'.join(ids))) + epsilon
+                    for i in range(dim):
+                        tf.summary.scalar('alpha' + '/%s' % ids[i], alpha[i], collections=['params'])
+                        tf.summary.scalar('beta' + '/%s' % ids[i], beta[i], collections=['params'])
+                    return tf.stack([alpha, beta], axis=0)
+                if family == 'ShiftedBetaPrime':
+                    log_alpha = tf.get_variable(sn('log_alpha_%s' % '-'.join(ids)), shape=[dim],
+                                                initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                    log_beta = tf.get_variable(sn('log_beta_%s' % '-'.join(ids)), shape=[dim],
+                                               initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                    log_neg_delta = tf.get_variable(sn('log_neg_delta_%s' % '-'.join(ids)), shape=[dim],
+                                                    initializer=tf.truncated_normal_initializer(stddev=.1),
+                                                    dtype=self.FLOAT)
+                    alpha = tf.exp(log_alpha, name=sn('alpha_%s' % '-'.join(ids))) + epsilon
+                    beta = tf.exp(log_beta, name=sn('beta_%s' % '-'.join(ids))) + epsilon
+                    delta = -tf.exp(log_neg_delta, name=sn('delta_%s' % '-'.join(ids)))
+                    for i in range(dim):
+                        tf.summary.scalar('alpha' + '/%s' % ids[i], alpha[i], collections=['params'])
+                        tf.summary.scalar('beta' + '/%s' % ids[i], beta[i], collections=['params'])
+                        tf.summary.scalar('delta' + '/%s' % ids[i], delta[i], collections=['params'])
+                    return tf.stack([alpha, beta, delta], axis=0)
+                raise ValueError('Impulse response function "%s" is not currently supported.' % family)
+
+    def initialize_objective(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if self.variational():
+                    self.inference = getattr(ed,self.inference_name)(self.inference_map, data={self.out: self.y})
+                    self.inference.initialize(
+                        n_samples=self.n_samples,
+                        n_iter=self.n_iter,
+                        n_print=self.logging_freq,
+                        logdir=self.outdir + '/tensorboard/distr',
+                        log_timestamp=False
+                    )
+                else:
+                    self.inference = getattr(ed,self.inference_name)(self.inference_map, data={self.out: self.y})
+                    self.inference.initialize(
+                        n_print=self.logging_freq,
+                        log_timestamp=False
+                    )
+
+    def start_logging(self):
+        f = self.form
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/fixed', self.sess.graph)
+                self.summary_params = tf.summary.merge_all(key='params')
+                if self.log_random:
+                    for r in f.ran_names:
+                        self.summary_random[r] = tf.summary.merge_all(key='by_' + f.random[r].gf)
+
+    def fit(self,
+            X,
+            y,
+            n_epoch_train=100,
+            n_epoch_tune=100,
+            minibatch_size=128,
+            irf_name_map=None,
+            plot_x_inches=28,
+            plot_y_inches=5,
+            cmap='gist_earth'):
+
+        usingGPU = is_gpu_available()
+
+        sys.stderr.write('Using GPU: %s\n' % usingGPU)
+
+        f = self.form
+
+        sys.stderr.write('Correlation matrix for input variables:Corr\n')
+        rho = X[f.terminal_names].corr()
+        sys.stderr.write(str(rho) + '\n\n')
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                pb = tf.contrib.keras.utils.Progbar(self.n_iter)
+
+                y_rangf = y[f.rangf]
+                for i in range(len(f.rangf)):
+                    c = f.rangf[i]
+                    y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
+
+                y_range = np.arange(len(y))
+                n_train = len(y[f.dv])
+
+                sys.stderr.write('Building history tensors...\n')
+                X_history, time_X_history = self.expand_history(X[f.terminal_names], X.time, y.first_obs, y.last_obs)
+                time_y = np.array(y.time)
+                y_dv = np.array(y[f.dv].astype('float32'))
+                gf_y = np.array(y_rangf)
+
+                fd = {
+                    self.X: X_history,
+                    self.time_X: time_X_history,
+                    self.y: y_dv,
+                    self.time_y: time_y,
+                    self.gf_y: gf_y
+                }
+
+                sys.stderr.write('Running %s inference...\n' % self.inference_name)
+                while self.global_step.eval(session=self.sess) < self.n_iter:
+                    p, p_inv = getRandomPermutation(len(y))
+                    if minibatch_size == inf:
+                        minibatch_size = len(y)
+                    n_minibatch = math.ceil(float(len(y)) / minibatch_size)
+
+                    loss_total = 0
+                    for j in range(0, len(y), minibatch_size):
+                        indices = p[j:j + minibatch_size]
+                        fd_minibatch = {
+                            self.X: X_history[indices],
+                            self.time_X: time_X_history[indices],
+                            self.y: y_dv[indices],
+                            self.time_y: time_y[indices],
+                            self.gf_y: gf_y[indices] if len(gf_y > 0) else gf_y
+                        }
+
+                        info_dict = self.inference.update(fd_minibatch)
+                        loss_total += info_dict['loss']
+                        self.sess.run(self.incr_global_batch_step)
+
+                    summary_params = self.sess.run(self.summary_params)
+                    self.writer.add_summary(summary_params, self.global_batch_step.eval(session=self.sess))
+                    self.make_plots(irf_name_map, plot_x_inches, plot_y_inches, cmap)
+                    self.sess.run(self.incr_global_step)
+                    self.save()
+
+                    pb.update(self.global_step.eval(session=self.sess), values=[('loss', loss_total)], force=True)
+
+                self.out_post = ed.copy(self.out, self.inference_map)
+
+                self.inference.finalize()
+
+                self.make_plots(irf_name_map, plot_x_inches, plot_y_inches, cmap)
+
+
+    def predict(self, X, y_time, y_rangf, first_obs, last_obs, minibatch_size=inf):
+        sys.stderr.write('Sampling predictions from posterior...\n')
+
+        f = self.form
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                for i in range(len(f.rangf)):
+                    c = f.rangf[i]
+                    y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
+
+                X_history, time_X_history = self.expand_history(X[f.terminal_names], X.time, first_obs, last_obs)
+                time_y = np.array(y_time)
+                gf_y = np.array(y_rangf)
+
+                fd = {
+                    self.X: X_history,
+                    self.time_X: time_X_history,
+                    self.time_y: time_y,
+                    self.gf_y: gf_y,
+                }
+
+                preds = np.zeros((len(y_time), self.n_samples_eval))
+
+                for i in range(self.n_samples_eval):
+                    sys.stderr.write('\r%d/%d'%(i+1, self.n_samples_eval))
+                    if minibatch_size == inf:
+                        preds[:,i] = self.sess.run(self.out_post, feed_dict=fd)
+                    else:
+                        for j in range(0, len(y_time), minibatch_size):
+                            fd_minibatch = {
+                                self.X: X_history[j:j+minibatch_size],
+                                self.time_X: time_X_history[j:j+minibatch_size],
+                                self.time_y: time_y[j:j+minibatch_size],
+                                self.gf_y: gf_y[j:j+minibatch_size] if len(gf_y) > 0 else gf_y,
+                            }
+                            preds[j:j+minibatch_size,i] = self.sess.run(self.out_post, feed_dict=fd_minibatch)
+
+                preds = preds.mean(axis=1)
+
+                sys.stderr.write('\n\n')
+
+                return preds
+
+    def eval(self, X, y):
+        f = self.form
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                y_rangf = y[f.rangf]
+                for i in range(len(f.rangf)):
+                    c = f.rangf[i]
+                    y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
+
+                X_history, time_X_history = self.expand_history(X[f.terminal_names], X.time, y.first_obs, y.last_obs)
+                time_y = np.array(y.time)
+                y_dv = np.array(y[f.dv].astype('float32'))
+                gf_y = np.array(y_rangf)
+
+                fd = {
+                    self.X: X_history,
+                    self.time_X: time_X_history,
+                    self.y: y_dv,
+                    self.time_y: time_y,
+                    self.gf_y: gf_y,
+                    self.out_post: self.y
+                }
+
+                sys.stderr.write('Evaluating...\n')
+                mse, mae, logLik = (ed.evaluate(['mse', 'mae', 'log_lik'], fd, n_samples=self.n_samples_eval))
+
+                return mse, mae, logLik
+
+    def __getstate__(self):
+        pass
+
+    def __setstate__(self, state):
+        pass

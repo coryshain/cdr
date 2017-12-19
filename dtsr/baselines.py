@@ -24,6 +24,15 @@ rstring = '''
 z_score = robjects.r(rstring)
 robjects.globalenv["z."] = z_score
 
+rstring = '''
+     function(x) {
+         return(x/sd(x))
+     }
+'''
+
+scale = robjects.r(rstring)
+robjects.globalenv["s."] = scale
+
 class LM(object):
     def __init__(self, formula, X):
         fit, summary, predict = self.instance_methods()

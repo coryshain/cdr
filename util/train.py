@@ -33,7 +33,7 @@ if __name__ == '__main__':
 
     dtsr_formula_list = [Formula(p.models[m]['formula']) for m in p.model_list if m.startswith('DTSR')]
     dtsr_formula_name_list = [m for m in p.model_list if m.startswith('DTSR')]
-    X, y = read_data(p.X_train, p.y_train, p.series_ids, categorical_columns=list(set(p.series_ids + [x.random[v].gf for x in dtsr_formula_list for v in x.random])))
+    X, y = read_data(p.X_train, p.y_train, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [x.random[v].gf for x in dtsr_formula_list for v in x.random])))
     X, y, select = preprocess_data(X, y, p, dtsr_formula_list, compute_history=run_dtsr)
     #
     # from matplotlib import pyplot as plt
@@ -44,7 +44,6 @@ if __name__ == '__main__':
     # exit()
 
     if run_baseline:
-        from dtsr.baselines import py2ri
         X['splitID'] = compute_splitID(X, p.split_ids)
         part = compute_partition(X, p.modulus, 3)
         part_select = part[0]
@@ -57,14 +56,11 @@ if __name__ == '__main__':
 
     for i in range(len(dtsr_formula_list)):
         x = dtsr_formula_list[i]
-        name = dtsr_formula_name_list[i]
         if run_baseline and x.dv not in X_baseline.columns:
             X_baseline[x.dv] = y[x.dv]
-        sys.stderr.write('Correlation matrix for DTSR model %s:\n' %name)
-        rho = X[x.terminal_names].corr()
-        sys.stderr.write(str(rho) + '\n\n')
 
     if run_baseline:
+        from dtsr.baselines import py2ri
         for c in X_baseline.columns:
             if X_baseline[c].dtype.name == 'category':
                 X_baseline[c] = X_baseline[c].astype(str)
@@ -77,7 +73,7 @@ if __name__ == '__main__':
         if m.startswith('LME'):
             from dtsr.baselines import LME
 
-            dv = formula.strip().split('~')[0].strip()
+            dv = formula.strip().split('~')[0].strip().replace('.','')
 
             if os.path.exists(p.logdir + '/' + m + '/m.obj'):
                 sys.stderr.write('Retrieving saved model %s...\n' % m)
@@ -108,7 +104,7 @@ if __name__ == '__main__':
         elif m.startswith('LM'):
             from dtsr.baselines import LM
 
-            dv = formula.strip().split('~')[0].strip()
+            dv = formula.strip().split('~')[0].strip().replace('.','')
 
             if os.path.exists(p.logdir + '/' + m + '/m.obj'):
                 sys.stderr.write('Retrieving saved model %s...\n' % m)
@@ -140,7 +136,7 @@ if __name__ == '__main__':
             import re
             from dtsr.baselines import GAM
 
-            dv = formula.strip().split('~')[0].strip()
+            dv = formula.strip().split('~')[0].strip().replace('.','')
 
             ## For some reason, GAM can't predict using custom functions, so we have to translate them
             z_term = re.compile('z.\((.*)\)')
@@ -179,41 +175,52 @@ if __name__ == '__main__':
             sys.stderr.write('\n\n')
         elif m.startswith('DTSR'):
             from dtsr.dtsr import DTSR
+            from dtsr.bdtsr import BDTSR
 
             if not p.use_gpu_if_available:
                 os.environ['CUDA_VISIBLE_DEVICES'] = ''
 
             dv = formula.strip().split('~')[0].strip()
 
-            print(p.irf)
-            if os.path.exists(p.logdir + '/' + m + '/m.obj'):
-                sys.stderr.write('Retrieving saved model %s...\n\n' % m)
-                with open(p.logdir + '/' + m + '/m.obj', 'rb') as m_file:
-                    dtsr_model = pickle.load(m_file)
+            sys.stderr.write('Fitting model %s...\n\n' % m)
+            if False:
+                dtsr_model = DTSR(
+                    formula,
+                    y,
+                    outdir=p.logdir + '/' + m,
+                    optim=p.optim,
+                    learning_rate=p.learning_rate,
+                    learning_rate_decay_factor=p.learning_rate_decay_factor,
+                    learning_rate_decay_family=p.learning_rate_decay_family,
+                    learning_rate_min=p.learning_rate_min,
+                    log_random=p.log_random
+                )
             else:
-                sys.stderr.write('Fitting model %s...\n\n' % m)
-                dtsr_model = DTSR(formula,
-                                  y,
-                                  outdir=p.logdir + '/' + m,
-                                  irf=p.irf,
-                                  optim=p.optim,
-                                  learning_rate=p.learning_rate,
-                                  log_random=p.log_random
-                                  )
-                with open(p.logdir + '/' + m + '/m.obj', 'wb') as m_file:
-                    pickle.dump(dtsr_model, m_file)
-            dtsr_model.train(X,
-                             y,
-                             n_epoch_train=p.n_epoch_train,
-                             n_epoch_tune=p.n_epoch_tune,
-                             minibatch_size=p.minibatch_size,
-                             irf_name_map=p.fixef_name_map,
-                             plot_x_inches=p.plot_x_inches,
-                             plot_y_inches=p.plot_y_inches,
-                             cmap=p.cmap
-                             )
+                dtsr_model = BDTSR(
+                    formula,
+                    y,
+                    outdir=p.logdir + '/' + m,
+                    log_random=p.log_random,
+                    inference_name='KLqp',
+                    n_samples=10,
+                    n_iter=500,
+                )
+            dtsr_model.fit(
+                X,
+                y,
+                n_epoch_train=p.n_epoch_train,
+                n_epoch_tune=p.n_epoch_tune,
+                minibatch_size=p.minibatch_size,
+                irf_name_map=p.fixef_name_map,
+                plot_x_inches=p.plot_x_inches,
+                plot_y_inches=p.plot_y_inches,
+                cmap=p.cmap
+            )
 
-            dtsr_preds = dtsr_model.predict(X, y.time, y[dtsr_model.form.rangf], y.first_obs, y.last_obs)
+            with open(p.logdir + '/' + m + '/m.obj', 'wb') as m_file:
+                pickle.dump(dtsr_model, m_file)
+
+            dtsr_preds = dtsr_model.predict(X, y.time, y[dtsr_model.form.rangf], y.first_obs, y.last_obs, minibatch_size=p.minibatch_size)
             dtsr_mse = mse(y[dv], dtsr_preds)
             dtsr_mae = mae(y[dv], dtsr_preds)
             summary = '=' * 50 + '\n'

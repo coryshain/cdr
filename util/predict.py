@@ -36,17 +36,16 @@ if __name__ == '__main__':
     dtsr_formula_list = [Formula(p.models[m]['formula']) for m in p.model_list if m.startswith('DTSR')]
     dtsr_formula_name_list = [m for m in p.model_list if m.startswith('DTSR')]
     if args.partition == 'train':
-        X, y = read_data(p.X_train, p.y_train, p.series_ids, categorical_columns=list(set(p.series_ids + [v for x in dtsr_formula_list for v in x.rangf])))
+        X, y = read_data(p.X_train, p.y_train, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [x.random[v].gf for x in dtsr_formula_list for v in x.random])))
     elif args.partition == 'dev':
-        X, y = read_data(p.X_dev, p.y_dev, p.series_ids, categorical_columns=list(set(p.series_ids + [v for x in dtsr_formula_list for v in x.rangf])))
+        X, y = read_data(p.X_dev, p.y_dev, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [x.random[v].gf for x in dtsr_formula_list for v in x.random])))
     elif args.partition == 'test':
-        X, y = read_data(p.X_test, p.y_test, p.series_ids, categorical_columns=list(set(p.series_ids + [v for x in dtsr_formula_list for v in x.rangf])))
+        X, y = read_data(p.X_test, p.y_test, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [x.random[v].gf for x in dtsr_formula_list for v in x.random])))
     else:
-        raise ValueError('Unrecognized value for "partition" argument: %s' %args.parition)
+        raise ValueError('Unrecognized value for "partition" argument: %s' %args.partition)
     X, y, select = preprocess_data(X, y, p, dtsr_formula_list, compute_history=run_dtsr)
 
     if run_baseline:
-        from dtsr.baselines import py2ri
         X['splitID'] = compute_splitID(X, p.split_ids)
         part = compute_partition(X, p.modulus, 3)
         if args.partition == 'train':
@@ -60,11 +59,11 @@ if __name__ == '__main__':
 
     for i in range(len(dtsr_formula_list)):
         x = dtsr_formula_list[i]
-        name = dtsr_formula_name_list[i]
         if run_baseline and x.dv not in X_baseline.columns:
             X_baseline[x.dv] = y[x.dv]
 
     if run_baseline:
+        from dtsr.baselines import py2ri
         for c in X_baseline.columns:
             if X_baseline[c].dtype.name == 'category':
                 X_baseline[c] = X_baseline[c].astype(str)

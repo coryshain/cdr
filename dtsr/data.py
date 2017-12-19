@@ -86,7 +86,7 @@ def compute_partition(y, modulus, n):
         partition.append(((y.splitID) % modulus) == (modulus - i))
     return partition
 
-def preprocess_data(X, y, p, formula_list, compute_history=True):
+def preprocess_data(X, y, p, formula_list, compute_history=True, debug=False):
     sys.stderr.write('Pre-processing data...\n')
 
     for x in formula_list:
@@ -107,7 +107,7 @@ def preprocess_data(X, y, p, formula_list, compute_history=True):
         first_obs, last_obs = compute_history_intervals(y, X, p.series_ids)
         y['first_obs'] = first_obs
         y['last_obs'] = last_obs
-        if False:
+        if debug:
             sample = np.random.randint(0, len(y), 10)
             for i in sample:
                 print(i)
