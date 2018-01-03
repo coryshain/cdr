@@ -66,7 +66,8 @@ class DTSR_kernel(object):
                  low_memory = True,
                  float_type='float32',
                  int_type='int32',
-                 log_random=False
+                 log_random=False,
+                 minibatch_size=128
                  ):
 
         self.g = tf.Graph()
@@ -99,6 +100,12 @@ class DTSR_kernel(object):
         self.int_type = int_type
         self.INT = getattr(tf, self.int_type)
         self.log_random = log_random
+        if minibatch_size == inf:
+            self.minibatch_size = len(y)
+        else:
+            self.minibatch_size = minibatch_size
+        self.n_minibatch = math.ceil(float(len(y)) / self.minibatch_size)
+        self.minibatch_scale = float(len(y)) / self.minibatch_size
         self.irf_tree = self.form.irf_tree
 
         self.preterminals = []
@@ -537,6 +544,7 @@ class DTSR_kernel(object):
                 plot_y = []
                 for x in self.irf_names:
                     plot_y.append(self.plot_tensors_atomic_unscaled[x].eval(session=self.sess))
+                # print(self.atomic_irf_means_by_family['Normal'].eval(session=self.sess))
                 plot_y = np.concatenate(plot_y, axis=1)
 
                 plot_convolutions(plot_x,
@@ -614,6 +622,7 @@ class DTSR(DTSR_kernel):
                  float_type='float32',
                  int_type='int32',
                  log_random=False,
+                 minibatch_size=128,
                  optim='Adam',
                  learning_rate=0.01,
                  learning_rate_decay_factor=0.,
@@ -628,7 +637,8 @@ class DTSR(DTSR_kernel):
             outdir,
             float_type=float_type,
             int_type=int_type,
-            log_random=log_random
+            log_random=log_random,
+            minibatch_size=minibatch_size
         )
 
         self.optim_name = optim

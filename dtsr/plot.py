@@ -10,7 +10,7 @@ def plot_convolutions(plot_x, plot_y, features, dir, filename='convolution_plot.
     feats = features[:]
     if irf_name_map is not None:
         for i in range(len(feats)):
-            feats[i] = irf_name_map.get(feats[i], feats[i])
+            feats[i] = ':'.join([irf_name_map.get(x, x) for x in feats[i].split(':')])
     sort_ix = [i[0] for i in sorted(enumerate(feats), key=lambda x:x[1])]
     for i in range(len(sort_ix)):
         if plot_y[1:,sort_ix[i]].sum() == 0:

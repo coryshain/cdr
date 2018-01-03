@@ -34,17 +34,8 @@ class Config(object):
             os.makedirs(self.logdir)
         if not os.path.exists(self.logdir + '/config.ini'):
             shutil.copy2(path, self.logdir + '/config.ini')
-        self.network_type = settings.get('network_type', 'mle')
-        self.irf = settings.get('irf', 'gamma')
-        self.optim = settings.get('optim', 'Adam')
-        self.learning_rate = settings.getfloat('learning_rate', 0.001)
-        self.learning_rate_decay_factor = settings.getfloat('learning_rate_decay_factor', 0.)
-        self.learning_rate_decay_family = settings.get('learning_rate_decay_family', 'exponential')
-        self.learning_rate_min = settings.getfloat('learning_rate_min', 1e-4)
-        self.loss = settings.get('loss', 'MSE')
         self.modulus = settings.getint('modulus', 4)
-        self.log_random = settings.getboolean('log_random', False)
-        self.log_convolution_plots = settings.getboolean('log_convolution_plots', False)
+        self.network_type = settings.get('network_type', 'nn')
         self.n_epoch_train = settings.getint('n_epoch_train', 100)
         self.n_epoch_tune = settings.getint('n_epoch_tune', 100)
         self.minibatch_size = settings.get('minibatch_size', 128)
@@ -52,11 +43,28 @@ class Config(object):
             self.minibatch_size = inf
         else:
             self.minibatch_size = int(self.minibatch_size)
+        self.log_random = settings.getboolean('log_random', False)
+        self.log_convolution_plots = settings.getboolean('log_convolution_plots', False)
         self.plot_x_inches = settings.getfloat('plot_x_inches', 7)
         self.plot_y_inches = settings.getfloat('plot_y_inches', 5)
         self.cmap = settings.get('cmap', 'gist_rainbow')
         self.use_gpu_if_available = settings.getboolean('use_gpu_if_available', False)
         self.validate_delta_t = settings.getboolean('validate_delta_t', True)
+        ## NN settings
+        self.optim = settings.get('optim', 'Adam')
+        self.learning_rate = settings.getfloat('learning_rate', 0.001)
+        self.learning_rate_decay_factor = settings.getfloat('learning_rate_decay_factor', 0.)
+        self.learning_rate_decay_family = settings.get('learning_rate_decay_family', 'exponential')
+        self.learning_rate_min = settings.getfloat('learning_rate_min', 1e-4)
+        self.loss = settings.get('loss', 'MSE')
+        ## Bayes net settings
+        self.inference_name = settings.get('inference_name', None)
+        self.n_samples = settings.getint('n_samples', 1)
+        self.n_samples_eval = settings.getint('n_samples_eval', 100)
+        self.conv_prior_sd = settings.getfloat('conv_prior_sd', 1.)
+        self.coef_prior_sd = settings.getfloat('coef_prior_sd', 1.)
+        self.y_sigma_scale = settings.getfloat('y_sigma_scale', 0.5)
+
 
         ## Filters
         self.filter_map = {}

@@ -183,7 +183,7 @@ if __name__ == '__main__':
             dv = formula.strip().split('~')[0].strip()
 
             sys.stderr.write('Fitting model %s...\n\n' % m)
-            if False:
+            if p.network_type == 'nn':
                 dtsr_model = DTSR(
                     formula,
                     y,
@@ -195,22 +195,28 @@ if __name__ == '__main__':
                     learning_rate_min=p.learning_rate_min,
                     log_random=p.log_random
                 )
-            else:
+            elif p.network_type == 'bayesian':
                 dtsr_model = BDTSR(
                     formula,
                     y,
                     outdir=p.logdir + '/' + m,
                     log_random=p.log_random,
-                    inference_name='KLqp',
-                    n_samples=10,
-                    n_iter=500,
+                    minibatch_size=p.minibatch_size,
+                    inference_name=p.inference_name,
+                    n_samples=p.n_samples,
+                    n_samples_eval=p.n_samples_eval,
+                    n_iter=p.n_epoch_train,
+                    conv_prior_sd=p.conv_prior_sd,
+                    coef_prior_sd=p.coef_prior_sd,
+                    y_sigma_scale=p.y_sigma_scale
                 )
+            else:
+                raise ValueError('Network type "%s" not supported' %p.network_type)
             dtsr_model.fit(
                 X,
                 y,
                 n_epoch_train=p.n_epoch_train,
                 n_epoch_tune=p.n_epoch_tune,
-                minibatch_size=p.minibatch_size,
                 irf_name_map=p.fixef_name_map,
                 plot_x_inches=p.plot_x_inches,
                 plot_y_inches=p.plot_y_inches,
