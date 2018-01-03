@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 sns.set(style='white', rc={'axes.facecolor': (0, 0, 0, 0)})
 
-def plot_convolutions(plot_x, plot_y, features, dir, filename='convolution_plot.jpg', irf_name_map=None, plot_x_inches=7, plot_y_inches=5, cmap='gist_earth'):
+def plot_convolutions(plot_x, plot_y, features, dir, filename='convolution_plot.png', irf_name_map=None, plot_x_inches=7, plot_y_inches=5, cmap='gist_earth'):
     cm = plt.get_cmap(cmap)
     plt.gca().set_prop_cycle(color=[cm(1. * i / len(features)) for i in range(len(features))])
     plt.gca().spines['right'].set_visible(False)
