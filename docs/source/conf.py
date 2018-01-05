@@ -18,16 +18,21 @@
 #
 import os
 import sys
-# from unittest.mock import MagicMock
-# 
-# class Mock(MagicMock):
-#     @classmethod
-#     def __getattr__(cls, name):
-#         return MagicMock()
-# MOCK_MODULES = ['argparse', 'numpy', 'pandas', 'tensorflow', 'keras', 'configparser']
-# sys.modules.update((mod_name, Mock()) for mod_name in MOCK_MODULES)
+import mock
 sys.path.insert(0, os.path.abspath('../../'))
 
+
+MOCK_MODULES = [
+    'argparse',
+    'configparser',
+    'scipy',
+    'numpy',
+    'rpy2',
+    'tensorflow',
+    'keras']
+
+for mod_name in MOCK_MODULES:
+    sys.modules[mod_name] = mock.Mock()
 
 # -- General configuration ------------------------------------------------
 
