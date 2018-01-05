@@ -21,19 +21,6 @@ import sys
 import mock
 sys.path.insert(0, os.path.abspath('../../'))
 
-
-MOCK_MODULES = [
-    'argparse',
-    'configparser',
-    'scipy',
-    'numpy',
-    'rpy2',
-    'tensorflow',
-    'keras']
-
-for mod_name in MOCK_MODULES:
-    sys.modules[mod_name] = mock.Mock()
-
 # -- General configuration ------------------------------------------------
 
 # If your documentation needs a minimal Sphinx version, state it here.
@@ -185,3 +172,17 @@ texinfo_documents = [
 
 # Example configuration for intersphinx: refer to the Python standard library.
 intersphinx_mapping = {'https://docs.python.org/': None}
+
+MOCK_MODULES = [
+    'argparse',
+    'configparser',
+    'scipy',
+    'numpy',
+    'rpy2',
+    'tensorflow',
+    'keras']
+
+for mod_name in MOCK_MODULES:
+    sys.modules[mod_name] = mock.Mock()
+
+
