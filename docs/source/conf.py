@@ -179,6 +179,7 @@ MOCK_MODULES = [
     'pandas',
     'rpy2',
     'rpy2.robjects',
+    'rpy2.robjects.packages',
     'tensorflow',
     'tensorflow.python.platform.test',
     'edward',
