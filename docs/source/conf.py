@@ -181,6 +181,7 @@ MOCK_MODULES = [
     'tensorflow',
     'keras',
     'matplotlib',
+    'matplotlib.pyplot',
     'seaborn']
 
 for mod_name in MOCK_MODULES:
