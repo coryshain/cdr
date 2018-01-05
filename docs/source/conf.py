@@ -178,8 +178,11 @@ MOCK_MODULES = [
     'numpy',
     'pandas',
     'rpy2',
+    'rpy2.robjects',
     'tensorflow',
-    'keras',
+    'tensorflow.python.platform.test',
+    'edward',
+    'edward.models',
     'matplotlib',
     'matplotlib.pyplot',
     'seaborn']
