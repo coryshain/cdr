@@ -174,8 +174,6 @@ texinfo_documents = [
 intersphinx_mapping = {'https://docs.python.org/': None}
 
 MOCK_MODULES = [
-    'argparse',
-    'configparser',
     'scipy',
     'numpy',
     'rpy2',
