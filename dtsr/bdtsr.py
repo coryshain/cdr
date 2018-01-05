@@ -14,13 +14,13 @@ tf_config.gpu_options.allow_growth = True
 from .formula import *
 from .util import *
 from .plot import *
-from .dtsr import sn, DTSR_kernel
+from .dtsr import sn, DTSR
 
 import edward as ed
 from edward.models import Normal, Gamma, Empirical
 
 
-class BDTSR(DTSR_kernel):
+class BDTSR(DTSR):
     def __init__(self,
                  form_str,
                  y,
