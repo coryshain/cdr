@@ -1,6 +1,5 @@
 numpy
 scipy
 pandas
-rpy2
 tensorflow
 edward
