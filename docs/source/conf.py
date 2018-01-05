@@ -176,6 +176,7 @@ intersphinx_mapping = {'https://docs.python.org/': None}
 MOCK_MODULES = [
     'scipy',
     'numpy',
+    'pandas',
     'rpy2',
     'tensorflow',
     'keras']
