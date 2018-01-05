@@ -179,7 +179,9 @@ MOCK_MODULES = [
     'pandas',
     'rpy2',
     'tensorflow',
-    'keras']
+    'keras',
+    'matplotlib',
+    'seaborn']
 
 for mod_name in MOCK_MODULES:
     sys.modules[mod_name] = mock.Mock()
