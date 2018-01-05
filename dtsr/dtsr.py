@@ -58,6 +58,9 @@ def sn(string):
 
 
 class DTSR_kernel(object):
+    """
+    DTSR instance
+    """
     def __init__(self,
                  form_str,
                  y,

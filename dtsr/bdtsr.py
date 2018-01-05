@@ -871,9 +871,10 @@ class BDTSR(DTSR_kernel):
                         summary_random = self.sess.run(self.summary_random)
                         self.writer.add_summary(summary_random, self.global_batch_step.eval(session=self.sess))
 
-                    self.make_plots(irf_name_map, plot_x_inches, plot_y_inches, cmap)
                     self.sess.run(self.incr_global_step)
-                    self.save()
+                    if self.global_step % self.logging_freq == 0:
+                        self.make_plots(irf_name_map, plot_x_inches, plot_y_inches, cmap)
+                        self.save()
 
 
                 self.out_post = ed.copy(self.out, self.inference_map)

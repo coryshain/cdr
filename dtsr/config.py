@@ -37,6 +37,7 @@ class Config(object):
         self.modulus = settings.getint('modulus', 4)
         self.network_type = settings.get('network_type', 'nn')
         self.n_epoch_train = settings.getint('n_epoch_train', 100)
+        self.logging_freq = settings.getint('logging_freq', 1)
         self.n_epoch_tune = settings.getint('n_epoch_tune', 100)
         self.minibatch_size = settings.get('minibatch_size', 128)
         if self.minibatch_size == 'inf':
