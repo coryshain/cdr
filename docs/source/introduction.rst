@@ -1,5 +1,5 @@
-Deconvolutional Time Series Regression (DTSR)
-=============================================
+Introduction
+============
 
 Deconvolutional time series regression (DTSR) is a regression technique for time series that directly models temporal diffusion of effects.
 DTSR recasts the streams of independent and dependent variables as `signals` and learns impulse response functions (IRF) that mediate the relationship between them.

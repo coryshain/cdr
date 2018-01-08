@@ -87,14 +87,12 @@ class DTSR(object):
     :param outdir: A ``str`` representing the output directory, where logs and model parameters are saved.
     :param history_length: An ``int`` representing the maximum length of the history window to use. If ``None``, history
         length is unbounded and only the low-memory model is permitted.
-    :param low_memory: A ``bool`` determining which DTSR memory implementation to use. If ``low_memory == True``, DTSR
-        convolves over history windows for each observation of in ``y`` using a TensorFlow control op. It can be used
-        with unboundedly long histories and uses less memory, but is generally much slower and results in poor GPU
-        utilization. If ``low_memory == False``, DTSR expands the design matrix into a rank 3 tensor in which the 2nd
-        axis contains the history for each independent variable for each observation of the independent variable.
+    :param low_memory: A ``bool`` determining which DTSR memory implementation to use.
+        If ``low_memory == True``, DTSR convolves over history windows for each observation of in ``y`` using a TensorFlow control op.
+        It can be used with unboundedly long histories and requires less memory, but results in poor GPU utilization.
+        If ``low_memory == False``, DTSR expands the design matrix into a rank 3 tensor in which the 2nd axis contains the history for each independent variable for each observation of the dependent variable.
         This requires more memory in order to store redundant input values and requires a finite history length.
-        However, it removes the need for a control op in the feedforward component and therefore generally runs much
-        faster if GPU is available.
+        However, it removes the need for a control op in the feedforward component and therefore generally runs much faster if GPU is available.
     :param float_type: A ``str`` representing the ``float`` type to use throughout the network.
     :param int_type: A ``str`` representing the ``int`` type to use throughout the network (used for tensor slicing).
     :param minibatch_size: An ``int`` representing the size of minibatches to use for fitting/prediction, or the
@@ -103,6 +101,15 @@ class DTSR(object):
     :param log_random: A ``bool`` determining whether to log random effects to Tensorboard.
     :param save_freq: An ``int`` representing the frequency (in iterations) with which to save model checkpoints.
     """
+
+
+
+    ######################################################
+    #
+    #  Native methods
+    #
+    ######################################################
+
     def __init__(self,
                  form_str,
                  y,
@@ -116,9 +123,6 @@ class DTSR(object):
                  log_random=True,
                  save_freq=1
                  ):
-
-        self.g = tf.Graph()
-        self.sess = tf.Session(graph=self.g, config=tf_config)
 
         self.form_str = form_str
         self.form = Formula(form_str)
@@ -179,7 +183,22 @@ class DTSR(object):
             self.summary_random_indexers = {}
             self.summary_random = {}
 
-    def initialize_inputs(self):
+    def __getstate__(self):
+        raise NotImplementedError
+
+    def __setstate__(self, state):
+        raise NotImplementedError
+
+
+
+
+    ######################################################
+    #
+    #  Private methods
+    #
+    ######################################################
+
+    def __initialize_inputs__(self):
         f = self.form
 
         with self.sess.as_default():
@@ -200,7 +219,7 @@ class DTSR(object):
                 self.global_batch_step = tf.Variable(0, name=sn('global_batch_step'), trainable=False)
                 self.incr_global_batch_step = tf.assign(self.global_batch_step, self.global_batch_step + 1)
 
-    def initialize_low_memory_inputs(self):
+    def __initialize_low_memory_inputs__(self):
         f = self.form
 
         with self.sess.as_default():
@@ -224,13 +243,10 @@ class DTSR(object):
                 self.global_batch_step = tf.Variable(0, name=sn('global_batch_step'), trainable=False)
                 self.incr_global_batch_step = tf.assign(self.global_batch_step, self.global_batch_step + 1)
 
-    def build(self):
+    def __initialize_intercepts_coefficients__(self):
         raise NotImplementedError
 
-    def initialize_intercepts_coefficients(self):
-        raise NotImplementedError
-
-    def initialize_irf_lambdas(self):
+    def __initialize_irf_lambdas__(self):
         epsilon = 1e-35
 
         with self.sess.as_default():
@@ -312,13 +328,13 @@ class DTSR(object):
 
                 self.irf_lambdas['ShiftedBetaPrime'] = shifted_beta_prime
 
-    def initialize_irf_params(self):
+    def __initialize_irf_params__(self):
         raise NotImplementedError
 
-    def initialize_irf_params_inner(self, family, ids):
+    def __initialize_irf_params_inner__(self, family, ids):
         raise NotImplementedError
 
-    def initialize_irfs(self, t):
+    def __initialize_irfs__(self, t):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 t.irfs = {}
@@ -351,18 +367,18 @@ class DTSR(object):
                         parent_scaled = getattr(t, 'plot_tensor_composite_scaled', None)
                         if parent_unscaled is not None:
                             composite = True
-                        t.irfs[f] = self.new_irf(self.irf_lambdas[f], t.params[f])
+                        t.irfs[f] = self.__new_irf__(self.irf_lambdas[f], t.params[f])
 
                         for i in range(len(child_nodes)):
                             child = t.children[f][child_nodes[i]]
                             coefs_ix = names2ix(child.coef_id(), self.form.coefficient_names)
-                            child.plot_tensor_atomic_unscaled = self.new_irf(self.irf_lambdas[f], self.atomic_irf_means_by_family[f][:, i])(self.support)
-                            child.plot_tensor_atomic_scaled = self.new_irf(self.irf_lambdas[f], self.atomic_irf_means_by_family[f][:, i])(self.support)*tf.gather(self.coefficient_fixed_means, coefs_ix)
+                            child.plot_tensor_atomic_unscaled = self.__new_irf__(self.irf_lambdas[f], self.atomic_irf_means_by_family[f][:, i])(self.support)
+                            child.plot_tensor_atomic_scaled = self.__new_irf__(self.irf_lambdas[f], self.atomic_irf_means_by_family[f][:, i])(self.support) * tf.gather(self.coefficient_fixed_means, coefs_ix)
                             self.plot_tensors_atomic_unscaled[child.name()] = child.plot_tensor_atomic_unscaled
                             self.plot_tensors_atomic_scaled[child.name()] = child.plot_tensor_atomic_scaled
                             if composite:
-                                child.plot_tensor_composite_unscaled = self.new_irf(self.irf_lambdas[f], self.atomic_irf_means_by_family[:, i])(parent_unscaled)
-                                child.plot_tensor_composite_scaled = self.new_irf(self.irf_lambdas[f], self.atomic_irf_means_by_family[:, i])(parent_scaled)*tf.gather(self.coefficient_fixed_means, coefs_ix)
+                                child.plot_tensor_composite_unscaled = self.__new_irf__(self.irf_lambdas[f], self.atomic_irf_means_by_family[:, i])(parent_unscaled)
+                                child.plot_tensor_composite_scaled = self.__new_irf__(self.irf_lambdas[f], self.atomic_irf_means_by_family[:, i])(parent_scaled) * tf.gather(self.coefficient_fixed_means, coefs_ix)
                             else:
                                 child.plot_tensor_composite_unscaled = child.plot_tensor_atomic_unscaled
                                 child.plot_tensor_composite_scaled = child.plot_tensor_atomic_scaled
@@ -371,10 +387,10 @@ class DTSR(object):
                             if child.terminal:
                                 self.preterminals.append(child.name())
                             else:
-                                self.initialize_irfs(child)
+                                self.__initialize_irfs__(child)
                             self.irf_names.append(child.name())
 
-    def initialize_convolutional_feedforward(self, t):
+    def __initialize_convolutional_feedforward__(self, t):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 out = []
@@ -400,7 +416,7 @@ class DTSR(object):
                                 terminals.append(x.impulse.name())
                             x.tensor = tf.expand_dims(tensor[:, :, i],-1)
                             if not x.terminal:
-                                out += self.initialize_convolutional_feedforward(x)
+                                out += self.__initialize_convolutional_feedforward__(x)
                         if len(preterminals) > 0 and len(terminals) > 0:
                             preterminals_ix = names2ix(preterminals, child_nodes)
                             terminals_ix = names2ix(terminals, self.form.terminal_names)
@@ -408,7 +424,7 @@ class DTSR(object):
                             out.append(new_out)
                 return out
 
-    def initialize_low_memory_convolutional_feedforward(self, t, inputs, coef):
+    def __initialize_low_memory_convolutional_feedforward__(self, t, inputs, coef):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 out = []
@@ -434,24 +450,24 @@ class DTSR(object):
                                 terminals.append(x.impulse.name())
                             x.tensor = tf.expand_dims(tensor[:, i], -1)
                             if not x.terminal:
-                                out += self.initialize_low_memory_convolutional_feedforward(x, inputs, coef)
+                                out += self.__initialize_low_memory_convolutional_feedforward__(x, inputs, coef)
                         if len(preterminals) > 0 and len(terminals) > 0:
                             preterminals_ix = names2ix(preterminals, child_nodes)
                             terminals_ix = names2ix(terminals, self.form.terminal_names)
                             out.append(tf.reduce_sum(tf.gather(inputs, terminals_ix, axis=1) * tf.gather(tensor, preterminals_ix, axis=1), 0))
                 return out
 
-    def construct_network(self):
+    def __construct_network__(self):
         f = self.form
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.irf_tree.tensor = tf.expand_dims(tf.expand_dims(self.time_y, -1) - self.time_X, -1)  # Tensor of temporal offsets with shape (?,history_length)
-                self.X_conv = self.initialize_convolutional_feedforward(self.irf_tree) # num_terminals-length array of convolved IV with shape (?)
+                self.X_conv = self.__initialize_convolutional_feedforward__(self.irf_tree) # num_terminals-length array of convolved IV with shape (?)
                 self.X_conv = tf.concat(self.X_conv, axis=1)
                 self.out = self.intercept + tf.reduce_sum(self.X_conv, axis=1)
 
-    def construct_low_memory_network(self):
+    def __construct_low_memory_network__(self):
         f = self.form
 
         with self.sess.as_default():
@@ -472,7 +488,7 @@ class DTSR(object):
                         coefficient = self.coefficient[0]
 
                     self.irf_tree.tensor = tf.expand_dims(t_delta, -1)
-                    out = self.initialize_low_memory_convolutional_feedforward(self.irf_tree, inputs, coefficient)
+                    out = self.__initialize_low_memory_convolutional_feedforward__(self.irf_tree, inputs, coefficient)
                     out = tf.concat(out, axis=0)
 
                     return out
@@ -484,19 +500,18 @@ class DTSR(object):
 
                 self.out = self.intercept + tf.reduce_sum(self.X_conv, axis=1)
 
-
-    def initialize_objective(self):
+    def __initialize_objective__(self):
         raise NotImplementedError
 
-    def start_logging(self):
+    def __start_logging__(self):
         raise NotImplementedError
 
-    def initialize_saver(self):
+    def __initialize_saver__(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.saver = tf.train.Saver()
 
-    def report_n_params(self):
+    def __report_n_params__(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 n_params = 0
@@ -512,13 +527,7 @@ class DTSR(object):
                 sys.stderr.write('Network contains %d total trainable parameters.\n' % n_params)
                 sys.stderr.write('\n')
 
-    ######################################################
-    #
-    #  Inner functions for network construction
-    #
-    ######################################################
-
-    def new_irf(self, irf_lambda, params, parent_irf=None):
+    def __new_irf__(self, irf_lambda, params, parent_irf=None):
         irf = irf_lambda(params)
         if parent_irf is None:
             def new_irf(x):
@@ -528,7 +537,7 @@ class DTSR(object):
                 return irf(parent_irf(x))
         return new_irf
 
-    def apply_op(self, op, input):
+    def __apply_op__(self, op, input):
         if op in ['c', 'c.']:
             out = input - tf.reduce_mean(input, axis=0)
         elif op in ['z', 'z.']:
@@ -548,19 +557,22 @@ class DTSR(object):
 
     ######################################################
     #
-    #  Handles for external methods
+    #  Public methods
     #
     ######################################################
+
+    def build(self):
+        raise NotImplementedError
 
     def save(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.saver.save(self.sess, self.outdir + '/model.ckpt')
 
-    def load(self):
+    def load(self, restore=True):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if os.path.exists(self.outdir + '/checkpoint'):
+                if restore and os.path.exists(self.outdir + '/checkpoint'):
                     self.saver.restore(self.sess, self.outdir + '/model.ckpt')
                 else:
                     self.sess.run(tf.global_variables_initializer())
@@ -657,12 +669,6 @@ class DTSR(object):
                                   plot_x_inches=plot_x_inches,
                                   plot_y_inches=plot_y_inches,
                                   cmap=cmap)
-
-    def __getstate__(self):
-        raise NotImplementedError
-
-    def __setstate__(self, state):
-        raise NotImplementedError
 
 
 

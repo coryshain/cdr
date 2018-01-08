@@ -28,24 +28,21 @@ class BDTSR(DTSR):
     :param y: A 2D pandas tensor representing the dependent variable. Must contain the following columns:
 
         * ``time``: Timestamp for each entry in ``y``
-        * ``first_obs``:  Index in the design matrix `X` of the first observation in the time series associated with
-          each entry in ``y``
-        * ``last_obs``:  Index in the design matrix `X` of the immediately preceding observation in the time series
-          associated with each entry in ``y``
+        * ``first_obs``:  Index in the design matrix `X` of the first observation in the time series associated with each entry in ``y``
+        * ``last_obs``:  Index in the design matrix `X` of the immediately preceding observation in the time series associated with each entry in ``y``
         * A column with the same name as the DV specified in ``form_str``
         * A column for each random grouping factor in the model specified in ``form_str``.
 
     :param outdir: A ``str`` representing the output directory, where logs and model parameters are saved.
     :param history_length: An ``int`` representing the maximum length of the history window to use. If ``None``, history
         length is unbounded and only the low-memory model is permitted.
-    :param low_memory: A ``bool`` determining which DTSR memory implementation to use. If ``low_memory == True``, DTSR
-        convolves over history windows for each observation of in ``y`` using a TensorFlow control op. It can be used
-        with unboundedly long histories and uses less memory, but is generally much slower and results in poor GPU
-        utilization. If ``low_memory == False``, DTSR expands the design matrix into a rank 3 tensor in which the 2nd
-        axis contains the history for each independent variable for each observation of the independent variable.
+    :param low_memory: A ``bool`` determining which DTSR memory implementation to use.
+        If ``low_memory == True``, DTSR convolves over history windows for each observation of in ``y`` using a TensorFlow control op.
+        It can be used with unboundedly long histories and requires less memory, but results in poor GPU utilization.
+        If ``low_memory == False``, DTSR expands the design matrix into a rank 3 tensor in which the 2nd axis contains the history for each independent variable for each observation of the dependent variable.
         This requires more memory in order to store redundant input values and requires a finite history length.
-        However, it removes the need for a control op in the feedforward component and therefore generally runs much
-        faster if GPU is available.
+        However, it removes the need for a control op in the feedforward component and therefore generally runs much faster if GPU is available.
+        *Because TensorFlow control ops are not currently supported by Edward, BDTSR currently only works with ``low_memory=False``.*
     :param float_type: A ``str`` representing the ``float`` type to use throughout the network.
     :param int_type: A ``str`` representing the ``int`` type to use throughout the network (used for tensor slicing).
     :param minibatch_size: An ``int`` representing the size of minibatches to use for fitting/prediction, or the
@@ -69,6 +66,14 @@ class BDTSR(DTSR):
         distribution of the dependent variable. Specifically, the DV is assumed to have the standard
         deviation ``stddev(y_train)*y_sigma_scale``.
     """
+
+
+
+    #####################################################
+    #
+    #  Native methods
+    #
+    ######################################################
 
     def __init__(self,
                  form_str,
@@ -132,44 +137,20 @@ class BDTSR(DTSR):
 
         self.build()
 
-    def variational(self):
-        return self.inference_name in [
-            'KLpq',
-            'KLqp',
-            'ImplicitKLqp',
-            'ReparameterizationEntropyKLqp',
-            'ReparameterizationKLKLqp',
-            'ReparameterizationKLqp',
-            'ScoreEntropyKLqp',
-            'ScoreKLKLqp',
-            'ScoreKLqp',
-            'ScoreRBKLqp',
-            'WakeSleep'
-        ]
+    def __getstate__(self):
+        pass
 
-    def build(self):
-        sys.stderr.write('Constructing network from model tree:\n')
-        sys.stdout.write(str(self.irf_tree))
-        sys.stdout.write('\n')
+    def __setstate__(self, state):
+        pass
 
-        self.initialize_inputs()
-        self.initialize_intercepts_coefficients()
-        # with self.sess.as_default():
-        #     with self.sess.graph.as_default():
-        #         self.out = self.X[:,-1,:]
-        #         self.out = self.intercept + tf.squeeze(tf.matmul(self.out, tf.expand_dims(self.coefficient[0], -1)), -1)
-        #         self.out = Normal(loc=self.out, scale=1., name='output')
-        self.initialize_irf_lambdas()
-        self.initialize_irf_params()
-        self.initialize_irfs(self.irf_tree)
-        self.construct_network()
-        self.initialize_objective()
-        self.start_logging()
-        self.initialize_saver()
-        self.load()
-        self.report_n_params()
 
-    def initialize_intercepts_coefficients(self):
+    #####################################################
+    #
+    #  Private methods
+    #
+    ######################################################
+
+    def __initialize_intercepts_coefficients__(self):
         f = self.form
 
         with self.sess.as_default():
@@ -398,16 +379,16 @@ class BDTSR(DTSR):
                                     collections=['random']
                                 )
 
-    def initialize_irf_params(self):
+    def __initialize_irf_params__(self):
         f = self.form
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 for x in f.atomic_irf_by_family:
-                    p, q = self.initialize_irf_params_inner(x, sorted(f.atomic_irf_by_family[x]))
+                    p, q = self.__initialize_irf_params_inner__(x, sorted(f.atomic_irf_by_family[x]))
                     self.atomic_irf_by_family[x] = tf.stack(p, axis=0)
                     self.atomic_irf_means_by_family[x] = tf.stack(q, axis=0)
 
-    def initialize_irf_params_inner(self, family, ids):
+    def __initialize_irf_params_inner__(self, family, ids):
         ## Infinitessimal value to add to bounded parameters
         epsilon = 1e-35  # np.nextafter(0, 1, dtype=getattr(np, self.float_type)) * 10
         dim = len(ids)
@@ -799,7 +780,7 @@ class BDTSR(DTSR):
                     return tf.stack([alpha, beta, delta], axis=0)
                 raise ValueError('Impulse response function "%s" is not currently supported.' % family)
 
-    def initialize_objective(self):
+    def __initialize_objective__(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.out = Normal(loc=self.out, scale=self.y_sigma_scale*self.y_sigma_init, name='output')
@@ -832,7 +813,7 @@ class BDTSR(DTSR):
                         scale={self.out: self.minibatch_scale}
                     )
 
-    def start_logging(self):
+    def __start_logging__(self):
         f = self.form
 
         with self.sess.as_default():
@@ -841,6 +822,63 @@ class BDTSR(DTSR):
                 self.summary_params = tf.summary.merge_all(key='params')
                 if self.log_random and len(f.random) > 0:
                     self.summary_random = tf.summary.merge_all(key='random')
+
+
+
+
+    #####################################################
+    #
+    #  Public methods
+    #
+    ######################################################
+
+    def build(self, restore=True, verbose=True):
+        """
+        Construct the DTSR network and initialize/load model parameters.
+
+        :param restore: Restore saved network parameters if model checkpoint exists in the output directory.
+        :param verbose: Show the model tree when called.
+        :return: ``None``
+        """
+        if verbose:
+            sys.stderr.write('Constructing network from model tree:\n')
+            sys.stdout.write(str(self.irf_tree))
+            sys.stdout.write('\n')
+
+        self.g = tf.Graph()
+        self.sess = tf.Session(graph=self.g, config=tf_config)
+
+        self.__initialize_inputs__()
+        self.__initialize_intercepts_coefficients__()
+        self.__initialize_irf_lambdas__()
+        self.__initialize_irf_params__()
+        self.__initialize_irfs__(self.irf_tree)
+        self.__construct_network__()
+        self.__initialize_objective__()
+        self.__start_logging__()
+        self.__initialize_saver__()
+        self.load(restore=restore)
+        self.__report_n_params__()
+
+    def variational(self):
+        """
+        Check whether the DTSR model uses variational Bayes.
+
+        :return: ``True`` if the model is variational, false otherwise.
+        """
+        return self.inference_name in [
+            'KLpq',
+            'KLqp',
+            'ImplicitKLqp',
+            'ReparameterizationEntropyKLqp',
+            'ReparameterizationKLKLqp',
+            'ReparameterizationKLqp',
+            'ScoreEntropyKLqp',
+            'ScoreKLKLqp',
+            'ScoreKLqp',
+            'ScoreRBKLqp',
+            'WakeSleep'
+        ]
 
     def fit(self,
             X,
@@ -851,6 +889,19 @@ class BDTSR(DTSR):
             plot_x_inches=28,
             plot_y_inches=5,
             cmap='gist_earth'):
+        """
+        Train the DTSR model.
+
+        :param X:
+        :param y:
+        :param n_epoch_train:
+        :param n_epoch_tune:
+        :param irf_name_map:
+        :param plot_x_inches:
+        :param plot_y_inches:
+        :param cmap:
+        :return:
+        """
 
         usingGPU = is_gpu_available()
 
@@ -939,6 +990,16 @@ class BDTSR(DTSR):
 
 
     def predict(self, X, y_time, y_rangf, first_obs, last_obs):
+        """
+        Predict from the pre-trained DTSR model.
+
+        :param X:
+        :param y_time:
+        :param y_rangf:
+        :param first_obs:
+        :param last_obs:
+        :return:
+        """
         sys.stderr.write('Sampling predictions from posterior...\n')
 
         f = self.form
@@ -983,6 +1044,14 @@ class BDTSR(DTSR):
                 return preds
 
     def eval(self, X, y):
+        """
+        Evaluate the pre-trained DTSR model.
+        
+        :param X:
+        :param y:
+        :return:
+        """
+
         f = self.form
 
         y_rangf = y[f.rangf]
@@ -1031,9 +1100,3 @@ class BDTSR(DTSR):
                 mae /= n_minibatch
 
                 return mse, mae, logLik
-
-    def __getstate__(self):
-        pass
-
-    def __setstate__(self, state):
-        pass

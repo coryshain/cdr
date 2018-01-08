@@ -35,14 +35,12 @@ class NNDTSR(DTSR):
     :param outdir: A ``str`` representing the output directory, where logs and model parameters are saved.
     :param history_length: An ``int`` representing the maximum length of the history window to use. If ``None``, history
         length is unbounded and only the low-memory model is permitted.
-    :param low_memory: A ``bool`` determining which DTSR memory implementation to use. If ``low_memory == True``, DTSR
-        convolves over history windows for each observation of in ``y`` using a TensorFlow control op. It can be used
-        with unboundedly long histories and uses less memory, but is generally much slower and results in poor GPU
-        utilization. If ``low_memory == False``, DTSR expands the design matrix into a rank 3 tensor in which the 2nd
-        axis contains the history for each independent variable for each observation of the independent variable.
+    :param low_memory: A ``bool`` determining which DTSR memory implementation to use.
+        If ``low_memory == True``, DTSR convolves over history windows for each observation of in ``y`` using a TensorFlow control op.
+        It can be used with unboundedly long histories and requires less memory, but results in poor GPU utilization.
+        If ``low_memory == False``, DTSR expands the design matrix into a rank 3 tensor in which the 2nd axis contains the history for each independent variable for each observation of the dependent variable.
         This requires more memory in order to store redundant input values and requires a finite history length.
-        However, it removes the need for a control op in the feedforward component and therefore generally runs much
-        faster if GPU is available.
+        However, it removes the need for a control op in the feedforward component and therefore generally runs much faster if GPU is available.
     :param float_type: A ``str`` representing the ``float`` type to use throughout the network.
     :param int_type: A ``str`` representing the ``int`` type to use throughout the network (used for tensor slicing).
     :param minibatch_size: An ``int`` representing the size of minibatches to use for fitting/prediction, or the
@@ -69,6 +67,14 @@ class NNDTSR(DTSR):
         would take the learning rate below this point, learning rate clipping will occur.
     :param loss: A ``str`` representing the optimization objective. Currently only ``MAE`` and ``MSE`` are supported.
     """
+
+
+
+    ######################################################
+    #
+    #  Native methods
+    #
+    ######################################################
 
     def __init__(self,
                  form_str,
@@ -113,30 +119,63 @@ class NNDTSR(DTSR):
 
         self.build()
 
-    def build(self):
-        sys.stderr.write('Constructing network from model tree:\n')
-        sys.stdout.write(str(self.irf_tree))
-        sys.stdout.write('\n')
+    def __getstate__(self):
 
-        if self.low_memory:
-            self.initialize_low_memory_inputs()
-        else:
-            self.initialize_inputs()
-        self.initialize_intercepts_coefficients()
-        self.initialize_irf_lambdas()
-        self.initialize_irf_params()
-        self.initialize_irfs(self.irf_tree)
-        if self.low_memory:
-            self.construct_low_memory_network()
-        else:
-            self.construct_network()
-        self.initialize_objective()
-        self.start_logging()
-        self.initialize_saver()
-        self.load()
-        self.report_n_params()
+        return (
+            self.form_str,
+            self.outdir,
+            self.rangf_map,
+            self.rangf_n_levels,
+            self.y_mu_init,
+            self.float_type,
+            self.int_type,
+            self.log_random,
+            self.optim_name,
+            self.learning_rate,
+            self.learning_rate_decay_factor,
+            self.learning_rate_decay_family,
+            self.learning_rate_min,
+            self.loss_name,
+        )
 
-    def initialize_intercepts_coefficients(self):
+    def __setstate__(self, state):
+        self.g = tf.Graph()
+        self.sess = tf.Session(graph=self.g, config=tf_config)
+        self.form_str, \
+        self.outdir, \
+        self.rangf_map, \
+        self.rangf_n_levels, \
+        self.y_mu_init, \
+        self.float_type, \
+        self.int_type, \
+        self.log_random, \
+        self.optim_name, \
+        self.learning_rate, \
+        self.learning_rate_decay_factor, \
+        self.learning_rate_decay_family, \
+        self.learning_rate_min, \
+        self.loss_name = state
+
+        self.FLOAT_TF = getattr(tf, self.float_type)
+        self.FLOAT_NP = getattr(np, self.float_type)
+        self.INT_TF = getattr(tf, self.int_type)
+        self.INT_NP = getattr(np, self.int_type)
+
+        self.form = Formula(self.form_str)
+        self.irf_tree = self.form.irf_tree
+
+        self.build()
+
+
+
+
+    ######################################################
+    #
+    #  Private methods
+    #
+    ######################################################
+
+    def __initialize_intercepts_coefficients__(self):
         f = self.form
 
         with self.sess.as_default():
@@ -213,15 +252,15 @@ class NNDTSR(DTSR):
                                     collections=['random']
                                 )
 
-    def initialize_irf_params(self):
+    def __initialize_irf_params__(self):
         f = self.form
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 for x in f.atomic_irf_by_family:
-                    self.atomic_irf_by_family[x] = self.initialize_irf_params_inner(x, sorted(f.atomic_irf_by_family[x]))
+                    self.atomic_irf_by_family[x] = self.__initialize_irf_params_inner__(x, sorted(f.atomic_irf_by_family[x]))
                     self.atomic_irf_means_by_family[x] = self.atomic_irf_by_family[x]
 
-    def initialize_irf_params_inner(self, family, ids):
+    def __initialize_irf_params_inner__(self, family, ids):
         ## Infinitessimal value to add to bounded parameters
         epsilon = 1e-35
         dim = len(ids)
@@ -374,7 +413,7 @@ class NNDTSR(DTSR):
                     return tf.stack([alpha, beta, delta], axis=0)
                 raise ValueError('Impulse response function "%s" is not currently supported.' % family)
 
-    def initialize_objective(self):
+    def __initialize_objective__(self):
         f = self.form
 
         with self.sess.as_default():
@@ -408,7 +447,7 @@ class NNDTSR(DTSR):
                             'Unrecognized learning rate decay schedule: "%s"' % self.learning_rate_decay_family)
                     self.lr = self.lr * decay_coef
                     self.lr = tf.clip_by_value(self.lr, tf.constant(self.learning_rate_min), inf)
-                self.optim = self.optim_init(self.optim_name, self.lr)
+                self.optim = self.__optim_init__(self.optim_name, self.lr)
 
                 # self.train_op = self.optim.minimize(self.loss_func, global_step=self.global_batch_step,
                 #                                     name=sn('optim'))
@@ -420,7 +459,7 @@ class NNDTSR(DTSR):
                 self.train_op = self.optim.apply_gradients(zip(self.gradients, variables),
                                                            global_step=self.global_batch_step, name=sn('optim'))
 
-    def start_logging(self):
+    def __start_logging__(self):
         f = self.form
 
         with self.sess.as_default():
@@ -431,7 +470,7 @@ class NNDTSR(DTSR):
                 if self.log_random and len(f.random) > 0:
                     self.summary_random = tf.summary.merge_all(key='random')
 
-    def optim_init(self, name, learning_rate):
+    def __optim_init__(self, name, learning_rate):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 return {
@@ -444,6 +483,49 @@ class NNDTSR(DTSR):
                     'Nadam': lambda x: tf.contrib.opt.NadamOptimizer(x)
                 }[name](learning_rate)
 
+
+
+
+    ######################################################
+    #
+    #  Public methods
+    #
+    ######################################################
+
+    def build(self, restore=True, verbose=True):
+        """
+        Construct the DTSR network and initialize/load model parameters.
+
+        :param restore: Restore saved network parameters if model checkpoint exists in the output directory.
+        :param verbose: Show the model tree when called.
+        :return: ``None``
+        """
+        if verbose:
+            sys.stderr.write('Constructing network from model tree:\n')
+            sys.stdout.write(str(self.irf_tree))
+            sys.stdout.write('\n')
+
+        self.g = tf.Graph()
+        self.sess = tf.Session(graph=self.g, config=tf_config)
+
+        if self.low_memory:
+            self.__initialize_low_memory_inputs__()
+        else:
+            self.__initialize_inputs__()
+        self.__initialize_intercepts_coefficients__()
+        self.__initialize_irf_lambdas__()
+        self.__initialize_irf_params__()
+        self.__initialize_irfs__(self.irf_tree)
+        if self.low_memory:
+            self.__construct_low_memory_network__()
+        else:
+            self.__construct_network__()
+        self.__initialize_objective__()
+        self.__start_logging__()
+        self.__initialize_saver__()
+        self.load(restore=restore)
+        self.__report_n_params__()
+
     def fit(self,
             X,
             y,
@@ -453,6 +535,19 @@ class NNDTSR(DTSR):
             plot_x_inches=28,
             plot_y_inches=5,
             cmap='gist_earth'):
+        """
+        Train the DTSR model.
+
+        :param X:
+        :param y:
+        :param n_epoch_train:
+        :param n_epoch_tune:
+        :param irf_name_map:
+        :param plot_x_inches:
+        :param plot_y_inches:
+        :param cmap:
+        :return:
+        """
 
         usingGPU = is_gpu_available()
 
@@ -620,6 +715,16 @@ class NNDTSR(DTSR):
 
 
     def predict(self, X, y_time, y_rangf, first_obs, last_obs):
+        """
+        Predict from the pre-trained DTSR model.
+
+        :param X:
+        :param y_time:
+        :param y_rangf:
+        :param first_obs:
+        :param last_obs:
+        :return:
+        """
         f = self.form
 
         for i in range(len(f.rangf)):
@@ -677,6 +782,13 @@ class NNDTSR(DTSR):
                 return preds
 
     def eval(self, X, y):
+        """
+        Evaluate the pre-trained DTSR model
+
+        :param X:
+        :param y:
+        :return:
+        """
         f = self.form
 
         y_rangf = y[f.rangf]
@@ -737,51 +849,3 @@ class NNDTSR(DTSR):
                     loss /= len(y)
 
                 return loss
-
-    def __getstate__(self):
-
-        return (
-            self.form_str,
-            self.outdir,
-            self.rangf_map,
-            self.rangf_n_levels,
-            self.y_mu_init,
-            self.float_type,
-            self.int_type,
-            self.log_random,
-            self.optim_name,
-            self.learning_rate,
-            self.learning_rate_decay_factor,
-            self.learning_rate_decay_family,
-            self.learning_rate_min,
-            self.loss_name,
-        )
-
-    def __setstate__(self, state):
-        self.g = tf.Graph()
-        self.sess = tf.Session(graph=self.g, config=tf_config)
-        self.form_str, \
-        self.outdir, \
-        self.rangf_map, \
-        self.rangf_n_levels, \
-        self.y_mu_init, \
-        self.float_type, \
-        self.int_type, \
-        self.log_random, \
-        self.optim_name, \
-        self.learning_rate, \
-        self.learning_rate_decay_factor, \
-        self.learning_rate_decay_family, \
-        self.learning_rate_min, \
-        self.loss_name = state
-
-        self.FLOAT_TF = getattr(tf, self.float_type)
-        self.FLOAT_NP = getattr(np, self.float_type)
-        self.INT_TF = getattr(tf, self.int_type)
-        self.INT_NP = getattr(np, self.int_type)
-
-        self.form = Formula(self.form_str)
-        self.irf_tree = self.form.irf_tree
-
-        self.build()
-
