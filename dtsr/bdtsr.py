@@ -64,7 +64,7 @@ class BDTSR(DTSR):
         Smaller values concentrate probability mass around the prior mean.
     :param y_sigma_scale: A ``float`` representing the scaling coefficient on the standard deviation of the
         distribution of the dependent variable. Specifically, the DV is assumed to have the standard
-        deviation ``stddev(y_train)*y_sigma_scale``.
+        deviation ``stddev(y_train) * y_sigma_scale``.
     """
 
 
@@ -864,7 +864,7 @@ class BDTSR(DTSR):
         """
         Check whether the DTSR model uses variational Bayes.
 
-        :return: ``True`` if the model is variational, false otherwise.
+        :return: ``True`` if the model is variational, ``False`` otherwise.
         """
         return self.inference_name in [
             'KLpq',
@@ -890,7 +890,7 @@ class BDTSR(DTSR):
             plot_y_inches=5,
             cmap='gist_earth'):
         """
-        Train the DTSR model.
+        Fit the DTSR model.
 
         :param X:
         :param y:
@@ -1046,7 +1046,7 @@ class BDTSR(DTSR):
     def eval(self, X, y):
         """
         Evaluate the pre-trained DTSR model.
-        
+
         :param X:
         :param y:
         :return:

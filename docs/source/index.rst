@@ -10,9 +10,14 @@ Documentation for the ``dtsr`` Python package.
    introduction
    nndtsr
    bdtsr
+   * :ref:`genindex`
+   * :ref:`modindex`
+   * :ref:`search`
 
-Indices and tables
+
+Indices
 ==================
 
 * :ref:`genindex`
 * :ref:`modindex`
+* :ref:`search`

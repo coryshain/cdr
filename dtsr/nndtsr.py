@@ -536,7 +536,7 @@ class NNDTSR(DTSR):
             plot_y_inches=5,
             cmap='gist_earth'):
         """
-        Train the DTSR model.
+        Fit the DTSR model.
 
         :param X:
         :param y:
