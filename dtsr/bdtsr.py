@@ -29,17 +29,66 @@ class BDTSR(DTSR):
                  low_memory=False,
                  float_type='float32',
                  int_type='int32',
-                 log_random=False,
-                 minibatch_size=128,
+                 minibatch_size=None,
+                 logging_freq = 1,
+                 log_random=True,
+                 save_freq=1,
                  inference_name='KLqp',
                  n_samples=None,
                  n_samples_eval=100,
                  n_iter=1000,
-                 logging_freq = 1,
                  conv_prior_sd=1,
                  coef_prior_sd=1,
                  y_sigma_scale=0.5
                  ):
+
+        """
+        Initialize a BDTSR (Bayesian DTSR) instance.
+
+        :param form_str: An R-style string representing the DTSR model formula.
+        :param y: A 2D pandas tensor representing the dependent variable. Must contain the following columns:
+            - `time`: Timestamp for each entry in `y`
+            - `first_obs`: Index in the design matrix X of the first observation in the time series associated with
+                each entry in `y`
+            - `last_obs`: Index in the design matrix X of the immediately preceding observation in the time series
+                associated with each entry in `y`
+            - A column with the same name as the DV specified in `form_str`
+            - A column for each random grouping factor in the model specified in `form_str`.
+        :param outdir: A `str` representing the output directory, where logs and model parameters are saved.
+        :param history_length: An `int` representing the maximum length of the history window to use. If `None`, history
+            length is unbounded and only the low-memory model is permitted.
+        :param low_memory: A `bool` determining which DTSR memory implementation to use. If `low_memory == True`, DTSR
+            convolves over history windows for each observation of in `y` using a TensorFlow control op. It can be used
+            with unboundedly long histories and uses less memory, but is generally much slower and results in poor GPU
+            utilization. If `low_memory == False`, DTSR expands the design matrix into a rank 3 tensor in which the 2nd
+            axis contains the history for each independent variable for each observation of the independent variable.
+            This requires more memory in order to store redundant input values and requires a finite history length.
+            However, it removes the need for a control op in the feedforward component and therefore generally runs much
+            faster if GPU is available.
+        :param float_type: A `str` representing the `float` type to use throughout the network.
+        :param int_type: A `str` representing the `int` type to use throughout the network (used for tensor slicing).
+        :param minibatch_size: An `int` representing the size of minibatches to use for fitting/prediction, or the
+            string `inf` to perform full-batch training.
+        :param logging_freq: An `int` representing the frequency (in minibatches) with which to write Tensorboard logs.
+        :param log_random: A `bool` determining whether to log random effects to Tensorboard.
+        :param save_freq: An `int` representing the frequency (in iterations) with which to save model checkpoints.
+        :param inference_name: A `str` representing the Edward inference class to use for fitting
+        :param n_samples: An `int` representing the number of samples to use from the variational posterior if using
+            variational inference. If using MCMC, this value is set deterministically as `n_iter*n_minibatch`, so
+            this user-supplied parameter is ignored.
+        :param n_samples_eval: An `int` representing the number of samples from the predictive posterior to use for
+            evaluation/prediction.
+        :param n_iter: An `int` representing the number of iterations to perform in training. Must be supplied to
+            `__init__()` because MCMC optimizations hard-code this into the network structure.
+        :param conv_prior_sd: A `float` representing the standard deviation of the Normal prior on convolution parameters.
+            Smaller values concentrate probability mass around the prior mean.
+        :param coef_prior_sd: A `float` representing the standard deviation of the Normal prior on coefficient parameters.
+            Smaller values concentrate probability mass around the prior mean.
+        :param y_sigma_scale: A `float` representing the scaling coefficient on the standard deviation of the
+            distribution of the dependent variable. Specifically, the DV is assumed to have the standard
+            deviation `stddev(y_train)*y_sigma_scale`.
+
+        """
 
         super(BDTSR, self).__init__(
             form_str,
@@ -49,8 +98,10 @@ class BDTSR(DTSR):
             low_memory=low_memory,
             float_type=float_type,
             int_type=int_type,
-            log_random=log_random,
-            minibatch_size=minibatch_size
+            minibatch_size=minibatch_size,
+            logging_freq=logging_freq,
+            save_freq=save_freq,
+            log_random = log_random
         )
 
         assert not self.low_memory, 'Because Edward does not support Tensorflow control ops, low_memory is not supported in BDTSR'
@@ -67,7 +118,7 @@ class BDTSR(DTSR):
         else:
             if n_samples is not None:
                 sys.stderr.write('Parameter n_samples being overridden for sampling optimization\n')
-            self.n_samples = self.n_iter*self.n_minibatch
+            self.n_samples = self.n_iter*self.n_train_minibatch
         self.logging_freq = logging_freq
         self.n_samples_eval = n_samples_eval
         self.conv_prior_sd = float(conv_prior_sd)
@@ -131,12 +182,12 @@ class BDTSR(DTSR):
                     if self.variational():
                         self.intercept_fixed_q_loc = tf.Variable(
                             tf.random_normal([1], mean=self.y_mu_init, stddev=self.coef_prior_sd),
-                            dtype=self.FLOAT,
+                            dtype=self.FLOAT_TF,
                             name='intercept_q_loc'
                         )
                         self.intercept_fixed_q_scale = tf.Variable(
                             tf.random_normal([1], mean=tf.contrib.distributions.softplus_inverse(self.coef_prior_sd), stddev=self.coef_prior_sd),
-                            dtype=self.FLOAT,
+                            dtype=self.FLOAT_TF,
                             name='intercept_q_scale'
                         )
                         self.intercept_fixed_q = Normal(
@@ -164,7 +215,7 @@ class BDTSR(DTSR):
                                           collections=['params'])
                     self.inference_map[self.intercept_fixed] = self.intercept_fixed_q
                 else:
-                    self.intercept_fixed = tf.constant(0., dtype=self.FLOAT, name='intercept')
+                    self.intercept_fixed = tf.constant(0., dtype=self.FLOAT_TF, name='intercept')
                 self.intercept = self.intercept_fixed
 
                 self.coefficient_fixed = Normal(
@@ -175,12 +226,12 @@ class BDTSR(DTSR):
                 if self.variational():
                     self.coefficient_fixed_q_loc = tf.Variable(
                         tf.random_normal([len(f.coefficient_names)], stddev=self.coef_prior_sd),
-                        dtype=self.FLOAT,
+                        dtype=self.FLOAT_TF,
                         name='coefficient_fixed_q_loc'
                     )
                     self.coefficient_fixed_q_scale = tf.Variable(
                             tf.random_normal([len(f.coefficient_names)], mean=tf.contrib.distributions.softplus_inverse(self.coef_prior_sd), stddev=self.coef_prior_sd),
-                            dtype=self.FLOAT,
+                            dtype=self.FLOAT_TF,
                             name='coefficient_fixed_q_scale'
                         )
                     self.coefficient_fixed_q = Normal(
@@ -221,8 +272,7 @@ class BDTSR(DTSR):
                 self.coefficient_fixed_means *= coefficient_fixed_mask
                 self.coefficient = tf.expand_dims(self.coefficient_fixed, 0)
                 self.ransl = False
-                if self.log_random:
-                    writers = {}
+
                 for i in range(len(f.ran_names)):
                     r = f.random[f.ran_names[i]]
                     mask_row_np = np.ones(self.rangf_n_levels[i], dtype=getattr(np, self.float_type))
@@ -231,7 +281,7 @@ class BDTSR(DTSR):
 
                     if r.intercept:
                         intercept_random = Normal(
-                            loc=tf.zeros([self.rangf_n_levels[i]], dtype=self.FLOAT),
+                            loc=tf.zeros([self.rangf_n_levels[i]], dtype=self.FLOAT_TF),
                             scale=self.coef_prior_sd,
                             name='intercept_by_%s' % r.gf
                         )
@@ -239,13 +289,13 @@ class BDTSR(DTSR):
                             intercept_random_q = Normal(
                                 loc=tf.Variable(
                                     tf.random_normal([self.rangf_n_levels[i]], stddev=self.coef_prior_sd),
-                                    dtype=self.FLOAT,
+                                    dtype=self.FLOAT_TF,
                                     name='intercept_q_loc_by_%s' % r.gf
                                 ),
                                 scale=tf.nn.softplus(
                                     tf.Variable(
                                         tf.random_normal([self.rangf_n_levels[i]], mean=tf.contrib.distributions.softplus_inverse(self.coef_prior_sd), stddev=self.coef_prior_sd),
-                                        dtype=self.FLOAT,
+                                        dtype=self.FLOAT_TF,
                                         name='intercept_q_scale_by_%s' % r.gf
                                     )
                                 ),
@@ -287,10 +337,10 @@ class BDTSR(DTSR):
                         coef_ix = names2ix(coefs, f.coefficient_names)
                         mask_col_np = np.zeros(len(f.coefficient_names))
                         mask_col_np[coef_ix] = 1.
-                        mask_col = tf.constant(mask_col_np, dtype=self.FLOAT)
+                        mask_col = tf.constant(mask_col_np, dtype=self.FLOAT_TF)
                         self.ransl = True
                         coefficient_random = Normal(
-                            loc=tf.zeros([self.rangf_n_levels[i], len(f.coefficient_names)], dtype=self.FLOAT),
+                            loc=tf.zeros([self.rangf_n_levels[i], len(f.coefficient_names)], dtype=self.FLOAT_TF),
                             scale=self.coef_prior_sd,
                             name='coefficient_by_%s' %r.gf
                         )
@@ -298,13 +348,13 @@ class BDTSR(DTSR):
                             coefficient_random_q = Normal(
                                 loc=tf.Variable(
                                     tf.random_normal([self.rangf_n_levels[i], len(f.coefficient_names)], stddev=self.coef_prior_sd),
-                                    dtype=self.FLOAT,
+                                    dtype=self.FLOAT_TF,
                                     name='coefficient_q_loc_by_%s' %r.gf
                                 ),
                                 scale = tf.nn.softplus(
                                     tf.Variable(
                                         tf.random_normal([self.rangf_n_levels[i], len(f.coefficient_names)], mean=tf.contrib.distributions.softplus_inverse(self.coef_prior_sd), stddev=self.coef_prior_sd),
-                                        dtype=self.FLOAT,
+                                        dtype=self.FLOAT_TF,
                                         name='coefficient_q_scale_by_%s' % r.gf
                                     )
                                 ),
@@ -368,17 +418,17 @@ class BDTSR(DTSR):
                     return (filler,), (filler,)
                 if family == 'Exp':
                     log_L = tf.get_variable(sn('log_L_%s' % '-'.join(ids)), shape=[1, dim],
-                                            initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                                            initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
                     L = tf.exp(log_L, name=sn('L_%s' % '-'.join(ids))) + epsilon
                     for i in range(dim):
                         tf.summary.scalar('L' + '/%s' % ids[i], L[i], collections=['params'])
                     return L
                 if family == 'ShiftedExp':
                     log_L = tf.get_variable(sn('log_L_%s' % '-'.join(ids)), shape=[dim],
-                                            initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                                            initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
                     log_neg_delta = tf.get_variable(sn('log_neg_delta_%s' % '-'.join(ids)), shape=[dim],
                                                     initializer=tf.truncated_normal_initializer(stddev=.1),
-                                                    dtype=self.FLOAT)
+                                                    dtype=self.FLOAT_TF)
                     L = tf.exp(log_L, name=sn('L_%s' % '-'.join(ids))) + epsilon
                     delta = -tf.exp(log_neg_delta, name=sn('delta_%s' % '-'.join(ids)))
                     for i in range(dim):
@@ -387,9 +437,9 @@ class BDTSR(DTSR):
                     return tf.stack([L, delta], axis=0)
                 if family == 'Gamma':
                     log_k = tf.get_variable(sn('log_k_%s' % '-'.join(ids)), shape=[dim],
-                                            initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                                            initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
                     log_theta = tf.get_variable(sn('log_theta_%s' % '-'.join(ids)), shape=[dim],
-                                                initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                                                initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
                     k = tf.exp(log_k, name=sn('k_%s' % '-'.join(ids))) + epsilon
                     theta = tf.exp(log_theta, name=sn('theta_%s' % '-'.join(ids))) + epsilon
                     for i in range(dim):
@@ -398,9 +448,9 @@ class BDTSR(DTSR):
                     return tf.stack([k, theta])
                 if family == 'GammaKgt1':
                     log_k = tf.get_variable(sn('log_k_%s' % '-'.join(ids)), shape=[dim],
-                                            initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                                            initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
                     log_theta = tf.get_variable(sn('log_theta_%s' % '-'.join(ids)), shape=[dim],
-                                                initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                                                initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
                     k = tf.exp(log_k, name=sn('k_%s' % '-'.join(ids))) + epsilon + 1.
                     theta = tf.exp(log_theta, name=sn('theta_%s' % '-'.join(ids))) + epsilon
                     for i in range(dim):
@@ -409,12 +459,12 @@ class BDTSR(DTSR):
                     return tf.stack([k, theta])
                 if family == 'ShiftedGamma':
                     log_k = tf.get_variable(sn('log_k_%s' % '-'.join(ids)), shape=[dim],
-                                            initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                                            initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
                     log_theta = tf.get_variable(sn('log_theta_%s' % '-'.join(ids)), shape=[dim],
-                                                initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                                                initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
                     log_neg_delta = tf.get_variable(sn('log_neg_delta_%s' % '-'.join(ids)), shape=[dim],
                                                     initializer=tf.truncated_normal_initializer(stddev=.1),
-                                                    dtype=self.FLOAT)
+                                                    dtype=self.FLOAT_TF)
                     k = tf.exp(log_k, name=sn('k')) + epsilon
                     theta = tf.exp(log_theta, name=sn('theta_%s' % '-'.join(ids))) + epsilon
                     delta = -tf.exp(log_neg_delta, name=sn('delta_%s' % '-'.join(ids)))
@@ -425,12 +475,12 @@ class BDTSR(DTSR):
                     return tf.stack([k, theta, delta], axis=0)
                 if family == 'ShiftedGammaKgt1':
                     log_k = tf.get_variable(sn('log_k_%s' % '-'.join(ids)), shape=[dim],
-                                            initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                                            initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
                     log_theta = tf.get_variable(sn('log_theta_%s' % '-'.join(ids)), shape=[dim],
-                                                initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                                                initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
                     log_neg_delta = tf.get_variable(sn('log_neg_delta_%s' % '-'.join(ids)), shape=[dim],
                                                     initializer=tf.truncated_normal_initializer(stddev=.1),
-                                                    dtype=self.FLOAT)
+                                                    dtype=self.FLOAT_TF)
                     k = tf.nn.softplus(log_k, name=sn('k_%s' % '-'.join(ids))) + 1. + epsilon
                     theta = tf.exp(log_theta, name=sn('theta_%s' % '-'.join(ids))) + epsilon
                     delta = -tf.exp(log_neg_delta, name=sn('delta_%s' % '-'.join(ids)))
@@ -446,13 +496,13 @@ class BDTSR(DTSR):
                         mu_q = Normal(
                             loc=tf.Variable(
                                 tf.random_normal([dim], stddev=self.conv_prior_sd),
-                                dtype=self.FLOAT,
+                                dtype=self.FLOAT_TF,
                                 name=sn('mu_q_loc_%s' % '-'.join(ids))
                             ),
                             scale=tf.nn.softplus(
                                 tf.Variable(
                                     tf.random_normal([dim], mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd), stddev=self.conv_prior_sd),
-                                    dtype=self.FLOAT,
+                                    dtype=self.FLOAT_TF,
                                     name=sn('mu_q_scale_%s' % '-'.join(ids)))
                             ),
                             name=sn('mu_q_%s' % '-'.join(ids))
@@ -460,13 +510,13 @@ class BDTSR(DTSR):
                         sigma_q = Normal(
                             loc=tf.Variable(
                                 tf.random_normal([dim], mean=tf.contrib.distributions.softplus_inverse(1.), stddev=self.conv_prior_sd),
-                                dtype=self.FLOAT,
+                                dtype=self.FLOAT_TF,
                                 name=sn('sigma_q_loc_%s' % '-'.join(ids))
                             ),
                             scale=tf.nn.softplus(
                                 tf.Variable(
                                     tf.random_normal([dim], mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd), stddev=self.conv_prior_sd),
-                                    dtype=self.FLOAT,
+                                    dtype=self.FLOAT_TF,
                                     name=sn('sigma_q_scale_%s' % '-'.join(ids))
                                 )
                             ),
@@ -526,24 +576,24 @@ class BDTSR(DTSR):
                     if self.variational():
                         mu_q = Normal(
                             loc=tf.Variable(
-                                tf.random_normal([dim], dtype=self.FLOAT),
+                                tf.random_normal([dim], dtype=self.FLOAT_TF),
                                 name=sn('mu_q_loc_%s' % '-'.join(ids))
                             ),
                             scale=tf.nn.softplus(
                                 tf.Variable(
-                                    tf.random_normal([dim], dtype=self.FLOAT),
+                                    tf.random_normal([dim], dtype=self.FLOAT_TF),
                                     name=sn('mu_q_scale_%s' % '-'.join(ids)))
                             ),
                             name=sn('mu_q_%s' % '-'.join(ids))
                         )
                         sigma_q = Normal(
                             loc=tf.Variable(
-                                tf.random_normal([dim], dtype=self.FLOAT),
+                                tf.random_normal([dim], dtype=self.FLOAT_TF),
                                 name=sn('sigma_q_loc_%s' % '-'.join(ids))
                             ),
                             scale=tf.nn.softplus(
                                 tf.Variable(
-                                    tf.random_normal([dim], dtype=self.FLOAT),
+                                    tf.random_normal([dim], dtype=self.FLOAT_TF),
                                     name=sn('sigma_q_scale_%s' % '-'.join(ids))
                                 )
                             ),
@@ -551,12 +601,12 @@ class BDTSR(DTSR):
                         )
                         alpha_q = Normal(
                             loc=tf.Variable(
-                                tf.random_normal([dim], dtype=self.FLOAT),
+                                tf.random_normal([dim], dtype=self.FLOAT_TF),
                                 name=sn('alpha_q_loc_%s' % '-'.join(ids))
                             ),
                             scale=tf.nn.softplus(
                                 tf.Variable(
-                                    tf.random_normal([dim], dtype=self.FLOAT),
+                                    tf.random_normal([dim], dtype=self.FLOAT_TF),
                                     name=sn('alpha_q_scale_%s' % '-'.join(ids))
                                 )
                             ),
@@ -632,24 +682,24 @@ class BDTSR(DTSR):
                     if self.variational():
                         mu_q = Normal(
                             loc=tf.Variable(
-                                tf.random_normal([dim], dtype=self.FLOAT),
+                                tf.random_normal([dim], dtype=self.FLOAT_TF),
                                 name=sn('mu_q_loc_%s' % '-'.join(ids))
                             ),
                             scale=tf.nn.softplus(
                                 tf.Variable(
-                                    tf.random_normal([dim], dtype=self.FLOAT),
+                                    tf.random_normal([dim], dtype=self.FLOAT_TF),
                                     name=sn('mu_q_scale_%s' % '-'.join(ids)))
                             ),
                             name=sn('mu_q_%s' % '-'.join(ids))
                         )
                         sigma_q = Normal(
                             loc=tf.Variable(
-                                tf.random_normal([dim], dtype=self.FLOAT),
+                                tf.random_normal([dim], dtype=self.FLOAT_TF),
                                 name=sn('sigma_q_loc_%s' % '-'.join(ids))
                             ),
                             scale=tf.nn.softplus(
                                 tf.Variable(
-                                    tf.random_normal([dim], dtype=self.FLOAT),
+                                    tf.random_normal([dim], dtype=self.FLOAT_TF),
                                     name=sn('sigma_q_scale_%s' % '-'.join(ids))
                                 )
                             ),
@@ -657,12 +707,12 @@ class BDTSR(DTSR):
                         )
                         L_q = Normal(
                             loc=tf.Variable(
-                                tf.random_normal([dim], dtype=self.FLOAT),
+                                tf.random_normal([dim], dtype=self.FLOAT_TF),
                                 name=sn('L_q_loc_%s' % '-'.join(ids))
                             ),
                             scale=tf.nn.softplus(
                                 tf.Variable(
-                                    tf.random_normal([dim], dtype=self.FLOAT),
+                                    tf.random_normal([dim], dtype=self.FLOAT_TF),
                                     name=sn('L_q_scale_%s' % '-'.join(ids))
                                 )
                             ),
@@ -721,9 +771,9 @@ class BDTSR(DTSR):
                     return (mu, tf.nn.softplus(sigma), tf.nn.softplus(L)), (mu_q.params[self.global_batch_step - 1], tf.nn.softplus(sigma_q.params[self.global_batch_step - 1]), tf.nn.softplus(L_q.params[self.global_batch_step - 1]))
                 if family == 'BetaPrime':
                     log_alpha = tf.get_variable(sn('log_alpha_%s' % '-'.join(ids)), shape=[dim],
-                                                initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                                                initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
                     log_beta = tf.get_variable(sn('log_beta_%s' % '-'.join(ids)), shape=[dim],
-                                               initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                                               initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
                     alpha = tf.exp(log_alpha, name=sn('alpha_%s' % '-'.join(ids))) + epsilon
                     beta = tf.exp(log_beta, name=sn('beta_%s' % '-'.join(ids))) + epsilon
                     for i in range(dim):
@@ -732,12 +782,12 @@ class BDTSR(DTSR):
                     return tf.stack([alpha, beta], axis=0)
                 if family == 'ShiftedBetaPrime':
                     log_alpha = tf.get_variable(sn('log_alpha_%s' % '-'.join(ids)), shape=[dim],
-                                                initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                                                initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
                     log_beta = tf.get_variable(sn('log_beta_%s' % '-'.join(ids)), shape=[dim],
-                                               initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT)
+                                               initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
                     log_neg_delta = tf.get_variable(sn('log_neg_delta_%s' % '-'.join(ids)), shape=[dim],
                                                     initializer=tf.truncated_normal_initializer(stddev=.1),
-                                                    dtype=self.FLOAT)
+                                                    dtype=self.FLOAT_TF)
                     alpha = tf.exp(log_alpha, name=sn('alpha_%s' % '-'.join(ids))) + epsilon
                     beta = tf.exp(log_beta, name=sn('beta_%s' % '-'.join(ids))) + epsilon
                     delta = -tf.exp(log_neg_delta, name=sn('delta_%s' % '-'.join(ids)))
@@ -811,27 +861,28 @@ class BDTSR(DTSR):
         rho = X[f.terminal_names].corr()
         sys.stderr.write(str(rho) + '\n\n')
 
+        if not np.isfinite(self.minibatch_size):
+            minibatch_size = len(y)
+        else:
+            minibatch_size = self.minibatch_size
+
+        y_rangf = y[f.rangf]
+        for i in range(len(f.rangf)):
+            c = f.rangf[i]
+            y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
+
+        X_3d, time_X_3d = self.expand_history(X[f.terminal_names], X.time, y.first_obs, y.last_obs)
+        time_y = np.array(y.time, dtype=self.FLOAT_NP)
+        y_dv = np.array(y[f.dv], dtype=self.FLOAT_NP)
+        gf_y = np.array(y_rangf, dtype=self.INT_NP)
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                pb = tf.contrib.keras.utils.Progbar(self.n_iter*self.n_minibatch)
-
-                y_rangf = y[f.rangf]
-                for i in range(len(f.rangf)):
-                    c = f.rangf[i]
-                    y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
-
-                y_range = np.arange(len(y))
-                n_train = len(y[f.dv])
-
-                sys.stderr.write('Building history tensors...\n')
-                X_history, time_X_history = self.expand_history(X[f.terminal_names], X.time, y.first_obs, y.last_obs)
-                time_y = np.array(y.time)
-                y_dv = np.array(y[f.dv].astype('float32'))
-                gf_y = np.array(y_rangf)
+                pb = tf.contrib.keras.utils.Progbar(self.n_iter * self.n_train_minibatch)
 
                 fd = {
-                    self.X: X_history,
-                    self.time_X: time_X_history,
+                    self.X: X_3d,
+                    self.time_X: time_X_3d,
                     self.y: y_dv,
                     self.time_y: time_y,
                     self.gf_y: gf_y
@@ -843,11 +894,11 @@ class BDTSR(DTSR):
                     p, p_inv = getRandomPermutation(len(y))
 
                     metric_total = 0
-                    for j in range(0, len(y), self.minibatch_size):
-                        indices = p[j:j + self.minibatch_size]
+                    for j in range(0, len(y), minibatch_size):
+                        indices = p[j:j+minibatch_size]
                         fd_minibatch = {
-                            self.X: X_history[indices],
-                            self.time_X: time_X_history[indices],
+                            self.X: X_3d[indices],
+                            self.time_X: time_X_3d[indices],
                             self.y: y_dv[indices],
                             self.time_y: time_y[indices],
                             self.gf_y: gf_y[indices] if len(gf_y > 0) else gf_y
@@ -858,21 +909,23 @@ class BDTSR(DTSR):
                         if not np.isfinite(metric_cur):
                             metric_cur = 0
                         metric_total += metric_cur
-                        self.sess.run(self.incr_global_batch_step)
 
-                        summary_params = self.sess.run(self.summary_params)
-                        self.writer.add_summary(summary_params, self.global_batch_step.eval(session=self.sess))
+                        if self.global_batch_step.eval(session=self.sess) % self.logging_freq == 0:
+                            summary_params = self.sess.run(self.summary_params)
+                            self.writer.add_summary(summary_params, self.global_batch_step.eval(session=self.sess))
+
+                        self.sess.run(self.incr_global_batch_step)
                         pb.update(self.global_batch_step.eval(session=self.sess), values=[('loss' if self.variational() else 'accept_rate', metric_cur)], force=True)
 
 
                     if not self.variational():
-                        metric_total /= self.n_minibatch
+                        metric_total /= self.n_train_minibatch
                     if self.log_random and len(f.random) > 0:
                         summary_random = self.sess.run(self.summary_random)
                         self.writer.add_summary(summary_random, self.global_batch_step.eval(session=self.sess))
 
                     self.sess.run(self.incr_global_step)
-                    if self.global_step % self.logging_freq == 0:
+                    if self.global_step.eval(session=self.sess) % self.save_freq == 0:
                         self.make_plots(irf_name_map, plot_x_inches, plot_y_inches, cmap)
                         self.save()
 
@@ -884,43 +937,43 @@ class BDTSR(DTSR):
                 self.make_plots(irf_name_map, plot_x_inches, plot_y_inches, cmap)
 
 
-    def predict(self, X, y_time, y_rangf, first_obs, last_obs, minibatch_size=inf):
+    def predict(self, X, y_time, y_rangf, first_obs, last_obs):
         sys.stderr.write('Sampling predictions from posterior...\n')
 
         f = self.form
 
+        for i in range(len(f.rangf)):
+            c = f.rangf[i]
+            y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
+
+        X_3d, time_X_3d = self.expand_history(X[f.terminal_names], X.time, first_obs, last_obs)
+        time_y = np.array(y_time, dtype=self.FLOAT_NP)
+        gf_y = np.array(y_rangf, dtype=self.INT_NP)
+
+        preds = np.zeros((len(y_time), self.n_samples_eval))
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                for i in range(len(f.rangf)):
-                    c = f.rangf[i]
-                    y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
-
-                X_history, time_X_history = self.expand_history(X[f.terminal_names], X.time, first_obs, last_obs)
-                time_y = np.array(y_time)
-                gf_y = np.array(y_rangf)
-
                 fd = {
-                    self.X: X_history,
-                    self.time_X: time_X_history,
+                    self.X: X_3d,
+                    self.time_X: time_X_3d,
                     self.time_y: time_y,
                     self.gf_y: gf_y,
                 }
 
-                preds = np.zeros((len(y_time), self.n_samples_eval))
-
                 for i in range(self.n_samples_eval):
                     sys.stderr.write('\r%d/%d'%(i+1, self.n_samples_eval))
-                    if minibatch_size == inf:
+                    if not np.isfinite(self.minibatch_size):
                         preds[:,i] = self.sess.run(self.out_post, feed_dict=fd)
                     else:
-                        for j in range(0, len(y_time), minibatch_size):
+                        for j in range(0, len(y_time), self.minibatch_size):
                             fd_minibatch = {
-                                self.X: X_history[j:j+minibatch_size],
-                                self.time_X: time_X_history[j:j+minibatch_size],
-                                self.time_y: time_y[j:j+minibatch_size],
-                                self.gf_y: gf_y[j:j+minibatch_size] if len(gf_y) > 0 else gf_y,
+                                self.X: X_3d[j:j+self.minibatch_size],
+                                self.time_X: time_X_3d[j:j+self.minibatch_size],
+                                self.time_y: time_y[j:j+self.minibatch_size],
+                                self.gf_y: gf_y[j:j+self.minibatch_size] if len(gf_y) > 0 else gf_y
                             }
-                            preds[j:j+minibatch_size,i] = self.sess.run(self.out_post, feed_dict=fd_minibatch)
+                            preds[j:j+self.minibatch_size,i] = self.sess.run(self.out_post, feed_dict=fd_minibatch)
 
                 preds = preds.mean(axis=1)
 
@@ -931,29 +984,50 @@ class BDTSR(DTSR):
     def eval(self, X, y):
         f = self.form
 
+        y_rangf = y[f.rangf]
+        for i in range(len(f.rangf)):
+            c = f.rangf[i]
+            y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
+
+        X_3d, time_X_3d = self.expand_history(X[f.terminal_names], X.time, y.first_obs, y.last_obs)
+        time_y = np.array(y.time, dtype=self.FLOAT_NP)
+        y_dv = np.array(y[f.dv], dtype=self.FLOAT_NP)
+        gf_y = np.array(y_rangf, dtype=self.INT_NP)
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                y_rangf = y[f.rangf]
-                for i in range(len(f.rangf)):
-                    c = f.rangf[i]
-                    y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
-
-                X_history, time_X_history = self.expand_history(X[f.terminal_names], X.time, y.first_obs, y.last_obs)
-                time_y = np.array(y.time)
-                y_dv = np.array(y[f.dv].astype('float32'))
-                gf_y = np.array(y_rangf)
-
                 fd = {
-                    self.X: X_history,
-                    self.time_X: time_X_history,
-                    self.y: y_dv,
+                    self.X: X_3d,
+                    self.time_X: time_X_3d,
                     self.time_y: time_y,
                     self.gf_y: gf_y,
+                    self.y: y_dv,
                     self.out_post: self.y
                 }
 
-                sys.stderr.write('Evaluating...\n')
-                mse, mae, logLik = (ed.evaluate(['mse', 'mae', 'log_lik'], fd, n_samples=self.n_samples_eval))
+                if not np.isfinite(self.minibatch_size):
+                    n_minibatch = 1
+                    mse, mae, logLik = ed.evaluate(['mse', 'mae', 'log_lik'], fd, n_samples=self.n_samples_eval)
+                else:
+                    n_minibatch = math.ceil(len(y)/self.minibatch_size)
+                    mse = mae = logLik = 0
+                    for j in range(0, len(y), self.minibatch_size):
+                        sys.stderr.write('\r%d/%d' % (j + 1, n_minibatch))
+                        fd_minibatch = {
+                            self.X: X_3d[j:j+self.minibatch_size],
+                            self.time_X: time_X_3d[j:j+self.minibatch_size],
+                            self.time_y: time_y[j:j+self.minibatch_size],
+                            self.gf_y: gf_y[j:j+self.minibatch_size] if len(gf_y) > 0 else gf_y,
+                            self.y: y_dv[j:j+self.minibatch_size],
+                            self.out_post: self.y
+                        }
+                        mse_cur, mae_cur, logLik_cur = ed.evaluate(['mse', 'mae', 'log_lik'], fd_minibatch, n_samples=self.n_samples_eval)
+                        mse += mse_cur*len(fd_minibatch[self.y])
+                        mae += mae_cur*len(fd_minibatch[self.y])
+                        logLik += logLik_cur
+
+                mse /= n_minibatch
+                mae /= n_minibatch
 
                 return mse, mae, logLik
 

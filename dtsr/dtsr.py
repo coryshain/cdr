@@ -16,42 +16,38 @@ from .formula import *
 from .util import *
 from .plot import *
 
-
 def reduce_var(x, axis=None, keepdims=False):
-    """Variance of a tensor, alongside the specified axis.
-
-    # Arguments
-        x: A tensor or variable.
-        axis: An integer, the axis to compute the variance.
-        keepdims: A boolean, whether to keep the dimensions or not.
-            If `keepdims` is `False`, the rank of the tensor is reduced
-            by 1. If `keepdims` is `True`,
-            the reduced dimension is retained with length 1.
-
-    # Returns
-        A tensor with the variance of elements of `x`.
     """
+    Variance of a tensor, along the specified axis.
+
+    :param x: A tensor or variable.
+    :param axis:  An integer, the axis along which to compute the variance.
+    :param keepdims: A boolean, whether to keep the dimensions or not.
+        If `keepdims` is `False`, the rank of the tensor is reduced
+        by 1. If `keepdims` is `True`,
+        the reduced dimension is retained with length 1.
+    :return: A tensor with the variance of elements of `x`.
+    """
+
     m = tf.reduce_mean(x, axis=axis, keep_dims=True)
     devs_squared = tf.square(x - m)
     return tf.reduce_mean(devs_squared, axis=axis, keep_dims=keepdims)
 
 
 def reduce_std(x, axis=None, keepdims=False):
-    """Standard deviation of a tensor, alongside the specified axis.
-
-    # Arguments
-        x: A tensor or variable.
-        axis: An integer, the axis to compute the standard deviation.
-        keepdims: A boolean, whether to keep the dimensions or not.
-            If `keepdims` is `False`, the rank of the tensor is reduced
-            by 1. If `keepdims` is `True`,
-            the reduced dimension is retained with length 1.
-
-    # Returns
-        A tensor with the standard deviation of elements of `x`.
     """
-    return tf.sqrt(reduce_var(x, axis=axis, keepdims=keepdims))
+    Standard deviation of a tensor, along the specified axis.
 
+    :param x: A tensor or variable.
+    :param axis:  An integer, the axis along which to compute the standard deviation.
+    :param keepdims: A boolean, whether to keep the dimensions or not.
+        If `keepdims` is `False`, the rank of the tensor is reduced
+        by 1. If `keepdims` is `True`,
+        the reduced dimension is retained with length 1.
+    :return: A tensor with the variance of elements of `x`.
+    """
+
+    return tf.sqrt(reduce_var(x, axis=axis, keepdims=keepdims))
 
 def sn(string):
     return re.sub('[^A-Za-z0-9_.\\-/]', '.', string)
@@ -86,9 +82,42 @@ class DTSR(object):
                  low_memory = True,
                  float_type='float32',
                  int_type='int32',
-                 log_random=False,
-                 minibatch_size=128
+                 minibatch_size=None,
+                 logging_freq=1,
+                 log_random=True,
+                 save_freq=1
                  ):
+        """
+        Initialize a DTSR instance.
+
+        :param form_str: An R-style string representing the DTSR model formula.
+        :param y: A 2D pandas tensor representing the dependent variable. Must contain the following columns:
+            - `time`: Timestamp for each entry in `y`
+            - `first_obs`: Index in the design matrix X of the first observation in the time series associated with
+                each entry in `y`
+            - `last_obs`: Index in the design matrix X of the immediately preceding observation in the time series
+                associated with each entry in `y`
+            - A column with the same name as the DV specified in `form_str`
+            - A column for each random grouping factor in the model specified in `form_str`.
+        :param outdir: A `str` representing the output directory, where logs and model parameters are saved.
+        :param history_length: An `int` representing the maximum length of the history window to use. If `None`, history
+            length is unbounded and only the low-memory model is permitted.
+        :param low_memory: A `bool` determining which DTSR memory implementation to use. If `low_memory == True`, DTSR
+            convolves over history windows for each observation of in `y` using a TensorFlow control op. It can be used
+            with unboundedly long histories and uses less memory, but is generally much slower and results in poor GPU
+            utilization. If `low_memory == False`, DTSR expands the design matrix into a rank 3 tensor in which the 2nd
+            axis contains the history for each independent variable for each observation of the independent variable.
+            This requires more memory in order to store redundant input values and requires a finite history length.
+            However, it removes the need for a control op in the feedforward component and therefore generally runs much
+            faster if GPU is available.
+        :param float_type: A `str` representing the `float` type to use throughout the network.
+        :param int_type: A `str` representing the `int` type to use throughout the network (used for tensor slicing).
+        :param minibatch_size: An `int` representing the size of minibatches to use for fitting/prediction, or the
+            string `inf` to perform full-batch training.
+        :param logging_freq: An `int` representing the frequency (in minibatches) with which to write Tensorboard logs.
+        :param log_random: A `bool` determining whether to log random effects to Tensorboard.
+        :param save_freq: An `int` representing the frequency (in iterations) with which to save model checkpoints.
+        """
 
         self.g = tf.Graph()
         self.sess = tf.Session(graph=self.g, config=tf_config)
@@ -97,8 +126,18 @@ class DTSR(object):
         self.form = Formula(form_str)
         f = self.form
 
+        self.float_type = float_type
+        self.FLOAT_TF = getattr(tf, self.float_type)
+        self.FLOAT_NP = getattr(np, self.float_type)
+        self.int_type = int_type
+        self.INT_TF = getattr(tf, self.int_type)
+        self.INT_NP = getattr(np, self.int_type)
+
         self.outdir = outdir
-        self.history_length = history_length
+        if history_length is None or history_length == 'inf':
+            self.history_length = inf
+        else:
+            self.history_length = history_length
         self.low_memory = low_memory
         if self.history_length is None:
             assert self.low_memory, 'Incompatible DTSR settings: history_length=None and low_memory=False'
@@ -107,7 +146,7 @@ class DTSR(object):
         for i in range(len(f.random)):
             gf = f.random[sorted(f.random.keys())[i]].gf
             keys = np.sort(y[gf].astype('str').unique())
-            vals = np.arange(len(keys), dtype=np.int32)
+            vals = np.arange(len(keys), dtype=self.INT_NP)
             rangf_map = pd.DataFrame({'id':vals},index=keys).to_dict()['id']
             oov_id = len(keys)+1
             rangf_map = defaultdict(lambda:oov_id, rangf_map)
@@ -115,17 +154,15 @@ class DTSR(object):
             self.rangf_n_levels.append(oov_id)
         self.y_mu_init = float(y[f.dv].mean())
         self.y_sigma_init = float(y[f.dv].std())
-        self.float_type = float_type
-        self.FLOAT = getattr(tf, self.float_type)
-        self.int_type = int_type
-        self.INT = getattr(tf, self.int_type)
-        self.log_random = log_random
-        if minibatch_size == inf:
-            self.minibatch_size = len(y)
+        if minibatch_size is None or minibatch_size == 'inf':
+            self.minibatch_size = inf
         else:
             self.minibatch_size = minibatch_size
-        self.n_minibatch = math.ceil(float(len(y)) / self.minibatch_size)
+        self.n_train_minibatch = math.ceil(float(len(y)) / self.minibatch_size)
         self.minibatch_scale = float(len(y)) / self.minibatch_size
+        self.log_random = log_random
+        self.logging_freq = logging_freq
+        self.save_freq = save_freq
         self.irf_tree = self.form.irf_tree
 
         self.preterminals = []
@@ -149,13 +186,13 @@ class DTSR(object):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                self.X = tf.placeholder(shape=[None, self.history_length, len(f.terminal_names)], dtype=self.FLOAT, name=sn('X'))
-                self.time_X = tf.placeholder(shape=[None, self.history_length], dtype=self.FLOAT, name=sn('time_X'))
+                self.X = tf.placeholder(shape=[None, self.history_length, len(f.terminal_names)], dtype=self.FLOAT_TF, name=sn('X'))
+                self.time_X = tf.placeholder(shape=[None, self.history_length], dtype=self.FLOAT_TF, name=sn('time_X'))
 
-                self.y = tf.placeholder(shape=[None], dtype=self.FLOAT, name=sn('y'))
-                self.time_y = tf.placeholder(shape=[None], dtype=self.FLOAT, name=sn('time_y'))
+                self.y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('y'))
+                self.time_y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('time_y'))
 
-                self.gf_y = tf.placeholder(shape=[None, len(f.random)], dtype=tf.int32)
+                self.gf_y = tf.placeholder(shape=[None, len(f.random)], dtype=self.INT_TF)
 
                 # Linspace tensor used for plotting
                 self.support = tf.expand_dims(tf.lin_space(0., 2.5, 1000), -1)
@@ -170,16 +207,16 @@ class DTSR(object):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                self.X = tf.placeholder(shape=[None, len(f.terminal_names)], dtype=self.FLOAT, name=sn('X'))
-                self.time_X = tf.placeholder(shape=[None], dtype=self.FLOAT, name=sn('time_X'))
+                self.X = tf.placeholder(shape=[None, len(f.terminal_names)], dtype=self.FLOAT_TF, name=sn('X'))
+                self.time_X = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('time_X'))
 
-                self.y = tf.placeholder(shape=[None], dtype=self.FLOAT, name=sn('y'))
-                self.time_y = tf.placeholder(shape=[None], dtype=self.FLOAT, name=sn('time_y'))
+                self.y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('y'))
+                self.time_y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('time_y'))
 
-                self.gf_y = tf.placeholder(shape=[None, len(f.random)], dtype=tf.int32)
+                self.gf_y = tf.placeholder(shape=[None, len(f.random)], dtype=tf.INT)
 
-                self.first_obs = tf.placeholder(shape=[None], dtype=self.INT, name=sn('first_obs'))
-                self.last_obs = tf.placeholder(shape=[None], dtype=self.INT, name=sn('last_obs'))
+                self.first_obs = tf.placeholder(shape=[None], dtype=self.INT_TF, name=sn('first_obs'))
+                self.last_obs = tf.placeholder(shape=[None], dtype=self.INT_TF, name=sn('last_obs'))
 
                 # Linspace tensor used for plotting
                 self.support = tf.expand_dims(tf.lin_space(0., 2.5, 1000), -1)
@@ -196,7 +233,7 @@ class DTSR(object):
         raise NotImplementedError
 
     def initialize_irf_lambdas(self):
-        epsilon = 1e-35  # np.nextafter(0, 1, dtype=getattr(np, self.float_type)) * 10
+        epsilon = 1e-35
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -383,19 +420,27 @@ class DTSR(object):
                     child_nodes = sorted(t.children[f].keys())
                     child_coefs = [t.children[f][x].coef_id() for x in child_nodes]
                     coefs_ix = names2ix(child_coefs, self.form.coefficient_names)
-                    tensor = t.irfs[f](t.tensor) * tf.gather(coef, coefs_ix)
-                    for i in range(len(child_nodes)):
-                        x = t.children[f][child_nodes[i]]
-                        if x.terminal():
-                            preterminals.append(x.name())
+                    if f == 'DiracDelta':
+                        for i in range(len(child_nodes)):
+                            x = t.children[f][child_nodes[i]]
                             terminals.append(x.impulse.name())
-                        x.tensor = tf.expand_dims(tensor[:, i], -1)
-                        if not x.terminal:
-                            out += self.initialize_low_memory_convolutional_feedforward(x, inputs, coef)
-                    if len(preterminals) > 0 and len(terminals) > 0:
-                        preterminals_ix = names2ix(preterminals, child_nodes)
                         terminals_ix = names2ix(terminals, self.form.terminal_names)
-                        out.append(tf.gather(inputs, terminals_ix, axis=1) * tf.gather(tensor, preterminals_ix, axis=1))
+                        new_out = tf.gather(inputs[-1], terminals_ix, axis=0) * tf.gather(self.coefficient[-1], coefs_ix, axis=0)
+                        out.append(new_out)
+                    else:
+                        tensor = t.irfs[f](t.tensor) * tf.gather(coef, coefs_ix)
+                        for i in range(len(child_nodes)):
+                            x = t.children[f][child_nodes[i]]
+                            if x.terminal():
+                                preterminals.append(x.name())
+                                terminals.append(x.impulse.name())
+                            x.tensor = tf.expand_dims(tensor[:, i], -1)
+                            if not x.terminal:
+                                out += self.initialize_low_memory_convolutional_feedforward(x, inputs, coef)
+                        if len(preterminals) > 0 and len(terminals) > 0:
+                            preterminals_ix = names2ix(preterminals, child_nodes)
+                            terminals_ix = names2ix(terminals, self.form.terminal_names)
+                            out.append(tf.reduce_sum(tf.gather(inputs, terminals_ix, axis=1) * tf.gather(tensor, preterminals_ix, axis=1), 0))
                 return out
 
     def construct_network(self):
@@ -413,9 +458,16 @@ class DTSR(object):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                if np.isfinite(self.history_length):
+                    history_length = tf.constant(self.history_length, dtype=self.INT_TF)
+
                 def convolve_events(time_target, first_obs, last_obs, coefficient):
-                    inputs = self.X[first_obs:last_obs]
-                    input_times = self.time_X[first_obs:last_obs]
+                    if np.isfinite(self.history_length):
+                        inputs = self.X[tf.maximum(first_obs, last_obs-history_length):last_obs]
+                        input_times = self.time_X[tf.maximum(first_obs, last_obs-history_length):last_obs]
+                    else:
+                        inputs = self.X[first_obs:last_obs]
+                        input_times = self.time_X[first_obs:last_obs]
                     t_delta = time_target - input_times
 
                     if not self.ransl:
@@ -423,15 +475,14 @@ class DTSR(object):
 
                     self.irf_tree.tensor = tf.expand_dims(t_delta, -1)
                     out = self.initialize_low_memory_convolutional_feedforward(self.irf_tree, inputs, coefficient)
+                    out = tf.concat(out, axis=0)
 
-                    out = tf.concat(out, axis=1)
-
-                    return tf.reduce_sum(out, 0)
+                    return out
 
                 self.X_conv = tf.map_fn(lambda x: convolve_events(*x),
                                         [self.time_y, self.first_obs, self.last_obs, self.coefficient],
                                         parallel_iterations=10,
-                                        dtype=self.FLOAT)
+                                        dtype=self.FLOAT_TF)
 
                 self.out = self.intercept + tf.reduce_sum(self.X_conv, axis=1)
 
@@ -468,19 +519,6 @@ class DTSR(object):
     #  Inner functions for network construction
     #
     ######################################################
-
-    def optim_init(self, name, learning_rate):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                return {
-                    'SGD': lambda x: tf.train.GradientDescentOptimizer(x),
-                    'AdaGrad': lambda x: tf.train.AdagradOptimizer(x),
-                    'AdaDelta': lambda x: tf.train.AdadeltaOptimizer(x),
-                    'Adam': lambda x: tf.train.AdamOptimizer(x),
-                    'FTRL': lambda x: tf.train.FtrlOptimizer(x),
-                    'RMSProp': lambda x: tf.train.RMSPropOptimizer(x),
-                    'Nadam': lambda x: tf.contrib.opt.NadamOptimizer(x)
-                }[name](learning_rate)
 
     def new_irf(self, irf_lambda, params, parent_irf=None):
         irf = irf_lambda(params)
@@ -530,10 +568,10 @@ class DTSR(object):
                     self.sess.run(tf.global_variables_initializer())
 
     def expand_history(self, X, X_time, first_obs, last_obs):
-        last_obs = np.array(last_obs, dtype='int32')
-        first_obs = np.maximum(np.array(first_obs, dtype='int32'), last_obs - self.history_length)
-        X_time = np.array(X_time, dtype=getattr(np, self.float_type))
-        X = np.array(X, dtype=getattr(np, self.float_type))
+        last_obs = np.array(last_obs, dtype=self.INT_NP)
+        first_obs = np.maximum(np.array(first_obs, dtype=self.INT_NP), last_obs - self.history_length)
+        X_time = np.array(X_time, dtype=self.FLOAT_NP)
+        X = np.array(X, dtype=self.FLOAT_NP)
 
         X_history = np.zeros((first_obs.shape[0], self.history_length, X.shape[1]))
         time_X_history = np.zeros((first_obs.shape[0], self.history_length))
@@ -563,7 +601,6 @@ class DTSR(object):
                 plot_y = []
                 for x in self.irf_names:
                     plot_y.append(self.plot_tensors_atomic_unscaled[x].eval(session=self.sess))
-                # print(self.atomic_irf_means_by_family['Normal'].eval(session=self.sess))
                 plot_y = np.concatenate(plot_y, axis=1)
 
                 plot_convolutions(plot_x,
