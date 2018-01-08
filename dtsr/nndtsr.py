@@ -25,12 +25,12 @@ class NNDTSR(DTSR):
     =========
 
     :param form_str: An R-style string representing the DTSR model formula.
-    :param y: A 2D pandas tensor representing the dependent variable. Must contain the following columns:
+    :param y: A 2D pandas tensor representing the dependent variable. Must contain the following columns...
 
-        * ``time``: Timestamp for each entry in ``y``
-        * ``first_obs``: Index in the design matrix `X` of the first observation in the time series associated with
+        * ``time`` - Timestamp for each entry in ``y``
+        * ``first_obs`` -  Index in the design matrix `X` of the first observation in the time series associated with
             each entry in ``y``
-        * ``last_obs``: Index in the design matrix `X` of the immediately preceding observation in the time series
+        * ``last_obs`` -  Index in the design matrix `X` of the immediately preceding observation in the time series
             associated with each entry in ``y``
         * A column with the same name as the DV specified in ``form_str``
         * A column for each random grouping factor in the model specified in ``form_str``.
@@ -62,20 +62,12 @@ class NNDTSR(DTSR):
         :math:`\lambda_0` is the initial learning rate, :math:`\delta` is the ``learning_rate_decay_factor``,
         and :math:`i` is the iteration index.
 
-        * ``linear``:
-            .. math::
-                \lambda = \lambda_0 * ( 1 - \delta \cdot i )
-        * ``inverse``:
-            .. math::
-                \lambda = \frac{\lambda_0}{1 + ( \delta \cdot i )}
-
-        * ``exponential``:
-            .. math::
-                \lambda = \lambda_0 * ( 2^{-\delta \cdot i} )
-
+        * ``linear``: :math:`\lambda_0 * ( 1 - \delta \cdot i )`
+        * ``inverse``: :math:`\frac{\lambda_0}{1 + ( \delta \cdot i )}`
+        * ``exponential``: :math:`\lambda = \lambda_0 * ( 2^{-\delta \cdot i} )`
         * ``stepdownXX``: where ``XX`` is replaced by an integer representing the stepdown interval :math:`a`
-            .. math::
-                \lambda = \lambda_0 * \delta^{\left \lfloor \frac{i}{a} \right \rfloor}
+            :math:`\lambda = \lambda_0 * \delta^{\left \lfloor \frac{i}{a} \right \rfloor}`
+
     :param learning_rate_min: A ``float`` representing the minimum value for the learning rate. If the decay schedule
         would take the learning rate below this point, learning rate clipping will occur.
     :param loss: A ``str`` representing the optimization objective. Currently only ``MAE`` and ``MSE`` are supported.
