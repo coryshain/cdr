@@ -24,48 +24,42 @@ class NNDTSR(DTSR):
     :param form_str: An R-style string representing the DTSR model formula.
     :param y: A 2D pandas tensor representing the dependent variable. Must contain the following columns:
 
-        * ``time``: Timestamp for each entry in ``y``
-        * ``first_obs``:  Index in the design matrix `X` of the first observation in the time series associated with
-          each entry in ``y``
-        * ``last_obs``:  Index in the design matrix `X` of the immediately preceding observation in the time series
-          associated with each entry in ``y``
+        * ``time``: Timestamp associated with each observation in ``y``
+        * ``first_obs``:  Index in the design matrix `X` of the first observation in the time series associated with each observation in ``y``
+        * ``last_obs``:  Index in the design matrix `X` of the immediately preceding observation in the time series associated with each observation in ``y``
         * A column with the same name as the DV specified in ``form_str``
-        * A column for each random grouping factor in the model specified in ``form_str``.
+        * A column for each random grouping factor in the model specified in ``form_str``
 
-    :param outdir: A ``str`` representing the output directory, where logs and model parameters are saved.
-    :param history_length: An ``int`` representing the maximum length of the history window to use. If ``None``, history
-        length is unbounded and only the low-memory model is permitted.
-    :param low_memory: A ``bool`` determining which DTSR memory implementation to use.
-        If ``low_memory == True``, DTSR convolves over history windows for each observation of in ``y`` using a TensorFlow control op.
+    :param outdir: ``str``; the output directory, where logs and model parameters are saved.
+    :param history_length: ``int`` or ``None``; the maximum length of the history window to use (unbounded if ``None``, which requires ``low_memory=True``).
+    :param low_memory: ``bool``; whether to use the ``low_memory`` network structure.
+        If ``True``, DTSR convolves over history windows for each observation of in ``y`` using a TensorFlow control op.
         It can be used with unboundedly long histories and requires less memory, but results in poor GPU utilization.
-        If ``low_memory == False``, DTSR expands the design matrix into a rank 3 tensor in which the 2nd axis contains the history for each independent variable for each observation of the dependent variable.
+        If ``False``, DTSR expands the design matrix into a rank 3 tensor in which the 2nd axis contains the history for each independent variable for each observation of the dependent variable.
         This requires more memory in order to store redundant input values and requires a finite history length.
         However, it removes the need for a control op in the feedforward component and therefore generally runs much faster if GPU is available.
-    :param float_type: A ``str`` representing the ``float`` type to use throughout the network.
-    :param int_type: A ``str`` representing the ``int`` type to use throughout the network (used for tensor slicing).
-    :param minibatch_size: An ``int`` representing the size of minibatches to use for fitting/prediction, or the
-        string ``inf`` to perform full-batch training.
-    :param logging_freq: An ``int`` representing the frequency (in minibatches) with which to write Tensorboard logs.
-    :param log_random: A ``bool`` determining whether to log random effects to Tensorboard.
-    :param save_freq: An ``int`` representing the frequency (in iterations) with which to save model checkpoints.
-    :param optim: A ``str`` representing the name of the optimizer to use. Choose from ``SGD``, ``AdaGrad``, ``AdaDelta``,
-        ``Adam``, ``FTRL``, ``RMSProp``, ``Nadam``.
-    :param learning_rate: A ``float`` representing the initial value for the learning rate.
-    :param learning_rate_decay_factor: A ``float`` used to compute the rate of learning rate decay (if applicable).
-    :param learning_rate_decay_family: A ``str`` representing the functional family for the learning rate decay
-        schedule (if applicable). Choose from the following, where :math:`\lambda` is the current learning rate,
-        :math:`\lambda_0` is the initial learning rate, :math:`\delta` is the ``learning_rate_decay_factor``,
-        and :math:`i` is the iteration index.
+        *Because TensorFlow control ops are not currently supported by Edward, BDTSR currently only works with* ``low_memory=False``.
+    :param float_type: ``str``; the ``float`` type to use throughout the network.
+    :param int_type: ``str``; the ``int`` type to use throughout the network (used for tensor slicing).
+    :param minibatch_size: ``int`` or ``None``; the size of minibatches to use for fitting/prediction (full-batch if ``None``).
+    :param logging_freq: ``int``; the frequency (in minibatches) with which to write Tensorboard logs.
+    :param log_random:``bool``; whether to log random effects to Tensorboard.
+    :param save_freq: ``int``; the frequency (in iterations) with which to save model checkpoints.
+    :param optim: ``str``; the name of the optimizer to use. Choose from ``SGD``, ``AdaGrad``, ``AdaDelta``, ``Adam``, ``FTRL``, ``RMSProp``, ``Nadam``.
+    :param learning_rate: ``float``; the initial value for the learning rate.
+    :param learning_rate_decay_factor: ``float``; rate parameter to the learning rate decay schedule (if applicable).
+    :param learning_rate_decay_family: ``str``; the functional family for the learning rate decay schedule (if applicable).
+        Choose from the following, where :math:`\lambda` is the current learning rate, :math:`\lambda_0` is the initial learning rate, :math:`\delta` is the ``learning_rate_decay_factor``, and :math:`i` is the iteration index.
 
         * ``linear``: :math:`\\lambda_0 \\cdot ( 1 - \\delta \\cdot i )`
         * ``inverse``: :math:`\\frac{\\lambda_0}{1 + ( \\delta \\cdot i )}`
         * ``exponential``: :math:`\\lambda = \\lambda_0 \\cdot ( 2^{-\\delta \\cdot i} )`
-        * ``stepdownXX``: where ``XX`` is replaced by an integer representing the stepdown interval :math:`a`:
-          :math:`\\lambda = \\lambda_0 * \\delta^{\\left \\lfloor \\frac{i}{a} \\right \\rfloor}`
+        * ``stepdownXX``: where ``XX`` is replaced by an integer representing the stepdown interval :math:`a`: :math:`\\lambda = \\lambda_0 * \\delta^{\\left \\lfloor \\frac{i}{a} \\right \\rfloor}`
 
-    :param learning_rate_min: A ``float`` representing the minimum value for the learning rate. If the decay schedule
-        would take the learning rate below this point, learning rate clipping will occur.
-    :param loss: A ``str`` representing the optimization objective. Currently only ``MAE`` and ``MSE`` are supported.
+    :param learning_rate_min: ``float``; the minimum value for the learning rate.
+        If the decay schedule would take the learning rate below this point, learning rate clipping will occur.
+    :param loss: ``str``; the optimization objective.
+        Currently only ``MAE`` and ``MSE`` are supported.
     """
 
 
@@ -495,6 +489,8 @@ class NNDTSR(DTSR):
     def build(self, restore=True, verbose=True):
         """
         Construct the DTSR network and initialize/load model parameters.
+        ``build()`` is called by default at initialization and unpickling, so users generally do not need to call this method.
+        ``build()`` can be used to reinitialize an existing network instance on the fly, but only if (1) no model checkpoint has been saved to the output directory or (2) ``restore`` is set to ``False``.
 
         :param restore: Restore saved network parameters if model checkpoint exists in the output directory.
         :param verbose: Show the model tree when called.
@@ -526,6 +522,22 @@ class NNDTSR(DTSR):
         self.load(restore=restore)
         self.__report_n_params__()
 
+    def expand_history(self, X, X_time, first_obs, last_obs):
+        """
+        Expand 2D matrix of independent variable values into a 3D tensor of `histories` of independent variable values and a 1D vector of independent variable timestamps into a 2D matrix of independent variable timestamp histories.
+        This is a necessary preprocessing step for the input data when using ``low_memory=False``.
+
+        :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
+            ``X`` must contain a column for each independent variable in the DTSR ``form_str`` provided at iniialization.
+        :param X_time: ``pandas Series`` or 1D ``numpy`` array; timestamps for the observations in ``X``, grouped and sorted identically to ``X``.
+        :param first_obs: ``pandas Series`` or 1D ``numpy`` array; row indices in ``X`` of the start of the series associated with the current regression target.
+            Sort order and number of observations must be identical to that of ``y_time``.
+        :param last_obs: ``pandas Series`` or 1D ``numpy`` array; row indices in ``X`` of the most recent observation in the series associated with the current regression target.
+            Sort order and number of observations must be identical to that of ``y_time``.
+        :return: ``tuple``; two numpy arrays ``(X_3d, time_X_3d)``, the expanded IV and timestamp tensors.
+        """
+        return super(NNDTSR, self).expand_history(X, X_time, first_obs, last_obs)
+
     def fit(self,
             X,
             y,
@@ -538,15 +550,29 @@ class NNDTSR(DTSR):
         """
         Fit the DTSR model.
 
-        :param X:
-        :param y:
-        :param n_epoch_train:
-        :param n_epoch_tune:
-        :param irf_name_map:
-        :param plot_x_inches:
-        :param plot_y_inches:
-        :param cmap:
-        :return:
+        :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
+            ``X`` must contain the following columns (additional columns are ignored):
+
+            * ``time``: Timestamp associated with each observation in ``X``
+            * A column for each independent variable in the DTSR ``form_str`` provided at iniialization
+
+        :param y: ``pandas`` table; the dependent variable. Must contain the following columns:
+
+            * ``time``: Timestamp associated with each observation in ``y``
+            * ``first_obs``:  Index in the design matrix `X` of the first observation in the time series associated with each entry in ``y``
+            * ``last_obs``:  Index in the design matrix `X` of the immediately preceding observation in the time series associated with each entry in ``y``
+            * A column with the same name as the DV specified in ``form_str``
+            * A column for each random grouping factor in the model specified in ``form_str``.
+
+            In general, ``y`` will be identical to the parameter ``y`` provided at model initialization.
+            However, this is not necessary.
+        :param n_epoch_train: ``int``; the number of training iterations
+        :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
+            If ``None``, IRF tree node string ID's will be used.
+        :param plot_x_inches: ``int``; width of plot in inches.
+        :param plot_y_inches: ``int``; height of plot in inches.
+        :param cmap: ``str``; name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot).
+        :return: ``None``
         """
 
         usingGPU = is_gpu_available()
@@ -718,13 +744,24 @@ class NNDTSR(DTSR):
         """
         Predict from the pre-trained DTSR model.
 
-        :param X:
-        :param y_time:
-        :param y_rangf:
-        :param first_obs:
-        :param last_obs:
-        :return:
+        :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
+            ``X`` must contain the following columns (additional columns are ignored):
+
+            * ``time``: Timestamp associated with each observation
+            * A column for each independent variable in the DTSR ``form_str`` provided at iniialization
+
+        :param y_time: ``pandas`` ``Series`` or 1D ``numpy`` array; timestamps for the regression targets, grouped by series.
+        :param y_rangf: ``pandas Series`` or 1D ``numpy`` array; random grouping factor values (if applicable). Can be of type ``str`` or ``int``.
+            Sort order and number of observations must be identical to that of ``y_time``.
+        :param first_obs: ``pandas Series`` or 1D ``numpy`` array; row indices in ``X`` of the start of the series associated with the current regression target.
+            Sort order and number of observations must be identical to that of ``y_time``.
+        :param last_obs: ``pandas Series`` or 1D ``numpy`` array; row indices in ``X`` of the most recent observation in the series associated with the current regression target.
+            Sort order and number of observations must be identical to that of ``y_time``.
+        :return: 1D ``numpy`` array; network predictions for regression targets (same length and sort order as ``y_time``).
         """
+
+        assert len(y_time) == len(y_rangf) == len(first_obs) == len(last_obs), 'y_time, y_rangf, first_obs, and last_obs must be of identical length. Got: len(y_time) = %d, len(y_rangf) = %d, len(first_obs) = %d, len(last_obs) = %d' % (len(y_time), len(y_rangf), len(first_obs), len(last_obs))
+
         f = self.form
 
         for i in range(len(f.rangf)):
@@ -783,11 +820,23 @@ class NNDTSR(DTSR):
 
     def eval(self, X, y):
         """
-        Evaluate the pre-trained DTSR model
+        Evaluate the pre-trained DTSR model.
 
-        :param X:
-        :param y:
-        :return:
+        :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
+            ``X`` must contain the following columns (additional columns are ignored):
+
+            * ``time``: Timestamp associated with each observation in ``X``
+            * A column for each independent variable in the DTSR ``form_str`` provided at iniialization
+
+        :param y: ``pandas`` table; the dependent variable. Must contain the following columns:
+
+            * ``time``: Timestamp associated with each observation in ``y``
+            * ``first_obs``:  Index in the design matrix `X` of the first observation in the time series associated with each entry in ``y``
+            * ``last_obs``:  Index in the design matrix `X` of the immediately preceding observation in the time series associated with each entry in ``y``
+            * A column with the same name as the DV specified in ``form_str``
+            * A column for each random grouping factor in the model specified in ``form_str``.
+
+        :return: ``float`` (scalar); the value of the evaluation metric (MSE/MAE) for the evaluation data.
         """
         f = self.form
 
@@ -849,3 +898,32 @@ class NNDTSR(DTSR):
                     loss /= len(y)
 
                 return loss
+
+    def make_plots(self, irf_name_map=None, plot_x_inches=7., plot_y_inches=5., cmap=None):
+        """
+        Generate plots of current state of deconvolution.
+        Saves four plots to the output directory:
+
+            * ``irf_atomic_scaled.jpg``: One line for each IRF kernel in the model (ignoring preconvolution in any composite kernels), scaled by the relevant coefficients
+            * ``irf_atomic_unscaled.jpg``: One line for each IRF kernel in the model (ignoring preconvolution in any composite kernels), unscaled
+            * ``irf_composite_scaled.jpg``: One line for each IRF kernel in the model (including preconvolution in any composite kernels), scaled by the relevant coefficients
+            * ``irf_composite_unscaled.jpg``: One line for each IRF kernel in the model (including preconvolution in any composite kernels), unscaled
+
+        If the model contains no composite IRF, corresponding atomic and composite plots will be identical.
+
+        To save space successive calls to ``make_plots()`` overwrite existing plots.
+        Thus, plots only show the most recently plotted state of learning.
+
+        :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
+            If ``None``, IRF tree node string ID's will be used.
+        :param plot_x_inches: ``int``; width of plot in inches.
+        :param plot_y_inches: ``int``; height of plot in inches.
+        :param cmap: ``str``; name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot).
+        :return: ``None``
+        """
+        return super(NNDTSR, self).make_plots(
+            irf_name_map=irf_name_map,
+            plot_x_inches=plot_x_inches,
+            plot_y_inches=plot_y_inches,
+            cmap=None
+        )

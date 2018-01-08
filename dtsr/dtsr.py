@@ -56,50 +56,6 @@ def sn(string):
 class DTSR(object):
     """
     Abstract base class for DTSR. Bayesian (BDTSR) and Neural Network (NNDTSR) implementations inherit from DTSR.
-
-    To build a new DTSR implementation, you must (at minimum) implement the following methods:
-
-    - ``build``
-    - ``initialize_intercepts_coefficients``
-    - ``initialize_irf_params``
-    - ``initialize_irf_params_inner``
-    - ``initialize_objective``
-    - ``start_logging``
-    - ``fit``
-    - ``predict``
-    - ``eval``
-    - ``__getstate__``
-    - ``__setstate__``
-
-    You will also likely need to override the ``__init__`` method.
-
-    :param form_str: An R-style string representing the DTSR model formula.
-    :param y: A 2D pandas tensor representing the dependent variable. Must contain the following columns:
-
-        * ``time``: Timestamp for each entry in ``y``
-        * ``first_obs``:  Index in the design matrix `X` of the first observation in the time series associated with
-          each entry in ``y``
-        * ``last_obs``:  Index in the design matrix `X` of the immediately preceding observation in the time series
-          associated with each entry in ``y``
-        * A column with the same name as the DV specified in ``form_str``
-        * A column for each random grouping factor in the model specified in ``form_str``.
-
-    :param outdir: A ``str`` representing the output directory, where logs and model parameters are saved.
-    :param history_length: An ``int`` representing the maximum length of the history window to use. If ``None``, history
-        length is unbounded and only the low-memory model is permitted.
-    :param low_memory: A ``bool`` determining which DTSR memory implementation to use.
-        If ``low_memory == True``, DTSR convolves over history windows for each observation of in ``y`` using a TensorFlow control op.
-        It can be used with unboundedly long histories and requires less memory, but results in poor GPU utilization.
-        If ``low_memory == False``, DTSR expands the design matrix into a rank 3 tensor in which the 2nd axis contains the history for each independent variable for each observation of the dependent variable.
-        This requires more memory in order to store redundant input values and requires a finite history length.
-        However, it removes the need for a control op in the feedforward component and therefore generally runs much faster if GPU is available.
-    :param float_type: A ``str`` representing the ``float`` type to use throughout the network.
-    :param int_type: A ``str`` representing the ``int`` type to use throughout the network (used for tensor slicing).
-    :param minibatch_size: An ``int`` representing the size of minibatches to use for fitting/prediction, or the
-        string ``inf`` to perform full-batch training.
-    :param logging_freq: An ``int`` representing the frequency (in minibatches) with which to write Tensorboard logs.
-    :param log_random: A ``bool`` determining whether to log random effects to Tensorboard.
-    :param save_freq: An ``int`` representing the frequency (in iterations) with which to save model checkpoints.
     """
 
 
