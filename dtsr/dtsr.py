@@ -75,8 +75,10 @@ class DTSR(object):
 
     Arguments
     =========
+
     :param form_str: An R-style string representing the DTSR model formula.
     :param y: A 2D pandas tensor representing the dependent variable. Must contain the following columns:
+
         - ``time``: Timestamp for each entry in ``y``
         - ``first_obs``: Index in the design matrix X of the first observation in the time series associated with
             each entry in ``y``
@@ -84,6 +86,7 @@ class DTSR(object):
             associated with each entry in ``y``
         - A column with the same name as the DV specified in ``form_str``
         - A column for each random grouping factor in the model specified in ``form_str``.
+
     :param outdir: A ``str`` representing the output directory, where logs and model parameters are saved.
     :param history_length: An ``int`` representing the maximum length of the history window to use. If ``None``, history
         length is unbounded and only the low-memory model is permitted.
