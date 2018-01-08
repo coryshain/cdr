@@ -62,7 +62,7 @@ class NNDTSR(DTSR):
         * ``linear``: :math:`\\lambda_0 \\cdot ( 1 - \\delta \\cdot i )`
         * ``inverse``: :math:`\\frac{\\lambda_0}{1 + ( \\delta \\cdot i )}`
         * ``exponential``: :math:`\\lambda = \\lambda_0 \\cdot ( 2^{-\\delta \\cdot i} )`
-        * ``stepdownXX``: where ``XX`` is replaced by an integer representing the stepdown interval :math:`a`.
+        * ``stepdownXX``: where ``XX`` is replaced by an integer representing the stepdown interval :math:`a`:
           :math:`\\lambda = \\lambda_0 * \\delta^{\\left \\lfloor \\frac{i}{a} \\right \\rfloor}`
 
     :param learning_rate_min: A ``float`` representing the minimum value for the learning rate. If the decay schedule
