@@ -46,7 +46,7 @@ class BDTSR(DTSR):
     :param int_type: ``str``; the ``int`` type to use throughout the network (used for tensor slicing).
     :param minibatch_size: ``int`` or ``None``; the size of minibatches to use for fitting/prediction (full-batch if ``None``).
     :param logging_freq: ``int``; the frequency (in minibatches) with which to write Tensorboard logs.
-    :param log_random:``bool``; whether to log random effects to Tensorboard.
+    :param log_random: ``bool``; whether to log random effects to Tensorboard.
     :param save_freq: ``int``; the frequency (in iterations) with which to save model checkpoints.
     :param inference_name: ``str``; the Edward inference class to use for fitting.
     :param n_samples: ``int``; the number of samples to draw from the variational posterior if using variational inference.
@@ -164,7 +164,11 @@ class BDTSR(DTSR):
                             name='intercept_q_loc'
                         )
                         self.intercept_fixed_q_scale = tf.Variable(
-                            tf.random_normal([1], mean=tf.contrib.distributions.softplus_inverse(self.coef_prior_sd), stddev=self.coef_prior_sd),
+                            tf.random_normal(
+                                [1],
+                                mean=tf.contrib.distributions.softplus_inverse(self.coef_prior_sd),
+                                stddev=self.coef_prior_sd
+                            ),
                             dtype=self.FLOAT_TF,
                             name='intercept_q_scale'
                         )
@@ -208,7 +212,11 @@ class BDTSR(DTSR):
                         name='coefficient_fixed_q_loc'
                     )
                     self.coefficient_fixed_q_scale = tf.Variable(
-                            tf.random_normal([len(f.coefficient_names)], mean=tf.contrib.distributions.softplus_inverse(self.coef_prior_sd), stddev=self.coef_prior_sd),
+                            tf.random_normal(
+                                [len(f.coefficient_names)],
+                                mean=tf.contrib.distributions.softplus_inverse(self.coef_prior_sd),
+                                stddev=self.coef_prior_sd
+                            ),
                             dtype=self.FLOAT_TF,
                             name='coefficient_fixed_q_scale'
                         )
@@ -272,7 +280,11 @@ class BDTSR(DTSR):
                                 ),
                                 scale=tf.nn.softplus(
                                     tf.Variable(
-                                        tf.random_normal([self.rangf_n_levels[i]], mean=tf.contrib.distributions.softplus_inverse(self.coef_prior_sd), stddev=self.coef_prior_sd),
+                                        tf.random_normal(
+                                            [self.rangf_n_levels[i]],
+                                            mean=tf.contrib.distributions.softplus_inverse(self.coef_prior_sd),
+                                            stddev=self.coef_prior_sd
+                                        ),
                                         dtype=self.FLOAT_TF,
                                         name='intercept_q_scale_by_%s' % r.gf
                                     )
@@ -331,7 +343,11 @@ class BDTSR(DTSR):
                                 ),
                                 scale = tf.nn.softplus(
                                     tf.Variable(
-                                        tf.random_normal([self.rangf_n_levels[i], len(f.coefficient_names)], mean=tf.contrib.distributions.softplus_inverse(self.coef_prior_sd), stddev=self.coef_prior_sd),
+                                        tf.random_normal(
+                                            [self.rangf_n_levels[i], len(f.coefficient_names)],
+                                            mean=tf.contrib.distributions.softplus_inverse(self.coef_prior_sd),
+                                            stddev=self.coef_prior_sd
+                                        ),
                                         dtype=self.FLOAT_TF,
                                         name='coefficient_q_scale_by_%s' % r.gf
                                     )
@@ -380,9 +396,10 @@ class BDTSR(DTSR):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 for x in f.atomic_irf_by_family:
-                    p, q = self.__initialize_irf_params_inner__(x, sorted(f.atomic_irf_by_family[x]))
-                    self.atomic_irf_by_family[x] = tf.stack(p, axis=0)
-                    self.atomic_irf_means_by_family[x] = tf.stack(q, axis=0)
+                    if x != 'DiracDelta':
+                        p, q = self.__initialize_irf_params_inner__(x, sorted(f.atomic_irf_by_family[x]))
+                        self.atomic_irf_by_family[x] = tf.stack(p, axis=0)
+                        self.atomic_irf_means_by_family[x] = tf.stack(q, axis=0)
 
     def __initialize_irf_params_inner__(self, family, ids):
         ## Infinitessimal value to add to bounded parameters
@@ -391,85 +408,763 @@ class BDTSR(DTSR):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if family == 'DiracDelta':
-                    filler = tf.expand_dims(tf.constant(1., shape=[1, dim]), -1)
-                    return (filler,), (filler,)
                 if family == 'Exp':
-                    log_L = tf.get_variable(sn('log_L_%s' % '-'.join(ids)), shape=[1, dim],
-                                            initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
-                    L = tf.exp(log_L, name=sn('L_%s' % '-'.join(ids))) + epsilon
-                    for i in range(dim):
-                        tf.summary.scalar('L' + '/%s' % ids[i], L[i], collections=['params'])
-                    return L
+                    L = Normal(
+                        loc=tf.ones([dim]) * tf.contrib.distributions.softplus_inverse(1.),
+                        scale=self.conv_prior_sd,
+                        name=sn('L_%s' % '-'.join(ids))
+                    )
+                    if self.variational():
+                        L_q = Normal(
+                            loc=tf.Variable(
+                                tf.random_normal(
+                                    [dim],
+                                    mean=tf.contrib.distributions.softplus_inverse(1.),
+                                    stddev=self.conv_prior_sd
+                                ),
+                                dtype=self.FLOAT_TF,
+                                name=sn('L_q_loc_%s' % '-'.join(ids))
+                            ),
+                            scale=tf.nn.softplus(
+                                tf.Variable(
+                                    tf.random_normal(
+                                        [dim],
+                                        mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
+                                        stddev=self.conv_prior_sd
+                                    ),
+                                    dtype=self.FLOAT_TF,
+                                    name=sn('L_q_scale_%s' % '-'.join(ids)))
+                            ),
+                            name=sn('L_q_%s' % '-'.join(ids))
+                        )
+                        for i in range(dim):
+                            tf.summary.scalar(
+                                'L' + '/%s' % ids[i],
+                                tf.nn.softplus(L_q.mean()[i]),
+                                collections=['params']
+                            )
+                    else:
+                        L_q = Empirical(
+                            params=tf.Variable(tf.zeros((self.n_samples, dim))),
+                            name=sn('L_q_%s' % '-'.join(ids))
+                        )
+                        if self.inference_name == 'MetropolisHastings':
+                            L_proposal = Normal(
+                                loc=L,
+                                scale=self.conv_prior_sd,
+                                name=sn('L_proposal_%s' % '-'.join(ids))
+                            )
+                            self.proposal_map[L] = L_proposal
+                        for i in range(dim):
+                            tf.summary.scalar(
+                                'L' + '/%s' % ids[i],
+                                tf.nn.softplus(L_q.params[self.global_batch_step - 1, i]),
+                                collections=['params']
+                            )
+                    self.inference_map[L] = L_q
+                    if self.variational():
+                        return (tf.nn.softplus(L),), (tf.nn.softplus(L_q.mean()),)
+                    return (
+                               tf.nn.softplus(L),
+                           ), \
+                           (
+                               tf.nn.softplus(L_q.params[self.global_batch_step - 1]),
+                           )
                 if family == 'ShiftedExp':
-                    log_L = tf.get_variable(sn('log_L_%s' % '-'.join(ids)), shape=[dim],
-                                            initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
-                    log_neg_delta = tf.get_variable(sn('log_neg_delta_%s' % '-'.join(ids)), shape=[dim],
-                                                    initializer=tf.truncated_normal_initializer(stddev=.1),
-                                                    dtype=self.FLOAT_TF)
-                    L = tf.exp(log_L, name=sn('L_%s' % '-'.join(ids))) + epsilon
-                    delta = -tf.exp(log_neg_delta, name=sn('delta_%s' % '-'.join(ids)))
-                    for i in range(dim):
-                        tf.summary.scalar('L' + '/%s' % ids[i], L[i], collections=['params'])
-                        tf.summary.scalar('delta' + '/%s' % ids[i], delta[i], collections=['params'])
-                    return tf.stack([L, delta], axis=0)
+                    L = Normal(
+                        loc=tf.ones([dim]) * tf.contrib.distributions.softplus_inverse(1.),
+                        scale=self.conv_prior_sd,
+                        name=sn('L_%s' % '-'.join(ids))
+                    )
+                    delta = Normal(
+                        loc=tf.ones([dim]) * tf.contrib.distributions.softplus_inverse(1.),
+                        scale=self.conv_prior_sd,
+                        name=sn('delta_%s' % '-'.join(ids))
+                    )
+                    if self.variational():
+                        L_q = Normal(
+                            loc=tf.Variable(
+                                tf.random_normal(
+                                    [dim],
+                                    mean=tf.contrib.distributions.softplus_inverse(1.),
+                                    stddev=self.conv_prior_sd
+                                ),
+                                dtype=self.FLOAT_TF,
+                                name=sn('L_q_loc_%s' % '-'.join(ids))
+                            ),
+                            scale=tf.nn.softplus(
+                                tf.Variable(
+                                    tf.random_normal(
+                                        [dim],
+                                        mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
+                                        stddev=self.conv_prior_sd
+                                    ),
+                                    dtype=self.FLOAT_TF,
+                                    name=sn('L_q_scale_%s' % '-'.join(ids)))
+                            ),
+                            name=sn('L_q_%s' % '-'.join(ids))
+                        )
+                        delta_q = Normal(
+                            loc=tf.Variable(
+                                tf.random_normal(
+                                    [dim],
+                                    mean=tf.contrib.distributions.softplus_inverse(1.),
+                                    stddev=self.conv_prior_sd
+                                ),
+                                dtype=self.FLOAT_TF,
+                                name=sn('delta_q_loc_%s' % '-'.join(ids))
+                            ),
+                            scale=tf.nn.softplus(
+                                tf.Variable(
+                                    tf.random_normal(
+                                        [dim],
+                                        mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
+                                        stddev=self.conv_prior_sd
+                                    ),
+                                    dtype=self.FLOAT_TF,
+                                    name=sn('delta_q_scale_%s' % '-'.join(ids)))
+                            ),
+                            name=sn('delta_q_%s' % '-'.join(ids))
+                        )
+                        for i in range(dim):
+                            tf.summary.scalar(
+                                'L' + '/%s' % ids[i],
+                                tf.nn.softplus(L_q.mean()[i]),
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'delta' + '/%s' % ids[i],
+                                -(tf.nn.softplus(delta_q.mean()[i]) + epsilon),
+                                collections=['params']
+                            )
+                    else:
+                        L_q = Empirical(
+                            params=tf.Variable(tf.zeros((self.n_samples, dim))),
+                            name=sn('L_q_%s' % '-'.join(ids))
+                        )
+                        delta_q = Empirical(
+                            params=tf.Variable(tf.zeros((self.n_samples, dim))),
+                            name=sn('delta_q_%s' % '-'.join(ids))
+                        )
+                        if self.inference_name == 'MetropolisHastings':
+                            L_proposal = Normal(
+                                loc=L,
+                                scale=self.conv_prior_sd,
+                                name=sn('L_proposal_%s' % '-'.join(ids))
+                            )
+                            delta_proposal = Normal(
+                                loc=delta,
+                                scale=self.conv_prior_sd,
+                                name=sn('delta_proposal_%s' % '-'.join(ids))
+                            )
+                            self.proposal_map[L] = L_proposal
+                            self.proposal_map[delta] = delta_proposal
+                        for i in range(dim):
+                            tf.summary.scalar(
+                                'L' + '/%s' % ids[i],
+                                tf.nn.softplus(L_q.params[self.global_batch_step - 1, i]),
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'delta' + '/%s' % ids[i],
+                                -(tf.nn.softplus(delta_q.params[self.global_batch_step - 1, i]) + epsilon),
+                                collections=['params']
+                            )
+                    self.inference_map[L] = L_q
+                    self.inference_map[delta] = delta_q
+                    if self.variational():
+                        return (tf.nn.softplus(L), -(tf.nn.softplus(delta) + epsilon)), (tf.nn.softplus(L_q.mean()), -(tf.nn.softplus(delta_q.mean()) + epsilon))
+                    return (
+                               tf.nn.softplus(L),
+                               -(tf.nn.softplus(delta) + epsilon),
+                           ), \
+                           (
+                               tf.nn.softplus(L_q.params[self.global_batch_step - 1]),
+                               -(tf.nn.softplus(L_q.params[self.global_batch_step - 1]) + epsilon),
+                           )
                 if family == 'Gamma':
-                    log_k = tf.get_variable(sn('log_k_%s' % '-'.join(ids)), shape=[dim],
-                                            initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
-                    log_theta = tf.get_variable(sn('log_theta_%s' % '-'.join(ids)), shape=[dim],
-                                                initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
-                    k = tf.exp(log_k, name=sn('k_%s' % '-'.join(ids))) + epsilon
-                    theta = tf.exp(log_theta, name=sn('theta_%s' % '-'.join(ids))) + epsilon
-                    for i in range(dim):
-                        tf.summary.scalar('k' + '/%s' % ids[i], k[i], collections=['params'])
-                        tf.summary.scalar('theta' + '/%s' % ids[i], theta[i], collections=['params'])
-                    return tf.stack([k, theta])
+                    k = Normal(
+                        loc=tf.ones([dim]) * tf.contrib.distributions.softplus_inverse(1.),
+                        scale=self.conv_prior_sd,
+                        name=sn('k_%s' % '-'.join(ids))
+                    )
+                    theta = Normal(
+                        loc=tf.ones([dim]) * tf.contrib.distributions.softplus_inverse(1.),
+                        scale=self.conv_prior_sd,
+                        name=sn('theta_%s' % '-'.join(ids))
+                    )
+                    if self.variational():
+                        k_q = Normal(
+                            loc=tf.Variable(
+                                tf.random_normal(
+                                    [dim],
+                                    mean=tf.contrib.distributions.softplus_inverse(1.),
+                                    stddev=self.conv_prior_sd
+                                ),
+                                dtype=self.FLOAT_TF,
+                                name=sn('k_q_loc_%s' % '-'.join(ids))
+                            ),
+                            scale=tf.nn.softplus(
+                                tf.Variable(
+                                    tf.random_normal(
+                                        [dim],
+                                        mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
+                                        stddev=self.conv_prior_sd
+                                    ),
+                                    dtype=self.FLOAT_TF,
+                                    name=sn('k_q_scale_%s' % '-'.join(ids)))
+                            ),
+                            name=sn('k_q_%s' % '-'.join(ids))
+                        )
+                        theta_q = Normal(
+                            loc=tf.Variable(
+                                tf.random_normal(
+                                    [dim],
+                                    mean=tf.contrib.distributions.softplus_inverse(1.),
+                                    stddev=self.conv_prior_sd
+                                ),
+                                dtype=self.FLOAT_TF,
+                                name=sn('theta_q_loc_%s' % '-'.join(ids))
+                            ),
+                            scale=tf.nn.softplus(
+                                tf.Variable(
+                                    tf.random_normal(
+                                        [dim],
+                                        mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
+                                        stddev=self.conv_prior_sd
+                                    ),
+                                    dtype=self.FLOAT_TF,
+                                    name=sn('theta_q_scale_%s' % '-'.join(ids))
+                                )
+                            ),
+                            name=sn('theta_q_%s' % '-'.join(ids))
+                        )
+                        for i in range(dim):
+                            tf.summary.scalar(
+                                'k' + '/%s' % ids[i],
+                                tf.nn.softplus(k_q.mean()[i]),
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'theta' + '/%s' % ids[i],
+                                tf.nn.softplus(theta_q.mean()[i]),
+                                collections=['params']
+                            )
+                    else:
+                        k_q = Empirical(
+                            params=tf.Variable(tf.zeros((self.n_samples, dim))),
+                            name=sn('k_q_%s' % '-'.join(ids))
+                        )
+                        theta_q = Empirical(
+                            params=tf.Variable(tf.zeros((self.n_samples, dim))),
+                            name=sn('theta_q_%s' % '-'.join(ids))
+                        )
+                        if self.inference_name == 'MetropolisHastings':
+                            k_proposal = Normal(
+                                loc=k,
+                                scale=self.conv_prior_sd,
+                                name=sn('k_proposal_%s' % '-'.join(ids))
+                            )
+                            theta_proposal = Normal(
+                                loc=theta,
+                                scale=self.conv_prior_sd,
+                                name=sn('theta_proposal_%s' % '-'.join(ids))
+                            )
+                            self.proposal_map[k] = k_proposal
+                            self.proposal_map[theta] = theta_proposal
+                        for i in range(dim):
+                            tf.summary.scalar(
+                                'k' + '/%s' % ids[i],
+                                tf.nn.softplus(k_q.params[self.global_batch_step - 1, i]),
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'theta' + '/%s' % ids[i],
+                                tf.nn.softplus(theta_q.params[self.global_batch_step - 1, i]),
+                                collections=['params']
+                            )
+                    self.inference_map[k] = k_q
+                    self.inference_map[theta] = theta_q
+                    if self.variational():
+                        return (tf.nn.softplus(k), tf.nn.softplus(theta)), (tf.nn.softplus(k_q.mean()), tf.nn.softplus(theta_q.mean()))
+                    return (
+                               tf.nn.softplus(k),
+                               tf.nn.softplus(theta)
+                           ), \
+                           (
+                               tf.nn.softplus(k_q.params[self.global_batch_step - 1]),
+                               tf.nn.softplus(theta_q.params[self.global_batch_step - 1])
+                           )
                 if family == 'GammaKgt1':
-                    log_k = tf.get_variable(sn('log_k_%s' % '-'.join(ids)), shape=[dim],
-                                            initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
-                    log_theta = tf.get_variable(sn('log_theta_%s' % '-'.join(ids)), shape=[dim],
-                                                initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
-                    k = tf.exp(log_k, name=sn('k_%s' % '-'.join(ids))) + epsilon + 1.
-                    theta = tf.exp(log_theta, name=sn('theta_%s' % '-'.join(ids))) + epsilon
-                    for i in range(dim):
-                        tf.summary.scalar('k' + '/%s' % ids[i], k[i], collections=['params'])
-                        tf.summary.scalar('theta' + '/%s' % ids[i], theta[i], collections=['params'])
-                    return tf.stack([k, theta])
+                    k = Normal(
+                        loc=tf.ones([dim]) * tf.contrib.distributions.softplus_inverse(1.),
+                        scale=self.conv_prior_sd,
+                        name=sn('k_%s' % '-'.join(ids))
+                    )
+                    theta = Normal(
+                        loc=tf.ones([dim]) * tf.contrib.distributions.softplus_inverse(1.),
+                        scale=self.conv_prior_sd,
+                        name=sn('theta_%s' % '-'.join(ids))
+                    )
+                    if self.variational():
+                        k_q = Normal(
+                            loc=tf.Variable(
+                                tf.random_normal(
+                                    [dim],
+                                    mean=tf.contrib.distributions.softplus_inverse(1.),
+                                    stddev=self.conv_prior_sd
+                                ),
+                                dtype=self.FLOAT_TF,
+                                name=sn('k_q_loc_%s' % '-'.join(ids))
+                            ),
+                            scale=tf.nn.softplus(
+                                tf.Variable(
+                                    tf.random_normal(
+                                        [dim],
+                                        mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
+                                        stddev=self.conv_prior_sd
+                                    ),
+                                    dtype=self.FLOAT_TF,
+                                    name=sn('k_q_scale_%s' % '-'.join(ids)))
+                            ),
+                            name=sn('k_q_%s' % '-'.join(ids))
+                        )
+                        theta_q = Normal(
+                            loc=tf.Variable(
+                                tf.random_normal(
+                                    [dim],
+                                    mean=tf.contrib.distributions.softplus_inverse(1.),
+                                    stddev=self.conv_prior_sd
+                                ),
+                                dtype=self.FLOAT_TF,
+                                name=sn('theta_q_loc_%s' % '-'.join(ids))
+                            ),
+                            scale=tf.nn.softplus(
+                                tf.Variable(
+                                    tf.random_normal(
+                                        [dim],
+                                        mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
+                                        stddev=self.conv_prior_sd
+                                    ),
+                                    dtype=self.FLOAT_TF,
+                                    name=sn('theta_q_scale_%s' % '-'.join(ids))
+                                )
+                            ),
+                            name=sn('theta_q_%s' % '-'.join(ids))
+                        )
+                        for i in range(dim):
+                            tf.summary.scalar(
+                                'k' + '/%s' % ids[i],
+                                tf.nn.softplus(k_q.mean()[i]) + 1.,
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'theta' + '/%s' % ids[i],
+                                tf.nn.softplus(theta_q.mean()[i]),
+                                collections=['params']
+                            )
+                    else:
+                        k_q = Empirical(
+                            params=tf.Variable(tf.zeros((self.n_samples, dim))),
+                            name=sn('k_q_%s' % '-'.join(ids))
+                        )
+                        theta_q = Empirical(
+                            params=tf.Variable(tf.zeros((self.n_samples, dim))),
+                            name=sn('theta_q_%s' % '-'.join(ids))
+                        )
+                        if self.inference_name == 'MetropolisHastings':
+                            k_proposal = Normal(
+                                loc=k,
+                                scale=self.conv_prior_sd,
+                                name=sn('k_proposal_%s' % '-'.join(ids))
+                            )
+                            theta_proposal = Normal(
+                                loc=theta,
+                                scale=self.conv_prior_sd,
+                                name=sn('theta_proposal_%s' % '-'.join(ids))
+                            )
+                            self.proposal_map[k] = k_proposal
+                            self.proposal_map[theta] = theta_proposal
+                        for i in range(dim):
+                            tf.summary.scalar(
+                                'k' + '/%s' % ids[i],
+                                tf.nn.softplus(k_q.params[self.global_batch_step - 1, i]) + 1.,
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'theta' + '/%s' % ids[i],
+                                tf.nn.softplus(theta_q.params[self.global_batch_step - 1, i]),
+                                collections=['params']
+                            )
+                    self.inference_map[k] = k_q
+                    self.inference_map[theta] = theta_q
+                    if self.variational():
+                        return (tf.nn.softplus(k) + 1., tf.nn.softplus(theta)), (tf.nn.softplus(k_q.mean()) + 1., tf.nn.softplus(theta_q.mean()))
+                    return (
+                               tf.nn.softplus(k) + 1.,
+                               tf.nn.softplus(theta)
+                           ), \
+                           (
+                               tf.nn.softplus(k_q.params[self.global_batch_step - 1]) + 1.,
+                               tf.nn.softplus(theta_q.params[self.global_batch_step - 1])
+                           )
                 if family == 'ShiftedGamma':
-                    log_k = tf.get_variable(sn('log_k_%s' % '-'.join(ids)), shape=[dim],
-                                            initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
-                    log_theta = tf.get_variable(sn('log_theta_%s' % '-'.join(ids)), shape=[dim],
-                                                initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
-                    log_neg_delta = tf.get_variable(sn('log_neg_delta_%s' % '-'.join(ids)), shape=[dim],
-                                                    initializer=tf.truncated_normal_initializer(stddev=.1),
-                                                    dtype=self.FLOAT_TF)
-                    k = tf.exp(log_k, name=sn('k')) + epsilon
-                    theta = tf.exp(log_theta, name=sn('theta_%s' % '-'.join(ids))) + epsilon
-                    delta = -tf.exp(log_neg_delta, name=sn('delta_%s' % '-'.join(ids)))
-                    for i in range(dim):
-                        tf.summary.scalar('k' + '/%s' % ids[i], k[i], collections=['params'])
-                        tf.summary.scalar('theta' + '/%s' % ids[i], theta[i], collections=['params'])
-                        tf.summary.scalar('delta' + '/%s' % ids[i], delta[i], collections=['params'])
-                    return tf.stack([k, theta, delta], axis=0)
+                    k = Normal(
+                        loc=tf.ones([dim]) * tf.contrib.distributions.softplus_inverse(1.),
+                        scale=self.conv_prior_sd,
+                        name=sn('k_%s' % '-'.join(ids))
+                    )
+                    theta = Normal(
+                        loc=tf.ones([dim]) * tf.contrib.distributions.softplus_inverse(1.),
+                        scale=self.conv_prior_sd,
+                        name=sn('theta_%s' % '-'.join(ids))
+                    )
+                    delta = Normal(
+                        loc=tf.ones([dim]) * tf.contrib.distributions.softplus_inverse(1.),
+                        scale=self.conv_prior_sd,
+                        name=sn('delta_%s' % '-'.join(ids))
+                    )
+                    if self.variational():
+                        k_q = Normal(
+                            loc=tf.Variable(
+                                tf.random_normal(
+                                    [dim],
+                                    mean=tf.contrib.distributions.softplus_inverse(1.),
+                                    stddev=self.conv_prior_sd
+                                ),
+                                dtype=self.FLOAT_TF,
+                                name=sn('k_q_loc_%s' % '-'.join(ids))
+                            ),
+                            scale=tf.nn.softplus(
+                                tf.Variable(
+                                    tf.random_normal(
+                                        [dim],
+                                        mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
+                                        stddev=self.conv_prior_sd
+                                    ),
+                                    dtype=self.FLOAT_TF,
+                                    name=sn('k_q_scale_%s' % '-'.join(ids)))
+                            ),
+                            name=sn('k_q_%s' % '-'.join(ids))
+                        )
+                        theta_q = Normal(
+                            loc=tf.Variable(
+                                tf.random_normal(
+                                    [dim],
+                                    mean=tf.contrib.distributions.softplus_inverse(1.),
+                                    stddev=self.conv_prior_sd
+                                ),
+                                dtype=self.FLOAT_TF,
+                                name=sn('theta_q_loc_%s' % '-'.join(ids))
+                            ),
+                            scale=tf.nn.softplus(
+                                tf.Variable(
+                                    tf.random_normal(
+                                        [dim],
+                                        mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
+                                        stddev=self.conv_prior_sd
+                                    ),
+                                    dtype=self.FLOAT_TF,
+                                    name=sn('theta_q_scale_%s' % '-'.join(ids))
+                                )
+                            ),
+                            name=sn('theta_q_%s' % '-'.join(ids))
+                        )
+                        delta_q = Normal(
+                            loc=tf.Variable(
+                                tf.random_normal(
+                                    [dim],
+                                    mean=tf.contrib.distributions.softplus_inverse(1.),
+                                    stddev=self.conv_prior_sd
+                                ),
+                                dtype=self.FLOAT_TF,
+                                name=sn('delta_q_loc_%s' % '-'.join(ids))
+                            ),
+                            scale=tf.nn.softplus(
+                                tf.Variable(
+                                    tf.random_normal(
+                                        [dim],
+                                        mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
+                                        stddev=self.conv_prior_sd
+                                    ),
+                                    dtype=self.FLOAT_TF,
+                                    name=sn('delta_q_scale_%s' % '-'.join(ids))
+                                )
+                            ),
+                            name=sn('delta_q_%s' % '-'.join(ids))
+                        )
+                        for i in range(dim):
+                            tf.summary.scalar(
+                                'k' + '/%s' % ids[i],
+                                tf.nn.softplus(k_q.mean()[i]),
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'theta' + '/%s' % ids[i],
+                                tf.nn.softplus(theta_q.mean()[i]),
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'delta' + '/%s' % ids[i],
+                                -(tf.nn.softplus(theta_q.mean()[i]) + epsilon),
+                                collections=['params']
+                            )
+                    else:
+                        k_q = Empirical(
+                            params=tf.Variable(tf.zeros((self.n_samples, dim))),
+                            name=sn('k_q_%s' % '-'.join(ids))
+                        )
+                        theta_q = Empirical(
+                            params=tf.Variable(tf.zeros((self.n_samples, dim))),
+                            name=sn('theta_q_%s' % '-'.join(ids))
+                        )
+                        delta_q = Empirical(
+                            params=tf.Variable(tf.zeros((self.n_samples, dim))),
+                            name=sn('delta_q_%s' % '-'.join(ids))
+                        )
+                        if self.inference_name == 'MetropolisHastings':
+                            k_proposal = Normal(
+                                loc=k,
+                                scale=self.conv_prior_sd,
+                                name=sn('k_proposal_%s' % '-'.join(ids))
+                            )
+                            theta_proposal = Normal(
+                                loc=theta,
+                                scale=self.conv_prior_sd,
+                                name=sn('theta_proposal_%s' % '-'.join(ids))
+                            )
+                            delta_proposal = Normal(
+                                loc=theta,
+                                scale=self.conv_prior_sd,
+                                name=sn('delta_proposal_%s' % '-'.join(ids))
+                            )
+                            self.proposal_map[k] = k_proposal
+                            self.proposal_map[theta] = theta_proposal
+                            self.proposal_map[delta] = delta_proposal
+                        for i in range(dim):
+                            tf.summary.scalar(
+                                'k' + '/%s' % ids[i],
+                                tf.nn.softplus(k_q.params[self.global_batch_step - 1, i]),
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'theta' + '/%s' % ids[i],
+                                tf.nn.softplus(theta_q.params[self.global_batch_step - 1, i]),
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'delta' + '/%s' % ids[i],
+                                -(tf.nn.softplus(delta_q.params[self.global_batch_step - 1, i]) + epsilon),
+                                collections=['params']
+                            )
+                    self.inference_map[k] = k_q
+                    self.inference_map[theta] = theta_q
+                    self.inference_map[delta] = delta_q
+                    if self.variational():
+                        return (
+                                   tf.nn.softplus(k),
+                                   tf.nn.softplus(theta),
+                                   -(tf.nn.softplus(delta)+epsilon)
+                               ), \
+                               (
+                                   tf.nn.softplus(k_q.mean()),
+                                   tf.nn.softplus(theta_q.mean()),
+                                   -(tf.nn.softplus(delta_q.mean()) + epsilon)
+                               )
+                    return (
+                               tf.nn.softplus(k),
+                               tf.nn.softplus(theta),
+                               -(tf.nn.softplus(delta) + epsilon)
+                           ), \
+                           (
+                               tf.nn.softplus(k_q.params[self.global_batch_step - 1]),
+                               tf.nn.softplus(theta_q.params[self.global_batch_step - 1]),
+                               -(tf.nn.softplus(delta_q.params[self.global_batch_step - 1]) + epsilon)
+                           )
                 if family == 'ShiftedGammaKgt1':
-                    log_k = tf.get_variable(sn('log_k_%s' % '-'.join(ids)), shape=[dim],
-                                            initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
-                    log_theta = tf.get_variable(sn('log_theta_%s' % '-'.join(ids)), shape=[dim],
-                                                initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
-                    log_neg_delta = tf.get_variable(sn('log_neg_delta_%s' % '-'.join(ids)), shape=[dim],
-                                                    initializer=tf.truncated_normal_initializer(stddev=.1),
-                                                    dtype=self.FLOAT_TF)
-                    k = tf.nn.softplus(log_k, name=sn('k_%s' % '-'.join(ids))) + 1. + epsilon
-                    theta = tf.exp(log_theta, name=sn('theta_%s' % '-'.join(ids))) + epsilon
-                    delta = -tf.exp(log_neg_delta, name=sn('delta_%s' % '-'.join(ids)))
-                    for i in range(dim):
-                        tf.summary.scalar('k' + '/%s' % ids[i], k[i], collections=['params'])
-                        tf.summary.scalar('theta' + '/%s' % ids[i], theta[i], collections=['params'])
-                        tf.summary.scalar('delta' + '/%s' % ids[i], delta[i], collections=['params'])
-                    return tf.stack([k, theta, delta], axis=0)
+                    k = Normal(
+                        loc=tf.ones([dim]) * tf.contrib.distributions.softplus_inverse(1.),
+                        scale=self.conv_prior_sd,
+                        name=sn('k_%s' % '-'.join(ids))
+                    )
+                    theta = Normal(
+                        loc=tf.ones([dim]) * tf.contrib.distributions.softplus_inverse(1.),
+                        scale=self.conv_prior_sd,
+                        name=sn('theta_%s' % '-'.join(ids))
+                    )
+                    delta = Normal(
+                        loc=tf.ones([dim]) * tf.contrib.distributions.softplus_inverse(1.),
+                        scale=self.conv_prior_sd,
+                        name=sn('delta_%s' % '-'.join(ids))
+                    )
+                    if self.variational():
+                        k_q = Normal(
+                            loc=tf.Variable(
+                                tf.random_normal(
+                                    [dim],
+                                    mean=tf.contrib.distributions.softplus_inverse(1.),
+                                    stddev=self.conv_prior_sd
+                                ),
+                                dtype=self.FLOAT_TF,
+                                name=sn('k_q_loc_%s' % '-'.join(ids))
+                            ),
+                            scale=tf.nn.softplus(
+                                tf.Variable(
+                                    tf.random_normal(
+                                        [dim],
+                                        mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
+                                        stddev=self.conv_prior_sd
+                                    ),
+                                    dtype=self.FLOAT_TF,
+                                    name=sn('k_q_scale_%s' % '-'.join(ids)))
+                            ),
+                            name=sn('k_q_%s' % '-'.join(ids))
+                        )
+                        theta_q = Normal(
+                            loc=tf.Variable(
+                                tf.random_normal(
+                                    [dim],
+                                    mean=tf.contrib.distributions.softplus_inverse(1.),
+                                    stddev=self.conv_prior_sd
+                                ),
+                                dtype=self.FLOAT_TF,
+                                name=sn('theta_q_loc_%s' % '-'.join(ids))
+                            ),
+                            scale=tf.nn.softplus(
+                                tf.Variable(
+                                    tf.random_normal(
+                                        [dim],
+                                        mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
+                                        stddev=self.conv_prior_sd
+                                    ),
+                                    dtype=self.FLOAT_TF,
+                                    name=sn('theta_q_scale_%s' % '-'.join(ids))
+                                )
+                            ),
+                            name=sn('theta_q_%s' % '-'.join(ids))
+                        )
+                        delta_q = Normal(
+                            loc=tf.Variable(
+                                tf.random_normal(
+                                    [dim],
+                                    mean=tf.contrib.distributions.softplus_inverse(1.),
+                                    stddev=self.conv_prior_sd
+                                ),
+                                dtype=self.FLOAT_TF,
+                                name=sn('delta_q_loc_%s' % '-'.join(ids))
+                            ),
+                            scale=tf.nn.softplus(
+                                tf.Variable(
+                                    tf.random_normal(
+                                        [dim],
+                                        mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
+                                        stddev=self.conv_prior_sd
+                                    ),
+                                    dtype=self.FLOAT_TF,
+                                    name=sn('delta_q_scale_%s' % '-'.join(ids))
+                                )
+                            ),
+                            name=sn('delta_q_%s' % '-'.join(ids))
+                        )
+                        for i in range(dim):
+                            tf.summary.scalar(
+                                'k' + '/%s' % ids[i],
+                                tf.nn.softplus(k_q.mean()[i]) + 1.,
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'theta' + '/%s' % ids[i],
+                                tf.nn.softplus(theta_q.mean()[i]),
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'delta' + '/%s' % ids[i],
+                                -(tf.nn.softplus(theta_q.mean()[i]) + epsilon),
+                                collections=['params']
+                            )
+                    else:
+                        k_q = Empirical(
+                            params=tf.Variable(tf.zeros((self.n_samples, dim))),
+                            name=sn('k_q_%s' % '-'.join(ids))
+                        )
+                        theta_q = Empirical(
+                            params=tf.Variable(tf.zeros((self.n_samples, dim))),
+                            name=sn('theta_q_%s' % '-'.join(ids))
+                        )
+                        delta_q = Empirical(
+                            params=tf.Variable(tf.zeros((self.n_samples, dim))),
+                            name=sn('delta_q_%s' % '-'.join(ids))
+                        )
+                        if self.inference_name == 'MetropolisHastings':
+                            k_proposal = Normal(
+                                loc=k,
+                                scale=self.conv_prior_sd,
+                                name=sn('k_proposal_%s' % '-'.join(ids))
+                            )
+                            theta_proposal = Normal(
+                                loc=theta,
+                                scale=self.conv_prior_sd,
+                                name=sn('theta_proposal_%s' % '-'.join(ids))
+                            )
+                            delta_proposal = Normal(
+                                loc=theta,
+                                scale=self.conv_prior_sd,
+                                name=sn('delta_proposal_%s' % '-'.join(ids))
+                            )
+                            self.proposal_map[k] = k_proposal
+                            self.proposal_map[theta] = theta_proposal
+                            self.proposal_map[delta] = delta_proposal
+                        for i in range(dim):
+                            tf.summary.scalar(
+                                'k' + '/%s' % ids[i],
+                                tf.nn.softplus(k_q.params[self.global_batch_step - 1, i]) + 1.,
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'theta' + '/%s' % ids[i],
+                                tf.nn.softplus(theta_q.params[self.global_batch_step - 1, i]),
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'delta' + '/%s' % ids[i],
+                                -(tf.nn.softplus(delta_q.params[self.global_batch_step - 1, i]) + epsilon),
+                                collections=['params']
+                            )
+                    self.inference_map[k] = k_q
+                    self.inference_map[theta] = theta_q
+                    self.inference_map[delta] = delta_q
+                    if self.variational():
+                        return (
+                                   tf.nn.softplus(k) + 1.,
+                                   tf.nn.softplus(theta),
+                                   -(tf.nn.softplus(delta) + epsilon)
+                               ), \
+                               (
+                                   tf.nn.softplus(k_q.mean()) + 1.,
+                                   tf.nn.softplus(theta_q.mean()),
+                                   -(tf.nn.softplus(delta_q.mean()) + epsilon)
+                               )
+                    return (
+                               tf.nn.softplus(k) + 1.,
+                               tf.nn.softplus(theta),
+                               -(tf.nn.softplus(delta) + epsilon)
+                           ), \
+                           (
+                               tf.nn.softplus(k_q.params[self.global_batch_step - 1]) + 1.,
+                               tf.nn.softplus(theta_q.params[self.global_batch_step - 1]),
+                               -(tf.nn.softplus(delta_q.params[self.global_batch_step - 1]) + epsilon)
+                           )
                 if family == 'Normal':
-                    mu = Normal(loc=tf.zeros([dim]), scale=self.conv_prior_sd, name=sn('mu_%s' % '-'.join(ids)))
-                    sigma = Normal(loc=tf.zeros([dim]), scale=1., name=sn('sigma_%s' % '-'.join(ids)))
+                    mu = Normal(
+                        loc=tf.zeros([dim]),
+                        scale=self.conv_prior_sd,
+                        name=sn('mu_%s' % '-'.join(ids))
+                    )
+                    sigma = Normal(
+                        loc=tf.ones([dim])*tf.contrib.distributions.softplus_inverse(1.),
+                        scale=self.conv_prior_sd,
+                        name=sn('sigma_%s' % '-'.join(ids))
+                    )
                     if self.variational():
                         mu_q = Normal(
                             loc=tf.Variable(
@@ -479,7 +1174,11 @@ class BDTSR(DTSR):
                             ),
                             scale=tf.nn.softplus(
                                 tf.Variable(
-                                    tf.random_normal([dim], mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd), stddev=self.conv_prior_sd),
+                                    tf.random_normal(
+                                        [dim],
+                                        mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
+                                        stddev=self.conv_prior_sd
+                                    ),
                                     dtype=self.FLOAT_TF,
                                     name=sn('mu_q_scale_%s' % '-'.join(ids)))
                             ),
@@ -487,13 +1186,21 @@ class BDTSR(DTSR):
                         )
                         sigma_q = Normal(
                             loc=tf.Variable(
-                                tf.random_normal([dim], mean=tf.contrib.distributions.softplus_inverse(1.), stddev=self.conv_prior_sd),
+                                tf.random_normal(
+                                    [dim],
+                                    mean=tf.contrib.distributions.softplus_inverse(1.),
+                                    stddev=self.conv_prior_sd
+                                ),
                                 dtype=self.FLOAT_TF,
                                 name=sn('sigma_q_loc_%s' % '-'.join(ids))
                             ),
                             scale=tf.nn.softplus(
                                 tf.Variable(
-                                    tf.random_normal([dim], mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd), stddev=self.conv_prior_sd),
+                                    tf.random_normal(
+                                        [dim],
+                                        mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
+                                        stddev=self.conv_prior_sd
+                                    ),
                                     dtype=self.FLOAT_TF,
                                     name=sn('sigma_q_scale_%s' % '-'.join(ids))
                                 )
@@ -501,9 +1208,16 @@ class BDTSR(DTSR):
                             name=sn('sigma_q_%s' % '-'.join(ids))
                         )
                         for i in range(dim):
-                            tf.summary.scalar('mu' + '/%s' % ids[i], mu_q.mean()[i], collections=['params'])
-                            tf.summary.scalar('sigma' + '/%s' % ids[i], tf.nn.softplus(sigma_q.mean()[i]),
-                                              collections=['params'])
+                            tf.summary.scalar(
+                                'mu' + '/%s' % ids[i],
+                                mu_q.mean()[i],
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'sigma' + '/%s' % ids[i],
+                                tf.nn.softplus(sigma_q.mean()[i]),
+                                collections=['params']
+                            )
                     else:
                         mu_q = Empirical(
                             params=tf.Variable(tf.zeros((self.n_samples, dim))),
@@ -527,51 +1241,81 @@ class BDTSR(DTSR):
                             self.proposal_map[mu] = mu_proposal
                             self.proposal_map[sigma] = sigma_proposal
                         for i in range(dim):
-                            tf.summary.scalar('mu' + '/%s' % ids[i], mu_q.params[self.global_batch_step-1,i], collections=['params'])
-                            tf.summary.scalar('sigma' + '/%s' % ids[i], tf.nn.softplus(sigma_q.params[self.global_batch_step-1,i]),
-                                              collections=['params'])
+                            tf.summary.scalar(
+                                'mu' + '/%s' % ids[i],
+                                mu_q.params[self.global_batch_step-1,i],
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'sigma' + '/%s' % ids[i],
+                                tf.nn.softplus(sigma_q.params[self.global_batch_step-1,i]),
+                                collections=['params']
+                            )
                     self.inference_map[mu] = mu_q
                     self.inference_map[sigma] = sigma_q
                     if self.variational():
                         return (mu, tf.nn.softplus(sigma)), (mu_q.mean(), tf.nn.softplus(sigma_q.mean()))
-                    return (mu, tf.nn.softplus(sigma)), (mu_q.params[self.global_batch_step-1], tf.nn.softplus(sigma_q.params[self.global_batch_step-1]))
+                    return (
+                               mu,
+                               tf.nn.softplus(sigma)
+                           ), \
+                           (
+                               mu_q.params[self.global_batch_step-1],
+                               tf.nn.softplus(sigma_q.params[self.global_batch_step-1])
+                           )
                 if family == 'SkewNormal':
                     mu = Normal(
                         loc=tf.zeros([dim]),
-                        scale=tf.ones([dim]) * self.conv_prior_sd,
+                        scale=self.conv_prior_sd,
                         name=sn('mu_%s' % '-'.join(ids))
                     )
                     sigma = Normal(
-                        loc=tf.zeros([dim]),
-                        scale=tf.ones([dim]) * self.conv_prior_sd,
+                        loc=tf.ones([dim])*tf.contrib.distributions.softplus_inverse(1.),
+                        scale=self.conv_prior_sd,
                         name=sn('sigma_%s' % '-'.join(ids))
                     )
                     alpha = Normal(
                         loc=tf.zeros([dim]),
-                        scale=tf.ones([dim]) * self.conv_prior_sd,
+                        scale=self.conv_prior_sd,
                         name=sn('alpha_%s' % '-'.join(ids))
                     )
                     if self.variational():
                         mu_q = Normal(
                             loc=tf.Variable(
-                                tf.random_normal([dim], dtype=self.FLOAT_TF),
+                                tf.random_normal([dim], stddev=self.conv_prior_sd),
+                                dtype=self.FLOAT_TF,
                                 name=sn('mu_q_loc_%s' % '-'.join(ids))
                             ),
                             scale=tf.nn.softplus(
                                 tf.Variable(
-                                    tf.random_normal([dim], dtype=self.FLOAT_TF),
+                                    tf.random_normal(
+                                        [dim],
+                                        mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
+                                        stddev=self.conv_prior_sd
+                                    ),
+                                    dtype=self.FLOAT_TF,
                                     name=sn('mu_q_scale_%s' % '-'.join(ids)))
                             ),
                             name=sn('mu_q_%s' % '-'.join(ids))
                         )
                         sigma_q = Normal(
                             loc=tf.Variable(
-                                tf.random_normal([dim], dtype=self.FLOAT_TF),
+                                tf.random_normal(
+                                    [dim],
+                                    mean=tf.contrib.distributions.softplus_inverse(1.),
+                                    stddev=self.conv_prior_sd
+                                ),
+                                dtype=self.FLOAT_TF,
                                 name=sn('sigma_q_loc_%s' % '-'.join(ids))
                             ),
                             scale=tf.nn.softplus(
                                 tf.Variable(
-                                    tf.random_normal([dim], dtype=self.FLOAT_TF),
+                                    tf.random_normal(
+                                        [dim],
+                                        mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
+                                        stddev=self.conv_prior_sd
+                                    ),
+                                    dtype=self.FLOAT_TF,
                                     name=sn('sigma_q_scale_%s' % '-'.join(ids))
                                 )
                             ),
@@ -579,22 +1323,38 @@ class BDTSR(DTSR):
                         )
                         alpha_q = Normal(
                             loc=tf.Variable(
-                                tf.random_normal([dim], dtype=self.FLOAT_TF),
+                                tf.random_normal([dim], stddev=self.conv_prior_sd),
+                                dtype=self.FLOAT_TF,
                                 name=sn('alpha_q_loc_%s' % '-'.join(ids))
                             ),
                             scale=tf.nn.softplus(
                                 tf.Variable(
-                                    tf.random_normal([dim], dtype=self.FLOAT_TF),
-                                    name=sn('alpha_q_scale_%s' % '-'.join(ids))
-                                )
+                                    tf.random_normal(
+                                        [dim],
+                                        mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
+                                        stddev=self.conv_prior_sd
+                                    ),
+                                    dtype=self.FLOAT_TF,
+                                    name=sn('alpha_q_scale_%s' % '-'.join(ids)))
                             ),
                             name=sn('alpha_q_%s' % '-'.join(ids))
                         )
                         for i in range(dim):
-                            tf.summary.scalar('mu' + '/%s' % ids[i], mu_q.mean()[i], collections=['params'])
-                            tf.summary.scalar('sigma' + '/%s' % ids[i], tf.nn.softplus(sigma_q.mean()[i]),
-                                              collections=['params'])
-                            tf.summary.scalar('alpha' + '/%s' % ids[i], alpha_q.mean()[i], collections=['params'])
+                            tf.summary.scalar(
+                                'mu' + '/%s' % ids[i],
+                                mu_q.mean()[i],
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'sigma' + '/%s' % ids[i],
+                                tf.nn.softplus(sigma_q.mean()[i]),
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'alpha' + '/%s' % ids[i],
+                                alpha_q.mean()[i],
+                                collections=['params']
+                            )
                     else:
                         mu_q = Empirical(
                             params=tf.Variable(tf.zeros((self.n_samples, dim))),
@@ -628,56 +1388,89 @@ class BDTSR(DTSR):
                             self.proposal_map[sigma] = sigma_proposal
                             self.proposal_map[alpha] = alpha_proposal
                         for i in range(dim):
-                            tf.summary.scalar('mu' + '/%s' % ids[i], mu_q.params[self.global_batch_step - 1, i],
-                                              collections=['params'])
-                            tf.summary.scalar('sigma' + '/%s' % ids[i],
-                                              tf.nn.softplus(sigma_q.params[self.global_batch_step - 1, i]),
-                                              collections=['params'])
-                            tf.summary.scalar('alpha' + '/%s' % ids[i], alpha_q.params[self.global_batch_step - 1, i],
-                                              collections=['params'])
+                            tf.summary.scalar(
+                                'mu' + '/%s' % ids[i],
+                                mu_q.params[self.global_batch_step - 1, i],
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'sigma' + '/%s' % ids[i],
+                                tf.nn.softplus(sigma_q.params[self.global_batch_step - 1, i]),
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'alpha' + '/%s' % ids[i],
+                                tf.nn.softplus(alpha_q.params[self.global_batch_step - 1, i]),
+                                collections=['alpha']
+                            )
                     self.inference_map[mu] = mu_q
                     self.inference_map[sigma] = sigma_q
                     self.inference_map[alpha] = alpha_q
                     if self.variational():
                         return (mu, tf.nn.softplus(sigma), alpha), (mu_q.mean(), tf.nn.softplus(sigma_q.mean()), alpha_q.mean())
-                    return (mu, tf.nn.softplus(sigma), alpha), (mu_q.params[self.global_batch_step - 1], tf.nn.softplus(sigma_q.params[self.global_batch_step - 1]), alpha_q.params[self.global_batch_step - 1])
+                    return (
+                               mu,
+                               tf.nn.softplus(sigma),
+                               alpha
+                           ), \
+                           (
+                               mu_q.params[self.global_batch_step - 1],
+                               tf.nn.softplus(sigma_q.params[self.global_batch_step - 1]),
+                               alpha_q.params[self.global_batch_step - 1]
+                           )
                 if family == 'EMG':
                     mu = Normal(
                         loc=tf.zeros([dim]),
-                        scale=tf.ones([dim]) * self.conv_prior_sd,
+                        scale=self.conv_prior_sd,
                         name=sn('mu_%s' % '-'.join(ids))
                     )
                     sigma = Normal(
-                        loc=tf.zeros([dim]),
-                        scale=tf.ones([dim]) * self.conv_prior_sd,
+                        loc=tf.ones([dim])*tf.contrib.distributions.softplus_inverse(1.),
+                        scale=self.conv_prior_sd,
                         name=sn('sigma_%s' % '-'.join(ids))
                     )
                     L = Normal(
                         loc=tf.zeros([dim]),
-                        scale=tf.ones([dim]) * self.conv_prior_sd,
+                        scale=self.conv_prior_sd,
                         name=sn('L_%s' % '-'.join(ids))
                     )
                     if self.variational():
                         mu_q = Normal(
                             loc=tf.Variable(
-                                tf.random_normal([dim], dtype=self.FLOAT_TF),
+                                tf.random_normal([dim], stddev=self.conv_prior_sd),
+                                dtype=self.FLOAT_TF,
                                 name=sn('mu_q_loc_%s' % '-'.join(ids))
                             ),
                             scale=tf.nn.softplus(
                                 tf.Variable(
-                                    tf.random_normal([dim], dtype=self.FLOAT_TF),
+                                    tf.random_normal(
+                                        [dim],
+                                        mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
+                                        stddev=self.conv_prior_sd
+                                    ),
+                                    dtype=self.FLOAT_TF,
                                     name=sn('mu_q_scale_%s' % '-'.join(ids)))
                             ),
                             name=sn('mu_q_%s' % '-'.join(ids))
                         )
                         sigma_q = Normal(
                             loc=tf.Variable(
-                                tf.random_normal([dim], dtype=self.FLOAT_TF),
+                                tf.random_normal(
+                                    [dim],
+                                    mean=tf.contrib.distributions.softplus_inverse(1.),
+                                    stddev=self.conv_prior_sd
+                                ),
+                                dtype=self.FLOAT_TF,
                                 name=sn('sigma_q_loc_%s' % '-'.join(ids))
                             ),
                             scale=tf.nn.softplus(
                                 tf.Variable(
-                                    tf.random_normal([dim], dtype=self.FLOAT_TF),
+                                    tf.random_normal(
+                                        [dim],
+                                        mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
+                                        stddev=self.conv_prior_sd
+                                    ),
+                                    dtype=self.FLOAT_TF,
                                     name=sn('sigma_q_scale_%s' % '-'.join(ids))
                                 )
                             ),
@@ -685,22 +1478,39 @@ class BDTSR(DTSR):
                         )
                         L_q = Normal(
                             loc=tf.Variable(
-                                tf.random_normal([dim], dtype=self.FLOAT_TF),
+                                tf.random_normal([dim], stddev=self.conv_prior_sd),
+                                dtype=self.FLOAT_TF,
                                 name=sn('L_q_loc_%s' % '-'.join(ids))
                             ),
                             scale=tf.nn.softplus(
                                 tf.Variable(
-                                    tf.random_normal([dim], dtype=self.FLOAT_TF),
+                                    tf.random_normal(
+                                        [dim],
+                                        mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
+                                        stddev=self.conv_prior_sd
+                                    ),
+                                    dtype=self.FLOAT_TF,
                                     name=sn('L_q_scale_%s' % '-'.join(ids))
                                 )
                             ),
                             name=sn('L_q_%s' % '-'.join(ids))
                         )
                         for i in range(dim):
-                            tf.summary.scalar('mu' + '/%s' % ids[i], mu_q.mean()[i], collections=['params'])
-                            tf.summary.scalar('sigma' + '/%s' % ids[i], tf.nn.softplus(sigma_q.mean()[i]),
-                                              collections=['params'])
-                            tf.summary.scalar('L' + '/%s' % ids[i], L_q.mean()[i], collections=['params'])
+                            tf.summary.scalar(
+                                'mu' + '/%s' % ids[i],
+                                mu_q.mean()[i],
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'sigma' + '/%s' % ids[i],
+                                tf.nn.softplus(sigma_q.mean()[i]),
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'L' + '/%s' % ids[i],
+                                L_q.mean()[i],
+                                collections=['params']
+                            )
                     else:
                         mu_q = Empirical(
                             params=tf.Variable(tf.zeros((self.n_samples, dim))),
@@ -734,46 +1544,323 @@ class BDTSR(DTSR):
                             self.proposal_map[sigma] = sigma_proposal
                             self.proposal_map[L] = L_proposal
                         for i in range(dim):
-                            tf.summary.scalar('mu' + '/%s' % ids[i], mu_q.params[self.global_batch_step - 1, i],
-                                              collections=['params'])
-                            tf.summary.scalar('sigma' + '/%s' % ids[i],
-                                              tf.nn.softplus(sigma_q.params[self.global_batch_step - 1, i]),
-                                              collections=['params'])
-                            tf.summary.scalar('L' + '/%s' % ids[i], L_q.params[self.global_batch_step - 1, i],
-                                              collections=['params'])
+                            tf.summary.scalar(
+                                'mu' + '/%s' % ids[i],
+                                mu_q.params[self.global_batch_step - 1, i],
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'sigma' + '/%s' % ids[i],
+                                tf.nn.softplus(sigma_q.params[self.global_batch_step - 1, i]),
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'L' + '/%s' % ids[i],
+                                L_q.params[self.global_batch_step - 1, i],
+                                collections=['params']
+                            )
                     self.inference_map[mu] = mu_q
                     self.inference_map[sigma] = sigma_q
                     self.inference_map[L] = L_q
                     if self.variational():
-                        return (mu, tf.nn.softplus(sigma), tf.nn.softplus(L)), (mu_q.mean(), tf.nn.softplus(sigma_q.mean()), tf.nn.softplus(L_q.mean()))
-                    return (mu, tf.nn.softplus(sigma), tf.nn.softplus(L)), (mu_q.params[self.global_batch_step - 1], tf.nn.softplus(sigma_q.params[self.global_batch_step - 1]), tf.nn.softplus(L_q.params[self.global_batch_step - 1]))
+                        return (mu, tf.nn.softplus(sigma), tf.nn.softplus(L)), \
+                               (mu_q.mean(), tf.nn.softplus(sigma_q.mean()), tf.nn.softplus(L_q.mean()))
+                    return (
+                               mu,
+                               tf.nn.softplus(sigma),
+                               tf.nn.softplus(L)
+                           ), \
+                           (
+                               mu_q.params[self.global_batch_step - 1],
+                               tf.nn.softplus(sigma_q.params[self.global_batch_step - 1]),
+                               tf.nn.softplus(L_q.params[self.global_batch_step - 1])
+                           )
                 if family == 'BetaPrime':
-                    log_alpha = tf.get_variable(sn('log_alpha_%s' % '-'.join(ids)), shape=[dim],
-                                                initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
-                    log_beta = tf.get_variable(sn('log_beta_%s' % '-'.join(ids)), shape=[dim],
-                                               initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
-                    alpha = tf.exp(log_alpha, name=sn('alpha_%s' % '-'.join(ids))) + epsilon
-                    beta = tf.exp(log_beta, name=sn('beta_%s' % '-'.join(ids))) + epsilon
-                    for i in range(dim):
-                        tf.summary.scalar('alpha' + '/%s' % ids[i], alpha[i], collections=['params'])
-                        tf.summary.scalar('beta' + '/%s' % ids[i], beta[i], collections=['params'])
-                    return tf.stack([alpha, beta], axis=0)
+                    alpha = Normal(
+                        loc=tf.ones([dim]) * tf.contrib.distributions.softplus_inverse(1.),
+                        scale=self.conv_prior_sd,
+                        name=sn('alpha_%s' % '-'.join(ids))
+                    )
+                    beta = Normal(
+                        loc=tf.ones([dim]) * tf.contrib.distributions.softplus_inverse(1.),
+                        scale=self.conv_prior_sd,
+                        name=sn('beta_%s' % '-'.join(ids))
+                    )
+                    if self.variational():
+                        alpha_q = Normal(
+                            loc=tf.Variable(
+                                tf.random_normal(
+                                    [dim],
+                                    mean=tf.contrib.distributions.softplus_inverse(1.),
+                                    stddev=self.conv_prior_sd
+                                ),
+                                dtype=self.FLOAT_TF,
+                                name=sn('alpha_q_loc_%s' % '-'.join(ids))
+                            ),
+                            scale=tf.nn.softplus(
+                                tf.Variable(
+                                    tf.random_normal(
+                                        [dim],
+                                        mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
+                                        stddev=self.conv_prior_sd
+                                    ),
+                                    dtype=self.FLOAT_TF,
+                                    name=sn('alpha_q_scale_%s' % '-'.join(ids)))
+                            ),
+                            name=sn('alpha_q_%s' % '-'.join(ids))
+                        )
+                        beta_q = Normal(
+                            loc=tf.Variable(
+                                tf.random_normal(
+                                    [dim],
+                                    mean=tf.contrib.distributions.softplus_inverse(1.),
+                                    stddev=self.conv_prior_sd
+                                ),
+                                dtype=self.FLOAT_TF,
+                                name=sn('beta_q_loc_%s' % '-'.join(ids))
+                            ),
+                            scale=tf.nn.softplus(
+                                tf.Variable(
+                                    tf.random_normal(
+                                        [dim],
+                                        mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
+                                        stddev=self.conv_prior_sd
+                                    ),
+                                    dtype=self.FLOAT_TF,
+                                    name=sn('beta_q_scale_%s' % '-'.join(ids))
+                                )
+                            ),
+                            name=sn('beta_q_%s' % '-'.join(ids))
+                        )
+                        for i in range(dim):
+                            tf.summary.scalar(
+                                'alpha' + '/%s' % ids[i],
+                                tf.nn.softplus(alpha_q.mean()[i]),
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'beta' + '/%s' % ids[i],
+                                tf.nn.softplus(beta_q.mean()[i]),
+                                collections=['params']
+                            )
+                    else:
+                        alpha_q = Empirical(
+                            params=tf.Variable(tf.zeros((self.n_samples, dim))),
+                            name=sn('alpha_q_%s' % '-'.join(ids))
+                        )
+                        beta_q = Empirical(
+                            params=tf.Variable(tf.zeros((self.n_samples, dim))),
+                            name=sn('beta_q_%s' % '-'.join(ids))
+                        )
+                        if self.inference_name == 'MetropolisHastings':
+                            alpha_proposal = Normal(
+                                loc=alpha,
+                                scale=self.conv_prior_sd,
+                                name=sn('alpha_proposal_%s' % '-'.join(ids))
+                            )
+                            beta_proposal = Normal(
+                                loc=beta,
+                                scale=self.conv_prior_sd,
+                                name=sn('beta_proposal_%s' % '-'.join(ids))
+                            )
+                            self.proposal_map[alpha] = alpha_proposal
+                            self.proposal_map[beta] = beta_proposal
+                        for i in range(dim):
+                            tf.summary.scalar(
+                                'alpha' + '/%s' % ids[i],
+                                tf.nn.softplus(alpha_q.params[self.global_batch_step - 1, i]),
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'beta' + '/%s' % ids[i],
+                                tf.nn.softplus(beta_q.params[self.global_batch_step - 1, i]),
+                                collections=['params']
+                            )
+                    self.inference_map[alpha] = alpha_q
+                    self.inference_map[beta] = beta_q
+                    if self.variational():
+                        return (tf.nn.softplus(alpha), tf.nn.softplus(beta)), (
+                        tf.nn.softplus(alpha_q.mean()), tf.nn.softplus(beta_q.mean()))
+                    return (
+                               tf.nn.softplus(alpha),
+                               tf.nn.softplus(beta)
+                           ), \
+                           (
+                               tf.nn.softplus(alpha_q.params[self.global_batch_step - 1]),
+                               tf.nn.softplus(beta_q.params[self.global_batch_step - 1])
+                           )
                 if family == 'ShiftedBetaPrime':
-                    log_alpha = tf.get_variable(sn('log_alpha_%s' % '-'.join(ids)), shape=[dim],
-                                                initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
-                    log_beta = tf.get_variable(sn('log_beta_%s' % '-'.join(ids)), shape=[dim],
-                                               initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
-                    log_neg_delta = tf.get_variable(sn('log_neg_delta_%s' % '-'.join(ids)), shape=[dim],
-                                                    initializer=tf.truncated_normal_initializer(stddev=.1),
-                                                    dtype=self.FLOAT_TF)
-                    alpha = tf.exp(log_alpha, name=sn('alpha_%s' % '-'.join(ids))) + epsilon
-                    beta = tf.exp(log_beta, name=sn('beta_%s' % '-'.join(ids))) + epsilon
-                    delta = -tf.exp(log_neg_delta, name=sn('delta_%s' % '-'.join(ids)))
-                    for i in range(dim):
-                        tf.summary.scalar('alpha' + '/%s' % ids[i], alpha[i], collections=['params'])
-                        tf.summary.scalar('beta' + '/%s' % ids[i], beta[i], collections=['params'])
-                        tf.summary.scalar('delta' + '/%s' % ids[i], delta[i], collections=['params'])
-                    return tf.stack([alpha, beta, delta], axis=0)
+                    alpha = Normal(
+                        loc=tf.ones([dim]) * tf.contrib.distributions.softplus_inverse(1.),
+                        scale=self.conv_prior_sd,
+                        name=sn('alpha_%s' % '-'.join(ids))
+                    )
+                    beta = Normal(
+                        loc=tf.ones([dim]) * tf.contrib.distributions.softplus_inverse(1.),
+                        scale=self.conv_prior_sd,
+                        name=sn('beta_%s' % '-'.join(ids))
+                    )
+                    delta = Normal(
+                        loc=tf.ones([dim]) * tf.contrib.distributions.softplus_inverse(1.),
+                        scale=self.conv_prior_sd,
+                        name=sn('delta_%s' % '-'.join(ids))
+                    )
+                    if self.variational():
+                        alpha_q = Normal(
+                            loc=tf.Variable(
+                                tf.random_normal(
+                                    [dim],
+                                    mean=tf.contrib.distributions.softplus_inverse(1.),
+                                    stddev=self.conv_prior_sd
+                                ),
+                                dtype=self.FLOAT_TF,
+                                name=sn('alpha_q_loc_%s' % '-'.join(ids))
+                            ),
+                            scale=tf.nn.softplus(
+                                tf.Variable(
+                                    tf.random_normal(
+                                        [dim],
+                                        mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
+                                        stddev=self.conv_prior_sd
+                                    ),
+                                    dtype=self.FLOAT_TF,
+                                    name=sn('alpha_q_scale_%s' % '-'.join(ids)))
+                            ),
+                            name=sn('alpha_q_%s' % '-'.join(ids))
+                        )
+                        beta_q = Normal(
+                            loc=tf.Variable(
+                                tf.random_normal(
+                                    [dim],
+                                    mean=tf.contrib.distributions.softplus_inverse(1.),
+                                    stddev=self.conv_prior_sd
+                                ),
+                                dtype=self.FLOAT_TF,
+                                name=sn('beta_q_loc_%s' % '-'.join(ids))
+                            ),
+                            scale=tf.nn.softplus(
+                                tf.Variable(
+                                    tf.random_normal(
+                                        [dim],
+                                        mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
+                                        stddev=self.conv_prior_sd
+                                    ),
+                                    dtype=self.FLOAT_TF,
+                                    name=sn('beta_q_scale_%s' % '-'.join(ids))
+                                )
+                            ),
+                            name=sn('beta_q_%s' % '-'.join(ids))
+                        )
+                        delta_q = Normal(
+                            loc=tf.Variable(
+                                tf.random_normal(
+                                    [dim],
+                                    mean=tf.contrib.distributions.softplus_inverse(1.),
+                                    stddev=self.conv_prior_sd
+                                ),
+                                dtype=self.FLOAT_TF,
+                                name=sn('delta_q_loc_%s' % '-'.join(ids))
+                            ),
+                            scale=tf.nn.softplus(
+                                tf.Variable(
+                                    tf.random_normal(
+                                        [dim],
+                                        mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
+                                        stddev=self.conv_prior_sd
+                                    ),
+                                    dtype=self.FLOAT_TF,
+                                    name=sn('delta_q_scale_%s' % '-'.join(ids)))
+                            ),
+                            name=sn('delta_q_%s' % '-'.join(ids))
+                        )
+                        for i in range(dim):
+                            tf.summary.scalar(
+                                'alpha' + '/%s' % ids[i],
+                                tf.nn.softplus(alpha_q.mean()[i]),
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'beta' + '/%s' % ids[i],
+                                tf.nn.softplus(beta_q.mean()[i]),
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'delta' + '/%s' % ids[i],
+                                -(tf.nn.softplus(delta_q.mean()[i]) + epsilon),
+                                collections=['params']
+                            )
+                    else:
+                        alpha_q = Empirical(
+                            params=tf.Variable(tf.zeros((self.n_samples, dim))),
+                            name=sn('alpha_q_%s' % '-'.join(ids))
+                        )
+                        beta_q = Empirical(
+                            params=tf.Variable(tf.zeros((self.n_samples, dim))),
+                            name=sn('beta_q_%s' % '-'.join(ids))
+                        )
+                        delta_q = Empirical(
+                            params=tf.Variable(tf.zeros((self.n_samples, dim))),
+                            name=sn('delta_q_%s' % '-'.join(ids))
+                        )
+                        if self.inference_name == 'MetropolisHastings':
+                            alpha_proposal = Normal(
+                                loc=alpha,
+                                scale=self.conv_prior_sd,
+                                name=sn('alpha_proposal_%s' % '-'.join(ids))
+                            )
+                            beta_proposal = Normal(
+                                loc=beta,
+                                scale=self.conv_prior_sd,
+                                name=sn('beta_proposal_%s' % '-'.join(ids))
+                            )
+                            delta_proposal = Normal(
+                                loc=delta,
+                                scale=self.conv_prior_sd,
+                                name=sn('delta_proposal_%s' % '-'.join(ids))
+                            )
+                            self.proposal_map[alpha] = alpha_proposal
+                            self.proposal_map[beta] = beta_proposal
+                            self.proposal_map[delta] = delta_proposal
+                        for i in range(dim):
+                            tf.summary.scalar(
+                                'alpha' + '/%s' % ids[i],
+                                tf.nn.softplus(alpha_q.params[self.global_batch_step - 1, i]),
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'beta' + '/%s' % ids[i],
+                                tf.nn.softplus(beta_q.params[self.global_batch_step - 1, i]),
+                                collections=['params']
+                            )
+                            tf.summary.scalar(
+                                'delta' + '/%s' % ids[i],
+                                -(tf.nn.softplus(delta_q.params[self.global_batch_step - 1, i]) + epsilon),
+                                collections=['params']
+                            )
+                    self.inference_map[alpha] = alpha_q
+                    self.inference_map[beta] = beta_q
+                    self.inference_map[delta] = delta_q
+                    if self.variational():
+                        return (
+                                   tf.nn.softplus(alpha),
+                                   tf.nn.softplus(beta),
+                                   -(tf.nn.softplus(beta) + epsilon)
+                               ), \
+                               (
+                                   tf.nn.softplus(alpha_q.mean()),
+                                   tf.nn.softplus(beta_q.mean()),
+                                   -(tf.nn.softplus(delta_q.mean()) + epsilon)
+                               )
+                    return (
+                               tf.nn.softplus(alpha),
+                               tf.nn.softplus(beta),
+                               -(tf.nn.softplus(delta) + epsilon)
+                           ), \
+                           (
+                               tf.nn.softplus(alpha_q.params[self.global_batch_step - 1]),
+                               tf.nn.softplus(beta_q.params[self.global_batch_step - 1]),
+                               -(tf.nn.softplus(delta_q.params[self.global_batch_step - 1]) + epsilon)
+                           )
                 raise ValueError('Impulse response function "%s" is not currently supported.' % family)
 
     def __initialize_objective__(self):
@@ -880,15 +1967,16 @@ class BDTSR(DTSR):
 
     def expand_history(self, X, X_time, first_obs, last_obs):
         """
-        Expand 2D matrix of independent variable values into a 3D tensor of `histories` of independent variable values and a 1D vector of independent variable timestamps into a 2D matrix of independent variable timestamp histories.
+        Expand 2D matrix of independent variable values into a 3D tensor of histories of independent variable values and a 1D vector of independent variable timestamps into a 2D matrix of histories of independent variable timestamps.
         This is a necessary preprocessing step for the input data when using ``low_memory=False``.
+        However, ``fit``, ``predict``, and ``eval`` all call ``expand_history()`` internally, so users generally should not need to call ``expand_history()`` directly and may pass their data to those methods as is.
 
         :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
             ``X`` must contain a column for each independent variable in the DTSR ``form_str`` provided at iniialization.
-        :param X_time: ``pandas Series`` or 1D ``numpy`` array; timestamps for the observations in ``X``, grouped and sorted identically to ``X``.
-        :param first_obs: ``pandas Series`` or 1D ``numpy`` array; row indices in ``X`` of the start of the series associated with the current regression target.
+        :param X_time: ``pandas`` ``Series`` or 1D ``numpy`` array; timestamps for the observations in ``X``, grouped and sorted identically to ``X``.
+        :param first_obs: ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the start of the series associated with the current regression target.
             Sort order and number of observations must be identical to that of ``y_time``.
-        :param last_obs: ``pandas Series`` or 1D ``numpy`` array; row indices in ``X`` of the most recent observation in the series associated with the current regression target.
+        :param last_obs: ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the most recent observation in the series associated with the current regression target.
             Sort order and number of observations must be identical to that of ``y_time``.
         :return: ``tuple``; two numpy arrays ``(X_3d, time_X_3d)``, the expanded IV and timestamp tensors.
         """
@@ -1030,18 +2118,19 @@ class BDTSR(DTSR):
             * A column for each independent variable in the DTSR ``form_str`` provided at iniialization
 
         :param y_time: ``pandas`` ``Series`` or 1D ``numpy`` array; timestamps for the regression targets, grouped by series.
-        :param y_rangf: ``pandas Series`` or 1D ``numpy`` array; random grouping factor values (if applicable). Can be of type ``str`` or ``int``.
+        :param y_rangf: ``pandas`` ``Series`` or 1D ``numpy`` array; random grouping factor values (if applicable).
+            Can be of type ``str`` or ``int``.
             Sort order and number of observations must be identical to that of ``y_time``.
-        :param first_obs: ``pandas Series`` or 1D ``numpy`` array; row indices in ``X`` of the start of the series associated with the current regression target.
+        :param first_obs: ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the start of the series associated with the current regression target.
             Sort order and number of observations must be identical to that of ``y_time``.
-        :param last_obs: ``pandas Series`` or 1D ``numpy`` array; row indices in ``X`` of the most recent observation in the series associated with the current regression target.
+        :param last_obs: ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the most recent observation in the series associated with the current regression target.
             Sort order and number of observations must be identical to that of ``y_time``.
         :return: 1D ``numpy`` array; mean network predictions for regression targets (same length and sort order as ``y_time``).
         """
 
         assert len(y_time) == len(y_rangf) == len(first_obs) == len(last_obs), 'y_time, y_rangf, first_obs, and last_obs must be of identical length. Got: len(y_time) = %d, len(y_rangf) = %d, len(first_obs) = %d, len(last_obs) = %d' % (len(y_time), len(y_rangf), len(first_obs), len(last_obs))
 
-        sys.stderr.write('Sampling predictions from posterior...\n')
+        sys.stderr.write('Sampling from predictive posterior...\n')
 
         f = self.form
 
@@ -1087,7 +2176,7 @@ class BDTSR(DTSR):
     def eval(self, X, y):
         """
         Evaluate the pre-trained DTSR model.
-        Predictions are averaged over ``self.n_samples_eval`` samples from the predictive posterior for each regression target.
+        Metrics are averaged over ``self.n_samples_eval`` samples from the predictive posterior for each regression target.
 
         :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
             ``X`` must contain the following columns (additional columns are ignored):
@@ -1105,6 +2194,8 @@ class BDTSR(DTSR):
 
         :return: ``tuple``; three floats ``(mse, mae, logLik)`` for the evaluation data.
         """
+
+        sys.stderr.write('Sampling from predictive posterior...\n')
 
         f = self.form
 
@@ -1136,7 +2227,7 @@ class BDTSR(DTSR):
                     n_minibatch = math.ceil(len(y)/self.minibatch_size)
                     mse = mae = logLik = 0
                     for j in range(0, len(y), self.minibatch_size):
-                        sys.stderr.write('\r%d/%d' % (j + 1, n_minibatch))
+                        sys.stderr.write('\r%d/%d' % ((j/self.minibatch_size)+1, n_minibatch))
                         fd_minibatch = {
                             self.X: X_3d[j:j+self.minibatch_size],
                             self.time_X: time_X_3d[j:j+self.minibatch_size],
@@ -1150,8 +2241,8 @@ class BDTSR(DTSR):
                         mae += mae_cur*len(fd_minibatch[self.y])
                         logLik += logLik_cur
 
-                mse /= n_minibatch
-                mae /= n_minibatch
+                mse /= len(y)
+                mae /= len(y)
 
                 return mse, mae, logLik
 
@@ -1183,5 +2274,5 @@ class BDTSR(DTSR):
             irf_name_map=irf_name_map,
             plot_x_inches=plot_x_inches,
             plot_y_inches=plot_y_inches,
-            cmap=None
+            cmap=cmap
         )

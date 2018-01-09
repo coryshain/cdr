@@ -174,20 +174,23 @@ if __name__ == '__main__':
                 print_tee(summary, [sys.stdout, f_out])
             sys.stderr.write('\n\n')
         elif m.startswith('DTSR'):
-            from dtsr.dtsr import DTSR
-            from dtsr.bdtsr import BDTSR
-
             if not p.use_gpu_if_available:
-                os.environ['CUDA_VISIBLE_DEVICES'] = ''
+                os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
             dv = formula.strip().split('~')[0].strip()
 
             sys.stderr.write('Fitting model %s...\n\n' % m)
             if p.network_type == 'nn':
-                dtsr_model = DTSR(
+                from dtsr.nndtsr import NNDTSR
+                dtsr_model = NNDTSR(
                     formula,
                     y,
                     outdir=p.logdir + '/' + m,
+                    history_length=p.history_length,
+                    low_memory=p.low_memory,
+                    minibatch_size=p.minibatch_size,
+                    logging_freq=p.logging_freq,
+                    save_freq=p.save_freq,
                     optim=p.optim,
                     learning_rate=p.learning_rate,
                     learning_rate_decay_factor=p.learning_rate_decay_factor,
@@ -196,16 +199,21 @@ if __name__ == '__main__':
                     log_random=p.log_random
                 )
             elif p.network_type == 'bayesian':
+                from dtsr.bdtsr import BDTSR
                 dtsr_model = BDTSR(
                     formula,
                     y,
                     outdir=p.logdir + '/' + m,
+                    history_length=p.history_length,
+                    low_memory=p.low_memory,
                     log_random=p.log_random,
                     minibatch_size=p.minibatch_size,
                     inference_name=p.inference_name,
                     n_samples=p.n_samples,
                     n_samples_eval=p.n_samples_eval,
                     n_iter=p.n_epoch_train,
+                    logging_freq=p.logging_freq,
+                    save_freq=p.save_freq,
                     conv_prior_sd=p.conv_prior_sd,
                     coef_prior_sd=p.coef_prior_sd,
                     y_sigma_scale=p.y_sigma_scale
@@ -216,7 +224,6 @@ if __name__ == '__main__':
                 X,
                 y,
                 n_epoch_train=p.n_epoch_train,
-                n_epoch_tune=p.n_epoch_tune,
                 irf_name_map=p.fixef_name_map,
                 plot_x_inches=p.plot_x_inches,
                 plot_y_inches=p.plot_y_inches,
@@ -226,7 +233,14 @@ if __name__ == '__main__':
             with open(p.logdir + '/' + m + '/m.obj', 'wb') as m_file:
                 pickle.dump(dtsr_model, m_file)
 
-            dtsr_preds = dtsr_model.predict(X, y.time, y[dtsr_model.form.rangf], y.first_obs, y.last_obs, minibatch_size=p.minibatch_size)
+            dtsr_preds = dtsr_model.predict(
+                X,
+                y.time,
+                y[dtsr_model.form.rangf],
+                y.first_obs,
+                y.last_obs
+            )
+
             dtsr_mse = mse(y[dv], dtsr_preds)
             dtsr_mae = mae(y[dv], dtsr_preds)
             summary = '=' * 50 + '\n'
@@ -241,5 +255,4 @@ if __name__ == '__main__':
             with open(p.logdir + '/' + m + '/summary.txt', 'w') as f_out:
                 print_tee(summary, [sys.stdout, f_out])
             sys.stderr.write('\n\n')
-
 

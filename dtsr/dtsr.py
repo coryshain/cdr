@@ -92,7 +92,7 @@ class DTSR(object):
         self.INT_NP = getattr(np, self.int_type)
 
         self.outdir = outdir
-        if history_length is None or history_length == 'inf':
+        if history_length is None or history_length in ['None', 'inf']:
             self.history_length = inf
         else:
             self.history_length = history_length
@@ -112,7 +112,7 @@ class DTSR(object):
             self.rangf_n_levels.append(oov_id)
         self.y_mu_init = float(y[f.dv].mean())
         self.y_sigma_init = float(y[f.dv].std())
-        if minibatch_size is None or minibatch_size == 'inf':
+        if minibatch_size is None or minibatch_size in ['None', 'inf']:
             self.minibatch_size = inf
         else:
             self.minibatch_size = minibatch_size
@@ -186,7 +186,7 @@ class DTSR(object):
                 self.y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('y'))
                 self.time_y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('time_y'))
 
-                self.gf_y = tf.placeholder(shape=[None, len(f.random)], dtype=tf.INT)
+                self.gf_y = tf.placeholder(shape=[None, len(f.random)], dtype=self.INT_TF)
 
                 self.first_obs = tf.placeholder(shape=[None], dtype=self.INT_TF, name=sn('first_obs'))
                 self.last_obs = tf.placeholder(shape=[None], dtype=self.INT_TF, name=sn('last_obs'))
@@ -270,17 +270,17 @@ class DTSR(object):
                     alpha = params[0]
                     beta = params[1]
                     return lambda x: (x + epsilon) ** (alpha - 1.) * (1. + (x + epsilon)) ** (-alpha - beta) / tf.exp(
-                        tf.lbeta(tf.transpose(tf.concat([alpha, beta], axis=0))))
+                        tf.lbeta(tf.transpose(tf.stack([alpha, beta], axis=0))))
 
                 self.irf_lambdas['BetaPrime'] = beta_prime
 
                 def shifted_beta_prime(params):
                     alpha = params[0]
                     beta = params[1]
-                    delta = params[3]
+                    delta = params[2]
                     return lambda x: (x - delta + epsilon) ** (alpha - 1) * (1 + (x - delta + epsilon)) ** (
                     -alpha - beta) / tf.exp(
-                        tf.lbeta(tf.transpose(tf.concat([alpha, beta], axis=0))))
+                        tf.lbeta(tf.transpose(tf.stack([alpha, beta], axis=0))))
 
                 self.irf_lambdas['ShiftedBetaPrime'] = shifted_beta_prime
 
@@ -349,7 +349,8 @@ class DTSR(object):
     def __initialize_convolutional_feedforward__(self, t):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                out = []
+                convolved = []
+                coefficients = []
                 for f in t.children:
                     preterminals = []
                     terminals = []
@@ -361,10 +362,11 @@ class DTSR(object):
                             x = t.children[f][child_nodes[i]]
                             terminals.append(x.impulse.name())
                         terminals_ix = names2ix(terminals, self.form.terminal_names)
-                        new_out = tf.gather(self.X, terminals_ix, axis=2)[:,-1,:] * tf.gather(self.coefficient, coefs_ix, axis=1)
-                        out.append(new_out)
+                        new_out = tf.gather(self.X, terminals_ix, axis=2)[:,-1,:]
+                        convolved.append(new_out)
+                        coefficients.append(coefs_ix)
                     else:
-                        tensor = t.irfs[f](t.tensor) * tf.expand_dims(tf.gather(self.coefficient, coefs_ix, axis=1), 1)
+                        tensor = t.irfs[f](t.tensor)
                         for i in range(len(child_nodes)):
                             x = t.children[f][child_nodes[i]]
                             if x.terminal():
@@ -372,33 +374,35 @@ class DTSR(object):
                                 terminals.append(x.impulse.name())
                             x.tensor = tf.expand_dims(tensor[:, :, i],-1)
                             if not x.terminal:
-                                out += self.__initialize_convolutional_feedforward__(x)
+                                convolved_cur, coefs_ix_cur = self.__initialize_convolutional_feedforward__(x)
+                                convolved += convolved_cur
+                                coefs_ix += coefs_ix_cur
                         if len(preterminals) > 0 and len(terminals) > 0:
                             preterminals_ix = names2ix(preterminals, child_nodes)
                             terminals_ix = names2ix(terminals, self.form.terminal_names)
                             new_out = tf.reduce_sum(tf.gather(self.X, terminals_ix, axis=2) * tf.gather(tensor, preterminals_ix, axis=2), 1)
-                            out.append(new_out)
-                return out
+                            convolved.append(new_out)
+                            coefficients.append(coefs_ix)
+                return (convolved, coefficients)
 
-    def __initialize_low_memory_convolutional_feedforward__(self, t, inputs, coef):
+    def __initialize_low_memory_convolutional_feedforward__(self, t, inputs):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                out = []
+                convolved = []
                 for f in t.children:
                     preterminals = []
                     terminals = []
                     child_nodes = sorted(t.children[f].keys())
                     child_coefs = [t.children[f][x].coef_id() for x in child_nodes]
-                    coefs_ix = names2ix(child_coefs, self.form.coefficient_names)
                     if f == 'DiracDelta':
                         for i in range(len(child_nodes)):
                             x = t.children[f][child_nodes[i]]
                             terminals.append(x.impulse.name())
                         terminals_ix = names2ix(terminals, self.form.terminal_names)
-                        new_out = tf.gather(inputs[-1], terminals_ix, axis=0) * tf.gather(self.coefficient[-1], coefs_ix, axis=0)
-                        out.append(new_out)
+                        new_out = tf.gather(inputs[-1], terminals_ix, axis=0)
+                        convolved.append(new_out)
                     else:
-                        tensor = t.irfs[f](t.tensor) * tf.gather(coef, coefs_ix)
+                        tensor = t.irfs[f](t.tensor)
                         for i in range(len(child_nodes)):
                             x = t.children[f][child_nodes[i]]
                             if x.terminal():
@@ -406,12 +410,14 @@ class DTSR(object):
                                 terminals.append(x.impulse.name())
                             x.tensor = tf.expand_dims(tensor[:, i], -1)
                             if not x.terminal:
-                                out += self.__initialize_low_memory_convolutional_feedforward__(x, inputs, coef)
+                                convolved_cur = self.__initialize_low_memory_convolutional_feedforward__(x, inputs)
+                                convolved += convolved_cur
                         if len(preterminals) > 0 and len(terminals) > 0:
                             preterminals_ix = names2ix(preterminals, child_nodes)
                             terminals_ix = names2ix(terminals, self.form.terminal_names)
-                            out.append(tf.reduce_sum(tf.gather(inputs, terminals_ix, axis=1) * tf.gather(tensor, preterminals_ix, axis=1), 0))
-                return out
+                            new_out = tf.reduce_sum(tf.gather(inputs, terminals_ix, axis=1) * tf.gather(tensor, preterminals_ix, axis=1), 0)
+                            convolved.append(new_out)
+                return convolved
 
     def __construct_network__(self):
         f = self.form
@@ -419,9 +425,10 @@ class DTSR(object):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.irf_tree.tensor = tf.expand_dims(tf.expand_dims(self.time_y, -1) - self.time_X, -1)  # Tensor of temporal offsets with shape (?,history_length)
-                self.X_conv = self.__initialize_convolutional_feedforward__(self.irf_tree) # num_terminals-length array of convolved IV with shape (?)
+                self.X_conv, coefs_ix = self.__initialize_convolutional_feedforward__(self.irf_tree) # num_terminals-length array of convolved IV with shape (?)
                 self.X_conv = tf.concat(self.X_conv, axis=1)
-                self.out = self.intercept + tf.reduce_sum(self.X_conv, axis=1)
+                coef_aligned = tf.gather(self.coefficient, tf.constant(np.concatenate(coefs_ix)), axis=1)
+                self.out = self.intercept + tf.reduce_sum(self.X_conv*coef_aligned, axis=1)
 
     def __construct_low_memory_network__(self):
         f = self.form
@@ -431,7 +438,25 @@ class DTSR(object):
                 if np.isfinite(self.history_length):
                     history_length = tf.constant(self.history_length, dtype=self.INT_TF)
 
-                def convolve_events(time_target, first_obs, last_obs, coefficient):
+                def get_coefs_ix(t):
+                    coefficients = []
+                    for fam in t.children:
+                        child_nodes = sorted(t.children[fam].keys())
+                        child_coefs = [t.children[fam][x].coef_id() for x in child_nodes]
+                        coefs_ix = names2ix(child_coefs, self.form.coefficient_names)
+                        terminals = []
+                        for i in range(len(child_nodes)):
+                            x = t.children[fam][child_nodes[i]]
+                            if x.terminal():
+                                terminals.append(x.impulse.name())
+                            else:
+                                coefs_ix_cur = get_coefs_ix(x)
+                                coefficients += coefs_ix_cur
+                        if len(terminals) > 0:
+                            coefficients.append(coefs_ix)
+                    return coefficients
+
+                def convolve_events(time_target, first_obs, last_obs):
                     if np.isfinite(self.history_length):
                         inputs = self.X[tf.maximum(first_obs, last_obs-history_length):last_obs]
                         input_times = self.time_X[tf.maximum(first_obs, last_obs-history_length):last_obs]
@@ -440,21 +465,23 @@ class DTSR(object):
                         input_times = self.time_X[first_obs:last_obs]
                     t_delta = time_target - input_times
 
-                    if not self.ransl:
-                        coefficient = self.coefficient[0]
-
                     self.irf_tree.tensor = tf.expand_dims(t_delta, -1)
-                    out = self.__initialize_low_memory_convolutional_feedforward__(self.irf_tree, inputs, coefficient)
-                    out = tf.concat(out, axis=0)
+                    convolved = self.__initialize_low_memory_convolutional_feedforward__(self.irf_tree, inputs)
+                    convolved = tf.concat(convolved, axis=0)
 
-                    return out
+                    return convolved
 
-                self.X_conv = tf.map_fn(lambda x: convolve_events(*x),
-                                        [self.time_y, self.first_obs, self.last_obs, self.coefficient],
-                                        parallel_iterations=10,
-                                        dtype=self.FLOAT_TF)
+                coefs_ix = tf.constant(np.concatenate(get_coefs_ix(self.irf_tree)))
+                coef_aligned = tf.gather(self.coefficient, coefs_ix, axis=1)
 
-                self.out = self.intercept + tf.reduce_sum(self.X_conv, axis=1)
+                self.X_conv = tf.map_fn(
+                    lambda x: convolve_events(*x),
+                    [self.time_y, self.first_obs, self.last_obs],
+                    parallel_iterations=10,
+                    dtype=self.FLOAT_TF
+                )
+
+                self.out = self.intercept + tf.reduce_sum(self.X_conv*coef_aligned, axis=1)
 
     def __initialize_objective__(self):
         raise NotImplementedError

@@ -43,7 +43,7 @@ class NNDTSR(DTSR):
     :param int_type: ``str``; the ``int`` type to use throughout the network (used for tensor slicing).
     :param minibatch_size: ``int`` or ``None``; the size of minibatches to use for fitting/prediction (full-batch if ``None``).
     :param logging_freq: ``int``; the frequency (in minibatches) with which to write Tensorboard logs.
-    :param log_random:``bool``; whether to log random effects to Tensorboard.
+    :param log_random: ``bool``; whether to log random effects to Tensorboard.
     :param save_freq: ``int``; the frequency (in iterations) with which to save model checkpoints.
     :param optim: ``str``; the name of the optimizer to use. Choose from ``SGD``, ``AdaGrad``, ``AdaDelta``, ``Adam``, ``FTRL``, ``RMSProp``, ``Nadam``.
     :param learning_rate: ``float``; the initial value for the learning rate.
@@ -218,7 +218,7 @@ class NNDTSR(DTSR):
                                 intercept_random,
                                 collections=['random']
                             )
-                    if len(coefs) > 0:
+                    if len(r.coefficient_names) > 0:
                         coefs = r.coefficient_names
                         coef_ix = names2ix(coefs, f.coefficient_names)
                         mask_col_np = np.zeros(len(f.coefficient_names))
@@ -251,8 +251,9 @@ class NNDTSR(DTSR):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 for x in f.atomic_irf_by_family:
-                    self.atomic_irf_by_family[x] = self.__initialize_irf_params_inner__(x, sorted(f.atomic_irf_by_family[x]))
-                    self.atomic_irf_means_by_family[x] = self.atomic_irf_by_family[x]
+                    if x != 'DiracDelta':
+                        self.atomic_irf_by_family[x] = self.__initialize_irf_params_inner__(x, sorted(f.atomic_irf_by_family[x]))
+                        self.atomic_irf_means_by_family[x] = self.atomic_irf_by_family[x]
 
     def __initialize_irf_params_inner__(self, family, ids):
         ## Infinitessimal value to add to bounded parameters
@@ -261,9 +262,6 @@ class NNDTSR(DTSR):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if family == 'DiracDelta':
-                    filler = tf.constant(1., shape=[1, dim])
-                    return filler
                 if family == 'Exp':
                     log_L = tf.get_variable(sn('log_L_%s' % '-'.join(ids)), shape=[1, dim],
                                             initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
@@ -363,7 +361,7 @@ class NNDTSR(DTSR):
                         tf.summary.scalar('mu' + '/%s' % ids[i], mu[i], collections=['params'])
                         tf.summary.scalar('sigma' + '/%s' % ids[i], sigma[i], collections=['params'])
                         tf.summary.scalar('alpha' + '/%s' % ids[i], alpha[i], collections=['params'])
-                    return tf.stack([mu, sigma, alpha], axis=1)
+                    return tf.stack([mu, sigma, alpha], axis=0)
                 if family == 'EMG':
                     log_sigma = tf.get_variable(sn('log_sigma_%s' % '-'.join(ids)), shape=[dim],
                                                 initializer=tf.truncated_normal_initializer(stddev=.1), dtype=self.FLOAT_TF)
@@ -524,15 +522,16 @@ class NNDTSR(DTSR):
 
     def expand_history(self, X, X_time, first_obs, last_obs):
         """
-        Expand 2D matrix of independent variable values into a 3D tensor of `histories` of independent variable values and a 1D vector of independent variable timestamps into a 2D matrix of independent variable timestamp histories.
+        Expand 2D matrix of independent variable values into a 3D tensor of histories of independent variable values and a 1D vector of independent variable timestamps into a 2D matrix of histories of independent variable timestamps.
         This is a necessary preprocessing step for the input data when using ``low_memory=False``.
+        However, ``fit``, ``predict``, and ``eval`` all call ``expand_history()`` internally, so users generally should not need to call ``expand_history()`` directly and may pass their data to those methods as is.
 
         :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
             ``X`` must contain a column for each independent variable in the DTSR ``form_str`` provided at iniialization.
-        :param X_time: ``pandas Series`` or 1D ``numpy`` array; timestamps for the observations in ``X``, grouped and sorted identically to ``X``.
-        :param first_obs: ``pandas Series`` or 1D ``numpy`` array; row indices in ``X`` of the start of the series associated with the current regression target.
+        :param X_time: ``pandas`` ``Series`` or 1D ``numpy`` array; timestamps for the observations in ``X``, grouped and sorted identically to ``X``.
+        :param first_obs: ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the start of the series associated with the current regression target.
             Sort order and number of observations must be identical to that of ``y_time``.
-        :param last_obs: ``pandas Series`` or 1D ``numpy`` array; row indices in ``X`` of the most recent observation in the series associated with the current regression target.
+        :param last_obs: ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the most recent observation in the series associated with the current regression target.
             Sort order and number of observations must be identical to that of ``y_time``.
         :return: ``tuple``; two numpy arrays ``(X_3d, time_X_3d)``, the expanded IV and timestamp tensors.
         """
@@ -723,7 +722,7 @@ class NNDTSR(DTSR):
 
                     self.save()
 
-                    sys.stderr.write('Number of graph nodes: %d\n' % len(self.sess.graph._nodes_by_name))
+                    # sys.stderr.write('Number of graph nodes: %d\n' % len(self.sess.graph._nodes_by_name))
                     self.make_plots(irf_name_map, plot_x_inches, plot_y_inches, cmap)
 
                     t1_iter = time.time()
@@ -751,11 +750,11 @@ class NNDTSR(DTSR):
             * A column for each independent variable in the DTSR ``form_str`` provided at iniialization
 
         :param y_time: ``pandas`` ``Series`` or 1D ``numpy`` array; timestamps for the regression targets, grouped by series.
-        :param y_rangf: ``pandas Series`` or 1D ``numpy`` array; random grouping factor values (if applicable). Can be of type ``str`` or ``int``.
+        :param y_rangf: ``pandas`` ``Series`` or 1D ``numpy`` array; random grouping factor values (if applicable). Can be of type ``str`` or ``int``.
             Sort order and number of observations must be identical to that of ``y_time``.
-        :param first_obs: ``pandas Series`` or 1D ``numpy`` array; row indices in ``X`` of the start of the series associated with the current regression target.
+        :param first_obs: ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the start of the series associated with the current regression target.
             Sort order and number of observations must be identical to that of ``y_time``.
-        :param last_obs: ``pandas Series`` or 1D ``numpy`` array; row indices in ``X`` of the most recent observation in the series associated with the current regression target.
+        :param last_obs: ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the most recent observation in the series associated with the current regression target.
             Sort order and number of observations must be identical to that of ``y_time``.
         :return: 1D ``numpy`` array; network predictions for regression targets (same length and sort order as ``y_time``).
         """
@@ -925,5 +924,5 @@ class NNDTSR(DTSR):
             irf_name_map=irf_name_map,
             plot_x_inches=plot_x_inches,
             plot_y_inches=plot_y_inches,
-            cmap=None
+            cmap=cmap
         )
