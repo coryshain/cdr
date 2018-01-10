@@ -62,6 +62,7 @@ class Formula(object):
         self.ran_names = sorted(self.random.keys())
         self.rangf = [self.random[r].gf for r in self.ran_names]
 
+
     def process_ast(self, t, ops=None, under_IRF=False, random_coefficients=None):
         if ops is None:
             ops = []
@@ -116,7 +117,7 @@ class Formula(object):
                 assert len(t.args) == 2, 'C() takes exactly two arguments in DTSR formula strings'
                 terms = self.process_ast(t.args[0], under_IRF=True, random_coefficients=random_coefficients)
                 for x in terms:
-                    new = self.process_irf(t.args[1], x, ops=None, random_coefficients=random_coefficients)
+                    new = self.process_irf(t.args[1], x, ops=None, under_IRF=under_IRF, random_coefficients=random_coefficients)
                     if new.name() not in self.preterminal_names:
                         self.preterminal_names.append(new.name())
                     if new.impulse.name() not in self.terminals:
@@ -140,12 +141,13 @@ class Formula(object):
             raise ValueError('Operation "%s" is not supported in DTSR formula strings' %type(t).__name___)
         return s
 
-    def process_irf(self, t, impulse, ops=None, random_coefficients=None):
+    def process_irf(self, t, impulse, ops=None, under_IRF=True, random_coefficients=None):
         if ops is None:
             ops = []
         assert t.func.id in Formula.IRF, 'Ill-formed model string: process_irf() called on non-IRF node'
         irf_id = None
         coef_id = None
+        cont=False
         if len(t.keywords) > 0:
             for k in t.keywords:
                 if k.arg == 'irf_id':
@@ -162,20 +164,31 @@ class Formula(object):
                         coef_id = k.value.id
                     elif type(k.value).__name__ == 'Num':
                         coef_id = str(k.value.n)
+                elif k.arg == 'cont':
+                    if type(k.value).__name__ == 'Str':
+                        if k.value.s in ['True', 'TRUE', 'true', 'T']:
+                            cont = True
+                    elif type(k.value).__name__ == 'Name':
+                        if k.value.id in ['True', 'TRUE', 'true', 'T']:
+                            cont = True
+                    elif type(k.value).__name__ == 'NameConstant':
+                        cont = k.value.value
+                    elif type(k.value).__name__ == 'Num':
+                        cont = k.value.n > 0
         p = self.irf_tree
         if len(t.args) > 0:
             assert len(t.args) == 1, 'Ill-formed model string: IRF can take at most 1 positional argument'
             p = self.process_irf(t.args[0], impulse)
-        new = IRFTreeNode(impulse=impulse, family=t.func.id, irfID=irf_id, coefID=coef_id, p=p, ops=ops)
+        new = IRFTreeNode(impulse=impulse, family=t.func.id, irfID=irf_id, coefID=coef_id, cont=cont, p=p, ops=ops)
         if new.family not in self.atomic_irf_by_family:
             self.atomic_irf_by_family[new.family] = []
         if new.irf_id() not in self.atomic_irf_by_family[new.family]:
             self.atomic_irf_by_family[new.family].append(new.irf_id())
-        if new.coef_id() not in self.coefficient_names:
+        if not under_IRF and new.coef_id() not in self.coefficient_names:
             self.coefficient_names.append(new.coef_id())
         if random_coefficients is not None and new.coef_id() not in random_coefficients:
             random_coefficients.append(new.coef_id())
-        if random_coefficients is None and new.coef_id() not in self.fixed_coefficient_names:
+        if random_coefficients is None and not under_IRF and new.coef_id() not in self.fixed_coefficient_names:
             self.fixed_coefficient_names.append(new.coef_id())
         return new
 
@@ -304,7 +317,6 @@ class RandomTerm(object):
 
 class IRFTreeNode(object):
     def __init__(self, impulse=None, family=None, irfID=None, coefID=None, ops=None, p=None, cont=False):
-        assert not cont, 'Responses to continuous input variables are not currently supported'
         if impulse is None:
             self.ops = []
             self.cont = False
@@ -356,6 +368,8 @@ class IRFTreeNode(object):
             args.append('irf_id="%s"' % self.irfID)
         if self.coefID is not None:
             args.append('coef_id="%s"' % self.coefID)
+        if self.cont:
+            args.append('cont=%r' % self.cont)
         out += ', '.join(args)
         out += ')'
         return out
@@ -367,7 +381,9 @@ class IRFTreeNode(object):
 
     def coef_id(self):
         if self.coefID is None:
-            return self.name()
+            if self.terminal():
+                return self.name()
+            return None
         return self.coefID
 
     def terminal(self):
@@ -385,7 +401,6 @@ class IRFTreeNode(object):
                 s += '\n  - %s' %self.impulse.name()
             else:
                 return 'ROOT'
-
         return s
 
     def merge_children(self, new):

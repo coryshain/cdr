@@ -1,5 +1,6 @@
 import os
 import math
+import time
 import pandas as pd
 from numpy import inf, nan
 
@@ -45,8 +46,8 @@ class BDTSR(DTSR):
     :param float_type: ``str``; the ``float`` type to use throughout the network.
     :param int_type: ``str``; the ``int`` type to use throughout the network (used for tensor slicing).
     :param minibatch_size: ``int`` or ``None``; the size of minibatches to use for fitting/prediction (full-batch if ``None``).
-    :param logging_freq: ``int``; the frequency (in minibatches) with which to write Tensorboard logs.
     :param log_random: ``bool``; whether to log random effects to Tensorboard.
+    :param log_freq: ``int``; the frequency (in iterations) with which to log model params to Tensorboard.
     :param save_freq: ``int``; the frequency (in iterations) with which to save model checkpoints.
     :param inference_name: ``str``; the Edward inference class to use for fitting.
     :param n_samples: ``int``; the number of samples to draw from the variational posterior if using variational inference.
@@ -80,8 +81,8 @@ class BDTSR(DTSR):
                  float_type='float32',
                  int_type='int32',
                  minibatch_size=None,
-                 logging_freq = 1,
                  log_random=True,
+                 log_freq=1,
                  save_freq=1,
                  inference_name='KLqp',
                  n_samples=None,
@@ -101,8 +102,8 @@ class BDTSR(DTSR):
             float_type=float_type,
             int_type=int_type,
             minibatch_size=minibatch_size,
-            logging_freq=logging_freq,
             save_freq=save_freq,
+            log_freq=log_freq,
             log_random = log_random
         )
 
@@ -121,7 +122,6 @@ class BDTSR(DTSR):
             if n_samples is not None:
                 sys.stderr.write('Parameter n_samples being overridden for sampling optimization\n')
             self.n_samples = self.n_iter*self.n_train_minibatch
-        self.logging_freq = logging_freq
         self.n_samples_eval = n_samples_eval
         self.conv_prior_sd = float(conv_prior_sd)
         self.coef_prior_sd = float(coef_prior_sd)
@@ -325,6 +325,7 @@ class BDTSR(DTSR):
                     if len(r.coefficient_names) > 0:
                         coefs = r.coefficient_names
                         coef_ix = names2ix(coefs, f.coefficient_names)
+                        print(f.coefficient_names)
                         mask_col_np = np.zeros(len(f.coefficient_names))
                         mask_col_np[coef_ix] = 1.
                         mask_col = tf.constant(mask_col_np, dtype=self.FLOAT_TF)
@@ -1844,7 +1845,7 @@ class BDTSR(DTSR):
                         return (
                                    tf.nn.softplus(alpha),
                                    tf.nn.softplus(beta),
-                                   -(tf.nn.softplus(beta) + epsilon)
+                                   -(tf.nn.softplus(delta) + epsilon)
                                ), \
                                (
                                    tf.nn.softplus(alpha_q.mean()),
@@ -1872,7 +1873,7 @@ class BDTSR(DTSR):
                     self.inference.initialize(
                         n_samples=self.n_samples,
                         n_iter=self.n_iter,
-                        n_print=self.logging_freq,
+                        n_print=self.n_train_minibatch * self.log_freq,
                         logdir=self.outdir + '/tensorboard/distr',
                         log_timestamp=False,
                         scale={self.out: self.minibatch_scale}
@@ -1880,7 +1881,7 @@ class BDTSR(DTSR):
                 elif self.inference_name == 'MetropolisHastings':
                     self.inference = getattr(ed, self.inference_name)(self.inference_map, self.proposal_map, data={self.out: self.y})
                     self.inference.initialize(
-                        n_print=self.logging_freq,
+                        n_print=self.n_train_minibatch * self.log_freq,
                         logdir=self.outdir + '/tensorboard/distr',
                         log_timestamp=False,
                         scale={self.out: self.minibatch_scale}
@@ -1890,7 +1891,7 @@ class BDTSR(DTSR):
                     self.inference.initialize(
                         step_size=0.0001, # 0.5 / self.minibatch_size,
                         # n_steps=2,
-                        n_print=self.logging_freq,
+                        n_print=self.n_train_minibatch * self.log_freq,
                         logdir=self.outdir + '/tensorboard/distr',
                         log_timestamp=False,
                         scale={self.out: self.minibatch_scale}
@@ -2047,7 +2048,6 @@ class BDTSR(DTSR):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                pb = tf.contrib.keras.utils.Progbar(self.n_iter * self.n_train_minibatch)
 
                 fd = {
                     self.X: X_3d,
@@ -2057,13 +2057,24 @@ class BDTSR(DTSR):
                     self.gf_y: gf_y
                 }
 
+                if self.global_step.eval(session=self.sess) == 0:
+                    summary_params = self.sess.run(self.summary_params)
+                    self.writer.add_summary(summary_params, self.global_batch_step.eval(session=self.sess))
+                    if self.log_random and len(f.random) > 0:
+                        summary_random = self.sess.run(self.summary_random)
+                        self.writer.add_summary(summary_random, self.global_batch_step.eval(session=self.sess))
+
                 sys.stderr.write('Running %s inference...\n' % self.inference_name)
-                metric_total = 0
                 while self.global_step.eval(session=self.sess) < self.n_iter:
+                    pb = tf.contrib.keras.utils.Progbar(self.n_train_minibatch)
+                    t0_iter = time.time()
+                    sys.stderr.write('-' * 50 + '\n')
+                    sys.stderr.write('Iteration %d\n' % int(self.global_step.eval(session=self.sess) + 1))
+                    sys.stderr.write('\n')
                     p, p_inv = getRandomPermutation(len(y))
 
-                    metric_total = 0
                     for j in range(0, len(y), minibatch_size):
+
                         indices = p[j:j+minibatch_size]
                         fd_minibatch = {
                             self.X: X_3d[indices],
@@ -2077,27 +2088,22 @@ class BDTSR(DTSR):
                         metric_cur = info_dict['loss'] if self.variational() else info_dict['accept_rate']
                         if not np.isfinite(metric_cur):
                             metric_cur = 0
-                        metric_total += metric_cur
-
-                        if self.global_batch_step.eval(session=self.sess) % self.logging_freq == 0:
-                            summary_params = self.sess.run(self.summary_params)
-                            self.writer.add_summary(summary_params, self.global_batch_step.eval(session=self.sess))
 
                         self.sess.run(self.incr_global_batch_step)
-                        pb.update(self.global_batch_step.eval(session=self.sess), values=[('loss' if self.variational() else 'accept_rate', metric_cur)], force=True)
-
-
-                    if not self.variational():
-                        metric_total /= self.n_train_minibatch
-                    if self.log_random and len(f.random) > 0:
-                        summary_random = self.sess.run(self.summary_random)
-                        self.writer.add_summary(summary_random, self.global_batch_step.eval(session=self.sess))
+                        pb.update((j/minibatch_size)+1, values=[('loss' if self.variational() else 'accept_rate', metric_cur)], force=True)
 
                     self.sess.run(self.incr_global_step)
                     if self.global_step.eval(session=self.sess) % self.save_freq == 0:
-                        self.make_plots(irf_name_map, plot_x_inches, plot_y_inches, cmap)
                         self.save()
+                        summary_params = self.sess.run(self.summary_params)
+                        self.writer.add_summary(summary_params, self.global_batch_step.eval(session=self.sess))
+                        if self.log_random and len(f.random) > 0:
+                            summary_random = self.sess.run(self.summary_random)
+                            self.writer.add_summary(summary_random, self.global_batch_step.eval(session=self.sess))
+                        self.make_plots(irf_name_map, plot_x_inches, plot_y_inches, cmap)
 
+                    t1_iter = time.time()
+                    sys.stderr.write('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
 
                 self.out_post = ed.copy(self.out, self.inference_map)
 

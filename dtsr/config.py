@@ -50,7 +50,7 @@ class Config(object):
             self.minibatch_size = inf
         else:
             self.minibatch_size = int(self.minibatch_size)
-        self.logging_freq = settings.getint('logging_freq', 1)
+        self.log_freq = settings.getint('log_freq', 1)
         self.log_random = settings.getboolean('log_random', False)
         self.save_freq = settings.getint('save_freq', 1)
         self.plot_x_inches = settings.getfloat('plot_x_inches', 7)

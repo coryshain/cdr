@@ -75,7 +75,7 @@ class DTSR(object):
                  float_type='float32',
                  int_type='int32',
                  minibatch_size=None,
-                 logging_freq=1,
+                 log_freq=1,
                  log_random=True,
                  save_freq=1
                  ):
@@ -119,7 +119,7 @@ class DTSR(object):
         self.n_train_minibatch = math.ceil(float(len(y)) / self.minibatch_size)
         self.minibatch_scale = float(len(y)) / self.minibatch_size
         self.log_random = log_random
-        self.logging_freq = logging_freq
+        self.log_freq = log_freq
         self.save_freq = save_freq
         self.irf_tree = self.form.irf_tree
 
@@ -299,7 +299,7 @@ class DTSR(object):
                     child_nodes = sorted(t.children[f].keys())
                     child_irfs = [t.children[f][x].irf_id() for x in child_nodes]
                     if f == 'DiracDelta':
-                        assert t.name() == 'ROOT', 'DiracDelta may be embedded under other IRF in DTSR formula strings'
+                        assert t.name() == 'ROOT', 'DiracDelta may not be embedded under other IRF in DTSR formula strings'
                         plot_base = tf.concat([tf.ones((1,1)), tf.zeros((self.support.shape[0]-1,1))], axis=0)
                         for i in range(len(child_nodes)):
                             child = t.children[f][child_nodes[i]]
@@ -327,41 +327,50 @@ class DTSR(object):
 
                         for i in range(len(child_nodes)):
                             child = t.children[f][child_nodes[i]]
-                            coefs_ix = names2ix(child.coef_id(), self.form.coefficient_names)
                             child.plot_tensor_atomic_unscaled = self.__new_irf__(self.irf_lambdas[f], self.atomic_irf_means_by_family[f][:, i])(self.support)
-                            child.plot_tensor_atomic_scaled = self.__new_irf__(self.irf_lambdas[f], self.atomic_irf_means_by_family[f][:, i])(self.support) * tf.gather(self.coefficient_fixed_means, coefs_ix)
+                            child.plot_tensor_atomic_scaled = self.__new_irf__(self.irf_lambdas[f], self.atomic_irf_means_by_family[f][:, i])(self.support)
+                            if child.terminal():
+                                coefs_ix = names2ix(child.coef_id(), self.form.coefficient_names)
+                                child.plot_tensor_atomic_scaled *= tf.gather(self.coefficient_fixed_means, coefs_ix)
                             self.plot_tensors_atomic_unscaled[child.name()] = child.plot_tensor_atomic_unscaled
                             self.plot_tensors_atomic_scaled[child.name()] = child.plot_tensor_atomic_scaled
                             if composite:
-                                child.plot_tensor_composite_unscaled = self.__new_irf__(self.irf_lambdas[f], self.atomic_irf_means_by_family[:, i])(parent_unscaled)
-                                child.plot_tensor_composite_scaled = self.__new_irf__(self.irf_lambdas[f], self.atomic_irf_means_by_family[:, i])(parent_scaled) * tf.gather(self.coefficient_fixed_means, coefs_ix)
+                                child.plot_tensor_composite_unscaled = self.__new_irf__(self.irf_lambdas[f], self.atomic_irf_means_by_family[f][:, i])(parent_unscaled)
+                                child.plot_tensor_composite_scaled = self.__new_irf__(self.irf_lambdas[f], self.atomic_irf_means_by_family[f][:, i])(parent_scaled)
+                                if child.terminal():
+                                    coefs_ix = names2ix(child.coef_id(), self.form.coefficient_names)
+                                    child.plot_tensor_composite_scaled *= tf.gather(self.coefficient_fixed_means, coefs_ix)
                             else:
                                 child.plot_tensor_composite_unscaled = child.plot_tensor_atomic_unscaled
                                 child.plot_tensor_composite_scaled = child.plot_tensor_atomic_scaled
                             self.plot_tensors_composite_unscaled[child.name()] = child.plot_tensor_composite_unscaled
                             self.plot_tensors_composite_scaled[child.name()] = child.plot_tensor_composite_scaled
-                            if child.terminal:
+                            if child.terminal():
                                 self.preterminals.append(child.name())
                             else:
                                 self.__initialize_irfs__(child)
                             self.irf_names.append(child.name())
 
-    def __initialize_convolutional_feedforward__(self, t):
+    def __initialize_convolutional_feedforward__(self, t, t_delta):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 convolved = []
                 coefficients = []
                 for f in t.children:
-                    preterminals = []
-                    terminals = []
+                    preterminals_discr = []
+                    terminals_discr = []
+                    coefs_discr = []
+                    preterminals_cont = []
+                    terminals_cont = []
+                    coefs_cont = []
                     child_nodes = sorted(t.children[f].keys())
-                    child_coefs = [t.children[f][x].coef_id() for x in child_nodes]
-                    coefs_ix = names2ix(child_coefs, self.form.coefficient_names)
                     if f == 'DiracDelta':
                         for i in range(len(child_nodes)):
                             x = t.children[f][child_nodes[i]]
-                            terminals.append(x.impulse.name())
-                        terminals_ix = names2ix(terminals, self.form.terminal_names)
+                            terminals_discr.append(x.impulse.name())
+                            coefs_discr.append(x.coef_id())
+                        terminals_ix = names2ix(terminals_discr, self.form.terminal_names)
+                        coefs_ix = names2ix(coefs_discr, self.form.coefficient_names)
                         new_out = tf.gather(self.X, terminals_ix, axis=2)[:,-1,:]
                         convolved.append(new_out)
                         coefficients.append(coefs_ix)
@@ -370,35 +379,73 @@ class DTSR(object):
                         for i in range(len(child_nodes)):
                             x = t.children[f][child_nodes[i]]
                             if x.terminal():
-                                preterminals.append(x.name())
-                                terminals.append(x.impulse.name())
+                                if x.cont:
+                                    preterminals_cont.append(x.name())
+                                    terminals_cont.append(x.impulse.name())
+                                    coefs_cont.append(x.coef_id())
+                                else:
+                                    preterminals_discr.append(x.name())
+                                    terminals_discr.append(x.impulse.name())
+                                    coefs_discr.append(x.coef_id())
                             x.tensor = tf.expand_dims(tensor[:, :, i],-1)
-                            if not x.terminal:
-                                convolved_cur, coefs_ix_cur = self.__initialize_convolutional_feedforward__(x)
+                            if not x.terminal():
+                                convolved_cur, coefficients_cur = self.__initialize_convolutional_feedforward__(x, t_delta)
                                 convolved += convolved_cur
-                                coefs_ix += coefs_ix_cur
-                        if len(preterminals) > 0 and len(terminals) > 0:
-                            preterminals_ix = names2ix(preterminals, child_nodes)
-                            terminals_ix = names2ix(terminals, self.form.terminal_names)
+                                coefficients += coefficients_cur
+                        if len(preterminals_discr) > 0 and len(terminals_discr) > 0 and len(coefs_discr) > 0:
+                            preterminals_ix = names2ix(preterminals_discr, child_nodes)
+                            terminals_ix = names2ix(terminals_discr, self.form.terminal_names)
+                            coefs_ix = names2ix(coefs_discr, self.form.coefficient_names)
                             new_out = tf.reduce_sum(tf.gather(self.X, terminals_ix, axis=2) * tf.gather(tensor, preterminals_ix, axis=2), 1)
+                            convolved.append(new_out)
+                            coefficients.append(coefs_ix)
+                        if len(preterminals_cont) > 0 and len(terminals_cont) > 0 and len(coefs_cont) > 0:
+                            preterminals_ix = names2ix(preterminals_cont, child_nodes)
+                            terminals_ix = names2ix(terminals_cont, self.form.terminal_names)
+                            coefs_ix = names2ix(coefs_cont, self.form.coefficient_names)
+                            new_out = tf.gather(self.X, terminals_ix, axis=2) * tf.gather(tensor, preterminals_ix, axis=2)
+                            new_out_cur = tf.pad(
+                                new_out[:, 1:],
+                                tf.constant([[0, 0], [1, 0], [0, 0]]),
+                                mode='CONSTANT'
+                            )
+                            new_out_prev = tf.pad(
+                                new_out[:, :-1],
+                                tf.constant([[0, 0], [1, 0], [0, 0]]),
+                                mode='CONSTANT'
+                            )
+                            new_out = (new_out_cur + new_out_prev) / 2
+                            t_delta_cur = tf.pad(
+                                t_delta[:, 1:],
+                                tf.constant([[0, 0], [1, 0], [0, 0]]),
+                                mode='CONSTANT'
+                            )
+                            t_delta_prev = tf.pad(
+                                t_delta[:, :-1],
+                                tf.constant([[0, 0], [1, 0], [0, 0]]),
+                                mode='CONSTANT'
+                            )
+                            duration = t_delta_cur - t_delta_prev
+                            new_out = tf.reduce_sum(new_out * duration, axis=1)
                             convolved.append(new_out)
                             coefficients.append(coefs_ix)
                 return (convolved, coefficients)
 
-    def __initialize_low_memory_convolutional_feedforward__(self, t, inputs):
+    def __initialize_low_memory_convolutional_feedforward__(self, t, inputs, t_delta):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 convolved = []
                 for f in t.children:
-                    preterminals = []
-                    terminals = []
+                    preterminals_discr = []
+                    terminals_discr = []
+                    preterminals_cont = []
+                    terminals_cont = []
                     child_nodes = sorted(t.children[f].keys())
-                    child_coefs = [t.children[f][x].coef_id() for x in child_nodes]
                     if f == 'DiracDelta':
                         for i in range(len(child_nodes)):
                             x = t.children[f][child_nodes[i]]
-                            terminals.append(x.impulse.name())
-                        terminals_ix = names2ix(terminals, self.form.terminal_names)
+                            terminals_discr.append(x.impulse.name())
+                        terminals_ix = names2ix(terminals_discr, self.form.terminal_names)
                         new_out = tf.gather(inputs[-1], terminals_ix, axis=0)
                         convolved.append(new_out)
                     else:
@@ -406,16 +453,55 @@ class DTSR(object):
                         for i in range(len(child_nodes)):
                             x = t.children[f][child_nodes[i]]
                             if x.terminal():
-                                preterminals.append(x.name())
-                                terminals.append(x.impulse.name())
+                                if x.cont:
+                                    preterminals_cont.append(x.name())
+                                    terminals_cont.append(x.impulse.name())
+                                else:
+                                    preterminals_discr.append(x.name())
+                                    terminals_discr.append(x.impulse.name())
                             x.tensor = tf.expand_dims(tensor[:, i], -1)
-                            if not x.terminal:
-                                convolved_cur = self.__initialize_low_memory_convolutional_feedforward__(x, inputs)
+                            if not x.terminal():
+                                convolved_cur = self.__initialize_low_memory_convolutional_feedforward__(x, inputs,
+                                                                                                         t_delta)
                                 convolved += convolved_cur
-                        if len(preterminals) > 0 and len(terminals) > 0:
-                            preterminals_ix = names2ix(preterminals, child_nodes)
-                            terminals_ix = names2ix(terminals, self.form.terminal_names)
-                            new_out = tf.reduce_sum(tf.gather(inputs, terminals_ix, axis=1) * tf.gather(tensor, preterminals_ix, axis=1), 0)
+                        if len(preterminals_discr) > 0 and len(terminals_discr) > 0:
+                            preterminals_ix = names2ix(preterminals_discr, child_nodes)
+                            terminals_ix = names2ix(terminals_discr, self.form.terminal_names)
+                            new_out = tf.reduce_sum(
+                                tf.gather(inputs, terminals_ix, axis=1) * tf.gather(tensor, preterminals_ix, axis=1),
+                                axis=0
+                            )
+                            convolved.append(new_out)
+                        if len(preterminals_cont) > 0 and len(terminals_cont) > 0:
+                            preterminals_ix = names2ix(preterminals_cont, child_nodes)
+                            terminals_ix = names2ix(terminals_cont, self.form.terminal_names)
+                            new_out = tf.gather(inputs, terminals_ix, axis=1) * tf.gather(tensor, preterminals_ix,
+                                                                                          axis=1)
+                            new_out_cur = tf.pad(
+                                new_out[1:],
+                                tf.constant([[1, 0], [0, 0]]),
+                                mode='CONSTANT'
+                            )
+                            new_out_prev = tf.pad(
+                                new_out[:-1],
+                                tf.constant([[1, 0], [0, 0]]),
+                                mode='CONSTANT'
+                            )
+                            new_out = (new_out_cur + new_out_prev) / 2
+                            t_delta_cur = tf.pad(
+                                t_delta[1:],
+                                tf.constant([[1, 0]]),
+                                mode='CONSTANT'
+                            )
+                            t_delta_prev = tf.pad(
+                                t_delta[:-1],
+                                tf.constant([[1, 0]]),
+                                mode='CONSTANT'
+                            )
+                            duration = tf.expand_dims(t_delta_cur - t_delta_prev, -1)
+                            print(new_out.shape)
+                            print(duration.shape)
+                            new_out = tf.reduce_sum(new_out * duration, axis=0)
                             convolved.append(new_out)
                 return convolved
 
@@ -425,7 +511,7 @@ class DTSR(object):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.irf_tree.tensor = tf.expand_dims(tf.expand_dims(self.time_y, -1) - self.time_X, -1)  # Tensor of temporal offsets with shape (?,history_length)
-                self.X_conv, coefs_ix = self.__initialize_convolutional_feedforward__(self.irf_tree) # num_terminals-length array of convolved IV with shape (?)
+                self.X_conv, coefs_ix = self.__initialize_convolutional_feedforward__(self.irf_tree, self.irf_tree.tensor) # num_terminals-length array of convolved IV with shape (?)
                 self.X_conv = tf.concat(self.X_conv, axis=1)
                 coef_aligned = tf.gather(self.coefficient, tf.constant(np.concatenate(coefs_ix)), axis=1)
                 self.out = self.intercept + tf.reduce_sum(self.X_conv*coef_aligned, axis=1)
@@ -442,17 +528,23 @@ class DTSR(object):
                     coefficients = []
                     for fam in t.children:
                         child_nodes = sorted(t.children[fam].keys())
-                        child_coefs = [t.children[fam][x].coef_id() for x in child_nodes]
-                        coefs_ix = names2ix(child_coefs, self.form.coefficient_names)
-                        terminals = []
+                        terminals_discr = []
+                        terminals_cont = []
                         for i in range(len(child_nodes)):
                             x = t.children[fam][child_nodes[i]]
                             if x.terminal():
-                                terminals.append(x.impulse.name())
+                                if x.cont:
+                                    terminals_discr.append(x.coef_id())
+                                else:
+                                    terminals_cont.append(x.coef_id())
                             else:
-                                coefs_ix_cur = get_coefs_ix(x)
-                                coefficients += coefs_ix_cur
-                        if len(terminals) > 0:
+                                coefficients_cur = get_coefs_ix(x)
+                                coefficients += coefficients_cur
+                        if len(terminals_discr) > 0:
+                            coefs_ix = names2ix(terminals_discr, self.form.coefficient_names)
+                            coefficients.append(coefs_ix)
+                        if len(terminals_cont) > 0:
+                            coefs_ix = names2ix(terminals_cont, self.form.coefficient_names)
                             coefficients.append(coefs_ix)
                     return coefficients
 
@@ -466,7 +558,7 @@ class DTSR(object):
                     t_delta = time_target - input_times
 
                     self.irf_tree.tensor = tf.expand_dims(t_delta, -1)
-                    convolved = self.__initialize_low_memory_convolutional_feedforward__(self.irf_tree, inputs)
+                    convolved = self.__initialize_low_memory_convolutional_feedforward__(self.irf_tree, inputs, t_delta)
                     convolved = tf.concat(convolved, axis=0)
 
                     return convolved
@@ -608,7 +700,6 @@ class DTSR(object):
 
                 plot_y = []
                 for x in self.irf_names:
-                    coef_ix = self.form.coefficient_names.index(x)
                     plot_y.append(self.plot_tensors_atomic_scaled[x].eval(session=self.sess))
                 plot_y = np.concatenate(plot_y, axis=1)
 
@@ -639,7 +730,6 @@ class DTSR(object):
 
                 plot_y = []
                 for x in self.irf_names:
-                    coef_ix = self.form.coefficient_names.index(x)
                     plot_y.append(self.plot_tensors_composite_scaled[x].eval(session=self.sess))
                 plot_y = np.concatenate(plot_y, axis=1)
 
