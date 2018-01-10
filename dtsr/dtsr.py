@@ -285,9 +285,65 @@ class DTSR(object):
                 self.irf_lambdas['ShiftedBetaPrime'] = shifted_beta_prime
 
     def __initialize_irf_params__(self):
-        raise NotImplementedError
+        f = self.form
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                for family in f.atomic_irf_by_family:
+                    ids = sorted(f.atomic_irf_by_family[family])
+                    if family == 'DiracDelta':
+                        pass
+                    elif family == 'Exp':
+                        L, L_mean = self.__new_irf_param__('L', ids, mean=1, lb=0)
+                        self.atomic_irf_by_family[family] = L
+                        self.atomic_irf_means_by_family[family] = L_mean
+                    elif family == 'ShiftedExp':
+                        L, L_mean = self.__new_irf_param__('L', ids, mean=1, lb=0)
+                        delta, delta_mean = self.__new_irf_param__('delta', ids, mean=-1, ub=0)
+                        self.atomic_irf_by_family[family] = tf.stack([L, delta], axis=0)
+                        self.atomic_irf_means_by_family[family] = tf.stack([L_mean, delta_mean], axis=0)
+                    elif family in ['Gamma', 'GammaKgt1']:
+                        k, k_mean = self.__new_irf_param__('k', ids, mean=1, lb=0)
+                        theta, theta_mean = self.__new_irf_param__('theta', ids, mean=1, lb=0)
+                        self.atomic_irf_by_family[family] = tf.stack([k, theta], axis=0)
+                        self.atomic_irf_means_by_family[family] = tf.stack([k_mean, theta_mean], axis=0)
+                    elif family == ['ShiftedGamma', 'ShiftedGammaKgt1']:
+                        k, k_mean = self.__new_irf_param__('k', ids, mean=1, lb=0)
+                        theta, theta_mean = self.__new_irf_param__('theta', ids, mean=1, lb=0)
+                        delta, delta_mean = self.__new_irf_param__('delta', ids, mean=-1, ub=0)
+                        self.atomic_irf_by_family[family] = tf.stack([k, theta, delta], axis=0)
+                        self.atomic_irf_means_by_family[family] = tf.stack([k_mean, theta_mean, delta_mean], axis=0)
+                    elif family == 'Normal':
+                        mu, mu_mean = self.__new_irf_param__('mu', ids)
+                        sigma, sigma_mean = self.__new_irf_param__('sigma', ids, mean=1, lb=0)
+                        self.atomic_irf_by_family[family] = tf.stack([mu, sigma], axis=0)
+                        self.atomic_irf_means_by_family[family] = tf.stack([mu_mean, sigma_mean], axis=0)
+                    elif family == 'SkewNormal':
+                        mu, mu_mean = self.__new_irf_param__('mu', ids)
+                        sigma, sigma_mean = self.__new_irf_param__('sigma', ids, mean=1, lb=0)
+                        alpha, alpha_mean = self.__new_irf_param__('alpha', ids)
+                        self.atomic_irf_by_family[family] = tf.stack([mu, sigma, alpha], axis=0)
+                        self.atomic_irf_means_by_family[family] = tf.stack([mu_mean, sigma_mean, alpha_mean], axis=0)
+                    elif family == 'EMG':
+                        mu, mu_mean = self.__new_irf_param__('mu', ids)
+                        sigma, sigma_mean = self.__new_irf_param__('sigma', ids, mean=1, lb=0)
+                        L, L_mean = self.__new_irf_param__('L', ids, mean=1, lb=0)
+                        self.atomic_irf_by_family[family] = tf.stack([mu, sigma, L], axis=0)
+                        self.atomic_irf_means_by_family[family] = tf.stack([mu_mean, sigma_mean, L_mean], axis=0)
+                    elif family == 'BetaPrime':
+                        alpha, alpha_mean = self.__new_irf_param__('alpha', ids, mean=1, lb=0)
+                        beta, beta_mean = self.__new_irf_param__('beta', ids, mean=1, lb=0)
+                        self.atomic_irf_by_family[family] = tf.stack([alpha, beta], axis=0)
+                        self.atomic_irf_means_by_family[family] = tf.stack([alpha_mean, beta_mean], axis=0)
+                    elif family == 'ShiftedBetaPrime':
+                        alpha, alpha_mean = self.__new_irf_param__('alpha', ids, mean=1, lb=0)
+                        beta, beta_mean = self.__new_irf_param__('beta', ids, mean=1, lb=0)
+                        delta, delta_mean = self.__new_irf_param__('delta', ids, mean=-1, ub=0)
+                        self.atomic_irf_by_family[family] = tf.stack([alpha, beta, delta], axis=0)
+                        self.atomic_irf_means_by_family[family] = tf.stack([alpha_mean, beta_mean, delta_mean], axis=0)
+                    else:
+                        raise ValueError('Impulse response function "%s" is not currently supported.' % family)
 
-    def __initialize_irf_params_inner__(self, family, ids):
+    def __new_irf_param__(self, param_name, ids, mean=0, lb=None, ub=None):
         raise NotImplementedError
 
     def __initialize_irfs__(self, t):
@@ -499,8 +555,6 @@ class DTSR(object):
                                 mode='CONSTANT'
                             )
                             duration = tf.expand_dims(t_delta_cur - t_delta_prev, -1)
-                            print(new_out.shape)
-                            print(duration.shape)
                             new_out = tf.reduce_sum(new_out * duration, axis=0)
                             convolved.append(new_out)
                 return convolved

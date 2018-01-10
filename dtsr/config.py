@@ -64,6 +64,7 @@ class Config(object):
         self.learning_rate_decay_factor = settings.getfloat('learning_rate_decay_factor', 0.)
         self.learning_rate_decay_family = settings.get('learning_rate_decay_family', None)
         self.learning_rate_min = settings.getfloat('learning_rate_min', 1e-4)
+        self.init_sd = settings.getfloat('init_sd', .1)
         self.loss = settings.get('loss', 'MSE')
         ## Bayes net settings
         self.inference_name = settings.get('inference_name', None)

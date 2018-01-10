@@ -33,7 +33,7 @@ class NNDTSR(DTSR):
     :param outdir: ``str``; the output directory, where logs and model parameters are saved.
     :param history_length: ``int`` or ``None``; the maximum length of the history window to use (unbounded if ``None``, which requires ``low_memory=True``).
     :param low_memory: ``bool``; whether to use the ``low_memory`` network structure.
-        If ``True``, DTSR convolves over history windows for each observation of in ``y`` using a TensorFlow control op.
+        If ``True``, DTSR convolves over history windows for each observation in ``y`` using a TensorFlow control op.
         It can be used with unboundedly long histories and requires less memory, but results in poor GPU utilization.
         If ``False``, DTSR expands the design matrix into a rank 3 tensor in which the 2nd axis contains the history for each independent variable for each observation of the dependent variable.
         This requires more memory in order to store redundant input values and requires a finite history length.
@@ -45,21 +45,22 @@ class NNDTSR(DTSR):
     :param log_random: ``bool``; whether to log random effects to Tensorboard.
     :param log_freq: ``int``; the frequency (in iterations) with which to log model params to Tensorboard.
     :param save_freq: ``int``; the frequency (in iterations) with which to save model checkpoints.
-    :param optim: ``str``; the name of the optimizer to use. Choose from ``SGD``, ``AdaGrad``, ``AdaDelta``, ``Adam``, ``FTRL``, ``RMSProp``, ``Nadam``.
+    :param optim: ``str``; the name of the optimizer to use. Choose from ``'SGD'``, ``'AdaGrad'``, ``'AdaDelta'``, ``'Adam'``, ``'FTRL'``, ``'RMSProp'``, ``'Nadam'``.
     :param learning_rate: ``float``; the initial value for the learning rate.
     :param learning_rate_decay_factor: ``float``; rate parameter to the learning rate decay schedule (if applicable).
     :param learning_rate_decay_family: ``str``; the functional family for the learning rate decay schedule (if applicable).
         Choose from the following, where :math:`\lambda` is the current learning rate, :math:`\lambda_0` is the initial learning rate, :math:`\delta` is the ``learning_rate_decay_factor``, and :math:`i` is the iteration index.
 
-        * ``linear``: :math:`\\lambda_0 \\cdot ( 1 - \\delta \\cdot i )`
-        * ``inverse``: :math:`\\frac{\\lambda_0}{1 + ( \\delta \\cdot i )}`
-        * ``exponential``: :math:`\\lambda = \\lambda_0 \\cdot ( 2^{-\\delta \\cdot i} )`
-        * ``stepdownXX``: where ``XX`` is replaced by an integer representing the stepdown interval :math:`a`: :math:`\\lambda = \\lambda_0 * \\delta^{\\left \\lfloor \\frac{i}{a} \\right \\rfloor}`
+        * ``'linear'``: :math:`\\lambda_0 \\cdot ( 1 - \\delta \\cdot i )`
+        * ``'inverse'``: :math:`\\frac{\\lambda_0}{1 + ( \\delta \\cdot i )}`
+        * ``'exponential'``: :math:`\\lambda = \\lambda_0 \\cdot ( 2^{-\\delta \\cdot i} )`
+        * ``'stepdownXX'``: where ``XX`` is replaced by an integer representing the stepdown interval :math:`a`: :math:`\\lambda = \\lambda_0 * \\delta^{\\left \\lfloor \\frac{i}{a} \\right \\rfloor}`
 
     :param learning_rate_min: ``float``; the minimum value for the learning rate.
         If the decay schedule would take the learning rate below this point, learning rate clipping will occur.
+    :param init_sd: ``float``; standard deviation of truncated normal parameter initializer
     :param loss: ``str``; the optimization objective.
-        Currently only ``MAE`` and ``MSE`` are supported.
+        Currently only ``'mse'`` and ``'mae'`` are supported.
     """
 
 
@@ -87,6 +88,7 @@ class NNDTSR(DTSR):
                  learning_rate_decay_factor=0.,
                  learning_rate_decay_family=None,
                  learning_rate_min=1e-4,
+                 init_sd=.1,
                  loss='mse',
                  ):
 
@@ -109,6 +111,7 @@ class NNDTSR(DTSR):
         self.learning_rate_decay_factor = learning_rate_decay_factor
         self.learning_rate_decay_family = learning_rate_decay_family
         self.learning_rate_min = learning_rate_min
+        self.init_sd = init_sd
         self.loss_name = loss
 
         self.build()
@@ -254,6 +257,72 @@ class NNDTSR(DTSR):
                     if x != 'DiracDelta':
                         self.atomic_irf_by_family[x] = self.__initialize_irf_params_inner__(x, sorted(f.atomic_irf_by_family[x]))
                         self.atomic_irf_means_by_family[x] = self.atomic_irf_by_family[x]
+
+    def __new_irf_param__(self, param_name, ids, mean=0, lb=None, ub=None):
+        epsilon = 1e-35
+        dim = len(ids)
+        mean = float(mean)
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if lb is None and ub is None:
+                    # Unbounded support
+                    param_mean_init = mean
+                elif lb is not None and ub is None:
+                    # Lower-bounded support only
+                    try:
+                        float(lb)
+                    except:
+                        raise ValueError('lb is not a valid number: %s' % lb)
+                    param_mean_init = tf.contrib.distributions.softplus_inverse(mean - lb - epsilon)
+                elif lb is None and ub is not None:
+                    # Upper-bounded support only
+                    try:
+                        float(ub)
+                    except:
+                        raise ValueError('ub is not a valid number: %s' % lb)
+                    param_mean_init = tf.contrib.distributions.softplus_inverse(-(mean - ub + epsilon))
+                else:
+                    # Finite-interval bounded support
+                    try:
+                        float(lb)
+                    except:
+                        raise ValueError('lb is not a valid number: %s' % lb)
+                    try:
+                        float(ub)
+                    except:
+                        raise ValueError('ub is not a valid number: %s' % lb)
+                    param_mean_init = tf.contrib.distributions.bijectors.Sigmoid.inverse(
+                        (mean - lb - epsilon) / ((ub - epsilon) - (lb + epsilon))
+                    )
+
+                param_mean_init *= tf.ones([dim])
+
+                param = tf.Variable(
+                    tf.truncated_normal([dim], mean=param_mean_init, stddev=self.init_sd),
+                    dtype=self.FLOAT_TF,
+                    name=sn('%s_%s' % (param_name, '-'.join(ids)))
+                )
+
+                if lb is None and ub is None:
+                    param_out = param
+                elif lb is not None and ub is None:
+                    param_out = tf.nn.softplus(param) + lb + epsilon
+                elif lb is None and ub is not None:
+                    param_out = -tf.nn.softplus(param) + ub - epsilon
+                else:
+                    param_out = tf.sigmoid(param) * ((ub - epsilon) - (lb + epsilon)) + lb + epsilon
+
+                for i in range(dim):
+                    tf.summary.scalar(
+                        sn('%s/%s' % (param_name, ids[i])),
+                        param_out[i],
+                        collections=['params']
+                    )
+
+                # Since NNDTSR just learns point estimates, we simply use those
+                # estimates for plotting in the 2nd return value
+                return (param_out, param_out)
 
     def __initialize_irf_params_inner__(self, family, ids):
         ## Infinitessimal value to add to bounded parameters
