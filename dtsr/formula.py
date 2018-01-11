@@ -63,25 +63,24 @@ class Formula(object):
         self.rangf = [self.random[r].gf for r in self.ran_names]
 
 
-    def process_ast(self, t, ops=None, under_IRF=False, random_coefficients=None):
+    def process_ast(self, t, ops=None, ran_coef=None, ran_gf=None):
         if ops is None:
             ops = []
         s = []
         if type(t).__name__ == 'BinOp':
             if type(t.op).__name__ == 'Add':
                 assert len(ops) == 0, 'Transformation of multiple terms is not supported in DTSR formula strings'
-                s += self.process_ast(t.left, ops=ops, under_IRF=under_IRF, random_coefficients=random_coefficients)
-                s += self.process_ast(t.right, ops=ops, under_IRF=under_IRF, random_coefficients=random_coefficients)
+                s += self.process_ast(t.left, ops=ops, ran_coef=ran_coef, ran_gf=ran_gf)
+                s += self.process_ast(t.right, ops=ops, ran_coef=ran_coef, ran_gf=ran_gf)
             elif type(t.op).__name__ == 'BitOr':
                 assert len(ops) == 0, 'Transformation of random terms is not supported in DTSR formula strings'
-                assert not under_IRF, 'Random terms may not be embedded under IRF terms in DTSR formula strings'
-                assert random_coefficients is None, 'Random terms may not be embedded under other random terms in DTSR formula strings'
-                random_coefficients = []
-                s = self.process_ast(t.left, random_coefficients=random_coefficients)
-                new = RandomTerm(s, t.right.id, random_coefficients[:])
+                assert ran_coef is None, 'Random terms may not be embedded under other random terms in DTSR formula strings'
+                ran_coef = []
+                s = self.process_ast(t.left, ran_coef=ran_coef, ran_gf=t.right.id)
+                new = RandomTerm(s, t.right.id, ran_coef[:])
                 self.random[new.name()] = new
             elif type(t.op).__name__ == 'Mod':
-                terms = self.process_ast(t.left, under_IRF=under_IRF, random_coefficients=random_coefficients) + self.process_ast(t.right, under_IRF=under_IRF, random_coefficients=random_coefficients)
+                terms = self.process_ast(t.left, ran_coef=ran_coef, ran_gf=ran_gf) + self.process_ast(t.right, ran_coef=ran_coef, ran_gf=ran_gf)
                 for x in terms:
                     if type(x).__name__ == 'IRFTreeNode':
                         raise ValueError('Interaction terms may not dominate IRF terms in DTSR formula strings')
@@ -89,8 +88,8 @@ class Formula(object):
                 s.append(new)
             elif type(t.op).__name__ == 'Mult':
                 assert len(ops) == 0, 'Transformation of term expansions is not supported in DTSR formula strings'
-                left = self.process_ast(t.left, random_coefficients=random_coefficients)
-                right = self.process_ast(t.right, random_coefficients=random_coefficients)
+                left = self.process_ast(t.left, ran_coef=ran_coef, ran_gf=ran_gf)
+                right = self.process_ast(t.right, ran_coef=ran_coef, ran_gf=ran_gf)
                 terms = left + right
                 for x in terms:
                     if type(x).__name__ == 'IRFTreeNode':
@@ -99,7 +98,7 @@ class Formula(object):
                 s += left + right + [new]
             elif type(t.op).__name__ == 'Pow':
                 assert len(ops) == 0, 'Transformation of term expansions is not supported in DTSR formula strings'
-                terms = self.process_ast(t.left, random_coefficients=random_coefficients)
+                terms = self.process_ast(t.left, ran_coef=ran_coef, ran_gf=ran_gf)
                 for x in terms:
                     if type(x).__name__ == 'IRFTreeNode':
                         raise ValueError('Term expansions may not dominate IRF terms in DTSR formula strings')
@@ -115,9 +114,9 @@ class Formula(object):
         elif type(t).__name__ == 'Call':
             if t.func.id == 'C':
                 assert len(t.args) == 2, 'C() takes exactly two arguments in DTSR formula strings'
-                terms = self.process_ast(t.args[0], under_IRF=True, random_coefficients=random_coefficients)
+                terms = self.process_ast(t.args[0], ran_coef=ran_coef, ran_gf=ran_gf)
                 for x in terms:
-                    new = self.process_irf(t.args[1], x, ops=None, under_IRF=under_IRF, random_coefficients=random_coefficients)
+                    new = self.process_irf(t.args[1], x, ops=None, terminal=True, ran_coef=ran_coef, ran_gf=ran_gf)
                     if new.name() not in self.preterminal_names:
                         self.preterminal_names.append(new.name())
                     if new.impulse.name() not in self.terminals:
@@ -127,7 +126,7 @@ class Formula(object):
                 raise ValueError('IRF calls can only occur as inputs to C() in DTSR formula strings')
             else:
                 assert len(t.args) <= 1, 'Only unary ops on variables supported in DTSR formula strings'
-                s += self.process_ast(t.args[0], ops=ops + [t.func.id], under_IRF=under_IRF, random_coefficients=random_coefficients)
+                s += self.process_ast(t.args[0], ops=ops + [t.func.id], ran_coef=ran_coef, ran_gf=ran_gf)
         elif type(t).__name__ == 'Name':
             new = Term(t.id, ops=ops)
             s.append(new)
@@ -141,13 +140,14 @@ class Formula(object):
             raise ValueError('Operation "%s" is not supported in DTSR formula strings' %type(t).__name___)
         return s
 
-    def process_irf(self, t, impulse, ops=None, under_IRF=True, random_coefficients=None):
+    def process_irf(self, t, impulse, ops=None, terminal=True, ran_coef=None, ran_gf=None):
         if ops is None:
             ops = []
         assert t.func.id in Formula.IRF, 'Ill-formed model string: process_irf() called on non-IRF node'
         irf_id = None
         coef_id = None
         cont=False
+        ran=False
         if len(t.keywords) > 0:
             for k in t.keywords:
                 if k.arg == 'irf_id':
@@ -175,20 +175,36 @@ class Formula(object):
                         cont = k.value.value
                     elif type(k.value).__name__ == 'Num':
                         cont = k.value.n > 0
+                elif k.arg == 'ran':
+                    if type(k.value).__name__ == 'Str':
+                        if k.value.s in ['True', 'TRUE', 'true', 'T']:
+                            ran = True
+                    elif type(k.value).__name__ == 'Name':
+                        if k.value.id in ['True', 'TRUE', 'true', 'T']:
+                            ran = True
+                    elif type(k.value).__name__ == 'NameConstant':
+                        ran = k.value.value
+                    elif type(k.value).__name__ == 'Num':
+                        ran = k.value.n > 0
         p = self.irf_tree
         if len(t.args) > 0:
             assert len(t.args) == 1, 'Ill-formed model string: IRF can take at most 1 positional argument'
-            p = self.process_irf(t.args[0], impulse)
+            p = self.process_irf(t.args[0], impulse, terminal=False, ran_gf=ran_gf)
+
         new = IRFTreeNode(impulse=impulse, family=t.func.id, irfID=irf_id, coefID=coef_id, cont=cont, p=p, ops=ops)
+        if ran:
+            if ran_gf is not None:
+                if ran_gf not in new.ran:
+                    new.ran.append(ran_gf)
+
         if new.family not in self.atomic_irf_by_family:
-            self.atomic_irf_by_family[new.family] = []
-        if new.irf_id() not in self.atomic_irf_by_family[new.family]:
-            self.atomic_irf_by_family[new.family].append(new.irf_id())
-        if not under_IRF and new.coef_id() not in self.coefficient_names:
+            self.atomic_irf_by_family[new.family] = {}
+        self.atomic_irf_by_family[new.family][new.irf_id()] = new
+        if terminal and new.coef_id() not in self.coefficient_names:
             self.coefficient_names.append(new.coef_id())
-        if random_coefficients is not None and new.coef_id() not in random_coefficients:
-            random_coefficients.append(new.coef_id())
-        if random_coefficients is None and not under_IRF and new.coef_id() not in self.fixed_coefficient_names:
+        if ran_coef is not None and new.coef_id() not in ran_coef:
+            ran_coef.append(new.coef_id())
+        if ran_coef is None and terminal and new.coef_id() not in self.fixed_coefficient_names:
             self.fixed_coefficient_names.append(new.coef_id())
         return new
 
@@ -237,7 +253,7 @@ class Formula(object):
         'ShiftedExp',
         'Gamma',
         'ShiftedGamma',
-        'GammKgt1',
+        'GammaKgt1',
         'ShiftedGammaKgt1',
         'Normal',
         'SkewNormal',
@@ -316,7 +332,7 @@ class RandomTerm(object):
         return self.name_str
 
 class IRFTreeNode(object):
-    def __init__(self, impulse=None, family=None, irfID=None, coefID=None, ops=None, p=None, cont=False):
+    def __init__(self, impulse=None, family=None, irfID=None, coefID=None, ops=None, p=None, cont=False, ran=None):
         if impulse is None:
             self.ops = []
             self.cont = False
@@ -327,6 +343,7 @@ class IRFTreeNode(object):
             self.children = {}
             self.p = None
             self.fit_center = True
+            self.ran = []
         else:
             if ops is None:
                 ops = []
@@ -339,12 +356,17 @@ class IRFTreeNode(object):
             self.children = {}
             self.p = p
             self.fit_center = True
+            if ran is None:
+                self.ran = []
+            else:
+                self.ran = ran
 
             if self.family not in p.children:
                 p.children[self.family] = {}
             if self.name() not in p.children[self.family]:
                 p.children[self.family][self.name()] = self
             else:
+                self.ran = p.children[self.family][self.name()].ran + self.ran
                 self.merge_children(p.children[self.family][self.name()])
                 p.children[self.family][self.name()] = self
 
@@ -391,6 +413,8 @@ class IRFTreeNode(object):
 
     def __str__(self):
         s = self.name()
+        if len(self.ran) > 0:
+            s += ': ' + ','.join(self.ran)
         for f in self.children:
             s += '\n  %s'%f
             indent = '    '

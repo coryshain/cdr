@@ -262,7 +262,7 @@ class BDTSR(DTSR):
                     r = f.random[f.ran_names[i]]
                     mask_row_np = np.ones(self.rangf_n_levels[i], dtype=getattr(np, self.float_type))
                     mask_row_np[self.rangf_n_levels[i] - 1] = 0
-                    mask_row = tf.constant(mask_row_np)
+                    mask_row = tf.constant(mask_row_np, dtype=self.FLOAT_TF)
 
                     if r.intercept:
                         intercept_random = Normal(
@@ -390,10 +390,12 @@ class BDTSR(DTSR):
                                     collections=['random']
                                 )
 
-    def __new_irf_param__(self, param_name, ids, mean=0, lb=None, ub=None):
+    def __new_irf_param__(self, param_name, ids, mean=0, lb=None, ub=None, ran_ids=None):
         epsilon = 1e-35
         dim = len(ids)
         mean = float(mean)
+        if ran_ids is None:
+            ran_ids = []
 
         with self.sess.as_default():
             with self.sess.graph.as_default():

@@ -204,12 +204,18 @@ class NNDTSR(DTSR):
                     r = f.random[f.ran_names[i]]
                     mask_row_np = np.ones(self.rangf_n_levels[i], dtype=self.FLOAT_NP)
                     mask_row_np[self.rangf_n_levels[i] - 1] = 0
-                    mask_row = tf.constant(mask_row_np)
+                    mask_row = tf.constant(mask_row_np, dtype=self.FLOAT_TF)
 
                     if r.intercept:
                         intercept_random = tf.Variable(
-                            tf.truncated_normal(shape=[self.rangf_n_levels[i]], mean=0., stddev=.1, dtype=tf.float32),
-                            name='intercept_by_%s' % r.gf)
+                            tf.truncated_normal(
+                                shape=[self.rangf_n_levels[i]],
+                                mean=0.,
+                                stddev=.1
+                            ),
+                            dtype=self.FLOAT_TF,
+                            name='intercept_by_%s' % r.gf
+                        )
                         intercept_random *= mask_row
                         intercept_random -= tf.reduce_mean(intercept_random, axis=0)
 
@@ -230,8 +236,14 @@ class NNDTSR(DTSR):
                         self.ransl = True
 
                         coefficient_random = tf.Variable(
-                            tf.truncated_normal(shape=[self.rangf_n_levels[i], len(f.coefficient_names)], mean=0., stddev=.1,
-                                                dtype=tf.float32), name='coefficient_by_%s' % (r.gf))
+                            tf.truncated_normal(
+                                shape=[self.rangf_n_levels[i], len(f.coefficient_names)],
+                                mean=0.,
+                                stddev=.1
+                            ),
+                            dtype=self.FLOAT_TF,
+                            name='coefficient_by_%s' % (r.gf)
+                        )
 
                         coefficient_random *= mask_col
                         coefficient_random *= tf.expand_dims(mask_row, -1)
@@ -249,19 +261,12 @@ class NNDTSR(DTSR):
                                     collections=['random']
                                 )
 
-    def __initialize_irf_params__(self):
-        f = self.form
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                for x in f.atomic_irf_by_family:
-                    if x != 'DiracDelta':
-                        self.atomic_irf_by_family[x] = self.__initialize_irf_params_inner__(x, sorted(f.atomic_irf_by_family[x]))
-                        self.atomic_irf_means_by_family[x] = self.atomic_irf_by_family[x]
-
-    def __new_irf_param__(self, param_name, ids, mean=0, lb=None, ub=None):
+    def __new_irf_param__(self, param_name, ids, mean=0, lb=None, ub=None, ran_ids=None):
         epsilon = 1e-35
         dim = len(ids)
         mean = float(mean)
+        if ran_ids is None:
+            ran_ids = []
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -296,10 +301,8 @@ class NNDTSR(DTSR):
                         (mean - lb - epsilon) / ((ub - epsilon) - (lb + epsilon))
                     )
 
-                param_mean_init *= tf.ones([dim])
-
                 param = tf.Variable(
-                    tf.truncated_normal([dim], mean=param_mean_init, stddev=self.init_sd),
+                    tf.truncated_normal([1, dim], mean=param_mean_init, stddev=self.init_sd),
                     dtype=self.FLOAT_TF,
                     name=sn('%s_%s' % (param_name, '-'.join(ids)))
                 )
@@ -316,234 +319,64 @@ class NNDTSR(DTSR):
                 for i in range(dim):
                     tf.summary.scalar(
                         sn('%s/%s' % (param_name, ids[i])),
-                        param_out[i],
+                        param_out[0, i],
                         collections=['params']
                     )
 
+                param_mean = param_out
+
+                if len(ran_ids) > 0:
+                    for gf in ran_ids:
+                        i = self.form.rangf.index(gf)
+                        mask_row_np = np.ones(self.rangf_n_levels[i], dtype=getattr(np, self.float_type))
+                        mask_row_np[self.rangf_n_levels[i] - 1] = 0
+                        mask_row = tf.constant(mask_row_np, dtype=self.FLOAT_TF)
+                        col_ix = names2ix(ran_ids[gf], ids)
+                        mask_col_np = np.zeros([1, dim])
+                        mask_col_np[0, col_ix] = 1.
+                        mask_col = tf.constant(mask_col_np, dtype=self.FLOAT_TF)
+
+                        param_ran = tf.Variable(
+                            tf.truncated_normal(
+                                shape=[self.rangf_n_levels[i], dim],
+                                mean=param_mean_init,
+                                stddev=self.init_sd
+                            ),
+                            dtype=self.FLOAT_TF,
+                            name='%s_by_%s' % (param_name, gf)
+                        )
+
+                        half_interval = None
+                        if lb is not None:
+                            half_interval = param_out - (lb + epsilon)
+                        if ub is not None:
+                            if lb is not None:
+                                half_interval = tf.minimum(half_interval, ub - epsilon - param_out)
+                            else:
+                                half_interval = ub - epsilon - param_out
+                        if half_interval is not None:
+                            param_ran = tf.sigmoid(param_ran) * half_interval * 2
+                            param_ran += lb + epsilon
+
+                        param_ran *= mask_col
+                        param_ran *= tf.expand_dims(mask_row, -1)
+                        param_ran -= tf.reduce_mean(param_ran, axis=0)
+
+                        param_out += tf.gather(param_ran, self.gf_y[:, i], axis=0)
+
+                        if self.log_random:
+                            for j in range(len(ran_ids[gf])):
+                                coef_name = ran_ids[gf][j]
+                                ix = col_ix[j]
+                                tf.summary.histogram(
+                                    'by_%s/%s/%s' % (gf, param_name, coef_name),
+                                    param_ran[:, ix],
+                                    collections=['random']
+                                )
+
                 # Since NNDTSR just learns point estimates, we simply use those
                 # estimates for plotting in the 2nd return value
-                return (param_out, param_out)
-
-    def __initialize_irf_params_inner__(self, family, ids):
-        ## Infinitessimal value to add to bounded parameters
-        epsilon = 1e-35
-        dim = len(ids)
-
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                if family == 'Exp':
-                    log_L = tf.get_variable(
-                        sn('log_L_%s' % '-'.join(ids)),
-                        shape=[1, dim],
-                        initializer=tf.truncated_normal_initializer(stddev=.1),
-                        dtype=self.FLOAT_TF
-                    )
-                    L = tf.exp(log_L, name=sn('L_%s' % '-'.join(ids))) + epsilon
-                    for i in range(dim):
-                        tf.summary.scalar('L' + '/%s' % ids[i], L[i], collections=['params'])
-                    return L
-                if family == 'ShiftedExp':
-                    log_L = tf.Variable(
-                        tf.truncated_normal([dim], stddev=.1),
-                        dtype=self.FLOAT_TF,
-                        name=sn('log_L_%s' % '-'.join(ids))
-                    )
-                    log_neg_delta = tf.Variable(
-                        tf.truncated_normal([dim], stddev=.1),
-                        dtype=self.FLOAT_TF,
-                        name=sn('log_neg_delta_%s' % '-'.join(ids))
-                    )
-                    L = tf.exp(log_L, name=sn('L_%s' % '-'.join(ids))) + epsilon
-                    delta = -tf.exp(log_neg_delta, name=sn('delta_%s' % '-'.join(ids)))
-                    for i in range(dim):
-                        tf.summary.scalar('L' + '/%s' % ids[i], L[i], collections=['params'])
-                        tf.summary.scalar('delta' + '/%s' % ids[i], delta[i], collections=['params'])
-                    return tf.stack([L, delta], axis=0)
-                if family == 'Gamma':
-                    log_k = tf.Variable(
-                        tf.truncated_normal([dim], stddev=.1),
-                        dtype=self.FLOAT_TF,
-                        name=sn('log_k_%s' % '-'.join(ids))
-                    )
-                    log_theta = tf.Variable(
-                        tf.truncated_normal([dim], stddev=.1),
-                        dtype=self.FLOAT_TF,
-                        name=sn('log_theta_%s' % '-'.join(ids))
-                    )
-                    k = tf.exp(log_k, name=sn('k_%s' % '-'.join(ids))) + epsilon
-                    theta = tf.exp(log_theta, name=sn('theta_%s' % '-'.join(ids))) + epsilon
-                    for i in range(dim):
-                        tf.summary.scalar('k' + '/%s' % ids[i], k[i], collections=['params'])
-                        tf.summary.scalar('theta' + '/%s' % ids[i], theta[i], collections=['params'])
-                    return tf.stack([k, theta])
-                if family == 'GammaKgt1':
-                    log_k = tf.Variable(
-                        tf.truncated_normal([dim], stddev=.1),
-                        dtype=self.FLOAT_TF,
-                        name=sn('log_k_%s' % '-'.join(ids))
-                    )
-                    log_theta = tf.Variable(
-                        tf.truncated_normal([dim], stddev=.1),
-                        dtype=self.FLOAT_TF,
-                        name=sn('log_theta_%s' % '-'.join(ids))
-                    )
-                    k = tf.exp(log_k, name=sn('k_%s' % '-'.join(ids))) + 1. + epsilon
-                    theta = tf.exp(log_theta, name=sn('theta_%s' % '-'.join(ids))) + epsilon
-                    for i in range(dim):
-                        tf.summary.scalar('k' + '/%s' % ids[i], k[i], collections=['params'])
-                        tf.summary.scalar('theta' + '/%s' % ids[i], theta[i], collections=['params'])
-                    return tf.stack([k, theta])
-                if family == 'ShiftedGamma':
-                    log_k = tf.Variable(
-                        tf.truncated_normal([dim], stddev=.1),
-                        dtype=self.FLOAT_TF,
-                        name=sn('log_k_%s' % '-'.join(ids))
-                    )
-                    log_theta = tf.Variable(
-                        tf.truncated_normal([dim], stddev=.1),
-                        dtype=self.FLOAT_TF,
-                        name=sn('log_theta_%s' % '-'.join(ids))
-                    )
-                    log_neg_delta = tf.Variable(
-                        tf.truncated_normal([dim], stddev=.1),
-                        dtype=self.FLOAT_TF,
-                        name=sn('log_neg_delta_%s' % '-'.join(ids))
-                    )
-                    k = tf.exp(log_k, name=sn('k_%s' % '-'.join(ids))) + epsilon
-                    theta = tf.exp(log_theta, name=sn('theta_%s' % '-'.join(ids))) + epsilon
-                    delta = -tf.exp(log_neg_delta, name=sn('delta_%s' % '-'.join(ids)))
-                    for i in range(dim):
-                        tf.summary.scalar('k' + '/%s' % ids[i], k[i], collections=['params'])
-                        tf.summary.scalar('theta' + '/%s' % ids[i], theta[i], collections=['params'])
-                        tf.summary.scalar('delta' + '/%s' % ids[i], delta[i], collections=['params'])
-                    return tf.stack([k, theta, delta], axis=0)
-                if family == 'ShiftedGammaKgt1':
-                    log_k = tf.Variable(
-                        tf.truncated_normal([dim], stddev=.1),
-                        dtype=self.FLOAT_TF,
-                        name=sn('log_k_%s' % '-'.join(ids))
-                    )
-                    log_theta = tf.Variable(
-                        tf.truncated_normal([dim], stddev=.1),
-                        dtype=self.FLOAT_TF,
-                        name=sn('log_theta_%s' % '-'.join(ids))
-                    )
-                    log_neg_delta = tf.Variable(
-                        tf.truncated_normal([dim], stddev=.1),
-                        dtype=self.FLOAT_TF,
-                        name=sn('log_neg_delta_%s' % '-'.join(ids))
-                    )
-                    k = tf.exp(log_k, name=sn('k_%s' % '-'.join(ids))) + 1. + epsilon
-                    theta = tf.exp(log_theta, name=sn('theta_%s' % '-'.join(ids))) + epsilon
-                    delta = -tf.exp(log_neg_delta, name=sn('delta_%s' % '-'.join(ids)))
-                    for i in range(dim):
-                        tf.summary.scalar('k' + '/%s' % ids[i], k[i], collections=['params'])
-                        tf.summary.scalar('theta' + '/%s' % ids[i], theta[i], collections=['params'])
-                        tf.summary.scalar('delta' + '/%s' % ids[i], delta[i], collections=['params'])
-                    return tf.stack([k, theta, delta], axis=0)
-                if family == 'Normal':
-                    log_sigma = tf.Variable(
-                        tf.truncated_normal([dim], stddev=.1),
-                        dtype=self.FLOAT_TF,
-                        name=sn('log_sigma_%s' % '-'.join(ids))
-                    )
-                    mu = tf.Variable(
-                        tf.truncated_normal([dim], stddev=.1),
-                        dtype=self.FLOAT_TF,
-                        name=sn('mu_%s' % '-'.join(ids))
-                    )
-                    sigma = tf.exp(log_sigma, name=sn('sigma_%s' % '-'.join(ids)))
-                    for i in range(dim):
-                        tf.summary.scalar('mu' + '/%s' % ids[i], mu[i], collections=['params'])
-                        tf.summary.scalar('sigma' + '/%s' % ids[i], sigma[i], collections=['params'])
-                    return tf.stack([mu, sigma], axis=0)
-                if family == 'SkewNormal':
-                    log_sigma = tf.Variable(
-                        tf.truncated_normal([dim], stddev=.1),
-                        dtype=self.FLOAT_TF,
-                        name=sn('log_sigma_%s' % '-'.join(ids))
-                    )
-                    mu = tf.Variable(
-                        tf.truncated_normal([dim], stddev=.1),
-                        dtype=self.FLOAT_TF,
-                        name=sn('mu_%s' % '-'.join(ids))
-                    )
-                    alpha = tf.Variable(
-                        tf.truncated_normal([dim], stddev=.1),
-                        dtype=self.FLOAT_TF,
-                        name=sn('alpha_%s' % '-'.join(ids))
-                    )
-                    sigma = tf.exp(log_sigma, name=sn('sigma_%s' % '-'.join(ids))) + epsilon
-                    for i in range(dim):
-                        tf.summary.scalar('mu' + '/%s' % ids[i], mu[i], collections=['params'])
-                        tf.summary.scalar('sigma' + '/%s' % ids[i], sigma[i], collections=['params'])
-                        tf.summary.scalar('alpha' + '/%s' % ids[i], alpha[i], collections=['params'])
-                    return tf.stack([mu, sigma, alpha], axis=0)
-                if family == 'EMG':
-                    log_sigma = tf.Variable(
-                        tf.truncated_normal([dim], stddev=.1),
-                        dtype=self.FLOAT_TF,
-                        name=sn('log_sigma_%s' % '-'.join(ids))
-                    )
-                    mu = tf.Variable(
-                        tf.truncated_normal([dim], stddev=.1),
-                        name=sn('mu_%s' % '-'.join(ids)),
-                        dtype=self.FLOAT_TF
-                    )
-                    log_L = tf.Variable(
-                        tf.truncated_normal([dim], stddev=.1),
-                        name=sn('log_L_%s' % '-'.join(ids)),
-                        dtype=self.FLOAT_TF
-                    )
-                    sigma = tf.exp(log_sigma, name=sn('sigma_%s' % '-'.join(ids))) + epsilon
-                    L = tf.exp(log_L, name=sn('L_%s' % '-'.join(ids))) + epsilon
-                    for i in range(dim):
-                        tf.summary.scalar('mu' + '/%s' % ids[i], mu[i], collections=['params'])
-                        tf.summary.scalar('sigma' + '/%s' % ids[i], sigma[i], collections=['params'])
-                        tf.summary.scalar('L' + '/%s' % ids[i], L[i], collections=['params'])
-                    return tf.stack([mu, sigma, L], axis=0)
-                if family == 'BetaPrime':
-                    log_alpha = tf.Variable(
-                        tf.truncated_normal([dim], stddev=.1),
-                        name=sn('log_alpha_%s' % '-'.join(ids)),
-                        dtype=self.FLOAT_TF
-                    )
-                    log_beta = tf.Variable(
-                        tf.truncated_normal([dim], stddev=.1),
-                        name=sn('log_beta_%s' % '-'.join(ids)),
-                        dtype=self.FLOAT_TF
-                    )
-                    alpha = tf.exp(log_alpha, name=sn('alpha_%s' % '-'.join(ids))) + epsilon
-                    beta = tf.exp(log_beta, name=sn('beta_%s' % '-'.join(ids))) + epsilon
-                    for i in range(dim):
-                        tf.summary.scalar('alpha' + '/%s' % ids[i], alpha[i], collections=['params'])
-                        tf.summary.scalar('beta' + '/%s' % ids[i], beta[i], collections=['params'])
-                    return tf.stack([alpha, beta], axis=0)
-                if family == 'ShiftedBetaPrime':
-                    log_alpha = tf.Variable(
-                        tf.truncated_normal([dim], stddev=.1),
-                        name=sn('log_alpha_%s' % '-'.join(ids)),
-                        dtype=self.FLOAT_TF
-                    )
-                    log_beta = tf.Variable(
-                        tf.truncated_normal([dim], stddev=.1),
-                        name=sn('log_beta_%s' % '-'.join(ids)),
-                        dtype=self.FLOAT_TF
-                    )
-                    log_neg_delta = tf.Variable(
-                        tf.truncated_normal([dim], stddev=.1),
-                        dtype=self.FLOAT_TF,
-                        name=sn('log_neg_delta_%s' % '-'.join(ids))
-                    )
-                    alpha = tf.exp(log_alpha, name=sn('alpha_%s' % '-'.join(ids))) + epsilon
-                    beta = tf.exp(log_beta, name=sn('beta_%s' % '-'.join(ids))) + epsilon
-                    delta = -tf.exp(log_neg_delta, name=sn('delta_%s' % '-'.join(ids)))
-                    for i in range(dim):
-                        tf.summary.scalar('alpha' + '/%s' % ids[i], alpha[i], collections=['params'])
-                        tf.summary.scalar('beta' + '/%s' % ids[i], beta[i], collections=['params'])
-                        tf.summary.scalar('delta' + '/%s' % ids[i], delta[i], collections=['params'])
-                    return tf.stack([alpha, beta, delta], axis=0)
-                raise ValueError('Impulse response function "%s" is not currently supported.' % family)
+                return (param_out, param_mean)
 
     def __initialize_objective__(self):
         f = self.form

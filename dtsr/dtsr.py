@@ -209,20 +209,20 @@ class DTSR(object):
             with self.sess.graph.as_default():
 
                 def exponential(params):
-                    pdf = tf.contrib.distributions.Exponential(rate=params[0]).prob
+                    pdf = tf.contrib.distributions.Exponential(rate=params[:,0:1]).prob
                     return lambda x: pdf(x + epsilon)
 
                 self.irf_lambdas['Exp'] = exponential
 
                 def shifted_exp(params):
-                    pdf = tf.contrib.distributions.Exponential(rate=params[0]).prob
-                    return lambda x: pdf(x - params[1] + epsilon)
+                    pdf = tf.contrib.distributions.Exponential(rate=params[:,0:1]).prob
+                    return lambda x: pdf(x - params[:,1:2] + epsilon)
 
                 self.irf_lambdas['ShiftedExp'] = shifted_exp
 
                 def gamma(params):
-                    pdf = tf.contrib.distributions.Gamma(concentration=params[0],
-                                                         rate=params[1],
+                    pdf = tf.contrib.distributions.Gamma(concentration=params[:,0:1],
+                                                         rate=params[:,1:2],
                                                          validate_args=False).prob
                     return lambda x: pdf(x + epsilon)
 
@@ -231,25 +231,25 @@ class DTSR(object):
                 self.irf_lambdas['GammaKgt1'] = gamma
 
                 def shifted_gamma(params):
-                    pdf = tf.contrib.distributions.Gamma(concentration=params[0],
-                                                         rate=params[1],
+                    pdf = tf.contrib.distributions.Gamma(concentration=params[:,0:1],
+                                                         rate=params[:,1:2],
                                                          validate_args=False).prob
-                    return lambda x: pdf(x - params[2] + epsilon)
+                    return lambda x: pdf(x - params[:,2:3] + epsilon)
 
                 self.irf_lambdas['ShiftedGamma'] = shifted_gamma
 
                 self.irf_lambdas['ShiftedGammaKgt1'] = shifted_gamma
 
                 def normal(params):
-                    pdf = tf.contrib.distributions.Normal(loc=params[0], scale=params[1]).prob
+                    pdf = tf.contrib.distributions.Normal(loc=params[:,0:1], scale=params[:,1:2]).prob
                     return lambda x: pdf(x)
 
                 self.irf_lambdas['Normal'] = normal
 
                 def skew_normal(params):
-                    mu = params[0]
-                    sigma = params[1]
-                    alpha = params[2]
+                    mu = params[:,0:1]
+                    sigma = params[:,1:2]
+                    alpha = params[:,2:3]
                     stdnorm = tf.contrib.distributions.Normal(loc=0., scale=1.)
                     stdnorm_pdf = stdnorm.prob
                     stdnorm_cdf = stdnorm.cdf
@@ -258,26 +258,26 @@ class DTSR(object):
                 self.irf_lambdas['SkewNormal'] = skew_normal
 
                 def emg(params):
-                    mu = params[0]
-                    sigma = params[1]
-                    L = params[2]
+                    mu = params[:,0:1]
+                    sigma = params[:,1:2]
+                    L = params[:,2:3]
                     return lambda x: L / 2 * tf.exp(0.5 * L * (2. * mu + L * sigma ** 2. - 2. * x)) * tf.erfc(
                         (mu + L * sigma ** 2 - x) / (tf.sqrt(2.) * sigma))
 
                 self.irf_lambdas['EMG'] = emg
 
                 def beta_prime(params):
-                    alpha = params[0]
-                    beta = params[1]
+                    alpha = params[:,1:2]
+                    beta = params[:,2:3]
                     return lambda x: (x + epsilon) ** (alpha - 1.) * (1. + (x + epsilon)) ** (-alpha - beta) / tf.exp(
                         tf.lbeta(tf.transpose(tf.stack([alpha, beta], axis=0))))
 
                 self.irf_lambdas['BetaPrime'] = beta_prime
 
                 def shifted_beta_prime(params):
-                    alpha = params[0]
-                    beta = params[1]
-                    delta = params[2]
+                    alpha = params[:,0:1]
+                    beta = params[:,1:2]
+                    delta = params[:,2:3]
                     return lambda x: (x - delta + epsilon) ** (alpha - 1) * (1 + (x - delta + epsilon)) ** (
                     -alpha - beta) / tf.exp(
                         tf.lbeta(tf.transpose(tf.stack([alpha, beta], axis=0))))
@@ -289,61 +289,68 @@ class DTSR(object):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 for family in f.atomic_irf_by_family:
-                    ids = sorted(f.atomic_irf_by_family[family])
+                    ids = sorted(list(f.atomic_irf_by_family[family].keys()))
+                    ran_ids = {}
+                    for id in ids:
+                        irf_node = f.atomic_irf_by_family[family][id]
+                        for gf in irf_node.ran:
+                            if gf not in ran_ids:
+                                ran_ids[gf] = []
+                            ran_ids[gf].append(id)
                     if family == 'DiracDelta':
                         pass
                     elif family == 'Exp':
-                        L, L_mean = self.__new_irf_param__('L', ids, mean=1, lb=0)
+                        L, L_mean = self.__new_irf_param__('L', ids, mean=1, lb=0, ran_ids=ran_ids)
                         self.atomic_irf_by_family[family] = L
                         self.atomic_irf_means_by_family[family] = L_mean
                     elif family == 'ShiftedExp':
-                        L, L_mean = self.__new_irf_param__('L', ids, mean=1, lb=0)
-                        delta, delta_mean = self.__new_irf_param__('delta', ids, mean=-1, ub=0)
-                        self.atomic_irf_by_family[family] = tf.stack([L, delta], axis=0)
-                        self.atomic_irf_means_by_family[family] = tf.stack([L_mean, delta_mean], axis=0)
+                        L, L_mean = self.__new_irf_param__('L', ids, mean=1, lb=0, ran_ids=ran_ids)
+                        delta, delta_mean = self.__new_irf_param__('delta', ids, mean=-1, ub=0, ran_ids=ran_ids)
+                        self.atomic_irf_by_family[family] = tf.stack([L, delta], axis=1)
+                        self.atomic_irf_means_by_family[family] = tf.stack([L_mean, delta_mean], axis=1)
                     elif family in ['Gamma', 'GammaKgt1']:
-                        k, k_mean = self.__new_irf_param__('k', ids, mean=1, lb=0)
-                        theta, theta_mean = self.__new_irf_param__('theta', ids, mean=1, lb=0)
-                        self.atomic_irf_by_family[family] = tf.stack([k, theta], axis=0)
-                        self.atomic_irf_means_by_family[family] = tf.stack([k_mean, theta_mean], axis=0)
+                        k, k_mean = self.__new_irf_param__('k', ids, mean=1, lb=0, ran_ids=ran_ids)
+                        theta, theta_mean = self.__new_irf_param__('theta', ids, mean=1, lb=0, ran_ids=ran_ids)
+                        self.atomic_irf_by_family[family] = tf.stack([k, theta], axis=1)
+                        self.atomic_irf_means_by_family[family] = tf.stack([k_mean, theta_mean], axis=1)
                     elif family == ['ShiftedGamma', 'ShiftedGammaKgt1']:
-                        k, k_mean = self.__new_irf_param__('k', ids, mean=1, lb=0)
-                        theta, theta_mean = self.__new_irf_param__('theta', ids, mean=1, lb=0)
-                        delta, delta_mean = self.__new_irf_param__('delta', ids, mean=-1, ub=0)
-                        self.atomic_irf_by_family[family] = tf.stack([k, theta, delta], axis=0)
-                        self.atomic_irf_means_by_family[family] = tf.stack([k_mean, theta_mean, delta_mean], axis=0)
+                        k, k_mean = self.__new_irf_param__('k', ids, mean=1, lb=0, ran_ids=ran_ids)
+                        theta, theta_mean = self.__new_irf_param__('theta', ids, mean=1, lb=0, ran_ids=ran_ids)
+                        delta, delta_mean = self.__new_irf_param__('delta', ids, mean=-1, ub=0, ran_ids=ran_ids)
+                        self.atomic_irf_by_family[family] = tf.stack([k, theta, delta], axis=1)
+                        self.atomic_irf_means_by_family[family] = tf.stack([k_mean, theta_mean, delta_mean], axis=1)
                     elif family == 'Normal':
-                        mu, mu_mean = self.__new_irf_param__('mu', ids)
-                        sigma, sigma_mean = self.__new_irf_param__('sigma', ids, mean=1, lb=0)
-                        self.atomic_irf_by_family[family] = tf.stack([mu, sigma], axis=0)
-                        self.atomic_irf_means_by_family[family] = tf.stack([mu_mean, sigma_mean], axis=0)
+                        mu, mu_mean = self.__new_irf_param__('mu', ids, ran_ids=ran_ids)
+                        sigma, sigma_mean = self.__new_irf_param__('sigma', ids, mean=1, lb=0, ran_ids=ran_ids)
+                        self.atomic_irf_by_family[family] = tf.stack([mu, sigma], axis=1)
+                        self.atomic_irf_means_by_family[family] = tf.stack([mu_mean, sigma_mean], axis=1)
                     elif family == 'SkewNormal':
-                        mu, mu_mean = self.__new_irf_param__('mu', ids)
-                        sigma, sigma_mean = self.__new_irf_param__('sigma', ids, mean=1, lb=0)
-                        alpha, alpha_mean = self.__new_irf_param__('alpha', ids)
-                        self.atomic_irf_by_family[family] = tf.stack([mu, sigma, alpha], axis=0)
-                        self.atomic_irf_means_by_family[family] = tf.stack([mu_mean, sigma_mean, alpha_mean], axis=0)
+                        mu, mu_mean = self.__new_irf_param__('mu', ids, ran_ids=ran_ids)
+                        sigma, sigma_mean = self.__new_irf_param__('sigma', ids, mean=1, lb=0, ran_ids=ran_ids)
+                        alpha, alpha_mean = self.__new_irf_param__('alpha', ids, ran_ids=ran_ids)
+                        self.atomic_irf_by_family[family] = tf.stack([mu, sigma, alpha], axis=1)
+                        self.atomic_irf_means_by_family[family] = tf.stack([mu_mean, sigma_mean, alpha_mean], axis=1)
                     elif family == 'EMG':
-                        mu, mu_mean = self.__new_irf_param__('mu', ids)
-                        sigma, sigma_mean = self.__new_irf_param__('sigma', ids, mean=1, lb=0)
-                        L, L_mean = self.__new_irf_param__('L', ids, mean=1, lb=0)
-                        self.atomic_irf_by_family[family] = tf.stack([mu, sigma, L], axis=0)
-                        self.atomic_irf_means_by_family[family] = tf.stack([mu_mean, sigma_mean, L_mean], axis=0)
+                        mu, mu_mean = self.__new_irf_param__('mu', ids, ran_ids=ran_ids)
+                        sigma, sigma_mean = self.__new_irf_param__('sigma', ids, mean=1, lb=0, ran_ids=ran_ids)
+                        L, L_mean = self.__new_irf_param__('L', ids, mean=1, lb=0, ran_ids=ran_ids)
+                        self.atomic_irf_by_family[family] = tf.stack([mu, sigma, L], axis=1)
+                        self.atomic_irf_means_by_family[family] = tf.stack([mu_mean, sigma_mean, L_mean], axis=1)
                     elif family == 'BetaPrime':
-                        alpha, alpha_mean = self.__new_irf_param__('alpha', ids, mean=1, lb=0)
-                        beta, beta_mean = self.__new_irf_param__('beta', ids, mean=1, lb=0)
-                        self.atomic_irf_by_family[family] = tf.stack([alpha, beta], axis=0)
-                        self.atomic_irf_means_by_family[family] = tf.stack([alpha_mean, beta_mean], axis=0)
+                        alpha, alpha_mean = self.__new_irf_param__('alpha', ids, mean=1, lb=0, ran_ids=ran_ids)
+                        beta, beta_mean = self.__new_irf_param__('beta', ids, mean=1, lb=0, ran_ids=ran_ids)
+                        self.atomic_irf_by_family[family] = tf.stack([alpha, beta], axis=1)
+                        self.atomic_irf_means_by_family[family] = tf.stack([alpha_mean, beta_mean], axis=1)
                     elif family == 'ShiftedBetaPrime':
-                        alpha, alpha_mean = self.__new_irf_param__('alpha', ids, mean=1, lb=0)
-                        beta, beta_mean = self.__new_irf_param__('beta', ids, mean=1, lb=0)
-                        delta, delta_mean = self.__new_irf_param__('delta', ids, mean=-1, ub=0)
-                        self.atomic_irf_by_family[family] = tf.stack([alpha, beta, delta], axis=0)
-                        self.atomic_irf_means_by_family[family] = tf.stack([alpha_mean, beta_mean, delta_mean], axis=0)
+                        alpha, alpha_mean = self.__new_irf_param__('alpha', ids, mean=1, lb=0, ran_ids=ran_ids)
+                        beta, beta_mean = self.__new_irf_param__('beta', ids, mean=1, lb=0, ran_ids=ran_ids)
+                        delta, delta_mean = self.__new_irf_param__('delta', ids, mean=-1, ub=0, ran_ids=ran_ids)
+                        self.atomic_irf_by_family[family] = tf.stack([alpha, beta, delta], axis=1)
+                        self.atomic_irf_means_by_family[family] = tf.stack([alpha_mean, beta_mean, delta_mean], axis=1)
                     else:
                         raise ValueError('Impulse response function "%s" is not currently supported.' % family)
 
-    def __new_irf_param__(self, param_name, ids, mean=0, lb=None, ub=None):
+    def __new_irf_param__(self, param_name, ids, mean=0, lb=None, ub=None, ran_ids=None):
         raise NotImplementedError
 
     def __initialize_irfs__(self, t):
@@ -372,8 +379,8 @@ class DTSR(object):
                             self.preterminals.append(child.name())
                             self.irf_names.append(child.name())
                     else:
-                        params_ix = names2ix(child_irfs, sorted(self.form.atomic_irf_by_family[f]))
-                        t.params[f] = tf.gather(self.atomic_irf_by_family[f], params_ix, axis=1)
+                        params_ix = names2ix(child_irfs, sorted(list(self.form.atomic_irf_by_family[f].keys())))
+                        t.params[f] = tf.gather(self.atomic_irf_by_family[f], params_ix, axis=2)
                         composite = False
                         parent_unscaled = getattr(t, 'plot_tensor_composite_unscaled', None)
                         parent_scaled = getattr(t, 'plot_tensor_composite_scaled', None)
@@ -383,16 +390,16 @@ class DTSR(object):
 
                         for i in range(len(child_nodes)):
                             child = t.children[f][child_nodes[i]]
-                            child.plot_tensor_atomic_unscaled = self.__new_irf__(self.irf_lambdas[f], self.atomic_irf_means_by_family[f][:, i])(self.support)
-                            child.plot_tensor_atomic_scaled = self.__new_irf__(self.irf_lambdas[f], self.atomic_irf_means_by_family[f][:, i])(self.support)
+                            child.plot_tensor_atomic_unscaled = self.__new_irf__(self.irf_lambdas[f], self.atomic_irf_means_by_family[f][:, :, i])(self.support)
+                            child.plot_tensor_atomic_scaled = self.__new_irf__(self.irf_lambdas[f], self.atomic_irf_means_by_family[f][:, :, i])(self.support)
                             if child.terminal():
                                 coefs_ix = names2ix(child.coef_id(), self.form.coefficient_names)
                                 child.plot_tensor_atomic_scaled *= tf.gather(self.coefficient_fixed_means, coefs_ix)
                             self.plot_tensors_atomic_unscaled[child.name()] = child.plot_tensor_atomic_unscaled
                             self.plot_tensors_atomic_scaled[child.name()] = child.plot_tensor_atomic_scaled
                             if composite:
-                                child.plot_tensor_composite_unscaled = self.__new_irf__(self.irf_lambdas[f], self.atomic_irf_means_by_family[f][:, i])(parent_unscaled)
-                                child.plot_tensor_composite_scaled = self.__new_irf__(self.irf_lambdas[f], self.atomic_irf_means_by_family[f][:, i])(parent_scaled)
+                                child.plot_tensor_composite_unscaled = self.__new_irf__(self.irf_lambdas[f], self.atomic_irf_means_by_family[f][:, :, i])(parent_unscaled)
+                                child.plot_tensor_composite_scaled = self.__new_irf__(self.irf_lambdas[f], self.atomic_irf_means_by_family[f][:, :, i])(parent_scaled)
                                 if child.terminal():
                                     coefs_ix = names2ix(child.coef_id(), self.form.coefficient_names)
                                     child.plot_tensor_composite_scaled *= tf.gather(self.coefficient_fixed_means, coefs_ix)
