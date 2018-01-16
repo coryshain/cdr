@@ -54,7 +54,7 @@ class NNDTSR(DTSR):
         * ``'linear'``: :math:`\\lambda_0 \\cdot ( 1 - \\delta \\cdot i )`
         * ``'inverse'``: :math:`\\frac{\\lambda_0}{1 + ( \\delta \\cdot i )}`
         * ``'exponential'``: :math:`\\lambda = \\lambda_0 \\cdot ( 2^{-\\delta \\cdot i} )`
-        * ``'stepdownXX'``: where ``XX`` is replaced by an integer representing the stepdown interval :math:`a`: :math:`\\lambda = \\lambda_0 * \\delta^{\\left \\lfloor \\frac{i}{a} \\right \\rfloor}`
+        * ``'stepdownXX'``: where ``XX`` is replaced by an integer representing the stepdown interval :math:`a`: :math:`\\lambda = \\lambda_0 * 2^{\\left \\lfloor \\frac{i}{a} \\right \\rfloor}`
 
     :param learning_rate_min: ``float``; the minimum value for the learning rate.
         If the decay schedule would take the learning rate below this point, learning rate clipping will occur.
@@ -71,26 +71,27 @@ class NNDTSR(DTSR):
     #
     ######################################################
 
-    def __init__(self,
-                 form_str,
-                 y,
-                 outdir,
-                 history_length=None,
-                 low_memory=True,
-                 float_type='float32',
-                 int_type='int32',
-                 minibatch_size=None,
-                 log_random=True,
-                 log_freq=1,
-                 save_freq=1,
-                 optim='Adam',
-                 learning_rate=0.01,
-                 learning_rate_decay_factor=0.,
-                 learning_rate_decay_family=None,
-                 learning_rate_min=1e-4,
-                 init_sd=.1,
-                 loss='mse',
-                 ):
+    def __init__(
+            self,
+            form_str,
+            y,
+            outdir,
+            history_length=None,
+            low_memory=True,
+            float_type='float32',
+            int_type='int32',
+            minibatch_size=None,
+            log_random=True,
+            log_freq=1,
+            save_freq=1,
+            optim='Adam',
+            learning_rate=0.01,
+            learning_rate_decay_factor=0.,
+            learning_rate_decay_family=None,
+            learning_rate_min=1e-4,
+            init_sd=.1,
+            loss='mse',
+    ):
 
         super(NNDTSR, self).__init__(
             form_str,
@@ -103,14 +104,14 @@ class NNDTSR(DTSR):
             minibatch_size=minibatch_size,
             log_random=log_random,
             log_freq=log_freq,
-            save_freq=save_freq
+            save_freq=save_freq,
+            optim=optim,
+            learning_rate=learning_rate,
+            learning_rate_decay_factor=learning_rate_decay_factor,
+            learning_rate_decay_family=learning_rate_decay_family,
+            learning_rate_min=learning_rate_min
         )
 
-        self.optim_name = optim
-        self.learning_rate = learning_rate
-        self.learning_rate_decay_factor = learning_rate_decay_factor
-        self.learning_rate_decay_family = learning_rate_decay_family
-        self.learning_rate_min = learning_rate_min
         self.init_sd = init_sd
         self.loss_name = loss
 
@@ -121,7 +122,7 @@ class NNDTSR(DTSR):
         return (
             self.form_str,
             self.outdir,
-            self.rangf_map,
+            self.rangf_map_base,
             self.rangf_n_levels,
             self.y_mu_init,
             self.float_type,
@@ -140,7 +141,7 @@ class NNDTSR(DTSR):
         self.sess = tf.Session(graph=self.g, config=tf_config)
         self.form_str, \
         self.outdir, \
-        self.rangf_map, \
+        self.rangf_map_base, \
         self.rangf_n_levels, \
         self.y_mu_init, \
         self.float_type, \
@@ -160,6 +161,9 @@ class NNDTSR(DTSR):
 
         self.form = Formula(self.form_str)
         self.irf_tree = self.form.irf_tree
+
+        for i in range(len(self.rangf_map_base)):
+            self.rangf_map.append(defaultdict(lambda: self.rangf_n_levels[i], self.rangf_map_base[i]))
 
         self.build()
 
@@ -348,28 +352,26 @@ class NNDTSR(DTSR):
 
                         half_interval = None
                         if lb is not None:
-                            half_interval = param_out - (lb + epsilon)
+                            half_interval = param_out - lb + epsilon
                         if ub is not None:
-                            if lb is not None:
+                            if half_interval is not None:
                                 half_interval = tf.minimum(half_interval, ub - epsilon - param_out)
                             else:
                                 half_interval = ub - epsilon - param_out
                         if half_interval is not None:
-                            param_ran = tf.sigmoid(param_ran) * half_interval * 2
-                            param_ran += lb + epsilon
+                            param_ran = tf.sigmoid(param_ran) * half_interval + lb + epsilon
 
                         param_ran *= mask_col
                         param_ran *= tf.expand_dims(mask_row, -1)
                         param_ran -= tf.reduce_mean(param_ran, axis=0)
-
                         param_out += tf.gather(param_ran, self.gf_y[:, i], axis=0)
 
                         if self.log_random:
                             for j in range(len(ran_ids[gf])):
-                                coef_name = ran_ids[gf][j]
+                                irf_name = ran_ids[gf][j]
                                 ix = col_ix[j]
                                 tf.summary.histogram(
-                                    'by_%s/%s/%s' % (gf, param_name, coef_name),
+                                    'by_%s/%s/%s' % (gf, param_name, irf_name),
                                     param_ran[:, ix],
                                     collections=['random']
                                 )
@@ -392,27 +394,7 @@ class NNDTSR(DTSR):
                 self.loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='loss_total')
                 tf.summary.scalar('loss/%s' % self.loss_name, self.loss_total, collections=['loss'])
 
-                sys.stderr.write('Using optimizer %s\n' % self.optim_name)
-                self.lr = tf.constant(self.learning_rate)
-                if self.learning_rate_decay_factor > 0:
-                    decay_step = tf.cast(self.global_step, dtype=self.FLOAT_TF) * tf.constant(
-                        self.learning_rate_decay_factor)
-                    if self.learning_rate_decay_family == 'linear':
-                        decay_coef = 1 - decay_step
-                    elif self.learning_rate_decay_family == 'inverse':
-                        decay_coef = 1. / (1. + decay_step)
-                    elif self.learning_rate_decay_family == 'exponential':
-                        decay_coef = 2 ** (-decay_step)
-                    elif self.learning_rate_decay_family.startswith('stepdown'):
-                        interval = tf.constant(float(self.learning_rate_decay_family[8:]), dtype=self.FLOAT_TF)
-                        decay_coef = tf.constant(self.learning_rate_decay_factor) ** tf.floor(
-                            tf.cast(self.global_step, dtype=self.FLOAT_TF) / interval)
-                    else:
-                        raise ValueError(
-                            'Unrecognized learning rate decay schedule: "%s"' % self.learning_rate_decay_family)
-                    self.lr = self.lr * decay_coef
-                    self.lr = tf.clip_by_value(self.lr, tf.constant(self.learning_rate_min), inf)
-                self.optim = self.__optim_init__(self.optim_name, self.lr)
+                self.optim = self.__optim_init__(self.optim_name)
 
                 # self.train_op = self.optim.minimize(self.loss_func, global_step=self.global_batch_step,
                 #                                     name=sn('optim'))
@@ -434,19 +416,6 @@ class NNDTSR(DTSR):
                 self.summary_losses = tf.summary.merge_all(key='loss')
                 if self.log_random and len(f.random) > 0:
                     self.summary_random = tf.summary.merge_all(key='random')
-
-    def __optim_init__(self, name, learning_rate):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                return {
-                    'SGD': lambda x: tf.train.GradientDescentOptimizer(x),
-                    'AdaGrad': lambda x: tf.train.AdagradOptimizer(x),
-                    'AdaDelta': lambda x: tf.train.AdadeltaOptimizer(x),
-                    'Adam': lambda x: tf.train.AdamOptimizer(x),
-                    'FTRL': lambda x: tf.train.FtrlOptimizer(x),
-                    'RMSProp': lambda x: tf.train.RMSPropOptimizer(x),
-                    'Nadam': lambda x: tf.contrib.opt.NadamOptimizer(x)
-                }[name](learning_rate)
 
 
 
@@ -470,7 +439,7 @@ class NNDTSR(DTSR):
         if verbose:
             sys.stderr.write('Constructing network from model tree:\n')
             sys.stdout.write(str(self.irf_tree))
-            sys.stdout.write('\n')
+            sys.stdout.write('\n\n')
 
         self.g = tf.Graph()
         self.sess = tf.Session(graph=self.g, config=tf_config)
@@ -627,7 +596,7 @@ class NNDTSR(DTSR):
                     sys.stderr.write('-' * 50 + '\n')
                     sys.stderr.write('Iteration %d\n' % int(self.global_step.eval(session=self.sess) + 1))
                     sys.stderr.write('\n')
-                    if self.learning_rate_decay_factor > 0:
+                    if self.learning_rate_decay:
                         sys.stderr.write('Learning rate: %s\n' %self.lr.eval(session=self.sess))
 
                     pb = tf.contrib.keras.utils.Progbar(n_minibatch)

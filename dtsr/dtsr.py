@@ -1,6 +1,7 @@
 import os
 import time
 from collections import defaultdict
+from functools import partial
 from numpy import inf
 import pandas as pd
 
@@ -77,7 +78,12 @@ class DTSR(object):
                  minibatch_size=None,
                  log_freq=1,
                  log_random=True,
-                 save_freq=1
+                 save_freq=1,
+                 optim='Adam',
+                 learning_rate=0.01,
+                 learning_rate_decay_factor=0.,
+                 learning_rate_decay_family=None,
+                 learning_rate_min=1e-4,
                  ):
 
         self.form_str = form_str
@@ -99,6 +105,7 @@ class DTSR(object):
         self.low_memory = low_memory
         if self.history_length is None:
             assert self.low_memory, 'Incompatible DTSR settings: history_length=None and low_memory=False'
+        self.rangf_map_base = []
         self.rangf_map = []
         self.rangf_n_levels = []
         for i in range(len(f.random)):
@@ -107,9 +114,13 @@ class DTSR(object):
             vals = np.arange(len(keys), dtype=self.INT_NP)
             rangf_map = pd.DataFrame({'id':vals},index=keys).to_dict()['id']
             oov_id = len(keys)+1
-            rangf_map = defaultdict(lambda:oov_id, rangf_map)
-            self.rangf_map.append(rangf_map)
+            self.rangf_map_base.append(rangf_map)
             self.rangf_n_levels.append(oov_id)
+        # Can't pickle defaultdict because it requires a lambda term for the default value,
+        # so instead we pickle a normal dictionary (``rangf_map_base``) and compute the defaultdict
+        # from it.
+        for i in range(len(self.rangf_map_base)):
+            self.rangf_map.append(defaultdict(lambda:self.rangf_n_levels[i], self.rangf_map_base[i]))
         self.y_mu_init = float(y[f.dv].mean())
         self.y_sigma_init = float(y[f.dv].std())
         if minibatch_size is None or minibatch_size in ['None', 'inf']:
@@ -121,6 +132,17 @@ class DTSR(object):
         self.log_random = log_random
         self.log_freq = log_freq
         self.save_freq = save_freq
+
+        self.optim_name = optim
+        self.learning_rate = learning_rate
+        self.learning_rate_decay_factor = learning_rate_decay_factor
+        self.learning_rate_decay_family = learning_rate_decay_family
+        if self.learning_rate_decay_family is not None:
+            self.learning_rate_decay = True
+        else:
+            self.learning_rate_decay = False
+        self.learning_rate_min = learning_rate_min
+
         self.irf_tree = self.form.irf_tree
 
         self.preterminals = []
@@ -147,7 +169,6 @@ class DTSR(object):
 
 
 
-
     ######################################################
     #
     #  Private methods
@@ -159,8 +180,16 @@ class DTSR(object):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                self.X = tf.placeholder(shape=[None, self.history_length, len(f.terminal_names)], dtype=self.FLOAT_TF, name=sn('X'))
-                self.time_X = tf.placeholder(shape=[None, self.history_length], dtype=self.FLOAT_TF, name=sn('time_X'))
+                self.X = tf.placeholder(
+                    shape=[None, self.history_length, len(f.terminal_names)],
+                    dtype=self.FLOAT_TF,
+                    name=sn('X')
+                )
+                self.time_X = tf.placeholder(
+                    shape=[None, self.history_length],
+                    dtype=self.FLOAT_TF,
+                    name=sn('time_X')
+                )
 
                 self.y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('y'))
                 self.time_y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('time_y'))
@@ -169,10 +198,21 @@ class DTSR(object):
 
                 # Linspace tensor used for plotting
                 self.support = tf.expand_dims(tf.lin_space(0., 2.5, 1000), -1)
+                self.support = tf.cast(self.support, dtype=self.FLOAT_TF)
 
-                self.global_step = tf.Variable(0, name=sn('global_step'), trainable=False)
+                self.global_step = tf.Variable(
+                    0,
+                    trainable=False,
+                    dtype=self.INT_TF,
+                    name=sn('global_step')
+                )
                 self.incr_global_step = tf.assign(self.global_step, self.global_step + 1)
-                self.global_batch_step = tf.Variable(0, name=sn('global_batch_step'), trainable=False)
+                self.global_batch_step = tf.Variable(
+                    0,
+                    trainable=False,
+                    dtype=self.INT_TF,
+                    name=sn('global_batch_step')
+                )
                 self.incr_global_batch_step = tf.assign(self.global_batch_step, self.global_batch_step + 1)
 
     def __initialize_low_memory_inputs__(self):
@@ -301,8 +341,8 @@ class DTSR(object):
                         pass
                     elif family == 'Exp':
                         L, L_mean = self.__new_irf_param__('L', ids, mean=1, lb=0, ran_ids=ran_ids)
-                        self.atomic_irf_by_family[family] = L
-                        self.atomic_irf_means_by_family[family] = L_mean
+                        self.atomic_irf_by_family[family] = tf.stack([L], axis=1)
+                        self.atomic_irf_means_by_family[family] =  tf.stack([L_mean], axis=1)
                     elif family == 'ShiftedExp':
                         L, L_mean = self.__new_irf_param__('L', ids, mean=1, lb=0, ran_ids=ran_ids)
                         delta, delta_mean = self.__new_irf_param__('delta', ids, mean=-1, ub=0, ran_ids=ran_ids)
@@ -313,7 +353,7 @@ class DTSR(object):
                         theta, theta_mean = self.__new_irf_param__('theta', ids, mean=1, lb=0, ran_ids=ran_ids)
                         self.atomic_irf_by_family[family] = tf.stack([k, theta], axis=1)
                         self.atomic_irf_means_by_family[family] = tf.stack([k_mean, theta_mean], axis=1)
-                    elif family == ['ShiftedGamma', 'ShiftedGammaKgt1']:
+                    elif family in ['ShiftedGamma', 'ShiftedGammaKgt1']:
                         k, k_mean = self.__new_irf_param__('k', ids, mean=1, lb=0, ran_ids=ran_ids)
                         theta, theta_mean = self.__new_irf_param__('theta', ids, mean=1, lb=0, ran_ids=ran_ids)
                         delta, delta_mean = self.__new_irf_param__('delta', ids, mean=-1, ub=0, ran_ids=ran_ids)
@@ -363,7 +403,13 @@ class DTSR(object):
                     child_irfs = [t.children[f][x].irf_id() for x in child_nodes]
                     if f == 'DiracDelta':
                         assert t.name() == 'ROOT', 'DiracDelta may not be embedded under other IRF in DTSR formula strings'
-                        plot_base = tf.concat([tf.ones((1,1)), tf.zeros((self.support.shape[0]-1,1))], axis=0)
+                        plot_base = tf.concat(
+                            [
+                                tf.ones((1,1), dtype=self.FLOAT_TF),
+                                tf.zeros((self.support.shape[0]-1,1), dtype=self.FLOAT_TF)
+                            ],
+                            axis=0
+                        )
                         for i in range(len(child_nodes)):
                             child = t.children[f][child_nodes[i]]
                             assert child.terminal(), 'DiracDelta may not dominate other IRF in DTSR formula strings'
@@ -638,6 +684,39 @@ class DTSR(object):
 
     def __initialize_objective__(self):
         raise NotImplementedError
+
+    def __optim_init__(self, name):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                sys.stderr.write('Using optimizer %s\n' % self.optim_name)
+                sys.stderr.write('Initial learning rate %s\n' % self.learning_rate)
+                self.lr = tf.constant(self.learning_rate)
+                if self.learning_rate_decay_factor > 0:
+                    decay_step = tf.cast(self.global_step, dtype=self.FLOAT_TF) * tf.constant(
+                        self.learning_rate_decay_factor)
+                    if self.learning_rate_decay_family == 'linear':
+                        decay_coef = 1 - decay_step
+                    elif self.learning_rate_decay_family == 'inverse':
+                        decay_coef = 1. / (1. + decay_step)
+                    elif self.learning_rate_decay_family == 'exponential':
+                        decay_coef = 2 ** (-decay_step)
+                    elif self.learning_rate_decay_family == 'stepdown':
+                        decay_coef = 2 ** -tf.floor(decay_step)
+                    else:
+                        raise ValueError(
+                            'Unrecognized learning rate decay schedule: "%s"' % self.learning_rate_decay_family)
+                    self.lr = self.lr * decay_coef
+                    self.lr = tf.clip_by_value(self.lr, tf.constant(self.learning_rate_min), inf)
+
+                return {
+                    'SGD': lambda x: tf.train.GradientDescentOptimizer(x),
+                    'AdaGrad': lambda x: tf.train.AdagradOptimizer(x),
+                    'AdaDelta': lambda x: tf.train.AdadeltaOptimizer(x),
+                    'Adam': lambda x: tf.train.AdamOptimizer(x),
+                    'FTRL': lambda x: tf.train.FtrlOptimizer(x),
+                    'RMSProp': lambda x: tf.train.RMSPropOptimizer(x),
+                    'Nadam': lambda x: tf.contrib.opt.NadamOptimizer(x)
+                }[name](self.lr)
 
     def __start_logging__(self):
         raise NotImplementedError

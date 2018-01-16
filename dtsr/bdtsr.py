@@ -48,6 +48,24 @@ class BDTSR(DTSR):
     :param log_random: ``bool``; whether to log random effects to Tensorboard.
     :param log_freq: ``int``; the frequency (in iterations) with which to log model params to Tensorboard.
     :param save_freq: ``int``; the frequency (in iterations) with which to save model checkpoints.
+    :param optim: ``str``; the name of the optimizer to use. Choose from ``'SGD'``, ``'AdaGrad'``, ``'AdaDelta'``, ``'Adam'``, ``'FTRL'``, ``'RMSProp'``, ``'Nadam'``.
+        **Note**: This parameter is only used for variational inference. Other inferences will ignore it.
+    :param learning_rate: ``float``; the initial value for the learning rate.
+        **Note**: This parameter is only used for variational inference. Other inferences will ignore it.
+    :param learning_rate_decay_factor: ``float``; rate parameter to the learning rate decay schedule (if applicable).
+        **Note**: This parameter is only used for variational inference. Other inferences will ignore it.
+    :param learning_rate_decay_family: ``str``; the functional family for the learning rate decay schedule (if applicable).
+        Choose from the following, where :math:`\lambda` is the current learning rate, :math:`\lambda_0` is the initial learning rate, :math:`\delta` is the ``learning_rate_decay_factor``, and :math:`i` is the iteration index.
+
+        * ``'linear'``: :math:`\\lambda_0 \\cdot ( 1 - \\delta \\cdot i )`
+        * ``'inverse'``: :math:`\\frac{\\lambda_0}{1 + ( \\delta \\cdot i )}`
+        * ``'exponential'``: :math:`\\lambda = \\lambda_0 \\cdot ( 2^{-\\delta \\cdot i} )`
+        * ``'stepdownXX'``: where ``XX`` is replaced by an integer representing the stepdown interval :math:`a`: :math:`\\lambda = \\lambda_0 * 2^{\\left \\lfloor \\frac{i}{a} \\right \\rfloor}`
+
+        **Note**: This parameter is only used for variational inference. Other inferences will ignore it.
+    :param learning_rate_min: ``float``; the minimum value for the learning rate.
+        If the decay schedule would take the learning rate below this point, learning rate clipping will occur.
+        **Note**: This parameter is only used for variational inference. Other inferences will ignore it.
     :param inference_name: ``str``; the Edward inference class to use for fitting.
     :param n_samples: ``int``; the number of samples to draw from the variational posterior if using variational inference.
         If using MCMC, the number of samples is set deterministically as ``n_iter * n_minibatch``, so this user-supplied parameter is ignored.
@@ -71,26 +89,32 @@ class BDTSR(DTSR):
     #
     ######################################################
 
-    def __init__(self,
-                 form_str,
-                 y,
-                 outdir,
-                 history_length=100,
-                 low_memory=False,
-                 float_type='float32',
-                 int_type='int32',
-                 minibatch_size=None,
-                 log_random=True,
-                 log_freq=1,
-                 save_freq=1,
-                 inference_name='KLqp',
-                 n_samples=None,
-                 n_samples_eval=100,
-                 n_iter=1000,
-                 conv_prior_sd=1,
-                 coef_prior_sd=1,
-                 y_sigma_scale=0.5
-                 ):
+    def __init__(
+            self,
+            form_str,
+            y,
+            outdir,
+            history_length=100,
+            low_memory=False,
+            float_type='float32',
+            int_type='int32',
+            minibatch_size=None,
+            log_random=True,
+            log_freq=1,
+            save_freq=1,
+            optim='Adam',
+            learning_rate=0.01,
+            learning_rate_decay_factor=0.,
+            learning_rate_decay_family=None,
+            learning_rate_min=1e-4,
+            inference_name='KLqp',
+            n_samples=None,
+            n_samples_eval=100,
+            n_iter=1000,
+            conv_prior_sd=1,
+            coef_prior_sd=1,
+            y_sigma_scale=0.5
+    ):
 
         super(BDTSR, self).__init__(
             form_str,
@@ -103,14 +127,21 @@ class BDTSR(DTSR):
             minibatch_size=minibatch_size,
             save_freq=save_freq,
             log_freq=log_freq,
-            log_random = log_random
+            log_random = log_random,
+            optim=optim,
+            learning_rate=learning_rate,
+            learning_rate_decay_factor=learning_rate_decay_factor,
+            learning_rate_decay_family=learning_rate_decay_family,
+            learning_rate_min=learning_rate_min
         )
 
-        assert not self.low_memory, 'Because Edward does not support Tensorflow control ops, low_memory is not supported in BDTSR'
+        assert not self.low_memory, 'Because Edward does not support Tensorflow control ops, ' \
+                                    'low_memory is not supported in BDTSR'
         try:
             float(self.history_length)
         except:
-            raise ValueError('Because Edward does not support Tensorflow control ops, finite history_length must be specified in BDTSR')
+            raise ValueError('Because Edward does not support Tensorflow control ops, '
+                             'finite history_length must be specified in BDTSR')
 
         self.inference_name = inference_name
 
@@ -150,25 +181,34 @@ class BDTSR(DTSR):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                zero = tf.constant(0, dtype=self.FLOAT_TF)
+                y_mu_init = tf.constant(self.y_mu_init, dtype=self.FLOAT_TF)
+                coef_prior_sd = tf.constant(self.coef_prior_sd, dtype=self.FLOAT_TF)
+
                 if f.intercept:
                     self.intercept_fixed = Normal(
-                        loc=tf.constant(self.y_mu_init, shape=[1]),
-                        scale=self.coef_prior_sd,
+                        sample_shape=[1],
+                        loc=y_mu_init,
+                        scale=coef_prior_sd,
                         name='intercept'
                     )
                     if self.variational():
                         self.intercept_fixed_q_loc = tf.Variable(
-                            tf.random_normal([1], mean=self.y_mu_init, stddev=self.coef_prior_sd),
-                            dtype=self.FLOAT_TF,
+                            tf.random_normal(
+                                [1],
+                                mean=y_mu_init,
+                                stddev=coef_prior_sd,
+                                dtype=self.FLOAT_TF
+                            ),
                             name='intercept_q_loc'
                         )
                         self.intercept_fixed_q_scale = tf.Variable(
                             tf.random_normal(
                                 [1],
-                                mean=tf.contrib.distributions.softplus_inverse(self.coef_prior_sd),
-                                stddev=self.coef_prior_sd
+                                mean=tf.contrib.distributions.softplus_inverse(coef_prior_sd),
+                                stddev=coef_prior_sd,
+                                dtype=self.FLOAT_TF
                             ),
-                            dtype=self.FLOAT_TF,
                             name='intercept_q_scale'
                         )
                         self.intercept_fixed_q = Normal(
@@ -176,47 +216,58 @@ class BDTSR(DTSR):
                             scale=tf.nn.softplus(self.intercept_fixed_q_scale),
                             name='intercept_q'
                         )
-                        tf.summary.scalar('intercept',
-                                          self.intercept_fixed_q.mean()[0],
-                                          collections=['params'])
+                        tf.summary.scalar(
+                            'intercept',
+                            self.intercept_fixed_q.mean()[0],
+                            collections=['params']
+                        )
                     else:
                         self.intercept_fixed_q = Empirical(
-                            params=tf.Variable(tf.ones((self.n_samples,1))*self.y_mu_init, name='intercept_q'),
+                            params=tf.Variable(
+                                tf.ones((self.n_samples,1), dtype=self.FLOAT_TF)*y_mu_init,
+                                name='intercept_q_samples'
+                            ),
                             name='intercept_q'
                         )
                         if self.inference_name == 'MetropolisHastings':
                             self.intercept_fixed_proposal = Normal(
                                 loc=self.intercept_fixed,
-                                scale=self.coef_prior_sd,
+                                scale=coef_prior_sd,
                                 name='intercept_proposal'
                             )
                             self.proposal_map[self.intercept_fixed] =  self.intercept_fixed_proposal
-                        tf.summary.scalar('intercept',
-                                          self.intercept_fixed_q.params[self.global_batch_step-1,0],
-                                          collections=['params'])
+                        tf.summary.scalar(
+                            'intercept',
+                            self.intercept_fixed_q.params[self.global_batch_step-1,0],
+                            collections=['params']
+                        )
                     self.inference_map[self.intercept_fixed] = self.intercept_fixed_q
                 else:
                     self.intercept_fixed = tf.constant(0., dtype=self.FLOAT_TF, name='intercept')
                 self.intercept = self.intercept_fixed
 
                 self.coefficient_fixed = Normal(
-                    loc=tf.zeros([len(f.coefficient_names)]),
-                    scale=self.coef_prior_sd,
+                    sample_shape=[len(f.coefficient_names)],
+                    loc=zero,
+                    scale=coef_prior_sd,
                     name='coefficient_fixed'
                 )
                 if self.variational():
                     self.coefficient_fixed_q_loc = tf.Variable(
-                        tf.random_normal([len(f.coefficient_names)], stddev=self.coef_prior_sd),
-                        dtype=self.FLOAT_TF,
+                        tf.random_normal(
+                            [len(f.coefficient_names)],
+                            stddev=coef_prior_sd,
+                            dtype=self.FLOAT_TF
+                        ),
                         name='coefficient_fixed_q_loc'
                     )
                     self.coefficient_fixed_q_scale = tf.Variable(
                             tf.random_normal(
                                 [len(f.coefficient_names)],
-                                mean=tf.contrib.distributions.softplus_inverse(self.coef_prior_sd),
-                                stddev=self.coef_prior_sd
+                                mean=tf.contrib.distributions.softplus_inverse(coef_prior_sd),
+                                stddev=coef_prior_sd,
+                                dtype=self.FLOAT_TF
                             ),
-                            dtype=self.FLOAT_TF,
                             name='coefficient_fixed_q_scale'
                         )
                     self.coefficient_fixed_q = Normal(
@@ -225,34 +276,41 @@ class BDTSR(DTSR):
                         name='coefficient_fixed_q'
                     )
                     for i in range(len(f.coefficient_names)):
-                        tf.summary.scalar('coefficient' + '/%s' % f.coefficient_names[i],
-                                          self.coefficient_fixed_q.mean()[i],
-                                          collections=['params'])
+                        tf.summary.scalar(
+                            'coefficient' + '/%s' % f.coefficient_names[i],
+                            self.coefficient_fixed_q.mean()[i],
+                            collections=['params']
+                        )
                 else:
                     self.coefficient_fixed_q = Empirical(
-                        params=tf.Variable(tf.zeros((self.n_samples, len(f.coefficient_names)))),
+                        params=tf.Variable(
+                            tf.zeros((self.n_samples, len(f.coefficient_names)), dtype=self.FLOAT_TF),
+                            name='coefficient_fixed_q_samples'
+                        ),
                         name='coefficient_fixed_q'
                     )
                     if self.inference_name == 'MetropolisHastings':
                         self.coefficient_fixed_proposal = Normal(
                             loc=self.coefficient_fixed,
-                            scale=self.coef_prior_sd,
+                            scale=coef_prior_sd,
                             name='coefficient_fixed_proposal'
                         )
                         self.proposal_map[self.coefficient_fixed] = self.coefficient_fixed_proposal
                     for i in range(len(f.coefficient_names)):
-                        tf.summary.scalar('coefficient' + '/%s' % f.coefficient_names[i],
-                                          self.coefficient_fixed_q.params[self.global_batch_step-1,i],
-                                          collections=['params'])
+                        tf.summary.scalar(
+                            'coefficient' + '/%s' % f.coefficient_names[i],
+                            self.coefficient_fixed_q.params[self.global_batch_step-1,i],
+                            collections=['params']
+                        )
                 if self.variational():
                     self.coefficient_fixed_means = self.coefficient_fixed_q.mean()
                 else:
                     self.coefficient_fixed_means = self.coefficient_fixed_q.params[self.global_batch_step-1]
                 self.inference_map[self.coefficient_fixed] = self.coefficient_fixed_q
                 fixef_ix = names2ix(f.fixed_coefficient_names, f.coefficient_names)
-                coefficient_fixed_mask = np.zeros(len(f.coefficient_names), dtype=getattr(np, self.float_type))
+                coefficient_fixed_mask = np.zeros(len(f.coefficient_names))
                 coefficient_fixed_mask[fixef_ix] = 1.
-                coefficient_fixed_mask = tf.constant(coefficient_fixed_mask)
+                coefficient_fixed_mask = tf.constant(coefficient_fixed_mask, dtype=self.FLOAT_TF)
                 self.coefficient_fixed *= coefficient_fixed_mask
                 self.coefficient_fixed_means *= coefficient_fixed_mask
                 self.coefficient = tf.expand_dims(self.coefficient_fixed, 0)
@@ -260,31 +318,35 @@ class BDTSR(DTSR):
 
                 for i in range(len(f.ran_names)):
                     r = f.random[f.ran_names[i]]
-                    mask_row_np = np.ones(self.rangf_n_levels[i], dtype=getattr(np, self.float_type))
+                    mask_row_np = np.ones(self.rangf_n_levels[i])
                     mask_row_np[self.rangf_n_levels[i] - 1] = 0
                     mask_row = tf.constant(mask_row_np, dtype=self.FLOAT_TF)
 
                     if r.intercept:
                         intercept_random = Normal(
-                            loc=tf.zeros([self.rangf_n_levels[i]], dtype=self.FLOAT_TF),
-                            scale=self.coef_prior_sd,
+                            sample_shape=[self.rangf_n_levels[i]],
+                            loc=zero,
+                            scale=coef_prior_sd,
                             name='intercept_by_%s' % r.gf
                         )
                         if self.variational():
                             intercept_random_q = Normal(
                                 loc=tf.Variable(
-                                    tf.random_normal([self.rangf_n_levels[i]], stddev=self.coef_prior_sd),
-                                    dtype=self.FLOAT_TF,
+                                    tf.random_normal(
+                                        [self.rangf_n_levels[i]],
+                                        stddev=coef_prior_sd,
+                                        dtype=self.FLOAT_TF
+                                    ),
                                     name='intercept_q_loc_by_%s' % r.gf
                                 ),
                                 scale=tf.nn.softplus(
                                     tf.Variable(
                                         tf.random_normal(
                                             [self.rangf_n_levels[i]],
-                                            mean=tf.contrib.distributions.softplus_inverse(self.coef_prior_sd),
-                                            stddev=self.coef_prior_sd
+                                            mean=tf.contrib.distributions.softplus_inverse(coef_prior_sd),
+                                            stddev=coef_prior_sd,
+                                            dtype=self.FLOAT_TF
                                         ),
-                                        dtype=self.FLOAT_TF,
                                         name='intercept_q_scale_by_%s' % r.gf
                                     )
                                 ),
@@ -294,13 +356,16 @@ class BDTSR(DTSR):
                                 intercept_random_log = intercept_random_q.mean()
                         else:
                             intercept_random_q = Empirical(
-                                params=tf.Variable(tf.zeros((self.n_samples, self.rangf_n_levels[i]))),
+                                params=tf.Variable(
+                                    tf.zeros((self.n_samples, self.rangf_n_levels[i]), dtype=self.FLOAT_TF),
+                                    name='intercept_q_by_%s_samples' % r.gf
+                                ),
                                 name='intercept_q_by_%s' % r.gf
                             )
                             if self.inference_name == 'MetropolisHastings':
                                 intercept_random_proposal = Normal(
                                     loc=intercept_random,
-                                    scale=self.coef_prior_sd,
+                                    scale=coef_prior_sd,
                                     name='intercept_proposal_by_%s' % r.gf
                                 )
                                 self.proposal_map[intercept_random] = intercept_random_proposal
@@ -329,25 +394,29 @@ class BDTSR(DTSR):
                         mask_col = tf.constant(mask_col_np, dtype=self.FLOAT_TF)
                         self.ransl = True
                         coefficient_random = Normal(
-                            loc=tf.zeros([self.rangf_n_levels[i], len(f.coefficient_names)], dtype=self.FLOAT_TF),
-                            scale=self.coef_prior_sd,
+                            sample_shape=[self.rangf_n_levels[i], len(f.coefficient_names)],
+                            loc=zero,
+                            scale=coef_prior_sd,
                             name='coefficient_by_%s' %r.gf
                         )
                         if self.variational():
                             coefficient_random_q = Normal(
                                 loc=tf.Variable(
-                                    tf.random_normal([self.rangf_n_levels[i], len(f.coefficient_names)], stddev=self.coef_prior_sd),
-                                    dtype=self.FLOAT_TF,
+                                    tf.random_normal(
+                                        [self.rangf_n_levels[i], len(f.coefficient_names)],
+                                        stddev=coef_prior_sd,
+                                        dtype=self.FLOAT_TF
+                                    ),
                                     name='coefficient_q_loc_by_%s' %r.gf
                                 ),
                                 scale = tf.nn.softplus(
                                     tf.Variable(
                                         tf.random_normal(
                                             [self.rangf_n_levels[i], len(f.coefficient_names)],
-                                            mean=tf.contrib.distributions.softplus_inverse(self.coef_prior_sd),
-                                            stddev=self.coef_prior_sd
+                                            mean=tf.contrib.distributions.softplus_inverse(coef_prior_sd),
+                                            stddev=coef_prior_sd,
+                                            dtype=self.FLOAT_TF
                                         ),
-                                        dtype=self.FLOAT_TF,
                                         name='coefficient_q_scale_by_%s' % r.gf
                                     )
                                 ),
@@ -357,7 +426,13 @@ class BDTSR(DTSR):
                                 coefficient_random_log = tf.gather(coefficient_random_q.mean(), coef_ix, axis=1)
                         else:
                             coefficient_random_q = Empirical(
-                                params=tf.Variable(tf.zeros((self.n_samples, self.rangf_n_levels[i], len(f.coefficient_names)))),
+                                params=tf.Variable(
+                                    tf.zeros(
+                                        (self.n_samples, self.rangf_n_levels[i], len(f.coefficient_names)),
+                                        dtype=self.FLOAT_TF
+                                    ),
+                                    name='coefficient_q_by_%s_samples' %r.gf
+                                ),
                                 name='coefficient_q_by_%s' %r.gf
                             )
                             if self.inference_name == 'MetropolisHastings':
@@ -368,7 +443,11 @@ class BDTSR(DTSR):
                                 )
                                 self.proposal_map[coefficient_random] = coefficient_random_proposal
                             if self.log_random:
-                                coefficient_random_log = tf.gather(coefficient_random_q.params[self.global_batch_step-1], coef_ix, axis=1)
+                                coefficient_random_log = tf.gather(
+                                    coefficient_random_q.params[self.global_batch_step-1],
+                                    coef_ix,
+                                    axis=1
+                                )
                         self.inference_map[coefficient_random] = coefficient_random_q
 
                         coefficient_random *= mask_col
@@ -391,9 +470,15 @@ class BDTSR(DTSR):
                                 )
 
     def __new_irf_param__(self, param_name, ids, mean=0, lb=None, ub=None, ran_ids=None):
-        epsilon = 1e-35
+        zero = tf.constant(0., dtype=self.FLOAT_TF)
+        conv_prior_sd = tf.constant(self.conv_prior_sd, dtype=self.FLOAT_TF)
+        mean = tf.constant(mean, dtype=self.FLOAT_TF)
+        epsilon = tf.constant(1e-35, dtype=self.FLOAT_TF)
+        if lb is not None:
+            lb = tf.constant(lb, dtype=self.FLOAT_TF)
+        if ub is not None:
+            ub = tf.constant(ub, dtype=self.FLOAT_TF)
         dim = len(ids)
-        mean = float(mean)
         if ran_ids is None:
             ran_ids = []
 
@@ -404,134 +489,204 @@ class BDTSR(DTSR):
                     param_mean_init = mean
                 elif lb is not None and ub is None:
                     # Lower-bounded support only
-                    try:
-                        float(lb)
-                    except:
-                        raise ValueError('lb is not a valid number: %s' %lb)
                     param_mean_init = tf.contrib.distributions.softplus_inverse(mean - lb - epsilon)
                 elif lb is None and ub is not None:
                     # Upper-bounded support only
-                    try:
-                        float(ub)
-                    except:
-                        raise ValueError('ub is not a valid number: %s' %lb)
                     param_mean_init = tf.contrib.distributions.softplus_inverse(-(mean - ub + epsilon))
                 else:
                     # Finite-interval bounded support
-                    try:
-                        float(lb)
-                    except:
-                        raise ValueError('lb is not a valid number: %s' %lb)
-                    try:
-                        float(ub)
-                    except:
-                        raise ValueError('ub is not a valid number: %s' %lb)
                     param_mean_init = tf.contrib.distributions.bijectors.Sigmoid.inverse(
                         (mean- lb - epsilon)  / ((ub-epsilon)-(lb+epsilon))
                     )
 
-                param_mean_init *= tf.ones([dim])
-
                 param = Normal(
+                    sample_shape = [1, dim],
                     loc=param_mean_init,
-                    scale=self.conv_prior_sd,
+                    scale=conv_prior_sd,
                     name=sn('%s_%s' % (param_name, '-'.join(ids)))
                 )
                 if self.variational():
                     param_q = Normal(
                         loc=tf.Variable(
                             tf.random_normal(
-                                [dim],
+                                [1, dim],
                                 mean=param_mean_init,
-                                stddev=self.conv_prior_sd
+                                stddev=conv_prior_sd,
+                                dtype=self.FLOAT_TF
                             ),
-                            dtype=self.FLOAT_TF,
                             name=sn('%s_q_loc_%s' % (param_name, '-'.join(ids)))
                         ),
                         scale=tf.nn.softplus(
                             tf.Variable(
                                 tf.random_normal(
-                                    [dim],
-                                    mean=tf.contrib.distributions.softplus_inverse(self.conv_prior_sd),
-                                    stddev=self.conv_prior_sd
+                                    [1, dim],
+                                    mean=tf.contrib.distributions.softplus_inverse(conv_prior_sd),
+                                    stddev=conv_prior_sd,
+                                    dtype=self.FLOAT_TF
                                 ),
-                                dtype=self.FLOAT_TF,
                                 name=sn('%s_q_scale_%s' % (param_name, '-'.join(ids)))
                             )
                         ),
                         name=sn('%s_q_%s' % (param_name, '-'.join(ids)))
                     )
 
-                    if lb is None and ub is None:
-                        param_mean = param_q.mean()
-                    elif lb is not None and ub is None:
-                        param_mean = tf.nn.softplus(param_q.mean()) + lb + epsilon
-                    elif lb is None and ub is not None:
-                        param_mean = -tf.nn.softplus(param_q.mean()) + ub - epsilon
-                    else:
-                        param_mean = tf.sigmoid(param_q.mean()) * ((ub-epsilon)-(lb+epsilon)) + lb + epsilon
-
-                    for i in range(dim):
-                        tf.summary.scalar(
-                            sn('%s/%s' % (param_name, ids[i])),
-                            param_mean[i],
-                            collections=['params']
-                        )
+                    param_mean = param_q.mean()
                 else:
                     param_q = Empirical(
-                        params=tf.Variable(tf.zeros((self.n_samples, dim))),
+                        params=tf.Variable(
+                            tf.zeros((self.n_samples, 1, dim), dtype=self.FLOAT_TF),
+                            name=sn('%s_q_%s_samples' % (param_name, '-'.join(ids)))
+                        ),
                         name=sn('%s_q_%s' % (param_name, '-'.join(ids)))
                     )
                     if self.inference_name == 'MetropolisHastings':
                         L_proposal = Normal(
                             loc=param,
-                            scale=self.conv_prior_sd,
+                            scale=conv_prior_sd,
                             name=sn('%s_proposal_%s' % (param_name, '-'.join(ids)))
                         )
                         self.proposal_map[param] = L_proposal
 
-                    if lb is None and ub is None:
-                        param_mean = param_q.params[self.global_batch_step - 1]
-                    elif lb is not None and ub is None:
-                        param_mean = tf.nn.softplus(param_q.params[self.global_batch_step - 1]) + lb + epsilon
-                    elif lb is None and ub is not None:
-                        param_mean = -tf.nn.softplus(param_q.params[self.global_batch_step - 1]) + ub - epsilon
-                    else:
-                        param_mean = tf.sigmoid(param_q.params[self.global_batch_step - 1]) * ((ub-epsilon)-(lb+epsilon)) + lb + epsilon
-
-                    for i in range(dim):
-                        tf.summary.scalar(
-                            sn('%s/%s' % (param_name, ids[i])),
-                            param_mean[i],
-                            collections=['params']
-                        )
+                    param_mean = param_q.params[self.global_batch_step - 1]
 
                 if lb is None and ub is None:
                     param_out = param
                 elif lb is not None and ub is None:
                     param_out = tf.nn.softplus(param) + lb + epsilon
+                    param_mean = tf.nn.softplus(param_mean) + lb + epsilon
                 elif lb is None and ub is not None:
                     param_out = -tf.nn.softplus(param) + ub - epsilon
+                    param_mean = -tf.nn.softplus(param_mean) + ub - epsilon
                 else:
                     param_out = tf.sigmoid(param) * ((ub-epsilon) - (lb+epsilon)) + lb + epsilon
+                    param_mean = tf.sigmoid(param_mean) * ((ub-epsilon) - (lb+epsilon)) + lb + epsilon
 
                 self.inference_map[param] = param_q
+
+                for i in range(dim):
+                    tf.summary.scalar(
+                        sn('%s/%s' % (param_name, ids[i])),
+                        param_mean[0, i],
+                        collections=['params']
+                    )
+                
+                if len(ran_ids) > 0:
+                    for gf in ran_ids:
+                        i = self.form.rangf.index(gf)
+                        mask_row_np = np.ones(self.rangf_n_levels[i])
+                        mask_row_np[self.rangf_n_levels[i] - 1] = 0
+                        mask_row = tf.constant(mask_row_np, dtype=self.FLOAT_TF)
+                        col_ix = names2ix(ran_ids[gf], ids)
+                        mask_col_np = np.zeros([1, dim])
+                        mask_col_np[0, col_ix] = 1.
+                        mask_col = tf.constant(mask_col_np, dtype=self.FLOAT_TF)
+
+                        param_ran = Normal(
+                            sample_shape=[self.rangf_n_levels[i], dim],
+                            loc=param_mean_init,
+                            scale=conv_prior_sd,
+                            name='%s_by_%s' % (param_name, gf)
+                        )
+                        if self.variational():
+                            param_ran_q = Normal(
+                                loc=tf.Variable(
+                                    tf.random_normal(
+                                        [self.rangf_n_levels[i], dim],
+                                        mean=param_mean_init,
+                                        stddev=conv_prior_sd,
+                                        dtype=self.FLOAT_TF
+                                    ),
+                                    name=sn('%s_q_loc_%s_by_%s' % (param_name, '-'.join(ids), gf))
+                                ),
+                                scale=tf.nn.softplus(
+                                    tf.Variable(
+                                        tf.random_normal(
+                                            [self.rangf_n_levels[i], dim],
+                                            mean=tf.contrib.distributions.softplus_inverse(conv_prior_sd),
+                                            stddev=conv_prior_sd,
+                                            dtype=self.FLOAT_TF
+                                        ),
+                                        name=sn('%s_q_scale_%s_by_%s' % (param_name, '-'.join(ids), gf))
+                                    )
+                                ),
+                                name=sn('%s_q_%s_by_%s' % (param_name, '-'.join(ids), gf))
+                            )
+                            if self.log_random:
+                                param_ran_log = tf.gather(param_ran_q.mean(), col_ix, axis=1)
+                        else:
+                            param_ran_q = Empirical(
+                                params=tf.Variable(
+                                    tf.zeros((self.n_samples, self.rangf_n_levels[i], dim), dtype=self.FLOAT_TF),
+                                    name=sn('%s_q_%s_by_%s_samples' % (param_name, '-'.join(ids), gf))
+                                ),
+                                name=sn('%s_q_%s_by_%s' % (param_name, '-'.join(ids), gf))
+                            )
+                            if self.inference_name == 'MetropolisHastings':
+                                param_ran_proposal = Normal(
+                                    loc=param_ran,
+                                    scale=conv_prior_sd,
+                                    name=sn('%s_proposal_%s_by_%s' % (param_name, '-'.join(ids), gf))
+                                )
+                                self.proposal_map[param_ran] = param_ran_proposal
+                            if self.log_random:
+                                param_ran_log = tf.gather(
+                                    param_ran_q.params[self.global_batch_step - 1],
+                                    col_ix,
+                                    axis=1
+                                )
+                        self.inference_map[param_ran] = param_ran_q
+
+                        half_interval = None
+                        if lb is not None:
+                            half_interval = param_out - lb + epsilon
+                        if ub is not None:
+                            if half_interval is not None:
+                                half_interval = tf.minimum(half_interval, ub - epsilon - param_out)
+                            else:
+                                half_interval = ub - epsilon - param_out
+                        if half_interval is not None:
+                            param_ran = tf.sigmoid(param_ran) * half_interval * 2 + lb + epsilon
+                            if self.log_random:
+                                param_ran_log = tf.sigmoid(param_ran_log) * half_interval * 2 + lb + epsilon
+
+                        param_ran *= mask_col
+                        param_ran *= tf.expand_dims(mask_row, -1)
+                        param_ran -= tf.reduce_mean(param_ran, axis=0)
+                        param_out += tf.gather(param_ran, self.gf_y[:, i], axis=0)
+
+                        if self.log_random:
+                            param_ran_log *= mask_col
+                            param_ran_log *= tf.expand_dims(mask_row, -1)
+                            param_ran_log -= tf.reduce_mean(param_ran_log, axis=0)
+
+                            for j in range(len(ran_ids[gf])):
+                                irf_name = ran_ids[gf][j]
+                                ix = col_ix[j]
+                                tf.summary.histogram(
+                                    'by_%s/%s/%s' % (gf, param_name, irf_name),
+                                    param_ran_log[:, ix],
+                                    collections=['random']
+                                )
 
                 return (param_out, param_mean)
 
     def __initialize_objective__(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                self.out = Normal(loc=self.out, scale=self.y_sigma_scale*self.y_sigma_init, name='output')
+                y_sigma_init = tf.constant(self.y_sigma_init, dtype=self.FLOAT_TF)
+                y_sigma_scale = tf.constant(self.y_sigma_scale, dtype=self.FLOAT_TF)
+                self.out = Normal(loc=self.out, scale=y_sigma_scale*y_sigma_init, name='output')
                 if self.variational():
                     self.inference = getattr(ed,self.inference_name)(self.inference_map, data={self.out: self.y})
+                    self.optim = self.__optim_init__(self.optim_name)
                     self.inference.initialize(
                         n_samples=self.n_samples,
                         n_iter=self.n_iter,
                         n_print=self.n_train_minibatch * self.log_freq,
                         logdir=self.outdir + '/tensorboard/distr',
                         log_timestamp=False,
-                        scale={self.out: self.minibatch_scale}
+                        scale={self.out: self.minibatch_scale},
+                        optimizer=self.optim
                     )
                 elif self.inference_name == 'MetropolisHastings':
                     self.inference = getattr(ed, self.inference_name)(self.inference_map, self.proposal_map, data={self.out: self.y})
@@ -584,7 +739,7 @@ class BDTSR(DTSR):
         if verbose:
             sys.stderr.write('Constructing network from model tree:\n')
             sys.stdout.write(str(self.irf_tree))
-            sys.stdout.write('\n')
+            sys.stdout.write('\n\n')
 
         self.g = tf.Graph()
         self.sess = tf.Session(graph=self.g, config=tf_config)
@@ -721,12 +876,15 @@ class BDTSR(DTSR):
 
                 sys.stderr.write('Running %s inference...\n' % self.inference_name)
                 while self.global_step.eval(session=self.sess) < self.n_iter:
-                    pb = tf.contrib.keras.utils.Progbar(self.n_train_minibatch)
+                    p, p_inv = getRandomPermutation(len(y))
                     t0_iter = time.time()
                     sys.stderr.write('-' * 50 + '\n')
                     sys.stderr.write('Iteration %d\n' % int(self.global_step.eval(session=self.sess) + 1))
                     sys.stderr.write('\n')
-                    p, p_inv = getRandomPermutation(len(y))
+                    if self.learning_rate_decay:
+                        sys.stderr.write('Learning rate: %s\n' %self.lr.eval(session=self.sess))
+
+                    pb = tf.contrib.keras.utils.Progbar(self.n_train_minibatch)
 
                     for j in range(0, len(y), minibatch_size):
 
@@ -748,13 +906,14 @@ class BDTSR(DTSR):
                         pb.update((j/minibatch_size)+1, values=[('loss' if self.variational() else 'accept_rate', metric_cur)], force=True)
 
                     self.sess.run(self.incr_global_step)
-                    if self.global_step.eval(session=self.sess) % self.save_freq == 0:
-                        self.save()
+                    if self.log_freq > 0 and self.global_step.eval(session=self.sess) % self.log_freq == 0:
                         summary_params = self.sess.run(self.summary_params)
                         self.writer.add_summary(summary_params, self.global_batch_step.eval(session=self.sess))
                         if self.log_random and len(f.random) > 0:
                             summary_random = self.sess.run(self.summary_random)
                             self.writer.add_summary(summary_random, self.global_batch_step.eval(session=self.sess))
+                    if self.save_freq > 0 and self.global_step.eval(session=self.sess) % self.save_freq == 0:
+                        self.save()
                         self.make_plots(irf_name_map, plot_x_inches, plot_y_inches, cmap)
 
                     t1_iter = time.time()
@@ -765,6 +924,8 @@ class BDTSR(DTSR):
                 self.inference.finalize()
 
                 self.make_plots(irf_name_map, plot_x_inches, plot_y_inches, cmap)
+
+                sys.stderr.write('%s\n\n' % ('='*50))
 
 
     def predict(self, X, y_time, y_rangf, first_obs, last_obs):

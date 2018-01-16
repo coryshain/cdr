@@ -38,14 +38,14 @@ class Config(object):
         self.network_type = settings.get('network_type', 'nn')
         self.float_type = settings.get('float_type', 'float32')
         self.int_type = settings.get('int_type', 'int32')
-        self.history_length = settings.get('history_length', 100)
+        self.history_length = settings.get('history_length', 128)
         try:
             self.history_length = int(self.history_length)
         except:
             pass
         self.low_memory = settings.getboolean('low_memory', False)
         self.n_epoch_train = settings.getint('n_epoch_train', 100)
-        self.minibatch_size = settings.get('minibatch_size', 128)
+        self.minibatch_size = settings.get('minibatch_size', 8192)
         if self.minibatch_size == 'inf':
             self.minibatch_size = inf
         else:
@@ -58,18 +58,18 @@ class Config(object):
         self.cmap = settings.get('cmap', 'gist_rainbow')
         self.use_gpu_if_available = settings.getboolean('use_gpu_if_available', True)
         self.validate_delta_t = settings.getboolean('validate_delta_t', True)
-        ## NN settings
         self.optim = settings.get('optim', 'Adam')
-        self.learning_rate = settings.getfloat('learning_rate', 0.001)
+        self.learning_rate = settings.getfloat('learning_rate', 0.01)
         self.learning_rate_decay_factor = settings.getfloat('learning_rate_decay_factor', 0.)
         self.learning_rate_decay_family = settings.get('learning_rate_decay_family', None)
         self.learning_rate_min = settings.getfloat('learning_rate_min', 1e-4)
+        ## NN settings
         self.init_sd = settings.getfloat('init_sd', .1)
         self.loss = settings.get('loss', 'MSE')
         ## Bayes net settings
         self.inference_name = settings.get('inference_name', None)
         self.n_samples = settings.getint('n_samples', 1)
-        self.n_samples_eval = settings.getint('n_samples_eval', 100)
+        self.n_samples_eval = settings.getint('n_samples_eval', 128)
         self.conv_prior_sd = settings.getfloat('conv_prior_sd', 1.)
         self.coef_prior_sd = settings.getfloat('coef_prior_sd', 1.)
         self.y_sigma_scale = settings.getfloat('y_sigma_scale', 0.5)
