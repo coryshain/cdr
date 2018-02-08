@@ -90,10 +90,10 @@ def preprocess_data(X, y, p, formula_list, compute_history=True, debug=False):
     sys.stderr.write('Pre-processing data...\n')
 
     for x in formula_list:
-        if len(x.random) > 0:
+        rangf = x.rangf
+        if len(rangf) > 0:
             n_level = []
-            for r in x.random:
-                gf = x.random[r].gf
+            for gf in rangf:
                 n_level.append(len(y[gf].cat.categories))
 
     select = compute_filters(y, p.filter_map)

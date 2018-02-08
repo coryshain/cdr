@@ -14,8 +14,7 @@ tf_config = tf.ConfigProto()
 tf_config.gpu_options.allow_growth = True
 from .formula import *
 from .util import *
-from .plot import *
-from .dtsr import sn, DTSR
+from .dtsr import DTSR
 
 class NNDTSR(DTSR):
     """
@@ -74,45 +73,59 @@ class NNDTSR(DTSR):
     def __init__(
             self,
             form_str,
+            X,
             y,
             outdir,
             history_length=None,
-            low_memory=True,
+            low_memory=False,
+            pc=False,
             float_type='float32',
             int_type='int32',
-            minibatch_size=None,
+            minibatch_size=128,
+            eval_minibatch_size=100000,
             log_random=True,
             log_freq=1,
             save_freq=1,
             optim='Adam',
             learning_rate=0.01,
-            learning_rate_decay_factor=0.,
-            learning_rate_decay_family=None,
             learning_rate_min=1e-4,
-            init_sd=.1,
+            lr_decay_family=None,
+            lr_decay_steps=25,
+            lr_decay_rate=0.,
+            lr_decay_staircase=False,
+            init_sd=1,
             loss='mse',
+            regularizer=None,
+            regularizer_scale=0.01
     ):
 
         super(NNDTSR, self).__init__(
             form_str,
+            X,
             y,
             outdir,
             history_length=history_length,
             low_memory=low_memory,
+            pc=pc,
             float_type=float_type,
             int_type=int_type,
             minibatch_size=minibatch_size,
-            log_random=log_random,
-            log_freq=log_freq,
+            eval_minibatch_size=eval_minibatch_size,
             save_freq=save_freq,
+            log_freq=log_freq,
+            log_random=log_random,
             optim=optim,
             learning_rate=learning_rate,
-            learning_rate_decay_factor=learning_rate_decay_factor,
-            learning_rate_decay_family=learning_rate_decay_family,
-            learning_rate_min=learning_rate_min
+            learning_rate_min=learning_rate_min,
+            lr_decay_family=lr_decay_family,
+            lr_decay_steps=lr_decay_steps,
+            lr_decay_rate=lr_decay_rate,
+            lr_decay_staircase=lr_decay_staircase,
+            init_sd=init_sd,
+            regularizer=regularizer,
+            regularizer_scale=regularizer_scale
         )
 
-        self.init_sd = init_sd
         self.loss_name = loss
 
         self.build()
@@ -122,48 +135,86 @@ class NNDTSR(DTSR):
         return (
             self.form_str,
             self.outdir,
-            self.rangf_map_base,
-            self.rangf_n_levels,
-            self.y_mu_init,
+            self.history_length,
+            self.low_memory,
+            self.pc,
+            self.eigenvec,
+            self.eigenval,
+            self.impulse_means,
+            self.impulse_sds,
             self.float_type,
             self.int_type,
+            self.minibatch_size,
+            self.eval_minibatch_size,
             self.log_random,
+            self.log_freq,
+            self.save_freq,
             self.optim_name,
             self.learning_rate,
-            self.learning_rate_decay_factor,
-            self.learning_rate_decay_family,
             self.learning_rate_min,
-            self.loss_name,
+            self.lr_decay_family,
+            self.lr_decay_steps,
+            self.lr_decay_rate,
+            self.lr_decay_staircase,
+            self.init_sd,
+            self.regularizer_name,
+            self.regularizer_scale,
+            self.n_train,
+            self.y_mu_init,
+            self.y_scale_init,
+            self.rangf_map_base,
+            self.rangf_n_levels,
+            self.loss_name
         )
 
     def __setstate__(self, state):
         self.g = tf.Graph()
         self.sess = tf.Session(graph=self.g, config=tf_config)
+
         self.form_str, \
         self.outdir, \
-        self.rangf_map_base, \
-        self.rangf_n_levels, \
-        self.y_mu_init, \
+        self.history_length, \
+        self.low_memory, \
+        self.pc, \
+        self.eigenvec, \
+        self.eigenval, \
+        self.impulse_means, \
+        self.impulse_sds, \
         self.float_type, \
         self.int_type, \
+        self.minibatch_size, \
+        self.eval_minibatch_size, \
         self.log_random, \
+        self.log_freq, \
+        self.save_freq, \
         self.optim_name, \
         self.learning_rate, \
-        self.learning_rate_decay_factor, \
-        self.learning_rate_decay_family, \
         self.learning_rate_min, \
+        self.lr_decay_family, \
+        self.lr_decay_steps, \
+        self.lr_decay_rate, \
+        self.lr_decay_staircase, \
+        self.init_sd, \
+        self.regularizer_name, \
+        self.regularizer_scale, \
+        self.n_train, \
+        self.y_mu_init, \
+        self.y_scale_init, \
+        self.rangf_map_base, \
+        self.rangf_n_levels, \
         self.loss_name = state
 
-        self.FLOAT_TF = getattr(tf, self.float_type)
-        self.FLOAT_NP = getattr(np, self.float_type)
-        self.INT_TF = getattr(tf, self.int_type)
-        self.INT_NP = getattr(np, self.int_type)
+        self.__initialize_metadata__()
 
-        self.form = Formula(self.form_str)
-        self.irf_tree = self.form.irf_tree
-
+        self.rangf_map = []
         for i in range(len(self.rangf_map_base)):
             self.rangf_map.append(defaultdict(lambda: self.rangf_n_levels[i], self.rangf_map_base[i]))
+
+        with self.sess.as_default():
+            with self.g.as_default():
+                self.y_mu_init_tf = tf.constant(self.y_mu_init, dtype=self.FLOAT_TF)
+                self.y_scale_init_tf = tf.constant(self.y_scale_init, dtype=self.FLOAT_TF)
+                self.epsilon = tf.constant(1e-35, dtype=self.FLOAT_TF)
 
         self.build()
 
@@ -172,153 +223,93 @@ class NNDTSR(DTSR):
 
     ######################################################
     #
-    #  Private methods
+    #  Network Initialization
     #
     ######################################################
 
-    def __initialize_intercepts_coefficients__(self):
+    def __initialize_intercept__(self, ran_gf=None, rangf_n_levels=None):
         f = self.form
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if f.intercept:
-                    self.intercept_fixed = tf.Variable(tf.constant(self.y_mu_init, shape=[1]), dtype=self.FLOAT_TF,
-                                                       name='intercept')
+                if ran_gf is None:
+                    intercept = tf.Variable(
+                        self.y_mu_init_tf,
+                        dtype=self.FLOAT_TF,
+                        name='intercept'
+                    )
+                    intercept_summary = intercept
                 else:
-                    self.intercept_fixed = tf.constant(0., dtype=self.FLOAT_TF, name='intercept')
-                self.intercept = self.intercept_fixed
-                tf.summary.scalar('intercept', self.intercept[0], collections=['params'])
+                    intercept = tf.Variable(
+                        tf.random_normal(
+                            shape=[rangf_n_levels],
+                            stddev=self.init_sd,
+                            dtype=self.FLOAT_TF
+                        ),
+                        name='intercept_by_%s' % ran_gf
+                    )
+                    self.__regularize__(intercept)
+                    intercept_summary = intercept
+                return intercept, intercept_summary
 
-                self.coefficient_fixed = tf.Variable(
-                    tf.truncated_normal(shape=[len(f.coefficient_names)], mean=0., stddev=0.1, dtype=self.FLOAT_TF),
-                    name='coefficient_fixed')
-                for i in range(len(f.coefficient_names)):
-                    tf.summary.scalar('coefficient' + '/%s' % f.coefficient_names[i], self.coefficient_fixed[i], collections=['params'])
-                self.coefficient = self.coefficient_fixed
-                fixef_ix = names2ix(f.fixed_coefficient_names, f.coefficient_names)
-                coefficient_fixed_mask = np.zeros(len(f.coefficient_names), dtype=self.FLOAT_NP)
-                coefficient_fixed_mask[fixef_ix] = 1.
-                coefficient_fixed_mask = tf.constant(coefficient_fixed_mask)
-                self.coefficient_fixed *= coefficient_fixed_mask
-                self.coefficient_fixed_means = self.coefficient_fixed
-                self.coefficient = self.coefficient_fixed
-                self.coefficient = tf.expand_dims(self.coefficient, 0)
-                self.ransl = False
-                for i in range(len(f.ran_names)):
-                    r = f.random[f.ran_names[i]]
-                    mask_row_np = np.ones(self.rangf_n_levels[i], dtype=self.FLOAT_NP)
-                    mask_row_np[self.rangf_n_levels[i] - 1] = 0
-                    mask_row = tf.constant(mask_row_np, dtype=self.FLOAT_TF)
-
-                    if r.intercept:
-                        intercept_random = tf.Variable(
-                            tf.truncated_normal(
-                                shape=[self.rangf_n_levels[i]],
-                                mean=0.,
-                                stddev=.1
-                            ),
-                            dtype=self.FLOAT_TF,
-                            name='intercept_by_%s' % r.gf
-                        )
-                        intercept_random *= mask_row
-                        intercept_random -= tf.reduce_mean(intercept_random, axis=0)
-
-                        self.intercept += tf.gather(intercept_random, self.gf_y[:, i])
-
-                        if self.log_random:
-                            tf.summary.histogram(
-                                'by_%s/intercept' % r.gf,
-                                intercept_random,
-                                collections=['random']
-                            )
-                    if len(r.coefficient_names) > 0:
-                        coefs = r.coefficient_names
-                        coef_ix = names2ix(coefs, f.coefficient_names)
-                        mask_col_np = np.zeros(len(f.coefficient_names))
-                        mask_col_np[coef_ix] = 1.
-                        mask_col = tf.constant(mask_col_np, dtype=self.FLOAT_TF)
-                        self.ransl = True
-
-                        coefficient_random = tf.Variable(
-                            tf.truncated_normal(
-                                shape=[self.rangf_n_levels[i], len(f.coefficient_names)],
-                                mean=0.,
-                                stddev=.1
-                            ),
-                            dtype=self.FLOAT_TF,
-                            name='coefficient_by_%s' % (r.gf)
-                        )
-
-                        coefficient_random *= mask_col
-                        coefficient_random *= tf.expand_dims(mask_row, -1)
-                        coefficient_random -= tf.reduce_mean(coefficient_random, axis=0)
-
-                        self.coefficient += tf.gather(coefficient_random, self.gf_y[:, i], axis=0)
-
-                        if self.log_random:
-                            for j in range(len(r.coefficient_names)):
-                                coef_name = r.coefficient_names[j]
-                                ix = coef_ix[j]
-                                tf.summary.histogram(
-                                    'by_%s/coefficient/%s' % (r.gf, coef_name),
-                                    coefficient_random[:, ix],
-                                    collections=['random']
-                                )
-
-    def __new_irf_param__(self, param_name, ids, mean=0, lb=None, ub=None, ran_ids=None):
-        epsilon = 1e-35
-        dim = len(ids)
-        mean = float(mean)
-        if ran_ids is None:
-            ran_ids = []
+    def __initialize_coefficient__(self, coef_ids=None, ran_gf=None, rangf_n_levels=None):
+        if coef_ids is None:
+            coef_ids = self.coef_names
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if lb is None and ub is None:
-                    # Unbounded support
-                    param_mean_init = mean
-                elif lb is not None and ub is None:
-                    # Lower-bounded support only
-                    try:
-                        float(lb)
-                    except:
-                        raise ValueError('lb is not a valid number: %s' % lb)
-                    param_mean_init = tf.contrib.distributions.softplus_inverse(mean - lb - epsilon)
-                elif lb is None and ub is not None:
-                    # Upper-bounded support only
-                    try:
-                        float(ub)
-                    except:
-                        raise ValueError('ub is not a valid number: %s' % lb)
-                    param_mean_init = tf.contrib.distributions.softplus_inverse(-(mean - ub + epsilon))
-                else:
-                    # Finite-interval bounded support
-                    try:
-                        float(lb)
-                    except:
-                        raise ValueError('lb is not a valid number: %s' % lb)
-                    try:
-                        float(ub)
-                    except:
-                        raise ValueError('ub is not a valid number: %s' % lb)
-                    param_mean_init = tf.contrib.distributions.bijectors.Sigmoid.inverse(
-                        (mean - lb - epsilon) / ((ub - epsilon) - (lb + epsilon))
+                if ran_gf is None:
+                    coefficient = tf.Variable(
+                        tf.random_normal(
+                            shape=[len(coef_ids)],
+                            stddev=self.init_sd,
+                            dtype=self.FLOAT_TF
+                        ),
+                        name='coefficient'
                     )
+                    coefficient_summary = coefficient
+                else:
+                    coefficient = tf.Variable(
+                        tf.random_normal(
+                            shape=[rangf_n_levels, len(coef_ids)],
+                            stddev=self.init_sd,
+                            dtype=self.FLOAT_TF
+                        ),
+                        name='coefficient_by_%s' % ran_gf
+                    )
+                    coefficient_summary = coefficient
+                self.__regularize__(coefficient)
+                return coefficient, coefficient_summary
+
+    def __initialize_irf_param__(self, param_name, ids, mean=0, lb=None, ub=None, irf_by_rangf=None):
+        dim = len(ids)
+        mean = float(mean)
+        if irf_by_rangf is None:
+            irf_by_rangf = []
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                param_mean_init, lb, ub = self.__process_mean__(mean, lb, ub)
 
                 param = tf.Variable(
-                    tf.truncated_normal([1, dim], mean=param_mean_init, stddev=self.init_sd),
-                    dtype=self.FLOAT_TF,
+                    tf.random_normal(
+                        shape=[1, dim],
+                        mean=param_mean_init,
+                        stddev=self.init_sd,
+                        dtype=self.FLOAT_TF
+                    ),
                     name=sn('%s_%s' % (param_name, '-'.join(ids)))
                 )
+                self.__regularize__(param, param_mean_init)
 
                 if lb is None and ub is None:
                     param_out = param
                 elif lb is not None and ub is None:
-                    param_out = tf.nn.softplus(param) + lb + epsilon
+                    param_out = tf.nn.softplus(param) + lb + self.epsilon
                 elif lb is None and ub is not None:
-                    param_out = -tf.nn.softplus(param) + ub - epsilon
+                    param_out = -tf.nn.softplus(param) + ub - self.epsilon
                 else:
-                    param_out = tf.sigmoid(param) * ((ub - epsilon) - (lb + epsilon)) + lb + epsilon
+                    param_out = tf.sigmoid(param) * ((ub - self.epsilon) - (lb + self.epsilon)) + lb + self.epsilon
 
                 for i in range(dim):
                     tf.summary.scalar(
@@ -329,37 +320,42 @@ class NNDTSR(DTSR):
 
                 param_mean = param_out
 
-                if len(ran_ids) > 0:
-                    for gf in ran_ids:
-                        i = self.form.rangf.index(gf)
+                if len(irf_by_rangf) > 0:
+                    for gf in irf_by_rangf:
+                        i = self.rangf.index(gf)
                         mask_row_np = np.ones(self.rangf_n_levels[i], dtype=getattr(np, self.float_type))
                         mask_row_np[self.rangf_n_levels[i] - 1] = 0
                         mask_row = tf.constant(mask_row_np, dtype=self.FLOAT_TF)
-                        col_ix = names2ix(ran_ids[gf], ids)
+                        col_ix = names2ix(irf_by_rangf[gf], ids)
                         mask_col_np = np.zeros([1, dim])
                         mask_col_np[0, col_ix] = 1.
                         mask_col = tf.constant(mask_col_np, dtype=self.FLOAT_TF)
 
                         param_ran = tf.Variable(
-                            tf.truncated_normal(
+                            tf.random_normal(
                                 shape=[self.rangf_n_levels[i], dim],
                                 mean=param_mean_init,
-                                stddev=self.init_sd
+                                stddev=self.init_sd,
+                                dtype=self.FLOAT_TF
                             ),
-                            dtype=self.FLOAT_TF,
                             name='%s_by_%s' % (param_name, gf)
                         )
+                        self.__regularize__(param, param_mean_init)
 
                         half_interval = None
                         if lb is not None:
-                            half_interval = param_out - lb + epsilon
-                        if ub is not None:
+                            half_interval = param_out - lb + self.epsilon
+                        elif ub is not None:
                             if half_interval is not None:
-                                half_interval = tf.minimum(half_interval, ub - epsilon - param_out)
+                                half_interval = tf.minimum(half_interval, ub - self.epsilon - param_out)
                             else:
-                                half_interval = ub - epsilon - param_out
+                                half_interval = ub - self.epsilon - param_out
                         if half_interval is not None:
-                            param_ran = tf.sigmoid(param_ran) * half_interval + lb + epsilon
+                            param_ran = tf.sigmoid(param_ran) * half_interval
+                            if lb is not None:
+                                param_ran += lb + self.epsilon
+                            else:
+                                param_ran = ub - self.epsilon - param_ran
 
                         param_ran *= mask_col
                         param_ran *= tf.expand_dims(mask_row, -1)
@@ -367,8 +363,8 @@ class NNDTSR(DTSR):
                         param_out += tf.gather(param_ran, self.gf_y[:, i], axis=0)
 
                         if self.log_random:
-                            for j in range(len(ran_ids[gf])):
-                                irf_name = ran_ids[gf][j]
+                            for j in range(len(irf_by_rangf[gf])):
+                                irf_name = irf_by_rangf[gf][j]
                                 ix = col_ix[j]
                                 tf.summary.histogram(
                                     'by_%s/%s/%s' % (gf, param_name, irf_name),
@@ -391,10 +387,13 @@ class NNDTSR(DTSR):
                     self.loss_func = self.mae_loss
                 else:
                     self.loss_func = self.mse_loss
+                if self.regularizer_name is not None:
+                    self.loss_func += self.regularizer_scale * tf.add_n(self.regularizer_losses)
                 self.loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='loss_total')
                 tf.summary.scalar('loss/%s' % self.loss_name, self.loss_total, collections=['loss'])
 
-                self.optim = self.__optim_init__(self.optim_name)
+                self.optim = self.__initialize_optimizer__(self.optim_name)
+                assert self.optim is not None, 'An optimizer name must be supplied'
 
                 # self.train_op = self.optim.minimize(self.loss_func, global_step=self.global_batch_step,
                 #                                     name=sn('optim'))
@@ -406,7 +405,7 @@ class NNDTSR(DTSR):
                 self.train_op = self.optim.apply_gradients(zip(self.gradients, variables),
                                                            global_step=self.global_batch_step, name=sn('optim'))
 
-    def __start_logging__(self):
+    def __initialize_logging__(self):
         f = self.form
 
         with self.sess.as_default():
@@ -414,7 +413,7 @@ class NNDTSR(DTSR):
                 self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/fixed', self.sess.graph)
                 self.summary_params = tf.summary.merge_all(key='params')
                 self.summary_losses = tf.summary.merge_all(key='loss')
-                if self.log_random and len(f.random) > 0:
+                if self.log_random and len(self.rangf) > 0:
                     self.summary_random = tf.summary.merge_all(key='random')
 
 
@@ -425,42 +424,6 @@ class NNDTSR(DTSR):
     #  Public methods
     #
     ######################################################
-
-    def build(self, restore=True, verbose=True):
-        """
-        Construct the DTSR network and initialize/load model parameters.
-        ``build()`` is called by default at initialization and unpickling, so users generally do not need to call this method.
-        ``build()`` can be used to reinitialize an existing network instance on the fly, but only if (1) no model checkpoint has been saved to the output directory or (2) ``restore`` is set to ``False``.
-
-        :param restore: Restore saved network parameters if model checkpoint exists in the output directory.
-        :param verbose: Show the model tree when called.
-        :return: ``None``
-        """
-        if verbose:
-            sys.stderr.write('Constructing network from model tree:\n')
-            sys.stdout.write(str(self.irf_tree))
-            sys.stdout.write('\n\n')
-
-        self.g = tf.Graph()
-        self.sess = tf.Session(graph=self.g, config=tf_config)
-
-        if self.low_memory:
-            self.__initialize_low_memory_inputs__()
-        else:
-            self.__initialize_inputs__()
-        self.__initialize_intercepts_coefficients__()
-        self.__initialize_irf_lambdas__()
-        self.__initialize_irf_params__()
-        self.__initialize_irfs__(self.irf_tree)
-        if self.low_memory:
-            self.__construct_low_memory_network__()
-        else:
-            self.__construct_network__()
-        self.__initialize_objective__()
-        self.__start_logging__()
-        self.__initialize_saver__()
-        self.load(restore=restore)
-        self.__report_n_params__()
 
     def expand_history(self, X, X_time, first_obs, last_obs):
         """
@@ -482,8 +445,7 @@ class NNDTSR(DTSR):
     def fit(self,
             X,
             y,
-            n_epoch_train=100,
-            n_epoch_tune=100,
+            n_iter=100,
             irf_name_map=None,
             plot_x_inches=28,
             plot_y_inches=5,
@@ -507,7 +469,7 @@ class NNDTSR(DTSR):
 
             In general, ``y`` will be identical to the parameter ``y`` provided at model initialization.
             However, this is not necessary.
-        :param n_epoch_train: ``int``; the number of training iterations
+        :param n_iter: ``int``; the number of training iterations
         :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
             If ``None``, IRF tree node string ID's will be used.
         :param plot_x_inches: ``int``; width of plot in inches.
@@ -516,14 +478,16 @@ class NNDTSR(DTSR):
         :return: ``None``
         """
 
-        usingGPU = is_gpu_available()
+        if self.pc:
+            impulse_names = self.src_impulse_names
+        else:
+            impulse_names  = self.impulse_names
 
+        usingGPU = is_gpu_available()
         sys.stderr.write('Using GPU: %s\n' % usingGPU)
 
-        f = self.form
-
-        sys.stderr.write('Correlation matrix for input variables:Corr\n')
-        rho = X[f.terminal_names].corr()
+        sys.stderr.write('Correlation matrix for input variables:\n')
+        rho = X[impulse_names].corr()
         sys.stderr.write(str(rho) + '\n\n')
 
         if not np.isfinite(self.minibatch_size):
@@ -532,21 +496,21 @@ class NNDTSR(DTSR):
             minibatch_size = self.minibatch_size
         n_minibatch = math.ceil(float(len(y)) / minibatch_size)
 
-        y_rangf = y[f.rangf]
-        for i in range(len(f.rangf)):
-            c = f.rangf[i]
+        y_rangf = y[self.rangf]
+        for i in range(len(self.rangf)):
+            c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
 
         if self.low_memory:
-            X_2d = X[f.terminal_names]
+            X_2d = X[impulse_names]
             time_X_2d = np.array(X.time, dtype=self.FLOAT_NP)
             first_obs = np.array(y.first_obs, dtype=self.INT_NP)
             last_obs = np.array(y.last_obs, dtype=self.INT_NP)
         else:
-            X_3d, time_X_3d = self.expand_history(X[f.terminal_names], X.time, y.first_obs, y.last_obs)
+            X_3d, time_X_3d = self.expand_history(X[impulse_names], X.time, y.first_obs, y.last_obs)
         time_y = np.array(y.time)
         gf_y = np.array(y_rangf, dtype=self.INT_NP)
-        y_dv = np.array(y[f.dv], dtype=self.FLOAT_NP)
+        y_dv = np.array(y[self.dv], dtype=self.FLOAT_NP)
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -575,28 +539,28 @@ class NNDTSR(DTSR):
                     summary_params = self.sess.run(self.summary_params, feed_dict=fd)
                     loss_total = 0.
                     for j in range(0, len(y), self.minibatch_size):
-                        fd_minibatch[self.y] = y_dv[j:j + self.minibatch_size]
-                        fd_minibatch[self.time_y] = time_y[j:j + self.minibatch_size]
-                        fd_minibatch[self.gf_y] = gf_y[j:j + self.minibatch_size]
+                        fd_minibatch[self.y] = y_dv[j:j + minibatch_size]
+                        fd_minibatch[self.time_y] = time_y[j:j + minibatch_size]
+                        fd_minibatch[self.gf_y] = gf_y[j:j + minibatch_size]
                         if self.low_memory:
-                            fd_minibatch[self.first_obs] = first_obs[j:j + self.minibatch_size]
-                            fd_minibatch[self.last_obs] = last_obs[j:j + self.minibatch_size]
+                            fd_minibatch[self.first_obs] = first_obs[j:j + minibatch_size]
+                            fd_minibatch[self.last_obs] = last_obs[j:j + minibatch_size]
                         else:
-                            fd_minibatch[self.X] = X_3d[j:j + self.minibatch_size]
-                            fd_minibatch[self.time_X] = time_X_3d[j:j + self.minibatch_size]
+                            fd_minibatch[self.X] = X_3d[j:j + minibatch_size]
+                            fd_minibatch[self.time_X] = time_X_3d[j:j + minibatch_size]
                         loss_total += self.sess.run(self.loss_func, feed_dict=fd_minibatch)*len(fd_minibatch[self.y])
                     loss_total /= len(y)
                     summary_train_loss = self.sess.run(self.summary_losses, {self.loss_total: loss_total})
                     self.writer.add_summary(summary_params, self.global_step.eval(session=self.sess))
                     self.writer.add_summary(summary_train_loss, self.global_step.eval(session=self.sess))
 
-                while self.global_step.eval(session=self.sess) < n_epoch_train:
+                while self.global_step.eval(session=self.sess) < n_iter:
                     p, p_inv = getRandomPermutation(len(y))
                     t0_iter = time.time()
                     sys.stderr.write('-' * 50 + '\n')
                     sys.stderr.write('Iteration %d\n' % int(self.global_step.eval(session=self.sess) + 1))
                     sys.stderr.write('\n')
-                    if self.learning_rate_decay:
+                    if self.lr_decay_family is not None:
                         sys.stderr.write('Learning rate: %s\n' %self.lr.eval(session=self.sess))
 
                     pb = tf.contrib.keras.utils.Progbar(n_minibatch)
@@ -640,47 +604,43 @@ class NNDTSR(DTSR):
 
                     self.sess.run(self.incr_global_step)
 
-                    summary_params = self.sess.run(self.summary_params, feed_dict=fd)
-                    loss_total = 0.
-                    for j in range(0, len(y), self.minibatch_size):
-                        fd_minibatch[self.y] = y_dv[j:j + self.minibatch_size]
-                        fd_minibatch[self.time_y] = time_y[j:j + self.minibatch_size]
-                        fd_minibatch[self.gf_y] = gf_y[j:j + self.minibatch_size]
-                        if self.low_memory:
-                            fd_minibatch[self.first_obs] = first_obs[j:j + self.minibatch_size]
-                            fd_minibatch[self.last_obs] = last_obs[j:j + self.minibatch_size]
-                        else:
-                            fd_minibatch[self.X] = X_3d[j:j + self.minibatch_size]
-                            fd_minibatch[self.time_X] = time_X_3d[j:j + self.minibatch_size]
-                        loss_total += self.sess.run(self.loss_func, feed_dict=fd_minibatch)*len(fd_minibatch[self.y])
-                    loss_total /= len(y)
-
                     if self.global_step.eval(session=self.sess) % self.save_freq == 0:
                         self.save()
-                        self.make_plots(irf_name_map, plot_x_inches, plot_y_inches, cmap)
+                        self.make_plots(
+                            irf_name_map=irf_name_map,
+                            plot_x_inches=plot_x_inches,
+                            plot_y_inches=plot_y_inches,
+                            cmap=cmap
+                        )
 
                     if self.global_step.eval(session=self.sess) % self.log_freq == 0:
+                        summary_params = self.sess.run(self.summary_params, feed_dict=fd)
                         summary_train_loss = self.sess.run(self.summary_losses, {self.loss_total: loss_total})
                         self.writer.add_summary(summary_params, self.global_step.eval(session=self.sess))
                         self.writer.add_summary(summary_train_loss, self.global_step.eval(session=self.sess))
 
-                        if self.log_random and len(f.random) > 0:
+                        if self.log_random and len(self.rangf) > 0:
                             summary_random = self.sess.run(self.summary_random)
                             self.writer.add_summary(summary_random, self.global_batch_step.eval(session=self.sess))
 
                     t1_iter = time.time()
+
                     sys.stderr.write('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
 
-                X_conv = pd.DataFrame(self.sess.run(self.X_conv, feed_dict=fd), columns=self.preterminals)
+                X_conv = self.convolve_inputs(X, time_y, gf_y, y.first_obs, y.last_obs)
 
                 sys.stderr.write('Mean values of convolved predictors\n')
-                sys.stderr.write(str(X_conv.mean(axis=0)) + '\n')
-                sys.stderr.write('Correlations of convolved predictors')
-                sys.stderr.write(str(X_conv.corr()) + '\n')
+                sys.stderr.write(str(X_conv.mean(axis=0)) + '\n\n')
+                sys.stderr.write('Correlations of convolved predictors\n')
+                sys.stderr.write(str(X_conv.corr()) + '\n\n')
                 sys.stderr.write('\n')
 
-                self.make_plots(irf_name_map, plot_x_inches, plot_y_inches, cmap)
-
+                self.make_plots(
+                    irf_name_map=irf_name_map,
+                    plot_x_inches=plot_x_inches,
+                    plot_y_inches=plot_y_inches,
+                    cmap=cmap
+                )
 
     def predict(self, X, y_time, y_rangf, first_obs, last_obs):
         """
@@ -704,19 +664,22 @@ class NNDTSR(DTSR):
 
         assert len(y_time) == len(y_rangf) == len(first_obs) == len(last_obs), 'y_time, y_rangf, first_obs, and last_obs must be of identical length. Got: len(y_time) = %d, len(y_rangf) = %d, len(first_obs) = %d, len(last_obs) = %d' % (len(y_time), len(y_rangf), len(first_obs), len(last_obs))
 
-        f = self.form
+        if self.pc:
+            impulse_names = self.src_impulse_names
+        else:
+            impulse_names  = self.impulse_names
 
-        for i in range(len(f.rangf)):
-            c = f.rangf[i]
+        for i in range(len(self.rangf)):
+            c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
 
         if self.low_memory:
-            X_2d = X[f.terminal_names]
+            X_2d = X[impulse_names]
             time_X_2d = np.array(X.time, dtype=self.FLOAT_NP)
             first_obs = np.array(first_obs, dtype=self.INT_NP)
             last_obs = np.array(last_obs, dtype=self.INT_NP)
         else:
-            X_3d, time_X_3d = self.expand_history(X[f.terminal_names], X.time, first_obs, last_obs)
+            X_3d, time_X_3d = self.expand_history(X[impulse_names], X.time, first_obs, last_obs)
         time_y = np.array(y_time, dtype=self.FLOAT_NP)
         gf_y = np.array(y_rangf, dtype=self.INT_NP)
 
@@ -743,20 +706,20 @@ class NNDTSR(DTSR):
                     self.time_X: fd[self.time_X]
                 }
 
-                if not np.isfinite(self.minibatch_size):
+                if not np.isfinite(self.eval_minibatch_size):
                     preds = self.sess.run(self.out, feed_dict=fd)
                 else:
-                    for j in range(0, len(y_time), self.minibatch_size):
-                        fd_minibatch[self.time_y] = time_y[j:j + self.minibatch_size]
-                        fd_minibatch[self.gf_y] = gf_y[j:j + self.minibatch_size]
+                    for j in range(0, len(y_time), self.eval_minibatch_size):
+                        fd_minibatch[self.time_y] = time_y[j:j + self.eval_minibatch_size]
+                        fd_minibatch[self.gf_y] = gf_y[j:j + self.eval_minibatch_size]
                         if self.low_memory:
-                            fd_minibatch[self.first_obs] = first_obs[j:j + self.minibatch_size]
-                            fd_minibatch[self.last_obs] = last_obs[j:j + self.minibatch_size]
+                            fd_minibatch[self.first_obs] = first_obs[j:j + self.eval_minibatch_size]
+                            fd_minibatch[self.last_obs] = last_obs[j:j + self.eval_minibatch_size]
                         else:
-                            fd_minibatch[self.X] = X_3d[j:j + self.minibatch_size]
-                            fd_minibatch[self.time_X] = time_X_3d[j:j + self.minibatch_size]
+                            fd_minibatch[self.X] = X_3d[j:j + self.eval_minibatch_size]
+                            fd_minibatch[self.time_X] = time_X_3d[j:j + self.eval_minibatch_size]
 
-                        preds[j:j + self.minibatch_size] = self.sess.run(self.out, feed_dict=fd_minibatch)
+                        preds[j:j + self.eval_minibatch_size] = self.sess.run(self.out, feed_dict=fd_minibatch)
 
                 return preds
 
@@ -780,23 +743,26 @@ class NNDTSR(DTSR):
 
         :return: ``float`` (scalar); the value of the evaluation metric (MSE/MAE) for the evaluation data.
         """
-        f = self.form
+        if self.pc:
+            impulse_names = self.src_impulse_names
+        else:
+            impulse_names  = self.impulse_names
 
-        y_rangf = y[f.rangf]
-        for i in range(len(f.rangf)):
+        y_rangf = y[self.rangf]
+        for i in range(len(self.rangf)):
             c = f.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
 
         if self.low_memory:
-            X_2d = X[f.terminal_names]
+            X_2d = X[impulse_names]
             time_X_2d = np.array(X.time, dtype=self.FLOAT_NP)
             first_obs = np.array(y.first_obs, dtype=self.INT_NP)
             last_obs = np.array(y.last_obs, dtype=self.INT_NP)
         else:
-            X_3d, time_X_3d = self.expand_history(X[f.terminal_names], X.time, y.first_obs, y.last_obs)
+            X_3d, time_X_3d = self.expand_history(X[impulse_names], X.time, y.first_obs, y.last_obs)
         time_y = np.array(y.time, dtype=self.FLOAT_NP)
         gf_y = np.array(y_rangf, dtype=self.INT_NP)
-        y_dv = np.array(y[f.dv], dtype=self.FLOAT_NP)
+        y_dv = np.array(y[self.dv], dtype=self.FLOAT_NP)
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -821,27 +787,27 @@ class NNDTSR(DTSR):
                     self.time_X: fd[self.time_X]
                 }
 
-                loss = 0.
+                out = 0.
 
-                if not np.isfinite(self.minibatch_size):
-                    loss = self.sess.run(self.loss_func, feed_dict=fd)
+                if not np.isfinite(self.eval_minibatch_size):
+                    out = self.sess.run(self.loss_func, feed_dict=fd)
                 else:
-                    for j in range(0, len(y), self.minibatch_size):
-                        fd_minibatch[self.y] = y_dv[j:j + self.minibatch_size]
-                        fd_minibatch[self.time_y] = time_y[j:j + self.minibatch_size]
-                        fd_minibatch[self.gf_y] = gf_y[j:j + self.minibatch_size]
+                    for j in range(0, len(y), self.eval_minibatch_size):
+                        fd_minibatch[self.y] = y_dv[j:j + self.eval_minibatch_size]
+                        fd_minibatch[self.time_y] = time_y[j:j + self.eval_minibatch_size]
+                        fd_minibatch[self.gf_y] = gf_y[j:j + self.eval_minibatch_size]
                         if self.low_memory:
-                            fd_minibatch[self.first_obs] = first_obs[j:j + self.minibatch_size]
-                            fd_minibatch[self.last_obs] = last_obs[j:j + self.minibatch_size]
+                            fd_minibatch[self.first_obs] = first_obs[j:j + self.eval_minibatch_size]
+                            fd_minibatch[self.last_obs] = last_obs[j:j + self.eval_minibatch_size]
                         else:
-                            fd_minibatch[self.X] = X_3d[j:j + self.minibatch_size]
-                            fd_minibatch[self.time_X] = time_X_3d[j:j + self.minibatch_size]
-                        loss += self.sess.run(self.loss_func, feed_dict=fd_minibatch)*len(fd_minibatch[self.y])
-                    loss /= len(y)
+                            fd_minibatch[self.X] = X_3d[j:j + self.eval_minibatch_size]
+                            fd_minibatch[self.time_X] = time_X_3d[j:j + self.eval_minibatch_size]
+                        out += self.sess.run(self.loss_func, feed_dict=fd_minibatch)*len(fd_minibatch[self.y])
+                    out /= len(y)
 
-                return loss
+                return out
 
-    def make_plots(self, irf_name_map=None, plot_x_inches=7., plot_y_inches=5., cmap=None):
+    def make_plots(self, **kwargs):
         """
         Generate plots of current state of deconvolution.
         Saves four plots to the output directory:
@@ -863,9 +829,4 @@ class NNDTSR(DTSR):
         :param cmap: ``str``; name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot).
         :return: ``None``
         """
-        return super(NNDTSR, self).make_plots(
-            irf_name_map=irf_name_map,
-            plot_x_inches=plot_x_inches,
-            plot_y_inches=plot_y_inches,
-            cmap=cmap
-        )
+        return super(NNDTSR, self).make_plots(**kwargs)

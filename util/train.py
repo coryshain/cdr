@@ -194,7 +194,7 @@ if __name__ == '__main__':
                     optim=p.optim,
                     learning_rate=p.learning_rate,
                     learning_rate_decay_factor=p.learning_rate_decay_factor,
-                    learning_rate_decay_family=p.learning_rate_decay_family,
+                    lr_decay_family=p.learning_rate_decay_family,
                     learning_rate_min=p.learning_rate_min,
                     log_random=p.log_random
                 )

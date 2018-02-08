@@ -1,5 +1,6 @@
 import sys
 import pandas as pd
+import numpy as np
 
 def read_data(path_X, path_y, series_ids, categorical_columns=None):
     sys.stderr.write('Loading data...\n')

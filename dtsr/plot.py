@@ -1,8 +1,21 @@
+import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 sns.set(style='white', rc={'axes.facecolor': (0, 0, 0, 0)})
 
-def plot_convolutions(plot_x, plot_y, features, dir, filename='convolution_plot.png', irf_name_map=None, plot_x_inches=7, plot_y_inches=5, cmap='gist_earth'):
+def plot_convolutions(
+        plot_x,
+        plot_y,
+        features,
+        uq=None,
+        lq=None,
+        dir='.',
+        filename='convolution_plot.png',
+        irf_name_map=None,
+        plot_x_inches=7,
+        plot_y_inches=5,
+        cmap='gist_earth'
+):
     cm = plt.get_cmap(cmap)
     plt.gca().set_prop_cycle(color=[cm(1. * i / len(features)) for i in range(len(features))])
     plt.gca().spines['right'].set_visible(False)
@@ -17,9 +30,26 @@ def plot_convolutions(plot_x, plot_y, features, dir, filename='convolution_plot.
             plt.plot(plot_x[:2], plot_y[:2,sort_ix[i]], label=feats[sort_ix[i]])
         else:
             plt.plot(plot_x, plot_y[:,sort_ix[i]], label=feats[sort_ix[i]])
+        if uq is not None and lq is not None:
+            plt.fill_between(plot_x[:,0], lq[:,sort_ix[i]], uq[:,sort_ix[i]], alpha=0.25)
     h, l = plt.gca().get_legend_handles_labels()
     plt.gcf().legend(h,l,fancybox=True, framealpha=0.5)
     plt.gcf().set_size_inches(plot_x_inches, plot_y_inches)
     plt.savefig(dir+'/'+filename)
     plt.close('all')
+
+def plot_heatmap(m, row_names, col_names, dir='.', filename='eigenvectors.png', plot_x_inches=7, plot_y_inches=5, cmap='Blues'):
+    cm = plt.get_cmap(cmap)
+    plt.gca().set_xticklabels(col_names)
+    plt.gca().set_xticks(np.arange(len(col_names)) + 0.5, minor=False)
+    plt.gca().set_yticklabels(row_names)
+    plt.gca().set_yticks(np.arange(len(row_names)) + 0.5, minor=False)
+    heatmap = plt.pcolor(m, cmap=cm)
+    plt.colorbar(heatmap)
+    plt.gcf().set_size_inches(plot_x_inches, plot_y_inches)
+    plt.gcf().subplots_adjust(bottom=0.25,left=0.25)
+    plt.savefig(dir+'/'+filename)
+    plt.close('all')
+
+
 
