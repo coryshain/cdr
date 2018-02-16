@@ -36,11 +36,11 @@ if __name__ == '__main__':
     dtsr_formula_list = [Formula(p.models[m]['formula']) for m in p.model_list if m.startswith('DTSR')]
     dtsr_formula_name_list = [m for m in p.model_list if m.startswith('DTSR')]
     if args.partition == 'train':
-        X, y = read_data(p.X_train, p.y_train, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [x.random[v].gf for x in dtsr_formula_list for v in x.random])))
+        X, y = read_data(p.X_train, p.y_train, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in dtsr_formula_list for v in x.rangf])))
     elif args.partition == 'dev':
-        X, y = read_data(p.X_dev, p.y_dev, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [x.random[v].gf for x in dtsr_formula_list for v in x.random])))
+        X, y = read_data(p.X_dev, p.y_dev, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in dtsr_formula_list for v in x.rangf])))
     elif args.partition == 'test':
-        X, y = read_data(p.X_test, p.y_test, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [x.random[v].gf for x in dtsr_formula_list for v in x.random])))
+        X, y = read_data(p.X_test, p.y_test, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in dtsr_formula_list for v in x.rangf])))
     else:
         raise ValueError('Unrecognized value for "partition" argument: %s' %args.partition)
     X, y, select = preprocess_data(X, y, p, dtsr_formula_list, compute_history=run_dtsr)

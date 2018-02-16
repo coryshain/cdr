@@ -3,10 +3,11 @@ import os
 import sys
 import pickle
 import pandas as pd
+import numpy as np
 
 pd.options.mode.chained_assignment = None
 
-from dtsr import Config, read_data, Formula, preprocess_data, print_tee, mse, mae, compute_splitID, compute_partition
+from dtsr import Config, read_data, Formula, preprocess_data, print_tee, mse, mae, compute_splitID, compute_partition, pca
 
 if __name__ == '__main__':
 
@@ -33,7 +34,7 @@ if __name__ == '__main__':
 
     dtsr_formula_list = [Formula(p.models[m]['formula']) for m in p.model_list if m.startswith('DTSR')]
     dtsr_formula_name_list = [m for m in p.model_list if m.startswith('DTSR')]
-    X, y = read_data(p.X_train, p.y_train, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [x.random[v].gf for x in dtsr_formula_list for v in x.random])))
+    X, y = read_data(p.X_train, p.y_train, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in dtsr_formula_list for v in x.rangf])))
     X, y, select = preprocess_data(X, y, p, dtsr_formula_list, compute_history=run_dtsr)
     #
     # from matplotlib import pyplot as plt
@@ -181,49 +182,81 @@ if __name__ == '__main__':
 
             sys.stderr.write('Fitting model %s...\n\n' % m)
             if p.network_type == 'nn':
+                bayes=False
                 from dtsr.nndtsr import NNDTSR
                 dtsr_model = NNDTSR(
                     formula,
+                    X,
                     y,
                     outdir=p.logdir + '/' + m,
                     history_length=p.history_length,
                     low_memory=p.low_memory,
+                    pc=p.pc,
+                    float_type=p.float_type,
+                    int_type=p.int_type,
                     minibatch_size=p.minibatch_size,
-                    logging_freq=p.log_freq,
+                    eval_minibatch_size=p.eval_minibatch_size,
+                    log_random=p.log_random,
+                    log_freq=p.log_freq,
                     save_freq=p.save_freq,
                     optim=p.optim,
                     learning_rate=p.learning_rate,
-                    learning_rate_decay_factor=p.learning_rate_decay_factor,
-                    lr_decay_family=p.learning_rate_decay_family,
                     learning_rate_min=p.learning_rate_min,
-                    log_random=p.log_random
+                    lr_decay_family=p.lr_decay_family,
+                    lr_decay_steps=p.lr_decay_steps,
+                    lr_decay_rate=p.lr_decay_rate,
+                    lr_decay_staircase=p.lr_decay_staircase,
+                    init_sd=p.init_sd,
+                    loss=p.loss,
+                    regularizer=p.regularizer,
+                    regularizer_scale=p.regularizer_scale
                 )
-            elif p.network_type == 'bayesian':
+            elif p.network_type.startswith('bayes'):
+                bayes=True
                 from dtsr.bdtsr import BDTSR
                 dtsr_model = BDTSR(
                     formula,
+                    X,
                     y,
                     outdir=p.logdir + '/' + m,
                     history_length=p.history_length,
                     low_memory=p.low_memory,
-                    log_random=p.log_random,
+                    pc=p.pc,
+                    float_type=p.float_type,
+                    int_type=p.int_type,
                     minibatch_size=p.minibatch_size,
+                    eval_minibatch_size=p.eval_minibatch_size,
                     inference_name=p.inference_name,
                     n_samples=p.n_samples,
                     n_samples_eval=p.n_samples_eval,
-                    n_iter=p.n_epoch_train,
-                    logging_freq=p.log_freq,
+                    n_iter=p.n_iter,
+                    log_random=p.log_random,
+                    log_freq=p.log_freq,
                     save_freq=p.save_freq,
-                    conv_prior_sd=p.conv_prior_sd,
+                    optim=p.optim,
+                    learning_rate=p.learning_rate,
+                    learning_rate_min=p.learning_rate_min,
+                    lr_decay_family=p.lr_decay_family,
+                    lr_decay_steps=p.lr_decay_steps,
+                    lr_decay_rate=p.lr_decay_rate,
+                    lr_decay_staircase=p.lr_decay_staircase,
+                    intercept_prior_sd=p.intercept_prior_sd,
                     coef_prior_sd=p.coef_prior_sd,
-                    y_sigma_scale=p.y_sigma_scale
+                    conv_prior_sd=p.conv_prior_sd,
+                    mv=p.mv,
+                    mv_ran=p.mv_ran,
+                    y_scale_fixed=p.y_scale,
+                    y_scale_prior_sd=p.y_scale_prior_sd,
+                    init_sd=p.init_sd,
+                    mh_proposal_sd=p.mh_proposal_sd,
+                    asymmetric_error=p.asymmetric_error
                 )
             else:
                 raise ValueError('Network type "%s" not supported' %p.network_type)
             dtsr_model.fit(
                 X,
                 y,
-                n_epoch_train=p.n_epoch_train,
+                n_iter=p.n_iter,
                 irf_name_map=p.fixef_name_map,
                 plot_x_inches=p.plot_x_inches,
                 plot_y_inches=p.plot_y_inches,
@@ -247,7 +280,22 @@ if __name__ == '__main__':
             summary += 'DTSR regression\n\n'
             summary += 'Model name: %s\n\n' % m
             summary += 'Formula:\n'
-            summary += '  ' + formula + '\n'
+            summary += '  ' + formula + '\n\n'
+            if bayes:
+                dtsr_mse2, dtsr_mae2, dtsr_loglik = dtsr_model.eval(X, y)
+                summary += 'Log likelihood: %s\n' %dtsr_loglik
+                summary += '\nPosterior integral summaries by predictor:\n'
+                if dtsr_model.pc:
+                    terminal_names = dtsr_model.src_terminal_names
+                else:
+                    terminal_names = dtsr_model.terminal_names
+                posterior_summaries = np.zeros((len(terminal_names), 3))
+                for i in range(len(terminal_names)):
+                    terminal = terminal_names[i]
+                    row = np.array(dtsr_model.ci_integral(terminal, n_time_units=10))
+                    posterior_summaries[i] += row
+                posterior_summaries = pd.DataFrame(posterior_summaries, index=terminal_names, columns=['Mean', '2.5%', '97.5%'])
+                summary += posterior_summaries.to_string() + '\n\n'
             summary += 'Training set loss:\n'
             summary += '  MSE: %.4f\n' % dtsr_mse
             summary += '  MAE: %.4f\n' % dtsr_mae

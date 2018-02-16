@@ -116,6 +116,7 @@ class Config(object):
         if self.y_scale is not None:
             self.y_scale = float(self.y_scale)
         self.mh_proposal_sd = settings.getfloat('mh_proposal_sd', 1.)
+        self.asymmetric_error = settings.getboolean('asymmetric_error', False)
 
 
         ## Filters
@@ -137,3 +138,11 @@ class Config(object):
                 self.fixef_name_map[x] = config['fixef_name_map'][x]
         else:
             self.fixef_name_map = None
+
+    def __str__(self):
+        out = ''
+        V = vars(self)
+        for x in V:
+            out += '%s: %s\n' %(x, V[x])
+        return out
+

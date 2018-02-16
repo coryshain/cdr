@@ -309,12 +309,14 @@ class DTSR(object):
                 self.gf_y = tf.placeholder(shape=[None, len(self.rangf)], dtype=self.INT_TF)
 
                 # Linspace tensor used for plotting
-                self.n_time_units = tf.placeholder(self.FLOAT_TF, shape=[], name='mc_total_seconds')
-                self.n_points_per_time_unit = tf.placeholder(self.INT_TF, shape=[], name='mc_points_per_second')
+                self.support_start = tf.placeholder(self.FLOAT_TF, shape=[], name='support_start')
+                self.n_time_units = tf.placeholder(self.FLOAT_TF, shape=[], name='n_time_units')
+                self.n_points_per_time_unit = tf.placeholder(self.INT_TF, shape=[], name='n_points_per_time_unit')
                 self.support = tf.lin_space(
-                    0.,
-                    self.n_time_units,
-                    tf.cast(self.n_time_units * tf.cast(self.n_points_per_time_unit, self.FLOAT_TF), self.INT_TF) + 1
+                    self.support_start,
+                    self.n_time_units+self.support_start,
+                    tf.cast(self.n_time_units * tf.cast(self.n_points_per_time_unit, self.FLOAT_TF), self.INT_TF) + 1,
+                    name='support'
                 )
                 self.support = tf.expand_dims(self.support, -1)
                 self.support = tf.cast(self.support, dtype=self.FLOAT_TF)
@@ -1514,6 +1516,7 @@ class DTSR(object):
             n_points_per_time_unit=1000
     ):
         fd = {
+            self.support_start: 0.,
             self.n_time_units: n_time_units,
             self.n_points_per_time_unit: n_points_per_time_unit
         }
@@ -1538,6 +1541,7 @@ class DTSR(object):
             n_points_per_time_unit=1000
     ):
         fd = {
+            self.support_start: 0.,
             self.n_time_units: n_time_units,
             self.n_points_per_time_unit: n_points_per_time_unit
         }
@@ -1573,6 +1577,7 @@ class DTSR(object):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 fd = {
+                    self.support_start: 0.,
                     self.n_time_units: total_seconds,
                     self.n_points_per_time_unit: points_per_second
                 }
@@ -1621,7 +1626,7 @@ class DTSR(object):
                 if self.pc:
                     for a in switches[0]:
                         for b in switches[1]:
-                            if b == 'scaled:':
+                            if b == 'scaled':
                                 plot_name = 'src_irf_%s_%s.png' % (a, b)
                                 names = self.src_plot_tensors[a][b]['names']
                                 if mc:

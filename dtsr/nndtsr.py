@@ -591,7 +591,7 @@ class NNDTSR(DTSR):
                         # else:
                         #     for i in range(len(gradients)):
                         #         gradients[i] += gradients_minibatch[i]
-                        pb.update((j / minibatch_size) + 1, values=[('loss', loss_minibatch)], force=True)
+                        pb.update((j / minibatch_size) + 1, values=[('loss', loss_minibatch)])
 
                     loss_total /= n_minibatch
                     fd[self.loss_total] = loss_total

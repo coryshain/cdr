@@ -15,10 +15,10 @@ tf_config = tf.ConfigProto()
 tf_config.gpu_options.allow_growth = True
 from .formula import *
 from .util import *
-from .dtsr import DTSR
+from .dtsr import DTSR, plot_convolutions
 
 import edward as ed
-from edward.models import Normal, Gamma, Empirical, MultivariateNormalTriL
+from edward.models import Normal, Gamma, Exponential, MultivariateNormalTriL, SinhArcsinh, Empirical
 
 
 class BDTSR(DTSR):
@@ -124,7 +124,8 @@ class BDTSR(DTSR):
             mv=False,
             mv_ran=False,
             y_scale_fixed=None,
-            y_scale_prior_sd=1
+            y_scale_prior_sd=1,
+            asymmetric_error=False
     ):
 
         super(BDTSR, self).__init__(
@@ -163,6 +164,7 @@ class BDTSR(DTSR):
         self.intercept_prior_sd = intercept_prior_sd
         self.y_scale_fixed = y_scale_fixed
         self.y_scale_prior_sd = y_scale_prior_sd
+        self.asymmetric_error = asymmetric_error
 
         assert not self.low_memory, 'Because Edward does not support Tensorflow control ops, ' \
                                     'low_memory is not supported in BDTSR'
@@ -191,14 +193,16 @@ class BDTSR(DTSR):
                 self.coef_prior_sd_tf = tf.constant(float(self.coef_prior_sd), dtype=self.FLOAT_TF)
                 self.conv_prior_sd_tf = tf.constant(float(self.conv_prior_sd), dtype=self.FLOAT_TF)
                 self.y_scale_prior_sd_tf = tf.constant(float(self.y_scale_prior_sd), dtype=self.FLOAT_TF)
+                print(self.y_scale_fixed)
                 if self.y_scale_fixed is not None:
                     self.y_scale_fixed_tf = tf.constant(float(self.y_scale_fixed), dtype=self.FLOAT_TF)
                 else:
                     self.y_scale_fixed_tf = self.y_scale_fixed
                 self.intercept_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.intercept_prior_sd_tf)
                 self.coef_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.coef_prior_sd_tf)
-                self.conv_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.conv_prior_sd)
-                self.y_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.y_scale_prior_sd)
+                self.conv_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.conv_prior_sd_tf)
+                self.y_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.y_scale_init_tf)
+                self.y_scale_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.y_scale_prior_sd_tf)
 
         if self.mv:
             self.__initialize_full_joint__()
@@ -233,8 +237,6 @@ class BDTSR(DTSR):
             self.lr_decay_rate,
             self.lr_decay_staircase,
             self.init_sd,
-            self.regularizer_name,
-            self.regularizer_scale,
             self.n_train,
             self.n_iter,
             self.y_mu_init,
@@ -251,7 +253,7 @@ class BDTSR(DTSR):
             self.mh_proposal_sd,
             self.coef_prior_sd,
             self.conv_prior_sd,
-            self.y_scale_fixed
+            self.asymmetric_error
         )
 
     def __setstate__(self, state):
@@ -282,8 +284,6 @@ class BDTSR(DTSR):
         self.lr_decay_rate, \
         self.lr_decay_staircase, \
         self.init_sd, \
-        self.regularizer_name, \
-        self.regularizer_scale, \
         self.n_train, \
         self.n_iter, \
         self.y_mu_init, \
@@ -300,7 +300,7 @@ class BDTSR(DTSR):
         self.mh_proposal_sd, \
         self.coef_prior_sd, \
         self.conv_prior_sd, \
-        self.y_scale_fixed = state
+        self.asymmetric_error = state
 
         self.__initialize_metadata__()
 
@@ -325,8 +325,9 @@ class BDTSR(DTSR):
                     self.y_scale_fixed_tf = self.y_scale_fixed
                 self.intercept_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.intercept_prior_sd_tf)
                 self.coef_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.coef_prior_sd_tf)
-                self.conv_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.conv_prior_sd)
-                self.y_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.y_scale_prior_sd)
+                self.conv_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.conv_prior_sd_tf)
+                self.y_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.y_scale_init_tf)
+                self.y_scale_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.y_scale_prior_sd_tf)
 
         if self.mv:
             self.__initialize_full_joint__()
@@ -487,7 +488,6 @@ class BDTSR(DTSR):
                         ),
                         name='full_joint_q_loc'
                     )
-                    self.__regularize__(full_joint_q_loc, self.full_joint_mu)
 
                     full_joint_q_scale = tf.Variable(
                         tf.random_normal(
@@ -498,7 +498,6 @@ class BDTSR(DTSR):
                         ),
                         name='full_joint_q_scale'
                     )
-                    self.__regularize__(full_joint_q_loc, self.full_joint_mu)
 
                     self.full_joint_q = MultivariateNormalTriL(
                         loc=full_joint_q_loc,
@@ -554,7 +553,6 @@ class BDTSR(DTSR):
                                 ),
                                 name='intercept_q_loc'
                             )
-                            self.__regularize__(intercept_q_loc)
 
                             intercept_q_scale = tf.Variable(
                                 tf.random_normal(
@@ -565,8 +563,6 @@ class BDTSR(DTSR):
                                 ),
                                 name='intercept_q_scale'
                             )
-                            self.__regularize__(intercept_q_scale)
-
 
                             intercept_q = Normal(
                                 loc=intercept_q_loc,
@@ -616,7 +612,6 @@ class BDTSR(DTSR):
                                 ),
                                 name='intercept_q_loc_by_%s' % ran_gf
                             )
-                            self.__regularize__(intercept_q_loc)
 
                             intercept_q_scale = tf.Variable(
                                 tf.random_normal(
@@ -627,7 +622,6 @@ class BDTSR(DTSR):
                                 ),
                                 name='intercept_q_scale_by_%s' % ran_gf
                             )
-                            self.__regularize__(intercept_q_scale, self.intercept_scale_mean_init)
 
                             intercept_q = Normal(
                                 loc=intercept_q_loc,
@@ -687,7 +681,6 @@ class BDTSR(DTSR):
                                 ),
                                 name='coefficient_q_loc'
                             )
-                            self.__regularize__(coefficient_q_loc)
 
                             coefficient_q_scale = tf.Variable(
                                 tf.random_normal(
@@ -698,7 +691,6 @@ class BDTSR(DTSR):
                                 ),
                                 name='coefficient_q_scale'
                             )
-                            self.__regularize__(coefficient_q_scale, self.coef_scale_mean_init)
 
                             coefficient_q = Normal(
                                 loc=coefficient_q_loc,
@@ -753,7 +745,6 @@ class BDTSR(DTSR):
                                 ),
                                 name='coefficient_q_loc_by_%s' % ran_gf
                             )
-                            self.__regularize__(coefficient_q_loc)
 
                             coefficient_q_scale = tf.Variable(
                                 tf.random_normal(
@@ -764,7 +755,6 @@ class BDTSR(DTSR):
                                 ),
                                 name='coefficient_q_scale_by_%s' % ran_gf
                             )
-                            self.__regularize__(coefficient_q_scale, self.coef_scale_mean_init)
 
                             coefficient_q = Normal(
                                 loc=coefficient_q_loc,
@@ -827,7 +817,6 @@ class BDTSR(DTSR):
                             ),
                             name=sn('%s_q_loc_%s' % (param_name, '-'.join(ids)))
                         )
-                        self.__regularize__(param_q_loc, param_mean_init)
 
                         param_q_scale = tf.Variable(
                             tf.random_normal(
@@ -838,7 +827,6 @@ class BDTSR(DTSR):
                             ),
                             name=sn('%s_q_scale_%s' % (param_name, '-'.join(ids)))
                         )
-                        self.__regularize__(param_q_scale, self.conv_scale_mean_init)
 
                         param_q = Normal(
                             loc=param_q_loc,
@@ -926,7 +914,6 @@ class BDTSR(DTSR):
                                     ),
                                     name=sn('%s_q_loc_%s_by_%s' % (param_name, '-'.join(ids), gf))
                                 )
-                                self.__regularize__(param_ran_q_loc, param_mean_init)
 
                                 param_ran_q_scale = tf.Variable(
                                     tf.random_normal(
@@ -937,7 +924,6 @@ class BDTSR(DTSR):
                                     ),
                                     name=sn('%s_q_scale_%s_by_%s' % (param_name, '-'.join(ids), gf))
                                 )
-                                self.__regularize__(param_ran_q_scale, self.conv_scale_mean_init)
 
                                 param_ran_q = Normal(
                                     loc=param_ran_q_loc,
@@ -1017,9 +1003,9 @@ class BDTSR(DTSR):
                         y_scale = self.full_joint[ix]
                         y_scale_summary = self.full_joint_q.mean()[ix]
                     else:
-                        y_scale_mean = self.y_scale_init_tf
+                        y_scale_mean_init = self.y_scale_mean_init
                         y_scale = Normal(
-                            loc=y_scale_mean,
+                            loc=y_scale_mean_init,
                             scale=self.y_scale_prior_sd_tf,
                             name='y_scale'
                         )
@@ -1027,18 +1013,17 @@ class BDTSR(DTSR):
                             y_scale_loc_q = tf.Variable(
                                 tf.random_normal(
                                     [],
-                                    mean=y_scale_mean,
+                                    mean=y_scale_mean_init,
                                     stddev=self.init_sd,
                                     dtype=self.FLOAT_TF
                                 ),
                                 name='y_scale_loc_q'
                             )
-                            self.__regularize__(y_scale_loc_q, y_scale_mean)
 
                             y_scale_scale_q = tf.Variable(
                                 tf.random_normal(
                                     [],
-                                    mean=self.y_scale_mean_init,
+                                    mean=self.y_scale_scale_mean_init,
                                     stddev=self.init_sd,
                                     dtype=self.FLOAT_TF
                                 ),
@@ -1049,7 +1034,6 @@ class BDTSR(DTSR):
                                 scale=tf.nn.softplus(y_scale_scale_q),
                                 name='y_scale_q'
                             )
-                            self.__regularize__(y_scale_scale_q, self.coef_scale_mean_init)
                             y_scale_summary = y_scale_q.mean()
                         else:
                             y_scale_q_samples = tf.Variable(
@@ -1076,9 +1060,163 @@ class BDTSR(DTSR):
                         collections=['params']
                     )
                 else:
+                    print('Fixed y scale: %s' %self.y_scale_fixed)
                     y_scale = self.y_scale_fixed_tf
+                    y_scale_summary = y_scale
 
-                self.out = Normal(loc=self.out, scale=y_scale, name='output')
+                if self.asymmetric_error:
+                    self.y_skewness_sd_prior = 1.
+                    self.y_tailweight_sd_prior = 1.
+                    self.y_skewness = Normal(
+                        loc = 0.,
+                        scale = self.y_skewness_sd_prior,
+                        name='y_skewness'
+                    )
+                    self.y_tailweight = Normal(
+                        loc=tf.contrib.distributions.softplus_inverse(1.),
+                        scale=self.y_tailweight_sd_prior,
+                        name='y_tailweight'
+                    )
+                    if self.variational():
+                        y_skewness_loc_q = tf.Variable(
+                            tf.random_normal(
+                                [],
+                                mean=0.,
+                                stddev=self.init_sd,
+                                dtype=self.FLOAT_TF
+                            ),
+                            name='y_skewness_loc_q'
+                        )
+                        y_skewness_scale_q = tf.Variable(
+                            tf.random_normal(
+                                [],
+                                mean=tf.contrib.distributions.softplus_inverse(self.y_skewness_sd_prior),
+                                stddev=self.init_sd,
+                                dtype=self.FLOAT_TF
+                            ),
+                            name='y_skewness_loc_q'
+                        )
+                        self.y_skewness_q = Normal(
+                            loc=y_skewness_loc_q,
+                            scale=tf.nn.softplus(y_skewness_scale_q),
+                            name='y_skewness_q'
+                        )
+                        self.y_skewness_summary = self.y_skewness_q.mean()
+                        tf.summary.scalar(
+                            'y_skewness',
+                            self.y_skewness_summary,
+                            collections=['params']
+                        )
+                        
+                        y_tailweight_loc_q = tf.Variable(
+                            tf.random_normal(
+                                [],
+                                mean=tf.contrib.distributions.softplus_inverse(1.),
+                                stddev=self.init_sd,
+                                dtype=self.FLOAT_TF
+                            ),
+                            name='y_tailweight_loc_q'
+                        )
+                        y_tailweight_scale_q = tf.Variable(
+                            tf.random_normal(
+                                [],
+                                mean=tf.contrib.distributions.softplus_inverse(self.y_tailweight_sd_prior),
+                                stddev=self.init_sd,
+                                dtype=self.FLOAT_TF
+                            ),
+                            name='y_tailweight_loc_q'
+                        )
+                        self.y_tailweight_q = Normal(
+                            loc=y_tailweight_loc_q,
+                            scale=tf.nn.softplus(y_tailweight_scale_q),
+                            name='y_tailweight_q'
+                        )
+                        self.y_tailweight_summary = self.y_tailweight_q.mean()
+                        tf.summary.scalar(
+                            'y_tailweight',
+                            self.y_tailweight_summary,
+                            collections=['params']
+                        )
+                    else:
+                        y_skewness_q_samples = tf.Variable(
+                            tf.zeros([self.n_samples], dtype=self.FLOAT_TF),
+                            name=sn('y_skewness_q_samples')
+                        )
+                        self.y_skewness_q = Empirical(
+                            params=y_skewness_q_samples,
+                            name=sn('y_skewness_q')
+                        )
+                        if self.inference_name == 'MetropolisHastings':
+                            y_skewness_proposal = Normal(
+                                loc=self.y_skewness,
+                                scale=self.mh_proposal_sd,
+                                name=sn('y_skewness_proposal')
+                            )
+                            self.proposal_map[self.y_skewness] = y_skewness_proposal
+                        self.y_skewness_summary = self.y_skewness_q.params[self.global_batch_step - 1]
+                        tf.summary.scalar(
+                            'y_skewness',
+                            self.y_skewness_summary,
+                            collections=['params']
+                        )
+
+                        y_tailweight_q_samples = tf.Variable(
+                            tf.zeros([self.n_samples], dtype=self.FLOAT_TF),
+                            name=sn('y_tailweight_q_samples')
+                        )
+                        self.y_tailweight_q = Empirical(
+                            params=y_tailweight_q_samples,
+                            name=sn('y_tailweight_q')
+                        )
+                        if self.inference_name == 'MetropolisHastings':
+                            y_tailweight_proposal = Normal(
+                                loc=self.y_tailweight,
+                                scale=self.mh_proposal_sd,
+                                name=sn('y_tailweight_proposal')
+                            )
+                            self.proposal_map[self.y_tailweight] = y_tailweight_proposal
+                        self.y_tailweight_summary = self.y_tailweight_q.params[self.global_batch_step - 1]
+                        tf.summary.scalar(
+                            'y_tailweight',
+                            self.y_tailweight_summary,
+                            collections=['params']
+                        )
+                        
+                    self.inference_map[self.y_skewness] = self.y_skewness_q
+                    self.inference_map[self.y_tailweight] = self.y_tailweight_q
+
+                    self.out = SinhArcsinh(
+                        loc=self.out,
+                        scale=tf.nn.softplus(y_scale),
+                        skewness=self.y_skewness,
+                        tailweight=tf.nn.softplus(self.y_tailweight),
+                        name='output'
+                    )
+                    self.err_dist = SinhArcsinh(
+                        loc=0.,
+                        scale=tf.nn.softplus(y_scale_summary),
+                        skewness=self.y_skewness_summary,
+                        tailweight=tf.nn.softplus(self.y_tailweight_summary),
+                        name='err_dist'
+                    )
+
+                    self.err_dist_plot = tf.exp(self.err_dist.log_prob(self.support))
+                else:
+                    self.out = Normal(
+                        loc=self.out,
+                        scale=tf.nn.softplus(y_scale),
+                        name='output'
+                    )
+                    self.err_dist = Normal(
+                        loc=0.,
+                        scale=tf.nn.softplus(y_scale_summary),
+                        name='err_dist'
+                    )
+                    self.err_dist_plot = tf.exp(self.err_dist.log_prob(self.support))
+
+                self.err_dist_lb = -2*tf.nn.softplus(y_scale_summary)
+                self.err_dist_ub = 2*tf.nn.softplus(y_scale_summary)
+
                 self.optim = self.__initialize_optimizer__(self.optim_name)
                 if self.variational():
                     self.inference = getattr(ed,self.inference_name)(self.inference_map, data={self.out: self.y})
@@ -1111,23 +1249,23 @@ class BDTSR(DTSR):
 
                 self.out_post = ed.copy(self.out, self.inference_map)
 
-                self.llprior = self.out.log_prob(self.y)
-                self.ll = self.out_post.log_prob(self.y)
+                # self.llprior = self.out.log_prob(self.y)
+                # self.ll = self.out_post.log_prob(self.y)
 
                 ## Set up posteriors for post-hoc MC sampling
                 for x in self.irf_mc:
                     for a in self.irf_mc[x]:
                         for b in self.irf_mc[x][a]:
                             self.irf_mc[x][a][b] = ed.copy(self.irf_mc[x][a][b], self.inference_map)
+                for x in self.mc_integrals:
+                    self.mc_integrals[x] = ed.copy(self.mc_integrals[x], self.inference_map)
                 if self.pc:
                     for x in self.src_irf_mc:
                         for a in self.src_irf_mc[x]:
                             for b in self.src_irf_mc[x][a]:
                                 self.src_irf_mc[x][a][b] = ed.copy(self.src_irf_mc[x][a][b], self.inference_map)
-                for x in self.mc_integrals:
-                    self.mc_integrals[x] = ed.copy(self.mc_integrals[x], self.inference_map)
-                for x in self.src_mc_integrals:
-                    self.src_mc_integrals[x] = ed.copy(self.src_mc_integrals[x], self.inference_map)
+                    for x in self.src_mc_integrals:
+                        self.src_mc_integrals[x] = ed.copy(self.src_mc_integrals[x], self.inference_map)
 
     def __initialize_logging__(self):
         with self.sess.as_default():
@@ -1273,7 +1411,7 @@ class BDTSR(DTSR):
                     sys.stderr.write('-' * 50 + '\n')
                     sys.stderr.write('Iteration %d\n' % int(self.global_step.eval(session=self.sess) + 1))
                     sys.stderr.write('\n')
-                    if self.lr_decay_family is not None:
+                    if self.optim_name is not None and self.lr_decay_family is not None:
                         sys.stderr.write('Learning rate: %s\n' %self.lr.eval(session=self.sess))
 
                     pb = tf.contrib.keras.utils.Progbar(self.n_train_minibatch)
@@ -1295,7 +1433,7 @@ class BDTSR(DTSR):
                             metric_cur = 0
 
                         self.sess.run(self.incr_global_batch_step)
-                        pb.update((j/minibatch_size)+1, values=[('loss' if self.variational() else 'accept_rate', metric_cur)], force=True)
+                        pb.update((j/minibatch_size)+1, values=[('loss' if self.variational() else 'accept_rate', metric_cur)])
 
                     self.sess.run(self.incr_global_step)
                     if self.log_freq > 0 and self.global_step.eval(session=self.sess) % self.log_freq == 0:
@@ -1311,6 +1449,23 @@ class BDTSR(DTSR):
                             plot_x_inches=plot_x_inches,
                             plot_y_inches=plot_y_inches,
                             cmap=cmap
+                        )
+                        lb = self.sess.run(self.err_dist_lb)
+                        ub = self.sess.run(self.err_dist_ub)
+                        n_time_units = ub-lb
+                        fd_plot = {
+                            self.support_start: lb,
+                            self.n_time_units: n_time_units,
+                            self.n_points_per_time_unit: 1
+                        }
+                        plot_x = self.sess.run(self.support, feed_dict=fd_plot)
+                        plot_y = self.sess.run(self.err_dist_plot, feed_dict=fd_plot)
+                        plot_convolutions(
+                            plot_x,
+                            plot_y,
+                            ['Error Distribution'],
+                            dir=self.outdir,
+                            filename='error_distribution.png'
                         )
                     t1_iter = time.time()
                     sys.stderr.write('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
