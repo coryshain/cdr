@@ -193,11 +193,10 @@ class BDTSR(DTSR):
                 self.coef_prior_sd_tf = tf.constant(float(self.coef_prior_sd), dtype=self.FLOAT_TF)
                 self.conv_prior_sd_tf = tf.constant(float(self.conv_prior_sd), dtype=self.FLOAT_TF)
                 self.y_scale_prior_sd_tf = tf.constant(float(self.y_scale_prior_sd), dtype=self.FLOAT_TF)
-                print(self.y_scale_fixed)
-                if self.y_scale_fixed is not None:
-                    self.y_scale_fixed_tf = tf.constant(float(self.y_scale_fixed), dtype=self.FLOAT_TF)
-                else:
+                if self.y_scale_fixed is None:
                     self.y_scale_fixed_tf = self.y_scale_fixed
+                else:
+                    self.y_scale_fixed_tf = tf.constant(float(self.y_scale_fixed), dtype=self.FLOAT_TF)
                 self.intercept_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.intercept_prior_sd_tf)
                 self.coef_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.coef_prior_sd_tf)
                 self.conv_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.conv_prior_sd_tf)
@@ -1249,8 +1248,8 @@ class BDTSR(DTSR):
 
                 self.out_post = ed.copy(self.out, self.inference_map)
 
-                # self.llprior = self.out.log_prob(self.y)
-                # self.ll = self.out_post.log_prob(self.y)
+                self.llprior = self.out.log_prob(self.y)
+                self.ll_post = self.out_post.log_prob(self.y)
 
                 ## Set up posteriors for post-hoc MC sampling
                 for x in self.irf_mc:
@@ -1562,6 +1561,78 @@ class BDTSR(DTSR):
                 sys.stderr.write('\n\n')
 
                 return preds
+
+    def log_lik(self, X, y):
+        """
+        Compute log-likelihood of data from predictive posterior.
+
+        :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
+            ``X`` must contain the following columns (additional columns are ignored):
+
+            * ``time``: Timestamp associated with each observation in ``X``
+            * A column for each independent variable in the DTSR ``form_str`` provided at iniialization
+
+        :param y: ``pandas`` table; the dependent variable. Must contain the following columns:
+
+            * ``time``: Timestamp associated with each observation in ``y``
+            * ``first_obs``:  Index in the design matrix `X` of the first observation in the time series associated with each entry in ``y``
+            * ``last_obs``:  Index in the design matrix `X` of the immediately preceding observation in the time series associated with each entry in ``y``
+            * A column with the same name as the DV specified in ``form_str``
+            * A column for each random grouping factor in the model specified in ``form_str``.
+
+        :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
+        """
+
+        if self.pc:
+            impulse_names = self.src_impulse_names
+        else:
+            impulse_names  = self.impulse_names
+
+        sys.stderr.write('Sampling from predictive posterior...\n')
+
+        y_rangf = y[self.rangf]
+        for i in range(len(self.rangf)):
+            c = self.rangf[i]
+            y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
+
+        X_3d, time_X_3d = self.expand_history(X[impulse_names], X.time, y.first_obs, y.last_obs)
+        time_y = np.array(y.time, dtype=self.FLOAT_NP)
+        y_dv = np.array(y[self.dv], dtype=self.FLOAT_NP)
+        gf_y = np.array(y_rangf, dtype=self.INT_NP)
+
+        log_lik = np.zeros((len(time_y), self.n_samples_eval))
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                fd = {
+                    self.X: X_3d,
+                    self.time_X: time_X_3d,
+                    self.time_y: time_y,
+                    self.gf_y: gf_y,
+                    self.y: y_dv
+                }
+
+                pb = tf.contrib.keras.utils.Progbar(self.n_eval_minibatch)
+
+                if not np.isfinite(self.eval_minibatch_size):
+                    for j in range(self.n_samples_eval):
+                        log_lik[:,j] = self.sess.run(self.ll_post, feed_dict=fd)
+                else:
+                    for i in range(0, len(time_y), self.eval_minibatch_size):
+                        fd_minibatch = {
+                            self.X: X_3d[i:i + self.eval_minibatch_size],
+                            self.time_X: time_X_3d[i:i + self.eval_minibatch_size],
+                            self.time_y: time_y[i:i + self.eval_minibatch_size],
+                            self.gf_y: gf_y[i:i + self.eval_minibatch_size] if len(gf_y) > 0 else gf_y,
+                            self.y: y_dv[i:i+self.eval_minibatch_size]
+                        }
+                        for j in range(self.n_samples_eval):
+                            log_lik[i:i + self.eval_minibatch_size, j] = self.sess.run(self.ll_post, feed_dict=fd_minibatch)
+                        pb.update((i/self.eval_minibatch_size)+1, force=True)
+
+                log_lik = log_lik.mean(axis=1)
+
+                return log_lik
 
     def eval(self, X, y, metric=None):
         """
