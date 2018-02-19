@@ -617,7 +617,7 @@ class DTSR(object):
                         params = tf.stack([L], axis=1)
                         params_summary =  tf.stack([L_mean], axis=1)
                     if family == 'SteepExp':
-                        L, L_mean = self.__initialize_irf_param__('L', irf_ids, mean=100, lb=0, irf_by_rangf=irf_by_rangf)
+                        L, L_mean = self.__initialize_irf_param__('L', irf_ids, mean=25, lb=0, irf_by_rangf=irf_by_rangf)
                         params = tf.stack([L], axis=1)
                         params_summary =  tf.stack([L_mean], axis=1)
                     elif family in ['Gamma', 'GammaKgt1']:
