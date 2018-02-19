@@ -195,6 +195,13 @@ class GAM(object):
             }
         '''
 
+        rstring = '''
+            function(model, bform, df, subjects=NULL, words=NULL) {
+                preds = predict(model, df[select,])
+                return(preds)
+            }
+        '''
+
         predict = robjects.r(rstring)
 
         rstring = '''

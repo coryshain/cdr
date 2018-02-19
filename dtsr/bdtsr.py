@@ -405,12 +405,11 @@ class BDTSR(DTSR):
                 L, _, _ = self.__process_mean__(1, lb=0)
                 param_mean = [L]
                 param_sd = [self.conv_prior_sd_tf]
-            elif family == 'ShiftedExp':
-                param_name = ['L', 'delta']
-                L, _, _ = self.__process_mean__(1, lb=0)
-                delta, _, _ = self.__process_mean__(-1, ub=0)
-                param_mean = [L, delta]
-                param_sd = [self.conv_prior_sd_tf] * 2
+            elif family == 'SteepExp':
+                param_name = ['L']
+                L, _, _ = self.__process_mean__(100, lb=0)
+                param_mean = [L]
+                param_sd = [self.conv_prior_sd_tf]
             elif family in ['Gamma', 'GammaKgt1']:
                 param_name = ['k', 'theta']
                 k_theta, _, _ = self.__process_mean__(1, lb=0)

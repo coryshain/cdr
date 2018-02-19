@@ -529,12 +529,7 @@ class DTSR(object):
                     return lambda x: pdf(x + self.epsilon)
 
                 self.irf_lambdas['Exp'] = exponential
-
-                def shifted_exp(params):
-                    pdf = tf.contrib.distributions.Exponential(rate=params[:,0:1]).prob
-                    return lambda x: pdf(x - params[:,1:2] + self.epsilon)
-
-                self.irf_lambdas['ShiftedExp'] = shifted_exp
+                self.irf_lambdas['SteepExp'] = exponential
 
                 def gamma(params):
                     pdf = tf.contrib.distributions.Gamma(concentration=params[:,0:1],
@@ -621,11 +616,10 @@ class DTSR(object):
                         L, L_mean = self.__initialize_irf_param__('L', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
                         params = tf.stack([L], axis=1)
                         params_summary =  tf.stack([L_mean], axis=1)
-                    elif family == 'ShiftedExp':
-                        L, L_mean = self.__initialize_irf_param__('L', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
-                        delta, delta_mean = self.__initialize_irf_param__('delta', irf_ids, mean=-1, ub=0, irf_by_rangf=irf_by_rangf)
-                        params = tf.stack([L, delta], axis=1)
-                        params_summary = tf.stack([L_mean, delta_mean], axis=1)
+                    if family == 'SteepExp':
+                        L, L_mean = self.__initialize_irf_param__('L', irf_ids, mean=100, lb=0, irf_by_rangf=irf_by_rangf)
+                        params = tf.stack([L], axis=1)
+                        params_summary =  tf.stack([L_mean], axis=1)
                     elif family in ['Gamma', 'GammaKgt1']:
                         k, k_mean = self.__initialize_irf_param__('k', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
                         theta, theta_mean = self.__initialize_irf_param__('theta', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
@@ -1224,16 +1218,16 @@ class DTSR(object):
 
                 if lb is None and ub is None:
                     # Unbounded support
-                    param_mean_init = mean
+                    mean = mean
                 elif lb is not None and ub is None:
                     # Lower-bounded support only
-                    param_mean_init = tf.contrib.distributions.softplus_inverse(mean - lb - self.epsilon)
+                    mean = tf.contrib.distributions.softplus_inverse(mean - lb - self.epsilon)
                 elif lb is None and ub is not None:
                     # Upper-bounded support only
-                    param_mean_init = tf.contrib.distributions.softplus_inverse(-(mean - ub + self.epsilon))
+                    mean = tf.contrib.distributions.softplus_inverse(-(mean - ub + self.epsilon))
                 else:
                     # Finite-interval bounded support
-                    param_mean_init = tf.contrib.distributions.bijectors.Sigmoid.inverse(
+                    mean = tf.contrib.distributions.bijectors.Sigmoid.inverse(
                         (mean - lb - self.epsilon) / ((ub - self.epsilon) - (lb + self.epsilon))
                     )
         return mean, lb, ub

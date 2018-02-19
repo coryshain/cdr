@@ -275,7 +275,7 @@ class Formula(object):
     IRF = [
         'DiracDelta',
         'Exp',
-        'ShiftedExp',
+        'SteepExp',
         'Gamma',
         'ShiftedGamma',
         'GammaKgt1',
