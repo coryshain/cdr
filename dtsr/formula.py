@@ -278,6 +278,7 @@ class Formula(object):
         'SteepExp',
         'Gamma',
         'ShiftedGamma',
+        'SteepGamma',
         'GammaKgt1',
         'ShiftedGammaKgt1',
         'Normal',

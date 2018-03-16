@@ -340,7 +340,7 @@ class NNDTSR(DTSR):
                             ),
                             name='%s_by_%s' % (param_name, gf)
                         )
-                        self.__regularize__(param, param_mean_init)
+                        self.__regularize__(param_ran)
 
                         half_interval = None
                         if lb is not None:
@@ -410,7 +410,10 @@ class NNDTSR(DTSR):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/fixed', self.sess.graph)
+                if os.path.exists:
+                    self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/fixed')
+                else:
+                    self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/fixed', self.sess.graph)
                 self.summary_params = tf.summary.merge_all(key='params')
                 self.summary_losses = tf.summary.merge_all(key='loss')
                 if self.log_random and len(self.rangf) > 0:
@@ -447,6 +450,8 @@ class NNDTSR(DTSR):
             y,
             n_iter=100,
             irf_name_map=None,
+            plot_n_time_units=2.5,
+            plot_n_points_per_time_unit=1000,
             plot_x_inches=28,
             plot_y_inches=5,
             cmap='gist_earth'):
@@ -501,6 +506,9 @@ class NNDTSR(DTSR):
             c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
 
+        assert 'rate' not in X.columns, '"rate" is a reserved variable name in DTSR.'
+        X['rate'] = 1.
+
         if self.low_memory:
             X_2d = X[impulse_names]
             time_X_2d = np.array(X.time, dtype=self.FLOAT_NP)
@@ -511,6 +519,133 @@ class NNDTSR(DTSR):
         time_y = np.array(y.time)
         gf_y = np.array(y_rangf, dtype=self.INT_NP)
         y_dv = np.array(y[self.dv], dtype=self.FLOAT_NP)
+
+        self.assign_training_data(
+            X=X_3d,
+            time_X=time_X_3d,
+            y=y_dv,
+            time_y=time_y,
+            gf_y=gf_y
+        )
+
+        ## Compute and log initial losses and parameters
+
+        fd = {
+            self.y: y_dv,
+            self.time_y: time_y,
+            self.gf_y: gf_y
+        }
+
+        if self.low_memory:
+            fd[self.X] = X_2d
+            fd[self.time_X] = time_X_2d
+            fd[self.first_obs] = first_obs
+            fd[self.last_obs] = last_obs
+        else:
+            fd[self.X] = X_3d
+            fd[self.time_X] = time_X_3d
+
+        if self.global_step.eval(session=self.sess) == 0:
+            summary_params = self.sess.run(self.summary_params, feed_dict=fd)
+            loss_total = 0.
+            for j in range(0, len(y), self.minibatch_size):
+                fd[self.y] = y_dv[j:j + minibatch_size]
+                fd[self.time_y] = time_y[j:j + minibatch_size]
+                fd[self.gf_y] = gf_y[j:j + minibatch_size]
+                if self.low_memory:
+                    fd[self.first_obs] = first_obs[j:j + minibatch_size]
+                    fd[self.last_obs] = last_obs[j:j + minibatch_size]
+                else:
+                    fd[self.X] = X_3d[j:j + minibatch_size]
+                    fd[self.time_X] = time_X_3d[j:j + minibatch_size]
+                loss_total += self.sess.run(self.loss_func, feed_dict=fd) * len(fd[self.y])
+            loss_total /= len(y)
+            summary_train_loss = self.sess.run(self.summary_losses, {self.loss_total: loss_total})
+            self.writer.add_summary(summary_params, self.global_step.eval(session=self.sess))
+            self.writer.add_summary(summary_train_loss, self.global_step.eval(session=self.sess))
+
+        ## Begin training
+
+        # QueueRunner setup for parallelism, seems to have negative performance impact, so turned off
+        # with self.sess.as_default():
+        #     with self.sess.graph.as_default():
+        #         fd = {
+        #             self.batch_size: minibatch_size
+        #         }
+        #         self.sess.run(self.iterator_init_train, feed_dict=fd)
+        #         coord = tf.train.Coordinator()
+        #         enqueue_threads = self.qr.create_threads(self.sess, coord=coord, start=True)
+        #
+        #         sys.stderr.write('-' * 50 + '\n')
+        #         sys.stderr.write('Iteration %d\n' % int(self.global_step.eval(session=self.sess) + 1))
+        #         sys.stderr.write('\n')
+        #         if self.lr_decay_family is not None:
+        #             sys.stderr.write('Learning rate: %s\n' % self.lr.eval(session=self.sess))
+        #
+        #         pb = tf.contrib.keras.utils.Progbar(n_minibatch)
+        #         j = 0
+        #         loss_total = 0.
+        #         t0_iter = time.time()
+        #
+        #         while self.global_step.eval(session=self.sess) < n_iter:
+        #             try:
+        #                 _, loss_minibatch = self.sess.run(
+        #                     [self.train_op, self.loss_func],
+        #                     feed_dict=fd
+        #                 )
+        #                 loss_total += loss_minibatch
+        #                 pb.update(j + 1, values=[('loss', loss_minibatch)])
+        #                 j += 1
+        #                 if j >= n_minibatch:
+        #                     loss_total /= n_minibatch
+        #                     fd[self.loss_total] = loss_total
+        #
+        #                     self.sess.run(self.incr_global_step)
+        #
+        #                     if self.global_step.eval(session=self.sess) % self.save_freq == 0:
+        #                         self.save()
+        #                         self.make_plots(
+        #                             irf_name_map=irf_name_map,
+        #                             plot_n_time_units=plot_n_time_units,
+        #                             plot_n_points_per_time_unit=plot_n_points_per_time_unit,
+        #                             plot_x_inches=plot_x_inches,
+        #                             plot_y_inches=plot_y_inches,
+        #                             cmap=cmap
+        #                         )
+        #
+        #                     if self.global_step.eval(session=self.sess) % self.log_freq == 0:
+        #                         summary_params = self.sess.run(self.summary_params, feed_dict=fd)
+        #                         summary_train_loss = self.sess.run(self.summary_losses, {self.loss_total: loss_total})
+        #                         self.writer.add_summary(summary_params, self.global_step.eval(session=self.sess))
+        #                         self.writer.add_summary(summary_train_loss, self.global_step.eval(session=self.sess))
+        #
+        #                         if self.log_random and len(self.rangf) > 0:
+        #                             summary_random = self.sess.run(self.summary_random)
+        #                             self.writer.add_summary(summary_random,
+        #                                                     self.global_batch_step.eval(session=self.sess))
+        #
+        #                     t1_iter = time.time()
+        #
+        #                     sys.stderr.write('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
+        #
+        #                     t0_iter = time.time()
+        #
+        #                     sys.stderr.write('-' * 50 + '\n')
+        #                     sys.stderr.write('Iteration %d\n' % int(self.global_step.eval(session=self.sess) + 1))
+        #                     sys.stderr.write('\n')
+        #                     if self.lr_decay_family is not None:
+        #                         sys.stderr.write('Learning rate: %s\n' % self.lr.eval(session=self.sess))
+        #
+        #                     pb = tf.contrib.keras.utils.Progbar(n_minibatch)
+        #                     j = 0
+        #                     loss_total = 0.
+        #             except:
+        #                 break
+        #
+        #         coord.request_stop()
+        #         coord.join(enqueue_threads)
+        #
+        # return
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -566,6 +701,7 @@ class NNDTSR(DTSR):
                     pb = tf.contrib.keras.utils.Progbar(n_minibatch)
 
                     loss_total = 0.
+                    max_grad = 0
 
                     for j in range(0, len(y), minibatch_size):
                         indices = p[j:j + self.minibatch_size]
@@ -579,18 +715,15 @@ class NNDTSR(DTSR):
                             fd_minibatch[self.X] = X_3d[indices]
                             fd_minibatch[self.time_X] = time_X_3d[indices]
 
-                        # _, gradients_minibatch, loss_minibatch = self.sess.run(
-                        #     [self.train_op, self.gradients, self.loss_func],
-                        #     feed_dict=fd_minibatch)
                         _, loss_minibatch = self.sess.run(
                             [self.train_op, self.loss_func],
-                            feed_dict=fd_minibatch)
+                            feed_dict=fd_minibatch
+                        )
                         loss_total += loss_minibatch
-                        # if gradients is None:
-                        #     gradients = list(gradients_minibatch)
-                        # else:
-                        #     for i in range(len(gradients)):
-                        #         gradients[i] += gradients_minibatch[i]
+
+                        # max_grad_minibatch = np.max([np.max(g) for g in grads_minibatch])
+                        # max_grad = max(max_grad, max_grad_minibatch)
+
                         pb.update((j / minibatch_size) + 1, values=[('loss', loss_minibatch)])
 
                     loss_total /= n_minibatch
@@ -608,6 +741,8 @@ class NNDTSR(DTSR):
                         self.save()
                         self.make_plots(
                             irf_name_map=irf_name_map,
+                            plot_n_time_units=plot_n_time_units,
+                            plot_n_points_per_time_unit=plot_n_points_per_time_unit,
                             plot_x_inches=plot_x_inches,
                             plot_y_inches=plot_y_inches,
                             cmap=cmap
@@ -625,6 +760,7 @@ class NNDTSR(DTSR):
 
                     t1_iter = time.time()
 
+                    sys.stderr.write('Maximum gradient norm: %s\n' %max_grad)
                     sys.stderr.write('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
 
                 X_conv = self.convolve_inputs(X, time_y, gf_y, y.first_obs, y.last_obs)
@@ -637,6 +773,8 @@ class NNDTSR(DTSR):
 
                 self.make_plots(
                     irf_name_map=irf_name_map,
+                    plot_n_time_units=plot_n_time_units,
+                    plot_n_points_per_time_unit=plot_n_points_per_time_unit,
                     plot_x_inches=plot_x_inches,
                     plot_y_inches=plot_y_inches,
                     cmap=cmap
@@ -672,6 +810,9 @@ class NNDTSR(DTSR):
         for i in range(len(self.rangf)):
             c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
+
+        assert 'rate' not in X.columns, '"rate" is a reserved variable name in DTSR.'
+        X['rate'] = 1.
 
         if self.low_memory:
             X_2d = X[impulse_names]
@@ -752,6 +893,9 @@ class NNDTSR(DTSR):
         for i in range(len(self.rangf)):
             c = f.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
+
+        assert 'rate' not in X.columns, '"rate" is a reserved variable name in DTSR.'
+        X['rate'] = 1.
 
         if self.low_memory:
             X_2d = X[impulse_names]

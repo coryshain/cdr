@@ -53,7 +53,9 @@ class DTSR(object):
             lr_decay_staircase=False,
             init_sd=1,
             regularizer=None,
-            regularizer_scale=0.01
+            regularizer_scale=0.01,
+            queue_capacity=100000,
+            num_threads=8
         ):
 
         ## Save initialization settings
@@ -81,6 +83,9 @@ class DTSR(object):
         self.init_sd = init_sd
         self.regularizer_name = regularizer
         self.regularizer_scale = regularizer_scale
+        self.queue_capacity = queue_capacity
+        self.num_threads = num_threads
+
         self.n_train = len(y)
 
         self.__initialize_metadata__()
@@ -292,11 +297,6 @@ class DTSR(object):
                     dtype=self.FLOAT_TF,
                     name='X'
                 )
-                self.rate = tf.placeholder(
-                    shape=[None],
-                    dtype=self.FLOAT_TF,
-                    name='rate'
-                )
                 self.time_X = tf.placeholder(
                     shape=[None, self.history_length],
                     dtype=self.FLOAT_TF,
@@ -307,6 +307,48 @@ class DTSR(object):
                 self.time_y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('time_y'))
 
                 self.gf_y = tf.placeholder(shape=[None, len(self.rangf)], dtype=self.INT_TF)
+
+                # QueueRunner setup for parallelism, seems to have negative performance impact, so turned off
+
+                # self.batch_size = tf.placeholder(shape=[], dtype=self.INT_TF, name='batch_size')
+                #
+                # self.df_train = tf.data.Dataset.from_generator(
+                #     lambda: self.data_generator(),
+                #     (self.FLOAT_TF, self.FLOAT_TF, self.FLOAT_TF, self.FLOAT_TF, self.INT_TF),
+                #     ([self.history_length, n_impulse], [self.history_length], [], [], [len(self.rangf)])
+                # )
+                # self.df_train = self.df_train.repeat()
+                #
+                # self.df_eval = tf.data.Dataset.from_generator(
+                #     lambda: self.data_generator(),
+                #     (self.FLOAT_TF, self.FLOAT_TF, self.FLOAT_TF, self.FLOAT_TF, self.INT_TF),
+                #     ([self.history_length, n_impulse], [self.history_length], [], [], [len(self.rangf)])
+                # )
+                #
+                # self.iterator = tf.data.Iterator.from_structure(
+                #     self.df_train.output_types,
+                #     self.df_train.output_shapes
+                # )
+                # self.iterator_init_train = self.iterator.make_initializer(self.df_train)
+                # self.iterator_init_eval = self.iterator.make_initializer(self.df_eval)
+                #
+                # self.queue = tf.RandomShuffleQueue(
+                #     capacity=self.queue_capacity,
+                #     min_after_dequeue=int(.9 * self.queue_capacity),
+                #     shapes=(
+                #         [self.history_length, n_impulse],
+                #         [self.history_length],
+                #         [],
+                #         [],
+                #         [len(self.rangf)]
+                #     ),
+                #     dtypes=(self.FLOAT_TF, self.FLOAT_TF, self.FLOAT_TF, self.FLOAT_TF, self.INT_TF)
+                # )
+                # self.enqueue = self.queue.enqueue(self.iterator.get_next())
+                # self.qr = tf.train.QueueRunner(self.queue, [self.enqueue] * self.num_threads)
+                # tf.train.add_queue_runner(self.qr)
+                # self.X, self.time_X, self.y, self.time_y, self.gf_y = self.queue.dequeue_many(self.batch_size)
+
 
                 # Linspace tensor used for plotting
                 self.support_start = tf.placeholder(self.FLOAT_TF, shape=[], name='support_start')
@@ -538,7 +580,7 @@ class DTSR(object):
                     return lambda x: pdf(x + self.epsilon)
 
                 self.irf_lambdas['Gamma'] = gamma
-
+                self.irf_lambdas['SteepGamma'] = gamma
                 self.irf_lambdas['GammaKgt1'] = gamma
 
                 def shifted_gamma(params):
@@ -548,7 +590,6 @@ class DTSR(object):
                     return lambda x: pdf(x - params[:,2:3] + self.epsilon)
 
                 self.irf_lambdas['ShiftedGamma'] = shifted_gamma
-
                 self.irf_lambdas['ShiftedGammaKgt1'] = shifted_gamma
 
                 def normal(params):
@@ -616,13 +657,18 @@ class DTSR(object):
                         L, L_mean = self.__initialize_irf_param__('L', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
                         params = tf.stack([L], axis=1)
                         params_summary =  tf.stack([L_mean], axis=1)
-                    if family == 'SteepExp':
+                    elif family == 'SteepExp':
                         L, L_mean = self.__initialize_irf_param__('L', irf_ids, mean=25, lb=0, irf_by_rangf=irf_by_rangf)
                         params = tf.stack([L], axis=1)
                         params_summary =  tf.stack([L_mean], axis=1)
                     elif family in ['Gamma', 'GammaKgt1']:
                         k, k_mean = self.__initialize_irf_param__('k', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
                         theta, theta_mean = self.__initialize_irf_param__('theta', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
+                        params = tf.stack([k, theta], axis=1)
+                        params_summary = tf.stack([k_mean, theta_mean], axis=1)
+                    elif family == 'SteepGamma':
+                        k, k_mean = self.__initialize_irf_param__('k', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
+                        theta, theta_mean = self.__initialize_irf_param__('theta', irf_ids, mean=25, lb=0, irf_by_rangf=irf_by_rangf)
                         params = tf.stack([k, theta], axis=1)
                         params_summary = tf.stack([k_mean, theta_mean], axis=1)
                     elif family in ['ShiftedGamma', 'ShiftedGammaKgt1']:
@@ -1221,14 +1267,14 @@ class DTSR(object):
                     mean = mean
                 elif lb is not None and ub is None:
                     # Lower-bounded support only
-                    mean = tf.contrib.distributions.softplus_inverse(mean - lb - self.epsilon)
+                    mean = tf.contrib.distributions.softplus_inverse(mean - lb + self.epsilon)
                 elif lb is None and ub is not None:
                     # Upper-bounded support only
                     mean = tf.contrib.distributions.softplus_inverse(-(mean - ub + self.epsilon))
                 else:
                     # Finite-interval bounded support
                     mean = tf.contrib.distributions.bijectors.Sigmoid.inverse(
-                        (mean - lb - self.epsilon) / ((ub - self.epsilon) - (lb + self.epsilon))
+                        (mean - lb + self.epsilon) / ((ub - self.epsilon) - (lb + self.epsilon))
                     )
         return mean, lb, ub
 
@@ -1378,6 +1424,8 @@ class DTSR(object):
                 sys.stdout.write(str(self.t_src))
                 sys.stdout.write('\n\n')
 
+        self.reset_training_data()
+
         if self.low_memory:
             self.__initialize_low_memory_inputs__()
         else:
@@ -1408,6 +1456,32 @@ class DTSR(object):
                     self.saver.restore(self.sess, self.outdir + '/model.ckpt')
                 else:
                     self.sess.run(tf.global_variables_initializer())
+
+    def assign_training_data(self, X, time_X, y, time_y, gf_y):
+        self.X_in = X
+        self.time_X_in = time_X
+        self.y_in = y
+        self.time_y_in = time_y
+        self.gf_y_in = gf_y
+
+    def reset_training_data(self):
+        self.X_in = None
+        self.time_X_in = None
+        self.y_in = None
+        self.time_y_in = None
+        self.gf_y_in = None
+
+    def data_generator(self):
+        j = 0
+        while j < self.y_in.shape[0]:
+            yield (
+                self.X_in[j],
+                self.time_X_in[j],
+                self.y_in[j],
+                self.time_y_in[j],
+                self.gf_y_in[j]
+            )
+            j += 1
 
     def expand_history(self, X, X_time, first_obs, last_obs):
         last_obs = np.array(last_obs, dtype=self.INT_NP)
@@ -1512,7 +1586,8 @@ class DTSR(object):
         fd = {
             self.support_start: 0.,
             self.n_time_units: n_time_units,
-            self.n_points_per_time_unit: n_points_per_time_unit
+            self.n_points_per_time_unit: n_points_per_time_unit,
+            self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0)
         }
 
         alpha = 100-float(level)
@@ -1537,7 +1612,8 @@ class DTSR(object):
         fd = {
             self.support_start: 0.,
             self.n_time_units: n_time_units,
-            self.n_points_per_time_unit: n_points_per_time_unit
+            self.n_points_per_time_unit: n_points_per_time_unit,
+            self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0)
         }
 
         alpha = 100 - float(level)
@@ -1558,9 +1634,9 @@ class DTSR(object):
 
     def make_plots(
             self,
-            total_seconds=2.5,
-            points_per_second=1000,
             irf_name_map=None,
+            plot_n_time_units=2.5,
+            plot_n_points_per_time_unit=1000,
             plot_x_inches=7.,
             plot_y_inches=5.,
             cmap=None,
@@ -1572,8 +1648,9 @@ class DTSR(object):
             with self.sess.graph.as_default():
                 fd = {
                     self.support_start: 0.,
-                    self.n_time_units: total_seconds,
-                    self.n_points_per_time_unit: points_per_second
+                    self.n_time_units: plot_n_time_units,
+                    self.n_points_per_time_unit: plot_n_points_per_time_unit,
+                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0)
                 }
 
                 plot_x = self.sess.run(self.support, fd)
@@ -1589,7 +1666,11 @@ class DTSR(object):
                             lq = []
                             uq = []
                             for name in names:
-                                mean_cur, lq_cur, uq_cur = self.ci_curve(self.irf_mc[name][a][b])
+                                mean_cur, lq_cur, uq_cur = self.ci_curve(
+                                    self.irf_mc[name][a][b],
+                                    n_time_units=plot_n_time_units,
+                                    n_points_per_time_unit=plot_n_points_per_time_unit,
+                                )
                                 plot_y.append(mean_cur)
                                 lq.append(lq_cur)
                                 uq.append(uq_cur)

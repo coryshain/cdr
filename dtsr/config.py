@@ -32,7 +32,7 @@ class Config(object):
         self.logdir = settings.get('logdir', 'log')
         if not os.path.exists(self.logdir):
             os.makedirs(self.logdir)
-        if not os.path.exists(self.logdir + '/config.ini'):
+        if os.path.realpath(path) != os.path.realpath(self.logdir + '/config.ini'):
             shutil.copy2(path, self.logdir + '/config.ini')
         self.pc = settings.getboolean('pc', False)
         self.modulus = settings.getint('modulus', 4)
@@ -68,6 +68,8 @@ class Config(object):
         self.log_freq = settings.getint('log_freq', 1)
         self.log_random = settings.getboolean('log_random', False)
         self.save_freq = settings.getint('save_freq', 1)
+        self.plot_n_time_units = settings.getfloat('plot_n_time_units', 2.5)
+        self.plot_n_points_per_time_unit = settings.getfloat('plot_n_points_per_time_unit', 1000)
         self.plot_x_inches = settings.getfloat('plot_x_inches', 7)
         self.plot_y_inches = settings.getfloat('plot_y_inches', 5)
         self.cmap = settings.get('cmap', 'gist_rainbow')
@@ -132,12 +134,12 @@ class Config(object):
             for f in config[model_field]:
                 self.models[model_field[6:]][f] = config[model_field][f]
 
-        if 'fixef_name_map' in config:
-            self.fixef_name_map = {}
-            for x in config['fixef_name_map']:
-                self.fixef_name_map[x] = config['fixef_name_map'][x]
+        if 'irf_name_map' in config:
+            self.irf_name_map = {}
+            for x in config['irf_name_map']:
+                self.irf_name_map[x] = config['irf_name_map'][x]
         else:
-            self.fixef_name_map = None
+            self.irf_name_map = None
 
     def __str__(self):
         out = ''

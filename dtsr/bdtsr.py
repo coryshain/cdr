@@ -252,6 +252,8 @@ class BDTSR(DTSR):
             self.mh_proposal_sd,
             self.coef_prior_sd,
             self.conv_prior_sd,
+            self.intercept_prior_sd,
+            self.y_scale_prior_sd,
             self.asymmetric_error
         )
 
@@ -299,7 +301,12 @@ class BDTSR(DTSR):
         self.mh_proposal_sd, \
         self.coef_prior_sd, \
         self.conv_prior_sd, \
+        self.intercept_prior_sd, \
+        self.y_scale_prior_sd, \
         self.asymmetric_error = state
+
+        self.regularizer_name = None
+        self.regularizer_scale = 0
 
         self.__initialize_metadata__()
 
@@ -1268,8 +1275,14 @@ class BDTSR(DTSR):
     def __initialize_logging__(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/fixed', self.sess.graph)
+                self.loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='loss_total')
+                tf.summary.scalar('loss', self.loss_total, collections=['loss'])
+                if os.path.exists(self.outdir + '/tensorboard/fixed'):
+                    self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/fixed')
+                else:
+                    self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/fixed', self.sess.graph)
                 self.summary_params = tf.summary.merge_all(key='params')
+                self.summary_losses = tf.summary.merge_all(key='loss')
                 if self.log_random and len(self.rangf) > 0:
                     self.summary_random = tf.summary.merge_all(key='random')
 
@@ -1324,6 +1337,8 @@ class BDTSR(DTSR):
             y,
             n_iter=100,
             irf_name_map=None,
+            plot_n_time_units=2.5,
+            plot_n_points_per_time_unit=1000,
             plot_x_inches=28,
             plot_y_inches=5,
             cmap='gist_earth'):
@@ -1373,11 +1388,15 @@ class BDTSR(DTSR):
             minibatch_size = len(y)
         else:
             minibatch_size = self.minibatch_size
+        n_minibatch = math.ceil(float(len(y)) / minibatch_size)
 
         y_rangf = y[self.rangf]
         for i in range(len(self.rangf)):
             c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
+
+        assert 'rate' not in X.columns, '"rate" is a reserved variable name in DTSR.'
+        X['rate'] = 1.
 
         X_3d, time_X_3d = self.expand_history(X[impulse_names], X.time, y.first_obs, y.last_obs)
         time_y = np.array(y.time, dtype=self.FLOAT_NP)
@@ -1414,6 +1433,8 @@ class BDTSR(DTSR):
 
                     pb = tf.contrib.keras.utils.Progbar(self.n_train_minibatch)
 
+                    loss_total = 0.
+
                     for j in range(0, len(y), minibatch_size):
 
                         indices = p[j:j+minibatch_size]
@@ -1429,14 +1450,18 @@ class BDTSR(DTSR):
                         metric_cur = info_dict['loss'] if self.variational() else info_dict['accept_rate']
                         if not np.isfinite(metric_cur):
                             metric_cur = 0
+                        loss_total += metric_cur
 
                         self.sess.run(self.incr_global_batch_step)
                         pb.update((j/minibatch_size)+1, values=[('loss' if self.variational() else 'accept_rate', metric_cur)])
 
                     self.sess.run(self.incr_global_step)
                     if self.log_freq > 0 and self.global_step.eval(session=self.sess) % self.log_freq == 0:
+                        loss_total /= n_minibatch
+                        summary_train_loss = self.sess.run(self.summary_losses, {self.loss_total: loss_total})
                         summary_params = self.sess.run(self.summary_params)
                         self.writer.add_summary(summary_params, self.global_batch_step.eval(session=self.sess))
+                        self.writer.add_summary(summary_train_loss, self.global_step.eval(session=self.sess))
                         if self.log_random and len(self.rangf) > 0:
                             summary_random = self.sess.run(self.summary_random)
                             self.writer.add_summary(summary_random, self.global_batch_step.eval(session=self.sess))
@@ -1444,6 +1469,8 @@ class BDTSR(DTSR):
                         self.save()
                         self.make_plots(
                             irf_name_map=irf_name_map,
+                            plot_n_time_units=plot_n_time_units,
+                            plot_n_points_per_time_unit=plot_n_points_per_time_unit,
                             plot_x_inches=plot_x_inches,
                             plot_y_inches=plot_y_inches,
                             cmap=cmap
@@ -1456,15 +1483,15 @@ class BDTSR(DTSR):
                             self.n_time_units: n_time_units,
                             self.n_points_per_time_unit: 1
                         }
-                        plot_x = self.sess.run(self.support, feed_dict=fd_plot)
-                        plot_y = self.sess.run(self.err_dist_plot, feed_dict=fd_plot)
-                        plot_convolutions(
-                            plot_x,
-                            plot_y,
-                            ['Error Distribution'],
-                            dir=self.outdir,
-                            filename='error_distribution.png'
-                        )
+                        # plot_x = self.sess.run(self.support, feed_dict=fd_plot)
+                        # plot_y = self.sess.run(self.err_dist_plot, feed_dict=fd_plot)
+                        # plot_convolutions(
+                        #     plot_x,
+                        #     plot_y,
+                        #     ['Error Distribution'],
+                        #     dir=self.outdir,
+                        #     filename='error_distribution.png'
+                        # )
                     t1_iter = time.time()
                     sys.stderr.write('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
 
@@ -1480,6 +1507,17 @@ class BDTSR(DTSR):
 
                 self.make_plots(
                     irf_name_map=irf_name_map,
+                    plot_n_time_units=plot_n_time_units,
+                    plot_n_points_per_time_unit=plot_n_points_per_time_unit,
+                    plot_x_inches=plot_x_inches,
+                    plot_y_inches=plot_y_inches,
+                    cmap=cmap
+                )
+
+                self.make_plots(
+                    irf_name_map=irf_name_map,
+                    plot_n_time_units=plot_n_time_units,
+                    plot_n_points_per_time_unit=plot_n_points_per_time_unit,
                     plot_x_inches=plot_x_inches,
                     plot_y_inches=plot_y_inches,
                     cmap=cmap,
@@ -1522,6 +1560,9 @@ class BDTSR(DTSR):
         for i in range(len(self.rangf)):
             c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
+
+        assert 'rate' not in X.columns, '"rate" is a reserved variable name in DTSR.'
+        X['rate'] = 1.
 
         X_3d, time_X_3d = self.expand_history(X[impulse_names], X.time, first_obs, last_obs)
         time_y = np.array(y_time, dtype=self.FLOAT_NP)
@@ -1593,6 +1634,9 @@ class BDTSR(DTSR):
         for i in range(len(self.rangf)):
             c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
+
+        assert 'rate' not in X.columns, '"rate" is a reserved variable name in DTSR.'
+        X['rate'] = 1.
 
         X_3d, time_X_3d = self.expand_history(X[impulse_names], X.time, y.first_obs, y.last_obs)
         time_y = np.array(y.time, dtype=self.FLOAT_NP)
@@ -1675,6 +1719,9 @@ class BDTSR(DTSR):
         for i in range(len(self.rangf)):
             c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
+
+        assert 'rate' not in X.columns, '"rate" is a reserved variable name in DTSR.'
+        X['rate'] = 1.
 
         X_3d, time_X_3d = self.expand_history(X[impulse_names], X.time, y.first_obs, y.last_obs)
         time_y = np.array(y.time, dtype=self.FLOAT_NP)
