@@ -19,6 +19,10 @@ def mse(true, preds):
 def mae(true, preds):
     return (true-preds).abs().mean()
 
+def r_squared(true, preds):
+    true_mean = true.mean()
+    return ((preds-true_mean)**2).sum() / ((true-true_mean)**2).sum()
+
 def powerset(n):
     return np.indices([2]*n).reshape(n, -1).T[1:].astype('int32')
 

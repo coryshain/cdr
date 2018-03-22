@@ -1365,6 +1365,8 @@ class BDTSR(DTSR):
         :param n_epoch_train: ``int``; the number of training iterations
         :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
             If ``None``, IRF tree node string ID's will be used.
+        :param plot_n_time_units: ``float``; number if time units to use in plotting.
+        :param plot_n_points_per_time_unit: ``float``; number of plot points to use per time unit.
         :param plot_x_inches: ``int``; width of plot in inches.
         :param plot_y_inches: ``int``; height of plot in inches.
         :param cmap: ``str``; name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot).
@@ -1394,9 +1396,6 @@ class BDTSR(DTSR):
         for i in range(len(self.rangf)):
             c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
-
-        assert 'rate' not in X.columns, '"rate" is a reserved variable name in DTSR.'
-        X['rate'] = 1.
 
         X_3d, time_X_3d = self.expand_history(X[impulse_names], X.time, y.first_obs, y.last_obs)
         time_y = np.array(y.time, dtype=self.FLOAT_NP)
@@ -1561,9 +1560,6 @@ class BDTSR(DTSR):
             c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
 
-        assert 'rate' not in X.columns, '"rate" is a reserved variable name in DTSR.'
-        X['rate'] = 1.
-
         X_3d, time_X_3d = self.expand_history(X[impulse_names], X.time, first_obs, last_obs)
         time_y = np.array(y_time, dtype=self.FLOAT_NP)
         gf_y = np.array(y_rangf, dtype=self.INT_NP)
@@ -1635,9 +1631,6 @@ class BDTSR(DTSR):
             c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
 
-        assert 'rate' not in X.columns, '"rate" is a reserved variable name in DTSR.'
-        X['rate'] = 1.
-
         X_3d, time_X_3d = self.expand_history(X[impulse_names], X.time, y.first_obs, y.last_obs)
         time_y = np.array(y.time, dtype=self.FLOAT_NP)
         y_dv = np.array(y[self.dv], dtype=self.FLOAT_NP)
@@ -1696,6 +1689,8 @@ class BDTSR(DTSR):
             * A column with the same name as the DV specified in ``form_str``
             * A column for each random grouping factor in the model specified in ``form_str``.
 
+        :param metric: ``str''; name of evaluation metric
+
         :return: ``tuple``; three floats ``(mse, mae, logLik)`` for the evaluation data.
         """
 
@@ -1719,9 +1714,6 @@ class BDTSR(DTSR):
         for i in range(len(self.rangf)):
             c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
-
-        assert 'rate' not in X.columns, '"rate" is a reserved variable name in DTSR.'
-        X['rate'] = 1.
 
         X_3d, time_X_3d = self.expand_history(X[impulse_names], X.time, y.first_obs, y.last_obs)
         time_y = np.array(y.time, dtype=self.FLOAT_NP)

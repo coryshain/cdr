@@ -12,10 +12,10 @@ tasks = ['noRE', 'si', 'ss']
 
 table_str = '''
 \\begin{table}
-\\begin{tabular}{r|cc|cc|cc}
-& \\multicolumn{6}{c}{Random effects structure} \\\\
-& \\multicolumn{2}{c}{$\\emptyset$} & \\multicolumn{2}{c}{I\\textsubscript{subj}} & \\multicolumn{2}{c}{S\\textsubscript{subj}} \\\\
-System & Train & Test & Train & Test & Train & Test \\\\
+\\begin{tabular}{r|ccc|ccc|ccc}
+& \\multicolumn{9}{c}{Random effects structure} \\\\
+& \\multicolumn{3}{c}{$\\emptyset$} & \\multicolumn{3}{c}{I\\textsubscript{subj}} & \\multicolumn{3}{c}{S\\textsubscript{subj}} \\\\
+System & Train & Dev & Test & Train & Dev & Test & Train & Dev & Test \\\\
 \\hline
 '''
 
@@ -36,7 +36,7 @@ for s in systems:
                     if 'failed to converge' in line:
                         converged = False
                     if line.startswith('  MSE'):
-                        MSE = int(rint(float(loss_val.match(line).group(1))))
+                        MSE = float(loss_val.match(line).group(1))
                 if converged:
                     row += ' & ' + str(MSE)
                 else:
@@ -49,7 +49,20 @@ for s in systems:
                     if 'failed to converge' in line:
                         converged = False
                     if line.startswith('  MSE'):
-                        MSE = int(rint(float(loss_val.match(line).group(1))))
+                        MSE = float(loss_val.match(line).group(1))
+                if converged:
+                    row += ' & ' + str(MSE)
+                else:
+                    row += ' & ' + str(MSE) + '\\textsuperscript{\\textdagger}'
+        else:
+            row += ' & ---'
+        if os.path.exists(cur_dir + 'eval_test.txt'):
+            with open(cur_dir + 'eval_test.txt', 'r') as s_file:
+                for line in s_file.readlines():
+                    if 'failed to converge' in line:
+                        converged = False
+                    if line.startswith('  MSE'):
+                        MSE = float(loss_val.match(line).group(1))
                 if converged:
                     row += ' & ' + str(MSE)
                 else:

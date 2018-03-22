@@ -410,7 +410,7 @@ class NNDTSR(DTSR):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if os.path.exists:
+                if os.path.exists(self.outdir + '/tensorboard/fixed'):
                     self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/fixed')
                 else:
                     self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/fixed', self.sess.graph)
@@ -477,6 +477,8 @@ class NNDTSR(DTSR):
         :param n_iter: ``int``; the number of training iterations
         :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
             If ``None``, IRF tree node string ID's will be used.
+        :param plot_n_time_units: ``float``; number if time units to use in plotting.
+        :param plot_n_points_per_time_unit: ``float``; number of plot points to use per time unit.
         :param plot_x_inches: ``int``; width of plot in inches.
         :param plot_y_inches: ``int``; height of plot in inches.
         :param cmap: ``str``; name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot).
@@ -505,9 +507,6 @@ class NNDTSR(DTSR):
         for i in range(len(self.rangf)):
             c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
-
-        assert 'rate' not in X.columns, '"rate" is a reserved variable name in DTSR.'
-        X['rate'] = 1.
 
         if self.low_memory:
             X_2d = X[impulse_names]
@@ -760,7 +759,7 @@ class NNDTSR(DTSR):
 
                     t1_iter = time.time()
 
-                    sys.stderr.write('Maximum gradient norm: %s\n' %max_grad)
+                    # sys.stderr.write('Maximum gradient norm: %s\n' %max_grad)
                     sys.stderr.write('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
 
                 X_conv = self.convolve_inputs(X, time_y, gf_y, y.first_obs, y.last_obs)
@@ -810,9 +809,6 @@ class NNDTSR(DTSR):
         for i in range(len(self.rangf)):
             c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
-
-        assert 'rate' not in X.columns, '"rate" is a reserved variable name in DTSR.'
-        X['rate'] = 1.
 
         if self.low_memory:
             X_2d = X[impulse_names]
@@ -891,11 +887,8 @@ class NNDTSR(DTSR):
 
         y_rangf = y[self.rangf]
         for i in range(len(self.rangf)):
-            c = f.rangf[i]
+            c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
-
-        assert 'rate' not in X.columns, '"rate" is a reserved variable name in DTSR.'
-        X['rate'] = 1.
 
         if self.low_memory:
             X_2d = X[impulse_names]

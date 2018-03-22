@@ -1092,8 +1092,9 @@ class DTSR(object):
                 coef_names = [self.node_table[x].coef_id() for x in self.terminal_names]
                 coef_ix = names2ix(coef_names, self.coef_names)
                 coef = tf.gather(self.coefficient, coef_ix, axis=1)
+                self.X_conv_scaled = self.X_conv*coef
 
-                self.out = self.intercept + tf.reduce_sum(self.X_conv*coef, axis=1)
+                self.out = self.intercept + tf.reduce_sum(self.X_conv_scaled, axis=1)
 
     def __construct_low_memory_network__(self):
         f = self.form
@@ -1500,7 +1501,7 @@ class DTSR(object):
 
         return X_history, time_X_history
 
-    def convolve_inputs(self, X, time_y, gf_y, first_obs, last_obs):
+    def convolve_inputs(self, X, time_y, gf_y, first_obs, last_obs, scaled=False):
 
         if self.pc:
             impulse_names = self.src_impulse_names
@@ -1561,7 +1562,7 @@ class DTSR(object):
                     else:
                         fd_minibatch[self.X] = X_3d[j:j + minibatch_size]
                         fd_minibatch[self.time_X] = time_X_3d[j:j + minibatch_size]
-                    X_conv_cur = self.sess.run(self.X_conv, feed_dict=fd_minibatch)
+                    X_conv_cur = self.sess.run(self.X_conv_scaled if scaled else self.X_conv, feed_dict=fd_minibatch)
                     X_conv.append(X_conv_cur)
                 X_conv = pd.DataFrame(np.concatenate(X_conv), columns=self.terminal_names)
                 return X_conv
