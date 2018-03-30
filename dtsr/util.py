@@ -3,6 +3,7 @@ import re
 import math
 import numpy as np
 from scipy import linalg
+from scipy.stats import chi2
 
 
 def names2ix(names, l, dtype=np.int32):
@@ -168,3 +169,8 @@ def pca_inv(Xpc, eigenvec, means=None, sds=None):
             means = np.expand_dims(means, 0)
         X += means
     return X
+
+def lrt(ll1, ll2, df):
+    M = ll1 if ll1 > ll2 else ll2
+    m = ll1 if ll1 < ll2 else ll1
+    return chi2.pdf(2 * (M - m), df)

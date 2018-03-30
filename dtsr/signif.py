@@ -2,9 +2,14 @@ import sys
 import numpy as np
 import math
 
-def bootstrap(err_1, err_2, n_iter=10000, n_tails=2):
+def bootstrap(err_1, err_2, n_iter=10000, n_tails=2, mode='loss'):
     err_table = np.stack([err_1, err_2], 1)
-    base_diff = err_table[:,0].mean() - err_table[:,1].mean()
+    if mode == 'loss':
+        base_diff = err_table[:,0].mean() - err_table[:,1].mean()
+    elif mode == 'loglik':
+        base_diff = err_table[:,0].sum() - err_table[:,1].sum()
+    else:
+        raise ValueError('Unrecognized aggregation function "%s" in permutation test' %mode)
     hits = 0
     sys.stderr.write('Permutation testing...\n')
     for i in range(n_iter):
@@ -13,7 +18,10 @@ def bootstrap(err_1, err_2, n_iter=10000, n_tails=2):
         shuffle = (np.random.random((len(err_table))) > 0.5).astype('int')
         m1 = err_table[np.arange(len(err_table)),shuffle]
         m2 = err_table[np.arange(len(err_table)),1-shuffle]
-        cur_diff = m1.mean() - m2.mean()
+        if mode == 'loss':
+            cur_diff = m1.mean() - m2.mean()
+        else:
+            cur_diff = m1.sum() - m2.sum()
         if n_tails == 1:
             if base_diff < 0 and cur_diff <= base_diff:
                 hits += 1

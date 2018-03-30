@@ -33,7 +33,7 @@ def plot_convolutions(plot_x, plot_y, features, dir, filename='convolution_plot.
 
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser('''
-        Generates synthetic temporally convolved data for DTSR evaluation.
+        Generates synthetic temporally convolved data using randomly sampled ShiftedGammaKgt1 IRF.
     ''')
     argparser.add_argument('-n', '--n', type=int, default=1, help='Number of covariates')
     argparser.add_argument('-x', '--x', type=int, default=10000, help='Length of obs table')
@@ -50,15 +50,15 @@ if __name__ == '__main__':
     args, unknown = argparser.parse_known_args()
 
     if args.k is None:
-        k = np.random.random(args.n)*2
+        k = np.random.random(args.n)*5 + 1
     else:
         k = np.ones(args.n)*args.k
     if args.theta is None:
-        theta = np.random.random(args.n)*2
+        theta = np.random.random(args.n)*5
     else:
         theta = np.ones(args.n)*args.theta
     if args.delta is None:
-        delta = -np.random.random(args.n)*2
+        delta = -np.random.random(args.n)
     else:
         delta = np.ones(args.n)*args.delta
     if args.beta is None:

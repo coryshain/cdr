@@ -1,4 +1,5 @@
 import os
+import pickle
 from collections import defaultdict
 from numpy import inf
 import pandas as pd
@@ -1449,6 +1450,8 @@ class DTSR(object):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.saver.save(self.sess, self.outdir + '/model.ckpt')
+                with open(self.outdir + '/m.obj', 'wb') as f:
+                    pickle.dump(self, f)
 
     def load(self, restore=True):
         with self.sess.as_default():
@@ -1501,34 +1504,33 @@ class DTSR(object):
 
         return X_history, time_X_history
 
-    def convolve_inputs(self, X, time_y, gf_y, first_obs, last_obs, scaled=False):
+    def run_conv_op(self, feed_dict, scaled=False):
+        raise NotImplementedError
+
+    def convolve_inputs(self, X, y, scaled=False):
 
         if self.pc:
             impulse_names = self.src_impulse_names
         else:
             impulse_names  = self.impulse_names
 
-        if not np.isfinite(self.minibatch_size):
-            minibatch_size = len(time_y)
-        else:
-            minibatch_size = self.minibatch_size
+        y_rangf = y[self.rangf]
+        for i in range(len(self.rangf)):
+            c = self.rangf[i]
+            y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
 
-        if isinstance(gf_y, pd.Series):
-            for i in range(len(self.rangf)):
-                c = self.rangf[i]
-                gf_y[c] = pd.Series(gf_y[c].astype(str)).map(self.rangf_map[i])
-            gf_y = np.array(gf_y, dtype=self.INT_NP)
+        X_3d, time_X_3d = self.expand_history(X[impulse_names], X.time, y.first_obs, y.last_obs)
+        time_y = np.array(y.time, dtype=self.FLOAT_NP)
+        gf_y = np.array(y_rangf, dtype=self.INT_NP)
 
         if isinstance(X, pd.DataFrame):
             if self.low_memory:
                 X_2d = X[impulse_names]
                 time_X_2d = np.array(X.time, dtype=self.FLOAT_NP)
-                first_obs = np.array(first_obs, dtype=self.INT_NP)
-                last_obs = np.array(last_obs, dtype=self.INT_NP)
+                first_obs = np.array(y.first_obs, dtype=self.INT_NP)
+                last_obs = np.array(y.last_obs, dtype=self.INT_NP)
             else:
-                X_3d, time_X_3d = self.expand_history(X[impulse_names], X.time, first_obs, last_obs)
-
-        time_y = np.array(time_y)
+                X_3d, time_X_3d = self.expand_history(X[impulse_names], X.time, y.first_obs, y.last_obs)
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -1553,19 +1555,23 @@ class DTSR(object):
                 }
 
                 X_conv = []
-                for j in range(0, len(time_y), minibatch_size):
-                    fd_minibatch[self.time_y] = time_y[j:j + minibatch_size]
-                    fd_minibatch[self.gf_y] = gf_y[j:j + minibatch_size]
+                for j in range(0, len(y), self.eval_minibatch_size):
+                    fd_minibatch[self.time_y] = time_y[j:j + self.eval_minibatch_size]
+                    fd_minibatch[self.gf_y] = gf_y[j:j + self.eval_minibatch_size]
                     if self.low_memory:
-                        fd_minibatch[self.first_obs] = first_obs[j:j + minibatch_size]
-                        fd_minibatch[self.last_obs] = last_obs[j:j + minibatch_size]
+                        fd_minibatch[self.first_obs] = first_obs[j:j + self.eval_minibatch_size]
+                        fd_minibatch[self.last_obs] = last_obs[j:j + self.eval_minibatch_size]
                     else:
-                        fd_minibatch[self.X] = X_3d[j:j + minibatch_size]
-                        fd_minibatch[self.time_X] = time_X_3d[j:j + minibatch_size]
-                    X_conv_cur = self.sess.run(self.X_conv_scaled if scaled else self.X_conv, feed_dict=fd_minibatch)
+                        fd_minibatch[self.X] = X_3d[j:j + self.eval_minibatch_size]
+                        fd_minibatch[self.time_X] = time_X_3d[j:j + self.eval_minibatch_size]
+                    X_conv_cur = self.run_conv_op(fd_minibatch, scaled=scaled)
                     X_conv.append(X_conv_cur)
-                X_conv = pd.DataFrame(np.concatenate(X_conv), columns=self.terminal_names)
-                return X_conv
+                names = [sn(''.join(x.split('-')[:-1])) for x in self.terminal_names]
+                X_conv = np.concatenate(X_conv, axis=0)
+                out = np.concatenate([y, X_conv], axis=1)
+                columns = list(y.columns) + names
+                out = pd.DataFrame(out, columns=columns)
+                return out
 
     def fit(self, X, y):
         raise NotImplementedError
@@ -1643,8 +1649,12 @@ class DTSR(object):
             cmap=None,
             mc=False,
             n_samples=1000,
-            level=95
+            level=95,
+            prefix='',
+            legend=True
     ):
+        if prefix != '':
+            prefix += '_'
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 fd = {
@@ -1692,11 +1702,12 @@ class DTSR(object):
                             lq=lq,
                             uq=uq,
                             dir=self.outdir,
-                            filename=plot_name,
+                            filename=prefix + plot_name,
                             irf_name_map=irf_name_map,
                             plot_x_inches=plot_x_inches,
                             plot_y_inches=plot_y_inches,
-                            cmap=cmap
+                            cmap=cmap,
+                            legend=legend
                         )
 
                 if self.pc:
@@ -1731,11 +1742,12 @@ class DTSR(object):
                                     lq=lq,
                                     uq=uq,
                                     dir=self.outdir,
-                                    filename=plot_name,
+                                    filename=prefix + plot_name,
                                     irf_name_map=irf_name_map,
                                     plot_x_inches=plot_x_inches,
                                     plot_y_inches=plot_y_inches,
-                                    cmap=cmap
+                                    cmap=cmap,
+                                    legend=legend
                                 )
 
 

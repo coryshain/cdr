@@ -14,7 +14,8 @@ def plot_convolutions(
         irf_name_map=None,
         plot_x_inches=7,
         plot_y_inches=5,
-        cmap='gist_earth'
+        cmap='gist_earth',
+        legend=True
 ):
     cm = plt.get_cmap(cmap)
     plt.gca().set_prop_cycle(color=[cm(1. * i / len(features)) for i in range(len(features))])
@@ -32,11 +33,20 @@ def plot_convolutions(
             plt.plot(plot_x, plot_y[:,sort_ix[i]], label=feats[sort_ix[i]])
         if uq is not None and lq is not None:
             plt.fill_between(plot_x[:,0], lq[:,sort_ix[i]], uq[:,sort_ix[i]], alpha=0.25)
-    h, l = plt.gca().get_legend_handles_labels()
-    plt.gcf().legend(h,l,fancybox=True, framealpha=0.5)
+    if legend:
+        plt.legend(fancybox=True, framealpha=0.5)
     plt.gcf().set_size_inches(plot_x_inches, plot_y_inches)
     plt.savefig(dir+'/'+filename)
     plt.close('all')
+
+def plot_legend(
+        features,
+        irf_name_map=None,
+        cmap='gist_earth'
+):
+    plt.gca().set_prop_cycle(color=[cm(1. * i / len(features)) for i in range(len(features))])
+
+
 
 def plot_heatmap(m, row_names, col_names, dir='.', filename='eigenvectors.png', plot_x_inches=7, plot_y_inches=5, cmap='Blues'):
     cm = plt.get_cmap(cmap)

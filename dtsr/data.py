@@ -55,21 +55,21 @@ def compute_filters(y, filter_map=None):
 def compute_filter(y, field, cond):
     cond = cond.strip()
     if cond.startswith('<='):
-        return y[field] <= float(cond[2:].strip())
+        return y[field] <= (np.inf if cond[2:].strip() == 'inf' else float(cond[2:].strip()))
     if cond.startswith('>='):
-        return y[field] >= float(cond[2:].strip())
+        return y[field] >= (np.inf if cond[2:].strip() == 'inf' else float(cond[2:].strip()))
     if cond.startswith('<'):
-        return y[field] < float(cond[1:].strip())
+        return y[field] < (np.inf if cond[1:].strip() == 'inf' else float(cond[1:].strip()))
     if cond.startswith('>'):
-        return y[field] > float(cond[1:].strip())
+        return y[field] > (np.inf if cond[1:].strip() == 'inf' else float(cond[1:].strip()))
     if cond.startswith('=='):
         try:
-            return y[field] == float(cond[2:].strip())
+            return y[field] == (np.inf if cond[2:].strip() == 'inf' else float(cond[2:].strip()))
         except:
             return y[field].astype('str') == cond[2:].strip()
     if cond.startswith('!='):
         try:
-            return y[field] != float(cond[2:].strip())
+            return y[field] != (np.inf if cond[2:].strip() == 'inf' else float(cond[2:].strip()))
         except:
             return y[field].astype('str') != cond[2:].strip()
     raise ValueError('Unsupported comparator in filter "%s"' %cond)

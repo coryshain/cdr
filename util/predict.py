@@ -7,7 +7,7 @@ import pandas as pd
 
 pd.options.mode.chained_assignment = None
 
-from dtsr import Config, read_data, Formula, preprocess_data, print_tee, mse, mae, compute_splitID, compute_partition
+from dtsr import Config, read_data, Formula, preprocess_data, print_tee, mse, mae, r_squared, compute_splitID, compute_partition
 
 if __name__ == '__main__':
 
@@ -196,6 +196,8 @@ if __name__ == '__main__':
             with open(p.logdir + '/' + m + '/m.obj', 'rb') as m_file:
                 dtsr_model = pickle.load(m_file)
 
+            bayes = p.network_type == 'bayes'
+
             dtsr_preds = dtsr_model.predict(X, y.time, y[dtsr_model.form.rangf], y.first_obs, y.last_obs)
             with open(p.logdir + '/' + m + '/preds_%s.txt'%args.partition, 'w') as p_file:
                 for i in range(len(dtsr_preds)):
@@ -207,16 +209,44 @@ if __name__ == '__main__':
             with open(p.logdir + '/' + m + '/%s_losses_%s.txt'%(p.loss, args.partition), 'w') as l_file:
                 for i in range(len(losses)):
                     l_file.write(str(losses[i]) + '\n')
+            with open(p.logdir + '/' + m + '/obs_%s.txt'%args.partition, 'w') as p_file:
+                for i in range(len(y[dv])):
+                    p_file.write(str(y[dv].iloc[i]) + '\n')
             dtsr_mse = mse(y[dv], dtsr_preds)
             dtsr_mae = mae(y[dv], dtsr_preds)
+            y_dv_mean = y[dv].mean()
+            dtsr_r2 = r_squared(y[dv], dtsr_preds)
             summary = '=' * 50 + '\n'
             summary += 'DTSR regression\n\n'
             summary += 'Model name: %s\n\n' % m
             summary += 'Formula:\n'
             summary += '  ' + formula + '\n'
+
+            if bayes:
+                dtsr_loglik_vector = dtsr_model.log_lik(X, y)
+                with open(p.logdir + '/' + m + '/loglik_%s.txt' % args.partition, 'w') as l_file:
+                    for i in range(len(dtsr_loglik_vector)):
+                        l_file.write(str(dtsr_loglik_vector[i]) + '\n')
+                dtsr_loglik = dtsr_loglik_vector.sum()
+                summary += 'Log likelihood: %s\n' % dtsr_loglik
+                summary += '\nPosterior integral summaries by predictor:\n'
+                if dtsr_model.pc:
+                    terminal_names = dtsr_model.src_terminal_names
+                else:
+                    terminal_names = dtsr_model.terminal_names
+                posterior_summaries = np.zeros((len(terminal_names), 3))
+                for i in range(len(terminal_names)):
+                    terminal = terminal_names[i]
+                    row = np.array(dtsr_model.ci_integral(terminal, n_time_units=10))
+                    posterior_summaries[i] += row
+                posterior_summaries = pd.DataFrame(posterior_summaries, index=terminal_names,
+                                                   columns=['Mean', '2.5%', '97.5%'])
+                summary += posterior_summaries.to_string() + '\n\n'
+
             summary += 'Loss (%s set):\n' % args.partition
             summary += '  MSE: %.4f\n' % dtsr_mse
             summary += '  MAE: %.4f\n' % dtsr_mae
+            summary += '  R-squared: %.4f\n' % dtsr_r2
             summary += '=' * 50 + '\n'
             with open(p.logdir + '/' + m + '/eval_%s.txt'%args.partition, 'w') as f_out:
                 print_tee(summary, [sys.stdout, f_out])

@@ -233,6 +233,8 @@ class Formula(object):
         return new
 
     def apply_op(self, op, arr):
+        arr.fillna(0, inplace=True)
+        arr[arr == np.inf] = 0
         if op in ['c', 'c.']:
             out = c(arr)
         elif op in ['z', 'z.']:

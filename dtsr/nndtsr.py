@@ -762,14 +762,6 @@ class NNDTSR(DTSR):
                     # sys.stderr.write('Maximum gradient norm: %s\n' %max_grad)
                     sys.stderr.write('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
 
-                X_conv = self.convolve_inputs(X, time_y, gf_y, y.first_obs, y.last_obs)
-
-                sys.stderr.write('Mean values of convolved predictors\n')
-                sys.stderr.write(str(X_conv.mean(axis=0)) + '\n\n')
-                sys.stderr.write('Correlations of convolved predictors\n')
-                sys.stderr.write(str(X_conv.corr()) + '\n\n')
-                sys.stderr.write('\n')
-
                 self.make_plots(
                     irf_name_map=irf_name_map,
                     plot_n_time_units=plot_n_time_units,
@@ -967,3 +959,17 @@ class NNDTSR(DTSR):
         :return: ``None``
         """
         return super(NNDTSR, self).make_plots(**kwargs)
+
+    def run_conv_op(self, feed_dict, scaled=False):
+        """
+        Feedforward a batch of data in feed_dict through the convolutional layer to produce convolved inputs
+
+        :param feed_dict: ``dict``; A dictionary of input variables
+        :param scale: ``bool``; Whether to scale the outputs using the latent coefficients
+        :return: ``numpy`` array; The convolved inputs
+        """
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                X_conv = self.sess.run(self.X_conv_scaled if scaled else self.X_conv, feed_dict=feed_dict)
+                return X_conv

@@ -7,7 +7,7 @@ import numpy as np
 
 pd.options.mode.chained_assignment = None
 
-from dtsr import Config, read_data, Formula, preprocess_data, print_tee, mse, mae, compute_splitID, compute_partition, pca
+from dtsr import Config, read_data, Formula, preprocess_data, print_tee, mse, mae, r_squared, compute_splitID, compute_partition, pca
 
 if __name__ == '__main__':
 
@@ -16,7 +16,10 @@ if __name__ == '__main__':
     ''')
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default = [], help='Path to configuration (*.ini) file')
+    argparser.add_argument('-e', '--eval', default=1, type=int, help='Whether to evaluate the trained DTSR models before exiting.')
     args, unknown = argparser.parse_known_args()
+
+    eval = bool(args.eval)
 
     p = Config(args.config_path)
     if len(args.models) > 0:
@@ -257,7 +260,9 @@ if __name__ == '__main__':
                 X,
                 y,
                 n_iter=p.n_iter,
-                irf_name_map=p.fixef_name_map,
+                irf_name_map=p.irf_name_map,
+                plot_n_time_units=p.plot_n_time_units,
+                plot_n_points_per_time_unit=p.plot_n_points_per_time_unit,
                 plot_x_inches=p.plot_x_inches,
                 plot_y_inches=p.plot_y_inches,
                 cmap=p.cmap
@@ -266,41 +271,46 @@ if __name__ == '__main__':
             with open(p.logdir + '/' + m + '/m.obj', 'wb') as m_file:
                 pickle.dump(dtsr_model, m_file)
 
-            dtsr_preds = dtsr_model.predict(
-                X,
-                y.time,
-                y[dtsr_model.form.rangf],
-                y.first_obs,
-                y.last_obs
-            )
+            if eval:
+                dtsr_preds = dtsr_model.predict(
+                    X,
+                    y.time,
+                    y[dtsr_model.form.rangf],
+                    y.first_obs,
+                    y.last_obs
+                )
 
-            dtsr_mse = mse(y[dv], dtsr_preds)
-            dtsr_mae = mae(y[dv], dtsr_preds)
-            summary = '=' * 50 + '\n'
-            summary += 'DTSR regression\n\n'
-            summary += 'Model name: %s\n\n' % m
-            summary += 'Formula:\n'
-            summary += '  ' + formula + '\n\n'
-            if bayes:
-                dtsr_mse2, dtsr_mae2, dtsr_loglik = dtsr_model.eval(X, y)
-                summary += 'Log likelihood: %s\n' %dtsr_loglik
-                summary += '\nPosterior integral summaries by predictor:\n'
-                if dtsr_model.pc:
-                    terminal_names = dtsr_model.src_terminal_names
-                else:
-                    terminal_names = dtsr_model.terminal_names
-                posterior_summaries = np.zeros((len(terminal_names), 3))
-                for i in range(len(terminal_names)):
-                    terminal = terminal_names[i]
-                    row = np.array(dtsr_model.ci_integral(terminal, n_time_units=10))
-                    posterior_summaries[i] += row
-                posterior_summaries = pd.DataFrame(posterior_summaries, index=terminal_names, columns=['Mean', '2.5%', '97.5%'])
-                summary += posterior_summaries.to_string() + '\n\n'
-            summary += 'Training set loss:\n'
-            summary += '  MSE: %.4f\n' % dtsr_mse
-            summary += '  MAE: %.4f\n' % dtsr_mae
-            summary += '=' * 50 + '\n'
-            with open(p.logdir + '/' + m + '/summary.txt', 'w') as f_out:
-                print_tee(summary, [sys.stdout, f_out])
-            sys.stderr.write('\n\n')
+                dtsr_mse = mse(y[dv], dtsr_preds)
+                dtsr_mae = mae(y[dv], dtsr_preds)
+                y_dv_mean = y[dv].mean()
+                dtsr_r2 = r_squared(y[dv], dtsr_preds)
+                summary = '=' * 50 + '\n'
+                summary += 'DTSR regression\n\n'
+                summary += 'Model name: %s\n\n' % m
+                summary += 'Formula:\n'
+                summary += '  ' + formula + '\n\n'
+                if bayes:
+                    dtsr_loglik_vector = dtsr_model.log_lik(X, y)
+                    dtsr_loglik = dtsr_loglik_vector.sum()
+                    summary += 'Log likelihood: %s\n' %dtsr_loglik
+                    summary += '\nPosterior integral summaries by predictor:\n'
+                    if dtsr_model.pc:
+                        terminal_names = dtsr_model.src_terminal_names
+                    else:
+                        terminal_names = dtsr_model.terminal_names
+                    posterior_summaries = np.zeros((len(terminal_names), 3))
+                    for i in range(len(terminal_names)):
+                        terminal = terminal_names[i]
+                        row = np.array(dtsr_model.ci_integral(terminal, n_time_units=10))
+                        posterior_summaries[i] += row
+                    posterior_summaries = pd.DataFrame(posterior_summaries, index=terminal_names, columns=['Mean', '2.5%', '97.5%'])
+                    summary += posterior_summaries.to_string() + '\n\n'
+                summary += 'Training set loss:\n'
+                summary += '  MSE: %.4f\n' % dtsr_mse
+                summary += '  MAE: %.4f\n' % dtsr_mae
+                summary += '  R-squared: %.4f\n' % dtsr_r2
+                summary += '=' * 50 + '\n'
+                with open(p.logdir + '/' + m + '/summary.txt', 'w') as f_out:
+                    print_tee(summary, [sys.stdout, f_out])
+                sys.stderr.write('\n\n')
 
