@@ -2,7 +2,8 @@ import sys
 import argparse
 import numpy as np
 import pandas as pd
-from dtsr import Config, bootstrap
+from dtsr.config import Config
+from dtsr.signif import bootstrap
 
 if __name__ == '__main__':
 

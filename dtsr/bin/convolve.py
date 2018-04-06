@@ -7,7 +7,10 @@ import pandas as pd
 
 pd.options.mode.chained_assignment = None
 
-from dtsr import Config, read_data, Formula, preprocess_data, print_tee, mse, mae, r_squared, compute_splitID, compute_partition
+from dtsr.config import Config
+from dtsr.io import read_data
+from dtsr.formula import Formula
+from dtsr.data import preprocess_data
 
 if __name__ == '__main__':
 

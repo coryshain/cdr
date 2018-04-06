@@ -15,7 +15,7 @@ tf_config = tf.ConfigProto()
 tf_config.gpu_options.allow_growth = True
 from .formula import *
 from .util import *
-from .dtsr import DTSR, plot_convolutions
+from .dtsr import DTSR
 
 import edward as ed
 from edward.models import Normal, Gamma, Exponential, MultivariateNormalTriL, SinhArcsinh, Empirical
@@ -1419,10 +1419,10 @@ class BDTSR(DTSR):
 
                 if self.global_step.eval(session=self.sess) == 0:
                     summary_params = self.sess.run(self.summary_params)
-                    self.writer.add_summary(summary_params, self.global_batch_step.eval(session=self.sess))
+                    self.writer.add_summary(summary_params, self.global_step.eval(session=self.sess))
                     if self.log_random and len(self.rangf) > 0:
                         summary_random = self.sess.run(self.summary_random)
-                        self.writer.add_summary(summary_random, self.global_batch_step.eval(session=self.sess))
+                        self.writer.add_summary(summary_random, self.global_step.eval(session=self.sess))
 
                 sys.stderr.write('Running %s inference...\n' % self.inference_name)
                 while self.global_step.eval(session=self.sess) < self.n_iter:
@@ -1463,11 +1463,11 @@ class BDTSR(DTSR):
                         loss_total /= n_minibatch
                         summary_train_loss = self.sess.run(self.summary_losses, {self.loss_total: loss_total})
                         summary_params = self.sess.run(self.summary_params)
-                        self.writer.add_summary(summary_params, self.global_batch_step.eval(session=self.sess))
+                        self.writer.add_summary(summary_params, self.global_step.eval(session=self.sess))
                         self.writer.add_summary(summary_train_loss, self.global_step.eval(session=self.sess))
                         if self.log_random and len(self.rangf) > 0:
                             summary_random = self.sess.run(self.summary_random)
-                            self.writer.add_summary(summary_random, self.global_batch_step.eval(session=self.sess))
+                            self.writer.add_summary(summary_random, self.global_step.eval(session=self.sess))
                     if self.save_freq > 0 and self.global_step.eval(session=self.sess) % self.save_freq == 0:
                         self.save()
                         self.make_plots(

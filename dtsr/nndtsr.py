@@ -755,7 +755,7 @@ class NNDTSR(DTSR):
 
                         if self.log_random and len(self.rangf) > 0:
                             summary_random = self.sess.run(self.summary_random)
-                            self.writer.add_summary(summary_random, self.global_batch_step.eval(session=self.sess))
+                            self.writer.add_summary(summary_random, self.global_step.eval(session=self.sess))
 
                     t1_iter = time.time()
 

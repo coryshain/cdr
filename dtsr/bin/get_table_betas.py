@@ -3,7 +3,7 @@ import os
 import re
 import argparse
 import pickle
-from dtsr import Config
+from dtsr.config import Config
 
 def print_table(beta_summaries, names, beta_names):
     table_str = '''
