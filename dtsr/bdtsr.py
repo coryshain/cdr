@@ -978,13 +978,17 @@ class BDTSR(DTSR):
 
                         param_ran *= mask_col
                         param_ran *= tf.expand_dims(mask_row, -1)
-                        param_ran -= tf.reduce_mean(param_ran, axis=0)
+
+                        param_ran_mean = tf.reduce_sum(param_ran, axis=0) / tf.reduce_sum(mask_row)
+                        param_ran_centering_vector = tf.expand_dims(mask_row, -1) * param_ran_mean
+                        param_ran -= param_ran_centering_vector
+
                         param_out += tf.gather(param_ran, self.gf_y[:, i], axis=0)
 
                         if self.log_random:
                             param_ran_summary *= mask_col
                             param_ran_summary *= tf.expand_dims(mask_row, -1)
-                            param_ran_summary -= tf.reduce_mean(param_ran_summary, axis=0)
+                            param_ran_summary -= param_ran_centering_vector
 
                             for j in range(len(irf_by_rangf[gf])):
                                 irf_name = irf_by_rangf[gf][j]
@@ -1065,7 +1069,7 @@ class BDTSR(DTSR):
                         collections=['params']
                     )
                 else:
-                    print('Fixed y scale: %s' %self.y_scale_fixed)
+                    sys.stderr.write('Fixed y scale: %s\n' %self.y_scale_fixed)
                     y_scale = self.y_scale_fixed_tf
                     y_scale_summary = y_scale
 

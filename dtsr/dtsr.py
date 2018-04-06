@@ -516,9 +516,12 @@ class DTSR(object):
                         )
                         intercept_random *= mask_row
                         intercept_random_summary *= mask_row
-                        intercept_random -= tf.reduce_mean(intercept_random, axis=0)
-                        intercept_random_summary -= tf.reduce_mean(intercept_random_summary, axis=0)
 
+                        intercept_random_mean = tf.reduce_sum(intercept_random_summary, axis=0) / tf.reduce_sum(mask_row)
+                        intercept_random_centering_vector = mask_row * intercept_random_mean
+
+                        intercept_random -= intercept_random_centering_vector
+                        intercept_random_summary -= intercept_random_centering_vector
                         self.intercept += tf.gather(intercept_random, self.gf_y[:, i])
 
                         if self.log_random:
@@ -547,7 +550,11 @@ class DTSR(object):
                         coefficient_random *= tf.expand_dims(mask_row, -1)
                         coefficient_random_summary *= tf.expand_dims(mask_row, -1)
 
-                        coefficient_random -= tf.reduce_mean(coefficient_random, axis=0)
+                        coefficient_random_mean = tf.reduce_sum(coefficient_random_summary, axis=0) / tf.reduce_sum(mask_row)
+                        coefficient_random_centering_vector = tf.expand_dims(mask_row, -1) * coefficient_random_mean
+
+                        coefficient_random -= coefficient_random_centering_vector
+                        coefficient_random_summary -= coefficient_random_centering_vector
                         self.coefficient += tf.gather(coefficient_random, self.gf_y[:, i], axis=0)
 
                         if self.log_random:
