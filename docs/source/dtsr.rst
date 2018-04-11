@@ -84,11 +84,3 @@ dtsr\.util module
     :undoc-members:
     :show-inheritance:
 
-
-Module contents
----------------
-
-.. automodule:: dtsr
-    :members:
-    :undoc-members:
-    :show-inheritance:
