@@ -3,7 +3,6 @@ import os
 import sys
 import itertools
 import re
-import pickle
 import pandas as pd
 from dtsr.baselines import LM
 import gc
@@ -60,7 +59,11 @@ def permute_spillover(bform, preds, perms):
         forms.append(''.join(l))
     return(forms)
 
-from dtsr import Config, read_data, Formula, preprocess_data, print_tee, mse, mae, compute_splitID, compute_partition
+from dtsr.config import Config
+from dtsr.io import read_data
+from dtsr.formula import Formula
+from dtsr.data import preprocess_data, compute_splitID, compute_partition
+from dtsr.util import print_tee, mse, mae
 
 if __name__ == '__main__':
 

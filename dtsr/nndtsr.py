@@ -37,7 +37,7 @@ class NNDTSR(DTSR):
         If ``False``, DTSR expands the design matrix into a rank 3 tensor in which the 2nd axis contains the history for each independent variable for each observation of the dependent variable.
         This requires more memory in order to store redundant input values and requires a finite history length.
         However, it removes the need for a control op in the feedforward component and therefore generally runs much faster if GPU is available.
-        *Because TensorFlow control ops are not currently supported by Edward, BDTSR currently only works with* ``low_memory=False``.
+        *NOTE*: Support for ``low_memory`` (and consequently unbounded history length) has been temporarily suspended, since the high-memory implementation is generally much faster and for many projects model fit is not greatly affected by history truncation. If your project demands unbounded history modeling, please let the developers know on Github so that they can prioritize re-implementing this feature.
     :param float_type: ``str``; the ``float`` type to use throughout the network.
     :param int_type: ``str``; the ``int`` type to use throughout the network (used for tensor slicing).
     :param minibatch_size: ``int`` or ``None``; the size of minibatches to use for fitting/prediction (full-batch if ``None``).
@@ -58,8 +58,12 @@ class NNDTSR(DTSR):
     :param learning_rate_min: ``float``; the minimum value for the learning rate.
         If the decay schedule would take the learning rate below this point, learning rate clipping will occur.
     :param init_sd: ``float``; standard deviation of truncated normal parameter initializer
+    :param ema_decay: ``float``; decay factor to use for exponential moving average for parameters (used in prediction)
     :param loss: ``str``; the optimization objective.
         Currently only ``'mse'`` and ``'mae'`` are supported.
+    :param regularizer: ``str``; name of regularizer to use (e.g. ``l1``, ``l2``), or if ``None``, no regularization
+    :param regularizer: ``float``; scale constant to use for regularization
+    :param log_graph: ``bool``; whether to log the network graph to Tensorboard
     """
 
 
@@ -75,7 +79,7 @@ class NNDTSR(DTSR):
             form_str,
             X,
             y,
-            outdir,
+            outdir='./dtsr_model/',
             history_length=None,
             low_memory=False,
             pc=False,
@@ -94,16 +98,17 @@ class NNDTSR(DTSR):
             lr_decay_rate=0.,
             lr_decay_staircase=False,
             init_sd=1,
+            ema_decay=0.999,
             loss='mse',
             regularizer=None,
-            regularizer_scale=0.01
+            regularizer_scale=0.01,
+            log_graph=True
     ):
 
         super(NNDTSR, self).__init__(
             form_str,
             X,
             y,
-            outdir,
             history_length=history_length,
             low_memory=low_memory,
             pc=pc,
@@ -122,13 +127,15 @@ class NNDTSR(DTSR):
             lr_decay_rate=lr_decay_rate,
             lr_decay_staircase=lr_decay_staircase,
             init_sd=init_sd,
+            ema_decay=ema_decay,
             regularizer=regularizer,
-            regularizer_scale=regularizer_scale
+            regularizer_scale=regularizer_scale,
+            log_graph=log_graph
         )
 
         self.loss_name = loss
 
-        self.build()
+        self.build(outdir)
 
     def __getstate__(self):
 
@@ -164,7 +171,8 @@ class NNDTSR(DTSR):
             self.y_scale_init,
             self.rangf_map_base,
             self.rangf_n_levels,
-            self.loss_name
+            self.loss_name,
+            self.ema_decay
         )
 
     def __setstate__(self, state):
@@ -202,9 +210,12 @@ class NNDTSR(DTSR):
         self.y_scale_init, \
         self.rangf_map_base, \
         self.rangf_n_levels, \
-        self.loss_name = state
+        self.loss_name, \
+        self.ema_decay = state
 
         self.__initialize_metadata__()
+
+        self.log_graph = False
 
         self.rangf_map = []
         for i in range(len(self.rangf_map_base)):
@@ -215,9 +226,6 @@ class NNDTSR(DTSR):
                 self.y_mu_init_tf = tf.constant(self.y_mu_init, dtype=self.FLOAT_TF)
                 self.y_scale_init_tf = tf.constant(self.y_scale_init, dtype=self.FLOAT_TF)
                 self.epsilon = tf.constant(1e-35, dtype=self.FLOAT_TF)
-
-        self.build()
-
 
 
 
@@ -402,8 +410,11 @@ class NNDTSR(DTSR):
                 self.gradients, variables = zip(*self.optim.compute_gradients(self.loss_func))
                 # ## CLIP GRADIENT NORM
                 # self.gradients, _ = tf.clip_by_global_norm(self.gradients, 1.0)
-                self.train_op = self.optim.apply_gradients(zip(self.gradients, variables),
-                                                           global_step=self.global_batch_step, name=sn('optim'))
+                self.train_op = self.optim.apply_gradients(
+                    zip(self.gradients, variables),
+                    global_step=self.global_batch_step,
+                    name=sn('optim')
+                )
 
     def __initialize_logging__(self):
         f = self.form
@@ -714,8 +725,8 @@ class NNDTSR(DTSR):
                             fd_minibatch[self.X] = X_3d[indices]
                             fd_minibatch[self.time_X] = time_X_3d[indices]
 
-                        _, loss_minibatch = self.sess.run(
-                            [self.train_op, self.loss_func],
+                        _, _, loss_minibatch = self.sess.run(
+                            [self.train_op, self.ema_op, self.loss_func],
                             feed_dict=fd_minibatch
                         )
                         loss_total += loss_minibatch
@@ -771,7 +782,7 @@ class NNDTSR(DTSR):
                     cmap=cmap
                 )
 
-    def predict(self, X, y_time, y_rangf, first_obs, last_obs):
+    def predict(self, X, y_time, y_rangf, first_obs, last_obs, n_samples=None):
         """
         Predict from the pre-trained DTSR model.
 
@@ -852,7 +863,7 @@ class NNDTSR(DTSR):
 
                 return preds
 
-    def eval(self, X, y):
+    def eval(self, X, y, n_samples=None):
         """
         Evaluate the pre-trained DTSR model.
 
@@ -960,7 +971,7 @@ class NNDTSR(DTSR):
         """
         return super(NNDTSR, self).make_plots(**kwargs)
 
-    def run_conv_op(self, feed_dict, scaled=False):
+    def run_conv_op(self, feed_dict, scaled=False, n_samples=None):
         """
         Feedforward a batch of data in feed_dict through the convolutional layer to produce convolved inputs
 

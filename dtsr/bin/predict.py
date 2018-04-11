@@ -12,6 +12,7 @@ from dtsr.io import read_data
 from dtsr.formula import Formula
 from dtsr.data import preprocess_data, compute_splitID, compute_partition
 from dtsr.util import print_tee, mse, mae, r_squared
+from dtsr.dtsr import load_dtsr
 
 if __name__ == '__main__':
 
@@ -21,6 +22,7 @@ if __name__ == '__main__':
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='Path to configuration (*.ini) file')
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
+    argparser.add_argument('-n', '--nsamples', type=int, default=1024, help='Number of posterior samples to average (only used for BDTSR)')
     args, unknown = argparser.parse_known_args()
 
     p = Config(args.config_path)
@@ -192,17 +194,13 @@ if __name__ == '__main__':
                 print_tee(summary, [sys.stdout, f_out])
             sys.stderr.write('\n\n')
         elif m.startswith('DTSR'):
-            from dtsr.dtsr import DTSR
-
             dv = formula.strip().split('~')[0].strip()
 
             sys.stderr.write('Retrieving saved model %s...\n' % m)
-            with open(p.logdir + '/' + m + '/m.obj', 'rb') as m_file:
-                dtsr_model = pickle.load(m_file)
+            dtsr_model = load_dtsr(p.logdir + '/' + m)
 
             bayes = p.network_type == 'bayes'
-
-            dtsr_preds = dtsr_model.predict(X, y.time, y[dtsr_model.form.rangf], y.first_obs, y.last_obs)
+            dtsr_preds = dtsr_model.predict(X, y.time, y[dtsr_model.form.rangf], y.first_obs, y.last_obs, n_samples=args.nsamples)
             with open(p.logdir + '/' + m + '/preds_%s.txt'%args.partition, 'w') as p_file:
                 for i in range(len(dtsr_preds)):
                     p_file.write(str(dtsr_preds[i]) + '\n')
@@ -227,7 +225,7 @@ if __name__ == '__main__':
             summary += '  ' + formula + '\n'
 
             if bayes:
-                dtsr_loglik_vector = dtsr_model.log_lik(X, y)
+                dtsr_loglik_vector = dtsr_model.log_lik(X, y, n_samples=args.nsamples)
                 with open(p.logdir + '/' + m + '/loglik_%s.txt' % args.partition, 'w') as l_file:
                     for i in range(len(dtsr_loglik_vector)):
                         l_file.write(str(dtsr_loglik_vector[i]) + '\n')

@@ -18,6 +18,21 @@ from .plot import *
 
 
 
+def load_dtsr(dir_path):
+    """
+    Convenience method for reconstructing a saved DTSR object. First loads in metadata from ``m.obj``, then uses
+    that metadata to construct the computation graph. Then, if saved weights are found, these are loaded into the
+    graph.
+
+    :param dir_path: Path to directory containing the DTSR checkpoint files.
+    :return: The loaded DTSR instance.
+    """
+    with open(dir_path + '/m.obj', 'rb') as f:
+        m = pickle.load(f)
+    m.build(outdir=dir_path)
+    m.load(dir=dir_path)
+    return m
+
 class DTSR(object):
     """
     Abstract base class for DTSR. Bayesian (BDTSR) and Neural Network (NNDTSR) implementations inherit from DTSR.
@@ -34,7 +49,6 @@ class DTSR(object):
             form_str,
             X,
             y,
-            outdir,
             history_length = None,
             low_memory = True,
             pc = False,
@@ -55,13 +69,17 @@ class DTSR(object):
             init_sd=1,
             regularizer=None,
             regularizer_scale=0.01,
+            ema_decay=0.998,
             queue_capacity=100000,
-            num_threads=8
+            num_threads=8,
+            log_graph=False
         ):
+
+        assert not low_memory, 'Setting low_memory is currently not supported. If needed for your project, contact shain.3@osu.edu.'
+        assert not history_length is None, 'Currently, history_length must be finite. If unbounded histories are needed for your project, contact shain.3@osu.edu.'
 
         ## Save initialization settings
         self.form_str = form_str
-        self.outdir = outdir
         self.history_length = history_length
         self.low_memory = low_memory
         if not np.isfinite(self.history_length):
@@ -84,8 +102,10 @@ class DTSR(object):
         self.init_sd = init_sd
         self.regularizer_name = regularizer
         self.regularizer_scale = regularizer_scale
+        self.ema_decay = ema_decay
         self.queue_capacity = queue_capacity
         self.num_threads = num_threads
+        self.log_graph = log_graph
 
         self.n_train = len(y)
 
@@ -287,7 +307,6 @@ class DTSR(object):
     def __initialize_inputs__(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-
                 if self.pc:
                     n_impulse = len(self.src_impulse_names)
                 else:
@@ -304,8 +323,14 @@ class DTSR(object):
                     name='time_X'
                 )
 
-                self.y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('y'))
-                self.time_y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('time_y'))
+                if self.low_memory:
+                    self.X = tf.placeholder(shape=[None, len(self.terminal_names)], dtype=self.FLOAT_TF, name=sn('X'))
+                    self.time_X = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('time_X'))
+                    self.first_obs = tf.placeholder(shape=[None], dtype=self.INT_TF, name=sn('first_obs'))
+                    self.last_obs = tf.placeholder(shape=[None], dtype=self.INT_TF, name=sn('last_obs'))
+                else:
+                    self.y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('y'))
+                    self.time_y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('time_y'))
 
                 self.gf_y = tf.placeholder(shape=[None, len(self.rangf)], dtype=self.INT_TF)
 
@@ -394,31 +419,6 @@ class DTSR(object):
                 if self.regularizer_name is not None:
                     self.regularizer = getattr(tf.contrib.layers, '%s_regularizer' %self.regularizer_name)(self.regularizer_scale)
 
-    def __initialize_low_memory_inputs__(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                if self.pc:
-                    self.e = tf.constant(self.eigenvec, dtype=self.FLOAT_TF)
-
-                self.X = tf.placeholder(shape=[None, len(self.terminal_names)], dtype=self.FLOAT_TF, name=sn('X'))
-                self.time_X = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('time_X'))
-
-                self.y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('y'))
-                self.time_y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('time_y'))
-
-                self.gf_y = tf.placeholder(shape=[None, len(self.rangf)], dtype=self.INT_TF)
-
-                self.first_obs = tf.placeholder(shape=[None], dtype=self.INT_TF, name=sn('first_obs'))
-                self.last_obs = tf.placeholder(shape=[None], dtype=self.INT_TF, name=sn('last_obs'))
-
-                # Linspace tensor used for plotting
-                self.support = tf.expand_dims(tf.lin_space(0., 2.5, 1000), -1)
-
-                self.global_step = tf.Variable(0, name=sn('global_step'), trainable=False)
-                self.incr_global_step = tf.assign(self.global_step, self.global_step + 1)
-                self.global_batch_step = tf.Variable(0, name=sn('global_batch_step'), trainable=False)
-                self.incr_global_batch_step = tf.assign(self.global_batch_step, self.global_batch_step + 1)
-
     def __intialize_intercept(self, ran_gf=None, rangf_n_levels=None):
         raise NotImplementedError
 
@@ -428,6 +428,7 @@ class DTSR(object):
     def __initialize_intercepts_coefficients__(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
+
                 if self.has_intercept[None]:
                     self.intercept, self.intercept_summary = self.__initialize_intercept__()
                     tf.summary.scalar(
@@ -573,7 +574,6 @@ class DTSR(object):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
-
                 def exponential(params):
                     pdf = tf.contrib.distributions.Exponential(rate=params[:,0:1]).prob
                     return lambda x: pdf(x + self.epsilon)
@@ -1194,6 +1194,7 @@ class DTSR(object):
 
                 return {
                     'SGD': lambda x: tf.train.GradientDescentOptimizer(x),
+                    'Momentum': lambda x: tf.train.MomentumOptimizer(x, 0.9),
                     'AdaGrad': lambda x: tf.train.AdagradOptimizer(x),
                     'AdaDelta': lambda x: tf.train.AdadeltaOptimizer(x),
                     'Adam': lambda x: tf.train.AdamOptimizer(x),
@@ -1208,7 +1209,18 @@ class DTSR(object):
     def __initialize_saver__(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                self.saver = tf.train.Saver()
+                    self.saver = tf.train.Saver()
+
+    def __initialize_ema__(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                vars = tf.get_collection('trainable_variables')
+                self.ema = tf.train.ExponentialMovingAverage(decay=self.ema_decay)
+                self.ema_op = self.ema.apply(vars)
+                self.ema_map = {}
+                for v in vars:
+                    self.ema_map[self.ema.average_name(v)] = v
+                self.ema_saver = tf.train.Saver(self.ema_map)
 
 
 
@@ -1397,6 +1409,11 @@ class DTSR(object):
     #
     ######################################################
 
+    def set_predict_mode(self, mode):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                self.load(predict=mode)
+
     def report_n_params(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -1413,7 +1430,7 @@ class DTSR(object):
                 sys.stderr.write('Network contains %d total trainable parameters.\n' % n_params)
                 sys.stderr.write('\n')
 
-    def build(self, restore=True, verbose=True):
+    def build(self, outdir=None, restore=True, verbose=True):
         """
         Construct the DTSR network and initialize/load model parameters.
         ``build()`` is called by default at initialization and unpickling, so users generally do not need to call this method.
@@ -1433,39 +1450,53 @@ class DTSR(object):
                 sys.stdout.write(str(self.t_src))
                 sys.stdout.write('\n\n')
 
+        if outdir is None:
+            if not hasattr(self, 'outdir'):
+                self.outdir = './dtsr_model/'
+        else:
+            self.outdir = outdir
+
         self.reset_training_data()
-
-        if self.low_memory:
-            self.__initialize_low_memory_inputs__()
-        else:
-            self.__initialize_inputs__()
-        self.__initialize_intercepts_coefficients__()
-        self.__initialize_irf_lambdas__()
-        self.__initialize_irf_params__()
-        if self.low_memory:
-            self.__construct_low_memory_network__()
-        else:
-            self.__construct_network__()
-        self.__initialize_objective__()
-        self.__initialize_logging__()
-        self.__initialize_saver__()
-        self.load(restore=restore)
-        self.__collect_plots__()
-        self.report_n_params()
-
-    def save(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                self.saver.save(self.sess, self.outdir + '/model.ckpt')
-                with open(self.outdir + '/m.obj', 'wb') as f:
+                self.__initialize_inputs__()
+                self.__initialize_intercepts_coefficients__()
+                self.__initialize_irf_lambdas__()
+                self.__initialize_irf_params__()
+                if self.low_memory:
+                    self.__construct_low_memory_network__()
+                else:
+                    self.__construct_network__()
+                self.__initialize_objective__()
+                self.__initialize_logging__()
+                self.__initialize_ema__()
+                self.__initialize_saver__()
+                self.load(restore=restore)
+                self.__collect_plots__()
+                self.report_n_params()
+
+    def save(self, dir=None):
+        if dir is None:
+            dir = self.outdir
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                self.saver.save(self.sess, dir + '/model.ckpt')
+                with open(dir + '/m.obj', 'wb') as f:
                     pickle.dump(self, f)
 
-    def load(self, restore=True):
+    def load(self, dir=None, predict=False, restore=True):
+        if dir is None:
+            dir = self.outdir
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if restore and os.path.exists(self.outdir + '/checkpoint'):
-                    self.saver.restore(self.sess, self.outdir + '/model.ckpt')
+                if restore and os.path.exists(dir + '/checkpoint'):
+                    if predict:
+                        self.ema_saver.restore(self.sess, dir + '/model.ckpt')
+                    else:
+                        self.saver.restore(self.sess, dir + '/model.ckpt')
                 else:
+                    if predict:
+                        sys.stderr.warn('No EMA checkpoint available. Leaving internal variables unchanged.')
                     self.sess.run(tf.global_variables_initializer())
 
     def assign_training_data(self, X, time_X, y, time_y, gf_y):
@@ -1514,7 +1545,7 @@ class DTSR(object):
     def run_conv_op(self, feed_dict, scaled=False):
         raise NotImplementedError
 
-    def convolve_inputs(self, X, y, scaled=False):
+    def convolve_inputs(self, X, y, scaled=False, n_samples=None):
 
         if self.pc:
             impulse_names = self.src_impulse_names
@@ -1541,6 +1572,7 @@ class DTSR(object):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                self.set_predict_mode(True)
 
                 fd = {
                     self.time_y: time_y,
@@ -1571,13 +1603,16 @@ class DTSR(object):
                     else:
                         fd_minibatch[self.X] = X_3d[j:j + self.eval_minibatch_size]
                         fd_minibatch[self.time_X] = time_X_3d[j:j + self.eval_minibatch_size]
-                    X_conv_cur = self.run_conv_op(fd_minibatch, scaled=scaled)
+                    X_conv_cur = self.run_conv_op(fd_minibatch, scaled=scaled, n_samples=n_samples)
                     X_conv.append(X_conv_cur)
                 names = [sn(''.join(x.split('-')[:-1])) for x in self.terminal_names]
                 X_conv = np.concatenate(X_conv, axis=0)
                 out = np.concatenate([y, X_conv], axis=1)
                 columns = list(y.columns) + names
                 out = pd.DataFrame(out, columns=columns)
+
+                self.set_predict_mode(False)
+
                 return out
 
     def fit(self, X, y):
@@ -1593,58 +1628,62 @@ class DTSR(object):
             self,
             posterior,
             level=95,
-            n_samples=1000,
+            n_samples=1024,
             n_time_units=2.5,
             n_points_per_time_unit=1000
     ):
-        fd = {
-            self.support_start: 0.,
-            self.n_time_units: n_time_units,
-            self.n_points_per_time_unit: n_points_per_time_unit,
-            self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0)
-        }
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                fd = {
+                    self.support_start: 0.,
+                    self.n_time_units: n_time_units,
+                    self.n_points_per_time_unit: n_points_per_time_unit,
+                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0)
+                }
 
-        alpha = 100-float(level)
+                alpha = 100-float(level)
 
-        samples = [self.sess.run(posterior, feed_dict=fd) for _ in range(n_samples)]
-        samples = np.concatenate(samples, axis=1)
+                samples = [self.sess.run(posterior, feed_dict=fd) for _ in range(n_samples)]
+                samples = np.concatenate(samples, axis=1)
 
-        mean = samples.mean(axis=1)
-        lower = np.percentile(samples, alpha/2, axis=1)
-        upper = np.percentile(samples, 100-(alpha/2), axis=1)
+                mean = samples.mean(axis=1)
+                lower = np.percentile(samples, alpha/2, axis=1)
+                upper = np.percentile(samples, 100-(alpha/2), axis=1)
 
-        return (mean, lower, upper)
+                return (mean, lower, upper)
 
     def ci_integral(
             self,
             terminal_name,
             level=95,
-            n_samples=1000,
+            n_samples=1024,
             n_time_units=2.5,
             n_points_per_time_unit=1000
     ):
-        fd = {
-            self.support_start: 0.,
-            self.n_time_units: n_time_units,
-            self.n_points_per_time_unit: n_points_per_time_unit,
-            self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0)
-        }
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                fd = {
+                    self.support_start: 0.,
+                    self.n_time_units: n_time_units,
+                    self.n_points_per_time_unit: n_points_per_time_unit,
+                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0)
+                }
 
-        alpha = 100 - float(level)
+                alpha = 100 - float(level)
 
-        if terminal_name in self.mc_integrals:
-            posterior = self.mc_integrals[terminal_name]
-        else:
-            posterior = self.src_mc_integrals[terminal_name]
+                if terminal_name in self.mc_integrals:
+                    posterior = self.mc_integrals[terminal_name]
+                else:
+                    posterior = self.src_mc_integrals[terminal_name]
 
-        samples = [np.squeeze(self.sess.run(posterior, feed_dict=fd)[0]) for _ in range(n_samples)]
-        samples = np.stack(samples, axis=0)
+                samples = [np.squeeze(self.sess.run(posterior, feed_dict=fd)[0]) for _ in range(n_samples)]
+                samples = np.stack(samples, axis=0)
 
-        mean = samples.mean(axis=0)
-        lower = np.percentile(samples, alpha / 2, axis=0)
-        upper = np.percentile(samples, 100 - (alpha / 2), axis=0)
+                mean = samples.mean(axis=0)
+                lower = np.percentile(samples, alpha / 2, axis=0)
+                upper = np.percentile(samples, 100 - (alpha / 2), axis=0)
 
-        return (mean, lower, upper)
+                return (mean, lower, upper)
 
     def make_plots(
             self,
@@ -1664,6 +1703,8 @@ class DTSR(object):
             prefix += '_'
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                self.set_predict_mode(True)
+
                 fd = {
                     self.support_start: 0.,
                     self.n_time_units: plot_n_time_units,
@@ -1756,6 +1797,8 @@ class DTSR(object):
                                     cmap=cmap,
                                     legend=legend
                                 )
+
+                self.set_predict_mode(False)
 
 
     def plot_v(self):

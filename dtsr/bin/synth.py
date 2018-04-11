@@ -11,7 +11,6 @@ import seaborn as sns
 sns.set(style="white", rc={"axes.facecolor": (0, 0, 0, 0)})
 
 
-
 def z(df):
     return (df-df.mean(axis=0))/df.std(axis=0)
 

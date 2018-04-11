@@ -12,6 +12,7 @@ from dtsr.io import read_data
 from dtsr.formula import Formula
 from dtsr.data import preprocess_data, compute_splitID, compute_partition
 from dtsr.util import print_tee, mse, mae, r_squared
+from dtsr.dtsr import load_dtsr
 
 if __name__ == '__main__':
 
@@ -188,8 +189,15 @@ if __name__ == '__main__':
             dv = formula.strip().split('~')[0].strip()
 
             sys.stderr.write('Fitting model %s...\n\n' % m)
+
             if p.network_type == 'nn':
-                bayes=False
+                bayes = False
+            else:
+                bayes = True
+
+            if os.path.exists(p.logdir + '/m.obj'):
+                dtsr_model = load_dtsr(p.logdir)
+            elif p.network_type == 'nn':
                 from dtsr.nndtsr import NNDTSR
                 dtsr_model = NNDTSR(
                     formula,
@@ -214,12 +222,12 @@ if __name__ == '__main__':
                     lr_decay_rate=p.lr_decay_rate,
                     lr_decay_staircase=p.lr_decay_staircase,
                     init_sd=p.init_sd,
+                    ema_decay=p.ema_decay,
                     loss=p.loss,
                     regularizer=p.regularizer,
                     regularizer_scale=p.regularizer_scale
                 )
             elif p.network_type.startswith('bayes'):
-                bayes=True
                 from dtsr.bdtsr import BDTSR
                 dtsr_model = BDTSR(
                     formula,
@@ -255,11 +263,13 @@ if __name__ == '__main__':
                     y_scale_fixed=p.y_scale,
                     y_scale_prior_sd=p.y_scale_prior_sd,
                     init_sd=p.init_sd,
+                    ema_decay=p.ema_decay,
                     mh_proposal_sd=p.mh_proposal_sd,
                     asymmetric_error=p.asymmetric_error
                 )
             else:
                 raise ValueError('Network type "%s" not supported' %p.network_type)
+
             dtsr_model.fit(
                 X,
                 y,
@@ -271,9 +281,6 @@ if __name__ == '__main__':
                 plot_y_inches=p.plot_y_inches,
                 cmap=p.cmap
             )
-
-            with open(p.logdir + '/' + m + '/m.obj', 'wb') as m_file:
-                pickle.dump(dtsr_model, m_file)
 
             if eval:
                 dtsr_preds = dtsr_model.predict(

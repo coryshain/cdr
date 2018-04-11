@@ -1,8 +1,4 @@
-import sys
-import os
-import re
 import argparse
-import pickle
 from dtsr.config import Config
 
 def print_table(beta_summaries, names, beta_names):
@@ -36,51 +32,53 @@ def print_table(beta_summaries, names, beta_names):
     table_str += '\\end{tabular}\n\\end{table}'
     print(table_str)
 
-argparser = argparse.ArgumentParser('''
-Generates a LaTeX table of beta summaries for one or more DTSR models
-''')
-argparser.add_argument('config', help='Path to config file defining models')
-argparser.add_argument('-m', '--models', nargs='+', default=[], help='Folder(s) containing model eval summaries.')
-argparser.add_argument('-n', '--names', nargs='+', default=[], help='Folder(s) containing model eval summaries.')
-argparser.add_argument('-p', '--partition', type=str, default='train', help='Name of partition to use for evaluation (train, dev, or test).')
-args = argparser.parse_args()
+if __name__ == 'main':
 
-p = Config(args.config)
-if len(args.models) == 0:
-    models = p.model_list[:]
-else:
-    models = args.models[:]
+    argparser = argparse.ArgumentParser('''
+    Generates a LaTeX table of beta summaries for one or more DTSR models
+    ''')
+    argparser.add_argument('config', help='Path to config file defining models')
+    argparser.add_argument('-m', '--models', nargs='+', default=[], help='Folder(s) containing model eval summaries.')
+    argparser.add_argument('-n', '--names', nargs='+', default=[], help='Folder(s) containing model eval summaries.')
+    argparser.add_argument('-p', '--partition', type=str, default='train', help='Name of partition to use for evaluation (train, dev, or test).')
+    args = argparser.parse_args()
 
-if len(args.names) == 0:
-    names = p.model_list[:]
-else:
-    assert len(args.names) == len(models), 'Length mismatch between number of models and number of model names'
-    names = args.names
+    p = Config(args.config)
+    if len(args.models) == 0:
+        models = p.model_list[:]
+    else:
+        models = args.models[:]
 
-beta_summaries = {}
-beta_names = set()
+    if len(args.names) == 0:
+        names = p.model_list[:]
+    else:
+        assert len(args.names) == len(models), 'Length mismatch between number of models and number of model names'
+        names = args.names
 
-for i in range(len(models)):
-    m = models[i]
-    name = names[i]
-    beta_summaries[name] = {}
-    with open(p.logdir + '/' + m + '/summary.txt', 'r') as f:
-        l = f.readline()
-        while l and not l.startswith('Posterior integral summaries by predictor'):
+    beta_summaries = {}
+    beta_names = set()
+
+    for i in range(len(models)):
+        m = models[i]
+        name = names[i]
+        beta_summaries[name] = {}
+        with open(p.logdir + '/' + m + '/summary.txt', 'r') as f:
             l = f.readline()
-        f.readline()
-        l = f.readline()
-        while l and len(l.strip()) > 0:
-            row = l.strip().split()
-            assert len(row) == 4, 'Ill-formed row in effect table: "%s"' %l.strip()
-            beta_names.add(row[0])
-            beta_summaries[name][row[0]] = {
-                'mean': float(row[1]),
-                'lower': float(row[2]),
-                'upper': float(row[3])
-            }
+            while l and not l.startswith('Posterior integral summaries by predictor'):
+                l = f.readline()
+            f.readline()
             l = f.readline()
+            while l and len(l.strip()) > 0:
+                row = l.strip().split()
+                assert len(row) == 4, 'Ill-formed row in effect table: "%s"' %l.strip()
+                beta_names.add(row[0])
+                beta_summaries[name][row[0]] = {
+                    'mean': float(row[1]),
+                    'lower': float(row[2]),
+                    'upper': float(row[3])
+                }
+                l = f.readline()
 
-print_table(beta_summaries, names, beta_names)
+    print_table(beta_summaries, names, beta_names)
 
 

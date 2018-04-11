@@ -42,6 +42,7 @@ class BDTSR(DTSR):
         If ``False``, DTSR expands the design matrix into a rank 3 tensor in which the 2nd axis contains the history for each independent variable for each observation of the dependent variable.
         This requires more memory in order to store redundant input values and requires a finite history length.
         However, it removes the need for a control op in the feedforward component and therefore generally runs much faster if GPU is available.
+        *NOTE*: Support for ``low_memory`` (and consequently unbounded history length) has been temporarily suspended, since the high-memory implementation is generally much faster and for many projects model fit is not greatly affected by history truncation. If your project demands unbounded history modeling, please let the developers know on Github so that they can prioritize re-implementing this feature.
     :param float_type: ``str``; the ``float`` type to use throughout the network.
     :param int_type: ``str``; the ``int`` type to use throughout the network (used for tensor slicing).
     :param minibatch_size: ``int`` or ``None``; the size of minibatches to use for fitting/prediction (full-batch if ``None``).
@@ -66,6 +67,8 @@ class BDTSR(DTSR):
     :param learning_rate_min: ``float``; the minimum value for the learning rate.
         If the decay schedule would take the learning rate below this point, learning rate clipping will occur.
         **Note**: This parameter is only used for variational inference. Other inferences will ignore it.
+    :param init_sd: ``float``; standard deviation of truncated normal parameter initializer
+    :param ema_decay: ``float``; decay factor to use for exponential moving average for parameters (used in prediction)
     :param inference_name: ``str``; the Edward inference class to use for fitting.
     :param n_samples: ``int``; the number of samples to draw from the variational posterior if using variational inference.
         If using MCMC, the number of samples is set deterministically as ``n_iter * n_minibatch``, so this user-supplied parameter is ignored.
@@ -79,6 +82,8 @@ class BDTSR(DTSR):
     :param y_sigma_scale: ``float``; the scaling coefficient on the standard deviation of the distribution of the dependent variable.
         Specifically, the DV is assumed to have the standard deviation ``stddev(y_train) * y_sigma_scale``.
         This setup allows the user to configure the output distribution independently of the units of the DV.
+    :param asymmetric_error: ``bool``; whether to apply the ``SinhArcsinh`` transform to the normal error, allowing fitting of skewness and tailweight
+    :param log_graph: ``bool``; whether to log the network graph to Tensorboard
     """
 
 
@@ -87,14 +92,14 @@ class BDTSR(DTSR):
     #
     #  Native methods
     #
-    ######################################################
+    #####################################################
 
     def __init__(
             self,
             form_str,
             X,
             y,
-            outdir,
+            outdir='./dtsr_model/',
             history_length=100,
             low_memory=False,
             pc=False,
@@ -113,6 +118,7 @@ class BDTSR(DTSR):
             lr_decay_rate=0.,
             lr_decay_staircase=False,
             init_sd=1,
+            ema_decay=0.999,
             mh_proposal_sd=1.,
             inference_name='KLqp',
             n_samples=None,
@@ -125,14 +131,14 @@ class BDTSR(DTSR):
             mv_ran=False,
             y_scale_fixed=None,
             y_scale_prior_sd=1,
-            asymmetric_error=False
+            asymmetric_error=False,
+            log_graph=True
     ):
 
         super(BDTSR, self).__init__(
             form_str,
             X,
             y,
-            outdir,
             history_length=history_length,
             low_memory=low_memory,
             pc=pc,
@@ -151,6 +157,8 @@ class BDTSR(DTSR):
             lr_decay_rate=lr_decay_rate,
             lr_decay_staircase=lr_decay_staircase,
             init_sd=init_sd,
+            ema_decay=ema_decay,
+            log_graph=log_graph
         )
 
         self.mv = mv
@@ -206,7 +214,7 @@ class BDTSR(DTSR):
         if self.mv:
             self.__initialize_full_joint__()
 
-        self.build()
+        self.build(outdir)
 
 
     def __getstate__(self):
@@ -254,7 +262,8 @@ class BDTSR(DTSR):
             self.conv_prior_sd,
             self.intercept_prior_sd,
             self.y_scale_prior_sd,
-            self.asymmetric_error
+            self.asymmetric_error,
+            self.ema_decay
         )
 
     def __setstate__(self, state):
@@ -303,10 +312,12 @@ class BDTSR(DTSR):
         self.conv_prior_sd, \
         self.intercept_prior_sd, \
         self.y_scale_prior_sd, \
-        self.asymmetric_error = state
+        self.asymmetric_error, \
+        self.ema_decay = state
 
         self.regularizer_name = None
         self.regularizer_scale = 0
+        self.log_graph=False
 
         self.__initialize_metadata__()
 
@@ -337,8 +348,6 @@ class BDTSR(DTSR):
 
         if self.mv:
             self.__initialize_full_joint__()
-
-        self.build()
 
 
     ######################################################
@@ -1116,7 +1125,7 @@ class BDTSR(DTSR):
                             self.y_skewness_summary,
                             collections=['params']
                         )
-                        
+
                         y_tailweight_loc_q = tf.Variable(
                             tf.random_normal(
                                 [],
@@ -1190,7 +1199,7 @@ class BDTSR(DTSR):
                             self.y_tailweight_summary,
                             collections=['params']
                         )
-                        
+
                     self.inference_map[self.y_skewness] = self.y_skewness_q
                     self.inference_map[self.y_tailweight] = self.y_tailweight_q
 
@@ -1281,10 +1290,10 @@ class BDTSR(DTSR):
             with self.sess.graph.as_default():
                 self.loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='loss_total')
                 tf.summary.scalar('loss', self.loss_total, collections=['loss'])
-                if os.path.exists(self.outdir + '/tensorboard/fixed'):
-                    self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/fixed')
-                else:
+                if self.log_graph:
                     self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/fixed', self.sess.graph)
+                else:
+                    self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/fixed')
                 self.summary_params = tf.summary.merge_all(key='params')
                 self.summary_losses = tf.summary.merge_all(key='loss')
                 if self.log_random and len(self.rangf) > 0:
@@ -1450,6 +1459,7 @@ class BDTSR(DTSR):
                         }
 
                         info_dict = self.inference.update(fd_minibatch)
+                        self.sess.run(self.ema_op)
                         metric_cur = info_dict['loss'] if self.variational() else info_dict['accept_rate']
                         if not np.isfinite(metric_cur):
                             metric_cur = 0
@@ -1499,6 +1509,7 @@ class BDTSR(DTSR):
                     sys.stderr.write('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
 
                 self.inference.finalize()
+                self.save()
 
                 self.make_plots(
                     irf_name_map=irf_name_map,
@@ -1521,7 +1532,7 @@ class BDTSR(DTSR):
                 sys.stderr.write('%s\n\n' % ('='*50))
 
 
-    def predict(self, X, y_time, y_rangf, first_obs, last_obs):
+    def predict(self, X, y_time, y_rangf, first_obs, last_obs, n_samples=None):
         """
         Predict from the pre-trained DTSR model.
         Predictions are averaged over ``self.n_samples_eval`` samples from the predictive posterior for each regression target.
@@ -1545,6 +1556,9 @@ class BDTSR(DTSR):
 
         assert len(y_time) == len(y_rangf) == len(first_obs) == len(last_obs), 'y_time, y_rangf, first_obs, and last_obs must be of identical length. Got: len(y_time) = %d, len(y_rangf) = %d, len(first_obs) = %d, len(last_obs) = %d' % (len(y_time), len(y_rangf), len(first_obs), len(last_obs))
 
+        if n_samples is None:
+            n_samples = self.n_samples_eval
+
         if self.pc:
             impulse_names = self.src_impulse_names
         else:
@@ -1560,10 +1574,13 @@ class BDTSR(DTSR):
         time_y = np.array(y_time, dtype=self.FLOAT_NP)
         gf_y = np.array(y_rangf, dtype=self.INT_NP)
 
-        preds = np.zeros((len(y_time), self.n_samples_eval))
+        preds = np.zeros((len(y_time), n_samples))
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
+
+                self.set_predict_mode(True)
+
                 fd = {
                     self.X: X_3d,
                     self.time_X: time_X_3d,
@@ -1574,7 +1591,7 @@ class BDTSR(DTSR):
                 pb = tf.contrib.keras.utils.Progbar(self.n_eval_minibatch)
 
                 if not np.isfinite(self.eval_minibatch_size):
-                    for j in range(self.n_samples_eval):
+                    for j in range(n_samples):
                         preds[:,j] = self.sess.run(self.out_post, feed_dict=fd)
                 else:
                     for i in range(0, len(y_time), self.eval_minibatch_size):
@@ -1584,7 +1601,7 @@ class BDTSR(DTSR):
                             self.time_y: time_y[i:i + self.eval_minibatch_size],
                             self.gf_y: gf_y[i:i + self.eval_minibatch_size] if len(gf_y) > 0 else gf_y
                         }
-                        for j in range(self.n_samples_eval):
+                        for j in range(n_samples):
                             preds[i:i + self.eval_minibatch_size, j] = self.sess.run(self.out_post, feed_dict=fd_minibatch)
                         pb.update((i/self.eval_minibatch_size)+1, force=True)
 
@@ -1592,9 +1609,11 @@ class BDTSR(DTSR):
 
                 sys.stderr.write('\n\n')
 
+                self.set_predict_mode(False)
+
                 return preds
 
-    def log_lik(self, X, y):
+    def log_lik(self, X, y, n_samples=None):
         """
         Compute log-likelihood of data from predictive posterior.
 
@@ -1615,6 +1634,9 @@ class BDTSR(DTSR):
         :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
         """
 
+        if n_samples is None:
+            n_samples = self.n_samples_eval
+
         if self.pc:
             impulse_names = self.src_impulse_names
         else:
@@ -1632,10 +1654,12 @@ class BDTSR(DTSR):
         y_dv = np.array(y[self.dv], dtype=self.FLOAT_NP)
         gf_y = np.array(y_rangf, dtype=self.INT_NP)
 
-        log_lik = np.zeros((len(time_y), self.n_samples_eval))
+        log_lik = np.zeros((len(time_y), n_samples))
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                self.set_predict_mode(True)
+
                 fd = {
                     self.X: X_3d,
                     self.time_X: time_X_3d,
@@ -1647,7 +1671,7 @@ class BDTSR(DTSR):
                 pb = tf.contrib.keras.utils.Progbar(self.n_eval_minibatch)
 
                 if not np.isfinite(self.eval_minibatch_size):
-                    for j in range(self.n_samples_eval):
+                    for j in range(n_samples):
                         log_lik[:,j] = self.sess.run(self.ll_post, feed_dict=fd)
                 else:
                     for i in range(0, len(time_y), self.eval_minibatch_size):
@@ -1658,18 +1682,20 @@ class BDTSR(DTSR):
                             self.gf_y: gf_y[i:i + self.eval_minibatch_size] if len(gf_y) > 0 else gf_y,
                             self.y: y_dv[i:i+self.eval_minibatch_size]
                         }
-                        for j in range(self.n_samples_eval):
+                        for j in range(n_samples):
                             log_lik[i:i + self.eval_minibatch_size, j] = self.sess.run(self.ll_post, feed_dict=fd_minibatch)
                         pb.update((i/self.eval_minibatch_size)+1, force=True)
 
                 log_lik = log_lik.mean(axis=1)
 
+                self.set_predict_mode(False)
+
                 return log_lik
 
-    def eval(self, X, y, metric=None):
+    def eval(self, X, y, metric=None, n_samples=None):
         """
         Evaluate the pre-trained DTSR model.
-        Metrics are averaged over ``self.n_samples_eval`` samples from the predictive posterior for each regression target.
+        Metrics are averaged over ``n_samples`` (or, if ``None``, ``self.n_samples_eval``) samples from the predictive posterior for each regression target.
 
         :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
             ``X`` must contain the following columns (additional columns are ignored):
@@ -1689,6 +1715,9 @@ class BDTSR(DTSR):
 
         :return: ``tuple``; three floats ``(mse, mae, logLik)`` for the evaluation data.
         """
+
+        if n_samples is None:
+            n_samples = self.n_samples_eval
 
         if metric is None:
             metric = ['mse', 'mae', 'log_lik']
@@ -1718,6 +1747,8 @@ class BDTSR(DTSR):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                self.set_predict_mode(True)
+
                 fd = {
                     self.X: X_3d,
                     self.time_X: time_X_3d,
@@ -1728,7 +1759,7 @@ class BDTSR(DTSR):
                 }
 
                 if not np.isfinite(self.eval_minibatch_size):
-                    out = ed.evaluate(metric, fd, n_samples=self.n_samples_eval)
+                    out = ed.evaluate(metric, fd, n_samples=n_samples)
                 else:
                     n_minibatch = math.ceil(len(y)/self.eval_minibatch_size)
                     out = [0.] * len(metric)
@@ -1744,7 +1775,7 @@ class BDTSR(DTSR):
                             self.y: y_dv[j:j+self.eval_minibatch_size],
                             self.out_post: self.y
                         }
-                        out_cur = ed.evaluate(metric, fd_minibatch, n_samples=self.n_samples_eval)
+                        out_cur = ed.evaluate(metric, fd_minibatch, n_samples=n_samples)
                         for i in range(len(metric)):
                             out[i] += out_cur[i]*len(fd_minibatch[self.y])
                         pb.update((j/self.eval_minibatch_size)+1, force=True)
@@ -1755,6 +1786,8 @@ class BDTSR(DTSR):
 
                 if scalar:
                     out = out[0]
+
+                self.set_predict_mode(False)
 
                 return out
 
@@ -1784,7 +1817,7 @@ class BDTSR(DTSR):
         """
         return super(BDTSR, self).make_plots(**kwargs)
 
-    def run_conv_op(self, feed_dict, scaled=False):
+    def run_conv_op(self, feed_dict, scaled=False, n_samples=None):
         """
         Feedforward a batch of data in feed_dict through the convolutional layer to produce convolved inputs
 
@@ -1793,12 +1826,14 @@ class BDTSR(DTSR):
         :return: ``pandas`` table; The convolved inputs
         """
 
-        X_conv = np.zeros((len(feed_dict[self.X]), self.X_conv.shape[-1], self.n_samples_eval))
+        if n_samples is None:
+            n_samples = self.n_samples_eval
+
+        X_conv = np.zeros((len(feed_dict[self.X]), self.X_conv.shape[-1], n_samples))
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
-
-                for i in range(0, self.n_samples_eval):
+                for i in range(0, n_samples):
                     X_conv[..., i] = self.sess.run(self.X_conv_scaled if scaled else self.X_conv, feed_dict=feed_dict)
                 X_conv = X_conv.mean(axis=2)
                 return X_conv

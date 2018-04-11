@@ -1,7 +1,6 @@
-import sys
 import os
 import re
-from numpy import rint
+import argparse
 
 def print_table(dataset, systems, system_map, tasks, loss_val):
     table_str = '''
@@ -12,7 +11,7 @@ def print_table(dataset, systems, system_map, tasks, loss_val):
     & \\multicolumn{2}{c}{$\\emptyset$} & \\multicolumn{2}{c}{I\\textsubscript{subj}} & \\multicolumn{2}{c}{S\\textsubscript{subj}} \\\\
     Inference type & Train & Test & Train & Test & Train & Test \\\\
     \\hline
-    ''' %dataset
+    ''' % dataset
 
     dir = dataset + '_'
 
@@ -43,17 +42,24 @@ def print_table(dataset, systems, system_map, tasks, loss_val):
     table_str += '\\end{tabular}\n\\end{table}'
     print(table_str)
 
-loss_val = re.compile('  MSE: (.+)')
+if __name__ == '__main__':
 
-datasets = ['natstor', 'dundee', 'ucl']
-systems = ['nn', 'nn_reg', 'prior_loose']
-system_map = {
-    'nn': 'SGD',
-    'nn_reg': 'Regularized SGD',
-    'prior_loose': 'BBVI'
-}
+    argparser = argparse.ArgumentParser('''
+    Generate a LaTeX table summarizing results from DTSR models fit to Natural Stories, UCL, and Dundee.
+    ''')
+    args = argparser.parse_args()
 
-tasks = ['noRE', 'si', 'ss']
+    loss_val = re.compile('  MSE: (.+)')
 
-for d in datasets:
-    print_table(d, systems, system_map, tasks, loss_val)
+    datasets = ['natstor', 'dundee', 'ucl']
+    systems = ['nn', 'nn_reg', 'prior_loose']
+    system_map = {
+        'nn': 'SGD',
+        'nn_reg': 'Regularized SGD',
+        'prior_loose': 'BBVI'
+    }
+
+    tasks = ['noRE', 'si', 'ss']
+
+    for d in datasets:
+        print_table(d, systems, system_map, tasks, loss_val)

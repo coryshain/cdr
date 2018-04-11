@@ -1,16 +1,14 @@
 import argparse
-import os
 import sys
 import pickle
-import numpy as np
 import pandas as pd
-
-pd.options.mode.chained_assignment = None
-
 from dtsr.config import Config
 from dtsr.io import read_data
 from dtsr.formula import Formula
 from dtsr.data import preprocess_data
+from dtsr.dtsr import load_dtsr
+
+pd.options.mode.chained_assignment = None
 
 if __name__ == '__main__':
 
@@ -20,6 +18,7 @@ if __name__ == '__main__':
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='Path to configuration (*.ini) file')
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
+    argparser.add_argument('-n', '--nsamples', type=int, default=1024, help='Number of posterior samples to average (only used for BDTSR)')
     args, unknown = argparser.parse_known_args()
 
     p = Config(args.config_path)
@@ -47,10 +46,9 @@ if __name__ == '__main__':
         dv = formula.strip().split('~')[0].strip()
 
         sys.stderr.write('Retrieving saved model %s...\n' % m)
-        with open(p.logdir + '/' + m + '/m.obj', 'rb') as m_file:
-            dtsr_model = pickle.load(m_file)
+        dtsr_model = load_dtsr(p.logdir + '/' + m)
 
-        X_conv = dtsr_model.convolve_inputs(X, y, scaled=False)
+        X_conv = dtsr_model.convolve_inputs(X, y, scaled=False, n_samples=args.nsamples)
         X_conv.to_csv(p.logdir + '/' + m + '/X_conv.csv', sep=' ', index=False, na_rep='nan')
 
 

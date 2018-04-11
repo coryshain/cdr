@@ -5,6 +5,31 @@ import configparser
 from numpy import inf
 
 class Config(object):
+    """
+    An object containing settings read in from a *.ini file. There are two required headings: ['data'] and ['settings'].
+    The following settings are available in each.
+
+    ['data']
+    :param X_train: ``str``; path to impulse data for the training set
+    :param X_dev: ``str``; path to impulse data for the dev set
+    :param X_test: ``str``; path to impulse data for the test set
+    :param y_train: ``str``; path to response data for the training set
+    :param y_dev: ``str``; path to response data for the dev set
+    :param y_test: ``str``; path to response data for the test set
+    :param split_ids: ``str``; names of columns used for data partitioning (only needed if using DTSR utils for partitioning)
+    :param modulus: ``int``; modulus to use for data partitioning (only needed if using DTSR utils for partitioning)
+    :param series_ids: ``str``; names of columns used to define series (each unique collection of vals in these columns will be considered a distinct series)
+    :param logdir: ``str``; path to output directory (will store checkpoints, Tensorboard logs, plots, and evaluation results)
+    :param pc: ``bool``; whether to use principal components regression (experimental)
+    :param network_type: ``str``; inference type to use, one of 'nn' (neural network) or 'bayes' (Bayesian)
+    :param float_type: ``str``; float type to use
+    :param int_type: ``str``; int type to use
+
+
+
+
+    """
+
     def __init__(self, path):
         config = configparser.ConfigParser()
         config.optionxform = str
@@ -12,7 +37,6 @@ class Config(object):
 
         data = config['data']
         settings = config['settings']
-        filters = config['filters']
 
         ## Data
         self.X_train = data.get('X_train', None)
@@ -94,6 +118,7 @@ class Config(object):
         self.lr_decay_rate = settings.getfloat('lr_decay_rate', .1)
         self.lr_decay_staircase = settings.getboolean('lr_decay_staircase', False)
         self.init_sd = settings.getfloat('init_sd', 1.)
+        self.ema_decay = settings.getfloat('ema_decay', 0.999)
 
         ## NN settings
         self.loss = settings.get('loss', 'MSE')
@@ -122,9 +147,11 @@ class Config(object):
 
 
         ## Filters
-        self.filter_map = {}
-        for f in filters:
-            self.filter_map[f] = [x.strip() for x in filters[f].strip().split(',')]
+        if 'filters' in config:
+            filters = config['filters']
+            self.filter_map = {}
+            for f in filters:
+                self.filter_map[f] = [x.strip() for x in filters[f].strip().split(',')]
 
         ## Model(s)
         self.models = {}
