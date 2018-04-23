@@ -32,15 +32,14 @@ def print_table(beta_summaries, names, beta_names):
     table_str += '\\end{tabular}\n\\end{table}'
     print(table_str)
 
-if __name__ == 'main':
+if __name__ == '__main__':
 
     argparser = argparse.ArgumentParser('''
     Generates a LaTeX table of beta summaries for one or more DTSR models
     ''')
     argparser.add_argument('config', help='Path to config file defining models')
-    argparser.add_argument('-m', '--models', nargs='+', default=[], help='Folder(s) containing model eval summaries.')
-    argparser.add_argument('-n', '--names', nargs='+', default=[], help='Folder(s) containing model eval summaries.')
-    argparser.add_argument('-p', '--partition', type=str, default='train', help='Name of partition to use for evaluation (train, dev, or test).')
+    argparser.add_argument('-m', '--models', nargs='+', default=[], help='Folder name(s) containing model eval summaries (if blank applies to all models described in config file).')
+    argparser.add_argument('-n', '--names', nargs='*', default=[], help='Model names to print in table (must be omitted or same length as --models).')
     args = argparser.parse_args()
 
     p = Config(args.config)

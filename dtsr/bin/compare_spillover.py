@@ -11,7 +11,7 @@ def getPrintTable(row_collection, key_list, field_sep=' '):
           for k in key_list ]])])
             for row in row_collection])
 
-if __name__ == 'main':
+if __name__ == '__main__':
 
     argparser = argparse.ArgumentParser('''
     Generate a summary table from a batch of spillover optimization runs.

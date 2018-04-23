@@ -396,7 +396,7 @@ class NNDTSR(DTSR):
                 else:
                     self.loss_func = self.mse_loss
                 if self.regularizer_name is not None:
-                    self.loss_func += self.regularizer_scale * tf.add_n(self.regularizer_losses)
+                    self.loss_func += tf.add_n(self.regularizer_losses)
                 self.loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='loss_total')
                 tf.summary.scalar('loss/%s' % self.loss_name, self.loss_total, collections=['loss'])
 
@@ -415,6 +415,13 @@ class NNDTSR(DTSR):
                     global_step=self.global_batch_step,
                     name=sn('optim')
                 )
+
+                ## Likelihood ops
+                self.y_scale = tf.Variable(self.y_scale_init, dtype=self.FLOAT_TF)
+                self.set_y_scale = tf.assign(self.y_scale, self.loss_total)
+                s = self.y_scale
+                y_dist = tf.distributions.Normal(loc=self.out, scale=self.y_scale)
+                self.ll = y_dist.log_prob(self.y)
 
     def __initialize_logging__(self):
         f = self.form
@@ -700,7 +707,7 @@ class NNDTSR(DTSR):
                     self.writer.add_summary(summary_train_loss, self.global_step.eval(session=self.sess))
 
                 while self.global_step.eval(session=self.sess) < n_iter:
-                    p, p_inv = getRandomPermutation(len(y))
+                    p, p_inv = get_random_permutation(len(y))
                     t0_iter = time.time()
                     sys.stderr.write('-' * 50 + '\n')
                     sys.stderr.write('Iteration %d\n' % int(self.global_step.eval(session=self.sess) + 1))
@@ -768,6 +775,22 @@ class NNDTSR(DTSR):
                             summary_random = self.sess.run(self.summary_random)
                             self.writer.add_summary(summary_random, self.global_step.eval(session=self.sess))
 
+                    if self.loss_name.lower() == 'mae':
+                        for j in range(0, len(y), self.minibatch_size):
+                            fd_minibatch[self.y] = y_dv[j:j + minibatch_size]
+                            fd_minibatch[self.time_y] = time_y[j:j + minibatch_size]
+                            fd_minibatch[self.gf_y] = gf_y[j:j + minibatch_size]
+                            if self.low_memory:
+                                fd_minibatch[self.first_obs] = first_obs[j:j + minibatch_size]
+                                fd_minibatch[self.last_obs] = last_obs[j:j + minibatch_size]
+                            else:
+                                fd_minibatch[self.X] = X_3d[j:j + minibatch_size]
+                                fd_minibatch[self.time_X] = time_X_3d[j:j + minibatch_size]
+                            loss_total += self.sess.run(self.mse_loss, feed_dict=fd_minibatch) * len(fd_minibatch[self.y])
+                        loss_total /= len(y)
+
+                    self.sess.run(self.set_y_scale, feed_dict={self.loss_total: math.sqrt(loss_total)})
+
                     t1_iter = time.time()
 
                     # sys.stderr.write('Maximum gradient norm: %s\n' %max_grad)
@@ -781,6 +804,22 @@ class NNDTSR(DTSR):
                     plot_y_inches=plot_y_inches,
                     cmap=cmap
                 )
+
+                loss_total = 0.
+                for j in range(0, len(y), self.minibatch_size):
+                    fd_minibatch[self.y] = y_dv[j:j + minibatch_size]
+                    fd_minibatch[self.time_y] = time_y[j:j + minibatch_size]
+                    fd_minibatch[self.gf_y] = gf_y[j:j + minibatch_size]
+                    if self.low_memory:
+                        fd_minibatch[self.first_obs] = first_obs[j:j + minibatch_size]
+                        fd_minibatch[self.last_obs] = last_obs[j:j + minibatch_size]
+                    else:
+                        fd_minibatch[self.X] = X_3d[j:j + minibatch_size]
+                        fd_minibatch[self.time_X] = time_X_3d[j:j + minibatch_size]
+                    loss_total += self.sess.run(self.mse_loss, feed_dict=fd_minibatch) * len(fd_minibatch[self.y])
+                loss_total /= len(y)
+                self.sess.run(self.set_y_scale, feed_dict={self.loss_total: math.sqrt(loss_total)})
+
 
     def predict(self, X, y_time, y_rangf, first_obs, last_obs, n_samples=None):
         """
@@ -863,9 +902,9 @@ class NNDTSR(DTSR):
 
                 return preds
 
-    def eval(self, X, y, n_samples=None):
+    def log_lik(self, X, y, n_samples=None):
         """
-        Evaluate the pre-trained DTSR model.
+        Compute log-likelihood of data from predictive posterior.
 
         :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
             ``X`` must contain the following columns (additional columns are ignored):
@@ -881,8 +920,9 @@ class NNDTSR(DTSR):
             * A column with the same name as the DV specified in ``form_str``
             * A column for each random grouping factor in the model specified in ``form_str``.
 
-        :return: ``float`` (scalar); the value of the evaluation metric (MSE/MAE) for the evaluation data.
+        :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
         """
+
         if self.pc:
             impulse_names = self.src_impulse_names
         else:
@@ -893,59 +933,44 @@ class NNDTSR(DTSR):
             c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
 
-        if self.low_memory:
-            X_2d = X[impulse_names]
-            time_X_2d = np.array(X.time, dtype=self.FLOAT_NP)
-            first_obs = np.array(y.first_obs, dtype=self.INT_NP)
-            last_obs = np.array(y.last_obs, dtype=self.INT_NP)
-        else:
-            X_3d, time_X_3d = self.expand_history(X[impulse_names], X.time, y.first_obs, y.last_obs)
+        X_3d, time_X_3d = self.expand_history(X[impulse_names], X.time, y.first_obs, y.last_obs)
         time_y = np.array(y.time, dtype=self.FLOAT_NP)
-        gf_y = np.array(y_rangf, dtype=self.INT_NP)
         y_dv = np.array(y[self.dv], dtype=self.FLOAT_NP)
+        gf_y = np.array(y_rangf, dtype=self.INT_NP)
+
+        log_lik = np.zeros(len(y))
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
+
+                print(self.y_scale.eval(session=self.sess))
+                self.set_predict_mode(True)
+
                 fd = {
+                    self.X: X_3d,
+                    self.time_X: time_X_3d,
                     self.time_y: time_y,
-                    self.gf_y: gf_y
+                    self.gf_y: gf_y,
+                    self.y: y_dv
                 }
 
-                if self.low_memory:
-                    fd[self.X] = X_2d
-                    fd[self.time_X] = time_X_2d
-                    fd[self.first_obs] = first_obs
-                    fd[self.last_obs] = last_obs
-                    fd[self.y] = y_dv
-                else:
-                    fd[self.X] = X_3d
-                    fd[self.time_X] = time_X_3d
-                    fd[self.y] = y_dv
-
-                fd_minibatch = {
-                    self.X: fd[self.X],
-                    self.time_X: fd[self.time_X]
-                }
-
-                out = 0.
 
                 if not np.isfinite(self.eval_minibatch_size):
-                    out = self.sess.run(self.loss_func, feed_dict=fd)
+                    log_lik = self.sess.run(self.ll, feed_dict=fd)
                 else:
-                    for j in range(0, len(y), self.eval_minibatch_size):
-                        fd_minibatch[self.y] = y_dv[j:j + self.eval_minibatch_size]
-                        fd_minibatch[self.time_y] = time_y[j:j + self.eval_minibatch_size]
-                        fd_minibatch[self.gf_y] = gf_y[j:j + self.eval_minibatch_size]
-                        if self.low_memory:
-                            fd_minibatch[self.first_obs] = first_obs[j:j + self.eval_minibatch_size]
-                            fd_minibatch[self.last_obs] = last_obs[j:j + self.eval_minibatch_size]
-                        else:
-                            fd_minibatch[self.X] = X_3d[j:j + self.eval_minibatch_size]
-                            fd_minibatch[self.time_X] = time_X_3d[j:j + self.eval_minibatch_size]
-                        out += self.sess.run(self.loss_func, feed_dict=fd_minibatch)*len(fd_minibatch[self.y])
-                    out /= len(y)
+                    for i in range(0, len(time_y), self.eval_minibatch_size):
+                        fd_minibatch = {
+                            self.X: X_3d[i:i + self.eval_minibatch_size],
+                            self.time_X: time_X_3d[i:i + self.eval_minibatch_size],
+                            self.time_y: time_y[i:i + self.eval_minibatch_size],
+                            self.gf_y: gf_y[i:i + self.eval_minibatch_size] if len(gf_y) > 0 else gf_y,
+                            self.y: y_dv[i:i+self.eval_minibatch_size]
+                        }
+                        log_lik[i:i + self.eval_minibatch_size] = self.sess.run(self.ll, feed_dict=fd_minibatch)
 
-                return out
+                self.set_predict_mode(False)
+
+                return log_lik
 
     def make_plots(self, **kwargs):
         """

@@ -1,9 +1,8 @@
-import sys
 import argparse
 import pandas as pd
 from dtsr.data import compute_splitID, compute_partition
 
-if __name__ == 'main':
+if __name__ == '__main__':
     argparser = argparse.ArgumentParser('''
         A utility for splitting a dataset into train, test, and dev sets given splitting criteria.
     ''')

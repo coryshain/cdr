@@ -1,5 +1,4 @@
 import os
-import pickle
 from collections import defaultdict
 from numpy import inf
 import pandas as pd
@@ -14,24 +13,6 @@ tf_config.gpu_options.allow_growth = True
 from .formula import *
 from .util import *
 from .plot import *
-
-
-
-
-def load_dtsr(dir_path):
-    """
-    Convenience method for reconstructing a saved DTSR object. First loads in metadata from ``m.obj``, then uses
-    that metadata to construct the computation graph. Then, if saved weights are found, these are loaded into the
-    graph.
-
-    :param dir_path: Path to directory containing the DTSR checkpoint files.
-    :return: The loaded DTSR instance.
-    """
-    with open(dir_path + '/m.obj', 'rb') as f:
-        m = pickle.load(f)
-    m.build(outdir=dir_path)
-    m.load(dir=dir_path)
-    return m
 
 class DTSR(object):
     """
@@ -163,7 +144,6 @@ class DTSR(object):
             self.n_eval_minibatch = math.ceil(float(self.n_train) / self.eval_minibatch_size)
         else:
             self.n_eval_minibatch = 1
-            self.eval_minibatch_size = 1
         self.regularizer_losses = []
 
         # Initialize lookup tables of network objects
@@ -1472,6 +1452,7 @@ class DTSR(object):
                 self.__initialize_ema__()
                 self.__initialize_saver__()
                 self.load(restore=restore)
+
                 self.__collect_plots__()
                 self.report_n_params()
 

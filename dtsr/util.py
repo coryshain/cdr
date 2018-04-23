@@ -28,15 +28,11 @@ def r_squared(true, preds):
 def powerset(n):
     return np.indices([2]*n).reshape(n, -1).T[1:].astype('int32')
 
-def getRandomPermutation(n):
+def get_random_permutation(n):
     p = np.random.permutation(np.arange(n))
     p_inv = np.zeros_like(p)
     p_inv[p] = np.arange(n)
     return p, p_inv
-
-def print_tee(s, file_list):
-    for f in file_list:
-        print(s, file=f)
 
 def logLik(res):
     N = len(res)
@@ -175,3 +171,18 @@ def lrt(ll1, ll2, df):
     M = ll1 if ll1 > ll2 else ll2
     m = ll1 if ll1 < ll2 else ll1
     return chi2.pdf(2 * (M - m), df)
+
+def load_dtsr(dir_path):
+    """
+    Convenience method for reconstructing a saved DTSR object. First loads in metadata from ``m.obj``, then uses
+    that metadata to construct the computation graph. Then, if saved weights are found, these are loaded into the
+    graph.
+
+    :param dir_path: Path to directory containing the DTSR checkpoint files.
+    :return: The loaded DTSR instance.
+    """
+    with open(dir_path + '/m.obj', 'rb') as f:
+        m = pickle.load(f)
+    m.build(outdir=dir_path)
+    m.load(dir=dir_path)
+    return m

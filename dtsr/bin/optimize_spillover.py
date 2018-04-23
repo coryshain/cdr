@@ -7,6 +7,12 @@ import pandas as pd
 from dtsr.baselines import LM
 import gc
 
+from dtsr.config import Config
+from dtsr.io import read_data
+from dtsr.formula import Formula
+from dtsr.data import preprocess_data, compute_splitID, compute_partition
+from dtsr.util import mse, mae
+
 pd.options.mode.chained_assignment = None
 
 splitter = re.compile(' *[-+|:] *')
@@ -59,11 +65,6 @@ def permute_spillover(bform, preds, perms):
         forms.append(''.join(l))
     return(forms)
 
-from dtsr.config import Config
-from dtsr.io import read_data
-from dtsr.formula import Formula
-from dtsr.data import preprocess_data, compute_splitID, compute_partition
-from dtsr.util import print_tee, mse, mae
 
 if __name__ == '__main__':
 
@@ -141,5 +142,6 @@ if __name__ == '__main__':
         summary += '  MAE: %.4f\n' % lm_mae
         summary += '=' * 50 + '\n'
         with open(p.logdir + '/spillover/' + m + '.txt', 'w') as f_out:
-            print_tee(summary, [sys.stdout, f_out])
+            f_out.write(summary)
+        sys.stderr.write(summary)
         sys.stderr.write('\n\n')

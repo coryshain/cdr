@@ -4,6 +4,8 @@ import numpy as np
 import pandas as pd
 from dtsr.config import Config
 from dtsr.signif import bootstrap
+from matplotlib import pyplot as plt
+
 
 if __name__ == '__main__':
 
@@ -17,6 +19,8 @@ if __name__ == '__main__':
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='Path to configuration (*.ini) file')
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
+    argparser.add_argument('-M', '--metric', type=str, default='loss', help='Metric to use for comparison (either "loss" or "loglik")')
+    argparser.add_argument('-t', '--tails', type=int, default=2, help='Number of tails (1 or 2)')
     args, unknown = argparser.parse_known_args()
 
     p = Config(args.config_path)
@@ -35,23 +39,31 @@ if __name__ == '__main__':
 
     sys.stderr.write('\n')
     dtsr_models = [x for x in models if x.startswith('DTSR')]
-    for m1 in dtsr_models:
-        trial_name = (m1 if '_' in m1 else m1+'_').strip().split('_')[1]
-        for m2 in models:
-            if m2 != m1 and (m2 if '_' in m2 else m2+'_').strip().split('_')[1] == trial_name:
-                a = pd.read_csv(p.logdir + '/' + m1 + '/%s_losses_%s.txt'%(p.loss, args.partition), sep=' ', header=None, skipinitialspace=True)
-                b = pd.read_csv(p.logdir + '/' + m2 + '/%s_losses_%s.txt'%(p.loss, args.partition), sep=' ', header=None, skipinitialspace=True)
-                select = np.logical_and(np.isfinite(np.array(a)), np.isfinite(np.array(b)))
-                diff = float(len(a) - select.sum())
-                p_value, base_diff = bootstrap(a[select], b[select], n_iter=10000)
-                sys.stderr.write('\n')
-                print('='*50)
-                print('Model comparison: %s vs %s' %(m1, m2))
+
+    if args.metric == 'loss':
+        file_name = '/%s_losses_%s.txt'%(p.loss, args.partition)
+    else:
+        file_name = '/loglik_%s.txt'%args.partition
+
+    for i in range(len(dtsr_models)):
+        m1 = dtsr_models[i]
+        for j in range(i+1, len(dtsr_models)):
+            m2 = dtsr_models[j]
+            name = '%s_v_%s' %(m1, m2)
+            a = pd.read_csv(p.logdir + '/' + m1 + file_name, sep=' ', header=None, skipinitialspace=True)
+            b = pd.read_csv(p.logdir + '/' + m2 + file_name, sep=' ', header=None, skipinitialspace=True)
+            select = np.logical_and(np.isfinite(np.array(a)), np.isfinite(np.array(b)))
+            diff = float(len(a) - select.sum())
+            p_value, base_diff, diffs = bootstrap(a[select], b[select], n_iter=10000, n_tails=args.tails, mode=args.metric)
+            sys.stderr.write('\n')
+            with open(p.logdir + '/' + name + '_' + args.partition + '.txt', 'w') as f:
+                f.write('='*50 + '\n')
+                f.write('Model comparison: %s vs %s\n' %(m1, m2))
                 if diff > 0:
-                    print('%d NaN rows filtered out (out of %d)' %(diff, len(a)))
-                print('Partition: %s' %args.partition)
-                print('Loss difference: %.4f' %base_diff)
-                print('p: %.4e' %p_value)
-                print('='*50)
-                print()
-                print()
+                    f.write('%d NaN rows filtered out (out of %d)\n' %(diff, len(a)))
+                f.write('Partition: %s\n' %args.partition)
+                f.write('Loss difference: %.4f\n' %base_diff)
+                f.write('p: %.4e\n' %p_value)
+                f.write('='*50 + '\n')
+            plt.hist(diffs, bins=1000)
+            plt.savefig(p.logdir + '/' + name + '_' + args.partition + '.png')

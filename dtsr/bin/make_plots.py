@@ -1,8 +1,7 @@
 import argparse
 import sys
-import pickle
 from dtsr.config import Config
-from dtsr.dtsr import load_dtsr
+from dtsr.util import load_dtsr
 
 if __name__ == '__main__':
 

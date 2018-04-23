@@ -7,16 +7,12 @@ import numpy as np
 interact = re.compile('([^ ]+):([^ ]+)')
 
 def z(df):
-    # sys.stderr.write('SD of %s:\n'%df.name)
-    # sys.stderr.write(str(df.std(axis=0)) + '\n')
     return (df-df.mean(axis=0))/df.std(axis=0)
 
 def c(df):
     return df-df.mean(axis=0)
 
 def s(df):
-    # sys.stderr.write('SD of %s:\n'%df.name)
-    # sys.stderr.write(str(df.std(axis=0)) + '\n')
     return df/df.std(axis=0)
 
 class Formula(object):

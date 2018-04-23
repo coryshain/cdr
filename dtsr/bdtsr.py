@@ -1019,7 +1019,7 @@ class BDTSR(DTSR):
                         assert len(ix) == 1, 'There should be exactly 1 parameter called "y_scale"'
                         ix = ix[0]
                         y_scale = self.full_joint[ix]
-                        y_scale_summary = self.full_joint_q.mean()[ix]
+                        y_scale_summary = tf.nn.softplus(self.full_joint_q.mean()[ix])
                     else:
                         y_scale_mean_init = self.y_scale_mean_init
                         y_scale = Normal(
@@ -1074,7 +1074,7 @@ class BDTSR(DTSR):
 
                     tf.summary.scalar(
                         'y_scale',
-                        y_scale_summary,
+                        tf.nn.softplus(y_scale_summary),
                         collections=['params']
                     )
                 else:
@@ -1152,7 +1152,7 @@ class BDTSR(DTSR):
                         self.y_tailweight_summary = self.y_tailweight_q.mean()
                         tf.summary.scalar(
                             'y_tailweight',
-                            self.y_tailweight_summary,
+                            tf.nn.softplus(self.y_tailweight_summary),
                             collections=['params']
                         )
                     else:
@@ -1196,7 +1196,7 @@ class BDTSR(DTSR):
                         self.y_tailweight_summary = self.y_tailweight_q.params[self.global_batch_step - 1]
                         tf.summary.scalar(
                             'y_tailweight',
-                            self.y_tailweight_summary,
+                            tf.nn.softplus(self.y_tailweight_summary),
                             collections=['params']
                         )
 
@@ -1435,7 +1435,7 @@ class BDTSR(DTSR):
 
                 sys.stderr.write('Running %s inference...\n' % self.inference_name)
                 while self.global_step.eval(session=self.sess) < self.n_iter:
-                    p, p_inv = getRandomPermutation(len(y))
+                    p, p_inv = get_random_permutation(len(y))
                     t0_iter = time.time()
                     sys.stderr.write('-' * 50 + '\n')
                     sys.stderr.write('Iteration %d\n' % int(self.global_step.eval(session=self.sess) + 1))
@@ -1588,13 +1588,16 @@ class BDTSR(DTSR):
                     self.gf_y: gf_y,
                 }
 
-                pb = tf.contrib.keras.utils.Progbar(self.n_eval_minibatch)
 
                 if not np.isfinite(self.eval_minibatch_size):
+                    pb = tf.contrib.keras.utils.Progbar(n_samples)
                     for j in range(n_samples):
                         preds[:,j] = self.sess.run(self.out_post, feed_dict=fd)
+                        pb.update(j+1, force=True)
                 else:
                     for i in range(0, len(y_time), self.eval_minibatch_size):
+                        sys.stderr.write('Minibatch %d/%d\n' %((i/self.eval_minibatch_size)+1, self.n_eval_minibatch))
+                        pb = tf.contrib.keras.utils.Progbar(n_samples)
                         fd_minibatch = {
                             self.X: X_3d[i:i + self.eval_minibatch_size],
                             self.time_X: time_X_3d[i:i + self.eval_minibatch_size],
@@ -1603,7 +1606,7 @@ class BDTSR(DTSR):
                         }
                         for j in range(n_samples):
                             preds[i:i + self.eval_minibatch_size, j] = self.sess.run(self.out_post, feed_dict=fd_minibatch)
-                        pb.update((i/self.eval_minibatch_size)+1, force=True)
+                            pb.update(j+1, force=True)
 
                 preds = preds.mean(axis=1)
 
@@ -1668,13 +1671,17 @@ class BDTSR(DTSR):
                     self.y: y_dv
                 }
 
-                pb = tf.contrib.keras.utils.Progbar(self.n_eval_minibatch)
 
                 if not np.isfinite(self.eval_minibatch_size):
+                    pb = tf.contrib.keras.utils.Progbar(n_samples)
                     for j in range(n_samples):
                         log_lik[:,j] = self.sess.run(self.ll_post, feed_dict=fd)
+                        pb.update(j+1, force=True)
                 else:
                     for i in range(0, len(time_y), self.eval_minibatch_size):
+                        sys.stderr.write('Minibatch %d/%d\n' %((i/self.eval_minibatch_size)+1, self.n_eval_minibatch))
+                        pb = tf.contrib.keras.utils.Progbar(n_samples)
+
                         fd_minibatch = {
                             self.X: X_3d[i:i + self.eval_minibatch_size],
                             self.time_X: time_X_3d[i:i + self.eval_minibatch_size],
@@ -1684,112 +1691,13 @@ class BDTSR(DTSR):
                         }
                         for j in range(n_samples):
                             log_lik[i:i + self.eval_minibatch_size, j] = self.sess.run(self.ll_post, feed_dict=fd_minibatch)
-                        pb.update((i/self.eval_minibatch_size)+1, force=True)
+                            pb.update(j+1, force=True)
 
                 log_lik = log_lik.mean(axis=1)
 
                 self.set_predict_mode(False)
 
                 return log_lik
-
-    def eval(self, X, y, metric=None, n_samples=None):
-        """
-        Evaluate the pre-trained DTSR model.
-        Metrics are averaged over ``n_samples`` (or, if ``None``, ``self.n_samples_eval``) samples from the predictive posterior for each regression target.
-
-        :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
-            ``X`` must contain the following columns (additional columns are ignored):
-
-            * ``time``: Timestamp associated with each observation in ``X``
-            * A column for each independent variable in the DTSR ``form_str`` provided at iniialization
-
-        :param y: ``pandas`` table; the dependent variable. Must contain the following columns:
-
-            * ``time``: Timestamp associated with each observation in ``y``
-            * ``first_obs``:  Index in the design matrix `X` of the first observation in the time series associated with each entry in ``y``
-            * ``last_obs``:  Index in the design matrix `X` of the immediately preceding observation in the time series associated with each entry in ``y``
-            * A column with the same name as the DV specified in ``form_str``
-            * A column for each random grouping factor in the model specified in ``form_str``.
-
-        :param metric: ``str''; name of evaluation metric
-
-        :return: ``tuple``; three floats ``(mse, mae, logLik)`` for the evaluation data.
-        """
-
-        if n_samples is None:
-            n_samples = self.n_samples_eval
-
-        if metric is None:
-            metric = ['mse', 'mae', 'log_lik']
-
-        if not isinstance(metric, list):
-            scalar = True
-            metric = [metric]
-        else:
-            scalar = False
-
-        if self.pc:
-            impulse_names = self.src_impulse_names
-        else:
-            impulse_names  = self.impulse_names
-
-        sys.stderr.write('Sampling from predictive posterior...\n')
-
-        y_rangf = y[self.rangf]
-        for i in range(len(self.rangf)):
-            c = self.rangf[i]
-            y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
-
-        X_3d, time_X_3d = self.expand_history(X[impulse_names], X.time, y.first_obs, y.last_obs)
-        time_y = np.array(y.time, dtype=self.FLOAT_NP)
-        y_dv = np.array(y[self.dv], dtype=self.FLOAT_NP)
-        gf_y = np.array(y_rangf, dtype=self.INT_NP)
-
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                self.set_predict_mode(True)
-
-                fd = {
-                    self.X: X_3d,
-                    self.time_X: time_X_3d,
-                    self.time_y: time_y,
-                    self.gf_y: gf_y,
-                    self.y: y_dv,
-                    self.out_post: self.y
-                }
-
-                if not np.isfinite(self.eval_minibatch_size):
-                    out = ed.evaluate(metric, fd, n_samples=n_samples)
-                else:
-                    n_minibatch = math.ceil(len(y)/self.eval_minibatch_size)
-                    out = [0.] * len(metric)
-
-                    pb = tf.contrib.keras.utils.Progbar(n_minibatch)
-
-                    for j in range(0, len(y), self.eval_minibatch_size):
-                        fd_minibatch = {
-                            self.X: X_3d[j:j+self.eval_minibatch_size],
-                            self.time_X: time_X_3d[j:j+self.eval_minibatch_size],
-                            self.time_y: time_y[j:j+self.eval_minibatch_size],
-                            self.gf_y: gf_y[j:j+self.eval_minibatch_size] if len(gf_y) > 0 else gf_y,
-                            self.y: y_dv[j:j+self.eval_minibatch_size],
-                            self.out_post: self.y
-                        }
-                        out_cur = ed.evaluate(metric, fd_minibatch, n_samples=n_samples)
-                        for i in range(len(metric)):
-                            out[i] += out_cur[i]*len(fd_minibatch[self.y])
-                        pb.update((j/self.eval_minibatch_size)+1, force=True)
-
-                for i in range(len(metric)):
-                    if metric[i] not in ['log_lik', 'log_likelihood']:
-                        out[i] /= len(y)
-
-                if scalar:
-                    out = out[0]
-
-                self.set_predict_mode(False)
-
-                return out
 
     def make_plots(self, **kwargs):
         """
@@ -1833,8 +1741,11 @@ class BDTSR(DTSR):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                sys.stderr.write('Convolving input features...\n')
+                pb = tf.contrib.keras.utils.Progbar(n_samples)
                 for i in range(0, n_samples):
                     X_conv[..., i] = self.sess.run(self.X_conv_scaled if scaled else self.X_conv, feed_dict=feed_dict)
+                    pb.update(i + 1, force=True)
                 X_conv = X_conv.mean(axis=2)
                 return X_conv
 

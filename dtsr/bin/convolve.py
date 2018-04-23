@@ -6,7 +6,7 @@ from dtsr.config import Config
 from dtsr.io import read_data
 from dtsr.formula import Formula
 from dtsr.data import preprocess_data
-from dtsr.dtsr import load_dtsr
+from dtsr.util import load_dtsr
 
 pd.options.mode.chained_assignment = None
 
@@ -19,6 +19,7 @@ if __name__ == '__main__':
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='Path to configuration (*.ini) file')
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
     argparser.add_argument('-n', '--nsamples', type=int, default=1024, help='Number of posterior samples to average (only used for BDTSR)')
+    argparser.add_argument('-s', '--scaled', action='store_true', help='Multiply outputs by DTSR-fitted coefficients')
     args, unknown = argparser.parse_known_args()
 
     p = Config(args.config_path)
@@ -27,8 +28,8 @@ if __name__ == '__main__':
     else:
         models = p.model_list[:]
 
-    dtsr_formula_list = [Formula(p.models[m]['formula']) for m in p.model_list if m.startswith('DTSR')]
-    dtsr_formula_name_list = [m for m in p.model_list if m.startswith('DTSR')]
+    dtsr_formula_list = [Formula(p.models[m]['formula']) for m in models if m.startswith('DTSR')]
+    dtsr_formula_name_list = [m for m in models if m.startswith('DTSR')]
 
     if args.partition == 'train':
         X, y = read_data(p.X_train, p.y_train, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in dtsr_formula_list for v in x.rangf])))
@@ -48,7 +49,7 @@ if __name__ == '__main__':
         sys.stderr.write('Retrieving saved model %s...\n' % m)
         dtsr_model = load_dtsr(p.logdir + '/' + m)
 
-        X_conv = dtsr_model.convolve_inputs(X, y, scaled=False, n_samples=args.nsamples)
+        X_conv = dtsr_model.convolve_inputs(X, y, scaled=args.scaled, n_samples=args.nsamples)
         X_conv.to_csv(p.logdir + '/' + m + '/X_conv.csv', sep=' ', index=False, na_rep='nan')
 
 

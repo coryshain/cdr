@@ -2,7 +2,7 @@ import sys
 import numpy as np
 import math
 
-def bootstrap(err_1, err_2, n_iter=10000, n_tails=2, mode='loss'):
+def bootstrap(err_1, err_2, n_iter=10000, n_tails=2, mode='loss', verbose=False):
     err_table = np.stack([err_1, err_2], 1)
     if mode == 'loss':
         base_diff = err_table[:,0].mean() - err_table[:,1].mean()
@@ -10,8 +10,17 @@ def bootstrap(err_1, err_2, n_iter=10000, n_tails=2, mode='loss'):
         base_diff = err_table[:,0].sum() - err_table[:,1].sum()
     else:
         raise ValueError('Unrecognized aggregation function "%s" in permutation test' %mode)
+
+    if base_diff == 0:
+        return (1.0, base_diff, np.zeros((n_iter,)))
+
     hits = 0
+    if verbose:
+        sys.stderr.write('Difference in test statistic: %s\n' %base_diff)
     sys.stderr.write('Permutation testing...\n')
+
+    diffs = np.zeros((n_iter,))
+
     for i in range(n_iter):
         sys.stderr.write('\r%d/%d' %(i+1, n_iter))
         sys.stderr.flush()
@@ -22,15 +31,16 @@ def bootstrap(err_1, err_2, n_iter=10000, n_tails=2, mode='loss'):
             cur_diff = m1.mean() - m2.mean()
         else:
             cur_diff = m1.sum() - m2.sum()
+        diffs[i] = cur_diff
         if n_tails == 1:
             if base_diff < 0 and cur_diff <= base_diff:
                 hits += 1
             elif base_diff > 0 and cur_diff >= base_diff:
                 hits += 1
-            elif base_diff == 0:
-                hits += 1
         elif n_tails == 2:
             if math.fabs(cur_diff) > math.fabs(base_diff):
+                if verbose:
+                    sys.stderr.write('Hit on iteration %d: %s\n' %(i, cur_diff))
                 hits += 1
         else:
             raise ValueError('Invalid bootstrap parameter n_tails: %s. Must be in {0, 1}.' %n_tails)
@@ -39,4 +49,4 @@ def bootstrap(err_1, err_2, n_iter=10000, n_tails=2, mode='loss'):
 
     sys.stderr.write('\n')
 
-    return p, base_diff
+    return p, base_diff, diffs

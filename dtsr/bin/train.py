@@ -11,8 +11,7 @@ from dtsr.config import Config
 from dtsr.io import read_data
 from dtsr.formula import Formula
 from dtsr.data import preprocess_data, compute_splitID, compute_partition
-from dtsr.util import print_tee, mse, mae, r_squared
-from dtsr.dtsr import load_dtsr
+from dtsr.util import mse, mae, r_squared, load_dtsr
 
 if __name__ == '__main__':
 
@@ -108,8 +107,10 @@ if __name__ == '__main__':
             summary += '  MAE: %.4f\n' % lme_mae
             summary += '=' * 50 + '\n'
             with open(p.logdir + '/' + m + '/summary.txt', 'w') as f_out:
-                print_tee(summary, [sys.stdout, f_out])
+                f_out.write(summary)
+            sys.stderr.write(summary)
             sys.stderr.write('\n\n')
+
         elif m.startswith('LM'):
             from dtsr.baselines import LM
 
@@ -139,8 +140,10 @@ if __name__ == '__main__':
             summary += '  MAE: %.4f\n' % lm_mae
             summary += '=' * 50 + '\n'
             with open(p.logdir + '/' + m + '/summary.txt', 'w') as f_out:
-                print_tee(summary, [sys.stdout, f_out])
+                f_out.write(summary)
+            sys.stderr.write(summary)
             sys.stderr.write('\n\n')
+
         elif m.startswith('GAM'):
             import re
             from dtsr.baselines import GAM
@@ -180,8 +183,10 @@ if __name__ == '__main__':
             summary += '  MAE: %.4f\n' % gam_mae
             summary += '=' * 50 + '\n'
             with open(p.logdir + '/' + m + '/summary.txt', 'w') as f_out:
-                print_tee(summary, [sys.stdout, f_out])
+                f_out.write(summary)
+            sys.stderr.write(summary)
             sys.stderr.write('\n\n')
+
         elif m.startswith('DTSR'):
             if not p.use_gpu_if_available:
                 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
@@ -294,17 +299,18 @@ if __name__ == '__main__':
                 dtsr_mse = mse(y[dv], dtsr_preds)
                 dtsr_mae = mae(y[dv], dtsr_preds)
                 y_dv_mean = y[dv].mean()
-                dtsr_r2 = r_squared(y[dv], dtsr_preds)
+
                 summary = '=' * 50 + '\n'
                 summary += 'DTSR regression\n\n'
                 summary += 'Model name: %s\n\n' % m
                 summary += 'Formula:\n'
                 summary += '  ' + formula + '\n\n'
+
+                dtsr_loglik_vector = dtsr_model.log_lik(X, y)
+                dtsr_loglik = dtsr_loglik_vector.sum()
+                summary += 'Log likelihood: %s\n' %dtsr_loglik
+
                 if bayes:
-                    dtsr_loglik_vector = dtsr_model.log_lik(X, y)
-                    dtsr_loglik = dtsr_loglik_vector.sum()
-                    summary += 'Log likelihood: %s\n' %dtsr_loglik
-                    summary += '\nPosterior integral summaries by predictor:\n'
                     if dtsr_model.pc:
                         terminal_names = dtsr_model.src_terminal_names
                     else:
@@ -315,13 +321,17 @@ if __name__ == '__main__':
                         row = np.array(dtsr_model.ci_integral(terminal, n_time_units=10))
                         posterior_summaries[i] += row
                     posterior_summaries = pd.DataFrame(posterior_summaries, index=terminal_names, columns=['Mean', '2.5%', '97.5%'])
+
+                    summary += '\nPosterior integral summaries by predictor:\n'
                     summary += posterior_summaries.to_string() + '\n\n'
+
                 summary += 'Training set loss:\n'
                 summary += '  MSE: %.4f\n' % dtsr_mse
                 summary += '  MAE: %.4f\n' % dtsr_mae
-                summary += '  R-squared: %.4f\n' % dtsr_r2
                 summary += '=' * 50 + '\n'
+
                 with open(p.logdir + '/' + m + '/summary.txt', 'w') as f_out:
-                    print_tee(summary, [sys.stdout, f_out])
+                    f_out.write(summary)
+                sys.stderr.write(summary)
                 sys.stderr.write('\n\n')
 
