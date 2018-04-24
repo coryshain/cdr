@@ -4,6 +4,13 @@ dtsr package
 Submodules
 ----------
 
+dtsr\.bdtsr module
+------------------
+
+.. automodule:: dtsr.bdtsr
+    :members:
+    :undoc-members:
+    :show-inheritance:
 
 dtsr\.config module
 -------------------
@@ -21,6 +28,14 @@ dtsr\.data module
     :undoc-members:
     :show-inheritance:
 
+dtsr\.dtsr module
+-----------------
+
+.. automodule:: dtsr.dtsr
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 dtsr\.formula module
 --------------------
 
@@ -33,14 +48,6 @@ dtsr\.io module
 ---------------
 
 .. automodule:: dtsr.io
-    :members:
-    :undoc-members:
-    :show-inheritance:
-
-dtsr\.nndtsr module
----------------
-
-.. automodule:: dtsr.nndtsr
     :members:
     :undoc-members:
     :show-inheritance:
