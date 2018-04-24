@@ -4,6 +4,14 @@ dtsr package
 Submodules
 ----------
 
+dtsr\.bdtsr module
+------------------
+
+.. automodule:: dtsr.bdtsr
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 dtsr\.config module
 -------------------
 

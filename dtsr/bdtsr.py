@@ -1,9 +1,7 @@
 import os
 from collections import defaultdict
-import math
 import time
 import pandas as pd
-from numpy import inf, nan
 
 pd.options.mode.chained_assignment = None
 import tensorflow as tf
@@ -18,7 +16,7 @@ from .util import *
 from .dtsr import DTSR
 
 import edward as ed
-from edward.models import Normal, Gamma, Exponential, MultivariateNormalTriL, SinhArcsinh, Empirical
+from edward.models import Empirical, Exponential, Gamma, MultivariateNormalTriL, Normal, SinhArcsinh
 
 
 class BDTSR(DTSR):

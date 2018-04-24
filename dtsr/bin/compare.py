@@ -67,3 +67,4 @@ if __name__ == '__main__':
                 f.write('='*50 + '\n')
             plt.hist(diffs, bins=1000)
             plt.savefig(p.logdir + '/' + name + '_' + args.partition + '.png')
+            plt.close('all')
