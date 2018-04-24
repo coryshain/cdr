@@ -37,6 +37,14 @@ dtsr\.io module
     :undoc-members:
     :show-inheritance:
 
+dtsr\.nndtsr module
+---------------
+
+.. automodule:: dtsr.nndtsr
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 dtsr\.plot module
 -----------------
 

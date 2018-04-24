@@ -9,7 +9,6 @@ class Config(object):
     An object containing settings read in from a *.ini file. There are two required headings: ['data'] and ['settings'].
     The following settings are available in each.
 
-    ['data']
     :param X_train: ``str``; path to impulse data for the training set
     :param X_dev: ``str``; path to impulse data for the dev set
     :param X_test: ``str``; path to impulse data for the test set
@@ -24,9 +23,6 @@ class Config(object):
     :param network_type: ``str``; inference type to use, one of 'nn' (neural network) or 'bayes' (Bayesian)
     :param float_type: ``str``; float type to use
     :param int_type: ``str``; int type to use
-
-
-
 
     """
 
