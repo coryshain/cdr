@@ -1,16 +1,16 @@
 import os
 from collections import defaultdict
 import time
+
 import pandas as pd
-
 pd.options.mode.chained_assignment = None
-import tensorflow as tf
 
+import tensorflow as tf
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-from tensorflow.python.platform.test import is_gpu_available
 
 tf_config = tf.ConfigProto()
 tf_config.gpu_options.allow_growth = True
+
 from .formula import *
 from .util import *
 from .dtsr import DTSR
@@ -1389,7 +1389,7 @@ class BDTSR(DTSR):
         else:
             impulse_names  = self.impulse_names
 
-        usingGPU = is_gpu_available()
+        usingGPU = tensorflow.python.platform.test.is_gpu_available()
 
         sys.stderr.write('Using GPU: %s\n' % usingGPU)
 
