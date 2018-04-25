@@ -1,3 +1,5 @@
+.. _bdtsr:
+
 Bayesian DTSR
 =============
 

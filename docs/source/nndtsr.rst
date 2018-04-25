@@ -1,3 +1,5 @@
+.. _nndtsr:
+
 Neural Net DTSR
 ===============
 

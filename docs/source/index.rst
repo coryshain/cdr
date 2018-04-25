@@ -1,3 +1,5 @@
+.. _index:
+
 DTSR package documentation
 =============================================
 
@@ -8,6 +10,7 @@ Documentation for the ``dtsr`` Python package.
    :caption: Contents:
 
    introduction
+   getting_started
    nndtsr
    bdtsr
 
