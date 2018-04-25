@@ -18,19 +18,35 @@ For example, to add a Gaussian convolution of predictor ``B``, the RHS above bec
 The currently supported IRF families are:
 
 - ``DiracDelta``: Stick function
+
   - Parameters: None
   - Definition: :math:`1` at :math:`x=0`, :math:`0` otherwise
+
 - ``Exp``: PDF of exponential distribution
+
   - Parameters: :math:`\lambda` (rate)
   - Definition: :math:`\lambda e^{-\lambda x}`
+
 - ``Gamma``: PDF of gamma distribution
+
   - Parameters: :math:`k` (shape), :math:`\theta` (rate)
   - Definition: :math:`\frac{x^{k-1}e^{-\frac{x}{\theta}}{\theta^k\Gamma(k)}`
+
 - ``ShiftedGamma``: PDF of gamma distribution with support starting at :math:`0 - \delta`
+
   - Parameters: :math:`k` (shape), :math:`\theta` (rate), :math:`\delta` (shift, strictly negative)
   - Definition: :math:`\frac{(x - \delta)^{k-1}e^{-\frac{x - \delta}{\theta}}{\theta^k\Gamma(k)}`
-- ``GammaKgt1``
-- ``ShiftedGammaKgt1``
+
+- ``GammaKgt1``: PDF of gamma distribution, :math:`k > 1` (enforces rising-then-falling shape)
+
+  - Parameters: :math:`k` (shape), :math:`\theta` (rate)
+  - Definition: :math:`\\frac{x^{k-1}e^{-\\frac{x}{\theta}}{\theta^k\Gamma(k)}`
+
+- ``ShiftedGammaKgt1``: PDF of gamma distribution with support starting at :math:`0 - \delta`, :math:`k > 1` (enforces rising-then-falling shape)
+
+  - Parameters: :math:`k` (shape), :math:`\theta` (rate), :math:`\delta` (shift, strictly negative)
+  - Definition: :math:`\frac{(x - \delta)^{k-1}e^{-\frac{x - \delta}{\theta}}{\theta^k\Gamma(k)}`
+
 - ``Normal``
 - ``SkewNormal``
 - ``EMG``
