@@ -25,14 +25,14 @@ For example, once a config file ``foo.ini`` has been created, the models defined
 
 ``python -m dtsr.bin.train foo.ini``
 
-The config file must at minimum contain the headings ``[data]`` (with pointers to training/evaluation data) and ``[settings]`` (with arguments used to construct the model).
-In addition, the config file should contain at least one model heading, consisting of the prefix ``model_DTSR_`` followed by a custom name for the model.
-For example, to define a DTSR model called ``readingtimes``, use the heading ``[model_DTSR_readingtimes]``.
-The string ``DTSR_readingtimes`` will then be used by a number of utilities to designate this model
-(The reason ``DTSR`` must be included in the prefix is that this repository distributes with unofficial support for running LM, LME, and GAM models from the same interface).
+The config file must at minimum contain the sections ``[data]`` (with pointers to training/evaluation data) and ``[settings]`` (with arguments used to construct the model).
+In addition, the config file should contain at least one model section, consisting of the prefix ``model_DTSR_`` followed by a custom name for the model.
+For example, to define a DTSR model called ``readingtimes``, use the section heading ``[model_DTSR_readingtimes]``.
+The identifier ``DTSR_readingtimes`` will then be used by a number of utilities to designate this model
+(the reason ``DTSR`` must be included in the prefix is that this repository distributes with unofficial support for running LM, LME, and GAM models from the same interface).
 The data and settings configurations will be shared between all models defined a single config file.
-Each model heading should contain a single field: ``form``.
-The value provided to ``form`` must be a valid DTSR model string.
+Each model section heading should contain a single field: ``formula``.
+The value provided to ``formula`` must be a valid DTSR model string.
 To run experiments with different data and/or settings, multiple config files must be created.
 
 For more details on the available configuration parameters, see :ref:`config`.

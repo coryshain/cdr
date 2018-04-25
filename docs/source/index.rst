@@ -11,6 +11,7 @@ Documentation for the ``dtsr`` Python package.
    introduction
    getting_started
    formula
+   config
    nndtsr
    bdtsr
 
