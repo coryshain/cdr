@@ -19,10 +19,10 @@ The currently supported IRF families are:
 
 - `DiracDelta`: Stick function
 -- Parameters: None
--- Definition: :math:`\\begin{cases}1 & x=0\\\\0 otherwise\\end{cases}`
+-- Definition: :math:`\[\left{\begin{array}1 & x=0\\0 & \mathrm{otherwise}\end{array}\right.`
 - `Exp`: PDF of exponential distribution
--- Parameters: :math:`\\lambda` (rate)
--- Definition: :math:`\\lambda e^{-\\lambda x}`
+-- Parameters: :math:`\lambda` (rate)
+-- Definition: :math:`\lambda e^{-\lambda x}`
 - Gamma
 - ShiftedGamma
 - GammaKgt1
