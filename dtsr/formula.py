@@ -241,6 +241,8 @@ class Formula(object):
             out = np.log(arr)
         elif op == 'log1p':
             out = np.log(arr + 1)
+        elif op == 'exp':
+            out = np.exp(arr)
         else:
             raise ValueError('Unrecognized op: "%s".' % op)
         return out

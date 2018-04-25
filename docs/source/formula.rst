@@ -132,15 +132,15 @@ As in the case of fixed effects, a random intercept is automatically added unles
 Mixed models are constructed simply by adding random effects to fixed effects in the RHS of the formula.
 For example, to construct a mixed model with a fixed and by-subject random coefficient for a Gaussian IRF for predictor ``A`` along with a random intercept by subject, the following RHS would be used:
 
-``C(A, Gaussian()) + (C(A, Gaussian()) | subject)``
+``C(A, Normal()) + (C(A, Normal()) | subject)``
 
-IRF in random effects statements are treated as tied to any corresponding fixed effects unless otherwise specified (see section below on parameter tying).
+IRF in random effects statements are treated as tied to any corresponding fixed effects unless explicitly distinguished by distinct IRF ID's (see section below on parameter tying).
 
 The above formula uses a single parameterization for the Gaussian IRF and fits by-subject coefficients for it.
 However it is also possible to fit by-subject IRF parameterizations.
 This can be accomplished by adding ``ran=T`` to the IRF call, as shown below:
 
-``C(A, Gaussian()) + (C(A, Gaussian(ran=T)) | subject)``
+``C(A, Normal()) + (C(A, Normal(ran=T)) | subject)``
 
 This formula will fit separate coefficients `and` IRF shapes for this predictor for each subject.
 
@@ -154,14 +154,61 @@ Random effects fit for grouping factors that vary during the experiment should t
 Parameter Tying
 ---------------
 
+A convolutional term in a DTSR model is factored into two components, an IRF component with appropriate parameters and a coefficient governing the overall amplitude of the estimate.
+Unless otherwise specified, both of these terms are fit separately for every predictor in the model.
+However, parameter tying is possible by passing keyword arguments to the IRF calls in the model formula.
+Coefficients can be tied using the ``coef_id`` argument, and IRF parameters can be tied using the ``irf_id`` argument.
+For example, the following RHS fits separate IRF and coefficients for each of ``A`` and ``B``:
+
+``C(A, Normal()) + C(B, Normal())``
+
+The following fits a single IRF (called "IRF_NAME") but separate coefficients for ``A`` and ``B``:
+
+``C(A, Normal(irf_id=IRF_NAME)) + C(B, Normal(irf_id=IRF_NAME))``
+
+The following fits separate IRF but a single coefficient (called "COEF_NAME") for both ``A`` and ``B``:
+
+``C(A, Normal(coef_id=COEF_NAME)) + C(B, Normal(coef_id=COEF_NAME))``
+
+And the following fits a single IRF (called "IRF_NAME") and a single coefficient (called "COEF_NAME"), both of which are shared between ``A`` and ``B``:
+
+``C(A, Normal(irf_id=IRF_NAME, coef_id=COEF_NAME)) + C(B, Normal(irf_id=IRF_NAME, coef_id=COEF_NAME))``
+
+
+
+
 
 
 Transforming Variables
 ----------------------
+DTSR provides limited support for automatic variable transformations based on model formulae.
+As in ``R`` formulae, a transformation is applied by wrapping the predictor name in the transformation function.
+For example, to fit a Gamma IRF to a log transform of predictor ``A``, the following is added to the RHS:
+
+``C(log(A), Gamma())``
+
+Transformations may be applied to the predictors and/or the response.
+
+The following are the currently supported transformations:
+
+- ``log()``: Applies a natural logarithm transformation to the variable
+- ``log1p()``: Adds 1 to the variable an applies a natural logarithm transformation (useful if predictor can include 0)
+- ``exp()``: Exponentiates the variable
+- ``z()``: Z-transforms the variable (subtracts its mean and divides by its standard deviation)
+- ``c()``: 0-centers the variable (subtracts its mean)
+- ``s()``: Scales the variable (divides by its standard deviation)
+
+Other transformations must be applied via data preprocessing.
+
 
 
 
 Planned Features (Future Work)
 ------------------------------
 
-
+- *Continuous inputs*: The current DTSR model is only valid for discrete input signals.
+  Input signals that constitute `samples` from a continuous source signal cannot be convolved exactly because the source is generally not analytically integrable.
+  Research is ongoing into computationally efficient methods for approximating the convolution integral for samples from a continuous signal.
+  When implemented, continuous variables will be able to be specified in the formula using the ``cont=T`` keyword argument in the IRF call.
+- *Hierarchical convolution*: Composing convolutions using distinct IRF, as in ``Exp(Normal())``, i.e. first convolving with a Gaussian IRF, then convolving the output of the first convolution with an Exponential IRF.
+  Research is ongoing into computationally efficient methods to fit these more complex convolutions functions.
