@@ -10,5 +10,31 @@ This reference assumes familiarity with the INI protocol.
 DTSR configuration files contain the sections and fields described below.
 
 
+``[data]``
+----------
+
+
+
+
+``[settings]``
+--------------
+
+
+
+
+
+``[filters]``
+-------------
+
+
+
+``[irf_name_map]``
+------------------
+
+
+
+``[model_DTSR_*]``
+------------------
+
 
 
