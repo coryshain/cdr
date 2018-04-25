@@ -17,7 +17,7 @@ For example, to add a Gaussian convolution of predictor ``B``, the RHS above bec
 
 The currently supported IRF families are:
 
-- ``DiracDelta``: Stick function
+- ``DiracDelta``: Stick function (equivalent to a predictor in linear regression)
 
   - Parameters: None
   - Definition: :math:`1` at :math:`x=0`, :math:`0` otherwise
@@ -40,15 +40,25 @@ The currently supported IRF families are:
 - ``GammaKgt1``: PDF of gamma distribution, :math:`k > 1` (enforces rising-then-falling shape)
 
   - Parameters: :math:`k` (shape), :math:`\theta` (rate)
-  - Definition: :math:`\\frac{x^{k-1}e^{-\\frac{x}{\theta}}}{\theta^k\Gamma(k)}`
+  - Definition: :math:`\frac{x^{k-1}e^{-\frac{x}{\theta}}}{\theta^k\Gamma(k)}`
 
 - ``ShiftedGammaKgt1``: PDF of gamma distribution with support starting at :math:`0 - \delta`, :math:`k > 1` (enforces rising-then-falling shape)
 
   - Parameters: :math:`k` (shape), :math:`\theta` (rate), :math:`\delta` (shift, strictly negative)
   - Definition: :math:`\frac{(x - \delta)^{k-1}e^{-\frac{x - \delta}{\theta}}}{\theta^k\Gamma(k)}`
 
-- ``Normal``
-- ``SkewNormal``
+- ``Normal``: PDF of Gaussian (normal) distribution
+
+  - Parameters: :math:`\mu` (mean), :math:`\sigma` (standard deviation)
+  - Definition: :math:`\frac{1}{\sqrt{2\pi\sigma^2}}e^{-\frac{(x - \mu) ^ 2}{2 \sigma ^ 2}}
+
+- ``SkewNormal``: PDF of SkewNormal distribution (normal distribution augmented with left/right skew parameter)
+
+  - Parameters: :math:`\mu` (mean), :math:`\sigma` (standard deviation), :math:`\alpha` (skew)
+  - Definition: Let :math:`\phi` and :math:`\Phi` denote the PDF and CDF (respectively) of the standard normal distribution.
+    Then the SkewNormal distribution is:
+    :math:`\frac{2}{\sigma} \phi\left(\frac{x-\mu}{\sigma}\right) \Phi(\alpha \frac{x-\mu}{\sigma})`
+
 - ``EMG``
 - ``BetaPrime``
 - ``ShiftedBetaPrime``
