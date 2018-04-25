@@ -6,23 +6,7 @@ from numpy import inf
 
 class Config(object):
     """
-    An object containing settings read in from a *.ini file. There are two required headings: ['data'] and ['settings'].
-    The following settings are available in each.
-
-    :param X_train: ``str``; path to impulse data for the training set
-    :param X_dev: ``str``; path to impulse data for the dev set
-    :param X_test: ``str``; path to impulse data for the test set
-    :param y_train: ``str``; path to response data for the training set
-    :param y_dev: ``str``; path to response data for the dev set
-    :param y_test: ``str``; path to response data for the test set
-    :param split_ids: ``str``; names of columns used for data partitioning (only needed if using DTSR utils for partitioning)
-    :param modulus: ``int``; modulus to use for data partitioning (only needed if using DTSR utils for partitioning)
-    :param series_ids: ``str``; names of columns used to define series (each unique collection of vals in these columns will be considered a distinct series)
-    :param logdir: ``str``; path to output directory (will store checkpoints, Tensorboard logs, plots, and evaluation results)
-    :param pc: ``bool``; whether to use principal components regression (experimental)
-    :param network_type: ``str``; inference type to use, one of 'nn' (neural network) or 'bayes' (Bayesian)
-    :param float_type: ``str``; float type to use
-    :param int_type: ``str``; int type to use
+    Parses an *.ini file and stores settings needed to define a set of DTSR experiments.
 
     """
 
