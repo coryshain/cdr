@@ -11,6 +11,9 @@ Documentation for the ``dtsr`` Python package.
 
    introduction
    getting_started
+      config
+      train
+      evaluate
    nndtsr
    bdtsr
 

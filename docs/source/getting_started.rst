@@ -3,14 +3,6 @@
 Getting Started
 ===============
 
-.. toctree::
-   :maxdepth: 2
-   :caption: Contents:
-
-   config
-   train
-   evaluate
-
 The ``dtsr`` package provides utilities that support easy training and evaluation of DTSR models.
 Most of these utilities depend on a config file ``*.ini`` containing metadata needed to construct the DTSR model(s).
 At training time, a copy of the config file is placed in the output directory for the experiment, which can be useful for record keeping.
