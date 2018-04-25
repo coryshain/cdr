@@ -6,14 +6,10 @@ DTSR package documentation
 Documentation for the ``dtsr`` Python package.
 
 .. toctree::
-   :maxdepth: 2
    :caption: Contents:
 
    introduction
    getting_started
-      config
-      train
-      evaluate
    nndtsr
    bdtsr
 
