@@ -33,7 +33,7 @@ class Config(object):
         self.series_ids = series_ids.strip().split()
 
         ## Settings
-        self.logdir = settings.get('logdir', 'log')
+        self.logdir = settings.get('logdir', './dtsr_model/')
         if not os.path.exists(self.logdir):
             os.makedirs(self.logdir)
         if os.path.realpath(path) != os.path.realpath(self.logdir + '/config.ini'):
@@ -69,6 +69,7 @@ class Config(object):
                 self.eval_minibatch_size = int(self.eval_minibatch_size)
             except:
                 raise ValueError('eval_minibatch_size parameter invalid: %s' % self.eval_minibatch_size)
+        self.n_interp = settings.getint('n_interp', 64)
         self.log_freq = settings.getint('log_freq', 1)
         self.log_random = settings.getboolean('log_random', False)
         self.save_freq = settings.getint('save_freq', 1)

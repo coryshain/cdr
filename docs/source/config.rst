@@ -1,5 +1,5 @@
 .. _config:
 
-Configuring DTSR Experiments
-============================
+DTSR Configuration File Reference
+=================================
 

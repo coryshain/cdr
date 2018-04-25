@@ -44,6 +44,7 @@ class BDTSR(DTSR):
     :param float_type: ``str``; the ``float`` type to use throughout the network.
     :param int_type: ``str``; the ``int`` type to use throughout the network (used for tensor slicing).
     :param minibatch_size: ``int`` or ``None``; the size of minibatches to use for fitting/prediction (full-batch if ``None``).
+    :param n_interp: ``int``; number of interpolation points (ignored unless the model formula specification contains continuous inputs).
     :param log_random: ``bool``; whether to log random effects to Tensorboard.
     :param log_freq: ``int``; the frequency (in iterations) with which to log model params to Tensorboard.
     :param save_freq: ``int``; the frequency (in iterations) with which to save model checkpoints.
@@ -105,6 +106,7 @@ class BDTSR(DTSR):
             int_type='int32',
             minibatch_size=128,
             eval_minibatch_size=100000,
+            n_interp=64,
             log_random=True,
             log_freq=1,
             save_freq=1,
@@ -144,6 +146,7 @@ class BDTSR(DTSR):
             int_type=int_type,
             minibatch_size=minibatch_size,
             eval_minibatch_size=eval_minibatch_size,
+            n_interp=n_interp,
             save_freq=save_freq,
             log_freq=log_freq,
             log_random = log_random,
