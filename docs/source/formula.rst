@@ -17,21 +17,23 @@ For example, to add a Gaussian convolution of predictor ``B``, the RHS above bec
 
 The currently supported IRF families are:
 
-- `DiracDelta`: Stick function
+- ``DiracDelta``: Stick function
 -- Parameters: None
--- Definition: :math:`\[\left{\begin{array}1 & x=0\\0 & \mathrm{otherwise}\end{array}\right.`
-- `Exp`: PDF of exponential distribution
+-- Definition: :math:`1` at :math:`x=0`, :math:`0` otherwise
+- ``Exp``: PDF of exponential distribution
 -- Parameters: :math:`\lambda` (rate)
 -- Definition: :math:`\lambda e^{-\lambda x}`
-- Gamma
-- ShiftedGamma
-- GammaKgt1
-- ShiftedGammaKgt1
-- Normal
-- SkewNormal
-- EMG
-- BetaPrime
-- ShiftedBetaPrime
+- ``Gamma``: PDF of gamma distribution
+-- Parameters: :math:`k` (shape), :math:`\theta` (rate)
+-- Definition: :math:`\frac{x^{k-1}e^{-\frac{x}{\theta}}{\theta^k\Gamma(k)}`
+- ``ShiftedGamma``
+- ``GammaKgt1``
+- ``ShiftedGammaKgt1``
+- ``Normal``
+- ``SkewNormal``
+- ``EMG``
+- ``BetaPrime``
+- ``ShiftedBetaPrime``
 
 
 For convenience, the ``C()`` function distributes the impulse response family over multiple ``+``-delimited terms in its first argument.
