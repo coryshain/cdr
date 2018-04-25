@@ -37,6 +37,7 @@ class DTSR(object):
             int_type='int32',
             minibatch_size=128,
             eval_minibatch_size=100000,
+            n_interp=64,
             log_freq=1,
             log_random=True,
             save_freq=1,
@@ -70,6 +71,7 @@ class DTSR(object):
         self.minibatch_size = minibatch_size
         self.int_type = int_type
         self.eval_minibatch_size = eval_minibatch_size
+        self.n_interp = n_interp
         self.log_random = log_random
         self.log_freq = log_freq
         self.save_freq = save_freq
@@ -971,9 +973,11 @@ class DTSR(object):
                             else:
                                 irf = irf[0]
 
-                            irf_seq = irf(self.t_delta)
+                            impulse_interp = self.__lininterp__(impulse, self.n_interp)
+                            t_delta_interp = self.__lininterp__(self.t_delta, self.n_interp)
+                            irf_seq = irf(t_delta_interp)
 
-                            self.convolutions[name] = self.__reduce_interpolated_sum__(impulse * irf_seq, self.time_X, axis=1)
+                            self.convolutions[name] = tf.reduce_sum(impulse_interp * irf_seq, axis=1)
                         else:
                             impulse = self.irf_impulses[name]
 
@@ -1378,6 +1382,15 @@ class DTSR(object):
                 out = tf.reduce_sum((X_prev + X_cur) / 2 * time_diff, axis=axis)
 
                 return out
+
+    def __lininterp__(self, x, n):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                n_input = tf.shape(x)[1]
+                n_output = n_input * (n+1)
+                interp = tf.image.resize_bilinear(tf.expand_dims(tf.expand_dims(x, -1), -1), [n_output, 1])
+                interp = tf.squeeze(tf.squeeze(interp, -1), -1)[..., :-n]
+                return interp
 
 
 

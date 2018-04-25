@@ -79,22 +79,22 @@ class NNDTSR(DTSR):
             X,
             y,
             outdir='./dtsr_model/',
-            history_length=None,
+            history_length=128,
             low_memory=False,
             pc=False,
             float_type='float32',
             int_type='int32',
-            minibatch_size=128,
+            minibatch_size=1024,
             eval_minibatch_size=100000,
             log_random=True,
             log_freq=1,
             save_freq=1,
             optim='Adam',
-            learning_rate=0.01,
-            learning_rate_min=1e-4,
+            learning_rate=0.001,
+            learning_rate_min=1e-5,
             lr_decay_family=None,
-            lr_decay_steps=25,
-            lr_decay_rate=0.,
+            lr_decay_steps=100,
+            lr_decay_rate=0.5,
             lr_decay_staircase=False,
             init_sd=1,
             ema_decay=0.999,
@@ -137,81 +137,13 @@ class NNDTSR(DTSR):
         self.build(outdir)
 
     def __getstate__(self):
-
-        return (
-            self.form_str,
-            self.outdir,
-            self.history_length,
-            self.low_memory,
-            self.pc,
-            self.eigenvec,
-            self.eigenval,
-            self.impulse_means,
-            self.impulse_sds,
-            self.float_type,
-            self.int_type,
-            self.minibatch_size,
-            self.eval_minibatch_size,
-            self.log_random,
-            self.log_freq,
-            self.save_freq,
-            self.optim_name,
-            self.learning_rate,
-            self.learning_rate_min,
-            self.lr_decay_family,
-            self.lr_decay_steps,
-            self.lr_decay_rate,
-            self.lr_decay_staircase,
-            self.init_sd,
-            self.regularizer_name,
-            self.regularizer_scale,
-            self.n_train,
-            self.y_mu_init,
-            self.y_scale_init,
-            self.rangf_map_base,
-            self.rangf_n_levels,
-            self.loss_name,
-            self.ema_decay
-        )
+        return self.pack_metadata()
 
     def __setstate__(self, state):
         self.g = tf.Graph()
         self.sess = tf.Session(graph=self.g, config=tf_config)
 
-        self.form_str, \
-        self.outdir, \
-        self.history_length, \
-        self.low_memory, \
-        self.pc, \
-        self.eigenvec, \
-        self.eigenval, \
-        self.impulse_means, \
-        self.impulse_sds, \
-        self.float_type, \
-        self.int_type, \
-        self.minibatch_size, \
-        self.eval_minibatch_size, \
-        self.log_random, \
-        self.log_freq, \
-        self.save_freq, \
-        self.optim_name, \
-        self.learning_rate, \
-        self.learning_rate_min, \
-        self.lr_decay_family, \
-        self.lr_decay_steps, \
-        self.lr_decay_rate, \
-        self.lr_decay_staircase, \
-        self.init_sd, \
-        self.regularizer_name, \
-        self.regularizer_scale, \
-        self.n_train, \
-        self.y_mu_init, \
-        self.y_scale_init, \
-        self.rangf_map_base, \
-        self.rangf_n_levels, \
-        self.loss_name, \
-        self.ema_decay = state
-
+        self.unpack_metadata(state)
         self.__initialize_metadata__()
 
         self.log_graph = False
@@ -226,6 +158,80 @@ class NNDTSR(DTSR):
                 self.y_scale_init_tf = tf.constant(self.y_scale_init, dtype=self.FLOAT_TF)
                 self.epsilon = tf.constant(1e-35, dtype=self.FLOAT_TF)
 
+    def pack_metadata(self):
+        return {
+            'form_str': self.form_str,
+            'n_train': self.n_train,
+            'y_mu_init': self.y_mu_init,
+            'y_scale_init': self.y_scale_init,
+            'rangf_map_base': self.rangf_map_base,
+            'rangf_n_levels': self.rangf_n_levels,
+            'outdir': self.outdir,
+            'history_length': self.history_length,
+            'low_memory': self.low_memory,
+            'pc': self.pc,
+            'eigenvec': self.eigenvec,
+            'eigenval': self.eigenval,
+            'impulse_means': self.impulse_means,
+            'impulse_sds': self.impulse_sds,
+            'float_type': self.float_type,
+            'int_type': self.int_type,
+            'minibatch_size': self.minibatch_size,
+            'eval_minibatch_size': self.eval_minibatch_size,
+            'n_interp': self.n_interp,
+            'log_random': self.log_random,
+            'log_freq': self.log_freq,
+            'save_freq': self.save_freq,
+            'optim_name': self.optim_name,
+            'learning_rate': self.learning_rate,
+            'learning_rate_min': self.learning_rate_min,
+            'lr_decay_family': self.lr_decay_family,
+            'lr_decay_steps': self.lr_decay_steps,
+            'lr_decay_rate': self.lr_decay_rate,
+            'lr_decay_staircase': self.lr_decay_staircase,
+            'init_sd': self.init_sd,
+            'regularizer_name': self.regularizer_name,
+            'regularizer_scale': self.regularizer_scale,
+            'loss_name': self.loss_name,
+            'ema_decay': self.ema_decay
+        }
+
+    def unpack_metadata(self, md):
+
+        self.form_str = md['form_str']
+        self.n_train = md['n_train']
+        self.y_mu_init = md['y_mu_init']
+        self.y_scale_init = md['y_scale_init']
+        self.rangf_map_base = md['rangf_map_base']
+        self.rangf_n_levels = md['rangf_n_levels']
+        self.outdir = md.get('outdir', './dtsr_model/')
+        self.history_length = md.get('history_length', 128)
+        self.low_memory = md.get('low_memory', False)
+        self.pc = md.get('pc', False)
+        self.eigenvec = md.get('eigenvec', None)
+        self.eigenval = md.get('eigenval', None)
+        self.impulse_means = md.get('impulse_means', None)
+        self.impulse_sds = md.get('impulse_sds', None)
+        self.float_type = md.get('float_type', 'float32')
+        self.int_type = md.get('int_type', 'int32')
+        self.minibatch_size = md.get('minibatch_size', 1024)
+        self.eval_minibatch_size = md.get('eval_minibatch_size', 100000)
+        self.n_interp = md.get('n_interp', 64)
+        self.log_random = md.get('log_random', True)
+        self.log_freq = md.get('log_freq', 1)
+        self.save_freq = md.get('save_freq', 1)
+        self.optim_name = md.get('optim_name', 'Adam')
+        self.learning_rate = md.get('learning_rate', 0.001)
+        self.learning_rate_min = md.get('learning_rate_min', 1e-5)
+        self.lr_decay_family = md.get('lr_decay_family', None)
+        self.lr_decay_steps = md.get('lr_decay_steps', 100)
+        self.lr_decay_rate = md.get('lr_decay_rate', 0.5)
+        self.lr_decay_staircase = md.get('lr_decay_staircase', False)
+        self.init_sd = md.get('init_sd', 1)
+        self.regularizer_name = md.get('regularizer_name', None)
+        self.regularizer_scale = md.get('regularizer_scale', 0.01)
+        self.loss_name = md.get('loss_name', 'mse')
+        self.ema_decay = md.get('ema_decay', 0.999)
 
 
     ######################################################
@@ -507,7 +513,7 @@ class NNDTSR(DTSR):
         else:
             impulse_names  = self.impulse_names
 
-        usingGPU = tensorflow.python.platform.test.is_gpu_available()
+        usingGPU = tf.test.is_gpu_available()
         sys.stderr.write('Using GPU: %s\n' % usingGPU)
 
         sys.stderr.write('Correlation matrix for input variables:\n')

@@ -8,7 +8,7 @@ DTSR Model Formulae
 Basic Overview
 --------------
 
-This package constructs DTSR models from ``R``-style formula strings defining the model structure.
+This package constructs DTSR models from **R**-style formula strings defining the model structure.
 A DTSR formula has the following template:
 
 ``RESPONSE ~ FIXED_EFFECTS + RANDOM_EFFECTS``
@@ -22,7 +22,7 @@ Defining an Impulse Response Function (IRF)
 -------------------------------------------
 
 A convolutional term is defined using the syntax ``C(..., IRF_FAMILY())``, where ``...`` is replaced by names of predictors contained in the input data.
-For example, to define a ``Gamma`` convolution of predictor ``A``, the expression ``C(A, Gamma())`` is added to the RHS.
+For example, to define a Gamma convolution of predictor ``A``, the expression ``C(A, Gamma())`` is added to the RHS.
 Separate terms are delimited by ``+``.
 For example, to add a Gaussian convolution of predictor ``B``, the RHS above becomes ``C(A, Gamma()) + C(B, Normal())``.
 
@@ -100,7 +100,7 @@ Therefore, the following two expressions are equivalent:
 ``C(A + B, Gamma())``
 ``C(A, Gamma()) + C(B, Gamma())``
 
-As in ``R``, interaction terms are designated with ``:``, as in ``C(A:B, Gamma())``, and cross-product interactions can be expressed using Python's power notation ``**<INT>``.
+As in **R**, interaction terms are designated with ``:``, as in ``C(A:B, Gamma())``, and cross-product interactions can be expressed using Python's power notation ``**<INT>``.
 For example, ``(A + B + C)**3`` adds all first, second, and third order interactions, expanding out as:
 
 ``A + B + C + A:B + B:C + A:C + A:B:C``
@@ -110,14 +110,14 @@ As above, IRF distribute across the expansion of interaction terms, such that th
 ``C((A + B + C)**3, Gamma())``
 ``C(A, Gamma()) + C(B, Gamma()) + C(C, Gamma()) + C(A:B, Gamma()) + C(B:C, Gamma()) + C(A:C, Gamma()) + C(A:B:C, Gamma())``
 
-Unlike ``R``, categorical variables are not yet handled automatically in DTSR.
-However, they can be considered simply by adding binary vectors for each of the :math:`n-1` levels of the variable to the input data.
+Unlike **R**, categorical variables are not yet handled automatically in DTSR.
+However, they can be included simply by adding binary indicator vectors for each of :math:`n-1` of the levels of the variable to the input data as a preprocessing step, then defining the model in terms of the binary indicators.
 
 Note that the term expansions described above add `separate` IRF for each term in the expansion.
-For example, ``C(A + B, Gamma())`` adds `two` distinct Gamma IRF parameterizations to the model, one for each predictor.
+For example, ``C(A + B, Gamma())`` adds two distinct Gamma IRF parameterizations to the model, one for each predictor.
 It is also possible to tie IRF between predictor variables (details below).
 
-Note also that (unlike ``R``) redundant terms are `not` automatically collapsed, so care must be taken to ensure that no duplicate terms are produced via term expansion.
+Note also that (unlike **R**) redundant terms are **not** automatically collapsed, so care must be taken to ensure that no duplicate terms are produced via term expansion.
 
 
 Random Effects
@@ -145,7 +145,7 @@ This can be accomplished by adding ``ran=T`` to the IRF call, as shown below:
 This formula will fit separate coefficients `and` IRF shapes for this predictor for each subject.
 
 An important complication in fitting mixed models with DTSR is that the relevant grouping factor is determined by the current `regression target`, not the properties of the independent variable observations in the series history.
-This means that random effects should only be fit using grouping factors that are constant for the entire series (e.g. the ID of the human subject completing the experiment).
+This means that random effects are only guaranteed to be meaningful when fit using grouping factors that are constant for the entire series (e.g. the ID of the human subject completing the experiment).
 Random effects fit for grouping factors that vary during the experiment should therefore be avoided unless they are intercept terms only, which are not affected by the temporal convolution.
 
 
@@ -182,7 +182,7 @@ And the following fits a single IRF (called "IRF_NAME") and a single coefficient
 Transforming Variables
 ----------------------
 DTSR provides limited support for automatic variable transformations based on model formulae.
-As in ``R`` formulae, a transformation is applied by wrapping the predictor name in the transformation function.
+As in **R** formulae, a transformation is applied by wrapping the predictor name in the transformation function.
 For example, to fit a Gamma IRF to a log transform of predictor ``A``, the following is added to the RHS:
 
 ``C(log(A), Gamma())``
@@ -206,9 +206,9 @@ Other transformations must be applied via data preprocessing.
 Planned Features (Future Work)
 ------------------------------
 
-- *Continuous inputs*: The current DTSR model is only valid for discrete input signals.
+- **Continuous inputs**: The current DTSR model is only valid for discrete input signals.
   Input signals that constitute `samples` from a continuous source signal cannot be convolved exactly because the source is generally not analytically integrable.
   Research is ongoing into computationally efficient methods for approximating the convolution integral for samples from a continuous signal.
   When implemented, continuous variables will be able to be specified in the formula using the ``cont=T`` keyword argument in the IRF call.
-- *Hierarchical convolution*: Composing convolutions using distinct IRF, as in ``Exp(Normal())``, i.e. first convolving with a Gaussian IRF, then convolving the output of the first convolution with an Exponential IRF.
+- **Hierarchical convolution**: Composing convolutions using distinct IRF, as in ``Exp(Normal())``, i.e. first convolving with a Gaussian IRF, then convolving the output of the first convolution with an Exponential IRF.
   Research is ongoing into computationally efficient methods to fit these more complex convolutions functions.
