@@ -65,6 +65,8 @@ The following sections go into more detail about training and evaluation utiliti
 Training DTSR Models
 --------------------
 
+First, gather some data and write a config file defining your experiments.
+Note that DTSR utilities assume the data will be saved in a **space-delimited text file**, a requirement that facilitates interoperability with the [Modelblocks repository](https://github.com/modelblocks/modelblocks-release), which can be used to generate and preprocess data for many psycholinguistic experiments.
 Once the config file has been written, training a DTSR model is simple using the ``train`` utility, which takes as its principle argument a path to the config file.
 For example, if the config file is names ``experiment.ini``, all models defined in it can be trained with the call:
 
