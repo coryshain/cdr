@@ -31,6 +31,7 @@ class Config(object):
         self.split_ids = split_ids.strip().split()
         series_ids = data.get('series_ids')
         self.series_ids = series_ids.strip().split()
+        self.modulus = data.getint('modulus', 4)
 
         ## Settings
         self.logdir = settings.get('logdir', './dtsr_model/')
@@ -39,7 +40,6 @@ class Config(object):
         if os.path.realpath(path) != os.path.realpath(self.logdir + '/config.ini'):
             shutil.copy2(path, self.logdir + '/config.ini')
         self.pc = settings.getboolean('pc', False)
-        self.modulus = settings.getint('modulus', 4)
         self.network_type = settings.get('network_type', 'bayes')
         self.float_type = settings.get('float_type', 'float32')
         self.int_type = settings.get('int_type', 'int32')
@@ -71,7 +71,7 @@ class Config(object):
                 raise ValueError('eval_minibatch_size parameter invalid: %s' % self.eval_minibatch_size)
         self.n_interp = settings.getint('n_interp', 64)
         self.log_freq = settings.getint('log_freq', 1)
-        self.log_random = settings.getboolean('log_random', False)
+        self.log_random = settings.getboolean('log_random', True)
         self.save_freq = settings.getint('save_freq', 1)
         self.plot_n_time_units = settings.getfloat('plot_n_time_units', 2.5)
         self.plot_n_points_per_time_unit = settings.getfloat('plot_n_points_per_time_unit', 500)

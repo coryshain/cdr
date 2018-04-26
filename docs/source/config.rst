@@ -41,13 +41,13 @@ For usage details run:
 
 **IMPORTANT NOTES**
 
-- The file indicated in ``X_train`` must contain the following columns:
+- The files indicated in ``X_*`` must contain the following columns:
 
   - ``time``: Timestamp associated with each observation
   - A column for each variable in ``series_ids``
   - A column for each predictor variable indicated in the model formula
 
-- The file in ``y_train`` must contain the following columns:
+- The file in ``y_*`` must contain the following columns:
 
   - ``time``: Timestamp associated with each observation
   - A column for the response variable in the model formula
@@ -55,7 +55,7 @@ For usage details run:
   - A column for each random grouping factor in the in the model formula
   - A column for each variable used for data filtration (see below)
 
-- Data in ``y_train`` may be filtered/partitioned, but data in ``X_train`` **must be uncensored** unless independent reason exists to assume that certain observations never have an impact on the response.
+- Data in ``y_*`` may be filtered/partitioned, but data in ``X_*`` **must be uncensored** unless independent reason exists to assume that certain observations never have an impact on the response.
 
 
 
@@ -85,7 +85,7 @@ The ``[settings]`` section supports the following fields:
   - ``FTRL``
   - ``RMSProp``
   - ``Nadam``
-  - ``None`` (only supported for ``BDTSR`` and not recommended; use the default optimizer defined by ``Edward``, which currently includes steep learning rate decay)
+  - ``None`` (only supported for ``BDTSR`` and not recommended; uses the default optimizer defined by Edward, which currently includes steep learning rate decay)
 
 - ``learning_rate``: ``float``; Learning rate (default: ``0.001``)
 - ``lr_decay_family``: ``str`` or ``None``; Name of learning rate decay family to use; supports all available decays in Tensorflow's ``train`` module, or no decay if ``None`` (default: ``None``)
@@ -128,6 +128,8 @@ The ``[settings]`` section supports the following fields:
 - ``conv_prior_sd``: ``float``; Standard deviation of prior on the IRF parameters (default: ``1``)
 - ``y_scale_prior_sd``: ``float``; Standard deviation of prior on the standard deviation of the output distribution, ignored of ``y_scale`` is not ``None`` (default: ``1``)
 - ``mh_proposal_sd``: ``float``; Standard deviation of the proposal distribution for Metropolis-Hastings inference, ignored unless ``inference_name`` is ``MetropolisHastings`` (default: ``1``)
+- ``mv``: ``bool``; Whether to use a MVN prior on fixed effects (otherwise fixed effects priors are independent normal, default: ``False``)
+- ``mv_ran``: ``bool``; Whether to use a MVN prior on random effects (otherwise random effects priors are independent normal, default: ``False``)
 - ``asymmetric_error``: ``boolean``; Whether to apply the ``SinhArcsinh`` transform to the normal error, allowing fitting of skewness and tailweight (default: ``False``)
 
 
