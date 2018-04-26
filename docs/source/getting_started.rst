@@ -43,17 +43,60 @@ For more details on DTSR model formulae, see :ref:`formula`.
 Running DTSR executables
 ------------------------
 
+A number of executable utilities are contained in the module ``dtsr.bin`` and can be executed using Python's ``-m`` flag.
+For example, the following call runs the ``train`` utility on all models specified in a config file ``config.ini``:
+
+``python -m dtsr.bin.train config.ini``
+
+Usage help for each utility can be viewed by running:
+
+``python -m dtsr.bin.<UTIL-NAME> -h``
+
+for the utility in question.
+Or usage help for all utilities can be printed at once using:
+
+``python -m dtsr.bin.help``
+
+The following sections go into more detail about training and evaluation utilities that will likely be useful to most users.
+
 
 
 
 Training DTSR Models
 --------------------
 
+Once the config file has been written, training a DTSR model is simple using the ``train`` utility, which takes as its principle argument a path to the config file.
+For example, if the config file is names ``experiment.ini``, all models defined in it can be trained with the call:
+
+``python -m dstr.bin.train experiment.ini``
+
+To restrict training to some subset of models, the ``-m`` flag is used.
+For example, the following call trains models ``A`` and ``B`` only:
+
+``python -m dtsr.bin.train experiment.ini -m DTSR_A DTSR_B``
 
 
 Evaluating DTSR Models
 ----------------------
 
+This package provides several utilities for inspecting and evaluating fitted DTSR models.
+The principal evaluation utility is ``predict``.
+The following generates predictions on test data from the model ``DTSR_A`` defined in ``experiment.ini``:
+
+``python -m dtsr.bin.predict experiment.ini -m DTSR_A -p test``
+
+This call will save files containing elementwise predictions, errors, and likelihoods, along with a performance summary.
+For more details on usage, run:
+
+``python -m dtsr.bin.predict -h``
+
+Once ``predict`` has been run for multiple models, statistical model comparison (permutation test) can be performed using ``compare``, as shown:
+
+``python -m dtsr.bin.compare experiment.ini -p test``
+
+The above call will permutation test pairwise differences in mean squared error on test data for all unique pairs of models defined in ``experiment.ini``.
+
+In addition to these core utilities, the ``convolve`` convolves the input predictors using the fitted DTSR data transform and saves the data table, and ``make_plots`` generates IRF plots with some degree of customization afforded by the command line arguments.
 
 
 

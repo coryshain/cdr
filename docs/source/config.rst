@@ -61,7 +61,8 @@ Section: ``[settings]``
 
 The ``[settings]`` section supports the following fields:
 
-**BOTH NNDTSR and BDTSR**
+**Both NNDTSR and BDTSR**
+
 - ``logdir``: ``str``; Path to output directory where checkpoints, plots, and Tensorboard logs should be saved (default: ``./dtsr_model/``).
   If it does not exist, this directory will be created.
   At runtime, the ``train`` utility will copy the config file to this directory as ``config.ini``, serving as a record of the settings used to generate the analysis.
@@ -86,7 +87,7 @@ The ``[settings]`` section supports the following fields:
 - ``lr_decay_family``: ``str`` or ``None``; Name of learning rate decay family to use; supports all available decays in Tensorflow's ``train`` module, or no decay if ``None`` (default: ``None``)
   **Note**: Decaying the learning rate can give a false impression of convergence, since stability in model parameters can be artificially induced by a vanishing learning rate.
 - ``learning_rate_min``: ``float`` or ``None``; Minimum learning rate (no minimum if ``None``), ignored if ``lr_decay_family`` is ``None`` (default: ``1e-5``)
-- ``lr_decay_steps``: ``int``; Decay rate for learning rate, ignored if ``lr_decay_family`` is ``None`` (default: 0.5)
+- ``lr_decay_steps``: ``int``; Decay rate for learning rate, ignored if ``lr_decay_family`` is ``None`` (default: ``0.5``)
 - ``lr_decay_rate``: ``float``; Number of training epochs per decay level, ignored if ``lr_decay_family`` is ``None`` (default: ``100``)
 - ``lr_decay_staircase``: ``bool``; Whether to staircase the learning rate decay (default: ``False)
 - ``n_iter``: ``int``; Number of training epochs (default: ``1000``)
@@ -106,12 +107,14 @@ The ``[settings]`` section supports the following fields:
 - ``plot_y_inches``: ``float``; Height of IRF plots in inches (default: ``500``)
 - ``cmap``: ``str``; Name of ``matplotlib`` colormap scheme to use for plotting (default: ``500``)
 
-**NNDTSR ONLY**
+**NNDTSR only**
+
 - ``loss``: ``str``; Name of loss to use (one of ``mse`` or ``mae``; default: ``mse``)
 - ``regularizer``: ``str`` or ``None``; Name of regularizer to use; supports all regularizer layers in Tensorflow's ``contrib.layers`` module, or no regularization if ``None`` (default: ``None``)
 - ``regularizer_scale``: ``float``; Regularization constant; ignored if ``regularizer`` is ``None`` (default: ``0.01``)
 
-**BDTSR ONLY**
+**BDTSR only**
+
 - ``inference_name``: ``str``; Name of inference to use; supports most inferences provided by Edward (default: ``KLqp``)
 - ``n_samples``: ``int`` or ``None``; Number of samples to use, use Edward defaults if ``None``. If using MCMC, the number of samples is set deterministically as ``n_iter * n_minibatch``, so this user-supplied parameter is ignored (default: 1)
 - ``n_samples_eval``: ``int`` or ``None``; Number of samples to use for evaluation, can be overridden by DTSR evaluation utilities (default: 128)
@@ -151,7 +154,7 @@ The optional ``[irf_name_map]`` section simply permits prettier variable naming 
 For example, the internal name for a convolution applied to predictor ``A`` may be ``ShiftedGammaKgt1.s(A)-Terminal.s(A)``, which is not very readable.
 To address this, the string above can be mapped to a more readable name using an INI key-value pair, as shown:
 
-``ShiftedGammaKgt1.s(A)-Terminal.s(A)`` = A``
+``ShiftedGammaKgt1.s(A)-Terminal.s(A) = A``
 
 The model will then print ``A`` in plots rather than ``ShiftedGammaKgt1.s(A)-Terminal.s(A)``.
 Unused entries in the name map are ignored, and model variables that do not have an entry in the name map print with their default internal identifier.

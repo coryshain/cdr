@@ -20,10 +20,7 @@ if __name__ == '__main__':
     ''')
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default = [], help='Path to configuration (*.ini) file')
-    argparser.add_argument('-e', '--eval', default=1, type=int, help='Whether to evaluate the trained DTSR models before exiting.')
     args, unknown = argparser.parse_known_args()
-
-    eval = bool(args.eval)
 
     p = Config(args.config_path)
     if len(args.models) > 0:
@@ -289,51 +286,50 @@ if __name__ == '__main__':
                 cmap=p.cmap
             )
 
-            if eval:
-                dtsr_preds = dtsr_model.predict(
-                    X,
-                    y.time,
-                    y[dtsr_model.form.rangf],
-                    y.first_obs,
-                    y.last_obs
-                )
+            dtsr_preds = dtsr_model.predict(
+                X,
+                y.time,
+                y[dtsr_model.form.rangf],
+                y.first_obs,
+                y.last_obs
+            )
 
-                dtsr_mse = mse(y[dv], dtsr_preds)
-                dtsr_mae = mae(y[dv], dtsr_preds)
-                y_dv_mean = y[dv].mean()
+            dtsr_mse = mse(y[dv], dtsr_preds)
+            dtsr_mae = mae(y[dv], dtsr_preds)
+            y_dv_mean = y[dv].mean()
 
-                summary = '=' * 50 + '\n'
-                summary += 'DTSR regression\n\n'
-                summary += 'Model name: %s\n\n' % m
-                summary += 'Formula:\n'
-                summary += '  ' + formula + '\n\n'
+            summary = '=' * 50 + '\n'
+            summary += 'DTSR regression\n\n'
+            summary += 'Model name: %s\n\n' % m
+            summary += 'Formula:\n'
+            summary += '  ' + formula + '\n\n'
 
-                dtsr_loglik_vector = dtsr_model.log_lik(X, y)
-                dtsr_loglik = dtsr_loglik_vector.sum()
-                summary += 'Log likelihood: %s\n' %dtsr_loglik
+            dtsr_loglik_vector = dtsr_model.log_lik(X, y)
+            dtsr_loglik = dtsr_loglik_vector.sum()
+            summary += 'Log likelihood: %s\n' %dtsr_loglik
 
-                if bayes:
-                    if dtsr_model.pc:
-                        terminal_names = dtsr_model.src_terminal_names
-                    else:
-                        terminal_names = dtsr_model.terminal_names
-                    posterior_summaries = np.zeros((len(terminal_names), 3))
-                    for i in range(len(terminal_names)):
-                        terminal = terminal_names[i]
-                        row = np.array(dtsr_model.ci_integral(terminal, n_time_units=10))
-                        posterior_summaries[i] += row
-                    posterior_summaries = pd.DataFrame(posterior_summaries, index=terminal_names, columns=['Mean', '2.5%', '97.5%'])
+            if bayes:
+                if dtsr_model.pc:
+                    terminal_names = dtsr_model.src_terminal_names
+                else:
+                    terminal_names = dtsr_model.terminal_names
+                posterior_summaries = np.zeros((len(terminal_names), 3))
+                for i in range(len(terminal_names)):
+                    terminal = terminal_names[i]
+                    row = np.array(dtsr_model.ci_integral(terminal, n_time_units=10))
+                    posterior_summaries[i] += row
+                posterior_summaries = pd.DataFrame(posterior_summaries, index=terminal_names, columns=['Mean', '2.5%', '97.5%'])
 
-                    summary += '\nPosterior integral summaries by predictor:\n'
-                    summary += posterior_summaries.to_string() + '\n\n'
+                summary += '\nPosterior integral summaries by predictor:\n'
+                summary += posterior_summaries.to_string() + '\n\n'
 
-                summary += 'Training set loss:\n'
-                summary += '  MSE: %.4f\n' % dtsr_mse
-                summary += '  MAE: %.4f\n' % dtsr_mae
-                summary += '=' * 50 + '\n'
+            summary += 'Training set loss:\n'
+            summary += '  MSE: %.4f\n' % dtsr_mse
+            summary += '  MAE: %.4f\n' % dtsr_mae
+            summary += '=' * 50 + '\n'
 
-                with open(p.logdir + '/' + m + '/summary.txt', 'w') as f_out:
-                    f_out.write(summary)
-                sys.stderr.write(summary)
-                sys.stderr.write('\n\n')
+            with open(p.logdir + '/' + m + '/summary.txt', 'w') as f_out:
+                f_out.write(summary)
+            sys.stderr.write(summary)
+            sys.stderr.write('\n\n')
 
