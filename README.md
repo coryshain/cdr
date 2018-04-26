@@ -1,5 +1,5 @@
 # Deconvolutional time series regression (DTSR)
-A regression technique for modeling temporally diffuse effects.
+DTSR is a regression technique for modeling temporally diffuse effects.
 
 This repository contains source code for the `dtsr` Python module as well as support for reproducting published experiments.
 Full documentation for the `dtsr` module is available at [http://dtsr.readthedocs.io/en/latest/](http://dtsr.readthedocs.io/en/latest/).
@@ -10,7 +10,7 @@ Reading time data files can be provided upon request.
 Once you have a copy of the source data, update the pointers in the `*.ini` files of the experiment directory to point to the correct location.
 
 DTSR models can be trained and evaluated using provided utility executables, documented in the API linked to above.
-For example, to a BBVI by-subject slopes model for Natural Stories, run:
+For example, to train a BBVI by-subject slopes model for Natural Stories, run:
 
 `python -m dtsr.bin.train natstor_bbvi.ini -m DTSR_ss`
 
@@ -21,5 +21,5 @@ To sequentially train all models defined for an experiment (e.g. BBVI on Natural
 Note that the latter will also try to run baseline LME and GAM models, which require `rpy2` and therefore won't work on Windows systems without some serious hacking.
 The `dtsr` module is cross-platform and therefore DTSR models should train regardless of operating system.
 
-For questions, concerns, or data requests, contact Cory Shain [shain.3@osu.edu](shain.3@osu.edu).
+For questions, concerns, or data requests, contact Cory Shain ([shain.3@osu.edu](shain.3@osu.edu)).
 Bug reports can be logged in the issue tracker on [Github](https://github.com/coryshain/dtsr).
