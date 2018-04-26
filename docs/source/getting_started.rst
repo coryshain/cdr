@@ -77,6 +77,21 @@ For example, the following call trains models ``A`` and ``B`` only:
 
 ``python -m dtsr.bin.train experiment.ini -m DTSR_A DTSR_B``
 
+DTSR periodically saves training checkpoints to the model's output directory (every **save_freq** training epochs, where **save_freq** can be defined in the config file or left at its default of ``1``).
+This allows training to be interrupted and resumed.
+To save space, checkpoints overwrite each other, so the output directory will contain only the most recent checkpoint.
+If the ``train`` utility discovers a checkpoint in the model's output directory, it loads it and resumes training from the saved state.
+This feature can also be used to add training epochs after termination in the event of model non-convergence.
+Simply increase the number of training iterations specified in the config file and rerun ``train``, and the model will continue training until it hits the new maximum number of epochs.
+
+It is strongly encouraged to monitor changes in the parameters via Tensorboard in order to visually diagnose convergence.
+When parameters do not seem to have moved substantially over the course of the most recent training epochs, training can be terminated.
+This is important because in practice overall training loss may decrease very little during the final stages of training while the model fine-tunes IRF shapes, so Tensorboard diagnostics are more informative for convergence than overall loss.
+To run Tensorboard for a DTSR model called ``DTSR_A`` saved in experiment directory ``EXP``, run
+
+``python -m tensorboard.main --logdir=EXP/DTSR_A``
+
+then open the returned address (usually ``http://<USERNAME>:6006``) in a web browser.
 
 Evaluating DTSR Models
 ----------------------
