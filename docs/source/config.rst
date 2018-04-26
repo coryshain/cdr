@@ -3,7 +3,7 @@
 DTSR Configuration File Reference
 =================================
 
-The DTSR utilities in this module read config files that following the INI standard.
+The DTSR utilities in this module read config files that follow the INI standard.
 Basic information about INI file syntax can be found e.g. `here <https://en.wikipedia.org/wiki/INI_file>`_.
 This reference assumes familiarity with the INI protocol.
 
@@ -33,7 +33,7 @@ The system will treat each unique combination of values in the columns given in 
 - ``X_test``: ``str``; Path to test data (impulse matrix)
 - ``y_test``: ``str``; Path to test data (response matrix)
 
-Several DTSR utilities (e.g. for prediction and evaluation) are constructed to handle train, dev, and test partitions of the input data, but these partitions must be constructed in advance.
+Several DTSR utilities (e.g. for prediction and evaluation) are designed to handle train, dev, and test partitions of the input data, but these partitions must be constructed in advance.
 This package also provides a ``partition`` utility that can be used to partition input data by applying modular arithmetic to some subset of the variables in the data.
 For usage details run:
 
@@ -42,15 +42,19 @@ For usage details run:
 **IMPORTANT NOTES**
 
 - The file indicated in ``X_train`` must contain the following columns:
+
   - ``time``: Timestamp associated with each observation
   - A column for each variable in ``series_ids``
   - A column for each predictor variable indicated in the model formula
+
 - The file in ``y_train`` must contain the following columns:
+
   - ``time``: Timestamp associated with each observation
   - A column for the response variable in the model formula
   - A column for each variable in ``series_ids``
   - A column for each random grouping factor in the in the model formula
   - A column for each variable used for data filtration (see below)
+
 - Data in ``y_train`` may be filtered/partitioned, but data in ``X_train`` **must be uncensored** unless independent reason exists to assume that certain observations never have an impact on the response.
 
 

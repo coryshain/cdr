@@ -96,7 +96,7 @@ Once ``predict`` has been run for multiple models, statistical model comparison 
 
 The above call will permutation test pairwise differences in mean squared error on test data for all unique pairs of models defined in ``experiment.ini``.
 
-In addition to these core utilities, the ``convolve`` convolves the input predictors using the fitted DTSR data transform and saves the data table, and ``make_plots`` generates IRF plots with some degree of customization afforded by the command line arguments.
+In addition to these core utilities, ``convolve`` convolves the input predictors using the fitted DTSR data transform and saves the data table, and ``make_plots`` generates IRF plots with basic customization as permitted by the command line arguments.
 
 
 
