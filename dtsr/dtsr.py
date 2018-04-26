@@ -399,7 +399,7 @@ class DTSR(object):
                     self.X_rate = tf.gather(self.X, rate_ix, axis=-1)
 
                 if self.regularizer_name is not None:
-                    self.regularizer = getattr(tf.contrib.layers, '%s_regularizer' %self.regularizer_name)(self.regularizer_scale)
+                    self.regularizer = getattr(tf.contrib.layers, self.regularizer_name)(self.regularizer_scale)
 
     def __intialize_intercept(self, ran_gf=None, rangf_n_levels=None):
         raise NotImplementedError
@@ -1161,7 +1161,7 @@ class DTSR(object):
                     lr_decay_steps = tf.constant(self.lr_decay_steps, dtype=self.INT_TF)
                     lr_decay_rate = tf.constant(self.lr_decay_rate, dtype=self.FLOAT_TF)
                     lr_decay_staircase = self.lr_decay_staircase
-                    self.lr = getattr(tf.train, self.lr_decay_family + '_decay')(
+                    self.lr = getattr(tf.train, self.lr_decay_family)(
                         lr,
                         self.global_step,
                         lr_decay_steps,

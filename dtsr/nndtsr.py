@@ -477,7 +477,7 @@ class NNDTSR(DTSR):
             n_iter=100,
             irf_name_map=None,
             plot_n_time_units=2.5,
-            plot_n_points_per_time_unit=1000,
+            plot_n_points_per_time_unit=500,
             plot_x_inches=28,
             plot_y_inches=5,
             cmap='gist_earth'):

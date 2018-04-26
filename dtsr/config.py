@@ -40,7 +40,7 @@ class Config(object):
             shutil.copy2(path, self.logdir + '/config.ini')
         self.pc = settings.getboolean('pc', False)
         self.modulus = settings.getint('modulus', 4)
-        self.network_type = settings.get('network_type', 'nn')
+        self.network_type = settings.get('network_type', 'bayes')
         self.float_type = settings.get('float_type', 'float32')
         self.int_type = settings.get('int_type', 'int32')
         self.history_length = settings.get('history_length', 128)
@@ -52,8 +52,8 @@ class Config(object):
             except:
                 raise ValueError('history_length parameter invalid: %s' %self.history_length)
         self.low_memory = settings.getboolean('low_memory', False)
-        self.n_iter = settings.getint('n_iter', 200)
-        self.minibatch_size = settings.get('minibatch_size', 128)
+        self.n_iter = settings.getint('n_iter', 1000)
+        self.minibatch_size = settings.get('minibatch_size', 1024)
         if self.minibatch_size in ['None', 'inf']:
             self.minibatch_size = inf
         else:
@@ -74,17 +74,16 @@ class Config(object):
         self.log_random = settings.getboolean('log_random', False)
         self.save_freq = settings.getint('save_freq', 1)
         self.plot_n_time_units = settings.getfloat('plot_n_time_units', 2.5)
-        self.plot_n_points_per_time_unit = settings.getfloat('plot_n_points_per_time_unit', 1000)
+        self.plot_n_points_per_time_unit = settings.getfloat('plot_n_points_per_time_unit', 500)
         self.plot_x_inches = settings.getfloat('plot_x_inches', 7)
         self.plot_y_inches = settings.getfloat('plot_y_inches', 5)
         self.cmap = settings.get('cmap', 'gist_rainbow')
         self.use_gpu_if_available = settings.getboolean('use_gpu_if_available', True)
-        self.validate_delta_t = settings.getboolean('validate_delta_t', True)
         self.optim = settings.get('optim', 'Adam')
         if self.optim == 'None':
             self.optim = None
-        self.learning_rate = settings.getfloat('learning_rate', 0.01)
-        self.learning_rate_min = settings.get('learning_rate_min', 1e-4)
+        self.learning_rate = settings.getfloat('learning_rate', 0.001)
+        self.learning_rate_min = settings.get('learning_rate_min', 1e-5)
         if self.learning_rate_min in ['None', '-inf']:
             self.learning_rate_min = -inf
         else:
@@ -95,8 +94,8 @@ class Config(object):
         self.lr_decay_family = settings.get('lr_decay_family', None)
         if self.lr_decay_family == 'None':
             self.lr_decay_family = None
-        self.lr_decay_steps = settings.getint('lr_decay_steps', 25)
-        self.lr_decay_rate = settings.getfloat('lr_decay_rate', .1)
+        self.lr_decay_steps = settings.getint('lr_decay_steps', 100)
+        self.lr_decay_rate = settings.getfloat('lr_decay_rate', .5)
         self.lr_decay_staircase = settings.getboolean('lr_decay_staircase', False)
         self.init_sd = settings.getfloat('init_sd', 1.)
         self.ema_decay = settings.getfloat('ema_decay', 0.999)
