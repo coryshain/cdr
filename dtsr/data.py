@@ -15,7 +15,7 @@ def build_DTSR_impulses(
         int_type='int32',
         float_type='float32',
 ):
-    assert (X_2d_predictors is None and X_2d_predictor_names is None) or (X_2d_predictors.shape[-1] == len(X_2d_predictor_names)), 'Shape mismatch between X_2d_predictors and X_2d_predictor_names'
+    assert (X_2d_predictors is None and (X_2d_predictor_names is None or len(X_2d_predictor_names) == 0)) or (X_2d_predictors.shape[-1] == len(X_2d_predictor_names)), 'Shape mismatch between X_2d_predictors and X_2d_predictor_names'
     if X_2d_predictors is None:
         X_2d_predictors = []
     if X_2d_predictor_names is None:
