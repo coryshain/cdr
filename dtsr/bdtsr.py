@@ -14,6 +14,7 @@ tf_config.gpu_options.allow_growth = True
 from .formula import *
 from .util import *
 from .dtsr import DTSR
+from .data import build_DTSR_impulses, corr_dtsr
 
 import edward as ed
 from edward.models import Empirical, Exponential, Gamma, MultivariateNormalTriL, Normal, SinhArcsinh
@@ -1352,7 +1353,7 @@ class BDTSR(DTSR):
             Sort order and number of observations must be identical to that of ``y_time``.
         :param last_obs: ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the most recent observation in the series associated with the current regression target.
             Sort order and number of observations must be identical to that of ``y_time``.
-        :return: ``tuple``; two numpy arrays ``(X_3d, time_X_3d)``, the expanded IV and timestamp tensors.
+        :return: ``tuple``; two numpy arrays ``(X_2d, time_X_2d)``, the expanded IV and timestamp tensors.
         """
         return super(BDTSR, self).expand_history(X, X_time, first_obs, last_obs)
 
@@ -1360,6 +1361,8 @@ class BDTSR(DTSR):
             X,
             y,
             n_iter=100,
+            X_2d_predictor_names=None,
+            X_2d_predictors=None,
             irf_name_map=None,
             plot_n_time_units=2.5,
             plot_n_points_per_time_unit=500,
@@ -1406,10 +1409,6 @@ class BDTSR(DTSR):
 
         sys.stderr.write('Using GPU: %s\n' % usingGPU)
 
-        sys.stderr.write('Correlation matrix for input variables:\n')
-        rho = X[impulse_names].corr()
-        sys.stderr.write(str(rho) + '\n\n')
-
         if not np.isfinite(self.minibatch_size):
             minibatch_size = len(y)
         else:
@@ -1421,17 +1420,33 @@ class BDTSR(DTSR):
             c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
 
-        X_3d, time_X_3d = self.expand_history(X[impulse_names], X.time, y.first_obs, y.last_obs)
+        X_2d, time_X_2d, time_mask = build_DTSR_impulses(
+            X,
+            y.first_obs,
+            y.last_obs,
+            impulse_names,
+            history_length=128,
+            X_2d_predictor_names=X_2d_predictor_names,
+            X_2d_predictors=X_2d_predictors,
+            int_type=self.int_type,
+            float_type=self.float_type,
+        )
+
         time_y = np.array(y.time, dtype=self.FLOAT_NP)
         y_dv = np.array(y[self.dv], dtype=self.FLOAT_NP)
         gf_y = np.array(y_rangf, dtype=self.INT_NP)
+
+        sys.stderr.write('Correlation matrix for input variables:\n')
+        impulse_names_2d = [x for x in impulse_names if x in X_2d_predictor_names]
+        rho = corr_dtsr(X_2d, impulse_names, impulse_names_2d, time_mask)
+        sys.stderr.write(str(rho) + '\n\n')
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
 
                 fd = {
-                    self.X: X_3d,
-                    self.time_X: time_X_3d,
+                    self.X: X_2d,
+                    self.time_X: time_X_2d,
                     self.y: y_dv,
                     self.time_y: time_y,
                     self.gf_y: gf_y
@@ -1462,8 +1477,8 @@ class BDTSR(DTSR):
 
                         indices = p[j:j+minibatch_size]
                         fd_minibatch = {
-                            self.X: X_3d[indices],
-                            self.time_X: time_X_3d[indices],
+                            self.X: X_2d[indices],
+                            self.time_X: time_X_2d[indices],
                             self.y: y_dv[indices],
                             self.time_y: time_y[indices],
                             self.gf_y: gf_y[indices] if len(gf_y > 0) else gf_y
@@ -1543,7 +1558,17 @@ class BDTSR(DTSR):
                 sys.stderr.write('%s\n\n' % ('='*50))
 
 
-    def predict(self, X, y_time, y_rangf, first_obs, last_obs, n_samples=None):
+    def predict(
+            self,
+            X,
+            y_time,
+            y_rangf,
+            first_obs,
+            last_obs,
+            X_2d_predictor_names=None,
+            X_2d_predictors=None,
+            n_samples=None
+    ):
         """
         Predict from the pre-trained DTSR model.
         Predictions are averaged over ``self.n_samples_eval`` samples from the predictive posterior for each regression target.
@@ -1581,7 +1606,17 @@ class BDTSR(DTSR):
             c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
 
-        X_3d, time_X_3d = self.expand_history(X[impulse_names], X.time, first_obs, last_obs)
+        X_2d, time_X_2d, time_mask = build_DTSR_impulses(
+            X,
+            first_obs,
+            last_obs,
+            impulse_names,
+            history_length=128,
+            X_2d_predictor_names=X_2d_predictor_names,
+            X_2d_predictors=X_2d_predictors,
+            int_type=self.int_type,
+            float_type=self.float_type,
+        )
         time_y = np.array(y_time, dtype=self.FLOAT_NP)
         gf_y = np.array(y_rangf, dtype=self.INT_NP)
 
@@ -1593,8 +1628,8 @@ class BDTSR(DTSR):
                 self.set_predict_mode(True)
 
                 fd = {
-                    self.X: X_3d,
-                    self.time_X: time_X_3d,
+                    self.X: X_2d,
+                    self.time_X: time_X_2d,
                     self.time_y: time_y,
                     self.gf_y: gf_y,
                 }
@@ -1610,8 +1645,8 @@ class BDTSR(DTSR):
                         sys.stderr.write('Minibatch %d/%d\n' %((i/self.eval_minibatch_size)+1, self.n_eval_minibatch))
                         pb = tf.contrib.keras.utils.Progbar(n_samples)
                         fd_minibatch = {
-                            self.X: X_3d[i:i + self.eval_minibatch_size],
-                            self.time_X: time_X_3d[i:i + self.eval_minibatch_size],
+                            self.X: X_2d[i:i + self.eval_minibatch_size],
+                            self.time_X: time_X_2d[i:i + self.eval_minibatch_size],
                             self.time_y: time_y[i:i + self.eval_minibatch_size],
                             self.gf_y: gf_y[i:i + self.eval_minibatch_size] if len(gf_y) > 0 else gf_y
                         }
@@ -1627,7 +1662,14 @@ class BDTSR(DTSR):
 
                 return preds
 
-    def log_lik(self, X, y, n_samples=None):
+    def log_lik(
+            self,
+            X,
+            y,
+            X_2d_predictor_names=None,
+            X_2d_predictors=None,
+            n_samples=None
+    ):
         """
         Compute log-likelihood of data from predictive posterior.
 
@@ -1663,7 +1705,17 @@ class BDTSR(DTSR):
             c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
 
-        X_3d, time_X_3d = self.expand_history(X[impulse_names], X.time, y.first_obs, y.last_obs)
+        X_2d, time_X_2d, time_mask = build_DTSR_impulses(
+            X,
+            y['first_obs'],
+            y['last_obs'],
+            impulse_names,
+            history_length=128,
+            X_2d_predictor_names=X_2d_predictor_names,
+            X_2d_predictors=X_2d_predictors,
+            int_type=self.int_type,
+            float_type=self.float_type,
+        )
         time_y = np.array(y.time, dtype=self.FLOAT_NP)
         y_dv = np.array(y[self.dv], dtype=self.FLOAT_NP)
         gf_y = np.array(y_rangf, dtype=self.INT_NP)
@@ -1675,8 +1727,8 @@ class BDTSR(DTSR):
                 self.set_predict_mode(True)
 
                 fd = {
-                    self.X: X_3d,
-                    self.time_X: time_X_3d,
+                    self.X: X_2d,
+                    self.time_X: time_X_2d,
                     self.time_y: time_y,
                     self.gf_y: gf_y,
                     self.y: y_dv
@@ -1694,8 +1746,8 @@ class BDTSR(DTSR):
                         pb = tf.contrib.keras.utils.Progbar(n_samples)
 
                         fd_minibatch = {
-                            self.X: X_3d[i:i + self.eval_minibatch_size],
-                            self.time_X: time_X_3d[i:i + self.eval_minibatch_size],
+                            self.X: X_2d[i:i + self.eval_minibatch_size],
+                            self.time_X: time_X_2d[i:i + self.eval_minibatch_size],
                             self.time_y: time_y[i:i + self.eval_minibatch_size],
                             self.gf_y: gf_y[i:i + self.eval_minibatch_size] if len(gf_y) > 0 else gf_y,
                             self.y: y_dv[i:i+self.eval_minibatch_size]

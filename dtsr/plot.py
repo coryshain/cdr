@@ -15,7 +15,9 @@ def plot_convolutions(
         plot_x_inches=7,
         plot_y_inches=5,
         cmap='gist_earth',
-        legend=True
+        legend=True,
+        xlab=None,
+        ylab=None
 ):
     cm = plt.get_cmap(cmap)
     plt.gca().set_prop_cycle(color=[cm(1. * i / len(features)) for i in range(len(features))])
@@ -33,6 +35,10 @@ def plot_convolutions(
             plt.plot(plot_x, plot_y[:,sort_ix[i]], label=feats[sort_ix[i]])
         if uq is not None and lq is not None:
             plt.fill_between(plot_x[:,0], lq[:,sort_ix[i]], uq[:,sort_ix[i]], alpha=0.25)
+    if xlab:
+        plt.xlabel(xlab)
+    if ylab:
+        plt.ylabel(ylab)
     if legend:
         plt.legend(fancybox=True, framealpha=0.5)
     plt.gcf().set_size_inches(plot_x_inches, plot_y_inches)

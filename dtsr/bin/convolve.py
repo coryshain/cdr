@@ -5,7 +5,7 @@ import pandas as pd
 from dtsr.config import Config
 from dtsr.io import read_data
 from dtsr.formula import Formula
-from dtsr.data import preprocess_data
+from dtsr.data import preprocess_data, compute_3d_predictors
 from dtsr.util import load_dtsr
 
 pd.options.mode.chained_assignment = None
@@ -39,7 +39,13 @@ if __name__ == '__main__':
         X, y = read_data(p.X_test, p.y_test, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in dtsr_formula_list for v in x.rangf])))
     else:
         raise ValueError('Unrecognized value for "partition" argument: %s' %args.partition)
-    X, y, select = preprocess_data(X, y, p, dtsr_formula_list, compute_history=True)
+    X, y, select, X_2d_predictor_names, X_2d_predictors = preprocess_data(
+        X,
+        y,
+        p,
+        dtsr_formula_list,
+        compute_history=True
+    )
 
     for m in dtsr_formula_name_list:
         formula = p.models[m]['formula']
@@ -49,7 +55,15 @@ if __name__ == '__main__':
         sys.stderr.write('Retrieving saved model %s...\n' % m)
         dtsr_model = load_dtsr(p.logdir + '/' + m)
 
-        X_conv = dtsr_model.convolve_inputs(X, y, scaled=args.scaled, n_samples=args.nsamples)
+        X_conv = dtsr_model.convolve_inputs(
+            X,
+            y,
+            X_3d_predictors_colnames=X_2d_predictor_names,
+            X_3d_predictors=X_2d_predictors,
+            scaled=args.scaled,
+            n_samples=args.nsamples
+        )
+
         X_conv.to_csv(p.logdir + '/' + m + '/X_conv.csv', sep=' ', index=False, na_rep='nan')
 
 

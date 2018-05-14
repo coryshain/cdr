@@ -90,7 +90,7 @@ if __name__ == '__main__':
     dtsr_formula_list = [Formula(p.models[m]['formula']) for m in p.model_list if m.startswith('DTSR')]
     dtsr_formula_name_list = [m for m in p.model_list if m.startswith('DTSR')]
     X, y = read_data(p.X_train, p.y_train, p.series_ids, categorical_columns=list(set(p.series_ids + [v for x in dtsr_formula_list for v in x.rangf])))
-    X, y, select = preprocess_data(X, y, p, dtsr_formula_list, compute_history=False)
+    X, y, select, X_2d_predictor_names, X_2d_predictors = preprocess_data(X, y, p, dtsr_formula_list, compute_history=False)
 
     from dtsr.baselines import py2ri
     X['splitID'] = compute_splitID(X, p.split_ids)

@@ -6,7 +6,6 @@ import numpy as np
 from scipy import linalg
 from scipy.stats import chi2
 
-
 def names2ix(names, l, dtype=np.int32):
     if type(names) is not list:
         names = [names]

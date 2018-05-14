@@ -10,8 +10,8 @@ pd.options.mode.chained_assignment = None
 from dtsr.config import Config
 from dtsr.io import read_data
 from dtsr.formula import Formula
-from dtsr.data import preprocess_data, compute_splitID, compute_partition
-from dtsr.util import mse, mae, r_squared
+from dtsr.data import compute_3d_predictors, preprocess_data, compute_splitID, compute_partition
+from dtsr.util import mse, mae
 from dtsr.util import load_dtsr
 
 if __name__ == '__main__':
@@ -50,7 +50,13 @@ if __name__ == '__main__':
         X, y = read_data(p.X_test, p.y_test, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in dtsr_formula_list for v in x.rangf])))
     else:
         raise ValueError('Unrecognized value for "partition" argument: %s' %args.partition)
-    X, y, select = preprocess_data(X, y, p, dtsr_formula_list, compute_history=run_dtsr)
+    X, y, select, X_2d_predictor_names, X_2d_predictors = preprocess_data(
+        X,
+        y,
+        p,
+        dtsr_formula_list,
+        compute_history=run_dtsr
+    )
 
     if run_baseline:
         X['splitID'] = compute_splitID(X, p.split_ids)
@@ -212,7 +218,16 @@ if __name__ == '__main__':
             summary += '  ' + formula + '\n'
 
             if args.mode in [None, 'response']:
-                dtsr_preds = dtsr_model.predict(X, y.time, y[dtsr_model.form.rangf], y.first_obs, y.last_obs, n_samples=args.nsamples)
+                dtsr_preds = dtsr_model.predict(
+                    X,
+                    y.time,
+                    y[dtsr_model.form.rangf],
+                    y.first_obs,
+                    y.last_obs,
+                    X_2d_predictor_names=X_2d_predictor_names,
+                    X_2d_predictors=X_2d_predictors,
+                    n_samples=args.nsamples,
+                )
                 with open(p.logdir + '/' + m + '/preds_%s.txt'%args.partition, 'w') as p_file:
                     for i in range(len(dtsr_preds)):
                         p_file.write(str(dtsr_preds[i]) + '\n')
@@ -234,7 +249,13 @@ if __name__ == '__main__':
                 summary += '  MAE: %.4f\n' % dtsr_mae
 
             if args.mode in [None, 'loglik']:
-                dtsr_loglik_vector = dtsr_model.log_lik(X, y, n_samples=args.nsamples)
+                dtsr_loglik_vector = dtsr_model.log_lik(
+                    X,
+                    y,
+                    X_2d_predictor_names=X_2d_predictor_names,
+                    X_2d_predictors=X_2d_predictors,
+                    n_samples=args.nsamples
+                )
                 with open(p.logdir + '/' + m + '/loglik_%s.txt' % args.partition, 'w') as l_file:
                     for i in range(len(dtsr_loglik_vector)):
                         l_file.write(str(dtsr_loglik_vector[i]) + '\n')

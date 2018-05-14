@@ -19,11 +19,11 @@ class Config(object):
         settings = config['settings']
 
         ## Data
-        self.X_train = data.get('X_train', None)
+        self.X_train = data.get('X_train')
         self.X_dev = data.get('X_dev', None)
         self.X_test = data.get('X_test', None)
 
-        self.y_train = data.get('y_train', None)
+        self.y_train = data.get('y_train')
         self.y_dev = data.get('y_dev', None)
         self.y_test = data.get('y_test', None)
 
@@ -32,6 +32,8 @@ class Config(object):
         series_ids = data.get('series_ids')
         self.series_ids = series_ids.strip().split()
         self.modulus = data.getint('modulus', 4)
+        self.cosine_distance = data.getboolean('cosine_distance', False)
+        self.euclidean_distance = data.getboolean('euclidean_distance', False)
 
         ## Settings
         self.logdir = settings.get('logdir', './dtsr_model/')

@@ -4,6 +4,9 @@ import ast
 import itertools
 import numpy as np
 
+from .data import compute_time_mask, expand_history
+from .util import names2ix
+
 interact = re.compile('([^ ]+):([^ ]+)')
 
 def z(df):
@@ -255,8 +258,8 @@ class Formula(object):
                     for t in impulse.terms:
                         df = self.apply_ops(t, df)
                     df[impulse.id] = df[[x.name() for x in impulse.terms]].product(axis=1)
-                # else:
-                #     raise ValueError('Unrecognized term "%s" in model formula' %term.id)
+                else:
+                    raise ValueError('Unrecognized term "%s" in model formula' %impulse.id)
             else:
                 df[impulse.name()] = df[impulse.id]
             for i in range(len(ops)):
@@ -264,13 +267,148 @@ class Formula(object):
                 df[impulse.name()] = self.apply_op(op, df[impulse.name()])
         return df
 
-    def apply_formula(self, y, X):
+    def compute_2d_predictor(
+            self,
+            predictor_name,
+            X,
+            first_obs,
+            last_obs,
+            history_length=128,
+    ):
+        supported = [
+            'cosdist2D',
+            'eucldist2D'
+        ]
+
+        assert predictor_name in supported, '2D predictor "%s" not currently supported' %predictor_name
+
+        if predictor_name in ['cosdist2D', 'eucldist2D']:
+            is_embedding_dimension = re.compile('d([0-9]+)')
+
+            embedding_colnames = [c for c in X.columns if is_embedding_dimension.match(c)]
+            embedding_colnames = sorted(embedding_colnames, key=lambda x: float(x[1:]))
+
+            assert len(embedding_colnames) > 0, 'Model formula contains vector distance predictors but no embedding columns found in the input data'
+            X_embeddings, _, _ = expand_history(
+                X[embedding_colnames],
+                X['time'],
+                first_obs,
+                last_obs,
+                history_length,
+                fill=np.nan
+            )
+            X_bases = X_embeddings[:, -1:, :]
+
+            if predictor_name == 'cosdist2D':
+                sys.stderr.write('Computing pointwise cosine distances...\n')
+                numerator = (X_bases * X_embeddings).sum(axis=2)
+                denominator = np.sqrt((X_bases ** 2).sum(axis=2)) * np.sqrt((X_embeddings ** 2).sum(axis=2))
+                cosine_distances = numerator / (denominator)
+
+                cosine_distances = np.where(np.isfinite(cosine_distances), cosine_distances,
+                                            np.zeros(X_embeddings.shape[:2]))
+
+                new_2d_predictor_name = 'cosdist2D'
+                new_2d_predictor = np.expand_dims(cosine_distances, -1)
+
+            elif predictor_name == 'eucldist2D':
+                sys.stderr.write('Computing pointwise Euclidean distances...\n')
+                diffs = X_bases - X_embeddings
+
+                euclidean_distances = np.sqrt((diffs ** 2).sum(axis=2))
+                euclidean_distances = np.where(np.isfinite(euclidean_distances), euclidean_distances,
+                                               np.zeros(X_embeddings.shape[:2]))
+
+                new_2d_predictor_name = 'eucldist2D'
+                new_2d_predictor = np.expand_dims(euclidean_distances, -1)
+
+        return new_2d_predictor_name, new_2d_predictor
+
+    def apply_op_2d(self, op, arr, time_mask):
+        with np.errstate(invalid='ignore'):
+            n = time_mask.sum()
+            if op in ['c', 'c.']:
+                mean = arr.sum() / n
+                out = (arr - mean) * time_mask
+            elif op in ['z', 'z.']:
+                mean = arr.sum() / n
+                sd = np.sqrt((((arr - mean) ** 2) * time_mask).sum() / n)
+                out = ((arr - mean) / sd) * time_mask
+            elif op in ['s', 's.']:
+                mean = arr.sum() / n
+                sd = np.sqrt((((arr - mean) ** 2) * time_mask).sum() / n)
+                out = (arr / sd) * time_mask
+            elif op == 'log':
+                out = np.where(time_mask, np.log(arr), np.zeros_like(arr))
+            elif op == 'log1p':
+                out = np.where(time_mask, np.log(arr + 1), np.zeros_like(arr))
+            elif op == 'exp':
+                out = np.where(time_mask, np.exp(arr), np.zeros_like(arr))
+            else:
+                raise ValueError('Unrecognized op: "%s".' % op)
+            return out
+
+    def apply_ops_2d(self, impulse, X_2d_predictor_names, X_2d_predictors, time_mask, history_length=128):
+        assert time_mask is not None, 'Trying to compute 2D predictor but no time mask provided'
+        ops = impulse.ops
+        if impulse.name() not in X_2d_predictor_names:
+            if impulse.id not in X_2d_predictor_names:
+                raise ValueError('Unrecognized term "%s" in model formula' %impulse.id)
+            else:
+                i = names2ix(impulse.id, X_2d_predictor_names)[0]
+                new_2d_predictor = X_2d_predictors[:, :, i:i + 1]
+            for i in range(len(ops)):
+                op = ops[i]
+                new_2d_predictor = self.apply_op_2d(op, new_2d_predictor, time_mask)
+            X_2d_predictor_names.append(impulse.name())
+            X_2d_predictors = np.concatenate([X_2d_predictors, new_2d_predictor], axis=2)
+        return X_2d_predictor_names, X_2d_predictors
+
+    def apply_formula(self, X, y, X_2d_predictor_names=None, X_2d_predictors=None, history_length=128):
         if self.dv not in y.columns:
             y = self.apply_ops(self.dv_term, y)
         impulses = self.t.impulses()
-        for t in impulses:
-            X = self.apply_ops(t, X)
-        return y, X
+
+        if X_2d_predictor_names is None:
+            X_2d_predictor_names = []
+
+        time_mask = None
+
+        for impulse in impulses:
+            if impulse.is_2d:
+                if time_mask is None:
+                    time_mask = compute_time_mask(
+                        X.time,
+                        y.first_obs,
+                        y.last_obs,
+                        history_length=history_length
+                    )
+
+                if impulse.id not in X_2d_predictor_names:
+                    new_2d_predictor_name, new_2d_predictor = self.compute_2d_predictor(
+                        impulse.id,
+                        X,
+                        y.first_obs,
+                        y.last_obs,
+                        history_length=history_length
+                    )
+                    X_2d_predictor_names.append(new_2d_predictor_name)
+                    if X_2d_predictors is None:
+                        X_2d_predictors = new_2d_predictor
+                    else:
+                        X_2d_predictors = np.concatenate([X_2d_predictors, new_2d_predictor], axis=2)
+
+                X_2d_predictor_names, X_2d_predictors = self.apply_ops_2d(
+                    impulse,
+                    X_2d_predictor_names,
+                    X_2d_predictors,
+                    time_mask,
+                    history_length=history_length
+                )
+
+            else:
+                X = self.apply_ops(impulse, X)
+        return X, y, X_2d_predictor_names, X_2d_predictors
 
     IRF = [
         'DiracDelta',
@@ -300,6 +438,7 @@ class Impulse(object):
         for op in self.ops:
             self.name_str = op + '(' + self.name_str + ')'
         self.id = name
+        self.is_2d = name.endswith('2D')
 
     def __str__(self):
         return self.name_str

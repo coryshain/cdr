@@ -14,7 +14,9 @@ if __name__ == '__main__':
     argparser.add_argument('-u', '--ntimeunits', type=float, default=5.0, help='Number of time units on x-axis')
     argparser.add_argument('-r', '--resolution', type=float, default=500, help='Number of points per time unit')
     argparser.add_argument('-x', '--x', type=float, default=10.0, help='Width of plot in inches')
+    argparser.add_argument('-X', '--xlab', type=str, default=None, help='x-axis label (if default -- None -- no label)')
     argparser.add_argument('-y', '--y', type=float, default=6.0, help='Height of plot in inches')
+    argparser.add_argument('-Y', '--ylab', type=str, default=None, help='y-axis label (if default -- None -- no label)')
     argparser.add_argument('-c', '--cmap', type=str, default='gist_rainbow', help='Name of matplotlib colormap library to use for curves')
     argparser.add_argument('-n', '--namemap', type=str, default=None, help='Path to config file with IRF name map information for legend (if blank, no name map is used)')
     argparser.add_argument('-l', '--nolegend', action='store_true', help='Omit legend from figure')
@@ -48,7 +50,9 @@ if __name__ == '__main__':
             plot_y_inches=y_inches,
             cmap=cmap,
             prefix=prefix + m,
-            legend=legend
+            legend=legend,
+            xlab=args.xlab,
+            ylab=args.ylab
         )
         if hasattr(dtsr_model, 'inference_name'):
             dtsr_model.make_plots(
@@ -60,7 +64,9 @@ if __name__ == '__main__':
                 cmap=cmap,
                 mc=True,
                 prefix=prefix + m,
-                legend=legend
+                legend=legend,
+                xlab=args.xlab,
+                ylab=args.ylab
             )
 
 

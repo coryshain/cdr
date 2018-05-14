@@ -11,7 +11,7 @@ from dtsr.config import Config
 from dtsr.io import read_data
 from dtsr.formula import Formula
 from dtsr.data import preprocess_data, compute_splitID, compute_partition
-from dtsr.util import mse, mae, r_squared, load_dtsr
+from dtsr.util import mse, mae, load_dtsr
 
 if __name__ == '__main__':
 
@@ -38,15 +38,15 @@ if __name__ == '__main__':
 
     dtsr_formula_list = [Formula(p.models[m]['formula']) for m in p.model_list if m.startswith('DTSR')]
     dtsr_formula_name_list = [m for m in p.model_list if m.startswith('DTSR')]
+    all_rangf = [v for x in dtsr_formula_list for v in x.rangf]
     X, y = read_data(p.X_train, p.y_train, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in dtsr_formula_list for v in x.rangf])))
-    X, y, select = preprocess_data(X, y, p, dtsr_formula_list, compute_history=run_dtsr)
-    #
-    # from matplotlib import pyplot as plt
-    # plt.scatter(X.totsurp, X.fwprob5surp)
-    # plt.show()
-    # print(X.totsurp.std())
-    # print(X.fwprob5surp.std())
-    # exit()
+    X, y, select, X_2d_predictor_names, X_2d_predictors = preprocess_data(
+        X,
+        y,
+        p,
+        dtsr_formula_list,
+        compute_history=run_dtsr
+    )
 
     if run_baseline:
         X['splitID'] = compute_splitID(X, p.split_ids)
@@ -278,6 +278,8 @@ if __name__ == '__main__':
                 X,
                 y,
                 n_iter=p.n_iter,
+                X_2d_predictor_names=X_2d_predictor_names,
+                X_2d_predictors=X_2d_predictors,
                 irf_name_map=p.irf_name_map,
                 plot_n_time_units=p.plot_n_time_units,
                 plot_n_points_per_time_unit=p.plot_n_points_per_time_unit,
@@ -291,7 +293,9 @@ if __name__ == '__main__':
                 y.time,
                 y[dtsr_model.form.rangf],
                 y.first_obs,
-                y.last_obs
+                y.last_obs,
+                X_2d_predictor_names=X_2d_predictor_names,
+                X_2d_predictors=X_2d_predictors,
             )
 
             dtsr_mse = mse(y[dv], dtsr_preds)
@@ -304,7 +308,12 @@ if __name__ == '__main__':
             summary += 'Formula:\n'
             summary += '  ' + formula + '\n\n'
 
-            dtsr_loglik_vector = dtsr_model.log_lik(X, y)
+            dtsr_loglik_vector = dtsr_model.log_lik(
+                X,
+                y,
+                X_2d_predictor_names=X_2d_predictor_names,
+                X_2d_predictors=X_2d_predictors,
+            )
             dtsr_loglik = dtsr_loglik_vector.sum()
             summary += 'Log likelihood: %s\n' %dtsr_loglik
 

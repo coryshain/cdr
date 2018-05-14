@@ -33,7 +33,7 @@ if __name__ == '__main__':
         4 models --- DTSR_TASK1, DTSR_TASK2, COMPETITOR_TASK1, and COMPETITOR_TASK2 --- the script
         will perform 2 comparisons: DTSR_TASK1 vs COMPETITOR_TASK1 and DTSR_TASK2 vs. COMPETITOR_TASK2.
     ''')
-    argparser.add_argument('-t', '--tasks', nargs='*', default=[], help='List of paths to results files.')
+    argparser.add_argument('-t', '--tasks', nargs='*', default=[], help='List of paths to config files.')
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
     args, unknown = argparser.parse_known_args()
 
