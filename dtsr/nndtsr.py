@@ -847,7 +847,6 @@ class NNDTSR(DTSR):
         with self.sess.as_default():
             with self.sess.graph.as_default():
 
-                print(self.y_scale.eval(session=self.sess))
                 self.set_predict_mode(True)
 
                 fd = {

@@ -16,8 +16,6 @@ def build_DTSR_impulses(
         float_type='float32',
 ):
     assert (X_2d_predictors is None and (X_2d_predictor_names is None or len(X_2d_predictor_names) == 0)) or (X_2d_predictors.shape[-1] == len(X_2d_predictor_names)), 'Shape mismatch between X_2d_predictors and X_2d_predictor_names'
-    if X_2d_predictors is None:
-        X_2d_predictors = []
     if X_2d_predictor_names is None:
         X_2d_predictor_names = []
     impulse_names_1d = list(set(impulse_names).difference(set(X_2d_predictor_names)))
@@ -34,8 +32,11 @@ def build_DTSR_impulses(
         float_type=float_type
     )
 
-    X_2d = np.concatenate([X_2d_from_1d, X_2d_predictors], axis=2)
-    X_2d = X_2d[:, :, names2ix(impulse_names, impulse_names_1d + impulse_names_2d)]
+    if X_2d_predictors is None:
+        X_2d = X_2d_from_1d[:, :, names2ix(impulse_names, impulse_names_1d)]
+    else:
+        X_2d = np.concatenate([X_2d_from_1d, X_2d_predictors], axis=2)
+        X_2d = X_2d[:, :, names2ix(impulse_names, impulse_names_1d + impulse_names_2d)]
 
     # ix = names2ix(impulse_names_1d, impulse_names)
     # print('Output check')
