@@ -658,7 +658,7 @@ class DTSR(object):
                         params = tf.stack([k, theta], axis=1)
                         params_summary = tf.stack([k_mean, theta_mean], axis=1)
                     elif family == 'GammaKgt1':
-                        k, k_mean = self.__initialize_irf_param__('k', irf_ids, mean=2, lb=1, irf_by_rangf=irf_by_rangf)
+                        k, k_mean = self.__initialize_irf_param__('k', irf_ids, mean=1.1, lb=1, irf_by_rangf=irf_by_rangf)
                         theta, theta_mean = self.__initialize_irf_param__('theta', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
                         params = tf.stack([k, theta], axis=1)
                         params_summary = tf.stack([k_mean, theta_mean], axis=1)
@@ -670,13 +670,13 @@ class DTSR(object):
                     elif family == 'ShiftedGamma':
                         k, k_mean = self.__initialize_irf_param__('k', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
                         theta, theta_mean = self.__initialize_irf_param__('theta', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
-                        delta, delta_mean = self.__initialize_irf_param__('delta', irf_ids, mean=-1, ub=0, irf_by_rangf=irf_by_rangf)
+                        delta, delta_mean = self.__initialize_irf_param__('delta', irf_ids, mean=-0.1, ub=0, irf_by_rangf=irf_by_rangf)
                         params = tf.stack([k, theta, delta], axis=1)
                         params_summary = tf.stack([k_mean, theta_mean, delta_mean], axis=1)
                     elif family == 'ShiftedGammaKgt1':
-                        k, k_mean = self.__initialize_irf_param__('k', irf_ids, mean=2, lb=1, irf_by_rangf=irf_by_rangf)
+                        k, k_mean = self.__initialize_irf_param__('k', irf_ids, mean=1.1, lb=1, irf_by_rangf=irf_by_rangf)
                         theta, theta_mean = self.__initialize_irf_param__('theta', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
-                        delta, delta_mean = self.__initialize_irf_param__('delta', irf_ids, mean=-1, ub=0, irf_by_rangf=irf_by_rangf)
+                        delta, delta_mean = self.__initialize_irf_param__('delta', irf_ids, mean=-0.1, ub=0, irf_by_rangf=irf_by_rangf)
                         params = tf.stack([k, theta, delta], axis=1)
                         params_summary = tf.stack([k_mean, theta_mean, delta_mean], axis=1)
                     elif family == 'Normal':
@@ -704,7 +704,7 @@ class DTSR(object):
                     elif family == 'ShiftedBetaPrime':
                         alpha, alpha_mean = self.__initialize_irf_param__('alpha', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
                         beta, beta_mean = self.__initialize_irf_param__('beta', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
-                        delta, delta_mean = self.__initialize_irf_param__('delta', irf_ids, mean=-1, ub=0, irf_by_rangf=irf_by_rangf)
+                        delta, delta_mean = self.__initialize_irf_param__('delta', irf_ids, mean=-0.1, ub=0, irf_by_rangf=irf_by_rangf)
                         params = tf.stack([alpha, beta, delta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean, delta_mean], axis=1)
                     else:
