@@ -20,9 +20,16 @@ def plot_convolutions(
         ylab=None
 ):
     cm = plt.get_cmap(cmap)
+    plt.rcParams["font.family"] = "sans-serif"
     plt.gca().set_prop_cycle(color=[cm(1. * i / len(features)) for i in range(len(features))])
-    plt.gca().spines['right'].set_visible(False)
     plt.gca().spines['top'].set_visible(False)
+    plt.gca().spines['right'].set_visible(False)
+    plt.gca().spines['bottom'].set_visible(False)
+    plt.gca().spines['left'].set_visible(False)
+    plt.grid(b=True, which='major', axis='both', ls='--', lw=.5, c='k', alpha=.3)
+    plt.axhline(y=0, lw=1, c='gray', alpha=1)
+    plt.axvline(x=0, lw=1, c='gray', alpha=1)
+
     feats = features[:]
     if irf_name_map is not None:
         for i in range(len(feats)):
@@ -30,19 +37,22 @@ def plot_convolutions(
     sort_ix = [i[0] for i in sorted(enumerate(feats), key=lambda x:x[1])]
     for i in range(len(sort_ix)):
         if plot_y[1:,sort_ix[i]].sum() == 0:
-            plt.plot(plot_x[:2], plot_y[:2,sort_ix[i]], label=feats[sort_ix[i]])
+            plt.plot(plot_x[:2], plot_y[:2,sort_ix[i]], label=feats[sort_ix[i]], lw=2, alpha=0.8, solid_capstyle='butt')
         else:
-            plt.plot(plot_x, plot_y[:,sort_ix[i]], label=feats[sort_ix[i]])
+            plt.plot(plot_x, plot_y[:,sort_ix[i]], label=feats[sort_ix[i]], lw=2, alpha=0.8, solid_capstyle='butt')
         if uq is not None and lq is not None:
             plt.fill_between(plot_x[:,0], lq[:,sort_ix[i]], uq[:,sort_ix[i]], alpha=0.25)
+
     if xlab:
-        plt.xlabel(xlab)
+        plt.xlabel(xlab, weight='bold')
     if ylab:
-        plt.ylabel(ylab)
+        plt.ylabel(ylab, weight='bold')
     if legend:
-        plt.legend(fancybox=True, framealpha=0.5)
+        plt.legend(fancybox=True, framealpha=0.75, frameon=True, facecolor='white', edgecolor='gray')
+
     plt.gcf().set_size_inches(plot_x_inches, plot_y_inches)
-    plt.savefig(dir+'/'+filename)
+    plt.tight_layout()
+    plt.savefig(dir+'/'+filename, dpi=600)
     plt.close('all')
 
 def plot_legend(
