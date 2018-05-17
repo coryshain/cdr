@@ -10,7 +10,7 @@ pd.options.mode.chained_assignment = None
 from dtsr.config import Config
 from dtsr.io import read_data
 from dtsr.formula import Formula
-from dtsr.data import compute_3d_predictors, preprocess_data, compute_splitID, compute_partition
+from dtsr.data import preprocess_data, compute_splitID, compute_partition
 from dtsr.util import mse, mae
 from dtsr.util import load_dtsr
 

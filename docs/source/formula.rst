@@ -58,7 +58,7 @@ The currently supported IRF families are:
   - Parameters: :math:`\alpha` (shape), :math:`\theta` (rate)
   - Definition: :math:`\frac{x^{\alpha-1}e^{-\frac{x}{\beta}}}{\beta^k\Gamma(k)}`
 
-- ``ShiftedGammaKgt1``: PDF of gamma distribution with support starting at :math:`0 - \delta`, :math:`\alpha > 1` (enforces rising-then-falling shape)
+- ``ShiftedGammaKgt1``: PDF of gamma distribution with support starting at :math:`0 + \delta`, :math:`\alpha > 1` (enforces rising-then-falling shape)
 
   - Parameters: :math:`\alpha` (shape), :math:`\beta` (rate), :math:`\delta` (shift, strictly negative)
   - Definition: :math:`\frac{(x - \delta)^{\alpha-1}e^{-\frac{x - \delta}{\beta}}}{\beta^k\Gamma(k)}`
@@ -164,7 +164,7 @@ These defaults are not guaranteed to be plausible for your particular applicatio
 Therefore, it is generally a good idea to think carefully in advance about what kinds of IRF shapes are `a priori` reasonable and choose initializations in that range.
 
 Note that the initialization values are on the constrained space, so make sure to respect the constraints when choosing them.
-For example :math:`\alpha` of the Gamma distribution is constrained to be > 0, so an initial :math:`\alpha` of <=0 will result in incorrect behavior.
+For example, :math:`\alpha` of the Gamma distribution is constrained to be > 0, so an initial :math:`\alpha` of <=0 will result in incorrect behavior.
 However, keep in mind that for BDTSR, prior variances are necessarily on the unconstrained space and get squashed by the constraint function, so choosing initializations that are very close to constraint boundaries can indirectly tighten the prior.
 For example, choosing an initialization :math:`\alpha = 0.001` for the Gamma distribution will result in a much tighter prior around small values of :math:`\alpha`.
 

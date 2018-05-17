@@ -5,7 +5,7 @@ import pandas as pd
 from dtsr.config import Config
 from dtsr.io import read_data
 from dtsr.formula import Formula
-from dtsr.data import preprocess_data, compute_3d_predictors
+from dtsr.data import preprocess_data
 from dtsr.util import load_dtsr
 
 pd.options.mode.chained_assignment = None
