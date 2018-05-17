@@ -300,7 +300,6 @@ class NNDTSR(DTSR):
 
     def __initialize_irf_param__(self, param_name, ids, mean=0, lb=None, ub=None, irf_by_rangf=None):
         dim = len(ids)
-        mean = float(mean)
         if irf_by_rangf is None:
             irf_by_rangf = []
 
@@ -311,7 +310,7 @@ class NNDTSR(DTSR):
                 param = tf.Variable(
                     tf.random_normal(
                         shape=[1, dim],
-                        mean=param_mean_init,
+                        mean=tf.expand_dims(param_mean_init, 0),
                         stddev=self.init_sd,
                         dtype=self.FLOAT_TF
                     ),

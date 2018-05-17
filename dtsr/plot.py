@@ -3,21 +3,22 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 sns.set(style='white', rc={'axes.facecolor': (0, 0, 0, 0)})
 
-def plot_convolutions(
+def plot_irf(
         plot_x,
         plot_y,
         features,
         uq=None,
         lq=None,
         dir='.',
-        filename='convolution_plot.png',
+        filename='irf_plot.png',
         irf_name_map=None,
-        plot_x_inches=7,
-        plot_y_inches=5,
-        cmap='gist_earth',
+        plot_x_inches=6,
+        plot_y_inches=4,
+        cmap='gist_rainbow',
         legend=True,
         xlab=None,
-        ylab=None
+        ylab=None,
+        transparent_background=False
 ):
     cm = plt.get_cmap(cmap)
     plt.rcParams["font.family"] = "sans-serif"
@@ -52,7 +53,7 @@ def plot_convolutions(
 
     plt.gcf().set_size_inches(plot_x_inches, plot_y_inches)
     plt.tight_layout()
-    plt.savefig(dir+'/'+filename, dpi=600)
+    plt.savefig(dir+'/'+filename, dpi=600, transparent=transparent_background)
     plt.close('all')
 
 def plot_legend(

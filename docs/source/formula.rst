@@ -40,28 +40,28 @@ The currently supported IRF families are:
 
 - ``Exp``: PDF of exponential distribution
 
-  - Parameters: :math:`\lambda` (rate)
-  - Definition: :math:`\lambda e^{-\lambda x}`
+  - Parameters: :math:`\beta` (rate)
+  - Definition: :math:`\beta e^{-\beta x}`
 
 - ``Gamma``: PDF of gamma distribution
 
-  - Parameters: :math:`k` (shape), :math:`\theta` (rate)
-  - Definition: :math:`\frac{x^{k-1}e^{-\frac{x}{\theta}}}{\theta^k\Gamma(k)}`
+  - Parameters: :math:`\alpha` (shape), :math:`\beta` (rate)
+  - Definition: :math:`\frac{x^{\alpha-1}e^{-\frac{x}{\beta}}}{\beta^k\Gamma(k)}`
 
 - ``ShiftedGamma``: PDF of gamma distribution with support starting at :math:`0 + \delta`
 
-  - Parameters: :math:`k` (shape), :math:`\theta` (rate), :math:`\delta` (shift, strictly negative)
-  - Definition: :math:`\frac{(x - \delta)^{k-1}e^{-\frac{x - \delta}{\theta}}}{\theta^k\Gamma(k)}`
+  - Parameters: :math:`\alpha` (shape), :math:`\beta` (rate), :math:`\delta` (shift, strictly negative)
+  - Definition: :math:`\frac{(x - \delta)^{\alpha-1}e^{-\frac{x - \delta}{\beta}}}{\beta^k\Gamma(k)}`
 
-- ``GammaKgt1``: PDF of gamma distribution, :math:`k > 1` (enforces rising-then-falling shape)
+- ``GammaKgt1``: PDF of gamma distribution, :math:`\alpha > 1` (enforces rising-then-falling shape)
 
-  - Parameters: :math:`k` (shape), :math:`\theta` (rate)
-  - Definition: :math:`\frac{x^{k-1}e^{-\frac{x}{\theta}}}{\theta^k\Gamma(k)}`
+  - Parameters: :math:`\alpha` (shape), :math:`\theta` (rate)
+  - Definition: :math:`\frac{x^{\alpha-1}e^{-\frac{x}{\beta}}}{\beta^k\Gamma(k)}`
 
-- ``ShiftedGammaKgt1``: PDF of gamma distribution with support starting at :math:`0 - \delta`, :math:`k > 1` (enforces rising-then-falling shape)
+- ``ShiftedGammaKgt1``: PDF of gamma distribution with support starting at :math:`0 - \delta`, :math:`\alpha > 1` (enforces rising-then-falling shape)
 
-  - Parameters: :math:`k` (shape), :math:`\theta` (rate), :math:`\delta` (shift, strictly negative)
-  - Definition: :math:`\frac{(x - \delta)^{k-1}e^{-\frac{x - \delta}{\theta}}}{\theta^k\Gamma(k)}`
+  - Parameters: :math:`\alpha` (shape), :math:`\beta` (rate), :math:`\delta` (shift, strictly negative)
+  - Definition: :math:`\frac{(x - \delta)^{\alpha-1}e^{-\frac{x - \delta}{\beta}}}{\beta^k\Gamma(k)}`
 
 - ``Normal``: PDF of Gaussian (normal) distribution
 
@@ -77,8 +77,8 @@ The currently supported IRF families are:
 
 - ``EMG``: PDF of exponentially modified gaussian distribution (convolution of a normal with an exponential distribution, can be right-skewed)
 
-  - Parameters: :math:`\mu` (mean), :math:`\sigma` (standard deviation), :math:`\lambda` (rate)
-  - Definition: :math:`\frac{\lambda}{2}e^{\frac{\lambda}{2}\left(2\mu + \lambda \sigma^2 - 2x \right)} \mathrm{erfc} \left(\frac{m + \lambda \sigma ^2 - x}{\sqrt{2}\sigma}\right)`, where :math:`\mathrm{erfc}(x) = \frac{2}{\sqrt{\pi}}\int_x^{\infty} e^{-t^2}dt`.
+  - Parameters: :math:`\mu` (mean), :math:`\sigma` (standard deviation), :math:`\beta` (rate)
+  - Definition: :math:`\frac{\beta}{2}e^{\frac{\beta}{2}\left(2\mu + \beta \sigma^2 - 2x \right)} \mathrm{erfc} \left(\frac{m + \beta \sigma ^2 - x}{\sqrt{2}\sigma}\right)`, where :math:`\mathrm{erfc}(x) = \frac{2}{\sqrt{\pi}}\int_x^{\infty} e^{-t^2}dt`.
 
 - ``BetaPrime``: PDF of BetaPrime (inverted beta) distribution
 
@@ -147,6 +147,26 @@ This formula will fit separate coefficients `and` IRF shapes for this predictor 
 An important complication in fitting mixed models with DTSR is that the relevant grouping factor is determined by the current `regression target`, not the properties of the independent variable observations in the series history.
 This means that random effects are only guaranteed to be meaningful when fit using grouping factors that are constant for the entire series (e.g. the ID of the human subject completing the experiment).
 Random effects fit for grouping factors that vary during the experiment should therefore be avoided unless they are intercept terms only, which are not affected by the temporal convolution.
+
+
+
+
+Parameter Initialization
+---------------
+IRF parameters can be initialized for a given convolutional term by specifying their initial values in the IRF call, using the parameter name as the keyword (see supported IRF and their associated parameters above).
+For example, to initialize a Gamma IRF with :math:`\alpha = 2` and :math:`\beta = 2` for predictor ``A``, use the following call:
+
+``C(A, Gamma(alpha=2, beta=2))``
+
+These values will serve as initializations in both NNDTSR and BDTSR, and in BDTSR they will additionally serve as the mean of the prior distribution for that parameter.
+If no initialization is specified, defaults will be used.
+These defaults are not guaranteed to be plausible for your particular application and may have a detrimental impact on training.
+Therefore, it is generally a good idea to think carefully in advance about what kinds of IRF shapes are `a priori` reasonable and choose initializations in that range.
+
+Note that the initialization values are on the constrained space, so make sure to respect the constraints when choosing them.
+For example :math:`\alpha` of the Gamma distribution is constrained to be > 0, so an initial :math:`\alpha` of <=0 will result in incorrect behavior.
+However, keep in mind that for BDTSR, prior variances are necessarily on the unconstrained space and get squashed by the constraint function, so choosing initializations that are very close to constraint boundaries can indirectly tighten the prior.
+For example, choosing an initialization :math:`\alpha = 0.001` for the Gamma distribution will result in a much tighter prior around small values of :math:`\alpha`.
 
 
 

@@ -181,6 +181,7 @@ class DTSR(object):
             self.src_impulse_names = t_src.impulse_names()
             self.src_terminal_names = t_src.terminal_names()
             self.src_atomic_irf_names_by_family = t_src.atomic_irf_by_family()
+            self.src_param_init_by_family = t_src.atomic_irf_param_init_by_family()
             self.src_coef2impulse = t_src.coef2impulse()
             self.src_impulse2coef = t_src.impulse2coef()
             self.src_coef2terminal = t_src.coef2terminal()
@@ -205,6 +206,7 @@ class DTSR(object):
             self.impulse_names = t.impulse_names()
             self.terminal_names = t.terminal_names()
             self.atomic_irf_names_by_family = t.atomic_irf_by_family()
+            self.atomic_irf_param_init_by_family = t.atomic_irf_param_init_by_family()
             self.coef2impulse = t.coef2impulse()
             self.impulse2coef = t.impulse2coef()
             self.coef2terminal = t.coef2terminal()
@@ -258,6 +260,7 @@ class DTSR(object):
             self.impulse_names = t.impulse_names()
             self.terminal_names = t.terminal_names()
             self.atomic_irf_names_by_family = t.atomic_irf_by_family()
+            self.atomic_irf_param_init_by_family = t.atomic_irf_param_init_by_family()
             self.coef2impulse = t.coef2impulse()
             self.impulse2coef = t.impulse2coef()
             self.coef2terminal = t.coef2terminal()
@@ -635,6 +638,7 @@ class DTSR(object):
                         continue
 
                     irf_ids = self.atomic_irf_names_by_family[family]
+                    irf_param_init = self.atomic_irf_param_init_by_family[family]
 
                     irf_by_rangf = {}
                     for id in irf_ids:
@@ -645,66 +649,93 @@ class DTSR(object):
                                 irf_by_rangf[gf].append(id)
 
                     if family == 'Exp':
-                        L, L_mean = self.__initialize_irf_param__('L', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
-                        params = tf.stack([L], axis=1)
-                        params_summary =  tf.stack([L_mean], axis=1)
+                        beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=1)
+                        beta, beta_mean = self.__initialize_irf_param__('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf)
+                        params = tf.stack([beta], axis=1)
+                        params_summary =  tf.stack([beta_mean], axis=1)
                     elif family == 'SteepExp':
-                        L, L_mean = self.__initialize_irf_param__('L', irf_ids, mean=25, lb=0, irf_by_rangf=irf_by_rangf)
-                        params = tf.stack([L], axis=1)
-                        params_summary =  tf.stack([L_mean], axis=1)
+                        beta_init = self.__get_mean_init_vector__('beta', 25)
+                        beta, beta_mean = self.__initialize_irf_param__('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf)
+                        params = tf.stack([beta], axis=1)
+                        params_summary =  tf.stack([beta_mean], axis=1)
                     elif family == 'Gamma':
-                        k, k_mean = self.__initialize_irf_param__('k', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
-                        theta, theta_mean = self.__initialize_irf_param__('theta', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
-                        params = tf.stack([k, theta], axis=1)
-                        params_summary = tf.stack([k_mean, theta_mean], axis=1)
+                        alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=1)
+                        beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=1)
+                        alpha, alpha_mean = self.__initialize_irf_param__('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf)
+                        beta, beta_mean = self.__initialize_irf_param__('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf)
+                        params = tf.stack([alpha, beta], axis=1)
+                        params_summary = tf.stack([alpha_mean, beta_mean], axis=1)
                     elif family == 'GammaKgt1':
-                        k, k_mean = self.__initialize_irf_param__('k', irf_ids, mean=1.1, lb=1, irf_by_rangf=irf_by_rangf)
-                        theta, theta_mean = self.__initialize_irf_param__('theta', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
-                        params = tf.stack([k, theta], axis=1)
-                        params_summary = tf.stack([k_mean, theta_mean], axis=1)
+                        alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=2)
+                        beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=5)
+                        alpha, alpha_mean = self.__initialize_irf_param__('alpha', irf_ids, mean=alpha_init, lb=1, irf_by_rangf=irf_by_rangf)
+                        beta, beta_mean = self.__initialize_irf_param__('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf)
+                        params = tf.stack([alpha, beta], axis=1)
+                        params_summary = tf.stack([alpha_mean, beta_mean], axis=1)
                     elif family == 'SteepGamma':
-                        k, k_mean = self.__initialize_irf_param__('k', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
-                        theta, theta_mean = self.__initialize_irf_param__('theta', irf_ids, mean=25, lb=0, irf_by_rangf=irf_by_rangf)
-                        params = tf.stack([k, theta], axis=1)
-                        params_summary = tf.stack([k_mean, theta_mean], axis=1)
+                        alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=1)
+                        beta_init = self.__get_mean_init_vector__('beta', 25)
+                        alpha, alpha_mean = self.__initialize_irf_param__('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf)
+                        beta, beta_mean = self.__initialize_irf_param__('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf)
+                        params = tf.stack([alpha, beta], axis=1)
+                        params_summary = tf.stack([alpha_mean, beta_mean], axis=1)
                     elif family == 'ShiftedGamma':
-                        k, k_mean = self.__initialize_irf_param__('k', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
-                        theta, theta_mean = self.__initialize_irf_param__('theta', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
-                        delta, delta_mean = self.__initialize_irf_param__('delta', irf_ids, mean=-0.1, ub=0, irf_by_rangf=irf_by_rangf)
-                        params = tf.stack([k, theta, delta], axis=1)
-                        params_summary = tf.stack([k_mean, theta_mean, delta_mean], axis=1)
+                        alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=1)
+                        beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=1)
+                        delta_init = self.__get_mean_init_vector__('delta', -1)
+                        alpha, alpha_mean = self.__initialize_irf_param__('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf)
+                        beta, beta_mean = self.__initialize_irf_param__('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf)
+                        delta, delta_mean = self.__initialize_irf_param__('delta', irf_ids, mean=delta_init, ub=0, irf_by_rangf=irf_by_rangf)
+                        params = tf.stack([alpha, beta, delta], axis=1)
+                        params_summary = tf.stack([alpha_mean, beta_mean, delta_mean], axis=1)
                     elif family == 'ShiftedGammaKgt1':
-                        k, k_mean = self.__initialize_irf_param__('k', irf_ids, mean=1.1, lb=1, irf_by_rangf=irf_by_rangf)
-                        theta, theta_mean = self.__initialize_irf_param__('theta', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
-                        delta, delta_mean = self.__initialize_irf_param__('delta', irf_ids, mean=-0.1, ub=0, irf_by_rangf=irf_by_rangf)
-                        params = tf.stack([k, theta, delta], axis=1)
-                        params_summary = tf.stack([k_mean, theta_mean, delta_mean], axis=1)
+                        alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=2)
+                        beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=5)
+                        delta_init = self.__get_mean_init_vector__(irf_ids, 'delta', irf_param_init, default=-0.5)
+                        alpha, alpha_mean = self.__initialize_irf_param__('alpha', irf_ids, mean=alpha_init, lb=1, irf_by_rangf=irf_by_rangf)
+                        beta, beta_mean = self.__initialize_irf_param__('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf)
+                        delta, delta_mean = self.__initialize_irf_param__('delta', irf_ids, mean=delta_init, ub=0, irf_by_rangf=irf_by_rangf)
+                        params = tf.stack([alpha, beta, delta], axis=1)
+                        params_summary = tf.stack([alpha_mean, beta_mean, delta_mean], axis=1)
                     elif family == 'Normal':
-                        mu, mu_mean = self.__initialize_irf_param__('mu', irf_ids, irf_by_rangf=irf_by_rangf)
-                        sigma, sigma_mean = self.__initialize_irf_param__('sigma', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
+                        mu_init = self.__get_mean_init_vector__(irf_ids, 'mu', irf_param_init, default=0)
+                        sigma_init = self.__get_mean_init_vector__(irf_ids, 'sigma', irf_param_init, default=1)
+                        mu, mu_mean = self.__initialize_irf_param__('mu', irf_ids, mean=mu_init, irf_by_rangf=irf_by_rangf)
+                        sigma, sigma_mean = self.__initialize_irf_param__('sigma', irf_ids, mean=sigma_init, lb=0, irf_by_rangf=irf_by_rangf)
                         params = tf.stack([mu, sigma], axis=1)
                         params_summary = tf.stack([mu_mean, sigma_mean], axis=1)
                     elif family == 'SkewNormal':
-                        mu, mu_mean = self.__initialize_irf_param__('mu', irf_ids, irf_by_rangf=irf_by_rangf)
-                        sigma, sigma_mean = self.__initialize_irf_param__('sigma', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
-                        alpha, alpha_mean = self.__initialize_irf_param__('alpha', irf_ids, irf_by_rangf=irf_by_rangf)
+                        mu_init = self.__get_mean_init_vector__(irf_ids, 'mu', irf_param_init, default=0)
+                        sigma_init = self.__get_mean_init_vector__(irf_ids, 'sigma', irf_param_init, default=1)
+                        alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=0)
+                        mu, mu_mean = self.__initialize_irf_param__('mu', irf_ids, mean=mu_init, irf_by_rangf=irf_by_rangf)
+                        sigma, sigma_mean = self.__initialize_irf_param__('sigma', irf_ids, mean=sigma_init, lb=0, irf_by_rangf=irf_by_rangf)
+                        alpha, alpha_mean = self.__initialize_irf_param__('alpha', irf_ids, alpha=alpha_init, irf_by_rangf=irf_by_rangf)
                         params = tf.stack([mu, sigma, alpha], axis=1)
                         params_summary = tf.stack([mu_mean, sigma_mean, alpha_mean], axis=1)
                     elif family == 'EMG':
-                        mu, mu_mean = self.__initialize_irf_param__('mu', irf_ids, irf_by_rangf=irf_by_rangf)
-                        sigma, sigma_mean = self.__initialize_irf_param__('sigma', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
-                        L, L_mean = self.__initialize_irf_param__('L', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
-                        params = tf.stack([mu, sigma, L], axis=1)
-                        params_summary = tf.stack([mu_mean, sigma_mean, L_mean], axis=1)
+                        mu_init = self.__get_mean_init_vector__(irf_ids, 'mu', irf_param_init, default=0)
+                        sigma_init = self.__get_mean_init_vector__(irf_ids, 'sigma', irf_param_init, default=1)
+                        beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=1)
+                        mu, mu_mean = self.__initialize_irf_param__('mu', irf_ids, mean=mu_init, irf_by_rangf=irf_by_rangf)
+                        sigma, sigma_mean = self.__initialize_irf_param__('sigma', irf_ids, mean=sigma_init, lb=0, irf_by_rangf=irf_by_rangf)
+                        beta, beta_mean = self.__initialize_irf_param__('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf)
+                        params = tf.stack([mu, sigma, beta], axis=1)
+                        params_summary = tf.stack([mu_mean, sigma_mean, beta_mean], axis=1)
                     elif family == 'BetaPrime':
-                        alpha, alpha_mean = self.__initialize_irf_param__('alpha', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
-                        beta, beta_mean = self.__initialize_irf_param__('beta', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
+                        alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=1)
+                        beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=1)
+                        alpha, alpha_mean = self.__initialize_irf_param__('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf)
+                        beta, beta_mean = self.__initialize_irf_param__('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf)
                         params = tf.stack([alpha, beta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean], axis=1)
                     elif family == 'ShiftedBetaPrime':
-                        alpha, alpha_mean = self.__initialize_irf_param__('alpha', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
-                        beta, beta_mean = self.__initialize_irf_param__('beta', irf_ids, mean=1, lb=0, irf_by_rangf=irf_by_rangf)
-                        delta, delta_mean = self.__initialize_irf_param__('delta', irf_ids, mean=-0.1, ub=0, irf_by_rangf=irf_by_rangf)
+                        alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=1)
+                        beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=1)
+                        delta_init = self.__get_mean_init_vector__('delta', -1)
+                        alpha, alpha_mean = self.__initialize_irf_param__('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf)
+                        beta, beta_mean = self.__initialize_irf_param__('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf)
+                        delta, delta_mean = self.__initialize_irf_param__('delta', irf_ids, mean=delta_init, ub=0, irf_by_rangf=irf_by_rangf)
                         params = tf.stack([alpha, beta, delta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean, delta_mean], axis=1)
                     else:
@@ -718,6 +749,12 @@ class DTSR(object):
 
     def __initialize_irf_param__(self, param_name, ids, mean=0, lb=None, ub=None, irf_by_rangf=None):
         raise NotImplementedError
+
+    def __get_mean_init_vector__(self, irf_ids, param_name, irf_param_init, default=0):
+        mean = np.zeros(len(irf_ids))
+        for i in range(len(irf_ids)):
+            mean[i] = irf_param_init[irf_ids[i]].get(param_name, default)
+        return mean
 
     def __initialize_irfs__(self, t):
         with self.sess.as_default():
@@ -1592,7 +1629,8 @@ class DTSR(object):
             prefix='',
             legend=True,
             xlab=None,
-            ylab=None
+            ylab=None,
+            transparent_background=False
     ):
         if prefix != '':
             prefix += '_'
@@ -1638,7 +1676,7 @@ class DTSR(object):
                             uq = None
                             plot_y = np.concatenate(plot_y, axis=1)
 
-                        plot_convolutions(
+                        plot_irf(
                             plot_x,
                             plot_y,
                             names,
@@ -1652,7 +1690,8 @@ class DTSR(object):
                             cmap=cmap,
                             legend=legend,
                             xlab=xlab,
-                            ylab=ylab
+                            ylab=ylab,
+                            transparent_background=transparent_background
                         )
 
                 if self.pc:
@@ -1680,7 +1719,7 @@ class DTSR(object):
                                     uq = None
                                     plot_y = np.concatenate(plot_y, axis=1)
 
-                                plot_convolutions(
+                                plot_irf(
                                     plot_x,
                                     plot_y,
                                     names,
@@ -1694,7 +1733,8 @@ class DTSR(object):
                                     cmap=cmap,
                                     legend=legend,
                                     xlab=xlab,
-                                    ylab=ylab
+                                    ylab=ylab,
+                                    transparent_background=transparent_background
                                 )
 
                 self.set_predict_mode(False)

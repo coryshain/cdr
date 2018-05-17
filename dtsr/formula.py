@@ -151,6 +151,7 @@ class Formula(object):
         coef_id = None
         cont=False
         ranirf=False
+        param_init={}
         if len(t.keywords) > 0:
             for k in t.keywords:
                 if k.arg == 'irf_id':
@@ -189,6 +190,15 @@ class Formula(object):
                         ranirf = k.value.value
                     elif type(k.value).__name__ == 'Num':
                         ranirf = k.value.n > 0
+                else:
+                    if type(k.value).__name__ == 'Num':
+                        param_init[k.arg] = k.value.n
+                    elif type(k.value).__name__ == 'UnaryOp':
+                        assert type(k.value.op).__name__ == 'USub', 'Invalid operator provided to to IRF parameter "%s"' %k.arg
+                        assert type(k.value.operand).__name__ == 'Num', 'Non-numeric initialization provided to IRF parameter "%s"' %k.arg
+                        param_init[k.arg] = -k.value.operand.n
+                    else:
+                        raise ValueError('Non-numeric initialization provided to IRF parameter "%s"' %k.arg)
 
         if isinstance(input, IRFNode):
             new = IRFNode(
@@ -196,7 +206,8 @@ class Formula(object):
                 irfID=irf_id,
                 ops=ops,
                 fixed=rangf is None,
-                rangf=rangf if ranirf else None
+                rangf=rangf if ranirf else None,
+                param_init=param_init
             )
 
             new.add_child(input)
@@ -220,7 +231,8 @@ class Formula(object):
                 coefID=coef_id,
                 cont=cont,
                 fixed=rangf is None,
-                rangf=rangf
+                rangf=rangf,
+                param_init=param_init
             )
 
             p = self.process_irf(
@@ -479,7 +491,8 @@ class IRFNode(object):
             ops=None,
             cont=False,
             fixed=True,
-            rangf=None
+            rangf=None,
+            param_init=None
     ):
         if family is None or family in ['Terminal', 'DiracDelta']:
             assert irfID is None, 'Attempted to tie parameters (irf_id=%s) on parameter-free IRF node (family=%s)' % (irfID, family)
@@ -496,6 +509,7 @@ class IRFNode(object):
             self.coefID = None
             self.fixed = fixed
             self.rangf = []
+            self.param_init={}
         else:
             self.ops = [] if ops is None else ops[:]
             self.cont = cont
@@ -505,6 +519,10 @@ class IRFNode(object):
             self.coefID = coefID
             self.fixed = fixed
             self.rangf = [] if rangf is None else rangf if isinstance(rangf, list) else [rangf]
+            if param_init is None:
+                self.param_init = {}
+            else:
+                self.param_init = param_init
 
         self.children = []
         self.p = p
@@ -648,6 +666,22 @@ class IRFNode(object):
                     for irf in c_id_by_family[f]:
                         if irf not in out[f]:
                             out[f].append(irf)
+        return out
+
+    def atomic_irf_param_init_by_family(self):
+        if self.family is None or self.family == 'Terminal':
+            out = {}
+        else:
+            out = {self.family: {self.irf_id(): self.param_init}}
+        for c in self.children:
+            c_id_by_family = c.atomic_irf_param_init_by_family()
+            for f in c_id_by_family:
+                if f not in out:
+                    out[f] = c_id_by_family[f]
+                else:
+                    for irf in c_id_by_family[f]:
+                        if irf not in out[f]:
+                            out[f][irf] = c_id_by_family[f][irf]
         return out
 
     def coef2impulse(self):

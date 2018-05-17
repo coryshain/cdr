@@ -828,8 +828,7 @@ class BDTSR(DTSR):
                     param_mean_init, lb, ub = self.__process_mean__(mean, lb, ub)
 
                     param = Normal(
-                        sample_shape = [1, dim],
-                        loc=param_mean_init,
+                        loc=tf.expand_dims(param_mean_init, 0),
                         scale=self.conv_prior_sd,
                         name=sn('%s_%s' % (param_name, '-'.join(ids)))
                     )
@@ -837,7 +836,7 @@ class BDTSR(DTSR):
                         param_q_loc = tf.Variable(
                             tf.random_normal(
                                 [1, dim],
-                                mean=param_mean_init,
+                                mean=tf.expand_dims(param_mean_init, 0),
                                 stddev=self.init_sd,
                                 dtype=self.FLOAT_TF
                             ),

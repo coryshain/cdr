@@ -20,6 +20,7 @@ if __name__ == '__main__':
     argparser.add_argument('-c', '--cmap', type=str, default='gist_rainbow', help='Name of matplotlib colormap library to use for curves')
     argparser.add_argument('-n', '--namemap', type=str, default=None, help='Path to config file with IRF name map information for legend (if blank, no name map is used)')
     argparser.add_argument('-l', '--nolegend', action='store_true', help='Omit legend from figure')
+    argparser.add_argument('-t', '--transparent_background', action='store_true', help='Use transparent background (otherwise white background)')
     args, unknown = argparser.parse_known_args()
 
     models = args.models
@@ -52,7 +53,8 @@ if __name__ == '__main__':
             prefix=prefix + m,
             legend=legend,
             xlab=args.xlab,
-            ylab=args.ylab
+            ylab=args.ylab,
+            transparent_background=args.transparent_background
         )
         if hasattr(dtsr_model, 'inference_name'):
             dtsr_model.make_plots(
@@ -66,7 +68,8 @@ if __name__ == '__main__':
                 prefix=prefix + m,
                 legend=legend,
                 xlab=args.xlab,
-                ylab=args.ylab
+                ylab=args.ylab,
+                transparent_background=args.transparent_background
             )
 
 
