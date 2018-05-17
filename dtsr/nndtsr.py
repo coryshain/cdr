@@ -436,10 +436,10 @@ class NNDTSR(DTSR):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if os.path.exists(self.outdir + '/tensorboard/fixed'):
-                    self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/fixed')
+                if os.path.exists(self.outdir + '/tensorboard'):
+                    self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard')
                 else:
-                    self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/fixed', self.sess.graph)
+                    self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard', self.sess.graph)
                 self.summary_params = tf.summary.merge_all(key='params')
                 self.summary_losses = tf.summary.merge_all(key='loss')
                 if self.log_random and len(self.rangf) > 0:

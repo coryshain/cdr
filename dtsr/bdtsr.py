@@ -1253,7 +1253,7 @@ class BDTSR(DTSR):
                         n_samples=self.n_samples,
                         n_iter=self.n_iter,
                         n_print=self.n_train_minibatch * self.log_freq,
-                        logdir=self.outdir + '/tensorboard/distr',
+                        logdir=self.outdir + '/tensorboard/edward',
                         log_timestamp=False,
                         scale={self.out: self.minibatch_scale},
                         optimizer=self.optim
@@ -1262,7 +1262,7 @@ class BDTSR(DTSR):
                     self.inference = getattr(ed, self.inference_name)(self.inference_map, self.proposal_map, data={self.out: self.y})
                     self.inference.initialize(
                         n_print=self.n_train_minibatch * self.log_freq,
-                        logdir=self.outdir + '/tensorboard/distr',
+                        logdir=self.outdir + '/tensorboard/edward',
                         log_timestamp=False,
                         scale={self.out: self.minibatch_scale}
                     )
@@ -1271,7 +1271,7 @@ class BDTSR(DTSR):
                     self.inference.initialize(
                         step_size=self.lr,
                         n_print=self.n_train_minibatch * self.log_freq,
-                        logdir=self.outdir + '/tensorboard/distr',
+                        logdir=self.outdir + '/tensorboard/edward',
                         log_timestamp=False,
                         scale={self.out: self.minibatch_scale}
                     )
@@ -1302,9 +1302,9 @@ class BDTSR(DTSR):
                 self.loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='loss_total')
                 tf.summary.scalar('loss', self.loss_total, collections=['loss'])
                 if self.log_graph:
-                    self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/fixed', self.sess.graph)
+                    self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/dtsr', self.sess.graph)
                 else:
-                    self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/fixed')
+                    self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/dtsr')
                 self.summary_params = tf.summary.merge_all(key='params')
                 self.summary_losses = tf.summary.merge_all(key='loss')
                 if self.log_random and len(self.rangf) > 0:
