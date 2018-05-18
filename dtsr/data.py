@@ -4,6 +4,15 @@ import numpy as np
 import pandas as pd
 from .util import names2ix
 
+def z(df):
+    return (df-df.mean(axis=0))/df.std(axis=0)
+
+def c(df):
+    return df-df.mean(axis=0)
+
+def s(df):
+    return df/df.std(axis=0)
+
 def build_DTSR_impulses(
         X,
         first_obs,

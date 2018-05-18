@@ -4,19 +4,10 @@ import ast
 import itertools
 import numpy as np
 
-from .data import compute_time_mask, expand_history
+from .data import z, c, s, compute_time_mask, expand_history
 from .util import names2ix
 
 interact = re.compile('([^ ]+):([^ ]+)')
-
-def z(df):
-    return (df-df.mean(axis=0))/df.std(axis=0)
-
-def c(df):
-    return df-df.mean(axis=0)
-
-def s(df):
-    return df/df.std(axis=0)
 
 class Formula(object):
     """

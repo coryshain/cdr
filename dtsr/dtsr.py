@@ -1309,6 +1309,18 @@ class DTSR(object):
                 interp = tf.squeeze(tf.squeeze(interp, -1), -1)[..., :-n]
                 return interp
 
+    def __lininterp_2__(self, x, time, hz):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                time = tf.round(time * hz)
+                time_ix = tf.expand_dims(tf.cast(time, dtype=self.INT_TF), -1)
+                n = tf.reduce_max(time_ix)
+
+                time_shape = (tf.shape(time), n)
+                time_new = tf.scatter_nd(time_ix, time, time_shape)
+
+                x_shape = (tf.shape(x)[0], tf.shape(x)[1], n)
+
 
 
 

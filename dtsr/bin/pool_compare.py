@@ -42,7 +42,7 @@ if __name__ == '__main__':
 
     systems = set()
     for task in args.tasks:
-        p = Config(task + '.ini')
+        p = Config(task)
         models = p.model_list[:]
         systems = systems.union(set([model2name(x.split('_')[0].strip()) for x in models]))
         for m in models:

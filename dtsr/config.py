@@ -27,13 +27,11 @@ class Config(object):
         self.y_dev = data.get('y_dev', None)
         self.y_test = data.get('y_test', None)
 
-        split_ids = data.get('split_ids')
-        self.split_ids = split_ids.strip().split()
         series_ids = data.get('series_ids')
         self.series_ids = series_ids.strip().split()
         self.modulus = data.getint('modulus', 4)
-        self.cosine_distance = data.getboolean('cosine_distance', False)
-        self.euclidean_distance = data.getboolean('euclidean_distance', False)
+        split_ids = data.get('split_ids', '')
+        self.split_ids = split_ids.strip().split()
 
         ## Settings
         self.logdir = settings.get('logdir', './dtsr_model/')

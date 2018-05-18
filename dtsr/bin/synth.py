@@ -10,25 +10,13 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 sns.set(style="white", rc={"axes.facecolor": (0, 0, 0, 0)})
 
+from dtsr.plot import plot_irf
 
-def z(df):
-    return (df-df.mean(axis=0))/df.std(axis=0)
+def convolve(x, k, theta, delta, coefficient = 1):
+    return gamma.pdf(x, k, scale=theta, loc=delta) * coefficient
 
-def c(df):
-    return df-df.mean(axis=0)
-
-def conv(x, k, theta, delta):
-    return gamma.pdf(x, k, scale=theta, loc=delta)
-
-def plot_convolutions(plot_x, plot_y, features, dir, filename='convolution_plot.jpg'):
-    cm = plt.get_cmap('gist_earth')
-    plt.gca().set_prop_cycle(color=[cm(1. * i / len(features)) for i in range(len(features))])
-    n_feat = plot_y.shape[-1]
-    for i in range(n_feat):
-        plt.plot(plot_x, plot_y[:,i], label=features[i])
-    plt.legend()
-    plt.savefig(dir+'/'+filename)
-    plt.clf()
+def read_params(path):
+    return pd.read_csv(path, sep=' ', index_col=0)
 
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser('''
@@ -73,7 +61,7 @@ if __name__ == '__main__':
 
     for i in range(args.y):
         delta_t = np.expand_dims(time_y[i] - time_X[0:i+1], -1)
-        X_conv = np.sum(conv(delta_t, k, theta, delta) * X[0:i+1], axis=0, keepdims=True)
+        X_conv = np.sum(convolve(delta_t, k, theta, delta) * X[0:i + 1], axis=0, keepdims=True)
         y_pred[i] = np.dot(X_conv, np.expand_dims(beta, 1))
         sys.stderr.write('\r%d/%d' %(i+1, args.y))
     sys.stderr.write('\n')
@@ -113,12 +101,19 @@ if __name__ == '__main__':
     df_err.to_csv(args.outdir + '/' + exp_name + '/MSE_losses_full.txt', index=False, na_rep='nan')
 
     plot_x = np.expand_dims(np.linspace(0., 2.5, 1000), -1)
-    plot_y = conv(plot_x, k, theta, delta)*beta
+    plot_y = convolve(plot_x, k, theta, delta) * beta
 
     with open(args.outdir + '/' + exp_name + '/conv_true.obj', 'wb') as f:
         pickle.dump(plot_x, f)
 
 
-    plot_convolutions(plot_x, plot_y, string.ascii_lowercase[:args.n], args.outdir + '/' + exp_name)
+    plot_irf(
+        plot_x,
+        plot_y,
+        string.ascii_lowercase[:args.n],
+        dir = args.outdir,
+        filename = exp_name + '.png',
+        legend=False
+    )
 
 
