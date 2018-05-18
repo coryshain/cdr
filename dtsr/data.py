@@ -138,8 +138,9 @@ def compute_filters(y, filter_map=None):
         return y
     select = np.ones(len(y), dtype=bool)
     for field in filter_map:
-        for cond in filter_map[field]:
-            select &= compute_filter(y, field, cond)
+        if field in y.columns:
+            for cond in filter_map[field]:
+                select &= compute_filter(y, field, cond)
     return select
 
 def compute_filter(y, field, cond):
