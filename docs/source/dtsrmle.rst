@@ -1,9 +1,9 @@
-.. _nndtsr:
+.. _dtsrmle:
 
 Neural Net DTSR
 ===============
 
-.. automodule:: dtsr.nndtsr
+.. automodule:: dtsr._dtsrmle
     :members:
     :undoc-members:
     :show-inheritance:

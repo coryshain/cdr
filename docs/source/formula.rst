@@ -158,14 +158,14 @@ For example, to initialize a Gamma IRF with :math:`\alpha = 2` and :math:`\beta 
 
 ``C(A, Gamma(alpha=2, beta=2))``
 
-These values will serve as initializations in both NNDTSR and BDTSR, and in BDTSR they will additionally serve as the mean of the prior distribution for that parameter.
+These values will serve as initializations in both DTSRMLE and DTSRBayes, and in DTSRBayes they will additionally serve as the mean of the prior distribution for that parameter.
 If no initialization is specified, defaults will be used.
 These defaults are not guaranteed to be plausible for your particular application and may have a detrimental impact on training.
 Therefore, it is generally a good idea to think carefully in advance about what kinds of IRF shapes are `a priori` reasonable and choose initializations in that range.
 
 Note that the initialization values are on the constrained space, so make sure to respect the constraints when choosing them.
 For example, :math:`\alpha` of the Gamma distribution is constrained to be > 0, so an initial :math:`\alpha` of <=0 will result in incorrect behavior.
-However, keep in mind that for BDTSR, prior variances are necessarily on the unconstrained space and get squashed by the constraint function, so choosing initializations that are very close to constraint boundaries can indirectly tighten the prior.
+However, keep in mind that for DTSRBayes, prior variances are necessarily on the unconstrained space and get squashed by the constraint function, so choosing initializations that are very close to constraint boundaries can indirectly tighten the prior.
 For example, choosing an initialization :math:`\alpha = 0.001` for the Gamma distribution will result in a much tighter prior around small values of :math:`\alpha`.
 
 

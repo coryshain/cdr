@@ -61,7 +61,7 @@ if __name__ == '__main__':
         m = models[i]
         name = names[i]
         beta_summaries[name] = {}
-        with open(p.logdir + '/' + m + '/summary.txt', 'r') as f:
+        with open(p.outdir + '/' + m + '/summary.txt', 'r') as f:
             l = f.readline()
             while l and not l.startswith('Posterior integral summaries by predictor'):
                 l = f.readline()

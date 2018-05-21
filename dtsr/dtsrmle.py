@@ -16,7 +16,7 @@ from .util import *
 from .dtsr import DTSR
 from .data import build_DTSR_impulses, corr_dtsr
 
-class NNDTSR(DTSR):
+class DTSRMLE(DTSR):
     """
     A neural net implementation of DTSR.
 
@@ -107,7 +107,7 @@ class NNDTSR(DTSR):
             log_graph=True
     ):
 
-        super(NNDTSR, self).__init__(
+        super(DTSRMLE, self).__init__(
             form_str,
             X,
             y,
@@ -388,7 +388,7 @@ class NNDTSR(DTSR):
                                     collections=['random']
                                 )
 
-                # Since NNDTSR just learns point estimates, we simply use those
+                # Since DTSRMLE just learns point estimates, we simply use those
                 # estimates for plotting in the 2nd return value
                 return (param_out, param_mean)
 
@@ -469,7 +469,7 @@ class NNDTSR(DTSR):
             Sort order and number of observations must be identical to that of ``y_time``.
         :return: ``tuple``; two numpy arrays ``(X_2d, time_X_2d)``, the expanded IV and timestamp tensors.
         """
-        return super(NNDTSR, self).expand_history(X, X_time, first_obs, last_obs)
+        return super(DTSRMLE, self).expand_history(X, X_time, first_obs, last_obs)
 
     def fit(self,
             X,
@@ -896,7 +896,7 @@ class NNDTSR(DTSR):
         :param cmap: ``str``; name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot).
         :return: ``None``
         """
-        return super(NNDTSR, self).make_plots(**kwargs)
+        return super(DTSRMLE, self).make_plots(**kwargs)
 
     def run_conv_op(self, feed_dict, scaled=False, n_samples=None):
         """

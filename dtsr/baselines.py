@@ -130,9 +130,9 @@ class LME(object):
         return fit, summary, predict
 
 class GAM(object):
-    def __init__(self, formula, X):
+    def __init__(self, formula, X, ran_gf=None):
         mgcv = importr('mgcv')
-        fit, summary, predict, unique = self.instance_methods()
+        process_ran_gf, add_z, fit, summary, predict, unique = self.instance_methods()
         self.formula = formula
         rstring = '''
             function() numeric()
@@ -146,6 +146,9 @@ class GAM(object):
             self.word = unique(X, 'word')
         else:
             self.word = empty()
+        if ran_gf is not None:
+            X = process_ran_gf(X, ran_gf)
+        X = add_z(X)
         self.m = fit(formula, X)
         self.summary = lambda: summary(self.m)
         self.predict = lambda x: predict(self.m, self.formula, x, self.subject, self.word)
@@ -156,21 +159,43 @@ class GAM(object):
     def __setstate__(self, state):
         mgcv = importr('mgcv')
         self.m, self.subject, self.word, self.formula = state
-        fit, summary, predict, unique = self.instance_methods()
+        process_ran_gf, add_z, fit, summary, predict, unique = self.instance_methods()
         self.summary = lambda: summary(self.m)
         self.predict = lambda x: predict(self.m, self.formula, x, self.subject, self.word)
 
     def instance_methods(self):
         rstring = '''
+            function(X, ran_gf) {
+                for (gf in ran_gf) {
+                    X[[gf]] <- as.factor(X[[gf]])
+                }
+                return(X)
+            }
+        '''
+        process_ran_gf = robjects.r(rstring)
+
+        rstring = '''
+            function(X) {
+                for (c in names(X)) {
+                    if (is.numeric(X[[c]])) {
+                        X[[paste0('z_',c)]] <- scale(X[[c]])
+                    }
+                }
+                return(X)
+            }
+        '''
+        add_z = robjects.r(rstring)
+
+        rstring = '''
             function(bform, df) {
-                return(gam(as.formula(bform), data=df, drop.unused.levels=FALSE))
+                return(bam(as.formula(bform), data=df, drop.unused.levels=FALSE, nthreads=10))
             }
         '''
 
         fit = robjects.r(rstring)
 
         rstring = '''
-            function(model) {10000
+            function(model) {
                 return(summary(model))
             }
         '''
@@ -179,6 +204,11 @@ class GAM(object):
 
         rstring = '''
             function(model, bform, df, subjects=NULL, words=NULL) {
+                for (c in names(df)) {
+                    if (is.numeric(df[[c]])) {
+                        df[[paste0('z_',c)]] <- scale(df[[c]])
+                    }
+                }
                 select = logical(nrow(df))
                 select = !select
                 if (grepl('subject', bform) & !is.null(subjects)) {
@@ -195,13 +225,6 @@ class GAM(object):
             }
         '''
 
-        rstring = '''
-            function(model, bform, df, subjects=NULL, words=NULL) {
-                preds = predict(model, df)
-                return(preds)
-            }
-        '''
-
         predict = robjects.r(rstring)
 
         rstring = '''
@@ -212,7 +235,7 @@ class GAM(object):
 
         unique = robjects.r(rstring)
 
-        return fit, summary, predict, unique
+        return process_ran_gf, add_z, fit, summary, predict, unique
 
 def py2ri(x):
     return pandas2ri.py2ri(x)

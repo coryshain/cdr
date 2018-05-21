@@ -50,13 +50,13 @@ if __name__ == '__main__':
         for j in range(i+1, len(dtsr_models)):
             m2 = dtsr_models[j]
             name = '%s_v_%s' %(m1, m2)
-            a = pd.read_csv(p.logdir + '/' + m1 + file_name, sep=' ', header=None, skipinitialspace=True)
-            b = pd.read_csv(p.logdir + '/' + m2 + file_name, sep=' ', header=None, skipinitialspace=True)
+            a = pd.read_csv(p.outdir + '/' + m1 + file_name, sep=' ', header=None, skipinitialspace=True)
+            b = pd.read_csv(p.outdir + '/' + m2 + file_name, sep=' ', header=None, skipinitialspace=True)
             select = np.logical_and(np.isfinite(np.array(a)), np.isfinite(np.array(b)))
             diff = float(len(a) - select.sum())
             p_value, base_diff, diffs = bootstrap(a[select], b[select], n_iter=10000, n_tails=args.tails, mode=args.metric)
             sys.stderr.write('\n')
-            with open(p.logdir + '/' + name + '_' + args.partition + '.txt', 'w') as f:
+            with open(p.outdir + '/' + name + '_' + args.partition + '.txt', 'w') as f:
                 f.write('='*50 + '\n')
                 f.write('Model comparison: %s vs %s\n' %(m1, m2))
                 if diff > 0:
@@ -66,5 +66,5 @@ if __name__ == '__main__':
                 f.write('p: %.4e\n' %p_value)
                 f.write('='*50 + '\n')
             plt.hist(diffs, bins=1000)
-            plt.savefig(p.logdir + '/' + name + '_' + args.partition + '.png')
+            plt.savefig(p.outdir + '/' + name + '_' + args.partition + '.png')
             plt.close('all')

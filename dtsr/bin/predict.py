@@ -22,7 +22,7 @@ if __name__ == '__main__':
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='Path to configuration (*.ini) file')
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
-    argparser.add_argument('-n', '--nsamples', type=int, default=1024, help='Number of posterior samples to average (only used for BDTSR)')
+    argparser.add_argument('-n', '--nsamples', type=int, default=1024, help='Number of posterior samples to average (only used for DTSRBayes)')
     argparser.add_argument('-M', '--mode', type=str, default=None, help='Predict mode ("response" or "loglik") or default None, which does both')
     args, unknown = argparser.parse_known_args()
 
@@ -84,26 +84,26 @@ if __name__ == '__main__':
 
     for m in models:
         formula = p.models[m]['formula']
-        if not os.path.exists(p.logdir + '/' + m):
-            os.makedirs(p.logdir + '/' + m)
+        if not os.path.exists(p.outdir + '/' + m):
+            os.makedirs(p.outdir + '/' + m)
         if m.startswith('LME'):
             from dtsr.baselines import LME
 
             dv = formula.strip().split('~')[0].strip()
 
             sys.stderr.write('Retrieving saved model %s...\n' % m)
-            with open(p.logdir + '/' + m + '/m.obj', 'rb') as m_file:
+            with open(p.outdir + '/' + m + '/m.obj', 'rb') as m_file:
                 lme = pickle.load(m_file)
 
             lme_preds = lme.predict(X_baseline)
-            with open(p.logdir + '/' + m + '/preds_%s.txt'%args.partition, 'w') as p_file:
+            with open(p.outdir + '/' + m + '/preds_%s.txt' % args.partition, 'w') as p_file:
                 for i in range(len(lme_preds)):
                     p_file.write(str(lme_preds[i]) + '\n')
             if p.loss.lower() == 'mae':
                 losses = np.array(y[dv] - lme_preds).abs()
             else:
                 losses = np.array(y[dv] - lme_preds) ** 2
-            with open(p.logdir + '/' + m + '/%s_losses_%s.txt'%(p.loss, args.partition), 'w') as p_file:
+            with open(p.outdir + '/' + m + '/%s_losses_%s.txt' % (p.loss, args.partition), 'w') as p_file:
                 for i in range(len(losses)):
                     p_file.write(str(losses[i]) + '\n')
             lme_mse = mse(y[dv], lme_preds)
@@ -118,7 +118,7 @@ if __name__ == '__main__':
             summary += '  MSE: %.4f\n' % lme_mse
             summary += '  MAE: %.4f\n' % lme_mae
             summary += '=' * 50 + '\n'
-            with open(p.logdir + '/' + m + '/eval_%s.txt'%args.partition, 'w') as f_out:
+            with open(p.outdir + '/' + m + '/eval_%s.txt' % args.partition, 'w') as f_out:
                 f_out.write(summary)
             sys.stderr.write(summary)
 
@@ -128,18 +128,18 @@ if __name__ == '__main__':
             dv = formula.strip().split('~')[0].strip()
 
             sys.stderr.write('Retrieving saved model %s...\n' % m)
-            with open(p.logdir + '/' + m + '/m.obj', 'rb') as m_file:
+            with open(p.outdir + '/' + m + '/m.obj', 'rb') as m_file:
                 lm = pickle.load(m_file)
 
             lm_preds = lm.predict(X_baseline)
-            with open(p.logdir + '/' + m + '/preds_%s.txt'%args.partition, 'w') as p_file:
+            with open(p.outdir + '/' + m + '/preds_%s.txt' % args.partition, 'w') as p_file:
                 for i in range(len(lm_preds)):
                     p_file.write(str(lm_preds[i]) + '\n')
             if p.loss.lower() == 'mae':
                 losses = np.array(y[dv] - lm_preds).abs()
             else:
                 losses = np.array(y[dv] - lm_preds) ** 2
-            with open(p.logdir + '/' + m + '/%s_losses_%s.txt'%(p.loss, args.partition), 'w') as p_file:
+            with open(p.outdir + '/' + m + '/%s_losses_%s.txt' % (p.loss, args.partition), 'w') as p_file:
                 for i in range(len(losses)):
                     p_file.write(str(losses[i]) + '\n')
             lm_mse = mse(y[dv], lm_preds)
@@ -154,7 +154,7 @@ if __name__ == '__main__':
             summary += '  MSE: %.4f\n' % lm_mse
             summary += '  MAE: %.4f\n' % lm_mae
             summary += '=' * 50 + '\n'
-            with open(p.logdir + '/' + m + '/eval_%s.txt'%args.partition, 'w') as f_out:
+            with open(p.outdir + '/' + m + '/eval_%s.txt' % args.partition, 'w') as f_out:
                 f_out.write(summary)
             sys.stderr.write(summary)
 
@@ -174,17 +174,17 @@ if __name__ == '__main__':
             formula = ' '.join(formula)
 
             sys.stderr.write('Retrieving saved model %s...\n' % m)
-            with open(p.logdir + '/' + m + '/m.obj', 'rb') as m_file:
+            with open(p.outdir + '/' + m + '/m.obj', 'rb') as m_file:
                 gam = pickle.load(m_file)
             gam_preds = gam.predict(X_baseline)
-            with open(p.logdir + '/' + m + '/preds_%s.txt'%args.partition, 'w') as p_file:
+            with open(p.outdir + '/' + m + '/preds_%s.txt' % args.partition, 'w') as p_file:
                 for i in range(len(gam_preds)):
                     p_file.write(str(gam_preds[i]) + '\n')
             if p.loss.lower() == 'mae':
                 losses = np.array(y[dv] - gam_preds).abs()
             else:
                 losses = np.array(y[dv] - gam_preds) ** 2
-            with open(p.logdir + '/' + m + '/%s_losses_%s.txt'%(p.loss, args.partition), 'w') as p_file:
+            with open(p.outdir + '/' + m + '/%s_losses_%s.txt' % (p.loss, args.partition), 'w') as p_file:
                 for i in range(len(losses)):
                     p_file.write(str(losses[i]) + '\n')
             gam_mse = mse(y[dv], gam_preds)
@@ -199,7 +199,7 @@ if __name__ == '__main__':
             summary += '  MSE: %.4f\n' % gam_mse
             summary += '  MAE: %.4f\n' % gam_mae
             summary += '=' * 50 + '\n'
-            with open(p.logdir + '/' + m + '/eval_%s.txt'%args.partition, 'w') as f_out:
+            with open(p.outdir + '/' + m + '/eval_%s.txt' % args.partition, 'w') as f_out:
                 f_out.write(summary)
             sys.stderr.write(summary)
 
@@ -207,7 +207,7 @@ if __name__ == '__main__':
             dv = formula.strip().split('~')[0].strip()
 
             sys.stderr.write('Retrieving saved model %s...\n' % m)
-            dtsr_model = load_dtsr(p.logdir + '/' + m)
+            dtsr_model = load_dtsr(p.outdir + '/' + m)
 
             bayes = p.network_type == 'bayes'
 
@@ -228,17 +228,17 @@ if __name__ == '__main__':
                     X_2d_predictors=X_2d_predictors,
                     n_samples=args.nsamples,
                 )
-                with open(p.logdir + '/' + m + '/preds_%s.txt'%args.partition, 'w') as p_file:
+                with open(p.outdir + '/' + m + '/preds_%s.txt' % args.partition, 'w') as p_file:
                     for i in range(len(dtsr_preds)):
                         p_file.write(str(dtsr_preds[i]) + '\n')
                 if p.loss.lower() == 'mae':
                     losses = np.array(y[dv] - dtsr_preds).abs()
                 else:
                     losses = np.array(y[dv] - dtsr_preds) ** 2
-                with open(p.logdir + '/' + m + '/%s_losses_%s.txt'%(p.loss, args.partition), 'w') as l_file:
+                with open(p.outdir + '/' + m + '/%s_losses_%s.txt' % (p.loss, args.partition), 'w') as l_file:
                     for i in range(len(losses)):
                         l_file.write(str(losses[i]) + '\n')
-                with open(p.logdir + '/' + m + '/obs_%s.txt'%args.partition, 'w') as p_file:
+                with open(p.outdir + '/' + m + '/obs_%s.txt' % args.partition, 'w') as p_file:
                     for i in range(len(y[dv])):
                         p_file.write(str(y[dv].iloc[i]) + '\n')
                 dtsr_mse = mse(y[dv], dtsr_preds)
@@ -256,7 +256,7 @@ if __name__ == '__main__':
                     X_2d_predictors=X_2d_predictors,
                     n_samples=args.nsamples
                 )
-                with open(p.logdir + '/' + m + '/loglik_%s.txt' % args.partition, 'w') as l_file:
+                with open(p.outdir + '/' + m + '/loglik_%s.txt' % args.partition, 'w') as l_file:
                     for i in range(len(dtsr_loglik_vector)):
                         l_file.write(str(dtsr_loglik_vector[i]) + '\n')
                 dtsr_loglik = dtsr_loglik_vector.sum()
@@ -280,7 +280,7 @@ if __name__ == '__main__':
 
             summary += '=' * 50 + '\n'
 
-            with open(p.logdir + '/' + m + '/eval_%s.txt'%args.partition, 'w') as f_out:
+            with open(p.outdir + '/' + m + '/eval_%s.txt' % args.partition, 'w') as f_out:
                 f_out.write(summary)
             sys.stderr.write(summary)
             sys.stderr.write('\n\n')

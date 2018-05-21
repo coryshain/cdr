@@ -65,12 +65,12 @@ Section: ``[settings]``
 
 The ``[settings]`` section supports the following fields:
 
-**Both NNDTSR and BDTSR**
+**Both DTSRMLE and DTSRBayes**
 
-- **logdir**: ``str``; Path to output directory where checkpoints, plots, and Tensorboard logs should be saved (default: ``./dtsr_model/``).
+- **outdir**: ``str``; Path to output directory where checkpoints, plots, and Tensorboard logs should be saved (default: ``./dtsr_model/``).
   If it does not exist, this directory will be created.
   At runtime, the ``train`` utility will copy the config file to this directory as ``config.ini``, serving as a record of the settings used to generate the analysis.
-- **network_type**: ``str``; Type of inference to use (one of ``bayes`` or ``nn``, default: ``bayes``)
+- **network_type**: ``str``; Type of inference to use (one of ``bayes`` or ``mle``, default: ``bayes``)
 - **history_length**: ``int`` or ``None``; Maximum number of preceding timepoints to use from the history (if ``None``, no clipping; default: ``128``)
 - **low_memory**: ``bool``; Whether to use the low memory setting for deconvolution (temporarily discontinued, only ``False`` is supported)
 - **init_sd**: ``float``; Standard deviation of parameter initialization distribution (default: ``0.1``)
@@ -85,7 +85,7 @@ The ``[settings]`` section supports the following fields:
   - ``FTRL``
   - ``RMSProp``
   - ``Nadam``
-  - ``None`` (only supported for ``BDTSR`` and not recommended; uses the default optimizer defined by Edward, which currently includes steep learning rate decay)
+  - ``None`` (only supported for ``DTSRBayes`` and not recommended; uses the default optimizer defined by Edward, which currently includes steep learning rate decay)
 
 - **learning_rate**: ``float``; Learning rate (default: ``0.001``)
 - **lr_decay_family**: ``str`` or ``None``; Name of learning rate decay family to use; supports all available decays in Tensorflow's ``train`` module, or no decay if ``None`` (default: ``None``)
@@ -111,13 +111,13 @@ The ``[settings]`` section supports the following fields:
 - **plot_y_inches**: ``float``; Height of IRF plots in inches (default: ``500``)
 - **cmap**: ``str``; Name of ``matplotlib`` colormap scheme to use for plotting (default: ``500``)
 
-**NNDTSR only**
+**DTSRMLE only**
 
 - **loss**: ``str``; Name of loss to use (one of ``mse`` or ``mae``; default: ``mse``)
 - **regularizer**: ``str`` or ``None``; Name of regularizer to use; supports all regularizer layers in Tensorflow's ``contrib.layers`` module, or no regularization if ``None`` (default: ``None``)
 - **regularizer_scale**: ``float``; Regularization constant; ignored if **regularizer** is ``None`` (default: ``0.01``)
 
-**BDTSR only**
+**DTSRBayes only**
 
 - **inference_name**: ``str``; Name of inference to use; supports most inferences provided by Edward (default: ``KLqp``)
 - **n_samples**: ``int`` or ``None``; Number of samples to use, use Edward defaults if ``None``. If using MCMC, the number of samples is set deterministically as ``n_iter * n_minibatch``, so this user-supplied parameter is ignored (default: ``1``)

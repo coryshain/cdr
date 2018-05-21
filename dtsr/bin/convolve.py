@@ -18,7 +18,7 @@ if __name__ == '__main__':
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='Path to configuration (*.ini) file')
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
-    argparser.add_argument('-n', '--nsamples', type=int, default=1024, help='Number of posterior samples to average (only used for BDTSR)')
+    argparser.add_argument('-n', '--nsamples', type=int, default=1024, help='Number of posterior samples to average (only used for DTSRBayes)')
     argparser.add_argument('-s', '--scaled', action='store_true', help='Multiply outputs by DTSR-fitted coefficients')
     args, unknown = argparser.parse_known_args()
 
@@ -53,7 +53,7 @@ if __name__ == '__main__':
         dv = formula.strip().split('~')[0].strip()
 
         sys.stderr.write('Retrieving saved model %s...\n' % m)
-        dtsr_model = load_dtsr(p.logdir + '/' + m)
+        dtsr_model = load_dtsr(p.outdir + '/' + m)
 
         X_conv = dtsr_model.convolve_inputs(
             X,
@@ -64,6 +64,6 @@ if __name__ == '__main__':
             n_samples=args.nsamples
         )
 
-        X_conv.to_csv(p.logdir + '/' + m + '/X_conv.csv', sep=' ', index=False, na_rep='nan')
+        X_conv.to_csv(p.outdir + '/' + m + '/X_conv.csv', sep=' ', index=False, na_rep='nan')
 
 

@@ -113,14 +113,14 @@ if __name__ == '__main__':
             X_baseline[c] = X_baseline[c].astype(str)
     X_baseline = py2ri(X_baseline)
 
-    if not os.path.exists(p.logdir + '/spillover/'):
-        os.makedirs(p.logdir + '/spillover/')
+    if not os.path.exists(p.outdir + '/spillover/'):
+        os.makedirs(p.outdir + '/spillover/')
 
     for formula in forms:
         m = '_'.join(sorted(list(get_preds(formula))))
         dv = formula.strip().split('~')[0].strip()
 
-        if os.path.exists(p.logdir + '/spillover/' + m + '.txt'):
+        if os.path.exists(p.outdir + '/spillover/' + m + '.txt'):
             sys.stderr.write('Model %s already exists. Skipping...\n' % m)
             continue
         else:
@@ -141,7 +141,7 @@ if __name__ == '__main__':
         summary += '  MSE: %.4f\n' % lm_mse
         summary += '  MAE: %.4f\n' % lm_mae
         summary += '=' * 50 + '\n'
-        with open(p.logdir + '/spillover/' + m + '.txt', 'w') as f_out:
+        with open(p.outdir + '/spillover/' + m + '.txt', 'w') as f_out:
             f_out.write(summary)
         sys.stderr.write(summary)
         sys.stderr.write('\n\n')

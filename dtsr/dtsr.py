@@ -17,7 +17,7 @@ from .plot import *
 
 class DTSR(object):
     """
-    Abstract base class for DTSR. Bayesian (BDTSR) and Neural Network (NNDTSR) implementations inherit from DTSR.
+    Abstract base class for DTSR. Bayesian (DTSRBayes) and MLE (DTSRMLE) implementations inherit from DTSR.
     """
 
     ######################################################

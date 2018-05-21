@@ -60,7 +60,7 @@ if __name__ == '__main__':
                 x,
                 y,
                 names,
-                dir=p.logdir,
+                dir=p.outdir,
                 filename=prefix + 'synthetic_true.png',
                 plot_x_inches=x_inches,
                 plot_y_inches=y_inches,
@@ -74,7 +74,7 @@ if __name__ == '__main__':
         for m in models:
 
             sys.stderr.write('Retrieving saved model %s...\n' % m)
-            dtsr_model = load_dtsr(p.logdir + '/' + m)
+            dtsr_model = load_dtsr(p.outdir + '/' + m)
 
             dtsr_model.make_plots(
                 irf_name_map=name_map,

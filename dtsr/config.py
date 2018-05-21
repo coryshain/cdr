@@ -34,11 +34,15 @@ class Config(object):
         self.split_ids = split_ids.strip().split()
 
         ## Settings
-        self.logdir = settings.get('logdir', './dtsr_model/')
-        if not os.path.exists(self.logdir):
-            os.makedirs(self.logdir)
-        if os.path.realpath(path) != os.path.realpath(self.logdir + '/config.ini'):
-            shutil.copy2(path, self.logdir + '/config.ini')
+        self.outdir = settings.get('outdir', None)
+        if self.outdir is None:
+            self.outdir = settings.get('logdir', None)
+        if self.outdir is None:
+            self.outdir = './dtsr_model/'
+        if not os.path.exists(self.outdir):
+            os.makedirs(self.outdir)
+        if os.path.realpath(path) != os.path.realpath(self.outdir + '/config.ini'):
+            shutil.copy2(path, self.outdir + '/config.ini')
         self.pc = settings.getboolean('pc', False)
         self.network_type = settings.get('network_type', 'bayes')
         self.float_type = settings.get('float_type', 'float32')

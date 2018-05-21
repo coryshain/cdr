@@ -20,7 +20,7 @@ import edward as ed
 from edward.models import Empirical, Exponential, Gamma, MultivariateNormalTriL, Normal, SinhArcsinh
 
 
-class BDTSR(DTSR):
+class DTSRBayes(DTSR):
     """
     A Bayesian implementation of DTSR.
 
@@ -136,7 +136,7 @@ class BDTSR(DTSR):
             log_graph=True
     ):
 
-        super(BDTSR, self).__init__(
+        super(DTSRBayes, self).__init__(
             form_str,
             X,
             y,
@@ -177,12 +177,12 @@ class BDTSR(DTSR):
         self.asymmetric_error = asymmetric_error
 
         assert not self.low_memory, 'Because Edward does not support Tensorflow control ops, ' \
-                                    'low_memory is not supported in BDTSR'
+                                    'low_memory is not supported in DTSRBayes'
         try:
             float(self.history_length)
         except:
             raise ValueError('Because Edward does not support Tensorflow control ops, '
-                             'finite history_length must be specified in BDTSR')
+                             'finite history_length must be specified in DTSRBayes')
 
 
         if not self.variational():
@@ -1354,7 +1354,7 @@ class BDTSR(DTSR):
             Sort order and number of observations must be identical to that of ``y_time``.
         :return: ``tuple``; two numpy arrays ``(X_2d, time_X_2d)``, the expanded IV and timestamp tensors.
         """
-        return super(BDTSR, self).expand_history(X, X_time, first_obs, last_obs)
+        return super(DTSRBayes, self).expand_history(X, X_time, first_obs, last_obs)
 
     def fit(self,
             X,
@@ -1776,7 +1776,7 @@ class BDTSR(DTSR):
         To save space successive calls to ``make_plots()`` overwrite existing plots.
         Thus, plots only show the most recently plotted state of learning.
 
-        For simplicity, plots for BDTSR models use the posterior mean, abstracting away from other characteristics of the posterior distribution (e.g. variance).
+        For simplicity, plots for DTSRBayes models use the posterior mean, abstracting away from other characteristics of the posterior distribution (e.g. variance).
 
         :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
             If ``None``, IRF tree node string ID's will be used.
@@ -1785,7 +1785,7 @@ class BDTSR(DTSR):
         :param cmap: ``str``; name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot).
         :return: ``None``
         """
-        return super(BDTSR, self).make_plots(**kwargs)
+        return super(DTSRBayes, self).make_plots(**kwargs)
 
     def run_conv_op(self, feed_dict, scaled=False, n_samples=None):
         """

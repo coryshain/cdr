@@ -73,21 +73,21 @@ if __name__ == '__main__':
 
     for m in models:
         formula = p.models[m]['formula']
-        if not os.path.exists(p.logdir + '/' + m):
-            os.makedirs(p.logdir + '/' + m)
+        if not os.path.exists(p.outdir + '/' + m):
+            os.makedirs(p.outdir + '/' + m)
         if m.startswith('LME'):
             from dtsr.baselines import LME
 
             dv = formula.strip().split('~')[0].strip().replace('.','')
 
-            if os.path.exists(p.logdir + '/' + m + '/m.obj'):
+            if os.path.exists(p.outdir + '/' + m + '/m.obj'):
                 sys.stderr.write('Retrieving saved model %s...\n' % m)
-                with open(p.logdir + '/' + m + '/m.obj', 'rb') as m_file:
+                with open(p.outdir + '/' + m + '/m.obj', 'rb') as m_file:
                     lme = pickle.load(m_file)
             else:
                 sys.stderr.write('Fitting model %s...\n' % m)
                 lme = LME(formula, X_baseline)
-                with open(p.logdir + '/' + m + '/m.obj', 'wb') as m_file:
+                with open(p.outdir + '/' + m + '/m.obj', 'wb') as m_file:
                     pickle.dump(lme, m_file)
 
             lme_preds = lme.predict(X_baseline)
@@ -103,7 +103,7 @@ if __name__ == '__main__':
             summary += '  MSE: %.4f\n' % lme_mse
             summary += '  MAE: %.4f\n' % lme_mae
             summary += '=' * 50 + '\n'
-            with open(p.logdir + '/' + m + '/summary.txt', 'w') as f_out:
+            with open(p.outdir + '/' + m + '/summary.txt', 'w') as f_out:
                 f_out.write(summary)
             sys.stderr.write(summary)
             sys.stderr.write('\n\n')
@@ -113,14 +113,14 @@ if __name__ == '__main__':
 
             dv = formula.strip().split('~')[0].strip().replace('.','')
 
-            if os.path.exists(p.logdir + '/' + m + '/m.obj'):
+            if os.path.exists(p.outdir + '/' + m + '/m.obj'):
                 sys.stderr.write('Retrieving saved model %s...\n' % m)
-                with open(p.logdir + '/' + m + '/m.obj', 'rb') as m_file:
+                with open(p.outdir + '/' + m + '/m.obj', 'rb') as m_file:
                     lm = pickle.load(m_file)
             else:
                 sys.stderr.write('Fitting model %s...\n' % m)
                 lm = LM(formula, X_baseline)
-                with open(p.logdir + '/' + m + '/m.obj', 'wb') as m_file:
+                with open(p.outdir + '/' + m + '/m.obj', 'wb') as m_file:
                     pickle.dump(lm, m_file)
 
             lm_preds = lm.predict(X_baseline)
@@ -136,7 +136,7 @@ if __name__ == '__main__':
             summary += '  MSE: %.4f\n' % lm_mse
             summary += '  MAE: %.4f\n' % lm_mae
             summary += '=' * 50 + '\n'
-            with open(p.logdir + '/' + m + '/summary.txt', 'w') as f_out:
+            with open(p.outdir + '/' + m + '/summary.txt', 'w') as f_out:
                 f_out.write(summary)
             sys.stderr.write(summary)
             sys.stderr.write('\n\n')
@@ -146,6 +146,7 @@ if __name__ == '__main__':
             from dtsr.baselines import GAM
 
             dv = formula.strip().split('~')[0].strip().replace('.','')
+            ran_gf = ['subject', 'word', 'sentid']
 
             ## For some reason, GAM can't predict using custom functions, so we have to translate them
             z_term = re.compile('z.\((.*)\)')
@@ -156,14 +157,14 @@ if __name__ == '__main__':
                 formula[i] = c_term.sub(r'scale(\1, scale=FALSE)', formula[i])
             formula = ' '.join(formula)
 
-            if os.path.exists(p.logdir + '/' + m + '/m.obj'):
+            if os.path.exists(p.outdir + '/' + m + '/m.obj'):
                 sys.stderr.write('Retrieving saved model %s...\n' % m)
-                with open(p.logdir + '/' + m + '/m.obj', 'rb') as m_file:
+                with open(p.outdir + '/' + m + '/m.obj', 'rb') as m_file:
                     gam = pickle.load(m_file)
             else:
                 sys.stderr.write('Fitting model %s...\n' % m)
-                gam = GAM(formula, X_baseline)
-                with open(p.logdir + '/' + m + '/m.obj', 'wb') as m_file:
+                gam = GAM(formula, X_baseline, ran_gf=ran_gf)
+                with open(p.outdir + '/' + m + '/m.obj', 'wb') as m_file:
                     pickle.dump(gam, m_file)
 
             gam_preds = gam.predict(X_baseline)
@@ -179,7 +180,7 @@ if __name__ == '__main__':
             summary += '  MSE: %.4f\n' % gam_mse
             summary += '  MAE: %.4f\n' % gam_mae
             summary += '=' * 50 + '\n'
-            with open(p.logdir + '/' + m + '/summary.txt', 'w') as f_out:
+            with open(p.outdir + '/' + m + '/summary.txt', 'w') as f_out:
                 f_out.write(summary)
             sys.stderr.write(summary)
             sys.stderr.write('\n\n')
@@ -192,20 +193,20 @@ if __name__ == '__main__':
 
             sys.stderr.write('Fitting model %s...\n\n' % m)
 
-            if p.network_type == 'nn':
+            if p.network_type in ['mle', 'nn']:
                 bayes = False
             else:
                 bayes = True
 
-            if os.path.exists(p.logdir + '/m.obj'):
-                dtsr_model = load_dtsr(p.logdir)
-            elif p.network_type == 'nn':
-                from dtsr.nndtsr import NNDTSR
-                dtsr_model = NNDTSR(
+            if os.path.exists(p.outdir + '/m.obj'):
+                dtsr_model = load_dtsr(p.outdir)
+            elif p.network_type in ['mle', 'nn']:
+                from dtsr.dtsrmle import DTSRMLE
+                dtsr_model = DTSRMLE(
                     formula,
                     X,
                     y,
-                    outdir=p.logdir + '/' + m,
+                    outdir=p.outdir + '/' + m,
                     history_length=p.history_length,
                     low_memory=p.low_memory,
                     pc=p.pc,
@@ -231,12 +232,12 @@ if __name__ == '__main__':
                     regularizer_scale=p.regularizer_scale
                 )
             elif p.network_type.startswith('bayes'):
-                from dtsr.bdtsr import BDTSR
-                dtsr_model = BDTSR(
+                from dtsr.dtsrbayes import DTSRBayes
+                dtsr_model = DTSRBayes(
                     formula,
                     X,
                     y,
-                    outdir=p.logdir + '/' + m,
+                    outdir=p.outdir + '/' + m,
                     history_length=p.history_length,
                     low_memory=p.low_memory,
                     pc=p.pc,
@@ -337,7 +338,7 @@ if __name__ == '__main__':
             summary += '  MAE: %.4f\n' % dtsr_mae
             summary += '=' * 50 + '\n'
 
-            with open(p.logdir + '/' + m + '/summary.txt', 'w') as f_out:
+            with open(p.outdir + '/' + m + '/summary.txt', 'w') as f_out:
                 f_out.write(summary)
             sys.stderr.write(summary)
             sys.stderr.write('\n\n')

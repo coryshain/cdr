@@ -12,8 +12,8 @@ Documentation for the ``dtsr`` Python package.
    getting_started
    formula
    config
-   nndtsr
-   bdtsr
+   dtsrmle
+   dtsrbayes
 
 
 Indices

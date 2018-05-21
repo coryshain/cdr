@@ -1,9 +1,9 @@
-.. _bdtsr:
+.. _dtsrbayes:
 
 Bayesian DTSR
 =============
 
-.. automodule:: dtsr.bdtsr
+.. automodule:: dtsr.dtsrbayes
     :members:
     :undoc-members:
     :show-inheritance:
