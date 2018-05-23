@@ -180,6 +180,7 @@ def load_dtsr(dir_path):
     :param dir_path: Path to directory containing the DTSR checkpoint files.
     :return: The loaded DTSR instance.
     """
+
     with open(dir_path + '/m.obj', 'rb') as f:
         m = pickle.load(f)
     m.build(outdir=dir_path)

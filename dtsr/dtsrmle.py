@@ -911,3 +911,14 @@ class DTSRMLE(DTSR):
             with self.sess.graph.as_default():
                 X_conv = self.sess.run(self.X_conv_scaled if scaled else self.X_conv, feed_dict=feed_dict)
                 return X_conv
+
+    def summary(self, fixed=True, random=False):
+        summary = '=' * 50 + '\n'
+        summary += 'DTSR regression\n\n'
+        summary += 'Output directory: %s\n\n' % self.outdir
+        summary += 'Formula:\n'
+        summary += '  ' + self.form_str + '\n\n'
+
+        #TODO: Fill this in
+
+        return(summary)

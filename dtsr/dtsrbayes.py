@@ -1811,3 +1811,33 @@ class DTSRBayes(DTSR):
                 X_conv = X_conv.mean(axis=2)
                 return X_conv
 
+    def summary(self, fixed=True, random=False):
+        summary = '=' * 50 + '\n'
+        summary += 'DTSR regression\n\n'
+        summary += 'Output directory: %s\n\n' % self.outdir
+        summary += 'Formula:\n'
+        summary += '  ' + self.form_str + '\n\n'
+
+        if fixed:
+            if self.pc:
+                terminal_names = self.src_terminal_names
+            else:
+                terminal_names = self.terminal_names
+            posterior_summaries = np.zeros((len(terminal_names), 3))
+            for i in range(len(terminal_names)):
+                terminal = terminal_names[i]
+                row = np.array(self.ci_integral(terminal, n_time_units=10))
+                posterior_summaries[i] += row
+            posterior_summaries = pd.DataFrame(posterior_summaries, index=terminal_names,
+                                               columns=['Mean', '2.5%', '97.5%'])
+
+            summary += '\nPosterior integral summaries by predictor:\n'
+            summary += posterior_summaries.to_string() + '\n\n'
+
+        #TODO: Fill the rest of this in
+
+        summary += '=' * 50 + '\n'
+
+        return(summary)
+
+

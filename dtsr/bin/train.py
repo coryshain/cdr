@@ -198,8 +198,8 @@ if __name__ == '__main__':
             else:
                 bayes = True
 
-            if os.path.exists(p.outdir + '/m.obj'):
-                dtsr_model = load_dtsr(p.outdir)
+            if os.path.exists(p.outdir + '/' + m + '/m.obj'):
+                dtsr_model = load_dtsr(p.outdir + '/' + m)
             elif p.network_type in ['mle', 'nn']:
                 from dtsr.dtsrmle import DTSRMLE
                 dtsr_model = DTSRMLE(

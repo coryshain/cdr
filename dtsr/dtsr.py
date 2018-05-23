@@ -793,11 +793,14 @@ class DTSR(object):
                     }
 
                     assert not t.name() in self.mc_integrals, 'Duplicate IRF node name already in self.mc_integrals'
-                    self.mc_integrals[t.name()] = self.__reduce_interpolated_sum__(
-                        self.irf_mc[t.name()]['composite']['scaled'],
-                        self.support[:,0],
-                        axis=0
-                    )
+                    if t.p.family == 'DiracDelta':
+                        self.mc_integrals[t.name()] = tf.gather(self.coefficient_fixed, coef_ix)
+                    else:
+                        self.mc_integrals[t.name()] = self.__reduce_interpolated_sum__(
+                            self.irf_mc[t.name()]['composite']['scaled'],
+                            self.support[:,0],
+                            axis=0
+                        )
 
                 elif t.family == 'DiracDelta':
                     assert t.p.name() == 'ROOT', 'DiracDelta may not be embedded under other IRF in DTSR formula strings'

@@ -8,6 +8,7 @@ from .data import z, c, s, compute_time_mask, expand_history
 from .util import names2ix
 
 interact = re.compile('([^ ]+):([^ ]+)')
+spillover = re.compile('^.+S[0-9]+$')
 
 class Formula(object):
     """
@@ -411,6 +412,8 @@ class Formula(object):
 
             else:
                 X = self.apply_ops(impulse, X)
+        for col in [x for x in X.columns if spillover.match(x)]:
+            X[col] = X[col].fillna(0)
         return X, y, X_2d_predictor_names, X_2d_predictors
 
     IRF = [
