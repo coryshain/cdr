@@ -204,6 +204,9 @@ if __name__ == '__main__':
             sys.stderr.write(summary)
 
         elif m.startswith('DTSR'):
+            if not p.use_gpu_if_available:
+                os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+
             dv = formula.strip().split('~')[0].strip()
 
             sys.stderr.write('Retrieving saved model %s...\n' % m)
