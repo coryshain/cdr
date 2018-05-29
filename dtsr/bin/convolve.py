@@ -1,5 +1,6 @@
 import argparse
 import sys
+import os
 import pickle
 import pandas as pd
 from dtsr.config import Config
@@ -23,6 +24,10 @@ if __name__ == '__main__':
     args, unknown = argparser.parse_known_args()
 
     p = Config(args.config_path)
+
+    if not p.use_gpu_if_available:
+        os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+
     if len(args.models) > 0:
         models = args.models
     else:
@@ -66,4 +71,5 @@ if __name__ == '__main__':
 
         X_conv.to_csv(p.outdir + '/' + m + '/X_conv.csv', sep=' ', index=False, na_rep='nan')
 
+        dtsr_model.finalize()
 

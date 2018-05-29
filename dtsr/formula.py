@@ -1,5 +1,6 @@
 import sys
 import re
+import math
 import ast
 import itertools
 import numpy as np
@@ -278,6 +279,7 @@ class Formula(object):
             first_obs,
             last_obs,
             history_length=128,
+            minibatch_size=50000
     ):
         supported = [
             'cosdist2D',
@@ -293,38 +295,47 @@ class Formula(object):
             embedding_colnames = sorted(embedding_colnames, key=lambda x: float(x[1:]))
 
             assert len(embedding_colnames) > 0, 'Model formula contains vector distance predictors but no embedding columns found in the input data'
-            X_embeddings, _, _ = expand_history(
-                X[embedding_colnames],
-                X['time'],
-                first_obs,
-                last_obs,
-                history_length,
-                fill=np.nan
-            )
-            X_bases = X_embeddings[:, -1:, :]
 
+            new_2d_predictor = []
             if predictor_name == 'cosdist2D':
-                sys.stderr.write('Computing pointwise cosine distances...\n')
-                numerator = (X_bases * X_embeddings).sum(axis=2)
-                denominator = np.sqrt((X_bases ** 2).sum(axis=2)) * np.sqrt((X_embeddings ** 2).sum(axis=2))
-                cosine_distances = numerator / (denominator)
-
-                cosine_distances = np.where(np.isfinite(cosine_distances), cosine_distances,
-                                            np.zeros(X_embeddings.shape[:2]))
-
                 new_2d_predictor_name = 'cosdist2D'
-                new_2d_predictor = np.expand_dims(cosine_distances, -1)
-
+                sys.stderr.write('Computing pointwise cosine distances...\n')
             elif predictor_name == 'eucldist2D':
                 sys.stderr.write('Computing pointwise Euclidean distances...\n')
-                diffs = X_bases - X_embeddings
-
-                euclidean_distances = np.sqrt((diffs ** 2).sum(axis=2))
-                euclidean_distances = np.where(np.isfinite(euclidean_distances), euclidean_distances,
-                                               np.zeros(X_embeddings.shape[:2]))
-
                 new_2d_predictor_name = 'eucldist2D'
-                new_2d_predictor = np.expand_dims(euclidean_distances, -1)
+
+            for i in range(0, len(first_obs), minibatch_size):
+                sys.stderr.write('\rProcessing batch %d/%d' %(i/minibatch_size + 1, math.ceil(len(first_obs)/minibatch_size)))
+                X_embeddings, _, _ = expand_history(
+                    np.array(X[embedding_colnames]),
+                    np.array(X['time']),
+                    np.array(first_obs)[i:i+minibatch_size],
+                    np.array(last_obs)[i:i+minibatch_size],
+                    history_length,
+                    fill=np.nan
+                )
+                X_bases = X_embeddings[:, -1:, :]
+
+                if predictor_name == 'cosdist2D':
+                    numerator = (X_bases * X_embeddings).sum(axis=2)
+                    denominator = np.sqrt((X_bases ** 2).sum(axis=2)) * np.sqrt((X_embeddings ** 2).sum(axis=2))
+                    cosine_distances = numerator / (denominator)
+
+                    cosine_distances = np.where(np.isfinite(cosine_distances), cosine_distances,
+                                                np.zeros(X_embeddings.shape[:2]))
+
+                    new_2d_predictor.append(np.expand_dims(cosine_distances, -1))
+
+                elif predictor_name == 'eucldist2D':
+                    diffs = X_bases - X_embeddings
+
+                    euclidean_distances = np.sqrt((diffs ** 2).sum(axis=2))
+                    euclidean_distances = np.where(np.isfinite(euclidean_distances), euclidean_distances,
+                                                   np.zeros(X_embeddings.shape[:2]))
+
+                    new_2d_predictor.append(np.expand_dims(euclidean_distances, -1))
+            new_2d_predictor = np.concatenate(new_2d_predictor, axis=0)
+            print(new_2d_predictor.shape)
 
         return new_2d_predictor_name, new_2d_predictor
 

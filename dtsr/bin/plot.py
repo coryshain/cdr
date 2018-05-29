@@ -30,6 +30,10 @@ if __name__ == '__main__':
 
     for path in args.paths:
         p = Config(path)
+
+        if not p.use_gpu_if_available:
+            os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+
         if len(args.models) > 0:
             models = [m for m in args.models if (m in p.model_list and m.startswith('DTSR'))]
         else:
@@ -104,6 +108,8 @@ if __name__ == '__main__':
                     ylab=args.ylab,
                     transparent_background=args.transparent_background
                 )
+
+            dtsr_model.finalize()
 
 
 

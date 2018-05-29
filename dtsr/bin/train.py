@@ -23,6 +23,10 @@ if __name__ == '__main__':
     args, unknown = argparser.parse_known_args()
 
     p = Config(args.config_path)
+
+    if not p.use_gpu_if_available:
+        os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+
     if len(args.models) > 0:
         models = args.models
     else:
@@ -186,9 +190,6 @@ if __name__ == '__main__':
             sys.stderr.write('\n\n')
 
         elif m.startswith('DTSR'):
-            if not p.use_gpu_if_available:
-                os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
-
             dv = formula.strip().split('~')[0].strip()
 
             sys.stderr.write('Fitting model %s...\n\n' % m)
@@ -198,9 +199,7 @@ if __name__ == '__main__':
             else:
                 bayes = True
 
-            if os.path.exists(p.outdir + '/' + m + '/m.obj'):
-                dtsr_model = load_dtsr(p.outdir + '/' + m)
-            elif p.network_type in ['mle', 'nn']:
+            if p.network_type in ['mle', 'nn']:
                 from dtsr.dtsrmle import DTSRMLE
                 dtsr_model = DTSRMLE(
                     formula,
@@ -342,4 +341,6 @@ if __name__ == '__main__':
                 f_out.write(summary)
             sys.stderr.write(summary)
             sys.stderr.write('\n\n')
+
+            dtsr_model.finalize()
 

@@ -1757,3 +1757,6 @@ class DTSR(object):
 
     def plot_v(self):
         plot_heatmap(self.eigenvec, self.src_impulse_names_norate, self.impulse_names_norate, dir=self.outdir)
+
+    def finalize(self):
+        self.sess.close()
