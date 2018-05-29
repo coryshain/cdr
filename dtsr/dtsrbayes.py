@@ -1399,14 +1399,13 @@ class DTSRBayes(DTSR):
         :return: ``None``
         """
 
+        usingGPU = tf.test.is_gpu_available()
+        sys.stderr.write('Using GPU: %s\n' % usingGPU)
+
         if self.pc:
             impulse_names = self.src_impulse_names
         else:
             impulse_names  = self.impulse_names
-
-        usingGPU = tf.test.is_gpu_available()
-
-        sys.stderr.write('Using GPU: %s\n' % usingGPU)
 
         if not np.isfinite(self.minibatch_size):
             minibatch_size = len(y)
@@ -1591,6 +1590,9 @@ class DTSRBayes(DTSR):
 
         assert len(y_time) == len(y_rangf) == len(first_obs) == len(last_obs), 'y_time, y_rangf, first_obs, and last_obs must be of identical length. Got: len(y_time) = %d, len(y_rangf) = %d, len(first_obs) = %d, len(last_obs) = %d' % (len(y_time), len(y_rangf), len(first_obs), len(last_obs))
 
+        usingGPU = tf.test.is_gpu_available()
+        sys.stderr.write('Using GPU: %s\n' % usingGPU)
+
         if n_samples is None:
             n_samples = self.n_samples_eval
 
@@ -1688,6 +1690,9 @@ class DTSRBayes(DTSR):
 
         :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
         """
+
+        usingGPU = tf.test.is_gpu_available()
+        sys.stderr.write('Using GPU: %s\n' % usingGPU)
 
         if n_samples is None:
             n_samples = self.n_samples_eval

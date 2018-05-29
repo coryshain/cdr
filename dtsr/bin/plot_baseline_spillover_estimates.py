@@ -3,6 +3,8 @@ import os
 import re
 import argparse
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 from matplotlib.ticker import MaxNLocator
 from dtsr.config import Config

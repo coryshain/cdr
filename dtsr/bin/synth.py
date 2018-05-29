@@ -6,9 +6,6 @@ import numpy as np
 import pandas as pd
 from scipy.stats import gamma
 import argparse
-import matplotlib.pyplot as plt
-import seaborn as sns
-sns.set(style="white", rc={"axes.facecolor": (0, 0, 0, 0)})
 
 from dtsr.plot import plot_irf
 

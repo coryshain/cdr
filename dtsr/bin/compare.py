@@ -4,6 +4,8 @@ import numpy as np
 import pandas as pd
 from dtsr.config import Config
 from dtsr.signif import bootstrap
+import matplotlib
+matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 
 

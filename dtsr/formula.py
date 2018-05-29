@@ -306,6 +306,7 @@ class Formula(object):
 
             for i in range(0, len(first_obs), minibatch_size):
                 sys.stderr.write('\rProcessing batch %d/%d' %(i/minibatch_size + 1, math.ceil(len(first_obs)/minibatch_size)))
+                sys.stderr.flush()
                 X_embeddings, _, _ = expand_history(
                     np.array(X[embedding_colnames]),
                     np.array(X['time']),
@@ -334,6 +335,8 @@ class Formula(object):
                                                    np.zeros(X_embeddings.shape[:2]))
 
                     new_2d_predictor.append(np.expand_dims(euclidean_distances, -1))
+
+            sys.stderr.write('\n')
             new_2d_predictor = np.concatenate(new_2d_predictor, axis=0)
 
         return new_2d_predictor_name, new_2d_predictor
