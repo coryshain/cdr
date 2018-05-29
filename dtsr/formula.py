@@ -335,7 +335,6 @@ class Formula(object):
 
                     new_2d_predictor.append(np.expand_dims(euclidean_distances, -1))
             new_2d_predictor = np.concatenate(new_2d_predictor, axis=0)
-            print(new_2d_predictor.shape)
 
         return new_2d_predictor_name, new_2d_predictor
 
