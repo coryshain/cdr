@@ -60,7 +60,7 @@ if __name__ == '__main__':
         sys.stderr.write('Retrieving saved model %s...\n' % m)
         dtsr_model = load_dtsr(p.outdir + '/' + m)
 
-        X_conv = dtsr_model.convolve_inputs(
+        X_conv, X_conv_summary = dtsr_model.convolve_inputs(
             X,
             y,
             X_3d_predictors_colnames=X_2d_predictor_names,
@@ -69,7 +69,11 @@ if __name__ == '__main__':
             n_samples=args.nsamples
         )
 
-        X_conv.to_csv(p.outdir + '/' + m + '/X_conv.csv', sep=' ', index=False, na_rep='nan')
+        X_conv.to_csv(p.outdir + '/' + m + '/X_conv_%s.csv' %args.partition, sep=' ', index=False, na_rep='nan')
+
+        sys.stderr.write(X_conv_summary)
+        with open(p.outdir + '/' + m + '/X_conv_%s_summary.txt' %args.partition, 'w') as f:
+            f.write(X_conv_summary)
 
         dtsr_model.finalize()
 

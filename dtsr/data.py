@@ -78,6 +78,7 @@ def compute_history_intervals(X, y, series_ids):
     i = j = 0
     start = 0
     end = 0
+    epsilon = 1e-10
     while i < n and j < len(X):
         sys.stderr.write('\r%d/%d' %(i+1, n))
         sys.stderr.flush()
@@ -88,7 +89,7 @@ def compute_history_intervals(X, y, series_ids):
             start += 1
             end += 1
             j += 1
-        while j < len(X) and time_X[j] <= time_y[i] and (id_vectors_X[j] == cur_ids).all():
+        while j < len(X) and time_X[j] <= time_y[i] + epsilon and (id_vectors_X[j] == cur_ids).all():
             end += 1
             j += 1
         first_obs[i] = start
@@ -228,6 +229,11 @@ def preprocess_data(X, y, p, formula_list, compute_history=True, debug=False):
         first_obs, last_obs = compute_history_intervals(X, y, p.series_ids)
         y['first_obs'] = first_obs
         y['last_obs'] = last_obs
+
+        # Floating point precision issues can allow the response to precede the impulse for simultaneous X/y,
+        # which can break downstream convolution. The correction below to y.time prevents this.
+        y.time = np.maximum(np.array(X.time)[last_obs - 1], y.time)
+
         if debug:
             sample = np.random.randint(0, len(y), 10)
             for i in sample:

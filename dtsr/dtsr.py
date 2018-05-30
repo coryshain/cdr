@@ -1557,13 +1557,37 @@ class DTSR(object):
                     X_conv.append(X_conv_cur)
                 names = [sn(''.join(x.split('-')[:-1])) for x in self.terminal_names]
                 X_conv = np.concatenate(X_conv, axis=0)
-                out = np.concatenate([y, X_conv], axis=1)
-                columns = list(y.columns) + names
-                out = pd.DataFrame(out, columns=columns)
+                out = pd.DataFrame(X_conv, columns=names, dtype=self.FLOAT_NP)
+                for c in y.columns:
+                    if c not in out:
+                        out[c] = y[c]
 
                 self.set_predict_mode(False)
 
-                return out
+                convolution_summary = ''
+                corr_conv = out.corr()
+                convolution_summary += '=' * 50 + '\n'
+                convolution_summary += 'Correlation matrix of convolved predictors:\n\n'
+                convolution_summary += str(corr_conv) + '\n\n'
+
+                select = np.where(np.isclose(time_X_3d[:,-1], time_y))[0]
+
+                X_input = X_3d[:,-1,:][select]
+
+                if X_input.shape[0] > 0:
+                    out_plus = out
+                    for i in range(len(self.impulse_names)):
+                        c = self.impulse_names[i]
+                        if c not in out_plus:
+                            out_plus[c] = X_3d[:,-1,i]
+                    corr_conv = out_plus.iloc[select].corr()
+                    convolution_summary += '-' * 50 + '\n'
+                    convolution_summary += 'Full correlation matrix of input and convolved predictors:\n'
+                    convolution_summary += 'Based on %d simultaneously sampled impulse/response pairs (out of %d total data points)\n\n' %(select.shape[0], y.shape[0])
+                    convolution_summary += str(corr_conv) + '\n\n'
+                    convolution_summary += '=' * 50 + '\n'
+
+                return out, convolution_summary
 
     def fit(self, X, y):
         raise NotImplementedError
