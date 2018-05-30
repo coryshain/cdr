@@ -575,6 +575,7 @@ class DTSR(object):
 
                 self.irf_lambdas['Gamma'] = gamma
                 self.irf_lambdas['SteepGamma'] = gamma
+                self.irf_lambdas['GammaShapeGT1'] = gamma
                 self.irf_lambdas['GammaKgt1'] = gamma
 
                 def shifted_gamma(params):
@@ -584,6 +585,7 @@ class DTSR(object):
                     return lambda x: pdf(x - params[:,2:3] + self.epsilon)
 
                 self.irf_lambdas['ShiftedGamma'] = shifted_gamma
+                self.irf_lambdas['ShiftedGammaShapeGT1'] = shifted_gamma
                 self.irf_lambdas['ShiftedGammaKgt1'] = shifted_gamma
 
                 def normal(params):
@@ -659,13 +661,13 @@ class DTSR(object):
                         params = tf.stack([beta], axis=1)
                         params_summary =  tf.stack([beta_mean], axis=1)
                     elif family == 'Gamma':
-                        alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=1)
-                        beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=1)
+                        alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=2)
+                        beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=5)
                         alpha, alpha_mean = self.__initialize_irf_param__('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf)
                         beta, beta_mean = self.__initialize_irf_param__('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf)
                         params = tf.stack([alpha, beta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean], axis=1)
-                    elif family == 'GammaKgt1':
+                    elif family in ['GammaKgt1', 'GammaShapeGT1']:
                         alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=2)
                         beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=5)
                         alpha, alpha_mean = self.__initialize_irf_param__('alpha', irf_ids, mean=alpha_init, lb=1, irf_by_rangf=irf_by_rangf)
@@ -680,15 +682,15 @@ class DTSR(object):
                         params = tf.stack([alpha, beta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean], axis=1)
                     elif family == 'ShiftedGamma':
-                        alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=1)
-                        beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=1)
-                        delta_init = self.__get_mean_init_vector__('delta', -1)
+                        alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=2)
+                        beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=5)
+                        delta_init = self.__get_mean_init_vector__('delta', -0.5)
                         alpha, alpha_mean = self.__initialize_irf_param__('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf)
                         beta, beta_mean = self.__initialize_irf_param__('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf)
                         delta, delta_mean = self.__initialize_irf_param__('delta', irf_ids, mean=delta_init, ub=0, irf_by_rangf=irf_by_rangf)
                         params = tf.stack([alpha, beta, delta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean, delta_mean], axis=1)
-                    elif family == 'ShiftedGammaKgt1':
+                    elif family in ['ShiftedGammaKgt1', 'ShiftedGammaShapeGT1']:
                         alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=2)
                         beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=5)
                         delta_init = self.__get_mean_init_vector__(irf_ids, 'delta', irf_param_init, default=-0.5)

@@ -419,6 +419,7 @@ class DTSRBayes(DTSR):
                 continue
 
             irf_ids = self.atomic_irf_names_by_family[family]
+            irf_param_init = self.atomic_irf_param_init_by_family[family]
 
             irf_by_rangf = {}
             for id in irf_ids:
@@ -429,55 +430,112 @@ class DTSRBayes(DTSR):
                         irf_by_rangf[gf].append(id)
 
             if family == 'Exp':
-                param_name = ['L']
-                L, _, _ = self.__process_mean__(1, lb=0)
-                param_mean = [L]
+                param_name = ['beta']
+                beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=1)
+                beta, _, _ = self.__process_mean__(beta_init, lb=0)
+                param_mean = [beta]
                 param_sd = [self.conv_prior_sd_tf]
             elif family == 'SteepExp':
-                param_name = ['L']
-                L, _, _ = self.__process_mean__(100, lb=0)
-                param_mean = [L]
+                param_name = ['beta']
+                beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=1)
+                beta, _, _ = self.__process_mean__(beta_init, lb=0)
+                param_mean = [beta]
                 param_sd = [self.conv_prior_sd_tf]
-            elif family in ['Gamma', 'GammaKgt1']:
-                param_name = ['k', 'theta']
-                k_theta, _, _ = self.__process_mean__(1, lb=0)
-                param_mean = [k_theta, k_theta]
+            elif family == 'Gamma':
+                param_name = ['alpha', 'beta']
+                alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=2)
+                beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=5)
+                alpha, _, _ = self.__process_mean__(alpha_init, lb=0)
+                beta, _, _ = self.__process_mean__(beta_init, lb=0)
+                param_mean = [alpha, beta]
                 param_sd = [self.conv_prior_sd_tf] * 2
-            elif family in ['ShiftedGamma', 'ShiftedGammaKgt1']:
-                param_name = ['k', 'theta', 'delta']
-                k_theta, _, _ = self.__process_mean__(1, lb=0)
-                delta, _, _ = self.__process_mean__(-1, ub=0)
-                param_mean = [k_theta, k_theta, delta]
+            elif family in ['GammaKgt1', 'GammaShapeGT1']:
+                param_name = ['alpha', 'beta']
+                alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=2)
+                beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=5)
+                alpha, _, _ = self.__process_mean__(alpha_init, lb=1)
+                beta, _, _ = self.__process_mean__(beta_init, lb=0)
+                param_mean = [alpha, beta]
+                param_sd = [self.conv_prior_sd_tf] * 2
+            elif family == 'SteepGamma':
+                param_name = ['alpha', 'beta']
+                alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=2)
+                beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=25)
+                alpha, _, _ = self.__process_mean__(alpha_init, lb=0)
+                beta, _, _ = self.__process_mean__(beta_init, lb=0)
+                param_mean = [alpha, beta]
+                param_sd = [self.conv_prior_sd_tf] * 2
+            elif family == 'ShiftedGamma':
+                param_name = ['alpha', 'beta', 'delta']
+                alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=2)
+                beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=5)
+                delta_init = self.__get_mean_init_vector__(irf_ids, 'delta', irf_param_init, default=-0.5)
+                alpha, _, _ = self.__process_mean__(alpha_init, lb=0)
+                beta, _, _ = self.__process_mean__(beta_init, lb=0)
+                delta, _, _ = self.__process_mean__(delta_init, ub=0)
+                param_mean = [alpha, beta, delta]
+                param_sd = [self.conv_prior_sd_tf] * 3
+            elif family in ['ShiftedGammaKgt1', 'ShiftedGammaShapeGT1']:
+                param_name = ['alpha', 'beta', 'delta']
+                alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=2)
+                beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=5)
+                delta_init = self.__get_mean_init_vector__(irf_ids, 'delta', irf_param_init, default=-0.5)
+                alpha, _, _ = self.__process_mean__(alpha_init, lb=1)
+                beta, _, _ = self.__process_mean__(beta_init, lb=0)
+                delta, _, _ = self.__process_mean__(delta_init, ub=0)
+                param_mean = [alpha, beta, delta]
                 param_sd = [self.conv_prior_sd_tf] * 3
             elif family == 'Normal':
                 param_name = ['mu', 'sigma']
-                sigma, _, _ = self.__process_mean__(1, lb=0)
-                param_mean = [0., sigma]
+                mu_init = self.__get_mean_init_vector__(irf_ids, 'mu', irf_param_init, default=0)
+                sigma_init = self.__get_mean_init_vector__(irf_ids, 'sigma', irf_param_init, default=1)
+                mu, _, _ = self.__process_mean__(mu_init)
+                sigma, _, _ = self.__process_mean__(sigma_init, lb=0)
+                param_mean = [mu, sigma]
                 param_sd = [self.conv_prior_sd_tf] * 2
             elif family == 'SkewNormal':
                 param_name = ['mu', 'sigma', 'alpha']
-                sigma, _, _ = self.__process_mean__(1, lb=0)
-                param_mean = [0., sigma, 0.]
+                mu_init = self.__get_mean_init_vector__(irf_ids, 'mu', irf_param_init, default=0)
+                sigma_init = self.__get_mean_init_vector__(irf_ids, 'sigma', irf_param_init, default=1)
+                alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=0)
+                mu, _, _ = self.__process_mean__(mu_init)
+                sigma, _, _ = self.__process_mean__(sigma_init, lb=0)
+                alpha, _, _ = self.__process_mean__(alpha_init)
+                param_mean = [mu, sigma, alpha]
                 param_sd = [self.conv_prior_sd_tf] * 3
             elif family == 'EMG':
-                param_name = ['mu', 'sigma', 'L']
-                sigma_L, _, _ = self.__process_mean__(1, lb=0)
-                param_mean = [0., sigma_L, sigma_L]
+                param_name = ['mu', 'sigma', 'beta']
+                mu_init = self.__get_mean_init_vector__(irf_ids, 'mu', irf_param_init, default=0)
+                sigma_init = self.__get_mean_init_vector__(irf_ids, 'sigma', irf_param_init, default=1)
+                beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=0)
+                mu, _, _ = self.__process_mean__(mu_init)
+                sigma, _, _ = self.__process_mean__(sigma_init, lb=0)
+                beta, _, _ = self.__process_mean__(beta_init, lb=0)
+                param_mean = [mu, sigma, beta]
                 param_sd = [self.conv_prior_sd_tf] * 3
             elif family == 'BetaPrime':
                 param_name = ['alpha', 'beta']
-                alpha_beta, _, _ = self.__process_mean__(1, lb=0)
-                param_mean = [alpha_beta, alpha_beta]
+                alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=1)
+                beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=1)
+                alpha, _, _ = self.__process_mean__(alpha_init, lb=0)
+                beta, _, _ = self.__process_mean__(beta_init, lb=0)
+                param_mean = [alpha, beta]
                 param_sd = [self.conv_prior_sd_tf] * 2
             elif family == 'ShiftedBetaPrime':
                 param_name = ['alpha', 'beta', 'delta']
-                alpha_beta, _, _ = self.__process_mean__(1, lb=0)
-                delta, _, _ = self.__process_mean__(-1, ub=0)
-                param_mean = [alpha_beta, alpha_beta, delta]
+                alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=1)
+                beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=1)
+                delta_init = self.__get_mean_init_vector__(irf_ids, 'delta', irf_param_init, default=-1)
+                alpha, _, _ = self.__process_mean__(alpha_init, lb=0)
+                beta, _, _ = self.__process_mean__(beta_init, lb=0)
+                delta, _, _ = self.__process_mean__(delta_init, ub=0)
+                param_mean = [alpha, beta, delta]
                 param_sd = [self.conv_prior_sd_tf] * 3
-            for id in irf_ids:
+
+            for i in range(len(irf_ids)):
+                id = irf_ids[i]
                 name += ['%s_%s' % (p, id) for p in param_name]
-                mean_init += param_mean
+                mean_init += [x[i] for x in param_mean]
                 sd_init += param_sd
                 if self.mv_ran:
                     for i in range(len(self.rangf)):
@@ -488,7 +546,7 @@ class DTSRBayes(DTSR):
                             mean_init += [0.] * self.rangf_n_levels[i] * len(param_name)
                             sd_init += [self.conv_scale_mean_init] * self.rangf_n_levels[i] * len(param_name)
 
-        return (name, mean_init, sd_init)
+        return(name, mean_init, sd_init)
 
     def __initialize_full_joint__(self):
         with self.sess.as_default():
@@ -925,7 +983,7 @@ class DTSRBayes(DTSR):
                         else:
                             param_ran = Normal(
                                 sample_shape=[self.rangf_n_levels[i], dim],
-                                loc=param_mean_init,
+                                loc=0.,
                                 scale=self.conv_prior_sd,
                                 name='%s_by_%s' % (param_name, gf)
                             )
@@ -933,7 +991,7 @@ class DTSRBayes(DTSR):
                                 param_ran_q_loc = tf.Variable(
                                     tf.random_normal(
                                         [self.rangf_n_levels[i], dim],
-                                        mean=param_mean_init,
+                                        mean=0.,
                                         stddev=self.init_sd,
                                         dtype=self.FLOAT_TF
                                     ),
@@ -981,6 +1039,13 @@ class DTSRBayes(DTSR):
                                     )
                             self.inference_map[param_ran] = param_ran_q
 
+                        param_ran *= mask_col
+                        param_ran *= tf.expand_dims(mask_row, -1)
+
+                        param_ran_mean = tf.reduce_sum(param_ran, axis=0) / tf.reduce_sum(mask_row)
+                        param_ran_centering_vector = tf.expand_dims(mask_row, -1) * param_ran_mean
+                        param_ran -= param_ran_centering_vector
+
                         half_interval = None
                         if lb is not None:
                             half_interval = param_out - lb + self.epsilon
@@ -990,25 +1055,28 @@ class DTSRBayes(DTSR):
                             else:
                                 half_interval = ub - self.epsilon - param_out
                         if half_interval is not None:
-                            param_ran = tf.sigmoid(param_ran) * half_interval
-                            if lb is not None:
-                                param_ran += lb + self.epsilon
-                            else:
-                                param_ran = ub - self.epsilon - param_ran
-
-                        param_ran *= mask_col
-                        param_ran *= tf.expand_dims(mask_row, -1)
-
-                        param_ran_mean = tf.reduce_sum(param_ran, axis=0) / tf.reduce_sum(mask_row)
-                        param_ran_centering_vector = tf.expand_dims(mask_row, -1) * param_ran_mean
-                        param_ran -= param_ran_centering_vector
+                            param_ran = tf.tanh(param_ran) * half_interval
 
                         param_out += tf.gather(param_ran, self.gf_y[:, i], axis=0)
 
                         if self.log_random:
                             param_ran_summary *= mask_col
                             param_ran_summary *= tf.expand_dims(mask_row, -1)
-                            param_ran_summary -= param_ran_centering_vector
+
+                            param_ran_summary_mean = tf.reduce_sum(param_ran_summary, axis=0) / tf.reduce_sum(mask_row)
+                            param_ran_summary_centering_vector = tf.expand_dims(mask_row, -1) * param_ran_summary_mean
+                            param_ran_summary -= param_ran_summary_centering_vector
+
+                            half_interval = None
+                            if lb is not None:
+                                half_interval = param_summary - lb + self.epsilon
+                            elif ub is not None:
+                                if half_interval is not None:
+                                    half_interval = tf.minimum(half_interval, ub - self.epsilon - param_summary)
+                                else:
+                                    half_interval = ub - self.epsilon - param_summary
+                            if half_interval is not None:
+                                param_ran_summary = tf.tanh(param_ran_summary) * 2 * half_interval
 
                             for j in range(len(irf_by_rangf[gf])):
                                 irf_name = irf_by_rangf[gf][j]

@@ -350,13 +350,20 @@ class DTSRMLE(DTSR):
                         param_ran = tf.Variable(
                             tf.random_normal(
                                 shape=[self.rangf_n_levels[i], dim],
-                                mean=param_mean_init,
+                                mean=0.,
                                 stddev=self.init_sd,
                                 dtype=self.FLOAT_TF
                             ),
                             name='%s_by_%s' % (param_name, gf)
                         )
                         self.__regularize__(param_ran)
+
+                        param_ran *= mask_col
+                        param_ran *= tf.expand_dims(mask_row, -1)
+
+                        param_ran_mean = tf.reduce_sum(param_ran, axis=0) / tf.reduce_sum(mask_row)
+                        param_ran_centering_vector = tf.expand_dims(mask_row, -1) * param_ran_mean
+                        param_ran -= param_ran_centering_vector
 
                         half_interval = None
                         if lb is not None:
@@ -367,15 +374,8 @@ class DTSRMLE(DTSR):
                             else:
                                 half_interval = ub - self.epsilon - param_out
                         if half_interval is not None:
-                            param_ran = tf.sigmoid(param_ran) * half_interval
-                            if lb is not None:
-                                param_ran += lb + self.epsilon
-                            else:
-                                param_ran = ub - self.epsilon - param_ran
+                            param_ran = tf.tanh(param_ran) * half_interval
 
-                        param_ran *= mask_col
-                        param_ran *= tf.expand_dims(mask_row, -1)
-                        param_ran -= tf.reduce_mean(param_ran, axis=0)
                         param_out += tf.gather(param_ran, self.gf_y[:, i], axis=0)
 
                         if self.log_random:
