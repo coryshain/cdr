@@ -168,6 +168,30 @@ For example, :math:`\alpha` of the Gamma distribution is constrained to be > 0, 
 However, keep in mind that for DTSRBayes, prior variances are necessarily on the unconstrained space and get squashed by the constraint function, so choosing initializations that are very close to constraint boundaries can indirectly tighten the prior.
 For example, choosing an initialization :math:`\alpha = 0.001` for the Gamma distribution will result in a much tighter prior around small values of :math:`\alpha`.
 
+Initializations for irrelevant parameters in ill-specified formulae will be ignored and the defaults for the parameters will be used instead.
+For example, if the model receives the IRF specification ``Normal(alpha=1, beta=1)``, it will initialize a Normal IRF at :math:`\mu=0`, :math:`\sigma=1` (the defaults for this kernel), since :math:`\alpha` and :math:`\beta` are not recognized parameter names for the Normal distribution.
+Therefore, make sure to match the parameter names above when specifying parameter defaults.
+The correctness of initializations can be checked in the Tensorboard logs.
+
+
+
+Using Constant (Non-trainable) Parameters
+------------------------------
+By default, DTSR trains all the variables that parameterize an IRF kernel (e.g. both :math:`\mu` and :math:`\sigma` for a Gaussian IRF kernel).
+But in some cases it's useful to treat certain IRF parameters as constants and leave them untrained.
+To do this, specify a list of trainable parameters with the keyword argument ``trainable``, using Python list syntax.
+For example, to specify a ShiftedGamma IRF in which the shift parameter :math:`\delta` is held constant at -1, use the following IRF specification:
+
+``ShiftedGamma(delta=-1, trainable=[alpha, beta])``
+
+The model will then only train the :math:`\alpha` and :math:`\beta` parameters of the response.
+As with parameter initialization, unrecognized parameter names in the ``trainable`` argument will be ignored, and parameter name mismatches can result in more parameters being held constant than intended.
+For example, the IRF specification ``Normal(trainable=[alpha, beta])``, will result in an (untrainable) Normal IRF with all parameters held fixed at their defaults.
+It is therefore important to make sure that parameter names match those given above.
+The correctness of the ``trainable`` specification can be checked in the Tensorboard logs, as well as by the number of trainable parameters reported to standard error at the start of DTSR training.
+Constant parameters will show 0 trainable parameters.
+
+
 
 
 

@@ -575,7 +575,7 @@ class DTSRBayes(DTSR):
 
                     full_joint_q_scale = tf.Variable(
                         tf.random_normal(
-                            [len(sds), len(sds)],
+                            [len(sds) * (len(sds)) / 2],
                             mean=tf.diag(self.full_joint_sigma),
                             stddev=self.init_sd,
                             dtype=self.FLOAT_TF
@@ -585,7 +585,7 @@ class DTSRBayes(DTSR):
 
                     self.full_joint_q = MultivariateNormalTriL(
                         loc=full_joint_q_loc,
-                        scale_tril=tf.nn.softplus(full_joint_q_scale),
+                        scale_tril=tf.contrib.distributions.fill_triangular(tf.nn.softplus(full_joint_q_scale)),
                         name='full_joint_q'
                     )
 
@@ -869,7 +869,7 @@ class DTSRBayes(DTSR):
 
                 return coefficient, coefficient_summary
 
-    def __initialize_irf_param__(self, param_name, ids, mean=0, lb=None, ub=None, irf_by_rangf=None):
+    def __initialize_irf_param__(self, param_name, ids, mean=0, lb=None, ub=None, irf_by_rangf=None, trainable=None):
         dim = len(ids)
         if irf_by_rangf is None:
             irf_by_rangf = []
@@ -885,8 +885,27 @@ class DTSRBayes(DTSR):
                 else:
                     param_mean_init, lb, ub = self.__process_mean__(mean, lb, ub)
 
+                    if trainable is None:
+                        trainable_ix = np.array(list(range(len(ids))), dtype=self.INT_NP)
+                        untrainable_ix = []
+                    else:
+                        trainable_ix = []
+                        untrainable_ix = []
+                        for i in range(len(ids)):
+                            name = ids[i]
+                            if param_name in trainable[name]:
+                                trainable_ix.append(i)
+                            else:
+                                untrainable_ix.append(i)
+                        trainable_ix = np.array(trainable_ix, dtype=self.INT_NP)
+                        untrainable_ix = np.array(untrainable_ix, dtype=self.INT_NP)
+
+                    dim = len(trainable_ix)
+
+                    # Initialize trainable IRF parameters as random variables
+
                     param = Normal(
-                        loc=tf.expand_dims(param_mean_init, 0),
+                        loc=tf.expand_dims(tf.gather(param_mean_init, trainable_ix), 0),
                         scale=self.conv_prior_sd,
                         name=sn('%s_%s' % (param_name, '-'.join(ids)))
                     )
@@ -894,7 +913,7 @@ class DTSRBayes(DTSR):
                         param_q_loc = tf.Variable(
                             tf.random_normal(
                                 [1, dim],
-                                mean=tf.expand_dims(param_mean_init, 0),
+                                mean=tf.expand_dims(tf.gather(param_mean_init, trainable_ix), 0),
                                 stddev=self.init_sd,
                                 dtype=self.FLOAT_TF
                             ),
@@ -951,13 +970,27 @@ class DTSRBayes(DTSR):
                     param_out = tf.sigmoid(param) * ((ub-self.epsilon) - (lb+self.epsilon)) + lb + self.epsilon
                     param_summary = tf.sigmoid(param_summary) * ((ub-self.epsilon) - (lb+self.epsilon)) + lb + self.epsilon
 
-
                 for i in range(dim):
                     tf.summary.scalar(
                         sn('%s/%s' % (param_name, ids[i])),
                         param_summary[0, i],
                         collections=['params']
                     )
+
+                # Initialize untrainable IRF parameters as constants
+
+                param_untrainable = tf.expand_dims(tf.gather(param_mean_init, untrainable_ix), 0)
+
+                if lb is None and ub is None:
+                    param_untrainable_out = param_untrainable
+                elif lb is not None and ub is None:
+                    param_untrainable_out = tf.nn.softplus(param_untrainable) + lb + self.epsilon
+                elif lb is None and ub is not None:
+                    param_untrainable_out = -tf.nn.softplus(param_untrainable) + ub - self.epsilon
+                else:
+                    param_untrainable_out = tf.sigmoid(param_untrainable) * ((ub - self.epsilon) - (lb + self.epsilon)) + lb + self.epsilon
+
+                # Process any random IRF parameters
 
                 if len(irf_by_rangf) > 0:
                     for gf in irf_by_rangf:
@@ -1086,6 +1119,14 @@ class DTSRBayes(DTSR):
                                     param_ran_summary[:, ix],
                                     collections=['random']
                                 )
+
+                # Combine trainable and untrainable parameters
+
+                param_out = tf.concat([param_out, param_untrainable_out], axis=1)
+                param_out = tf.gather(param_out, np.concatenate([trainable_ix, untrainable_ix]), axis=1)
+
+                param_summary = tf.concat([param_summary, param_untrainable_out], axis=1)
+                param_summary = tf.gather(param_summary, np.concatenate([trainable_ix, untrainable_ix]), axis=1)
 
                 return (param_out, param_summary)
 
@@ -1669,7 +1710,7 @@ class DTSRBayes(DTSR):
         else:
             impulse_names  = self.impulse_names
 
-        sys.stderr.write('Sampling from predictive posterior...\n')
+        sys.stderr.write('Sampling per-datum predictions/errors from posterior predictive distribution...\n')
 
         for i in range(len(self.rangf)):
             c = self.rangf[i]
@@ -1770,7 +1811,7 @@ class DTSRBayes(DTSR):
         else:
             impulse_names  = self.impulse_names
 
-        sys.stderr.write('Sampling from predictive posterior...\n')
+        sys.stderr.write('Sampling per-datum likelihoods from posterior predictive distribution...\n')
 
         y_rangf = y[self.rangf]
         for i in range(len(self.rangf)):

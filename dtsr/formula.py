@@ -112,7 +112,7 @@ class Formula(object):
             else:
                 assert len(t.args) <= 1, 'Only unary ops on variables supported in DTSR formula strings'
                 subterms = []
-                self.process_ast(t.args[0], terms=subterms, has_intercept=has_intercept, ops=ops + [t.func.id], rangf=rangf)
+                self.process_ast(t.args[0], terms=subterms, has_intercept=has_intercept, ops=[t.func.id] + ops, rangf=rangf)
                 terms += subterms
         elif type(t).__name__ == 'Name':
             new = Impulse(t.id, ops=ops)
@@ -142,8 +142,9 @@ class Formula(object):
         assert t.func.id in Formula.IRF, 'Ill-formed model string: process_irf() called on non-IRF node'
         irf_id = None
         coef_id = None
-        cont=False
-        ranirf=False
+        cont = False
+        ranirf = False
+        trainable = None
         param_init={}
         if len(t.keywords) > 0:
             for k in t.keywords:
@@ -183,6 +184,14 @@ class Formula(object):
                         ranirf = k.value.value
                     elif type(k.value).__name__ == 'Num':
                         ranirf = k.value.n > 0
+                elif k.arg == 'trainable':
+                    assert type(k.value).__name__ == 'List', 'Non-list argument provided to keyword arg "trainable"'
+                    trainable = []
+                    for x in k.value.elts:
+                        if type(x).__name__ == 'Name':
+                            trainable.append(x.id)
+                        elif type(x).__name__ == 'Str':
+                            trainable.append(x.s)
                 else:
                     if type(k.value).__name__ == 'Num':
                         param_init[k.arg] = k.value.n
@@ -193,6 +202,7 @@ class Formula(object):
                     else:
                         raise ValueError('Non-numeric initialization provided to IRF parameter "%s"' %k.arg)
 
+
         if isinstance(input, IRFNode):
             new = IRFNode(
                 family=t.func.id,
@@ -200,7 +210,8 @@ class Formula(object):
                 ops=ops,
                 fixed=rangf is None,
                 rangf=rangf if ranirf else None,
-                param_init=param_init
+                param_init=param_init,
+                trainable=trainable
             )
 
             new.add_child(input)
@@ -225,7 +236,8 @@ class Formula(object):
                 cont=cont,
                 fixed=rangf is None,
                 rangf=rangf,
-                param_init=param_init
+                param_init=param_init,
+                trainable=trainable
             )
 
             p = self.process_irf(
@@ -432,10 +444,8 @@ class Formula(object):
     IRF = [
         'DiracDelta',
         'Exp',
-        'SteepExp',
         'Gamma',
         'ShiftedGamma',
-        'SteepGamma',
         'GammaKgt1',
         'GammaShapeGT1',
         'ShiftedGammaKgt1',
@@ -444,8 +454,24 @@ class Formula(object):
         'SkewNormal',
         'EMG',
         'BetaPrime',
-        'ShiftedBetaPrime',
+        'ShiftedBetaPrime'
     ]
+
+    IRF_PARAMS = {
+        'DiracDelta': [],
+        'Exp': ['beta'],
+        'Gamma': ['alpha', 'beta'],
+        'ShiftedGamma': ['alpha', 'beta', 'delta'],
+        'GammaKgt1': ['alpha', 'beta'],
+        'GammaShapeGT1': ['alpha', 'beta'],
+        'ShiftedGammaKgt1': ['alpha', 'beta', 'delta'],
+        'ShiftedGammaShapeGT1': ['alpha', 'beta', 'delta'],
+        'Normal': ['mu', 'sigma'],
+        'SkewNormal': ['mu', 'sigma', 'alpha'],
+        'EMG': ['mu', 'sigma', 'beta'],
+        'BetaPrime': ['alpha', 'beta'],
+        'ShiftedBetaPrime': ['alpha', 'beta', 'delta']
+    }
 
     def __str__(self):
         return self.bform_str
@@ -501,7 +527,8 @@ class IRFNode(object):
             cont=False,
             fixed=True,
             rangf=None,
-            param_init=None
+            param_init=None,
+            trainable=None
     ):
         if family is None or family in ['Terminal', 'DiracDelta']:
             assert irfID is None, 'Attempted to tie parameters (irf_id=%s) on parameter-free IRF node (family=%s)' % (irfID, family)
@@ -532,6 +559,10 @@ class IRFNode(object):
                 self.param_init = {}
             else:
                 self.param_init = param_init
+        if trainable is None:
+            self.trainable = Formula.IRF_PARAMS.get(self.family, [])
+        else:
+            self.trainable = trainable
 
         self.children = []
         self.p = p
@@ -684,6 +715,22 @@ class IRFNode(object):
             out = {self.family: {self.irf_id(): self.param_init}}
         for c in self.children:
             c_id_by_family = c.atomic_irf_param_init_by_family()
+            for f in c_id_by_family:
+                if f not in out:
+                    out[f] = c_id_by_family[f]
+                else:
+                    for irf in c_id_by_family[f]:
+                        if irf not in out[f]:
+                            out[f][irf] = c_id_by_family[f][irf]
+        return out
+
+    def atomic_irf_param_trainable_by_family(self):
+        if self.family is None or self.family == 'Terminal':
+            out = {}
+        else:
+            out = {self.family: {self.irf_id(): self.trainable}}
+        for c in self.children:
+            c_id_by_family = c.atomic_irf_param_trainable_by_family()
             for f in c_id_by_family:
                 if f not in out:
                     out[f] = c_id_by_family[f]
@@ -906,6 +953,8 @@ class IRFNode(object):
         s = self.name()
         if len(self.rangf) > 0:
             s += '; rangf: ' + ','.join(self.rangf)
+        if len(self.trainable) > 0:
+            s +=  '; trainable params: ' + ', '.join(self.trainable)
         indent = '  '
         for c in self.children:
             s += '\n%s' % indent + str(c).replace('\n', '\n%s' % indent)

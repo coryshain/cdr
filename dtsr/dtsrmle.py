@@ -298,8 +298,7 @@ class DTSRMLE(DTSR):
                 self.__regularize__(coefficient)
                 return coefficient, coefficient_summary
 
-    def __initialize_irf_param__(self, param_name, ids, mean=0, lb=None, ub=None, irf_by_rangf=None):
-        dim = len(ids)
+    def __initialize_irf_param__(self, param_name, ids, trainable=None, mean=0, lb=None, ub=None, irf_by_rangf=None):
         if irf_by_rangf is None:
             irf_by_rangf = []
 
@@ -307,10 +306,29 @@ class DTSRMLE(DTSR):
             with self.sess.graph.as_default():
                 param_mean_init, lb, ub = self.__process_mean__(mean, lb, ub)
 
+                if trainable is None:
+                    trainable_ix = np.array(list(range(len(ids))), dtype=self.INT_NP)
+                    untrainable_ix = []
+                else:
+                    trainable_ix = []
+                    untrainable_ix = []
+                    for i in range(len(ids)):
+                        name = ids[i]
+                        if param_name in trainable[name]:
+                            trainable_ix.append(i)
+                        else:
+                            untrainable_ix.append(i)
+                    trainable_ix = np.array(trainable_ix, dtype=self.INT_NP)
+                    untrainable_ix = np.array(untrainable_ix, dtype=self.INT_NP)
+
+                dim = len(trainable_ix)
+
+                # Initialize trainable IRF parameters as trainable variables
+
                 param = tf.Variable(
                     tf.random_normal(
                         shape=[1, dim],
-                        mean=tf.expand_dims(param_mean_init, 0),
+                        mean=tf.expand_dims(tf.gather(param_mean_init, trainable_ix), 0),
                         stddev=self.init_sd,
                         dtype=self.FLOAT_TF
                     ),
@@ -334,7 +352,22 @@ class DTSRMLE(DTSR):
                         collections=['params']
                     )
 
-                param_mean = param_out
+                param_summary = param_out
+
+                # Initialize untrainable IRF parameters as constants
+
+                param_untrainable = tf.expand_dims(tf.gather(param_mean_init, untrainable_ix), 0)
+
+                if lb is None and ub is None:
+                    param_untrainable_out = param_untrainable
+                elif lb is not None and ub is None:
+                    param_untrainable_out = tf.nn.softplus(param_untrainable) + lb + self.epsilon
+                elif lb is None and ub is not None:
+                    param_untrainable_out = -tf.nn.softplus(param_untrainable) + ub - self.epsilon
+                else:
+                    param_untrainable_out = tf.sigmoid(param_untrainable) * ((ub - self.epsilon) - (lb + self.epsilon)) + lb + self.epsilon
+
+                # Process any random IRF parameters
 
                 if len(irf_by_rangf) > 0:
                     for gf in irf_by_rangf:
@@ -388,9 +421,17 @@ class DTSRMLE(DTSR):
                                     collections=['random']
                                 )
 
+                # Combine trainable and untrainable parameters
+
+                param_out = tf.concat([param_out, param_untrainable_out], axis=1)
+                param_out = tf.gather(param_out, np.concatenate([trainable_ix, untrainable_ix]), axis=1)
+
+                param_summary = tf.concat([param_summary, param_untrainable_out], axis=1)
+                param_summary = tf.gather(param_summary, np.concatenate([trainable_ix, untrainable_ix]), axis=1)
+
                 # Since DTSRMLE just learns point estimates, we simply use those
                 # estimates for plotting in the 2nd return value
-                return (param_out, param_mean)
+                return (param_out, param_summary)
 
     def __initialize_objective__(self):
         f = self.form
