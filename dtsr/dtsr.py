@@ -53,7 +53,7 @@ class DTSR(object):
             init_sd=1,
             regularizer=None,
             regularizer_scale=0.01,
-            ema_decay=0.998,
+            ema_decay=0.999,
             queue_capacity=100000,
             num_threads=8,
             log_graph=False
@@ -70,8 +70,8 @@ class DTSR(object):
             assert self.low_memory, 'Incompatible DTSR settings: low_memory=False requires finite history_length'
         self.pc = pc
         self.float_type = float_type
-        self.minibatch_size = minibatch_size
         self.int_type = int_type
+        self.minibatch_size = minibatch_size
         self.eval_minibatch_size = eval_minibatch_size
         self.n_interp = n_interp
         self.log_random = log_random
@@ -111,8 +111,9 @@ class DTSR(object):
         # Can't pickle defaultdict because it requires a lambda term for the default value,
         # so instead we pickle a normal dictionary (``rangf_map_base``) and compute the defaultdict
         # from it.
+
         for i in range(len(self.rangf_map_base)):
-            self.rangf_map.append(defaultdict(lambda:self.rangf_n_levels[i], self.rangf_map_base[i]))
+            self.rangf_map.append(defaultdict((lambda x: lambda: x)(self.rangf_n_levels[i]), self.rangf_map_base[i]))
 
         self.g = tf.Graph()
         self.sess = tf.Session(graph=self.g, config=tf_config)
@@ -144,10 +145,6 @@ class DTSR(object):
         else:
             self.n_train_minibatch = 1
             self.minibatch_scale = 1
-        if np.isfinite(self.eval_minibatch_size):
-            self.n_eval_minibatch = math.ceil(float(self.n_train) / self.eval_minibatch_size)
-        else:
-            self.n_eval_minibatch = 1
         self.regularizer_losses = []
 
         # Initialize lookup tables of network objects
@@ -1452,7 +1449,7 @@ class DTSR(object):
                             self.saver.restore(self.sess, dir + '/model_backup.ckpt')
                 else:
                     if predict:
-                        sys.stderr.warn('No EMA checkpoint available. Leaving internal variables unchanged.')
+                        sys.stderr.write('No EMA checkpoint available. Leaving internal variables unchanged.\n')
                     self.sess.run(tf.global_variables_initializer())
 
     def assign_training_data(self, X, time_X, y, time_y, gf_y):

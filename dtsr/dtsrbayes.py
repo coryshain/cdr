@@ -235,7 +235,7 @@ class DTSRBayes(DTSR):
 
         self.rangf_map = []
         for i in range(len(self.rangf_map_base)):
-            self.rangf_map.append(defaultdict(lambda: self.rangf_n_levels[i], self.rangf_map_base[i]))
+            self.rangf_map.append(defaultdict((lambda x: lambda: x)(self.rangf_n_levels[i]), self.rangf_map_base[i]))
 
         self.inference_map = {}
 
@@ -1751,8 +1751,9 @@ class DTSRBayes(DTSR):
                         preds[:,j] = self.sess.run(self.out_post, feed_dict=fd)
                         pb.update(j+1, force=True)
                 else:
+                    n_eval_minibatch = math.ceil(len(y_time) / self.eval_minibatch_size)
                     for i in range(0, len(y_time), self.eval_minibatch_size):
-                        sys.stderr.write('Minibatch %d/%d\n' %((i/self.eval_minibatch_size)+1, self.n_eval_minibatch))
+                        sys.stderr.write('Minibatch %d/%d\n' %((i/self.eval_minibatch_size)+1, n_eval_minibatch))
                         pb = tf.contrib.keras.utils.Progbar(n_samples)
                         fd_minibatch = {
                             self.X: X_2d[i:i + self.eval_minibatch_size],
@@ -1854,8 +1855,9 @@ class DTSRBayes(DTSR):
                         log_lik[:,j] = self.sess.run(self.ll_post, feed_dict=fd)
                         pb.update(j+1, force=True)
                 else:
+                    n_eval_minibatch = math.ceil(len(y) / self.eval_minibatch_size)
                     for i in range(0, len(time_y), self.eval_minibatch_size):
-                        sys.stderr.write('Minibatch %d/%d\n' %((i/self.eval_minibatch_size)+1, self.n_eval_minibatch))
+                        sys.stderr.write('Minibatch %d/%d\n' %((i/self.eval_minibatch_size)+1, n_eval_minibatch))
                         pb = tf.contrib.keras.utils.Progbar(n_samples)
 
                         fd_minibatch = {

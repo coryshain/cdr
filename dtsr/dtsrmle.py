@@ -154,7 +154,7 @@ class DTSRMLE(DTSR):
 
         self.rangf_map = []
         for i in range(len(self.rangf_map_base)):
-            self.rangf_map.append(defaultdict(lambda: self.rangf_n_levels[i], self.rangf_map_base[i]))
+            self.rangf_map.append(defaultdict((lambda x: lambda: x)(self.rangf_n_levels[i]), self.rangf_map_base[i]))
 
         with self.sess.as_default():
             with self.g.as_default():
