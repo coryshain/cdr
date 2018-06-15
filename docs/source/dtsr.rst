@@ -36,14 +36,6 @@ dtsr\.dtsrbayes module
     :undoc-members:
     :show-inheritance:
 
-dtsr\.dtsrlme module
----------------
-
-.. automodule:: dtsr.dtsrlme
-    :members:
-    :undoc-members:
-    :show-inheritance:
-
 dtsr\.formula module
 --------------------
 

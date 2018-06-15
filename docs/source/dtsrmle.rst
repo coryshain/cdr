@@ -1,9 +1,9 @@
-.. _dtsrmle:
+.. _dtsr:
 
-Neural Net DTSR
-===============
+Maximum Likelihood (MLE) DTSR
+=============================
 
-.. automodule:: dtsr._dtsrmle
+.. automodule:: dtsr._dtsr
     :members:
     :undoc-members:
     :show-inheritance:
