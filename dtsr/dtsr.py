@@ -206,25 +206,23 @@ class DTSR(object):
 
     _doc_header = """
         Abstract base class for DTSR. Bayesian (DTSRBayes) and MLE (DTSRMLE) implementations inherit from DTSR.
+        
     """
     _doc_args = """
-        **Args**:
-            :param form_str: An R-style string representing the DTSR model formula.
-            :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
-                ``X`` must contain the following columns (additional columns are ignored):
+        :param form_str: An R-style string representing the DTSR model formula.
+        :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
+            ``X`` must contain the following columns (additional columns are ignored):
+
+            * ``time``: Timestamp associated with each observation in ``X``
+            * A column for each independent variable in the DTSR ``form_str`` provided at iniialization
+        :param y: A 2D pandas tensor representing the dependent variable. Must contain the following columns:
     
-                * ``time``: Timestamp associated with each observation in ``X``
-                * A column for each independent variable in the DTSR ``form_str`` provided at iniialization
-            :param y: A 2D pandas tensor representing the dependent variable. Must contain the following columns:
-        
-                * ``time``: Timestamp associated with each observation in ``y``
-                * ``first_obs``:  Index in the design matrix `X` of the first observation in the time series associated with each observation in ``y``
-                * ``last_obs``:  Index in the design matrix `X` of the immediately preceding observation in the time series associated with each observation in ``y``
-                * A column with the same name as the DV specified in ``form_str``
-                * A column for each random grouping factor in the model specified in ``form_str``
-                
-        **Kwargs**:\n"""
-    _doc_kwargs = '\n'.join([' ' * 12 + ':param %s' %x.key + ':' + '; '.join([x.type, x.descr]) + ' **Default**: ``%s``.' %x.default_value for x in _INITIALIZATION_KWARGS])
+            * ``time``: Timestamp associated with each observation in ``y``
+            * ``first_obs``:  Index in the design matrix `X` of the first observation in the time series associated with each observation in ``y``
+            * ``last_obs``:  Index in the design matrix `X` of the immediately preceding observation in the time series associated with each observation in ``y``
+            * A column with the same name as the DV specified in ``form_str``
+            * A column for each random grouping factor in the model specified in ``form_str``\n"""
+    _doc_kwargs = '\n'.join([' ' * 8 + ':param %s' %x.key + ':' + '; '.join([x.type, x.descr]) + ' **Default**: ``%s``.' %x.default_value for x in _INITIALIZATION_KWARGS])
     __doc__ = _doc_header + _doc_args + _doc_kwargs
 
     ######################################################
@@ -2433,7 +2431,7 @@ class DTSRMLE(DTSR):
     """
     _doc_args = DTSR._doc_args
     _doc_kwargs = DTSR._doc_kwargs
-    _doc_kwargs += '\n' + '\n'.join([' ' * 12 + ':param %s' %x.key + ':' + '; '.join([x.type, x.descr]) + ' **Default**: ``%s``.' %x.default_value for x in _INITIALIZATION_KWARGS])
+    _doc_kwargs += '\n' + '\n'.join([' ' * 8 + ':param %s' %x.key + ':' + '; '.join([x.type, x.descr]) + ' **Default**: ``%s``.' %x.default_value for x in _INITIALIZATION_KWARGS])
     __doc__ = _doc_header + _doc_args + _doc_kwargs
 
     ######################################################
