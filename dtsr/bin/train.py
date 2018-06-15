@@ -76,7 +76,8 @@ if __name__ == '__main__':
         X_baseline = py2ri(X_baseline)
 
     for m in models:
-        formula = p.models[m]['formula']
+        p.set_model(m)
+        formula = p['formula']
         if not os.path.exists(p.outdir + '/' + m):
             os.makedirs(p.outdir + '/' + m)
         if m.startswith('LME'):
@@ -194,12 +195,12 @@ if __name__ == '__main__':
 
             sys.stderr.write('Fitting model %s...\n\n' % m)
 
-            if p.network_type in ['mle', 'nn']:
+            if p['network_type'] in ['mle', 'nn']:
                 bayes = False
             else:
                 bayes = True
 
-            if p.network_type in ['mle', 'nn']:
+            if p['network_type'] in ['mle', 'nn']:
                 from dtsr.dtsrmle import DTSRMLE
                 dtsr_model = DTSRMLE(
                     formula,
@@ -207,30 +208,30 @@ if __name__ == '__main__':
                     y,
                     outdir=p.outdir + '/' + m,
                     history_length=p.history_length,
-                    low_memory=p.low_memory,
-                    pc=p.pc,
-                    float_type=p.float_type,
-                    int_type=p.int_type,
-                    minibatch_size=p.minibatch_size,
-                    eval_minibatch_size=p.eval_minibatch_size,
-                    n_interp=p.n_interp,
-                    log_random=p.log_random,
-                    log_freq=p.log_freq,
-                    save_freq=p.save_freq,
-                    optim=p.optim,
-                    learning_rate=p.learning_rate,
-                    learning_rate_min=p.learning_rate_min,
-                    lr_decay_family=p.lr_decay_family,
-                    lr_decay_steps=p.lr_decay_steps,
-                    lr_decay_rate=p.lr_decay_rate,
-                    lr_decay_staircase=p.lr_decay_staircase,
-                    init_sd=p.init_sd,
-                    ema_decay=p.ema_decay,
-                    loss=p.loss,
-                    regularizer=p.regularizer,
-                    regularizer_scale=p.regularizer_scale
+                    low_memory=p['low_memory'],
+                    pc=p['pc'],
+                    float_type=p['float_type'],
+                    int_type=p['int_type'],
+                    minibatch_size=p['minibatch_size'],
+                    eval_minibatch_size=p['eval_minibatch_size'],
+                    n_interp=p['n_interp'],
+                    log_random=p['log_random'],
+                    log_freq=p['log_freq'],
+                    save_freq=p['save_freq'],
+                    optim_name=p['optim_name'],
+                    learning_rate=p['learning_rate'],
+                    learning_rate_min=p['learning_rate_min'],
+                    lr_decay_family=p['lr_decay_family'],
+                    lr_decay_steps=p['lr_decay_steps'],
+                    lr_decay_rate=p['lr_decay_rate'],
+                    lr_decay_staircase=p['lr_decay_staircase'],
+                    init_sd=p['init_sd'],
+                    ema_decay=p['ema_decay'],
+                    loss_type=p['loss_type'],
+                    regularizer_name=p['regularizer_name'],
+                    regularizer_scale=p['regularizer_scale']
                 )
-            elif p.network_type.startswith('bayes'):
+            elif p['network_type'].startswith('bayes'):
                 from dtsr.dtsrbayes import DTSRBayes
                 dtsr_model = DTSRBayes(
                     formula,
@@ -238,54 +239,60 @@ if __name__ == '__main__':
                     y,
                     outdir=p.outdir + '/' + m,
                     history_length=p.history_length,
-                    low_memory=p.low_memory,
-                    pc=p.pc,
-                    float_type=p.float_type,
-                    int_type=p.int_type,
-                    minibatch_size=p.minibatch_size,
-                    eval_minibatch_size=p.eval_minibatch_size,
-                    n_interp=p.n_interp,
-                    inference_name=p.inference_name,
-                    n_samples=p.n_samples,
-                    n_samples_eval=p.n_samples_eval,
-                    n_iter=p.n_iter,
-                    log_random=p.log_random,
-                    log_freq=p.log_freq,
-                    save_freq=p.save_freq,
-                    optim=p.optim,
-                    learning_rate=p.learning_rate,
-                    learning_rate_min=p.learning_rate_min,
-                    lr_decay_family=p.lr_decay_family,
-                    lr_decay_steps=p.lr_decay_steps,
-                    lr_decay_rate=p.lr_decay_rate,
-                    lr_decay_staircase=p.lr_decay_staircase,
-                    intercept_prior_sd=p.intercept_prior_sd,
-                    coef_prior_sd=p.coef_prior_sd,
-                    conv_prior_sd=p.conv_prior_sd,
-                    mv=p.mv,
-                    mv_ran=p.mv_ran,
-                    y_scale_fixed=p.y_scale,
-                    y_scale_prior_sd=p.y_scale_prior_sd,
-                    init_sd=p.init_sd,
-                    ema_decay=p.ema_decay,
-                    mh_proposal_sd=p.mh_proposal_sd,
-                    asymmetric_error=p.asymmetric_error
+                    low_memory=p['low_memory'],
+                    pc=p['pc'],
+                    float_type=p['float_type'],
+                    int_type=p['int_type'],
+                    minibatch_size=p['minibatch_size'],
+                    eval_minibatch_size=p['eval_minibatch_size'],
+                    n_interp=p['n_interp'],
+                    inference_name=p['inference_name'],
+                    declare_priors=p['declare_priors'],
+                    n_samples=p['n_samples'],
+                    n_samples_eval=p['n_samples_eval'],
+                    n_iter=p['n_iter'],
+                    log_random=p['log_random'],
+                    log_freq=p['log_freq'],
+                    save_freq=p['save_freq'],
+                    optim_name=p['optim_name'],
+                    learning_rate=p['learning_rate'],
+                    learning_rate_min=p['learning_rate_min'],
+                    lr_decay_family=p['lr_decay_family'],
+                    lr_decay_steps=p['lr_decay_steps'],
+                    lr_decay_rate=p['lr_decay_rate'],
+                    lr_decay_staircase=p['lr_decay_staircase'],
+                    intercept_prior_sd=p['intercept_prior_sd'],
+                    coef_prior_sd=p['coef_prior_sd'],
+                    conv_prior_sd=p['conv_prior_sd'],
+                    mv=p['mv'],
+                    mv_ran=p['mv_ran'],
+                    y_scale_init=p['y_scale_init'],
+                    y_scale_trainable=p['y_scale_trainable'],
+                    y_scale_prior_sd=p['y_scale_prior_sd'],
+                    prior_sd_scaling_coefficient=p['prior_sd_scaling_coefficient'],
+                    y_scale_prior_sd_scaling_coefficient=p['y_scale_prior_sd_scaling_coefficient'],
+                    ranef_to_fixef_prior_sd_ratio=p['ranef_to_fixef_prior_sd_ratio'],
+                    posterior_to_prior_sd_ratio=p['posterior_to_prior_sd_ratio'],
+                    init_sd=p['init_sd'],
+                    ema_decay=p['ema_decay'],
+                    mh_proposal_sd=p['mh_proposal_sd'],
+                    asymmetric_error=p['asymmetric_error']
                 )
             else:
-                raise ValueError('Network type "%s" not supported' %p.network_type)
+                raise ValueError('Network type "%s" not supported' %p['network_type'])
 
             dtsr_model.fit(
                 X,
                 y,
-                n_iter=p.n_iter,
+                n_iter=p['n_iter'],
                 X_2d_predictor_names=X_2d_predictor_names,
                 X_2d_predictors=X_2d_predictors,
                 irf_name_map=p.irf_name_map,
-                plot_n_time_units=p.plot_n_time_units,
-                plot_n_points_per_time_unit=p.plot_n_points_per_time_unit,
-                plot_x_inches=p.plot_x_inches,
-                plot_y_inches=p.plot_y_inches,
-                cmap=p.cmap
+                plot_n_time_units=p['plot_n_time_units'],
+                plot_n_points_per_time_unit=p['plot_n_points_per_time_unit'],
+                plot_x_inches=p['plot_x_inches'],
+                plot_y_inches=p['plot_y_inches'],
+                cmap=p['cmap']
             )
 
             dtsr_preds = dtsr_model.predict(

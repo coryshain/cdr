@@ -46,13 +46,14 @@ if __name__ == '__main__':
         models = p.model_list[:]
         systems = systems.union(set([model2name(x.split('_')[0].strip()) for x in models]))
         for m in models:
-            if os.path.exists(p.outdir + '/' + m + '/%s_losses_%s.txt' % (p.loss, args.partition)):
+            p.set_model(m)
+            if os.path.exists(p.outdir + '/' + m + '/%s_losses_%s.txt' % (p['loss_type'], args.partition)):
                 sys_name, trial_name = m.split('_')
                 sys_name = model2name(sys_name)
                 if sys_name.startswith('LME') and trial_name == 'noRE':
-                    l = pd.read_csv(p.outdir + '/' + m + '/%s_losses_%s.txt' % (p.loss, args.partition), sep=' ', header=None, skipinitialspace=True)
+                    l = pd.read_csv(p.outdir + '/' + m + '/%s_losses_%s.txt' % (p['loss_type'], args.partition), sep=' ', header=None, skipinitialspace=True)
                 else:
-                    l = pd.read_csv(p.outdir + '/' + name2model(m) + '/%s_losses_%s.txt' % (p.loss, args.partition), sep=' ', header=None, skipinitialspace=True)
+                    l = pd.read_csv(p.outdir + '/' + name2model(m) + '/%s_losses_%s.txt' % (p['loss_type'], args.partition), sep=' ', header=None, skipinitialspace=True)
                 s = np.isfinite(np.array(l))
                 if sys_name not in losses:
                     losses[sys_name] = {}

@@ -13,7 +13,7 @@ tf_config = tf.ConfigProto()
 tf_config.gpu_options.allow_growth = True
 from .formula import *
 from .util import *
-from .data import build_DTSR_impulses
+from .data import build_DTSR_impulses, corr_dtsr
 from .plot import *
 
 class DTSR(object):
@@ -27,99 +27,67 @@ class DTSR(object):
     #
     ######################################################
 
+    def __new__(cls, *args, **kwargs):
+        if cls is DTSR:
+            raise TypeError("DTSR is an abstract class and may not be instantiated")
+        return object.__new__(cls)
+
+    _INITIALIZATION_KWARGS = {
+        'intercept_init': None,
+        'history_length':  None,
+        'low_memory':  True,
+        'pc':  False,
+        'float_type': 'float32',
+        'int_type': 'int32',
+        'minibatch_size': 128,
+        'eval_minibatch_size': 100000,
+        'n_interp': 64,
+        'log_freq': 1,
+        'log_random': True,
+        'save_freq': 1,
+        'optim_name': 'Adam',
+        'learning_rate': 0.01,
+        'learning_rate_min': 1e-4,
+        'lr_decay_family': None,
+        'lr_decay_steps': 25,
+        'lr_decay_rate': 0.,
+        'lr_decay_staircase': False,
+        'init_sd': .01,
+        'regularizer_name': None,
+        'regularizer_scale': 0.01,
+        'ema_decay': 0.999,
+        'queue_capacity': 100000,
+        'num_threads': 8,
+        'log_graph': False
+    }
+
     def __init__(
             self,
             form_str,
             X,
             y,
-            history_length = None,
-            low_memory = True,
-            pc = False,
-            float_type='float32',
-            int_type='int32',
-            minibatch_size=128,
-            eval_minibatch_size=100000,
-            n_interp=64,
-            log_freq=1,
-            log_random=True,
-            save_freq=1,
-            optim='Adam',
-            learning_rate=0.01,
-            learning_rate_min=1e-4,
-            lr_decay_family=None,
-            lr_decay_steps=25,
-            lr_decay_rate=0.,
-            lr_decay_staircase=False,
-            init_sd=1,
-            regularizer=None,
-            regularizer_scale=0.01,
-            ema_decay=0.999,
-            queue_capacity=100000,
-            num_threads=8,
-            log_graph=False
+            **kwargs
         ):
 
-        assert not low_memory, 'Setting low_memory is currently not supported. If needed for your project, contact shain.3@osu.edu.'
-        assert not history_length is None, 'Currently, history_length must be finite. If unbounded histories are needed for your project, contact shain.3@osu.edu.'
-
-        ## Save initialization settings
+        ## Store initialization settings
         self.form_str = form_str
-        self.history_length = history_length
-        self.low_memory = low_memory
+        for kwarg in DTSR._INITIALIZATION_KWARGS:
+            setattr(self, kwarg, kwargs.pop(kwarg, DTSR._INITIALIZATION_KWARGS[kwarg]))
+
+        assert not self.low_memory, 'Setting low_memory is currently not supported. If needed for your project, contact shain.3@osu.edu.'
+        assert not self.history_length is None, 'Currently, history_length must be finite. If unbounded histories are needed for your project, contact shain.3@osu.edu.'
         if not np.isfinite(self.history_length):
             assert self.low_memory, 'Incompatible DTSR settings: low_memory=False requires finite history_length'
-        self.pc = pc
-        self.float_type = float_type
-        self.int_type = int_type
-        self.minibatch_size = minibatch_size
-        self.eval_minibatch_size = eval_minibatch_size
-        self.n_interp = n_interp
-        self.log_random = log_random
-        self.log_freq = log_freq
-        self.save_freq = save_freq
-        self.optim_name = optim
-        self.learning_rate = learning_rate
-        self.learning_rate_min = learning_rate_min
-        self.lr_decay_family = lr_decay_family
-        self.lr_decay_steps = lr_decay_steps
-        self.lr_decay_rate = lr_decay_rate
-        self.lr_decay_staircase = lr_decay_staircase
-        self.init_sd = init_sd
-        self.regularizer_name = regularizer
-        self.regularizer_scale = regularizer_scale
-        self.ema_decay = ema_decay
-        self.queue_capacity = queue_capacity
-        self.num_threads = num_threads
-        self.log_graph = log_graph
 
+        # Parse and store model data from formula
+        form = Formula(self.form_str)
+        dv = form.dv
+        rangf = form.rangf
+
+        # Compute from training data
         self.n_train = len(y)
-
-        self.__initialize_metadata__()
-
-        ## Set up hash table for random effects lookup
-        self.rangf_map_base = []
-        self.rangf_map = []
-        self.rangf_n_levels = []
-        for i in range(len(self.rangf)):
-            gf = self.rangf[i]
-            keys = np.sort(y[gf].astype('str').unique())
-            vals = np.arange(len(keys), dtype=self.INT_NP)
-            rangf_map = pd.DataFrame({'id':vals},index=keys).to_dict()['id']
-            oov_id = len(keys)+1
-            self.rangf_map_base.append(rangf_map)
-            self.rangf_n_levels.append(oov_id)
-        # Can't pickle defaultdict because it requires a lambda term for the default value,
-        # so instead we pickle a normal dictionary (``rangf_map_base``) and compute the defaultdict
-        # from it.
-
-        for i in range(len(self.rangf_map_base)):
-            self.rangf_map.append(defaultdict((lambda x: lambda: x)(self.rangf_n_levels[i]), self.rangf_map_base[i]))
-
-        self.g = tf.Graph()
-        self.sess = tf.Session(graph=self.g, config=tf_config)
-
-        self.y_mu_init = float(y[self.dv].mean())
-        self.y_scale_init = float(y[self.dv].std())
+        self.y_train_mean = float(y[dv].mean())
+        self.y_train_sd = float(y[dv].std())
 
         if self.pc:
             _, self.eigenvec, self.eigenval, self.impulse_means, self.impulse_sds = pca(X[self.src_impulse_names_norate])
@@ -127,18 +95,37 @@ class DTSR(object):
         else:
             self.eigenvec = self.eigenval = self.impulse_means = self.impulse_sds = None
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                self.y_mu_init_tf = tf.constant(self.y_mu_init, dtype=self.FLOAT_TF)
-                self.y_scale_init_tf = tf.constant(self.y_scale_init, dtype=self.FLOAT_TF)
-                self.epsilon = tf.constant(1e-35, dtype=self.FLOAT_TF)
+        ## Set up hash table for random effects lookup
+        self.rangf_map_base = []
+        self.rangf_n_levels = []
+        for i in range(len(rangf)):
+            gf = rangf[i]
+            keys = np.sort(y[gf].astype('str').unique())
+            vals = np.arange(len(keys), dtype=getattr(np, self.int_type))
+            rangf_map = pd.DataFrame({'id':vals},index=keys).to_dict()['id']
+            oov_id = len(keys)+1
+            self.rangf_map_base.append(rangf_map)
+            self.rangf_n_levels.append(oov_id)
 
-    def __initialize_metadata__(self):
+        self._initialize_session()
+
+    def _initialize_session(self):
+        self.g = tf.Graph()
+        self.sess = tf.Session(graph=self.g, config=tf_config)
+
+    def _initialize_metadata(self):
         ## Compute secondary data from intialization settings
         self.FLOAT_TF = getattr(tf, self.float_type)
         self.FLOAT_NP = getattr(np, self.float_type)
         self.INT_TF = getattr(tf, self.int_type)
         self.INT_NP = getattr(np, self.int_type)
+
+        self.form = Formula(self.form_str)
+        f = self.form
+        self.dv = f.dv
+        self.has_intercept = f.has_intercept
+        self.rangf = f.rangf
+
         if np.isfinite(self.minibatch_size):
             self.n_train_minibatch = math.ceil(float(self.n_train) / self.minibatch_size)
             self.minibatch_scale = float(self.n_train) / self.minibatch_size
@@ -163,11 +150,6 @@ class DTSR(object):
         self.convolutions = {}
 
         # Initialize model metadata
-        self.form = Formula(self.form_str)
-        f = self.form
-        self.dv = f.dv
-        self.has_intercept = f.has_intercept
-        self.rangf = f.rangf
 
         if self.pc:
             # Initialize source tree metadata
@@ -276,13 +258,59 @@ class DTSR(object):
             self.summary_random_indexers = {}
             self.summary_random = {}
 
+        # Can't pickle defaultdict because it requires a lambda term for the default value,
+        # so instead we pickle a normal dictionary (``rangf_map_base``) and compute the defaultdict
+        # from it.
+        self.rangf_map = []
+        for i in range(len(self.rangf_map_base)):
+            self.rangf_map.append(
+                defaultdict((lambda x: lambda: x)(self.rangf_n_levels[i]), self.rangf_map_base[i]))
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if self.intercept_init is None:
+                    self.intercept_init = self.y_train_mean
+                self.intercept_init_tf = tf.constant(self.intercept_init, dtype=self.FLOAT_TF)
+                self.epsilon = tf.constant(1e-35, dtype=self.FLOAT_TF)
+
     def __getstate__(self):
-        raise NotImplementedError
+        md = self._pack_metadata()
+        return md
 
     def __setstate__(self, state):
-        raise NotImplementedError
+        self.g = tf.Graph()
+        self.sess = tf.Session(graph=self.g, config=tf_config)
 
+        self._unpack_metadata(state)
+        self._initialize_metadata()
 
+        self.log_graph = False
+
+    def _pack_metadata(self):
+        md = {
+            'form_str': self.form_str,
+            'n_train': self.n_train,
+            'y_train_mean': self.y_train_mean,
+            'y_train_sd': self.y_train_sd,
+            'rangf_map_base': self.rangf_map_base,
+            'rangf_n_levels': self.rangf_n_levels,
+            'outdir': self.outdir,
+        }
+        for kwarg in DTSR._INITIALIZATION_KWARGS:
+            md[kwarg] = getattr(self, kwarg)
+        return md
+
+    def _unpack_metadata(self, md):
+        self.form_str = md.pop('form_str')
+        self.n_train = md.pop('n_train')
+        self.y_train_mean = md.pop('y_train_mean')
+        self.y_train_sd = md.pop('y_train_sd')
+        self.rangf_map_base = md.pop('rangf_map_base')
+        self.rangf_n_levels = md.pop('rangf_n_levels')
+        self.outdir = md.pop('outdir', './dtsr_model/')
+
+        for kwarg in DTSR._INITIALIZATION_KWARGS:
+            setattr(self, kwarg, md.pop(kwarg, DTSR._INITIALIZATION_KWARGS[kwarg]))
 
 
     ######################################################
@@ -291,7 +319,7 @@ class DTSR(object):
     #
     ######################################################
 
-    def __initialize_inputs__(self):
+    def _initialize_inputs(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if self.pc:
@@ -406,18 +434,18 @@ class DTSR(object):
                 if self.regularizer_name is not None:
                     self.regularizer = getattr(tf.contrib.layers, self.regularizer_name)(self.regularizer_scale)
 
-    def __intialize_intercept(self, ran_gf=None, rangf_n_levels=None):
+    def _initialize_intercept(self, ran_gf=None, rangf_n_levels=None):
         raise NotImplementedError
 
-    def __initialize_coefficient(self, coef_ids=None, ran_gf=None, rangf_n_levels=None):
+    def _initialize_coefficient(self, coef_ids=None, ran_gf=None, rangf_n_levels=None):
         raise NotImplementedError
 
-    def __initialize_intercepts_coefficients__(self):
+    def _initialize_intercepts_coefficients(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
 
                 if self.has_intercept[None]:
-                    self.intercept, self.intercept_summary = self.__initialize_intercept__()
+                    self.intercept, self.intercept_summary = self._initialize_intercept()
                     tf.summary.scalar(
                         'intercept',
                         self.intercept_summary,
@@ -433,7 +461,7 @@ class DTSR(object):
 
                 coef_ids = self.coef_names
 
-                self.coefficient_fixed, self.coefficient_summary = self.__initialize_coefficient__(coef_ids=coef_ids)
+                self.coefficient_fixed, self.coefficient_summary = self._initialize_coefficient(coef_ids=coef_ids)
 
                 self.coefficient_fixed *= coefficient_fixed_mask
                 self.coefficient_summary *= coefficient_fixed_mask
@@ -498,7 +526,7 @@ class DTSR(object):
                     mask_row = tf.constant(mask_row_np, dtype=self.FLOAT_TF)
 
                     if self.has_intercept[gf]:
-                        intercept_random, intercept_random_summary = self.__initialize_intercept__(
+                        intercept_random, intercept_random_summary = self._initialize_intercept(
                             ran_gf=gf,
                             rangf_n_levels=self.rangf_n_levels[i]
                         )
@@ -527,7 +555,7 @@ class DTSR(object):
                         mask_col = tf.constant(mask_col_np, dtype=self.FLOAT_TF)
                         self.ransl = True
 
-                        coefficient_random, coefficient_random_summary = self.__initialize_coefficient__(
+                        coefficient_random, coefficient_random_summary = self._initialize_coefficient(
                             coef_ids=coef_ids,
                             ran_gf=gf,
                             rangf_n_levels=self.rangf_n_levels[i]
@@ -557,7 +585,7 @@ class DTSR(object):
                                     collections=['random']
                                 )
 
-    def __initialize_irf_lambdas__(self):
+    def _initialize_irf_lambdas(self):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -633,7 +661,7 @@ class DTSR(object):
 
                 self.irf_lambdas['ShiftedBetaPrime'] = shifted_beta_prime
 
-    def __initialize_irf_params__(self):
+    def _initialize_irf_params(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 for family in self.atomic_irf_names_by_family:
@@ -653,93 +681,93 @@ class DTSR(object):
                                 irf_by_rangf[gf].append(id)
 
                     if family == 'Exp':
-                        beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=1)
-                        beta, beta_mean = self.__initialize_irf_param__('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=1)
+                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([beta], axis=1)
                         params_summary =  tf.stack([beta_mean], axis=1)
                     elif family == 'SteepExp':
-                        beta_init = self.__get_mean_init_vector__('beta', 25)
-                        beta, beta_mean = self.__initialize_irf_param__('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta_init = self._get_mean_init_vector('beta', 25)
+                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([beta], axis=1)
                         params_summary =  tf.stack([beta_mean], axis=1)
                     elif family == 'Gamma':
-                        alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=2)
-                        beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=5)
-                        alpha, alpha_mean = self.__initialize_irf_param__('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        beta, beta_mean = self.__initialize_irf_param__('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=2)
+                        beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=5)
+                        alpha, alpha_mean = self._initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([alpha, beta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean], axis=1)
                     elif family in ['GammaKgt1', 'GammaShapeGT1']:
-                        alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=2)
-                        beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=5)
-                        alpha, alpha_mean = self.__initialize_irf_param__('alpha', irf_ids, mean=alpha_init, lb=1, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        beta, beta_mean = self.__initialize_irf_param__('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=2)
+                        beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=5)
+                        alpha, alpha_mean = self._initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=1, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([alpha, beta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean], axis=1)
                     elif family == 'SteepGamma':
-                        alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=1)
-                        beta_init = self.__get_mean_init_vector__('beta', 25)
-                        alpha, alpha_mean = self.__initialize_irf_param__('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        beta, beta_mean = self.__initialize_irf_param__('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=1)
+                        beta_init = self._get_mean_init_vector('beta', 25)
+                        alpha, alpha_mean = self._initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([alpha, beta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean], axis=1)
                     elif family == 'ShiftedGamma':
-                        alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=2)
-                        beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=5)
-                        delta_init = self.__get_mean_init_vector__('delta', -0.5)
-                        alpha, alpha_mean = self.__initialize_irf_param__('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        beta, beta_mean = self.__initialize_irf_param__('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        delta, delta_mean = self.__initialize_irf_param__('delta', irf_ids, mean=delta_init, ub=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=2)
+                        beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=5)
+                        delta_init = self._get_mean_init_vector('delta', -0.5)
+                        alpha, alpha_mean = self._initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        delta, delta_mean = self._initialize_irf_param('delta', irf_ids, mean=delta_init, ub=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([alpha, beta, delta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean, delta_mean], axis=1)
                     elif family in ['ShiftedGammaKgt1', 'ShiftedGammaShapeGT1']:
-                        alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=2)
-                        beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=5)
-                        delta_init = self.__get_mean_init_vector__(irf_ids, 'delta', irf_param_init, default=-0.5)
-                        alpha, alpha_mean = self.__initialize_irf_param__('alpha', irf_ids, mean=alpha_init, lb=1, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        beta, beta_mean = self.__initialize_irf_param__('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        delta, delta_mean = self.__initialize_irf_param__('delta', irf_ids, mean=delta_init, ub=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=2)
+                        beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=5)
+                        delta_init = self._get_mean_init_vector(irf_ids, 'delta', irf_param_init, default=-0.5)
+                        alpha, alpha_mean = self._initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=1, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        delta, delta_mean = self._initialize_irf_param('delta', irf_ids, mean=delta_init, ub=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([alpha, beta, delta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean, delta_mean], axis=1)
                     elif family == 'Normal':
-                        mu_init = self.__get_mean_init_vector__(irf_ids, 'mu', irf_param_init, default=0)
-                        sigma_init = self.__get_mean_init_vector__(irf_ids, 'sigma', irf_param_init, default=1)
-                        mu, mu_mean = self.__initialize_irf_param__('mu', irf_ids, mean=mu_init, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        sigma, sigma_mean = self.__initialize_irf_param__('sigma', irf_ids, mean=sigma_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        mu_init = self._get_mean_init_vector(irf_ids, 'mu', irf_param_init, default=0)
+                        sigma_init = self._get_mean_init_vector(irf_ids, 'sigma', irf_param_init, default=1)
+                        mu, mu_mean = self._initialize_irf_param('mu', irf_ids, mean=mu_init, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        sigma, sigma_mean = self._initialize_irf_param('sigma', irf_ids, mean=sigma_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([mu, sigma], axis=1)
                         params_summary = tf.stack([mu_mean, sigma_mean], axis=1)
                     elif family == 'SkewNormal':
-                        mu_init = self.__get_mean_init_vector__(irf_ids, 'mu', irf_param_init, default=0)
-                        sigma_init = self.__get_mean_init_vector__(irf_ids, 'sigma', irf_param_init, default=1)
-                        alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=0)
-                        mu, mu_mean = self.__initialize_irf_param__('mu', irf_ids, mean=mu_init, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        sigma, sigma_mean = self.__initialize_irf_param__('sigma', irf_ids, mean=sigma_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        alpha, alpha_mean = self.__initialize_irf_param__('alpha', irf_ids, alpha=alpha_init, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        mu_init = self._get_mean_init_vector(irf_ids, 'mu', irf_param_init, default=0)
+                        sigma_init = self._get_mean_init_vector(irf_ids, 'sigma', irf_param_init, default=1)
+                        alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=0)
+                        mu, mu_mean = self._initialize_irf_param('mu', irf_ids, mean=mu_init, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        sigma, sigma_mean = self._initialize_irf_param('sigma', irf_ids, mean=sigma_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        alpha, alpha_mean = self._initialize_irf_param('alpha', irf_ids, alpha=alpha_init, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([mu, sigma, alpha], axis=1)
                         params_summary = tf.stack([mu_mean, sigma_mean, alpha_mean], axis=1)
                     elif family == 'EMG':
-                        mu_init = self.__get_mean_init_vector__(irf_ids, 'mu', irf_param_init, default=0)
-                        sigma_init = self.__get_mean_init_vector__(irf_ids, 'sigma', irf_param_init, default=1)
-                        beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=1)
-                        mu, mu_mean = self.__initialize_irf_param__('mu', irf_ids, mean=mu_init, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        sigma, sigma_mean = self.__initialize_irf_param__('sigma', irf_ids, mean=sigma_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        beta, beta_mean = self.__initialize_irf_param__('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        mu_init = self._get_mean_init_vector(irf_ids, 'mu', irf_param_init, default=0)
+                        sigma_init = self._get_mean_init_vector(irf_ids, 'sigma', irf_param_init, default=1)
+                        beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=1)
+                        mu, mu_mean = self._initialize_irf_param('mu', irf_ids, mean=mu_init, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        sigma, sigma_mean = self._initialize_irf_param('sigma', irf_ids, mean=sigma_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([mu, sigma, beta], axis=1)
                         params_summary = tf.stack([mu_mean, sigma_mean, beta_mean], axis=1)
                     elif family == 'BetaPrime':
-                        alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=1)
-                        beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=1)
-                        alpha, alpha_mean = self.__initialize_irf_param__('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        beta, beta_mean = self.__initialize_irf_param__('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=1)
+                        beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=1)
+                        alpha, alpha_mean = self._initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([alpha, beta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean], axis=1)
                     elif family == 'ShiftedBetaPrime':
-                        alpha_init = self.__get_mean_init_vector__(irf_ids, 'alpha', irf_param_init, default=1)
-                        beta_init = self.__get_mean_init_vector__(irf_ids, 'beta', irf_param_init, default=1)
-                        delta_init = self.__get_mean_init_vector__('delta', -1)
-                        alpha, alpha_mean = self.__initialize_irf_param__('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        beta, beta_mean = self.__initialize_irf_param__('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        delta, delta_mean = self.__initialize_irf_param__('delta', irf_ids, mean=delta_init, ub=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=1)
+                        beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=1)
+                        delta_init = self._get_mean_init_vector('delta', -1)
+                        alpha, alpha_mean = self._initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        delta, delta_mean = self._initialize_irf_param('delta', irf_ids, mean=delta_init, ub=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([alpha, beta, delta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean, delta_mean], axis=1)
                     else:
@@ -751,16 +779,16 @@ class DTSR(object):
                         self.irf_params[id] = tf.gather(params, ix, axis=2)
                         self.irf_params_summary[id] = tf.gather(params_summary, ix, axis=2)
 
-    def __initialize_irf_param__(self, param_name, ids, trainable=None, mean=0, lb=None, ub=None, irf_by_rangf=None):
+    def _initialize_irf_param(self, param_name, ids, trainable=None, mean=0, lb=None, ub=None, irf_by_rangf=None):
         raise NotImplementedError
 
-    def __get_mean_init_vector__(self, irf_ids, param_name, irf_param_init, default=0):
+    def _get_mean_init_vector(self, irf_ids, param_name, irf_param_init, default=0):
         mean = np.zeros(len(irf_ids))
         for i in range(len(irf_ids)):
             mean[i] = irf_param_init[irf_ids[i]].get(param_name, default)
         return mean
 
-    def __initialize_irfs__(self, t):
+    def _initialize_irfs(self, t):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if t.family is None:
@@ -800,7 +828,7 @@ class DTSR(object):
                     if t.p.family == 'DiracDelta':
                         self.mc_integrals[t.name()] = tf.gather(self.coefficient_fixed, coef_ix)
                     else:
-                        self.mc_integrals[t.name()] = self.__reduce_interpolated_sum__(
+                        self.mc_integrals[t.name()] = self._reduce_interpolated_sum(
                             self.irf_mc[t.name()]['composite']['scaled'],
                             self.support[:,0],
                             axis=0
@@ -841,8 +869,8 @@ class DTSR(object):
                     params = self.irf_params[t.irf_id()]
                     params_summary = self.irf_params_summary[t.irf_id()]
 
-                    atomic_irf = self.__new_irf__(self.irf_lambdas[t.family], params)
-                    atomic_irf_plot = self.__new_irf__(self.irf_lambdas[t.family], params_summary)
+                    atomic_irf = self._new_irf(self.irf_lambdas[t.family], params)
+                    atomic_irf_plot = self._new_irf(self.irf_lambdas[t.family], params_summary)
                     if t.p.name() in self.irf:
                         irf = self.irf[t.p.name()][:] + [atomic_irf]
                         irf_plot = self.irf[t.p.name()][:] + [atomic_irf_plot]
@@ -859,12 +887,12 @@ class DTSR(object):
                     if len(irf_plot) > 1:
                         composite_irf_mc = irf[0]
                         for p_irf in irf[1:]:
-                            composite_irf_mc = self.__merge_irf__(composite_irf_mc, p_irf, self.t_delta)
+                            composite_irf_mc = self._merge_irf(composite_irf_mc, p_irf, self.t_delta)
                         composite_irf_mc = composite_irf_mc(self.support)[0]
 
                         composite_irf_plot = irf_plot[0]
                         for p_irf in irf_plot[1:]:
-                            composite_irf_plot = self.__merge_irf__(composite_irf_plot, p_irf, self.t_delta)
+                            composite_irf_plot = self._merge_irf(composite_irf_plot, p_irf, self.t_delta)
                         composite_irf_plot = composite_irf_plot(self.support)[0]
 
                     else:
@@ -896,9 +924,9 @@ class DTSR(object):
                     }
 
                 for c in t.children:
-                    self.__initialize_irfs__(c)
+                    self._initialize_irfs(c)
 
-    def __initialize_backtransformed_irf_plot__(self, t):
+    def _initialize_backtransformed_irf_plot(self, t):
         if self.pc:
             with self.sess.as_default():
                 with self.sess.graph.as_default():
@@ -966,9 +994,9 @@ class DTSR(object):
 
                     for c in t.children:
                         if c.name() in self.irf_plot:
-                            self.__initialize_backtransformed_irf_plot__(c)
+                            self._initialize_backtransformed_irf_plot(c)
 
-    def __initialize_impulses__(self):
+    def _initialize_impulses(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 for name in self.terminal_names:
@@ -988,7 +1016,7 @@ class DTSR(object):
                                 src_impulse_names = list(src_impulse_names)
                                 src_impulse_ix = names2ix(src_impulse_names, self.src_impulse_names)
                                 X = self.X[:, -1, :]
-                                impulse = self.__apply_pc__(X, src_ix=src_impulse_ix, pc_ix=impulse_ix)
+                                impulse = self._apply_pc(X, src_ix=src_impulse_ix, pc_ix=impulse_ix)
                         else:
                             impulse = tf.gather(self.X, impulse_ix, axis=2)[:, -1, :]
                     else:
@@ -1003,13 +1031,13 @@ class DTSR(object):
                                 src_impulse_names = list(src_impulse_names)
                                 src_impulse_ix = names2ix(src_impulse_names, self.src_impulse_names)
                                 X = self.X
-                                impulse = self.__apply_pc__(X, src_ix=src_impulse_ix, pc_ix=impulse_ix)
+                                impulse = self._apply_pc(X, src_ix=src_impulse_ix, pc_ix=impulse_ix)
                         else:
                             impulse = tf.gather(self.X, impulse_ix, axis=2)
 
                     self.irf_impulses[name] = impulse
 
-    def __initialize_convolutions__(self):
+    def _initialize_convolutions(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 for name in self.terminal_names:
@@ -1024,13 +1052,13 @@ class DTSR(object):
                             if len(irf) > 1:
                                 cur_irf = irf[0]
                                 for p_irf in irf[1:]:
-                                    cur_irf = self.__merge_irf__(cur_irf, p_irf, self.t_delta)
+                                    cur_irf = self._merge_irf(cur_irf, p_irf, self.t_delta)
                                 irf = cur_irf(self.support)[0]
                             else:
                                 irf = irf[0]
 
-                            impulse_interp = self.__lininterp__(impulse, self.n_interp)
-                            t_delta_interp = self.__lininterp__(self.t_delta, self.n_interp)
+                            impulse_interp = self._lininterp(impulse, self.n_interp)
+                            t_delta_interp = self._lininterp(self.t_delta, self.n_interp)
                             irf_seq = irf(t_delta_interp)
 
                             self.convolutions[name] = tf.reduce_sum(impulse_interp * irf_seq, axis=1)
@@ -1041,7 +1069,7 @@ class DTSR(object):
                             if len(irf) > 1:
                                 cur_irf = irf[0]
                                 for p_irf in irf[1:]:
-                                    cur_irf = self.__merge_irf__(cur_irf, p_irf, self.t_delta)
+                                    cur_irf = self._merge_irf(cur_irf, p_irf, self.t_delta)
                                 irf = cur_irf(self.support)[0]
                             else:
                                 irf = irf[0]
@@ -1050,16 +1078,16 @@ class DTSR(object):
 
                             self.convolutions[name] = tf.reduce_sum(impulse * irf_seq, axis=1)
 
-    def __construct_network__(self):
+    def _construct_network(self):
         f = self.form
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.t_delta = tf.expand_dims(tf.expand_dims(self.time_y, -1) - self.time_X, -1)  # Tensor of temporal offsets with shape (?,history_length)
-                self.__initialize_irfs__(self.t)
-                self.__initialize_impulses__()
-                self.__initialize_convolutions__()
-                self.__initialize_backtransformed_irf_plot__(self.t)
+                self._initialize_irfs(self.t)
+                self._initialize_impulses()
+                self._initialize_convolutions()
+                self._initialize_backtransformed_irf_plot(self.t)
 
                 convolutions = [self.convolutions[x] for x in self.terminal_names]
                 self.X_conv = tf.concat(convolutions, axis=1)
@@ -1071,10 +1099,10 @@ class DTSR(object):
 
                 self.out = self.intercept + tf.reduce_sum(self.X_conv_scaled, axis=1)
 
-    def __initialize_objective__(self):
+    def _initialize_objective(self):
         raise NotImplementedError
 
-    def __initialize_optimizer__(self, name):
+    def _initialize_optimizer(self, name):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 lr = tf.constant(self.learning_rate, dtype=self.FLOAT_TF)
@@ -1111,15 +1139,15 @@ class DTSR(object):
                     'Nadam': lambda x: tf.contrib.opt.NadamOptimizer(x)
                 }[name](self.lr)
 
-    def __initialize_logging__(self):
+    def _initialize_logging(self):
         raise NotImplementedError
 
-    def __initialize_saver__(self):
+    def _initialize_saver(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                     self.saver = tf.train.Saver()
 
-    def __initialize_ema__(self):
+    def _initialize_ema(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 vars = tf.get_collection('trainable_variables')
@@ -1140,7 +1168,7 @@ class DTSR(object):
     #
     ######################################################
 
-    def __new_irf__(self, irf_lambda, params, parent_irf=None):
+    def _new_irf(self, irf_lambda, params, parent_irf=None):
         irf = irf_lambda(params)
         if parent_irf is None:
             def new_irf(x):
@@ -1150,14 +1178,13 @@ class DTSR(object):
                 return irf(parent_irf(x))
         return new_irf
 
-    def __merge_irf__(self, A, B, t_delta):
+    def _merge_irf(self, A, B, t_delta):
         raise ValueError('Hierarchical convolutions are not yet supported.')
 
         # ode = lambda y, t: A(t) * B(t)
         # A_conv_B = tf.contrib.integrate.odeint(ode, , tf.reverse(self.t_delta))
-        return
 
-    def __apply_pc__(self, inputs, src_ix=None, pc_ix=None, inv=False):
+    def _apply_pc(self, inputs, src_ix=None, pc_ix=None, inv=False):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if src_ix is None:
@@ -1177,12 +1204,12 @@ class DTSR(object):
                 while len(X.shape) < 2:
                     expansions += 1
                     X = tf.expand_dims(X, 0)
-                outputs = self.__matmul__(X, e)
+                outputs = self._matmul(X, e)
                 if expansions > 0:
                     outputs = tf.squeeze(outputs, axis=list(range(expansions)))
                 return outputs
 
-    def __process_mean__(self, mean, lb=None, ub=None):
+    def _process_mean(self, mean, lb=None, ub=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 mean = tf.constant(mean, dtype=self.FLOAT_TF)
@@ -1207,7 +1234,7 @@ class DTSR(object):
                     )
         return mean, lb, ub
 
-    def __collect_plots__(self):
+    def _collect_plots(self):
         switches = [['atomic', 'composite'], ['scaled', 'unscaled']]
 
         with self.sess.as_default():
@@ -1245,7 +1272,7 @@ class DTSR(object):
                                 'plot': plot_y
                             }
 
-    def __matmul__(self, A, B):
+    def _matmul(self, A, B):
         """
         Matmul operation that supports broadcasting of A
         :param A: Left tensor (>= 2D)
@@ -1261,7 +1288,7 @@ class DTSR(object):
                 C = tf.reshape(C, C_shape)
                 return C
 
-    def __regularize__(self, var, center=None):
+    def _regularize(self, var, center=None):
         if self.regularizer_name is not None:
             with self.sess.as_default():
                 with self.sess.graph.as_default():
@@ -1271,7 +1298,7 @@ class DTSR(object):
                         reg = tf.contrib.layers.apply_regularization(self.regularizer, [var - center])
                     self.regularizer_losses.append(reg)
 
-    def __reduce_interpolated_sum__(self, X, time, axis=0):
+    def _reduce_interpolated_sum(self, X, time, axis=0):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 assert len(X.shape) > 0, 'A scalar cannot be interpolated'
@@ -1307,7 +1334,7 @@ class DTSR(object):
 
                 return out
 
-    def __lininterp__(self, x, n):
+    def _lininterp(self, x, n):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 n_input = tf.shape(x)[1]
@@ -1316,7 +1343,7 @@ class DTSR(object):
                 interp = tf.squeeze(tf.squeeze(interp, -1), -1)[..., :-n]
                 return interp
 
-    def __lininterp_2__(self, x, time, hz):
+    def _lininterp_2(self, x, time, hz):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 time = tf.round(time * hz)
@@ -1388,21 +1415,18 @@ class DTSR(object):
         self.reset_training_data()
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                self.__initialize_inputs__()
-                self.__initialize_intercepts_coefficients__()
-                self.__initialize_irf_lambdas__()
-                self.__initialize_irf_params__()
-                if self.low_memory:
-                    self.__construct_low_memory_network__()
-                else:
-                    self.__construct_network__()
-                self.__initialize_objective__()
-                self.__initialize_logging__()
-                self.__initialize_ema__()
-                self.__initialize_saver__()
+                self._initialize_inputs()
+                self._initialize_intercepts_coefficients()
+                self._initialize_irf_lambdas()
+                self._initialize_irf_params()
+                self._construct_network()
+                self._initialize_objective()
+                self._initialize_logging()
+                self._initialize_ema()
+                self._initialize_saver()
                 self.load(restore=restore)
 
-                self.__collect_plots__()
+                self._collect_plots()
                 self.report_n_params()
 
     def save(self, dir=None):
@@ -1429,7 +1453,6 @@ class DTSR(object):
                     self.saver.save(self.sess, dir + '/model_backup.ckpt')
                     with open(dir + '/m.obj', 'wb') as f:
                         pickle.dump(self, f)
-
 
     def load(self, dir=None, predict=False, restore=True):
         if dir is None:
@@ -1495,8 +1518,494 @@ class DTSR(object):
 
         return X_history, time_X_history
 
+    def ci_curve(
+            self,
+            posterior,
+            level=95,
+            n_samples=1024,
+            n_time_units=2.5,
+            n_points_per_time_unit=1000
+    ):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                fd = {
+                    self.support_start: 0.,
+                    self.n_time_units: n_time_units,
+                    self.n_points_per_time_unit: n_points_per_time_unit,
+                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0)
+                }
+
+                alpha = 100-float(level)
+
+                samples = [self.sess.run(posterior, feed_dict=fd) for _ in range(n_samples)]
+                samples = np.concatenate(samples, axis=1)
+
+                mean = samples.mean(axis=1)
+                lower = np.percentile(samples, alpha/2, axis=1)
+                upper = np.percentile(samples, 100-(alpha/2), axis=1)
+
+                return (mean, lower, upper)
+
+    def ci_integral(
+            self,
+            terminal_name,
+            level=95,
+            n_samples=1024,
+            n_time_units=2.5,
+            n_points_per_time_unit=1000
+    ):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                fd = {
+                    self.support_start: 0.,
+                    self.n_time_units: n_time_units,
+                    self.n_points_per_time_unit: n_points_per_time_unit,
+                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0)
+                }
+
+                alpha = 100 - float(level)
+
+                if terminal_name in self.mc_integrals:
+                    posterior = self.mc_integrals[terminal_name]
+                else:
+                    posterior = self.src_mc_integrals[terminal_name]
+
+                samples = [np.squeeze(self.sess.run(posterior, feed_dict=fd)[0]) for _ in range(n_samples)]
+                samples = np.stack(samples, axis=0)
+
+                mean = samples.mean(axis=0)
+                lower = np.percentile(samples, alpha / 2, axis=0)
+                upper = np.percentile(samples, 100 - (alpha / 2), axis=0)
+
+                return (mean, lower, upper)
+
+    def run_train_step(self, feed_dict):
+        raise NotImplementedError
+
+    def run_predict_op(self, feed_dict, n_samples=None):
+        raise NotImplementedError
+
+    def run_loglik_op(self, feed_dict, n_samples=None):
+        raise NotImplementedError
+
     def run_conv_op(self, feed_dict, scaled=False):
         raise NotImplementedError
+
+    def finalize(self):
+        self.sess.close()
+
+
+    ######################################################
+    #
+    #  High-level methods for training, prediction,
+    #  and plotting
+    #
+    ######################################################
+
+    def fit(self,
+            X,
+            y,
+            n_iter=100,
+            X_2d_predictor_names=None,
+            X_2d_predictors=None,
+            irf_name_map=None,
+            plot_n_time_units=2.5,
+            plot_n_points_per_time_unit=500,
+            plot_x_inches=28,
+            plot_y_inches=5,
+            cmap='gist_rainbow'):
+        """
+        Fit the DTSR model.
+
+        :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
+            ``X`` must contain the following columns (additional columns are ignored):
+
+            * ``time``: Timestamp associated with each observation in ``X``
+            * A column for each independent variable in the DTSR ``form_str`` provided at iniialization
+
+        :param y: ``pandas`` table; the dependent variable. Must contain the following columns:
+
+            * ``time``: Timestamp associated with each observation in ``y``
+            * ``first_obs``:  Index in the design matrix `X` of the first observation in the time series associated with each entry in ``y``
+            * ``last_obs``:  Index in the design matrix `X` of the immediately preceding observation in the time series associated with each entry in ``y``
+            * A column with the same name as the DV specified in ``form_str``
+            * A column for each random grouping factor in the model specified in ``form_str``.
+
+            In general, ``y`` will be identical to the parameter ``y`` provided at model initialization.
+            This must hold for MCMC inference, since the number of minibatches is built into the model architecture.
+            However, it is not necessary for variational inference.
+        :param n_epoch_train: ``int``; the number of training iterations
+        :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
+            If ``None``, IRF tree node string ID's will be used.
+        :param plot_n_time_units: ``float``; number if time units to use in plotting.
+        :param plot_n_points_per_time_unit: ``float``; number of plot points to use per time unit.
+        :param plot_x_inches: ``int``; width of plot in inches.
+        :param plot_y_inches: ``int``; height of plot in inches.
+        :param cmap: ``str``; name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot).
+        :return: ``None``
+        """
+
+        usingGPU = tf.test.is_gpu_available()
+        sys.stderr.write('Using GPU: %s\n' % usingGPU)
+
+        if self.pc:
+            impulse_names = self.src_impulse_names
+            assert X_2d_predictors is None, 'Principal components regression not support for models with 3d predictors'
+        else:
+            impulse_names  = self.impulse_names
+
+        if not np.isfinite(self.minibatch_size):
+            minibatch_size = len(y)
+        else:
+            minibatch_size = self.minibatch_size
+        n_minibatch = math.ceil(float(len(y)) / minibatch_size)
+
+        y_rangf = y[self.rangf]
+        for i in range(len(self.rangf)):
+            c = self.rangf[i]
+            y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
+
+        X_2d, time_X_2d, time_mask = build_DTSR_impulses(
+            X,
+            y.first_obs,
+            y.last_obs,
+            impulse_names,
+            history_length=128,
+            X_2d_predictor_names=X_2d_predictor_names,
+            X_2d_predictors=X_2d_predictors,
+            int_type=self.int_type,
+            float_type=self.float_type,
+        )
+
+        time_y = np.array(y.time, dtype=self.FLOAT_NP)
+        y_dv = np.array(y[self.dv], dtype=self.FLOAT_NP)
+        gf_y = np.array(y_rangf, dtype=self.INT_NP)
+
+        sys.stderr.write('Correlation matrix for input variables:\n')
+        impulse_names_2d = [x for x in impulse_names if x in X_2d_predictor_names]
+        rho = corr_dtsr(X_2d, impulse_names, impulse_names_2d, time_mask)
+        sys.stderr.write(str(rho) + '\n\n')
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+
+                fd = {
+                    self.X: X_2d,
+                    self.time_X: time_X_2d,
+                    self.y: y_dv,
+                    self.time_y: time_y,
+                    self.gf_y: gf_y
+                }
+
+                if self.global_step.eval(session=self.sess) == 0:
+                    summary_params = self.sess.run(self.summary_params)
+                    self.writer.add_summary(summary_params, self.global_step.eval(session=self.sess))
+                    if self.log_random and len(self.rangf) > 0:
+                        summary_random = self.sess.run(self.summary_random)
+                        self.writer.add_summary(summary_random, self.global_step.eval(session=self.sess))
+
+                while self.global_step.eval(session=self.sess) < n_iter:
+                    p, p_inv = get_random_permutation(len(y))
+                    t0_iter = pytime.time()
+                    sys.stderr.write('-' * 50 + '\n')
+                    sys.stderr.write('Iteration %d\n' % int(self.global_step.eval(session=self.sess) + 1))
+                    sys.stderr.write('\n')
+                    if self.optim_name is not None and self.lr_decay_family is not None:
+                        sys.stderr.write('Learning rate: %s\n' %self.lr.eval(session=self.sess))
+
+                    pb = tf.contrib.keras.utils.Progbar(self.n_train_minibatch)
+
+                    loss_total = 0.
+
+                    for j in range(0, len(y), minibatch_size):
+
+                        indices = p[j:j+minibatch_size]
+                        fd_minibatch = {
+                            self.X: X_2d[indices],
+                            self.time_X: time_X_2d[indices],
+                            self.y: y_dv[indices],
+                            self.time_y: time_y[indices],
+                            self.gf_y: gf_y[indices] if len(gf_y > 0) else gf_y
+                        }
+
+                        info_dict = self.run_train_step(fd_minibatch)
+                        loss_cur = info_dict['loss']
+                        self.sess.run(self.ema_op)
+                        if not np.isfinite(loss_cur):
+                            loss_cur = 0
+                        loss_total += loss_cur
+
+                        pb.update((j/minibatch_size)+1, values=[('loss', loss_cur)])
+
+                    self.sess.run(self.incr_global_step)
+
+                    if self.log_freq > 0 and self.global_step.eval(session=self.sess) % self.log_freq == 0:
+                        loss_total /= n_minibatch
+                        summary_train_loss = self.sess.run(self.summary_losses, {self.loss_total: loss_total})
+                        summary_params = self.sess.run(self.summary_params)
+                        self.writer.add_summary(summary_params, self.global_step.eval(session=self.sess))
+                        self.writer.add_summary(summary_train_loss, self.global_step.eval(session=self.sess))
+                        if self.log_random and len(self.rangf) > 0:
+                            summary_random = self.sess.run(self.summary_random)
+                            self.writer.add_summary(summary_random, self.global_step.eval(session=self.sess))
+
+                    if self.save_freq > 0 and self.global_step.eval(session=self.sess) % self.save_freq == 0:
+                        self.save()
+                        self.make_plots(
+                            irf_name_map=irf_name_map,
+                            plot_n_time_units=plot_n_time_units,
+                            plot_n_points_per_time_unit=plot_n_points_per_time_unit,
+                            plot_x_inches=plot_x_inches,
+                            plot_y_inches=plot_y_inches,
+                            cmap=cmap
+                        )
+                        # lb = self.sess.run(self.err_dist_lb)
+                        # ub = self.sess.run(self.err_dist_ub)
+                        # n_time_units = ub-lb
+                        # fd_plot = {
+                        #     self.support_start: lb,
+                        #     self.n_time_units: n_time_units,
+                        #     self.n_points_per_time_unit: 1
+                        # }
+                        # plot_x = self.sess.run(self.support, feed_dict=fd_plot)
+                        # plot_y = self.sess.run(self.err_dist_plot, feed_dict=fd_plot)
+                        # plot_convolutions(
+                        #     plot_x,
+                        #     plot_y,
+                        #     ['Error Distribution'],
+                        #     dir=self.outdir,
+                        #     filename='error_distribution.png'
+                        # )
+                    t1_iter = pytime.time()
+                    sys.stderr.write('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
+
+                self.finalize()
+                self.save()
+
+                self.make_plots(
+                    irf_name_map=irf_name_map,
+                    plot_n_time_units=plot_n_time_units,
+                    plot_n_points_per_time_unit=plot_n_points_per_time_unit,
+                    plot_x_inches=plot_x_inches,
+                    plot_y_inches=plot_y_inches,
+                    cmap=cmap
+                )
+
+                if self.network_type == 'bayes':
+                    # Generate plots with 95% credible intervals
+                    self.make_plots(
+                        irf_name_map=irf_name_map,
+                        plot_n_time_units=plot_n_time_units,
+                        plot_n_points_per_time_unit=plot_n_points_per_time_unit,
+                        plot_x_inches=plot_x_inches,
+                        plot_y_inches=plot_y_inches,
+                        cmap=cmap,
+                        mc=True
+                    )
+                else:
+                    # Compute and store the model variance for log likelihood computation
+                    loss_total = 0.
+                    for j in range(0, len(y), self.minibatch_size):
+                        fd_minibatch[self.y] = y_dv[j:j + minibatch_size]
+                        fd_minibatch[self.time_y] = time_y[j:j + minibatch_size]
+                        fd_minibatch[self.gf_y] = gf_y[j:j + minibatch_size]
+                        fd_minibatch[self.X] = X_2d[j:j + minibatch_size]
+                        fd_minibatch[self.time_X] = time_X_2d[j:j + minibatch_size]
+                        loss_total += self.sess.run(self.mse_loss, feed_dict=fd_minibatch) * len(fd_minibatch[self.y])
+                    loss_total /= len(y)
+                    self.sess.run(self.set_y_scale, feed_dict={self.loss_total: math.sqrt(loss_total)})
+                sys.stderr.write('%s\n\n' % ('='*50))
+
+    def predict(
+            self,
+            X,
+            y_time,
+            y_rangf,
+            first_obs,
+            last_obs,
+            X_2d_predictor_names=None,
+            X_2d_predictors=None,
+            n_samples=None
+    ):
+        """
+        Predict from the pre-trained DTSR model.
+        Predictions are averaged over ``self.n_samples_eval`` samples from the predictive posterior for each regression target.
+
+        :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
+            ``X`` must contain the following columns (additional columns are ignored):
+
+            * ``time``: Timestamp associated with each observation
+            * A column for each independent variable in the DTSR ``form_str`` provided at iniialization
+
+        :param y_time: ``pandas`` ``Series`` or 1D ``numpy`` array; timestamps for the regression targets, grouped by series.
+        :param y_rangf: ``pandas`` ``Series`` or 1D ``numpy`` array; random grouping factor values (if applicable).
+            Can be of type ``str`` or ``int``.
+            Sort order and number of observations must be identical to that of ``y_time``.
+        :param first_obs: ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the start of the series associated with the current regression target.
+            Sort order and number of observations must be identical to that of ``y_time``.
+        :param last_obs: ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the most recent observation in the series associated with the current regression target.
+            Sort order and number of observations must be identical to that of ``y_time``.
+        :return: 1D ``numpy`` array; mean network predictions for regression targets (same length and sort order as ``y_time``).
+        """
+
+        assert len(y_time) == len(y_rangf) == len(first_obs) == len(last_obs), 'y_time, y_rangf, first_obs, and last_obs must be of identical length. Got: len(y_time) = %d, len(y_rangf) = %d, len(first_obs) = %d, len(last_obs) = %d' % (len(y_time), len(y_rangf), len(first_obs), len(last_obs))
+
+        usingGPU = tf.test.is_gpu_available()
+        sys.stderr.write('Using GPU: %s\n' % usingGPU)
+
+        if self.pc:
+            impulse_names = self.src_impulse_names
+        else:
+            impulse_names  = self.impulse_names
+
+        sys.stderr.write('Sampling per-datum predictions/errors from posterior predictive distribution...\n')
+
+        for i in range(len(self.rangf)):
+            c = self.rangf[i]
+            y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
+
+        X_2d, time_X_2d, time_mask = build_DTSR_impulses(
+            X,
+            first_obs,
+            last_obs,
+            impulse_names,
+            history_length=128,
+            X_2d_predictor_names=X_2d_predictor_names,
+            X_2d_predictors=X_2d_predictors,
+            int_type=self.int_type,
+            float_type=self.float_type,
+        )
+        time_y = np.array(y_time, dtype=self.FLOAT_NP)
+        gf_y = np.array(y_rangf, dtype=self.INT_NP)
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+
+                self.set_predict_mode(True)
+
+                fd = {
+                    self.X: X_2d,
+                    self.time_X: time_X_2d,
+                    self.time_y: time_y,
+                    self.gf_y: gf_y,
+                }
+
+
+                if not np.isfinite(self.eval_minibatch_size):
+                    preds = self.run_predict_op(fd, n_samples=n_samples)
+                else:
+                    preds = np.zeros((len(y_time),))
+                    n_eval_minibatch = math.ceil(len(y_time) / self.eval_minibatch_size)
+                    for i in range(0, len(y_time), self.eval_minibatch_size):
+                        sys.stderr.write('\rMinibatch %d/%d\n' %((i/self.eval_minibatch_size)+1, n_eval_minibatch))
+                        sys.stderr.flush()
+                        fd_minibatch = {
+                            self.X: X_2d[i:i + self.eval_minibatch_size],
+                            self.time_X: time_X_2d[i:i + self.eval_minibatch_size],
+                            self.time_y: time_y[i:i + self.eval_minibatch_size],
+                            self.gf_y: gf_y[i:i + self.eval_minibatch_size] if len(gf_y) > 0 else gf_y
+                        }
+                        preds[i:i + self.eval_minibatch_size] = self.run_predict_op(fd_minibatch, n_samples=n_samples)
+
+                sys.stderr.write('\n\n')
+
+                self.set_predict_mode(False)
+
+                return preds
+
+    def log_lik(
+            self,
+            X,
+            y,
+            X_2d_predictor_names=None,
+            X_2d_predictors=None,
+            n_samples=None
+    ):
+        """
+        Compute log-likelihood of data from predictive posterior.
+
+        :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
+            ``X`` must contain the following columns (additional columns are ignored):
+
+            * ``time``: Timestamp associated with each observation in ``X``
+            * A column for each independent variable in the DTSR ``form_str`` provided at iniialization
+
+        :param y: ``pandas`` table; the dependent variable. Must contain the following columns:
+
+            * ``time``: Timestamp associated with each observation in ``y``
+            * ``first_obs``:  Index in the design matrix `X` of the first observation in the time series associated with each entry in ``y``
+            * ``last_obs``:  Index in the design matrix `X` of the immediately preceding observation in the time series associated with each entry in ``y``
+            * A column with the same name as the DV specified in ``form_str``
+            * A column for each random grouping factor in the model specified in ``form_str``.
+
+        :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
+        """
+
+        usingGPU = tf.test.is_gpu_available()
+        sys.stderr.write('Using GPU: %s\n' % usingGPU)
+
+        if self.pc:
+            impulse_names = self.src_impulse_names
+        else:
+            impulse_names  = self.impulse_names
+
+        sys.stderr.write('Sampling per-datum likelihoods from posterior predictive distribution...\n')
+
+        y_rangf = y[self.rangf]
+        for i in range(len(self.rangf)):
+            c = self.rangf[i]
+            y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
+
+        X_2d, time_X_2d, time_mask = build_DTSR_impulses(
+            X,
+            y['first_obs'],
+            y['last_obs'],
+            impulse_names,
+            history_length=128,
+            X_2d_predictor_names=X_2d_predictor_names,
+            X_2d_predictors=X_2d_predictors,
+            int_type=self.int_type,
+            float_type=self.float_type,
+        )
+        time_y = np.array(y.time, dtype=self.FLOAT_NP)
+        y_dv = np.array(y[self.dv], dtype=self.FLOAT_NP)
+        gf_y = np.array(y_rangf, dtype=self.INT_NP)
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                self.set_predict_mode(True)
+
+                fd = {
+                    self.X: X_2d,
+                    self.time_X: time_X_2d,
+                    self.time_y: time_y,
+                    self.gf_y: gf_y,
+                    self.y: y_dv
+                }
+
+
+                if not np.isfinite(self.eval_minibatch_size):
+                    log_lik = self.run_loglik_op(fd, n_samples=n_samples)
+                else:
+                    log_lik = np.zeros((len(time_y),))
+                    n_eval_minibatch = math.ceil(len(y) / self.eval_minibatch_size)
+                    for i in range(0, len(time_y), self.eval_minibatch_size):
+                        sys.stderr.write('\rMinibatch %d/%d\n' %((i/self.eval_minibatch_size)+1, n_eval_minibatch))
+                        sys.stderr.flush()
+                        fd_minibatch = {
+                            self.X: X_2d[i:i + self.eval_minibatch_size],
+                            self.time_X: time_X_2d[i:i + self.eval_minibatch_size],
+                            self.time_y: time_y[i:i + self.eval_minibatch_size],
+                            self.gf_y: gf_y[i:i + self.eval_minibatch_size] if len(gf_y) > 0 else gf_y,
+                            self.y: y_dv[i:i+self.eval_minibatch_size]
+                        }
+                        log_lik[i:i+self.eval_minibatch_size] = self.run_loglik_op(fd_minibatch, n_samples=n_samples)
+
+                self.set_predict_mode(False)
+
+                sys.stderr.write('\n\n')
+
+                return log_lik
 
     def convolve_inputs(
             self,
@@ -1613,76 +2122,6 @@ class DTSR(object):
                     convolution_summary += '=' * 50 + '\n'
 
                 return out, convolution_summary
-
-    def fit(self, X, y):
-        raise NotImplementedError
-
-    def predict(self, X, y_time, y_rangf, first_obs, last_obs):
-        raise NotImplementedError
-
-    def eval(self, X, y):
-        raise NotImplementedError
-
-    def ci_curve(
-            self,
-            posterior,
-            level=95,
-            n_samples=1024,
-            n_time_units=2.5,
-            n_points_per_time_unit=1000
-    ):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                fd = {
-                    self.support_start: 0.,
-                    self.n_time_units: n_time_units,
-                    self.n_points_per_time_unit: n_points_per_time_unit,
-                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0)
-                }
-
-                alpha = 100-float(level)
-
-                samples = [self.sess.run(posterior, feed_dict=fd) for _ in range(n_samples)]
-                samples = np.concatenate(samples, axis=1)
-
-                mean = samples.mean(axis=1)
-                lower = np.percentile(samples, alpha/2, axis=1)
-                upper = np.percentile(samples, 100-(alpha/2), axis=1)
-
-                return (mean, lower, upper)
-
-    def ci_integral(
-            self,
-            terminal_name,
-            level=95,
-            n_samples=1024,
-            n_time_units=2.5,
-            n_points_per_time_unit=1000
-    ):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                fd = {
-                    self.support_start: 0.,
-                    self.n_time_units: n_time_units,
-                    self.n_points_per_time_unit: n_points_per_time_unit,
-                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0)
-                }
-
-                alpha = 100 - float(level)
-
-                if terminal_name in self.mc_integrals:
-                    posterior = self.mc_integrals[terminal_name]
-                else:
-                    posterior = self.src_mc_integrals[terminal_name]
-
-                samples = [np.squeeze(self.sess.run(posterior, feed_dict=fd)[0]) for _ in range(n_samples)]
-                samples = np.stack(samples, axis=0)
-
-                mean = samples.mean(axis=0)
-                lower = np.percentile(samples, alpha / 2, axis=0)
-                upper = np.percentile(samples, 100 - (alpha / 2), axis=0)
-
-                return (mean, lower, upper)
 
     def make_plots(
             self,
@@ -1808,9 +2247,9 @@ class DTSR(object):
 
                 self.set_predict_mode(False)
 
-
     def plot_v(self):
         plot_heatmap(self.eigenvec, self.src_impulse_names_norate, self.impulse_names_norate, dir=self.outdir)
 
-    def finalize(self):
-        self.sess.close()
+    def summary(self, fixed=True, random=False):
+        raise NotImplementedError
+

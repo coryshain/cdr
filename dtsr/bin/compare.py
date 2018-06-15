@@ -42,13 +42,15 @@ if __name__ == '__main__':
     sys.stderr.write('\n')
     dtsr_models = [x for x in models if x.startswith('DTSR')]
 
-    if args.metric == 'loss':
-        file_name = '/%s_losses_%s.txt'%(p.loss, args.partition)
-    else:
-        file_name = '/loglik_%s.txt'%args.partition
-
     for i in range(len(dtsr_models)):
         m1 = dtsr_models[i]
+        p.set_model(m1)
+
+        if args.metric == 'loss':
+            file_name = '/%s_losses_%s.txt' % (p['loss_type'], args.partition)
+        else:
+            file_name = '/loglik_%s.txt' % args.partition
+
         for j in range(i+1, len(dtsr_models)):
             m2 = dtsr_models[j]
             name = '%s_v_%s' %(m1, m2)

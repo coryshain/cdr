@@ -84,11 +84,10 @@ if __name__ == '__main__':
 
     for m in models:
         formula = p.models[m]['formula']
+        p.set_model(m)
         if not os.path.exists(p.outdir + '/' + m):
             os.makedirs(p.outdir + '/' + m)
         if m.startswith('LME'):
-            from dtsr.baselines import LME
-
             dv = formula.strip().split('~')[0].strip()
 
             sys.stderr.write('Retrieving saved model %s...\n' % m)
@@ -99,11 +98,11 @@ if __name__ == '__main__':
             with open(p.outdir + '/' + m + '/preds_%s.txt' % args.partition, 'w') as p_file:
                 for i in range(len(lme_preds)):
                     p_file.write(str(lme_preds[i]) + '\n')
-            if p.loss.lower() == 'mae':
+            if p['loss_type'].lower() == 'mae':
                 losses = np.array(y[dv] - lme_preds).abs()
             else:
                 losses = np.array(y[dv] - lme_preds) ** 2
-            with open(p.outdir + '/' + m + '/%s_losses_%s.txt' % (p.loss, args.partition), 'w') as p_file:
+            with open(p.outdir + '/' + m + '/%s_losses_%s.txt' % (p['loss_type'], args.partition), 'w') as p_file:
                 for i in range(len(losses)):
                     p_file.write(str(losses[i]) + '\n')
             lme_mse = mse(y[dv], lme_preds)
@@ -123,8 +122,6 @@ if __name__ == '__main__':
             sys.stderr.write(summary)
 
         elif m.startswith('LM'):
-            from dtsr.baselines import LM
-
             dv = formula.strip().split('~')[0].strip()
 
             sys.stderr.write('Retrieving saved model %s...\n' % m)
@@ -135,11 +132,11 @@ if __name__ == '__main__':
             with open(p.outdir + '/' + m + '/preds_%s.txt' % args.partition, 'w') as p_file:
                 for i in range(len(lm_preds)):
                     p_file.write(str(lm_preds[i]) + '\n')
-            if p.loss.lower() == 'mae':
+            if p['loss_type'].lower() == 'mae':
                 losses = np.array(y[dv] - lm_preds).abs()
             else:
                 losses = np.array(y[dv] - lm_preds) ** 2
-            with open(p.outdir + '/' + m + '/%s_losses_%s.txt' % (p.loss, args.partition), 'w') as p_file:
+            with open(p.outdir + '/' + m + '/%s_losses_%s.txt' % (p['loss_type'], args.partition), 'w') as p_file:
                 for i in range(len(losses)):
                     p_file.write(str(losses[i]) + '\n')
             lm_mse = mse(y[dv], lm_preds)
@@ -160,8 +157,6 @@ if __name__ == '__main__':
 
         elif m.startswith('GAM'):
             import re
-            from dtsr.baselines import GAM
-
             dv = formula.strip().split('~')[0].strip()
 
             ## For some reason, GAM can't predict using custom functions, so we have to translate them
@@ -180,11 +175,11 @@ if __name__ == '__main__':
             with open(p.outdir + '/' + m + '/preds_%s.txt' % args.partition, 'w') as p_file:
                 for i in range(len(gam_preds)):
                     p_file.write(str(gam_preds[i]) + '\n')
-            if p.loss.lower() == 'mae':
+            if p['loss_type'].lower() == 'mae':
                 losses = np.array(y[dv] - gam_preds).abs()
             else:
                 losses = np.array(y[dv] - gam_preds) ** 2
-            with open(p.outdir + '/' + m + '/%s_losses_%s.txt' % (p.loss, args.partition), 'w') as p_file:
+            with open(p.outdir + '/' + m + '/%s_losses_%s.txt' % (p['loss_type'], args.partition), 'w') as p_file:
                 for i in range(len(losses)):
                     p_file.write(str(losses[i]) + '\n')
             gam_mse = mse(y[dv], gam_preds)
@@ -212,7 +207,7 @@ if __name__ == '__main__':
             sys.stderr.write('Retrieving saved model %s...\n' % m)
             dtsr_model = load_dtsr(p.outdir + '/' + m)
 
-            bayes = p.network_type == 'bayes'
+            bayes = p['network_type'] == 'bayes'
 
             summary = '=' * 50 + '\n'
             summary += 'DTSR regression\n\n'
@@ -234,11 +229,11 @@ if __name__ == '__main__':
                 with open(p.outdir + '/' + m + '/preds_%s.txt' % args.partition, 'w') as p_file:
                     for i in range(len(dtsr_preds)):
                         p_file.write(str(dtsr_preds[i]) + '\n')
-                if p.loss.lower() == 'mae':
+                if p['loss_type'].lower() == 'mae':
                     losses = np.array(y[dv] - dtsr_preds).abs()
                 else:
                     losses = np.array(y[dv] - dtsr_preds) ** 2
-                with open(p.outdir + '/' + m + '/%s_losses_%s.txt' % (p.loss, args.partition), 'w') as l_file:
+                with open(p.outdir + '/' + m + '/%s_losses_%s.txt' % (p['loss_type'], args.partition), 'w') as l_file:
                     for i in range(len(losses)):
                         l_file.write(str(losses[i]) + '\n')
                 with open(p.outdir + '/' + m + '/obs_%s.txt' % args.partition, 'w') as p_file:
