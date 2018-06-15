@@ -13,79 +13,162 @@ tf_config.gpu_options.allow_growth = True
 
 from .formula import *
 from .util import *
-from .dtsr import DTSR
+from .dtsr import DTSR, Kwarg
 from .data import build_DTSR_impulses, corr_dtsr
 
 import edward as ed
 from edward.models import Empirical, Exponential, Gamma, MultivariateNormalTriL, Normal, SinhArcsinh
 
 
+
+
+
+######################################################
+#
+#  BAYESIAN IMPLEMENTATION OF DTSR
+#
+######################################################
+
+DTSRBAYES_INITIALIZATION_KWARGS = [
+    Kwarg(
+        'inference_name',
+        'KLqp',
+        "``str``",
+        "The Edward inference class to use for fitting."
+    ),
+    Kwarg(
+        'declare_priors',
+        True,
+        "``bool``",
+        "Specify Gaussian priors for all model parameters (if ``False``, use implicit improper uniform priors)."
+    ),
+    Kwarg(
+        'n_iter',
+        1000,
+        "``bool``",
+        "Number of training iterations. If using variational inference, this becomes the `expected` number of training iterations and is used only for Tensorboard logging, with no impact on training behavior."
+    ),
+    Kwarg(
+        'n_samples',
+        None,
+        "``int``",
+        "Number of posterior samples to draw at each training step during variational inference. If using MCMC inferences, the number of samples is set deterministically as ``n_iter * n_minibatch``, so this user-supplied parameter is overridden."
+    ),
+    Kwarg(
+        'n_samples_eval',
+        256,
+        "``int``",
+        "Number of posterior predictive samples to draw for prediction/evaluation."
+    ),
+    Kwarg(
+        'intercept_prior_sd',
+        None,
+        "``float`` or ``None``",
+        "Standard deviation of prior on fixed intercept. If ``None``, inferred as ``prior_sd_scaling_coefficient`` times the empirical variance of the response on the training set."
+    ),
+    Kwarg(
+        'coef_prior_sd',
+        None,
+        "``float`` or ``None``",
+        "Standard deviation of prior on fixed coefficients. If ``None``, inferred as ``prior_sd_scaling_coefficient`` times the empirical variance of the response on the training set."
+    ),
+    Kwarg(
+        'conv_prior_sd',
+        1,
+        "``float``",
+        "Standard deviation of prior on convolutional IRF parameters"
+    ),
+    Kwarg(
+        'y_scale_init',
+        None,
+        "``float`` or ``None``",
+        "Initial value for the standard deviation of the output model. If ``None``, inferred as the empirical standard deviation of the response on the training set."
+    ),
+    Kwarg(
+        'y_scale_trainable',
+        True,
+        "``bool``",
+        "Tune the standard deviation of the output model during training. If ``False``, remains fixed at ``y_scale_init``."
+    ),
+    Kwarg(
+        'y_scale_prior_sd',
+        None,
+        "``float`` or ``None``",
+        "Standard deviation of prior on standard deviation of output model. If ``None``, inferred as ``y_scale_prior_sd_scaling_coefficient`` times the empirical variance of the response on the training set."
+    ),
+    Kwarg(
+        'y_skewness_prior_sd',
+        1,
+        "``float``",
+        "Standard deviation of prior on skewness parameter of output model. Only used if ``asymmetric_error == True``, otherwise ignored."
+    ),
+    Kwarg(
+        'y_tailweight_prior_sd',
+        1,
+        "``float``",
+        "Standard deviation of prior on tailweight parameter of output model. Only used if ``asymmetric_error == True``, otherwise ignored."
+    ),
+    Kwarg(
+        'mh_proposal_sd',
+        None,
+        "``float`` or ``None``",
+        "Standard deviation of proposal distribution. If ``None``, inferred as standard deviation of corresponding prior. Only used if ``inference_name == 'MetropolisHastings', otherwise ignored."
+    ),
+    Kwarg(
+        'prior_sd_scaling_coefficient',
+        1,
+        "``float``",
+        "Factor by which to multiply priors on intercepts and coefficients if inferred from the empirical variance of the data (i.e. if ``intercept_prior_sd`` or ``coef_prior_sd`` is ``None``). Ignored for any prior widths that are explicitly specified."
+    ),
+    Kwarg(
+        'y_scale_prior_sd_scaling_coefficient',
+        1,
+        "``float``",
+        "Factor by which to multiply prior on output model variance if inferred from the empirical variance of the data (i.e. if ``y_scale_prior_sd`` is ``None``). Ignored if prior width is explicitly specified."
+    ),
+    Kwarg(
+        'ranef_to_fixef_prior_sd_ratio',
+        1,
+        "``float``",
+        "Ratio of widths of random to fixed effects priors. I.e. if less than 1, random effects have tighter priors."
+    ),
+    Kwarg(
+        'posterior_to_prior_sd_ratio',
+        0.01,
+        "``float``",
+        "Ratio of widths of priors to posterior initializations. Low values are often beneficial to stability, convergence speed, and optimality of the final model by avoiding erratic sampling and divergent behavior early in training."
+    ),
+    Kwarg(
+        'asymmetric_error',
+        False,
+        "``bool``",
+        "Allow an asymmetric error distribution by fitting a SinArcsinh transform of the normal error, adding trainable skewness and tailweight parameters."
+    ),
+    Kwarg(
+        'mv',
+        False,
+        "``bool``",
+        "Use multivariate model that fits covariances between fixed effects (experimental, not thoroughly tested). If ``False``, parameter distributions are treated as independent."
+    ),
+    Kwarg(
+        'mv_ran',
+        False,
+        "``bool``",
+        "Use multivariate model that fits covariances between random effects within a random grouping factor (experimental, not thoroughly tested). If ``False``, random parameter distributions are treated as independent."
+    )
+]
+
 class DTSRBayes(DTSR):
+
+    _INITIALIZATION_KWARGS = DTSRBAYES_INITIALIZATION_KWARGS
+
+    _doc_header = """
+        A DTSR implementation fitted using Bayesian inference.
     """
-    A Bayesian implementation of DTSR.
-
-    :param form_str: An R-style string representing the DTSR model formula.
-    :param y: A 2D pandas tensor representing the dependent variable. Must contain the following columns:
-
-        * ``time``: Timestamp associated with each observation in ``y``
-        * ``first_obs``:  Index in the design matrix `X` of the first observation in the time series associated with each observation in ``y``
-        * ``last_obs``:  Index in the design matrix `X` of the immediately preceding observation in the time series associated with each observation in ``y``
-        * A column with the same name as the DV specified in ``form_str``
-        * A column for each random grouping factor in the model specified in ``form_str``
-
-    :param outdir: ``str``; the output directory, where logs and model parameters are saved.
-    :param history_length: ``int`` or ``None``; the maximum length of the history window to use (unbounded if ``None``, which requires ``low_memory=True``).
-    :param low_memory: ``bool``; whether to use the ``low_memory`` network structure.
-        If ``True``, DTSR convolves over history windows for each observation in ``y`` using a TensorFlow control op.
-        It can be used with unboundedly long histories and requires less memory, but results in poor GPU utilization.
-        If ``False``, DTSR expands the design matrix into a rank 3 tensor in which the 2nd axis contains the history for each independent variable for each observation of the dependent variable.
-        This requires more memory in order to store redundant input values and requires a finite history length.
-        However, it removes the need for a control op in the feedforward component and therefore generally runs much faster if GPU is available.
-        *NOTE*: Support for ``low_memory`` (and consequently unbounded history length) has been temporarily suspended, since the high-memory implementation is generally much faster and for many projects model fit is not greatly affected by history truncation. If your project demands unbounded history modeling, please let the developers know on Github so that they can prioritize re-implementing this feature.
-    :param float_type: ``str``; the ``float`` type to use throughout the network.
-    :param int_type: ``str``; the ``int`` type to use throughout the network (used for tensor slicing).
-    :param minibatch_size: ``int`` or ``None``; the size of minibatches to use for fitting/prediction (full-batch if ``None``).
-    :param n_interp: ``int``; number of interpolation points (ignored unless the model formula specification contains continuous inputs).
-    :param log_random: ``bool``; whether to log random effects to Tensorboard.
-    :param log_freq: ``int``; the frequency (in iterations) with which to log model params to Tensorboard.
-    :param save_freq: ``int``; the frequency (in iterations) with which to save model checkpoints.
-    :param optim: ``str``; the name of the optimizer to use. Choose from ``'SGD'``, ``'AdaGrad'``, ``'AdaDelta'``, ``'Adam'``, ``'FTRL'``, ``'RMSProp'``, ``'Nadam'``.
-        **Note**: This parameter is only used for variational inference. Other inferences will ignore it.
-    :param learning_rate: ``float``; the initial value for the learning rate.
-        **Note**: This parameter is only used for variational inference. Other inferences will ignore it.
-    :param learning_rate_decay_factor: ``float``; rate parameter to the learning rate decay schedule (if applicable).
-        **Note**: This parameter is only used for variational inference. Other inferences will ignore it.
-    :param learning_rate_decay_family: ``str``; the functional family for the learning rate decay schedule (if applicable).
-        Choose from the following, where :math:`\lambda` is the current learning rate, :math:`\lambda_0` is the initial learning rate, :math:`\delta` is the ``learning_rate_decay_factor``, and :math:`i` is the iteration index.
-
-        * ``'linear'``: :math:`\\lambda_0 \\cdot ( 1 - \\delta \\cdot i )`
-        * ``'inverse'``: :math:`\\frac{\\lambda_0}{1 + ( \\delta \\cdot i )}`
-        * ``'exponential'``: :math:`\\lambda = \\lambda_0 \\cdot ( 2^{-\\delta \\cdot i} )`
-        * ``'stepdownXX'``: where ``XX`` is replaced by an integer representing the stepdown interval :math:`a`: :math:`\\lambda = \\lambda_0 * 2^{\\left \\lfloor \\frac{i}{a} \\right \\rfloor}`
-
-        **Note**: This parameter is only used for variational inference. Other inferences will ignore it.
-    :param learning_rate_min: ``float``; the minimum value for the learning rate.
-        If the decay schedule would take the learning rate below this point, learning rate clipping will occur.
-        **Note**: This parameter is only used for variational inference. Other inferences will ignore it.
-    :param init_sd: ``float``; standard deviation of truncated normal parameter initializer
-    :param ema_decay: ``float``; decay factor to use for exponential moving average for parameters (used in prediction)
-    :param inference_name: ``str``; the Edward inference class to use for fitting.
-    :param n_samples: ``int``; the number of samples to draw from the variational posterior if using variational inference.
-        If using MCMC, the number of samples is set deterministically as ``n_iter * n_minibatch``, so this user-supplied parameter is ignored.
-    :param n_samples_eval: ``int``; the number of samples from the predictive posterior to use for evaluation/prediction.
-    :param n_iter: ``int``; the number of iterations to perform in training.
-        Must be supplied to ``__init__()`` because MCMC inferences hard-code this into the network structure.
-    :param conv_prior_sd: ``float``; the standard deviation of the Normal prior on convolution parameters.
-        Smaller values concentrate probability mass around the prior mean.
-    :param coef_prior_sd: ``float``; the standard deviation of the Normal prior on coefficient parameters.
-        Smaller values concentrate probability mass around the prior mean.
-    :param y_sigma_scale: ``float``; the scaling coefficient on the standard deviation of the distribution of the dependent variable.
-        Specifically, the DV is assumed to have the standard deviation ``stddev(y_train) * y_sigma_scale``.
-        This setup allows the user to configure the output distribution independently of the units of the DV.
-    :param asymmetric_error: ``bool``; whether to apply the ``SinhArcsinh`` transform to the normal error, allowing fitting of skewness and tailweight
-    :param log_graph: ``bool``; whether to log the network graph to Tensorboard
-    """
-
+    _doc_args = DTSR._doc_args
+    _doc_kwargs = DTSR._doc_kwargs
+    _doc_kwargs += '\n' + '\n'.join([' ' * 12 + ':param %s' %x.key + ':' + '; '.join([x.type, x.descr]) + ' **Default**: ``%s``.' %x.default_value for x in _INITIALIZATION_KWARGS])
+    __doc__ = _doc_header + _doc_args + _doc_kwargs
 
 
     #####################################################
@@ -94,36 +177,11 @@ class DTSRBayes(DTSR):
     #
     #####################################################
 
-    _INITIALIZATION_KWARGS = {
-        'inference_name': 'KLqp',
-        'declare_priors': True,
-        'n_samples': None,
-        'n_samples_eval': 256,
-        'intercept_prior_sd': None,
-        'coef_prior_sd': None,
-        'conv_prior_sd': 1,
-        'mv': False,
-        'mv_ran': False,
-        'y_scale_init': None,
-        'y_scale_trainable': True,
-        'y_scale_prior_sd': None,
-        'y_skewness_prior_sd':  1,
-        'y_tailweight_prior_sd':  1,
-        'mh_proposal_sd': None,
-        'prior_sd_scaling_coefficient': 0.01,
-        'y_scale_prior_sd_scaling_coefficient': 0.1,
-        'ranef_to_fixef_prior_sd_ratio': 1,
-        'posterior_to_prior_sd_ratio': 0.1,
-        'asymmetric_error': False,
-        'n_iter': 1000,
-    }
-
     def __init__(
             self,
             form_str,
             X,
             y,
-            outdir='./dtsr_model/',
             **kwargs
     ):
 
@@ -135,11 +193,12 @@ class DTSRBayes(DTSR):
         )
 
         for kwarg in DTSRBayes._INITIALIZATION_KWARGS:
-            setattr(self, kwarg, kwargs.pop(kwarg, DTSRBayes._INITIALIZATION_KWARGS[kwarg]))
+            setattr(self, kwarg.key, kwargs.pop(kwarg.key, kwarg.default_value))
 
-        for kwarg in kwargs:
-            if kwarg not in DTSR._INITIALIZATION_KWARGS:
-                raise TypeError('__init__() got an unexpected keyword argument %s' %kwarg)
+        kwarg_keys = [x.key for x in DTSR._INITIALIZATION_KWARGS]
+        for kwarg_key in kwargs:
+            if kwarg_key not in kwarg_keys:
+                raise TypeError('__init__() got an unexpected keyword argument %s' %kwarg_key)
 
         if not self.variational():
             if self.n_samples is not None:
@@ -151,14 +210,13 @@ class DTSRBayes(DTSR):
 
         self._initialize_metadata()
 
-        self.build(outdir)
+        self.build()
 
     def _initialize_metadata(self):
         super(DTSRBayes, self)._initialize_metadata()
 
         self.regularizer_name = None
         self.regularizer_scale = 0
-        self.network_type = 'bayes'
 
         self.inference_map = {}
         if self.intercept_init is None:
@@ -219,14 +277,14 @@ class DTSRBayes(DTSR):
     def _pack_metadata(self):
         md = super(DTSRBayes, self)._pack_metadata()
         for kwarg in DTSRBayes._INITIALIZATION_KWARGS:
-            md[kwarg] = getattr(self, kwarg)
+            md[kwarg.key] = getattr(self, kwarg.key)
         return md
 
     def _unpack_metadata(self, md):
         super(DTSRBayes, self)._unpack_metadata(md)
 
         for kwarg in DTSRBayes._INITIALIZATION_KWARGS:
-            setattr(self, kwarg, md.pop(kwarg, DTSRBayes._INITIALIZATION_KWARGS[kwarg]))
+            setattr(self, kwarg.key, md.pop(kwarg.key, kwarg.default_value))
 
         if len(md) > 0:
             sys.stderr.write('Saved model contained unrecognized attributes %s which are being ignored\n' %sorted(list(md.keys())))
@@ -1389,14 +1447,14 @@ class DTSRBayes(DTSR):
 
                     self.out = SinhArcsinh(
                         loc=self.out,
-                        scale=tf.nn.softplus(y_scale),
+                        scale=y_scale,
                         skewness=self.y_skewness,
                         tailweight=tf.nn.softplus(self.y_tailweight),
                         name='output'
                     )
                     self.err_dist = SinhArcsinh(
                         loc=0.,
-                        scale=tf.nn.softplus(y_scale_summary),
+                        scale=y_scale_summary,
                         skewness=self.y_skewness_summary,
                         tailweight=tf.nn.softplus(self.y_tailweight_summary),
                         name='err_dist'
@@ -1416,8 +1474,8 @@ class DTSRBayes(DTSR):
                     )
                     self.err_dist_plot = tf.exp(self.err_dist.log_prob(self.support))
 
-                self.err_dist_lb = -2 * y_scale_summary
-                self.err_dist_ub = 2 * y_scale_summary
+                self.err_dist_lb = -3 * y_scale_summary
+                self.err_dist_ub = 3 * y_scale_summary
 
     def _initialize_objective(self):
         with self.sess.as_default():

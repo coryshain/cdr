@@ -8,6 +8,7 @@ class Config(object):
     """
     Parses an *.ini file and stores settings needed to define a set of DTSR experiments.
 
+    :param path: Path to *.ini file
     """
 
     def __init__(self, path):
@@ -39,14 +40,7 @@ class Config(object):
         split_ids = data.get('split_ids', '')
         self.split_ids = split_ids.strip().split()
 
-        self.history_length = data.get('history_length', 128)
-        if self.history_length in ['None', 'inf']:
-            self.history_length = inf
-        else:
-            try:
-                self.history_length = int(self.history_length)
-            except:
-                raise ValueError('history_length parameter invalid: %s' % self.history_length)
+        self.history_length = data.getint('history_length', 128)
 
         ###################
         # Global Settings #
@@ -126,8 +120,6 @@ class Config(object):
             out['float_type'] = settings.get('float_type', 'float32')
         if 'int_type' in settings or add_defaults:
             out['int_type'] = settings.get('int_type', 'int32')
-        if 'low_memory' in settings or add_defaults:
-            out['low_memory'] = settings.getboolean('low_memory', False)
         if 'n_iter' in settings or add_defaults:
             out['n_iter'] = settings.getint('n_iter', 1000)
         if 'minibatch_size' in settings or add_defaults:

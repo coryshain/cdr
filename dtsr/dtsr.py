@@ -4,22 +4,228 @@ from numpy import inf
 import pandas as pd
 import time as pytime
 
-pd.options.mode.chained_assignment = None
-import tensorflow as tf
-
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-
-tf_config = tf.ConfigProto()
-tf_config.gpu_options.allow_growth = True
 from .formula import *
 from .util import *
 from .data import build_DTSR_impulses, corr_dtsr
 from .plot import *
 
+import tensorflow as tf
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+tf_config = tf.ConfigProto()
+tf_config.gpu_options.allow_growth = True
+
+pd.options.mode.chained_assignment = None
+
+class Kwarg(object):
+    """
+    Data structure for storing keyword arguments and their documentation.
+
+    :param key: ``str``; Key
+    :param default_value: Any; Default value
+    :param type: ``str``; Description of data type of kwarg
+    :param descr: ``str``; Description of kwarg
+    """
+    def __init__(self, key, default_value, type, descr):
+        self.key = key
+        self.default_value = default_value
+        self.type = type
+        self.descr = descr
+
+
+
+
+
+######################################################
+#
+#  ABSTRACT DTSR CLASS
+#
+######################################################
+
+DTSR_INITIALIZATION_KWARGS = [
+    Kwarg(
+        'outdir',
+        './dtsr_model/',
+        "``str``",
+        "Path to output directory, where logs and model parameters are saved."
+    ),
+    Kwarg(
+        'history_length',
+        None,
+        "``int``",
+        "Length of the history window to use."
+    ),
+    Kwarg(
+        'pc',
+        False,
+        "``bool``",
+        "Transform input variables using principal components analysis (experimental, not thoroughly tested)."
+    ),
+    Kwarg(
+        'intercept_init',
+        None,
+        "``float`` or ``None``",
+        "Initial value to use for the intercept (if ``None``, use mean response in training data)"
+    ),
+    Kwarg(
+        'init_sd',
+        .01,
+        "``float``",
+        "Standard deviation of Gaussian initialization distribution for trainable variables."
+    ),
+    Kwarg(
+        'n_interp',
+        64,
+        "``int``",
+        "Number of interpolation points (ignored unless the model formula specification contains continuous inputs)."
+    ),
+    Kwarg(
+        'optim_name',
+        'Adam',
+        "``float``",
+        "Name of the optimizer to use. Choose from ``'SGD'``, ``'AdaGrad'``, ``'AdaDelta'``, ``'Adam'``, ``'FTRL'``, ``'RMSProp'``, ``'Nadam'``."
+    ),
+    Kwarg(
+        'learning_rate',
+        0.01,
+        "``float``",
+        "Initial value for the learning rate."
+    ),
+    Kwarg(
+        'learning_rate_min',
+        1e-4,
+        "``float``",
+        "Minimum value for the learning rate."
+    ),
+    Kwarg(
+        'lr_decay_family',
+        None,
+        "``str`` or ``None``",
+        "Functional family for the learning rate decay schedule (no decay if ``None``)."
+    ),
+    Kwarg(
+        'lr_decay_rate',
+        0.,
+        "``float``",
+        "coefficient by which to decay the learning rate every ``lr_decay_steps`` (ignored if ``lr_decay_family==None``)."
+    ),
+    Kwarg(
+        'lr_decay_steps',
+        25,
+        "``int``",
+        "Span of iterations over which to decay the learning rate by ``lr_decay_rate`` (ignored if ``lr_decay_family==None``)."
+    ),
+    Kwarg(
+        'lr_decay_staircase',
+        False,
+        "``bool``",
+        "Keep learning rate flat between ``lr_decay_steps`` (ignored if ``lr_decay_family==None``)."
+    ),
+    Kwarg(
+        'regularizer_name',
+        None,
+        "``str``",
+        "Name of regularizer to use (e.g. ``l1``, ``l2``), or if ``None``, no regularization."
+    ),
+    Kwarg(
+        'regularizer_scale',
+        0.01,
+        "``float``",
+        "Regularizer scale (ignored if ``regularizer_name==None``)."
+    ),
+    Kwarg(
+        'ema_decay',
+        0.999,
+        "``float``",
+        "Decay factor to use for exponential moving average for parameters (used in prediction)."
+    ),
+    Kwarg(
+        'minibatch_size',
+        128,
+        "``int`` or ``None``",
+        "Size of minibatches to use for fitting (full-batch if ``None``)."
+    ),
+    Kwarg(
+        'eval_minibatch_size',
+        100000,
+        "``int`` or ``None``",
+        "Size of minibatches to use for prediction/evaluation (full-batch if ``None``)."
+    ),
+    Kwarg(
+        'float_type',
+        'float32',
+        "``str``",
+        "``float`` type to use throughout the network."
+    ),
+    Kwarg(
+        'int_type',
+        'int32',
+        "``str``",
+        "``int`` type to use throughout the network (used for tensor slicing)."
+    ),
+    Kwarg(
+        'queue_capacity',
+        100000,
+        "``int``",
+        "Queue capacity for data feeding (currently not used)."
+    ),
+    Kwarg(
+        'num_threads',
+        8,
+        "``int``",
+        "Number of threads for data dequeuing (currently not used)"
+    ),
+    Kwarg(
+        'save_freq',
+        1,
+        "``int``",
+        "Frequency (in iterations) with which to save model checkpoints."
+    ),
+    Kwarg(
+        'log_random',
+        True,
+        "``bool``",
+        "Log random effects to Tensorboard."
+    ),
+    Kwarg(
+        'log_freq',
+        1,
+        "``int``",
+        "Frequency (in iterations) with which to log model params to Tensorboard."
+    ),
+    Kwarg(
+        'log_graph',
+        False,
+        "``bool``",
+        "Log the network graph to Tensorboard"
+    )
+]
+
 class DTSR(object):
+
+    _INITIALIZATION_KWARGS = DTSR_INITIALIZATION_KWARGS
+
+    _doc_header = """
+        Abstract base class for DTSR. Bayesian (DTSRBayes) and MLE (DTSRMLE) implementations inherit from DTSR.
     """
-    Abstract base class for DTSR. Bayesian (DTSRBayes) and MLE (DTSRMLE) implementations inherit from DTSR.
-    """
+    _doc_args = """
+        **Args**:
+            :param form_str: An R-style string representing the DTSR model formula.
+            :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
+                ``X`` must contain the following columns (additional columns are ignored):
+    
+                * ``time``: Timestamp associated with each observation in ``X``
+                * A column for each independent variable in the DTSR ``form_str`` provided at iniialization
+            :param y: A 2D pandas tensor representing the dependent variable. Must contain the following columns:
+        
+                * ``time``: Timestamp associated with each observation in ``y``
+                * ``first_obs``:  Index in the design matrix `X` of the first observation in the time series associated with each observation in ``y``
+                * ``last_obs``:  Index in the design matrix `X` of the immediately preceding observation in the time series associated with each observation in ``y``
+                * A column with the same name as the DV specified in ``form_str``
+                * A column for each random grouping factor in the model specified in ``form_str``
+                
+        **Kwargs**:\n"""
+    _doc_kwargs = '\n'.join([' ' * 12 + ':param %s' %x.key + ':' + '; '.join([x.type, x.descr]) + ' **Default**: ``%s``.' %x.default_value for x in _INITIALIZATION_KWARGS])
+    __doc__ = _doc_header + _doc_args + _doc_kwargs
 
     ######################################################
     #
@@ -32,35 +238,6 @@ class DTSR(object):
             raise TypeError("DTSR is an abstract class and may not be instantiated")
         return object.__new__(cls)
 
-    _INITIALIZATION_KWARGS = {
-        'intercept_init': None,
-        'history_length':  None,
-        'low_memory':  True,
-        'pc':  False,
-        'float_type': 'float32',
-        'int_type': 'int32',
-        'minibatch_size': 128,
-        'eval_minibatch_size': 100000,
-        'n_interp': 64,
-        'log_freq': 1,
-        'log_random': True,
-        'save_freq': 1,
-        'optim_name': 'Adam',
-        'learning_rate': 0.01,
-        'learning_rate_min': 1e-4,
-        'lr_decay_family': None,
-        'lr_decay_steps': 25,
-        'lr_decay_rate': 0.,
-        'lr_decay_staircase': False,
-        'init_sd': .01,
-        'regularizer_name': None,
-        'regularizer_scale': 0.01,
-        'ema_decay': 0.999,
-        'queue_capacity': 100000,
-        'num_threads': 8,
-        'log_graph': False
-    }
-
     def __init__(
             self,
             form_str,
@@ -72,12 +249,7 @@ class DTSR(object):
         ## Store initialization settings
         self.form_str = form_str
         for kwarg in DTSR._INITIALIZATION_KWARGS:
-            setattr(self, kwarg, kwargs.pop(kwarg, DTSR._INITIALIZATION_KWARGS[kwarg]))
-
-        assert not self.low_memory, 'Setting low_memory is currently not supported. If needed for your project, contact shain.3@osu.edu.'
-        assert not self.history_length is None, 'Currently, history_length must be finite. If unbounded histories are needed for your project, contact shain.3@osu.edu.'
-        if not np.isfinite(self.history_length):
-            assert self.low_memory, 'Incompatible DTSR settings: low_memory=False requires finite history_length'
+            setattr(self, kwarg.key, kwargs.pop(kwarg.key, kwarg.default_value))
 
         # Parse and store model data from formula
         form = Formula(self.form_str)
@@ -297,7 +469,7 @@ class DTSR(object):
             'outdir': self.outdir,
         }
         for kwarg in DTSR._INITIALIZATION_KWARGS:
-            md[kwarg] = getattr(self, kwarg)
+            md[kwarg.key] = getattr(self, kwarg.key)
         return md
 
     def _unpack_metadata(self, md):
@@ -310,7 +482,7 @@ class DTSR(object):
         self.outdir = md.pop('outdir', './dtsr_model/')
 
         for kwarg in DTSR._INITIALIZATION_KWARGS:
-            setattr(self, kwarg, md.pop(kwarg, DTSR._INITIALIZATION_KWARGS[kwarg]))
+            setattr(self, kwarg.key, md.pop(kwarg.key, kwarg.default_value))
 
 
     ######################################################
@@ -338,15 +510,8 @@ class DTSR(object):
                     name='time_X'
                 )
 
-                if self.low_memory:
-                    self.X = tf.placeholder(shape=[None, len(self.terminal_names)], dtype=self.FLOAT_TF, name=sn('X'))
-                    self.time_X = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('time_X'))
-                    self.first_obs = tf.placeholder(shape=[None], dtype=self.INT_TF, name=sn('first_obs'))
-                    self.last_obs = tf.placeholder(shape=[None], dtype=self.INT_TF, name=sn('last_obs'))
-                else:
-                    self.y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('y'))
-                    self.time_y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('time_y'))
-
+                self.y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('y'))
+                self.time_y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('time_y'))
                 self.gf_y = tf.placeholder(shape=[None, len(self.rangf)], dtype=self.INT_TF)
 
                 # QueueRunner setup for parallelism, seems to have negative performance impact, so turned off
@@ -1759,27 +1924,28 @@ class DTSR(object):
                             plot_y_inches=plot_y_inches,
                             cmap=cmap
                         )
-                        # lb = self.sess.run(self.err_dist_lb)
-                        # ub = self.sess.run(self.err_dist_ub)
-                        # n_time_units = ub-lb
-                        # fd_plot = {
-                        #     self.support_start: lb,
-                        #     self.n_time_units: n_time_units,
-                        #     self.n_points_per_time_unit: 1
-                        # }
-                        # plot_x = self.sess.run(self.support, feed_dict=fd_plot)
-                        # plot_y = self.sess.run(self.err_dist_plot, feed_dict=fd_plot)
-                        # plot_convolutions(
-                        #     plot_x,
-                        #     plot_y,
-                        #     ['Error Distribution'],
-                        #     dir=self.outdir,
-                        #     filename='error_distribution.png'
-                        # )
+                        if type(self).__name__ == 'DTSRBayes':
+                            lb = self.sess.run(self.err_dist_lb)
+                            ub = self.sess.run(self.err_dist_ub)
+                            n_time_units = ub-lb
+                            fd_plot = {
+                                self.support_start: lb,
+                                self.n_time_units: n_time_units,
+                                self.n_points_per_time_unit: 500
+                            }
+                            plot_x = self.sess.run(self.support, feed_dict=fd_plot)
+                            plot_y = self.sess.run(self.err_dist_plot, feed_dict=fd_plot)
+                            plot_irf(
+                                plot_x,
+                                plot_y,
+                                ['Error Distribution'],
+                                dir=self.outdir,
+                                filename='error_distribution.png',
+                                legend=False,
+                            )
                     t1_iter = pytime.time()
                     sys.stderr.write('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
 
-                self.finalize()
                 self.save()
 
                 self.make_plots(
@@ -1791,7 +1957,7 @@ class DTSR(object):
                     cmap=cmap
                 )
 
-                if self.network_type == 'bayes':
+                if type(self).__name__ == 'DTSRBayes':
                     # Generate plots with 95% credible intervals
                     self.make_plots(
                         irf_name_map=irf_name_map,
@@ -2046,13 +2212,7 @@ class DTSR(object):
         gf_y = np.array(y_rangf, dtype=self.INT_NP)
 
         if isinstance(X, pd.DataFrame):
-            if self.low_memory:
-                X_2d = X[impulse_names]
-                time_X_2d = np.array(X.time, dtype=self.FLOAT_NP)
-                first_obs = np.array(y.first_obs, dtype=self.INT_NP)
-                last_obs = np.array(y.last_obs, dtype=self.INT_NP)
-            else:
-                X_3d, time_X_3d = self.expand_history(X[impulse_names], X.time, y.first_obs, y.last_obs)
+            X_3d, time_X_3d = self.expand_history(X[impulse_names], X.time, y.first_obs, y.last_obs)
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -2060,17 +2220,10 @@ class DTSR(object):
 
                 fd = {
                     self.time_y: time_y,
-                    self.gf_y: gf_y
+                    self.gf_y: gf_y,
+                    self.X: X_3d,
+                    self.time_X: time_X_3d
                 }
-
-                if self.low_memory:
-                    fd[self.X] = X_2d
-                    fd[self.time_X] = time_X_2d
-                    fd[self.first_obs] = first_obs
-                    fd[self.last_obs] = last_obs
-                else:
-                    fd[self.X] = X_3d
-                    fd[self.time_X] = time_X_3d
 
                 fd_minibatch = {
                     self.X: fd[self.X],
@@ -2081,12 +2234,8 @@ class DTSR(object):
                 for j in range(0, len(y), self.eval_minibatch_size):
                     fd_minibatch[self.time_y] = time_y[j:j + self.eval_minibatch_size]
                     fd_minibatch[self.gf_y] = gf_y[j:j + self.eval_minibatch_size]
-                    if self.low_memory:
-                        fd_minibatch[self.first_obs] = first_obs[j:j + self.eval_minibatch_size]
-                        fd_minibatch[self.last_obs] = last_obs[j:j + self.eval_minibatch_size]
-                    else:
-                        fd_minibatch[self.X] = X_3d[j:j + self.eval_minibatch_size]
-                        fd_minibatch[self.time_X] = time_X_3d[j:j + self.eval_minibatch_size]
+                    fd_minibatch[self.X] = X_3d[j:j + self.eval_minibatch_size]
+                    fd_minibatch[self.time_X] = time_X_3d[j:j + self.eval_minibatch_size]
                     X_conv_cur = self.run_conv_op(fd_minibatch, scaled=scaled, n_samples=n_samples)
                     X_conv.append(X_conv_cur)
                 names = [sn(''.join(x.split('-')[:-1])) for x in self.terminal_names]
@@ -2253,3 +2402,442 @@ class DTSR(object):
     def summary(self, fixed=True, random=False):
         raise NotImplementedError
 
+
+
+
+
+
+
+
+######################################################
+#
+#  MLE IMPLEMENTATION OF DTSR
+#
+######################################################
+
+DTSRMLE_INITIALIZATION_KWARGS = [
+    Kwarg(
+        'loss_type',
+        'mse',
+        "``str``",
+        "The optimization objective."
+    )
+]
+
+class DTSRMLE(DTSR):
+
+    _INITIALIZATION_KWARGS = DTSRMLE_INITIALIZATION_KWARGS
+
+    _doc_header = """
+        A DTSR implementation fitted using maximum likelihood estimation.
+    """
+    _doc_args = DTSR._doc_args
+    _doc_kwargs = DTSR._doc_kwargs
+    _doc_kwargs += '\n' + '\n'.join([' ' * 12 + ':param %s' %x.key + ':' + '; '.join([x.type, x.descr]) + ' **Default**: ``%s``.' %x.default_value for x in _INITIALIZATION_KWARGS])
+    __doc__ = _doc_header + _doc_args + _doc_kwargs
+
+    ######################################################
+    #
+    #  Initialization methods
+    #
+    ######################################################
+
+    def __init__(
+            self,
+            form_str,
+            X,
+            y,
+            **kwargs
+    ):
+
+        super(DTSRMLE, self).__init__(
+            form_str,
+            X,
+            y,
+            **kwargs
+        )
+
+        for kwarg in DTSRMLE._INITIALIZATION_KWARGS:
+            setattr(self, kwarg.key, kwargs.pop(kwarg.key, kwarg.default_value))
+
+        kwarg_keys = [x.key for x in DTSR._INITIALIZATION_KWARGS]
+        for kwarg_key in kwargs:
+            if kwarg_key not in kwarg_keys:
+                raise TypeError('__init__() got an unexpected keyword argument %s' %kwarg_key)
+
+        self._initialize_metadata()
+
+        self.build()
+
+    def _initialize_metadata(self):
+        super(DTSRMLE, self)._initialize_metadata()
+
+    def _pack_metadata(self):
+        md = super(DTSRMLE, self)._pack_metadata()
+        for kwarg in DTSRMLE._INITIALIZATION_KWARGS:
+            md[kwarg.key] = getattr(self, kwarg.key)
+        return md
+
+    def _unpack_metadata(self, md):
+        super(DTSRMLE, self)._unpack_metadata(md)
+
+        for kwarg in DTSRMLE._INITIALIZATION_KWARGS:
+            setattr(self, kwarg.key, md.pop(kwarg.key, kwarg.default_value))
+
+        if len(md) > 0:
+            sys.stderr.write('Saved model contained unrecognized attributes %s which are being ignored\n' %sorted(list(md.keys())))
+
+
+    ######################################################
+    #
+    #  Network Initialization
+    #
+    ######################################################
+
+    def _initialize_intercept(self, ran_gf=None, rangf_n_levels=None):
+        f = self.form
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if ran_gf is None:
+                    intercept = tf.Variable(
+                        self.intercept_init_tf,
+                        dtype=self.FLOAT_TF,
+                        name='intercept'
+                    )
+                    intercept_summary = intercept
+                else:
+                    intercept = tf.Variable(
+                        tf.random_normal(
+                            shape=[rangf_n_levels],
+                            stddev=self.init_sd,
+                            dtype=self.FLOAT_TF
+                        ),
+                        name='intercept_by_%s' % ran_gf
+                    )
+                    self._regularize(intercept)
+                    intercept_summary = intercept
+                return intercept, intercept_summary
+
+    def _initialize_coefficient(self, coef_ids=None, ran_gf=None, rangf_n_levels=None):
+        if coef_ids is None:
+            coef_ids = self.coef_names
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if ran_gf is None:
+                    coefficient = tf.Variable(
+                        tf.random_normal(
+                            shape=[len(coef_ids)],
+                            stddev=self.init_sd,
+                            dtype=self.FLOAT_TF
+                        ),
+                        name='coefficient'
+                    )
+                    coefficient_summary = coefficient
+                else:
+                    coefficient = tf.Variable(
+                        tf.random_normal(
+                            shape=[rangf_n_levels, len(coef_ids)],
+                            stddev=self.init_sd,
+                            dtype=self.FLOAT_TF
+                        ),
+                        name='coefficient_by_%s' % ran_gf
+                    )
+                    coefficient_summary = coefficient
+                self._regularize(coefficient)
+                return coefficient, coefficient_summary
+
+    def _initialize_irf_param(self, param_name, ids, trainable=None, mean=0, lb=None, ub=None, irf_by_rangf=None):
+        if irf_by_rangf is None:
+            irf_by_rangf = []
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                param_mean_init, lb, ub = self._process_mean(mean, lb, ub)
+
+                if trainable is None:
+                    trainable_ix = np.array(list(range(len(ids))), dtype=self.INT_NP)
+                    untrainable_ix = []
+                else:
+                    trainable_ix = []
+                    untrainable_ix = []
+                    for i in range(len(ids)):
+                        name = ids[i]
+                        if param_name in trainable[name]:
+                            trainable_ix.append(i)
+                        else:
+                            untrainable_ix.append(i)
+                    trainable_ix = np.array(trainable_ix, dtype=self.INT_NP)
+                    untrainable_ix = np.array(untrainable_ix, dtype=self.INT_NP)
+
+                dim = len(trainable_ix)
+
+                # Initialize trainable IRF parameters as trainable variables
+
+                param = tf.Variable(
+                    tf.random_normal(
+                        shape=[1, dim],
+                        mean=tf.expand_dims(tf.gather(param_mean_init, trainable_ix), 0),
+                        stddev=self.init_sd,
+                        dtype=self.FLOAT_TF
+                    ),
+                    name=sn('%s_%s' % (param_name, '-'.join(ids)))
+                )
+                self._regularize(param, param_mean_init)
+
+                if lb is None and ub is None:
+                    param_out = param
+                elif lb is not None and ub is None:
+                    param_out = tf.nn.softplus(param) + lb + self.epsilon
+                elif lb is None and ub is not None:
+                    param_out = -tf.nn.softplus(param) + ub - self.epsilon
+                else:
+                    param_out = tf.sigmoid(param) * ((ub - self.epsilon) - (lb + self.epsilon)) + lb + self.epsilon
+
+                for i in range(dim):
+                    tf.summary.scalar(
+                        sn('%s/%s' % (param_name, ids[i])),
+                        param_out[0, i],
+                        collections=['params']
+                    )
+
+                param_summary = param_out
+
+                # Initialize untrainable IRF parameters as constants
+
+                param_untrainable = tf.expand_dims(tf.gather(param_mean_init, untrainable_ix), 0)
+
+                if lb is None and ub is None:
+                    param_untrainable_out = param_untrainable
+                elif lb is not None and ub is None:
+                    param_untrainable_out = tf.nn.softplus(param_untrainable) + lb + self.epsilon
+                elif lb is None and ub is not None:
+                    param_untrainable_out = -tf.nn.softplus(param_untrainable) + ub - self.epsilon
+                else:
+                    param_untrainable_out = tf.sigmoid(param_untrainable) * ((ub - self.epsilon) - (lb + self.epsilon)) + lb + self.epsilon
+
+                # Process any random IRF parameters
+
+                if len(irf_by_rangf) > 0:
+                    for gf in irf_by_rangf:
+                        i = self.rangf.index(gf)
+                        mask_row_np = np.ones(self.rangf_n_levels[i], dtype=getattr(np, self.float_type))
+                        mask_row_np[self.rangf_n_levels[i] - 1] = 0
+                        mask_row = tf.constant(mask_row_np, dtype=self.FLOAT_TF)
+                        col_ix = names2ix(irf_by_rangf[gf], ids)
+                        mask_col_np = np.zeros([1, dim])
+                        mask_col_np[0, col_ix] = 1.
+                        mask_col = tf.constant(mask_col_np, dtype=self.FLOAT_TF)
+
+                        param_ran = tf.Variable(
+                            tf.random_normal(
+                                shape=[self.rangf_n_levels[i], dim],
+                                mean=0.,
+                                stddev=self.init_sd,
+                                dtype=self.FLOAT_TF
+                            ),
+                            name='%s_by_%s' % (param_name, gf)
+                        )
+                        self._regularize(param_ran)
+
+                        param_ran *= mask_col
+                        param_ran *= tf.expand_dims(mask_row, -1)
+
+                        param_ran_mean = tf.reduce_sum(param_ran, axis=0) / tf.reduce_sum(mask_row)
+                        param_ran_centering_vector = tf.expand_dims(mask_row, -1) * param_ran_mean
+                        param_ran -= param_ran_centering_vector
+
+                        half_interval = None
+                        if lb is not None:
+                            half_interval = param_out - lb + self.epsilon
+                        elif ub is not None:
+                            if half_interval is not None:
+                                half_interval = tf.minimum(half_interval, ub - self.epsilon - param_out)
+                            else:
+                                half_interval = ub - self.epsilon - param_out
+                        if half_interval is not None:
+                            param_ran = tf.tanh(param_ran) * half_interval
+
+                        param_out += tf.gather(param_ran, self.gf_y[:, i], axis=0)
+
+                        if self.log_random:
+                            for j in range(len(irf_by_rangf[gf])):
+                                irf_name = irf_by_rangf[gf][j]
+                                ix = col_ix[j]
+                                tf.summary.histogram(
+                                    'by_%s/%s/%s' % (gf, param_name, irf_name),
+                                    param_ran[:, ix],
+                                    collections=['random']
+                                )
+
+                # Combine trainable and untrainable parameters
+                if len(untrainable_ix) > 0:
+                    param_out = tf.concat([param_out, param_untrainable_out], axis=1)
+                    param_summary = tf.concat([param_summary, param_untrainable_out], axis=1)
+
+                param_out = tf.gather(param_out, np.concatenate([trainable_ix, untrainable_ix]), axis=1)
+                param_summary = tf.gather(param_summary, np.concatenate([trainable_ix, untrainable_ix]), axis=1)
+
+                # Since DTSRMLE just learns point estimates, we simply use those
+                # estimates for plotting in the 2nd return value
+                return (param_out, param_summary)
+
+    def _initialize_objective(self):
+        f = self.form
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                self.mae_loss = tf.losses.absolute_difference(self.y, self.out)
+                self.mse_loss = tf.losses.mean_squared_error(self.y, self.out)
+                if self.loss_type.lower() == 'mae':
+                    self.loss_func = self.mae_loss
+                else:
+                    self.loss_func = self.mse_loss
+                if self.regularizer_name is not None:
+                    self.loss_func += tf.add_n(self.regularizer_losses)
+                self.loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='loss_total')
+                tf.summary.scalar('loss/%s' % self.loss_type, self.loss_total, collections=['loss'])
+
+                self.optim = self._initialize_optimizer(self.optim_name)
+                assert self.optim_name is not None, 'An optimizer name must be supplied'
+
+                # self.train_op = self.optim.minimize(self.loss_func, global_step=self.global_batch_step,
+                #                                     name=sn('optim'))
+                # self.gradients = self.optim.compute_gradients(self.loss_func)
+
+                self.gradients, variables = zip(*self.optim.compute_gradients(self.loss_func))
+                # ## CLIP GRADIENT NORM
+                # self.gradients, _ = tf.clip_by_global_norm(self.gradients, 1.0)
+                self.train_op = self.optim.apply_gradients(
+                    zip(self.gradients, variables),
+                    global_step=self.global_batch_step,
+                    name=sn('optim')
+                )
+
+                ## Likelihood ops
+                self.y_scale = tf.Variable(self.y_train_sd, dtype=self.FLOAT_TF)
+                self.set_y_scale = tf.assign(self.y_scale, self.loss_total)
+                s = self.y_scale
+                y_dist = tf.distributions.Normal(loc=self.out, scale=self.y_scale)
+                self.ll = y_dist.log_prob(self.y)
+
+    def _initialize_logging(self):
+        f = self.form
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if os.path.exists(self.outdir + '/tensorboard'):
+                    self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard')
+                else:
+                    self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard', self.sess.graph)
+                self.summary_params = tf.summary.merge_all(key='params')
+                self.summary_losses = tf.summary.merge_all(key='loss')
+                if self.log_random and len(self.rangf) > 0:
+                    self.summary_random = tf.summary.merge_all(key='random')
+
+
+
+
+    ######################################################
+    #
+    #  Public methods
+    #
+    ######################################################
+
+    def expand_history(self, X, X_time, first_obs, last_obs):
+        """
+        Expand 2D matrix of independent variable values into a 3D tensor of histories of independent variable values and a 1D vector of independent variable timestamps into a 2D matrix of histories of independent variable timestamps.
+        However, ``fit``, ``predict``, and ``eval`` all call ``expand_history()`` internally, so users generally should not need to call ``expand_history()`` directly and may pass their data to those methods as is.
+
+        :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
+            ``X`` must contain a column for each independent variable in the DTSR ``form_str`` provided at iniialization.
+        :param X_time: ``pandas`` ``Series`` or 1D ``numpy`` array; timestamps for the observations in ``X``, grouped and sorted identically to ``X``.
+        :param first_obs: ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the start of the series associated with the current regression target.
+            Sort order and number of observations must be identical to that of ``y_time``.
+        :param last_obs: ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the most recent observation in the series associated with the current regression target.
+            Sort order and number of observations must be identical to that of ``y_time``.
+        :return: ``tuple``; two numpy arrays ``(X_2d, time_X_2d)``, the expanded IV and timestamp tensors.
+        """
+        return super(DTSRMLE, self).expand_history(X, X_time, first_obs, last_obs)
+
+    def run_train_step(self, feed_dict):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                _, _, loss = self.sess.run(
+                    [self.train_op, self.ema_op, self.loss_func],
+                    feed_dict=feed_dict
+                )
+
+                out_dict = {
+                    'loss': loss
+                }
+
+                return out_dict
+
+    def run_predict_op(self, feed_dict, n_samples=None):
+        if n_samples is not None:
+            sys.stderr.write('Parameter n_samples is irrelevant to predict() from a DTSRMLE model and will be ignored')
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                preds = self.sess.run(self.out, feed_dict=feed_dict)
+                return preds
+
+    def run_loglik_op(self, feed_dict, n_samples=None):
+        if n_samples is not None:
+            sys.stderr.write('Parameter n_samples is irrelevant to log_lik() from a DTSRMLE model and will be ignored')
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                log_lik = self.sess.run(self.ll, feed_dict=feed_dict)
+                return log_lik
+
+    def run_conv_op(self, feed_dict, scaled=False, n_samples=None):
+        """
+        Feedforward a batch of data in feed_dict through the convolutional layer to produce convolved inputs
+
+        :param feed_dict: ``dict``; A dictionary of input variables
+        :param scale: ``bool``; Whether to scale the outputs using the latent coefficients
+        :return: ``numpy`` array; The convolved inputs
+        """
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                X_conv = self.sess.run(self.X_conv_scaled if scaled else self.X_conv, feed_dict=feed_dict)
+                return X_conv
+
+    def make_plots(self, **kwargs):
+        """
+        Generate plots of current state of deconvolution.
+        Saves four plots to the output directory:
+
+            * ``irf_atomic_scaled.jpg``: One line for each IRF kernel in the model (ignoring preconvolution in any composite kernels), scaled by the relevant coefficients
+            * ``irf_atomic_unscaled.jpg``: One line for each IRF kernel in the model (ignoring preconvolution in any composite kernels), unscaled
+            * ``irf_composite_scaled.jpg``: One line for each IRF kernel in the model (including preconvolution in any composite kernels), scaled by the relevant coefficients
+            * ``irf_composite_unscaled.jpg``: One line for each IRF kernel in the model (including preconvolution in any composite kernels), unscaled
+
+        If the model contains no composite IRF, corresponding atomic and composite plots will be identical.
+
+        To save space successive calls to ``make_plots()`` overwrite existing plots.
+        Thus, plots only show the most recently plotted state of learning.
+
+        :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
+            If ``None``, IRF tree node string ID's will be used.
+        :param plot_x_inches: ``int``; width of plot in inches.
+        :param plot_y_inches: ``int``; height of plot in inches.
+        :param cmap: ``str``; name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot).
+        :return: ``None``
+        """
+        return super(DTSRMLE, self).make_plots(**kwargs)
+
+    def summary(self, fixed=True, random=False):
+        summary = '=' * 50 + '\n'
+        summary += 'DTSR regression\n\n'
+        summary += 'Output directory: %s\n\n' % self.outdir
+        summary += 'Formula:\n'
+        summary += '  ' + self.form_str + '\n\n'
+
+        #TODO: Fill this in
+
+        return(summary)
