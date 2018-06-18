@@ -1575,23 +1575,6 @@ class DTSRBayes(DTSR):
             'WakeSleep'
         ]
 
-    def expand_history(self, X, X_time, first_obs, last_obs):
-        """
-        Expand 2D matrix of independent variable values into a 3D tensor of histories of independent variable values and a 1D vector of independent variable timestamps into a 2D matrix of histories of independent variable timestamps.
-        This is a necessary preprocessing step for the input data when using ``low_memory=False``.
-        However, ``fit``, ``predict``, and ``eval`` all call ``expand_history()`` internally, so users generally should not need to call ``expand_history()`` directly and may pass their data to those methods as is.
-
-        :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
-            ``X`` must contain a column for each independent variable in the DTSR ``form_str`` provided at iniialization.
-        :param X_time: ``pandas`` ``Series`` or 1D ``numpy`` array; timestamps for the observations in ``X``, grouped and sorted identically to ``X``.
-        :param first_obs: ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the start of the series associated with the current regression target.
-            Sort order and number of observations must be identical to that of ``y_time``.
-        :param last_obs: ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the most recent observation in the series associated with the current regression target.
-            Sort order and number of observations must be identical to that of ``y_time``.
-        :return: ``tuple``; two numpy arrays ``(X_2d, time_X_2d)``, the expanded IV and timestamp tensors.
-        """
-        return super(DTSRBayes, self).expand_history(X, X_time, first_obs, last_obs)
-
     def run_train_step(self, feed_dict):
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -1624,6 +1607,10 @@ class DTSRBayes(DTSR):
                 return preds
 
     def finalize(self):
+        """
+        Close the DTSR model to prevent memory leaks
+        :return: ``None``
+        """
         super(DTSRBayes, self).finalize()
         self.inference.finalize()
 
@@ -1669,67 +1656,6 @@ class DTSRBayes(DTSR):
                     pb.update(i + 1, force=True)
                 X_conv = X_conv.mean(axis=2)
                 return X_conv
-
-    def fit(self, X, y, **kwargs):
-        """
-        Fit the DTSR model.
-
-        :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
-            ``X`` must contain the following columns (additional columns are ignored):
-
-            * ``time``: Timestamp associated with each observation in ``X``
-            * A column for each independent variable in the DTSR ``form_str`` provided at iniialization
-
-        :param y: ``pandas`` table; the dependent variable. Must contain the following columns:
-
-            * ``time``: Timestamp associated with each observation in ``y``
-            * ``first_obs``:  Index in the design matrix `X` of the first observation in the time series associated with each entry in ``y``
-            * ``last_obs``:  Index in the design matrix `X` of the immediately preceding observation in the time series associated with each entry in ``y``
-            * A column with the same name as the DV specified in ``form_str``
-            * A column for each random grouping factor in the model specified in ``form_str``.
-
-            In general, ``y`` will be identical to the parameter ``y`` provided at model initialization.
-            However, this is not necessary.
-        :param n_iter: ``int``; the number of training iterations
-        :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
-            If ``None``, IRF tree node string ID's will be used.
-        :param plot_n_time_units: ``float``; number if time units to use in plotting.
-        :param plot_n_points_per_time_unit: ``float``; number of plot points to use per time unit.
-        :param plot_x_inches: ``int``; width of plot in inches.
-        :param plot_y_inches: ``int``; height of plot in inches.
-        :param cmap: ``str``; name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot).
-        :return: ``None``
-        """
-
-        super(DTSRBayes, self).fit(X, y, **kwargs)
-
-
-
-    def make_plots(self, **kwargs):
-        """
-        Generate plots of current state of deconvolution.
-        Saves four plots to the output directory:
-
-            * ``irf_atomic_scaled.jpg``: One line for each IRF kernel in the model (ignoring preconvolution in any composite kernels), scaled by the relevant coefficients
-            * ``irf_atomic_unscaled.jpg``: One line for each IRF kernel in the model (ignoring preconvolution in any composite kernels), unscaled
-            * ``irf_composite_scaled.jpg``: One line for each IRF kernel in the model (including preconvolution in any composite kernels), scaled by the relevant coefficients
-            * ``irf_composite_unscaled.jpg``: One line for each IRF kernel in the model (including preconvolution in any composite kernels), unscaled
-
-        If the model contains no composite IRF, corresponding atomic and composite plots will be identical.
-
-        To save space successive calls to ``make_plots()`` overwrite existing plots.
-        Thus, plots only show the most recently plotted state of learning.
-
-        For simplicity, plots for DTSRBayes models use the posterior mean, abstracting away from other characteristics of the posterior distribution (e.g. variance).
-
-        :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
-            If ``None``, IRF tree node string ID's will be used.
-        :param plot_x_inches: ``int``; width of plot in inches.
-        :param plot_y_inches: ``int``; height of plot in inches.
-        :param cmap: ``str``; name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot).
-        :return: ``None``
-        """
-        return super(DTSRBayes, self).make_plots(**kwargs)
 
     def summary(self, fixed=True, random=False):
         summary = '=' * 50 + '\n'

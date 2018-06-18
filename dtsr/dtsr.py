@@ -1756,6 +1756,10 @@ class DTSR(object):
         raise NotImplementedError
 
     def finalize(self):
+        """
+        Close the DTSR model to prevent memory leaks
+        :return: ``None``
+        """
         self.sess.close()
 
 
@@ -2288,6 +2292,30 @@ class DTSR(object):
             ylab=None,
             transparent_background=False
     ):
+        """
+        Generate plots of current state of deconvolution.
+        Saves four plots to the output directory:
+
+            * ``irf_atomic_scaled.jpg``: One line for each IRF kernel in the model (ignoring preconvolution in any composite kernels), scaled by the relevant coefficients
+            * ``irf_atomic_unscaled.jpg``: One line for each IRF kernel in the model (ignoring preconvolution in any composite kernels), unscaled
+            * ``irf_composite_scaled.jpg``: One line for each IRF kernel in the model (including preconvolution in any composite kernels), scaled by the relevant coefficients
+            * ``irf_composite_unscaled.jpg``: One line for each IRF kernel in the model (including preconvolution in any composite kernels), unscaled
+
+        If the model contains no composite IRF, corresponding atomic and composite plots will be identical.
+
+        To save space, successive calls to ``make_plots()`` overwrite existing plots.
+        Thus, plots only show the most recently plotted state of learning.
+
+        For simplicity, plots for DTSRBayes models use the posterior mean, abstracting away from other characteristics of the posterior distribution (e.g. variance).
+
+        :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
+            If ``None``, IRF tree node string ID's will be used.
+        :param plot_x_inches: ``int``; width of plot in inches.
+        :param plot_y_inches: ``int``; height of plot in inches.
+        :param cmap: ``str``; name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot).
+        :return: ``None``
+        """
+
         if prefix != '':
             prefix += '_'
         with self.sess.as_default():
@@ -2396,6 +2424,11 @@ class DTSR(object):
                 self.set_predict_mode(False)
 
     def plot_v(self):
+        """
+        Save heatmap representation of training data eigenvector matrix to the model's output directory.
+        Will throw an error unless ``self.pc == True``.
+        :return: ``None``
+        """
         plot_heatmap(self.eigenvec, self.src_impulse_names_norate, self.impulse_names_norate, dir=self.outdir)
 
     def summary(self, fixed=True, random=False):
@@ -2744,22 +2777,6 @@ class DTSRMLE(DTSR):
     #
     ######################################################
 
-    def expand_history(self, X, X_time, first_obs, last_obs):
-        """
-        Expand 2D matrix of independent variable values into a 3D tensor of histories of independent variable values and a 1D vector of independent variable timestamps into a 2D matrix of histories of independent variable timestamps.
-        However, ``fit``, ``predict``, and ``eval`` all call ``expand_history()`` internally, so users generally should not need to call ``expand_history()`` directly and may pass their data to those methods as is.
-
-        :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
-            ``X`` must contain a column for each independent variable in the DTSR ``form_str`` provided at iniialization.
-        :param X_time: ``pandas`` ``Series`` or 1D ``numpy`` array; timestamps for the observations in ``X``, grouped and sorted identically to ``X``.
-        :param first_obs: ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the start of the series associated with the current regression target.
-            Sort order and number of observations must be identical to that of ``y_time``.
-        :param last_obs: ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the most recent observation in the series associated with the current regression target.
-            Sort order and number of observations must be identical to that of ``y_time``.
-        :return: ``tuple``; two numpy arrays ``(X_2d, time_X_2d)``, the expanded IV and timestamp tensors.
-        """
-        return super(DTSRMLE, self).expand_history(X, X_time, first_obs, last_obs)
-
     def run_train_step(self, feed_dict):
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -2805,30 +2822,6 @@ class DTSRMLE(DTSR):
             with self.sess.graph.as_default():
                 X_conv = self.sess.run(self.X_conv_scaled if scaled else self.X_conv, feed_dict=feed_dict)
                 return X_conv
-
-    def make_plots(self, **kwargs):
-        """
-        Generate plots of current state of deconvolution.
-        Saves four plots to the output directory:
-
-            * ``irf_atomic_scaled.jpg``: One line for each IRF kernel in the model (ignoring preconvolution in any composite kernels), scaled by the relevant coefficients
-            * ``irf_atomic_unscaled.jpg``: One line for each IRF kernel in the model (ignoring preconvolution in any composite kernels), unscaled
-            * ``irf_composite_scaled.jpg``: One line for each IRF kernel in the model (including preconvolution in any composite kernels), scaled by the relevant coefficients
-            * ``irf_composite_unscaled.jpg``: One line for each IRF kernel in the model (including preconvolution in any composite kernels), unscaled
-
-        If the model contains no composite IRF, corresponding atomic and composite plots will be identical.
-
-        To save space successive calls to ``make_plots()`` overwrite existing plots.
-        Thus, plots only show the most recently plotted state of learning.
-
-        :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
-            If ``None``, IRF tree node string ID's will be used.
-        :param plot_x_inches: ``int``; width of plot in inches.
-        :param plot_y_inches: ``int``; height of plot in inches.
-        :param cmap: ``str``; name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot).
-        :return: ``None``
-        """
-        return super(DTSRMLE, self).make_plots(**kwargs)
 
     def summary(self, fixed=True, random=False):
         summary = '=' * 50 + '\n'
