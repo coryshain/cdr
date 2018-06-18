@@ -1,4 +1,4 @@
-.. _dtsr:
+.. _dtsrmle:
 
 Maximum Likelihood (MLE) DTSR
 =============================
