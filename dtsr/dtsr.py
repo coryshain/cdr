@@ -1757,7 +1757,8 @@ class DTSR(object):
 
     def finalize(self):
         """
-        Close the DTSR model to prevent memory leaks
+        Close the DTSR instance to prevent memory leaks.
+
         :return: ``None``
         """
         self.sess.close()

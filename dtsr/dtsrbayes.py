@@ -1607,10 +1607,6 @@ class DTSRBayes(DTSR):
                 return preds
 
     def finalize(self):
-        """
-        Close the DTSR model to prevent memory leaks
-        :return: ``None``
-        """
         super(DTSRBayes, self).finalize()
         self.inference.finalize()
 
