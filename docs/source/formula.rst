@@ -53,12 +53,12 @@ The currently supported IRF families are:
   - Parameters: :math:`\alpha` (shape), :math:`\beta` (rate), :math:`\delta` (shift, strictly negative)
   - Definition: :math:`\frac{(x - \delta)^{\alpha-1}e^{-\frac{x - \delta}{\beta}}}{\beta^k\Gamma(k)}`
 
-- ``GammaKgt1``: PDF of gamma distribution, :math:`\alpha > 1` (enforces rising-then-falling shape)
+- ``GammaShapeGT1``: PDF of gamma distribution, :math:`\alpha > 1` (enforces rising-then-falling shape)
 
   - Parameters: :math:`\alpha` (shape), :math:`\theta` (rate)
   - Definition: :math:`\frac{x^{\alpha-1}e^{-\frac{x}{\beta}}}{\beta^k\Gamma(k)}`
 
-- ``ShiftedGammaKgt1``: PDF of gamma distribution with support starting at :math:`0 + \delta`, :math:`\alpha > 1` (enforces rising-then-falling shape)
+- ``ShiftedGammaShapeGT1``: PDF of gamma distribution with support starting at :math:`0 + \delta`, :math:`\alpha > 1` (enforces rising-then-falling shape)
 
   - Parameters: :math:`\alpha` (shape), :math:`\beta` (rate), :math:`\delta` (shift, strictly negative)
   - Definition: :math:`\frac{(x - \delta)^{\alpha-1}e^{-\frac{x - \delta}{\beta}}}{\beta^k\Gamma(k)}`

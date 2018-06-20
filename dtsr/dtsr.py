@@ -1816,6 +1816,7 @@ class DTSR(object):
 
         usingGPU = tf.test.is_gpu_available()
         sys.stderr.write('Using GPU: %s\n' % usingGPU)
+        sys.stderr.write('Number of training samples: %d\n\n' % len(y))
 
         if self.pc:
             impulse_names = self.src_impulse_names

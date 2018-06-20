@@ -61,8 +61,6 @@ if __name__ == '__main__':
 
     n_train_sample = len(y)
 
-    sys.stderr.write('\nNumber of training samples: %d\n' %n_train_sample)
-
     for i in range(len(dtsr_formula_list)):
         x = dtsr_formula_list[i]
         if run_baseline and x.dv not in X_baseline.columns:
@@ -192,6 +190,7 @@ if __name__ == '__main__':
 
         elif m.startswith('DTSR'):
             dv = formula.strip().split('~')[0].strip()
+            y_complete_cases = y[np.isfinite(y[dv])]
 
             sys.stderr.write('Fitting model %s...\n\n' % m)
 
@@ -201,11 +200,11 @@ if __name__ == '__main__':
                 bayes = True
 
             if p['network_type'] in ['mle', 'nn']:
-                from dtsr.dtsrmle import DTSRMLE
+                from dtsr.dtsr import DTSRMLE
                 dtsr_model = DTSRMLE(
                     formula,
                     X,
-                    y,
+                    y_complete_cases,
                     outdir=p.outdir + '/' + m,
                     history_length=p.history_length,
                     pc=p['pc'],
@@ -235,7 +234,7 @@ if __name__ == '__main__':
                 dtsr_model = DTSRBayes(
                     formula,
                     X,
-                    y,
+                    y_complete_cases,
                     outdir=p.outdir + '/' + m,
                     history_length=p.history_length,
                     pc=p['pc'],
@@ -281,7 +280,7 @@ if __name__ == '__main__':
 
             dtsr_model.fit(
                 X,
-                y,
+                y_complete_cases,
                 n_iter=p['n_iter'],
                 X_2d_predictor_names=X_2d_predictor_names,
                 X_2d_predictors=X_2d_predictors,
@@ -295,17 +294,17 @@ if __name__ == '__main__':
 
             dtsr_preds = dtsr_model.predict(
                 X,
-                y.time,
-                y[dtsr_model.form.rangf],
-                y.first_obs,
-                y.last_obs,
+                y_complete_cases.time,
+                y_complete_cases[dtsr_model.form.rangf],
+                y_complete_cases.first_obs,
+                y_complete_cases.last_obs,
                 X_2d_predictor_names=X_2d_predictor_names,
                 X_2d_predictors=X_2d_predictors,
             )
 
-            dtsr_mse = mse(y[dv], dtsr_preds)
-            dtsr_mae = mae(y[dv], dtsr_preds)
-            y_dv_mean = y[dv].mean()
+            dtsr_mse = mse(y_complete_cases[dv], dtsr_preds)
+            dtsr_mae = mae(y_complete_cases[dv], dtsr_preds)
+            y_dv_mean = y_complete_cases[dv].mean()
 
             summary = '=' * 50 + '\n'
             summary += 'DTSR regression\n\n'
@@ -315,7 +314,7 @@ if __name__ == '__main__':
 
             dtsr_loglik_vector = dtsr_model.log_lik(
                 X,
-                y,
+                y_complete_cases,
                 X_2d_predictor_names=X_2d_predictor_names,
                 X_2d_predictors=X_2d_predictors,
             )
