@@ -200,9 +200,8 @@ Additional fields from ``[dtsr_settings]`` may be specified for a given model, i
 For example, imagine that ``[dtsr_settings]`` contains the field ``n_iter = 1000``.
 All DTSR models subsequently specified in the config file will train for 1000 iterations.
 However, imagine that model ``[model_DTSR_longertrain]`` should train for 5000 iterations instead.
-This can be specified within the same config file as:
+This can be specified within the same config file as:::
 
-::
     [model_DTSR_longertrain]
     n_iter = 5000
     formula = ...
