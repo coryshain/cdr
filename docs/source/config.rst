@@ -187,7 +187,7 @@ Sections: ``[model_DTSR_*]``
 ----------------------------
 
 Arbitrarily many sections named ``[model_DTSR_*]`` can be provided in the config file, where ``*`` stands in for a unique identifier.
-Each such section defines a different DTSR model and must contain exactly one field --- ``formula`` --- whose value is a DTSR model formula (see :ref:`formula` for more on DTSR formula syntax)
+Each such section defines a different DTSR model and must contain at least one field --- ``formula`` --- whose value is a DTSR model formula (see :ref:`formula` for more on DTSR formula syntax)
 The identifier ``DTSR_*`` will be used by the DTSR utilities to reference the fitted model and its output files.
 
 For example, to define a DTSR model called ``readingtimes``, the section header ``[model_DTSR_readingtimes]`` is included in the config file along with an appropriate ``formula`` specification.
@@ -195,4 +195,17 @@ To use this specific model once fitted, it can be referenced using the identifie
 For example, the following call will extract predictions on dev data from a fitted ``DTSR_readingtimes`` defined in config file **config.ini**:
 
 ``python -m dtsr.bin.predict config.ini -m DTSR_readingtimes -p dev``
+
+Additional fields from ``[dtsr_settings]`` may be specified for a given model, in which case the locally-specified setting (rather than the globally specified setting or the default value) will be used to train the model.
+For example, imagine that ``[dtsr_settings]`` contains the field ``n_iter = 1000``.
+All DTSR models subsequently specified in the config file will train for 1000 iterations.
+However, imagine that model ``[model_DTSR_longertrain]`` should train for 5000 iterations instead.
+This can be specified within the same config file as:
+
+``[model_DTSR_longertrain]``
+``n_iter = 5000``
+``formula = ...``
+
+This setup allows a single config file to define a variety of DTSR models, as long as they all share the same data.
+Distinct datasets require distinct config files.
 

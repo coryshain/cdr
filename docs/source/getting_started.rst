@@ -34,7 +34,7 @@ The data and settings configurations will be shared between all models defined a
 Each model section heading should contain at least the field ``formula``.
 The value provided to ``formula`` must be a valid DTSR model string.
 Additional fields may be provided to override inherited DTSR settings on a model-specific basis.
-To run experiments with different data and/or settings, multiple config files must be created.
+Experiments involving distinct datasets require distinct config files.
 
 For more details on the available configuration parameters, see :ref:`config`.
 For more details on DTSR model formulae, see :ref:`formula`.
