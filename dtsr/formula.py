@@ -444,6 +444,7 @@ class Formula(object):
     IRF = [
         'DiracDelta',
         'Exp',
+        'ExpRateGT1',
         'Gamma',
         'ShiftedGamma',
         'GammaKgt1',
@@ -460,6 +461,7 @@ class Formula(object):
     IRF_PARAMS = {
         'DiracDelta': [],
         'Exp': ['beta'],
+        'ExpRateGT1': ['beta'],
         'Gamma': ['alpha', 'beta'],
         'ShiftedGamma': ['alpha', 'beta', 'delta'],
         'GammaKgt1': ['alpha', 'beta'],

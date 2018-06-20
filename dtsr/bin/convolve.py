@@ -63,8 +63,8 @@ if __name__ == '__main__':
         X_conv, X_conv_summary = dtsr_model.convolve_inputs(
             X,
             y,
-            X_3d_predictors_colnames=X_2d_predictor_names,
-            X_3d_predictors=X_2d_predictors,
+            X_2d_predictor_names=X_2d_predictor_names,
+            X_2d_predictors=X_2d_predictors,
             scaled=args.scaled,
             n_samples=args.nsamples
         )

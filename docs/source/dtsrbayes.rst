@@ -3,7 +3,7 @@
 Bayesian DTSR
 =============
 
-.. automodule:: dtsr.dtsrbayes
+.. autoclass:: dtsr.dtsrbayes.DTSRBayes
     :members:
     :inherited-members:
     :show-inheritance:

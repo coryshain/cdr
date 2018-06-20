@@ -1153,7 +1153,7 @@ class DTSRBayes(DTSR):
                                 else:
                                     half_interval = ub - self.epsilon - param_summary
                             if half_interval is not None:
-                                param_ran_summary = tf.tanh(param_ran_summary) * 2 * half_interval
+                                param_ran_summary = tf.tanh(param_ran_summary) * half_interval
 
                             for j in range(len(irf_by_rangf[gf])):
                                 irf_name = irf_by_rangf[gf][j]
@@ -1188,6 +1188,33 @@ class DTSRBayes(DTSR):
                         y_scale_mean_init = self.y_scale_mean_init
 
                         if self.variational():
+                            # Posterior distribution
+                            y_scale_loc_q = tf.Variable(
+                                tf.random_normal(
+                                    [],
+                                    mean=y_scale_mean_init,
+                                    stddev=self.init_sd,
+                                    dtype=self.FLOAT_TF
+                                ),
+                                name='y_scale_loc_q'
+                            )
+
+                            y_scale_scale_q = tf.Variable(
+                                tf.random_normal(
+                                    [],
+                                    mean=self.y_scale_posterior_scale_mean_init,
+                                    stddev=self.init_sd,
+                                    dtype=self.FLOAT_TF
+                                ),
+                                name='y_scale_scale_q'
+                            )
+                            y_scale_q = Normal(
+                                loc=y_scale_loc_q,
+                                scale=tf.nn.softplus(y_scale_scale_q),
+                                name='y_scale_q'
+                            )
+                            y_scale_summary = y_scale_q.mean()
+
                             if self.declare_priors:
                                 # Prior distribution
                                 y_scale = Normal(
@@ -1195,48 +1222,9 @@ class DTSRBayes(DTSR):
                                     scale=self.y_scale_prior_sd_tf,
                                     name='y_scale'
                                 )
-
-                                y_scale_loc_q = tf.Variable(
-                                    tf.random_normal(
-                                        [],
-                                        mean=y_scale_mean_init,
-                                        stddev=self.init_sd,
-                                        dtype=self.FLOAT_TF
-                                    ),
-                                    name='y_scale_loc_q'
-                                )
-
-                                y_scale_scale_q = tf.Variable(
-                                    tf.random_normal(
-                                        [],
-                                        mean=self.y_scale_posterior_scale_mean_init,
-                                        stddev=self.init_sd,
-                                        dtype=self.FLOAT_TF
-                                    ),
-                                    name='y_scale_scale_q'
-                                )
-                                y_scale_q = Normal(
-                                    loc=y_scale_loc_q,
-                                    scale=tf.nn.softplus(y_scale_scale_q),
-                                    name='y_scale_q'
-                                )
-                                y_scale_summary = y_scale_q.mean()
-
                                 self.inference_map[y_scale] = y_scale_q
-
                             else:
-                                y_scale =  tf.Variable(
-                                    tf.random_normal(
-                                        [],
-                                        mean=y_scale_mean_init,
-                                        stddev=self.init_sd,
-                                        dtype=self.FLOAT_TF
-                                    ),
-                                    name='y_scale'
-                                )
-
-                                y_scale_summary = y_scale
-
+                                y_scale = y_scale_q
                         else:
                             # Prior distribution
                             y_scale = Normal(
@@ -1286,6 +1274,68 @@ class DTSRBayes(DTSR):
 
                 if self.asymmetric_error:
                     if self.variational():
+                        # Posterior distributions
+                        y_skewness_loc_q = tf.Variable(
+                            tf.random_normal(
+                                [],
+                                mean=0.,
+                                stddev=self.init_sd,
+                                dtype=self.FLOAT_TF
+                            ),
+                            name='y_skewness_q_loc'
+                        )
+                        y_skewness_scale_q = tf.Variable(
+                            tf.random_normal(
+                                [],
+                                mean=self.y_skewness_posterior_scale_mean_init,
+                                stddev=self.init_sd,
+                                dtype=self.FLOAT_TF
+                            ),
+                            name='y_skewness_q_loc'
+                        )
+
+                        self.y_skewness_q = Normal(
+                            loc=y_skewness_loc_q,
+                            scale=tf.nn.softplus(y_skewness_scale_q),
+                            name='y_skewness_q'
+                        )
+                        self.y_skewness_summary = self.y_skewness_q.mean()
+                        tf.summary.scalar(
+                            'y_skewness',
+                            self.y_skewness_summary,
+                            collections=['params']
+                        )
+
+                        y_tailweight_loc_q = tf.Variable(
+                            tf.random_normal(
+                                [],
+                                mean=tf.contrib.distributions.softplus_inverse(1.),
+                                stddev=self.init_sd,
+                                dtype=self.FLOAT_TF
+                            ),
+                            name='y_tailweight_q_loc'
+                        )
+                        y_tailweight_scale_q = tf.Variable(
+                            tf.random_normal(
+                                [],
+                                mean=self.y_tailweight_posterior_scale_mean_init,
+                                stddev=self.init_sd,
+                                dtype=self.FLOAT_TF
+                            ),
+                            name='y_tailweight_q_scale'
+                        )
+                        self.y_tailweight_q = Normal(
+                            loc=y_tailweight_loc_q,
+                            scale=tf.nn.softplus(y_tailweight_scale_q),
+                            name='y_tailweight_q'
+                        )
+                        self.y_tailweight_summary = self.y_tailweight_q.mean()
+                        tf.summary.scalar(
+                            'y_tailweight',
+                            tf.nn.softplus(self.y_tailweight_summary),
+                            collections=['params']
+                        )
+
                         if self.declare_priors:
                             # Prior distributions
                             self.y_skewness = Normal(
@@ -1299,89 +1349,12 @@ class DTSRBayes(DTSR):
                                 name='y_tailweight'
                             )
 
-                            y_skewness_loc_q = tf.Variable(
-                                tf.random_normal(
-                                    [],
-                                    mean=0.,
-                                    stddev=self.init_sd,
-                                    dtype=self.FLOAT_TF
-                                ),
-                                name='y_skewness_q_loc'
-                            )
-                            y_skewness_scale_q = tf.Variable(
-                                tf.random_normal(
-                                    [],
-                                    mean=self.y_skewness_posterior_scale_mean_init,
-                                    stddev=self.init_sd,
-                                    dtype=self.FLOAT_TF
-                                ),
-                                name='y_skewness_q_loc'
-                            )
-
-                            self.y_skewness_q = Normal(
-                                loc=y_skewness_loc_q,
-                                scale=tf.nn.softplus(y_skewness_scale_q),
-                                name='y_skewness_q'
-                            )
-                            self.y_skewness_summary = self.y_skewness_q.mean()
-                            tf.summary.scalar(
-                                'y_skewness',
-                                self.y_skewness_summary,
-                                collections=['params']
-                            )
-
-                            y_tailweight_loc_q = tf.Variable(
-                                tf.random_normal(
-                                    [],
-                                    mean=tf.contrib.distributions.softplus_inverse(1.),
-                                    stddev=self.init_sd,
-                                    dtype=self.FLOAT_TF
-                                ),
-                                name='y_tailweight_q_loc'
-                            )
-                            y_tailweight_scale_q = tf.Variable(
-                                tf.random_normal(
-                                    [],
-                                    mean=self.y_tailweight_posterior_scale_mean_init,
-                                    stddev=self.init_sd,
-                                    dtype=self.FLOAT_TF
-                                ),
-                                name='y_tailweight_q_scale'
-                            )
-                            self.y_tailweight_q = Normal(
-                                loc=y_tailweight_loc_q,
-                                scale=tf.nn.softplus(y_tailweight_scale_q),
-                                name='y_tailweight_q'
-                            )
-                            self.y_tailweight_summary = self.y_tailweight_q.mean()
-                            tf.summary.scalar(
-                                'y_tailweight',
-                                tf.nn.softplus(self.y_tailweight_summary),
-                                collections=['params']
-                            )
-
                             self.inference_map[self.y_skewness] = self.y_skewness_q
                             self.inference_map[self.y_tailweight] = self.y_tailweight_q
 
                         else:
-                            self.y_skewness = tf.Variable(
-                                tf.random_normal(
-                                    [],
-                                    mean=0.,
-                                    stddev=self.init_sd,
-                                    dtype=self.FLOAT_TF
-                                ),
-                                name='y_skewness'
-                            )
-                            self.y_tailweight = tf.Variable(
-                                tf.random_normal(
-                                    [],
-                                    mean=tf.contrib.distributions.softplus_inverse(1.),
-                                    stddev=self.init_sd,
-                                    dtype=self.FLOAT_TF
-                                ),
-                                name='y_tailweight'
-                            )
+                            self.y_skewness = self.y_skewness_q
+                            self.y_tailweight = self.y_tailweight_q
                     else:
                         # Prior distributions
                         self.y_skewness = Normal(

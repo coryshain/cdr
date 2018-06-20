@@ -262,7 +262,7 @@ class DTSR(object):
 
         if self.pc:
             _, self.eigenvec, self.eigenval, self.impulse_means, self.impulse_sds = pca(X[self.src_impulse_names_norate])
-            self.plot_v()
+            self.plot_eigenvectors()
         else:
             self.eigenvec = self.eigenval = self.impulse_means = self.impulse_sds = None
 
@@ -758,7 +758,7 @@ class DTSR(object):
                     return lambda x: pdf(x + self.epsilon)
 
                 self.irf_lambdas['Exp'] = exponential
-                self.irf_lambdas['SteepExp'] = exponential
+                self.irf_lambdas['ExpRateGT1'] = exponential
 
                 def gamma(params):
                     pdf = tf.contrib.distributions.Gamma(concentration=params[:,0:1],
@@ -849,9 +849,9 @@ class DTSR(object):
                         beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([beta], axis=1)
                         params_summary =  tf.stack([beta_mean], axis=1)
-                    elif family == 'SteepExp':
-                        beta_init = self._get_mean_init_vector('beta', 25)
-                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                    elif family == 'ExpRateGT1':
+                        beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=2)
+                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=1, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([beta], axis=1)
                         params_summary =  tf.stack([beta_mean], axis=1)
                     elif family == 'Gamma':
@@ -2181,8 +2181,8 @@ class DTSR(object):
             self,
             X,
             y,
-            X_3d_predictors_colnames=None,
-            X_3d_predictors=None,
+            X_2d_predictor_names=None,
+            X_2d_predictors=None,
             scaled=False,
             n_samples=None
     ):
@@ -2200,14 +2200,14 @@ class DTSR(object):
             c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
 
-        X_3d, time_X_3d, time_mask = build_DTSR_impulses(
+        X_2d, time_X_2d, time_mask = build_DTSR_impulses(
             X,
             y['first_obs'],
             y['last_obs'],
             impulse_names,
             history_length=128,
-            X_2d_predictor_names=X_3d_predictors_colnames,
-            X_2d_predictors=X_3d_predictors,
+            X_2d_predictor_names=X_2d_predictor_names,
+            X_2d_predictors=X_2d_predictors,
             int_type=self.int_type,
             float_type=self.float_type,
         )
@@ -2216,7 +2216,7 @@ class DTSR(object):
         gf_y = np.array(y_rangf, dtype=self.INT_NP)
 
         if isinstance(X, pd.DataFrame):
-            X_3d, time_X_3d = self.expand_history(X[impulse_names], X.time, y.first_obs, y.last_obs)
+            X_2d, time_X_2d = self.expand_history(X[impulse_names], X.time, y.first_obs, y.last_obs)
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -2225,8 +2225,8 @@ class DTSR(object):
                 fd = {
                     self.time_y: time_y,
                     self.gf_y: gf_y,
-                    self.X: X_3d,
-                    self.time_X: time_X_3d
+                    self.X: X_2d,
+                    self.time_X: time_X_2d
                 }
 
                 fd_minibatch = {
@@ -2238,8 +2238,8 @@ class DTSR(object):
                 for j in range(0, len(y), self.eval_minibatch_size):
                     fd_minibatch[self.time_y] = time_y[j:j + self.eval_minibatch_size]
                     fd_minibatch[self.gf_y] = gf_y[j:j + self.eval_minibatch_size]
-                    fd_minibatch[self.X] = X_3d[j:j + self.eval_minibatch_size]
-                    fd_minibatch[self.time_X] = time_X_3d[j:j + self.eval_minibatch_size]
+                    fd_minibatch[self.X] = X_2d[j:j + self.eval_minibatch_size]
+                    fd_minibatch[self.time_X] = time_X_2d[j:j + self.eval_minibatch_size]
                     X_conv_cur = self.run_conv_op(fd_minibatch, scaled=scaled, n_samples=n_samples)
                     X_conv.append(X_conv_cur)
                 names = [sn(''.join(x.split('-')[:-1])) for x in self.terminal_names]
@@ -2257,16 +2257,16 @@ class DTSR(object):
                 convolution_summary += 'Correlation matrix of convolved predictors:\n\n'
                 convolution_summary += str(corr_conv) + '\n\n'
 
-                select = np.where(np.isclose(time_X_3d[:,-1], time_y))[0]
+                select = np.where(np.isclose(time_X_2d[:,-1], time_y))[0]
 
-                X_input = X_3d[:,-1,:][select]
+                X_input = X_2d[:,-1,:][select]
 
                 if X_input.shape[0] > 0:
                     out_plus = out
                     for i in range(len(self.impulse_names)):
                         c = self.impulse_names[i]
                         if c not in out_plus:
-                            out_plus[c] = X_3d[:,-1,i]
+                            out_plus[c] = X_2d[:,-1,i]
                     corr_conv = out_plus.iloc[select].corr()
                     convolution_summary += '-' * 50 + '\n'
                     convolution_summary += 'Full correlation matrix of input and convolved predictors:\n'
@@ -2424,10 +2424,11 @@ class DTSR(object):
 
                 self.set_predict_mode(False)
 
-    def plot_v(self):
+    def plot_eigenvectors(self):
         """
         Save heatmap representation of training data eigenvector matrix to the model's output directory.
         Will throw an error unless ``self.pc == True``.
+
         :return: ``None``
         """
         plot_heatmap(self.eigenvec, self.src_impulse_names_norate, self.impulse_names_norate, dir=self.outdir)
