@@ -202,9 +202,10 @@ All DTSR models subsequently specified in the config file will train for 1000 it
 However, imagine that model ``[model_DTSR_longertrain]`` should train for 5000 iterations instead.
 This can be specified within the same config file as:
 
-``[model_DTSR_longertrain]``
-``n_iter = 5000``
-``formula = ...``
+    .. highlight::
+    [model_DTSR_longertrain]
+    n_iter = 5000
+    formula = ...
 
 This setup allows a single config file to define a variety of DTSR models, as long as they all share the same data.
 Distinct datasets require distinct config files.
