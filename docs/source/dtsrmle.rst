@@ -3,7 +3,7 @@
 Maximum Likelihood (MLE) DTSR
 =============================
 
-.. autoclass:: dtsr.dtsr.DTSRMLE
+.. automodule:: dtsr.dtsr
     :members:
     :inherited-members:
     :show-inheritance:

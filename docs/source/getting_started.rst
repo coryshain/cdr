@@ -25,14 +25,15 @@ For example, once a config file ``foo.ini`` has been created, the models defined
 
 ``python -m dtsr.bin.train foo.ini``
 
-The config file must at minimum contain the sections ``[data]`` (with pointers to training/evaluation data) and ``[settings]`` (with arguments used to construct the model).
+The config file must at minimum contain the sections ``[data]`` (with pointers to training/evaluation data), ``[global_settings]`` (with the location of the output directory) and ``[dtsr_settings]`` (with arguments used to construct the model).
 In addition, the config file should contain at least one model section, consisting of the prefix ``model_DTSR_`` followed by a custom name for the model.
 For example, to define a DTSR model called ``readingtimes``, use the section heading ``[model_DTSR_readingtimes]``.
 The identifier ``DTSR_readingtimes`` will then be used by a number of utilities to designate this model
 (the reason ``DTSR`` must be included in the prefix is that this repository distributes with unofficial support for running LM, LME, and GAM models from the same interface).
 The data and settings configurations will be shared between all models defined a single config file.
-Each model section heading should contain a single field: ``formula``.
+Each model section heading should contain at least the field ``formula``.
 The value provided to ``formula`` must be a valid DTSR model string.
+Additional fields may be provided to override inherited DTSR settings on a model-specific basis.
 To run experiments with different data and/or settings, multiple config files must be created.
 
 For more details on the available configuration parameters, see :ref:`config`.

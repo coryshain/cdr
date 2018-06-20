@@ -144,7 +144,7 @@ class Config(object):
         if 'n_interp' in settings or add_defaults:
             out['n_interp'] = settings.getint('n_interp', 64)
         if 'optim_name' in settings or add_defaults:
-            out['optim_name'] = settings.get('optim_name', 'Adam')
+            out['optim_name'] = settings.get('optim_name', 'Nadam')
             if out['optim_name'] == 'None':
                 out['optim_name'] = None
         if 'learning_rate' in settings or add_defaults:
@@ -178,7 +178,7 @@ class Config(object):
         if 'pc' in settings or add_defaults:
             out['pc'] = settings.getboolean('pc', False)
         if 'init_sd' in settings or add_defaults:
-            out['init_sd'] = settings.getfloat('init_sd', 1.)
+            out['init_sd'] = settings.getfloat('init_sd', 0.01)
         if 'intercept_init' in settings or add_defaults:
             out['intercept_init'] = settings.get('intercept_init', None)
         if 'intercept_init' in settings or add_defaults:

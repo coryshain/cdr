@@ -60,22 +60,30 @@ For usage details run:
 
 
 
-Section: ``[settings]``
------------------------
-
-The ``[settings]`` section supports the following fields:
-
-**Both DTSRMLE and DTSRBayes**
+Section: ``[global_settings]``
+------------------------------
+The ``[global_settings]`` section supports the following field:
 
 - **outdir**: ``str``; Path to output directory where checkpoints, plots, and Tensorboard logs should be saved (default: ``./dtsr_model/``).
   If it does not exist, this directory will be created.
   At runtime, the ``train`` utility will copy the config file to this directory as ``config.ini``, serving as a record of the settings used to generate the analysis.
+
+
+
+
+
+Section: ``[dtsr_settings]``
+----------------------------
+
+The ``[dtsr_settings]`` section supports the following fields:
+
+**Both DTSRMLE and DTSRBayes**
+
 - **network_type**: ``str``; Type of inference to use (one of ``bayes`` or ``mle``, default: ``bayes``)
-- **history_length**: ``int`` or ``None``; Maximum number of preceding timepoints to use from the history (if ``None``, no clipping; default: ``128``)
-- **low_memory**: ``bool``; Whether to use the low memory setting for deconvolution (temporarily discontinued, only ``False`` is supported)
-- **init_sd**: ``float``; Standard deviation of parameter initialization distribution (default: ``0.1``)
+- **history_length**: ``int`` Maximum number of preceding timepoints to use from the history (default: ``128``)
+- **init_sd**: ``float``; Standard deviation of parameter initialization distribution (default: ``0.01``)
 - **ema_decay**: ``str``; Decay rate to use in the exponential moving average of parameters, used for prediction (default: ``0.999``)
-- **optim**: ``str``; Name of optimizer to use, one of the following (default: ``Adam``)
+- **optim_name**: ``str``; Name of optimizer to use, one of the following (default: ``Nadam``)
 
   - ``SGD``
   - ``Momentum``
@@ -100,7 +108,7 @@ The ``[settings]`` section supports the following fields:
 - **n_interp**: ``int``; Number of interpolation points to use for approximate deconvolution, only used if the model formula flags at least one input as continuous (see :ref:`formula`, default: ``64``)
 - **float_type**: ``str``; Type of floating point representation to use (default: ``float32``)
 - **int_type**: ``str``; Type of integer representation to use (default: ``int32``)
-- ``use_gpu_if_available``; ``bool``; Whether to use GPU if available (default: ``True``)
+- **use_gpu_if_available**; ``bool``; Whether to use GPU if available (default: ``True``)
 - **log_freq**: ``int``; Frequency (in epochs) with which to write Tensorboard logs during training (default: ``1``)
 - **pc**: ``bool``; Whether to use principle components regression (experimental; default: ``False``)
 - **save_freq**: ``int``; Frequency (in epochs) with which to save model checkpoints and plots during training (default: ``1``)
@@ -114,22 +122,30 @@ The ``[settings]`` section supports the following fields:
 **DTSRMLE only**
 
 - **loss**: ``str``; Name of loss to use (one of ``mse`` or ``mae``; default: ``mse``)
-- **regularizer**: ``str`` or ``None``; Name of regularizer to use; supports all regularizer layers in Tensorflow's ``contrib.layers`` module, or no regularization if ``None`` (default: ``None``)
+- **regularizer_name**: ``str`` or ``None``; Name of regularizer to use; supports all regularizer layers in Tensorflow's ``contrib.layers`` module, or no regularization if ``None`` (default: ``None``)
 - **regularizer_scale**: ``float``; Regularization constant; ignored if **regularizer** is ``None`` (default: ``0.01``)
 
 **DTSRBayes only**
 
 - **inference_name**: ``str``; Name of inference to use; supports most inferences provided by Edward (default: ``KLqp``)
+- **declare_priors**: ``bool``; Declare explicit Gaussian priors with means and variances as provided by the DTSR model formula and settings. If ``False`` improper uniform priors will implicitly be used, with the aformentioned means and variances serving as initialization. (default: ``True``)
 - **n_samples**: ``int`` or ``None``; Number of samples to use, use Edward defaults if ``None``. If using MCMC, the number of samples is set deterministically as ``n_iter * n_minibatch``, so this user-supplied parameter is ignored (default: ``1``)
 - **n_samples_eval**: ``int`` or ``None``; Number of samples to use for evaluation, can be overridden by DTSR evaluation utilities (default: ``128``)
-- **y_scale**: ``float`` or ``None``; Fixed value for the standard deviation of the output distribution, or ``None`` to fit this as a parameter (default: ``None``)
-- **intercept_prior_sd**: ``float``; Standard deviation of prior on the intercept (default: ``1``)
-- **coef_prior_sd**: ``float``; Standard deviation of prior on the model coefficients (default: ``1``)
+- **y_scale_init**: ``float`` or ``None``; Initial value for the standard deviation of the output distribution, or ``None`` to base initialization on the empirical variance of the response (default: ``None``)
+- **y_scale_trainable**: ``bool``; Fit the standard deviation of the output distribution as a parameter of the model. If ``False``, remains fixed at initialization. (default: ``True``)
+- **intercept_prior_sd**: ``float`` or ``None``; Standard deviation of prior on the intercept. If ``None``, inferred as **prior_sd_scaling_coefficient** times the empirical variance of the response on the training set. (default: ``None``)
+- **coef_prior_sd**: ``float`` or ``None``; Standard deviation of prior on the model coefficients. If ``None``, inferred as **prior_sd_scaling_coefficient** times the empirical variance of the response on the training set. (default: ``None``)
 - **conv_prior_sd**: ``float``; Standard deviation of prior on the IRF parameters (default: ``1``)
-- **y_scale_prior_sd**: ``float``; Standard deviation of prior on the standard deviation of the output distribution, ignored if **y_scale** is not ``None`` (default: ``1``)
+- **y_scale_prior_sd**: ``float`` or ``None``; Standard deviation of prior on the standard deviation of the output distribution. If ``None``, inferred as **y_scale_prior_sd_scaling_coefficient** times the empirical variance of the response on the training set. (default: ``None``)
+- **y_skewness_prior_sd**: ``float``; Standard deviation of prior on the standard deviation of the skewness of the distribution, ignored if **asymmetric_error** is ``False`` (default: ``1``)
+- **y_tailweight_prior_sd**: ``float``; Standard deviation of prior on the standard deviation of the tailweight of the distribution, ignored if **asymmetric_error** is ``False`` (default: ``1``)
 - **mh_proposal_sd**: ``float``; Standard deviation of the proposal distribution for Metropolis-Hastings inference, ignored unless **inference_name** is ``MetropolisHastings`` (default: ``1``)
-- **mv**: ``bool``; Whether to use a MVN prior on fixed effects (otherwise fixed effects priors are independent normal, default: ``False``)
-- **mv_ran**: ``bool``; Whether to use a MVN prior on random effects (otherwise random effects priors are independent normal, default: ``False``)
+- **prior_sd_scaling_coefficient**: ``float``; Factor by which to multiply priors on intercepts and coefficients if inferred from the empirical variance of the data (i.e. if ``intercept_prior_sd`` or ``coef_prior_sd`` is ``None``). Ignored for any prior widths that are explicitly specified. (default: ``1``)
+- **y_scale_prior_sd_scaling_coefficient**: ``float``; Factor by which to multiply prior on output model variance if inferred from the empirical variance of the data (i.e. if ``y_scale_prior_sd`` is ``None``). Ignored if prior width is explicitly specified. (default: ``1``)
+- **ranef_to_fixef_prior_sd_ratio**: ``float``; Ratio of widths of random to fixed effects priors. I.e. if less than 1, random effects have tighter priors. (default: ``1``)
+- **posterior_to_prior_sd_ratio**: ``float``; Ratio of widths of priors to posterior initializations. Low values are often beneficial to stability, convergence speed, and optimality of the final model by avoiding erratic sampling and divergent behavior early in training. (default: ``0.01``)
+- **mv**: ``bool``; **CURRENTLY BROKEN** Whether to use a MVN prior on fixed effects (otherwise fixed effects priors are independent normal, default: ``False``)
+- **mv_ran**: ``bool``; **CURRENTLY BROKEN** Whether to use a MVN prior on random effects (otherwise random effects priors are independent normal, default: ``False``)
 - **asymmetric_error**: ``boolean``; Whether to apply the ``SinhArcsinh`` transform to the normal error, allowing fitting of skewness and tailweight (default: ``False``)
 
 
