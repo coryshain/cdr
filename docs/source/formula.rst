@@ -9,9 +9,9 @@ Basic Overview
 --------------
 
 This package constructs DTSR models from **R**-style formula strings defining the model structure.
-A DTSR formula has the following template:
+A DTSR formula has the following template:::
 
-``RESPONSE ~ FIXED_EFFECTS + RANDOM_EFFECTS``
+    RESPONSE ~ FIXED_EFFECTS + RANDOM_EFFECTS
 
 The left-hand side (LHS) of the formula contains the name a single (possibly transformed) variable from the input data table, and the right-hand side (RHS) contains fixed and random effects, each of which must consist exclusively of intercept terms and/or convolutional terms.
 Intercept terms can be added by including ``1`` in the RHS and removed by including ``0`` in the RHS.
@@ -95,20 +95,20 @@ Automatic Term Expansion
 ------------------------
 
 For convenience, the ``C()`` function distributes the impulse response family over multiple ``+``-delimited terms in its first argument.
-Therefore, the following two expressions are equivalent:
+Therefore, the following two expressions are equivalent:::
 
-``C(A + B, Gamma())``
-``C(A, Gamma()) + C(B, Gamma())``
+    C(A + B, Gamma())
+    C(A, Gamma()) + C(B, Gamma())
 
 As in **R**, interaction terms are designated with ``:``, as in ``C(A:B, Gamma())``, and cross-product interactions can be expressed using Python's power notation ``**<INT>``.
-For example, ``(A + B + C)**3`` adds all first, second, and third order interactions, expanding out as:
+For example, ``(A + B + C)**3`` adds all first, second, and third order interactions, expanding out as:::
 
-``A + B + C + A:B + B:C + A:C + A:B:C``
+    A + B + C + A:B + B:C + A:C + A:B:C
 
-As above, IRF distribute across the expansion of interaction terms, such that the following expressions are equivalent:
+As above, IRF distribute across the expansion of interaction terms, such that the following expressions are equivalent:::
 
-``C((A + B + C)**3, Gamma())``
-``C(A, Gamma()) + C(B, Gamma()) + C(C, Gamma()) + C(A:B, Gamma()) + C(B:C, Gamma()) + C(A:C, Gamma()) + C(A:B:C, Gamma())``
+    C((A + B + C)**3, Gamma())
+    C(A, Gamma()) + C(B, Gamma()) + C(C, Gamma()) + C(A:B, Gamma()) + C(B:C, Gamma()) + C(A:C, Gamma()) + C(A:B:C, Gamma())
 
 Unlike **R**, categorical variables are not yet handled automatically in DTSR.
 However, they can be included simply by adding binary indicator vectors for each of :math:`n-1` of the levels of the variable to the input data as a preprocessing step, then defining the model in terms of the binary indicators.
@@ -123,24 +123,24 @@ Note also that (unlike **R**) redundant terms are **not** automatically collapse
 Random Effects
 --------------
 
-Random effects in DTSR are specified using the following syntax:
+Random effects in DTSR are specified using the following syntax:::
 
-``(RANDOM_TERMS | GROUPING_FACTOR)``
+    (RANDOM_TERMS | GROUPING_FACTOR)
 
 where ``RANDOM_TERMS`` are terms as they would appear in the RHS of the model described above and ``GROUPING_FACTOR`` is the name of a categorical variable in the input that is used to define the random effect (e.g. a vector of ID's of human subjects).
 As in the case of fixed effects, a random intercept is automatically added unless ``0`` appears among the random terms.
 Mixed models are constructed simply by adding random effects to fixed effects in the RHS of the formula.
-For example, to construct a mixed model with a fixed and by-subject random coefficient for a Gaussian IRF for predictor ``A`` along with a random intercept by subject, the following RHS would be used:
+For example, to construct a mixed model with a fixed and by-subject random coefficient for a Gaussian IRF for predictor ``A`` along with a random intercept by subject, the following RHS would be used:::
 
-``C(A, Normal()) + (C(A, Normal()) | subject)``
+    C(A, Normal()) + (C(A, Normal()) | subject)
 
 IRF in random effects statements are treated as tied to any corresponding fixed effects unless explicitly distinguished by distinct IRF ID's (see section below on parameter tying).
 
 The above formula uses a single parameterization for the Gaussian IRF and fits by-subject coefficients for it.
 However it is also possible to fit by-subject IRF parameterizations.
-This can be accomplished by adding ``ran=T`` to the IRF call, as shown below:
+This can be accomplished by adding ``ran=T`` to the IRF call, as shown below:::
 
-``C(A, Normal()) + (C(A, Normal(ran=T)) | subject)``
+    C(A, Normal()) + (C(A, Normal(ran=T)) | subject)
 
 This formula will fit separate coefficients `and` IRF shapes for this predictor for each subject.
 
@@ -154,9 +154,9 @@ Random effects fit for grouping factors that vary during the experiment should t
 Parameter Initialization
 ---------------
 IRF parameters can be initialized for a given convolutional term by specifying their initial values in the IRF call, using the parameter name as the keyword (see supported IRF and their associated parameters above).
-For example, to initialize a Gamma IRF with :math:`\alpha = 2` and :math:`\beta = 2` for predictor ``A``, use the following call:
+For example, to initialize a Gamma IRF with :math:`\alpha = 2` and :math:`\beta = 2` for predictor ``A``, use the following call:::
 
-``C(A, Gamma(alpha=2, beta=2))``
+    C(A, Gamma(alpha=2, beta=2))
 
 These values will serve as initializations in both DTSRMLE and DTSRBayes, and in DTSRBayes they will additionally serve as the mean of the prior distribution for that parameter.
 If no initialization is specified, defaults will be used.
@@ -180,9 +180,9 @@ Using Constant (Non-trainable) Parameters
 By default, DTSR trains all the variables that parameterize an IRF kernel (e.g. both :math:`\mu` and :math:`\sigma` for a Gaussian IRF kernel).
 But in some cases it's useful to treat certain IRF parameters as constants and leave them untrained.
 To do this, specify a list of trainable parameters with the keyword argument ``trainable``, using Python list syntax.
-For example, to specify a ShiftedGamma IRF in which the shift parameter :math:`\delta` is held constant at -1, use the following IRF specification:
+For example, to specify a ShiftedGamma IRF in which the shift parameter :math:`\delta` is held constant at -1, use the following IRF specification:::
 
-``ShiftedGamma(delta=-1, trainable=[alpha, beta])``
+    ShiftedGamma(delta=-1, trainable=[alpha, beta])
 
 The model will then only train the :math:`\alpha` and :math:`\beta` parameters of the response.
 As with parameter initialization, unrecognized parameter names in the ``trainable`` argument will be ignored, and parameter name mismatches can result in more parameters being held constant than intended.
@@ -202,21 +202,21 @@ A convolutional term in a DTSR model is factored into two components, an IRF com
 Unless otherwise specified, both of these terms are fit separately for every predictor in the model.
 However, parameter tying is possible by passing keyword arguments to the IRF calls in the model formula.
 Coefficients can be tied using the ``coef_id`` argument, and IRF parameters can be tied using the ``irf_id`` argument.
-For example, the following RHS fits separate IRF and coefficients for each of ``A`` and ``B``:
+For example, the following RHS fits separate IRF and coefficients for each of ``A`` and ``B``:::
 
-``C(A, Normal()) + C(B, Normal())``
+    C(A, Normal()) + C(B, Normal())
 
-The following fits a single IRF (called "IRF_NAME") but separate coefficients for ``A`` and ``B``:
+The following fits a single IRF (called "IRF_NAME") but separate coefficients for ``A`` and ``B``:::
 
-``C(A, Normal(irf_id=IRF_NAME)) + C(B, Normal(irf_id=IRF_NAME))``
+    C(A, Normal(irf_id=IRF_NAME)) + C(B, Normal(irf_id=IRF_NAME))
 
-The following fits separate IRF but a single coefficient (called "COEF_NAME") for both ``A`` and ``B``:
+The following fits separate IRF but a single coefficient (called "COEF_NAME") for both ``A`` and ``B``:::
 
-``C(A, Normal(coef_id=COEF_NAME)) + C(B, Normal(coef_id=COEF_NAME))``
+    C(A, Normal(coef_id=COEF_NAME)) + C(B, Normal(coef_id=COEF_NAME))
 
-And the following fits a single IRF (called "IRF_NAME") and a single coefficient (called "COEF_NAME"), both of which are shared between ``A`` and ``B``:
+And the following fits a single IRF (called "IRF_NAME") and a single coefficient (called "COEF_NAME"), both of which are shared between ``A`` and ``B``:::
 
-``C(A, Normal(irf_id=IRF_NAME, coef_id=COEF_NAME)) + C(B, Normal(irf_id=IRF_NAME, coef_id=COEF_NAME))``
+    C(A, Normal(irf_id=IRF_NAME, coef_id=COEF_NAME)) + C(B, Normal(irf_id=IRF_NAME, coef_id=COEF_NAME))
 
 
 
@@ -227,9 +227,9 @@ Transforming Variables
 ----------------------
 DTSR provides limited support for automatic variable transformations based on model formulae.
 As in **R** formulae, a transformation is applied by wrapping the predictor name in the transformation function.
-For example, to fit a Gamma IRF to a log transform of predictor ``A``, the following is added to the RHS:
+For example, to fit a Gamma IRF to a log transform of predictor ``A``, the following is added to the RHS:::
 
-``C(log(A), Gamma())``
+    C(log(A), Gamma())
 
 Transformations may be applied to the predictors and/or the response.
 

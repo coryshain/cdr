@@ -1756,7 +1756,7 @@ class DTSR(object):
 
     def run_predict_op(self, feed_dict, n_samples=None):
         """
-        Generate response predictions from a batch of data
+        Generate predictions from a batch of data
 
         :param feed_dict: ``dict``; A dictionary of predictor values
         :param n_samples: ``int`` or ``None``; Number of posterior samples to use (ignored by DTSRMLE)
@@ -1777,7 +1777,7 @@ class DTSR(object):
 
     def run_conv_op(self, feed_dict, scaled=False, n_samples=None):
         """
-        Convolve a batch of data in feed_dict with the latent IRF to produce convolved data
+        Convolve a batch of data in feed_dict with the model's latent IRF
 
         :param feed_dict: ``dict``; A dictionary of predictor variables
         :param scaled: ``bool``; Whether to scale the outputs using the model's coefficients

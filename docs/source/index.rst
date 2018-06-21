@@ -12,8 +12,7 @@ Documentation for the ``dtsr`` Python package.
    getting_started
    formula
    config
-   dtsrmle
-   dtsrbayes
+   api
    dtsr
 
 

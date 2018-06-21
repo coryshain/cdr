@@ -157,13 +157,13 @@ The optional ``[filters]`` section allows specification of simple data censoring
 All variables used in a filter must be contained in the data files indicated by the ``y_*`` parameters in the ``[data]`` section of the config file.
 The variable name is specified as an INI field, and the condition is specified as its value.
 Supported logical operators are ``<``, ``<=``, ``>``, ``>=``, ``==``, and ``!=``.
-For example, to keep only data points for which column ``foo`` is less or equal to 100, the following filter can be added:
+For example, to keep only data points for which column ``foo`` is less or equal to 100, the following filter can be added:::
 
-``foo = <= 100``
+    foo = <= 100
 
-To keep only data points for which the column ``foo`` does not equal ``bar``, the following filter can be added:
+To keep only data points for which the column ``foo`` does not equal ``bar``, the following filter can be added:::
 
-``foo = != bar``
+    foo = != bar
 
 More complex filtration conditions are not supported automatically in DTSR but can be applied to the data by the user as a preprocess.
 
@@ -174,9 +174,9 @@ Section: ``[irf_name_map]``
 
 The optional ``[irf_name_map]`` section simply permits prettier variable naming in plots.
 For example, the internal name for a convolution applied to predictor ``A`` may be ``ShiftedGammaKgt1.s(A)-Terminal.s(A)``, which is not very readable.
-To address this, the string above can be mapped to a more readable name using an INI key-value pair, as shown:
+To address this, the string above can be mapped to a more readable name using an INI key-value pair, as shown:::
 
-``ShiftedGammaKgt1.s(A)-Terminal.s(A) = A``
+    ShiftedGammaKgt1.s(A)-Terminal.s(A) = A
 
 The model will then print ``A`` in plots rather than ``ShiftedGammaKgt1.s(A)-Terminal.s(A)``.
 Unused entries in the name map are ignored, and model variables that do not have an entry in the name map print with their default internal identifier.
@@ -192,9 +192,9 @@ The identifier ``DTSR_*`` will be used by the DTSR utilities to reference the fi
 
 For example, to define a DTSR model called ``readingtimes``, the section header ``[model_DTSR_readingtimes]`` is included in the config file along with an appropriate ``formula`` specification.
 To use this specific model once fitted, it can be referenced using the identifier ``DTSR_readingtimes``.
-For example, the following call will extract predictions on dev data from a fitted ``DTSR_readingtimes`` defined in config file **config.ini**:
+For example, the following call will extract predictions on dev data from a fitted ``DTSR_readingtimes`` defined in config file **config.ini**:::
 
-``python -m dtsr.bin.predict config.ini -m DTSR_readingtimes -p dev``
+    python -m dtsr.bin.predict config.ini -m DTSR_readingtimes -p dev
 
 Additional fields from ``[dtsr_settings]`` may be specified for a given model, in which case the locally-specified setting (rather than the globally specified setting or the default value) will be used to train the model.
 For example, imagine that ``[dtsr_settings]`` contains the field ``n_iter = 1000``.
