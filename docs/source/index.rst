@@ -14,6 +14,7 @@ Documentation for the ``dtsr`` Python package.
    config
    dtsrmle
    dtsrbayes
+   dtsr
 
 
 Indices

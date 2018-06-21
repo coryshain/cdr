@@ -1,5 +1,5 @@
-dtsr package
-============
+DTSR Module Index
+=================
 
 Submodules
 ----------
