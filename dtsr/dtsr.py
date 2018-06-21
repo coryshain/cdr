@@ -451,7 +451,7 @@ class DTSR(object):
         self.rangf_map = []
         for i in range(len(self.rangf_map_base)):
             self.rangf_map.append(
-                defaultdict((lambda x: lambda: x)(self.rangf_n_levels[i]), self.rangf_map_base[i]))
+                defaultdict((lambda x: lambda: x)(self.rangf_n_levels[i] - 1), self.rangf_map_base[i]))
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -1358,7 +1358,7 @@ class DTSR(object):
 
     def initialize_coefficient(self, coef_ids=None, ran_gf=None):
         """
-        Add a coefficient to the DTSR model.
+        Add coefficients to the DTSR model.
         This method must be implemented by subclasses of ``DTSR`` and should only be called at model initialization.
         Correct model behavior is not guaranteed if called at any other time.
 
@@ -1371,7 +1371,7 @@ class DTSR(object):
 
     def initialize_irf_param(self, param_name, ids, trainable=None, mean=0, lb=None, ub=None, irf_by_rangf=None):
         """
-        Add a matrix of IRF parameters to the DTSR model.
+        Add IRF parameters to the DTSR model.
         This method must be implemented by subclasses of ``DTSR`` and should only be called at model initialization.
         Correct model behavior is not guaranteed if called at any other time.
 
