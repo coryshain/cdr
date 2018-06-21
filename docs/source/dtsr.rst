@@ -25,6 +25,13 @@ dtsr\.dtsr module
     :members:
     :show-inheritance:
 
+dtsr\.dtsrmle module
+-----------------
+
+.. automodule:: dtsr.dtsrmle
+    :members:
+    :show-inheritance:
+
 dtsr\.dtsrbayes module
 ------------------
 
