@@ -167,7 +167,7 @@ class DTSRBayes(DTSR):
     """
     _doc_args = DTSR._doc_args
     _doc_kwargs = DTSR._doc_kwargs
-    _doc_kwargs += '\n' + '\n'.join([' ' * 8 + ':param %s' %x.key + ': ' + '; '.join([x.type, x.descr]) + ' **Default**: ``%s``.' %x.default_value for x in _INITIALIZATION_KWARGS])
+    _doc_kwargs += '\n' + '\n'.join([' ' * 8 + ':param %s' %x.key + ': ' + '; '.join([x.type, x.descr]) + ' **Default**: ``%s``.' %(x.default_value if not isinstance(x.default_value, str) else "'%s'" %x.default_value) for x in _INITIALIZATION_KWARGS])
     __doc__ = _doc_header + _doc_args + _doc_kwargs
 
 
