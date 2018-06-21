@@ -1837,7 +1837,7 @@ class DTSR(object):
                     self.support_start: 0.,
                     self.n_time_units: n_time_units,
                     self.n_points_per_time_unit: n_points_per_time_unit,
-                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0)
+                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1
                 }
 
                 alpha = 100-float(level)
@@ -1865,7 +1865,7 @@ class DTSR(object):
                     self.support_start: 0.,
                     self.n_time_units: n_time_units,
                     self.n_points_per_time_unit: n_points_per_time_unit,
-                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels - 1, dtype=self.INT_NP), 0)
+                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1
                 }
 
                 alpha = 100 - float(level)
@@ -2457,7 +2457,7 @@ class DTSR(object):
                     self.support_start: 0.,
                     self.n_time_units: plot_n_time_units,
                     self.n_points_per_time_unit: plot_n_points_per_time_unit,
-                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels - 1, dtype=self.INT_NP), 0)
+                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1
                 }
 
                 plot_x = self.sess.run(self.support, fd)
