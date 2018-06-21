@@ -1,8 +1,6 @@
 DTSR Module Index
 =================
 
-Submodules
-----------
 
 dtsr\.config module
 -------------------

@@ -1,7 +1,9 @@
 .. _dtsrbayes:
 
-DTSRBayes (DTSR with Bayesian inference)
-========================================
+DTSRBayes
+=========
+
+DTSR with Bayesian inference.
 
 .. autoclass:: dtsr.dtsrbayes.DTSRBayes
     :members:

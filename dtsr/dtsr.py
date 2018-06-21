@@ -205,7 +205,7 @@ class DTSR(object):
     _INITIALIZATION_KWARGS = DTSR_INITIALIZATION_KWARGS
 
     _doc_header = """
-        Abstract base class for DTSR. Bayesian (DTSRBayes) and MLE (DTSRMLE) implementations inherit from DTSR.
+        Abstract base class for DTSR. Bayesian (:ref:`dtsrbayes`) and MLE (:ref:`dtsrmle`) implementations inherit from ``DTSR``.
         ``DTSR`` is not a complete implementation and cannot be instantiated.
         Subclasses of ``DTSR`` must implement the following instance methods:
         
@@ -221,7 +221,7 @@ class DTSR(object):
             
         Additionally, if the subclass requires any keyword arguments beyond those provided by ``DTSR``, it must also implement ``__init__()``, ``_pack_metadata()`` and ``_unpack_metadata()`` to support model initialization, saving, and resumption, respectively.
         
-        Example implementations of each of these methods can be found in the source code for :ref:`dtsrmle` and :ref:`dtsrbayes`
+        Example implementations of each of these methods can be found in the source code for :ref:`dtsrmle` and :ref:`dtsrbayes`.
         
     """
     _doc_args = """
@@ -1608,7 +1608,6 @@ class DTSR(object):
         **All subclasses must implement this method.**
 
         :param feed_dict: ``dict``; A dictionary of predictor and response values
-        :param n_samples: ``int`` or ``None``; Number of posterior samples to use (ignored by DTSRMLE)
         :return: ``numpy`` array; Predicted responses, one for each training sample
         """
 
@@ -1616,8 +1615,8 @@ class DTSR(object):
 
     def run_predict_op(self, feed_dict, n_samples=None):
         """
-        Generate predictions from a batch of data
-        **All subclasses must implement this method.**
+        Generate predictions from a batch of data.
+        **All DTSR subclasses must implement this method.**
 
         :param feed_dict: ``dict``; A dictionary of predictor values.
         :param n_samples: ``int`` or ``None``; Number of posterior samples to use (ignored by DTSRMLE)
@@ -1628,7 +1627,7 @@ class DTSR(object):
     def run_loglik_op(self, feed_dict, n_samples=None):
         """
         Compute the log-likelihoods of a batch of data.
-        **All subclasses must implement this method.**
+        **All DTSR subclasses must implement this method.**
 
         :param feed_dict: ``dict``; A dictionary of predictor and response values
         :param n_samples: ``int`` or ``None``; Number of posterior samples to use (ignored by DTSRMLE)
@@ -1640,7 +1639,7 @@ class DTSR(object):
     def run_conv_op(self, feed_dict, scaled=False, n_samples=None):
         """
         Convolve a batch of data in feed_dict with the model's latent IRF.
-        **All subclasses must implement this method.**
+        **All DTSR subclasses must implement this method.**
 
         :param feed_dict: ``dict``; A dictionary of predictor variables
         :param scaled: ``bool``; Whether to scale the outputs using the model's coefficients
@@ -1653,7 +1652,7 @@ class DTSR(object):
     def summary(self, fixed=True, random=False):
         """
         Generate a summary of the fitted model.
-        **All subclasses must implement this method.**
+        **All DTSR subclasses must implement this method.**
 
         :param fixed: ``bool``; Report fixed effects parameters
         :param random: ``bool``; Report random effects parameters
