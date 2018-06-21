@@ -103,9 +103,7 @@ class DTSRMLE(DTSR):
     #
     ######################################################
 
-    def _initialize_intercept(self, ran_gf=None, rangf_n_levels=None):
-        f = self.form
-
+    def initialize_intercept(self, ran_gf=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if ran_gf is None:
@@ -116,6 +114,7 @@ class DTSRMLE(DTSR):
                     )
                     intercept_summary = intercept
                 else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)]
                     intercept = tf.Variable(
                         tf.random_normal(
                             shape=[rangf_n_levels],
@@ -128,7 +127,7 @@ class DTSRMLE(DTSR):
                     intercept_summary = intercept
                 return intercept, intercept_summary
 
-    def _initialize_coefficient(self, coef_ids=None, ran_gf=None, rangf_n_levels=None):
+    def initialize_coefficient(self, coef_ids=None, ran_gf=None):
         if coef_ids is None:
             coef_ids = self.coef_names
 
@@ -145,6 +144,7 @@ class DTSRMLE(DTSR):
                     )
                     coefficient_summary = coefficient
                 else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)]
                     coefficient = tf.Variable(
                         tf.random_normal(
                             shape=[rangf_n_levels, len(coef_ids)],
@@ -157,7 +157,7 @@ class DTSRMLE(DTSR):
                 self._regularize(coefficient)
                 return coefficient, coefficient_summary
 
-    def _initialize_irf_param(self, param_name, ids, trainable=None, mean=0, lb=None, ub=None, irf_by_rangf=None):
+    def initialize_irf_param(self, param_name, ids, trainable=None, mean=0, lb=None, ub=None, irf_by_rangf=None):
         if irf_by_rangf is None:
             irf_by_rangf = []
 
@@ -293,7 +293,7 @@ class DTSRMLE(DTSR):
                 # estimates for plotting in the 2nd return value
                 return (param_out, param_summary)
 
-    def _initialize_objective(self):
+    def initialize_objective(self):
         f = self.form
 
         with self.sess.as_default():
@@ -306,8 +306,6 @@ class DTSRMLE(DTSR):
                     self.loss_func = self.mse_loss
                 if self.regularizer_name is not None:
                     self.loss_func += tf.add_n(self.regularizer_losses)
-                self.loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='loss_total')
-                tf.summary.scalar('loss/%s' % self.loss_type, self.loss_total, collections=['loss'])
 
                 self.optim = self._initialize_optimizer(self.optim_name)
                 assert self.optim_name is not None, 'An optimizer name must be supplied'
@@ -331,20 +329,6 @@ class DTSRMLE(DTSR):
                 s = self.y_scale
                 y_dist = tf.distributions.Normal(loc=self.out, scale=self.y_scale)
                 self.ll = y_dist.log_prob(self.y)
-
-    def _initialize_logging(self):
-        f = self.form
-
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                if os.path.exists(self.outdir + '/tensorboard'):
-                    self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard')
-                else:
-                    self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard', self.sess.graph)
-                self.summary_params = tf.summary.merge_all(key='params')
-                self.summary_losses = tf.summary.merge_all(key='loss')
-                if self.log_random and len(self.rangf) > 0:
-                    self.summary_random = tf.summary.merge_all(key='random')
 
     ######################################################
     #

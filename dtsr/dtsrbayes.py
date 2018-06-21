@@ -536,9 +536,7 @@ class DTSRBayes(DTSR):
 
                 self.inference_map[self.full_joint] = self.full_joint_q
 
-    def _initialize_intercept(self, ran_gf=None, rangf_n_levels=None):
-        f = self.form
-
+    def initialize_intercept(self, ran_gf=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if ran_gf is None:
@@ -625,8 +623,9 @@ class DTSRBayes(DTSR):
                             self.inference_map[intercept] = intercept_q
 
                 else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)]
                     if self.mv_ran:
-                        names = ['intercept_by_%s_%s' %(ran_gf, i) for i in range(self.rangf_n_levels[self.rangf.index(ran_gf)])]
+                        names = ['intercept_by_%s_%s' %(ran_gf, i) for i in range(rangf_n_levels)]
                         ix = names2ix(names, self.full_joint_names)
                         intercept = tf.gather(self.full_joint, ix)
                         intercept_summary = tf.gather(self.full_joint_q.mean(), ix)
@@ -706,7 +705,7 @@ class DTSRBayes(DTSR):
 
                 return intercept, intercept_summary
 
-    def _initialize_coefficient(self, coef_ids=None, ran_gf=None, rangf_n_levels=None):
+    def initialize_coefficient(self, coef_ids=None, ran_gf=None):
         f = self.form
 
         if coef_ids is None:
@@ -791,11 +790,12 @@ class DTSRBayes(DTSR):
 
                             self.inference_map[coefficient] = coefficient_q
                 else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)]
                     if self.mv_ran:
                         coefficient = []
                         coefficient_summary = []
                         for coef in self.coef_names:
-                            names = ['%s_by_%s_%s' % (coef, ran_gf, i) for i in range(self.rangf_n_levels[self.rangf.index(ran_gf)])]
+                            names = ['%s_by_%s_%s' % (coef, ran_gf, i) for i in range(rangf_n_levels)]
                             ix = names2ix(names, self.full_joint_names)
                             coefficient.append(tf.gather(self.full_joint, ix))
                             coefficient_summary.append(tf.gather(self.full_joint_q.mean(), ix))
@@ -878,7 +878,7 @@ class DTSRBayes(DTSR):
 
                 return coefficient, coefficient_summary
 
-    def _initialize_irf_param(self, param_name, ids, mean=0, lb=None, ub=None, irf_by_rangf=None, trainable=None):
+    def initialize_irf_param(self, param_name, ids, mean=0, lb=None, ub=None, irf_by_rangf=None, trainable=None):
         dim = len(ids)
         if irf_by_rangf is None:
             irf_by_rangf = []
@@ -1450,7 +1450,7 @@ class DTSRBayes(DTSR):
                 self.err_dist_lb = -3 * y_scale_summary
                 self.err_dist_ub = 3 * y_scale_summary
 
-    def _initialize_objective(self):
+    def initialize_objective(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self._initialize_output_model()
@@ -1504,20 +1504,6 @@ class DTSRBayes(DTSR):
                                 self.src_irf_mc[x][a][b] = ed.copy(self.src_irf_mc[x][a][b], self.inference_map)
                     for x in self.src_mc_integrals:
                         self.src_mc_integrals[x] = ed.copy(self.src_mc_integrals[x], self.inference_map)
-
-    def _initialize_logging(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                self.loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='loss_total')
-                tf.summary.scalar('loss', self.loss_total, collections=['loss'])
-                if self.log_graph:
-                    self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/dtsr', self.sess.graph)
-                else:
-                    self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/dtsr')
-                self.summary_params = tf.summary.merge_all(key='params')
-                self.summary_losses = tf.summary.merge_all(key='loss')
-                if self.log_random and len(self.rangf) > 0:
-                    self.summary_random = tf.summary.merge_all(key='random')
 
 
 

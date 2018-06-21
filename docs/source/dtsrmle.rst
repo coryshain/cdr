@@ -1,7 +1,7 @@
 .. _dtsrmle:
 
-Maximum Likelihood (MLE) DTSR
-=============================
+DTSRMLE (DTSR with maximum likelihood estimation)
+=================================================
 
 .. autoclass:: dtsr.dtsrmle.DTSRMLE
     :members:

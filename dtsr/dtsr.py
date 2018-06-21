@@ -206,6 +206,22 @@ class DTSR(object):
 
     _doc_header = """
         Abstract base class for DTSR. Bayesian (DTSRBayes) and MLE (DTSRMLE) implementations inherit from DTSR.
+        ``DTSR`` is not a complete implementation and cannot be instantiated.
+        Subclasses of ``DTSR`` must implement the following instance methods:
+        
+            * ``initialize_intercept()``
+            * ``initialize_coefficient()``
+            * ``initialize_irf_param()``
+            * ``initialize_objective()``
+            * ``run_conv_op()``
+            * ``run_loglik_op()``
+            * ``run_predict_op()``
+            * ``run_train_step()``
+            * ``summary()``
+            
+        Additionally, if the subclass requires any keyword arguments beyond those provided by ``DTSR``, it must also implement ``__init__()``, ``_pack_metadata()`` and ``_unpack_metadata()`` to support model initialization, saving, and resumption, respectively.
+        
+        Example implementations of each of these methods can be found in the source code for :ref:`dtsrmle` and :ref:`dtsrbayes`
         
     """
     _doc_args = """
@@ -598,18 +614,12 @@ class DTSR(object):
                 if self.regularizer_name is not None:
                     self.regularizer = getattr(tf.contrib.layers, self.regularizer_name)(self.regularizer_scale)
 
-    def _initialize_intercept(self, ran_gf=None, rangf_n_levels=None):
-        raise NotImplementedError
-
-    def _initialize_coefficient(self, coef_ids=None, ran_gf=None, rangf_n_levels=None):
-        raise NotImplementedError
-
     def _initialize_intercepts_coefficients(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
 
                 if self.has_intercept[None]:
-                    self.intercept, self.intercept_summary = self._initialize_intercept()
+                    self.intercept, self.intercept_summary = self.initialize_intercept()
                     tf.summary.scalar(
                         'intercept',
                         self.intercept_summary,
@@ -625,7 +635,7 @@ class DTSR(object):
 
                 coef_ids = self.coef_names
 
-                self.coefficient_fixed, self.coefficient_summary = self._initialize_coefficient(coef_ids=coef_ids)
+                self.coefficient_fixed, self.coefficient_summary = self.initialize_coefficient(coef_ids=coef_ids)
 
                 self.coefficient_fixed *= coefficient_fixed_mask
                 self.coefficient_summary *= coefficient_fixed_mask
@@ -690,10 +700,7 @@ class DTSR(object):
                     mask_row = tf.constant(mask_row_np, dtype=self.FLOAT_TF)
 
                     if self.has_intercept[gf]:
-                        intercept_random, intercept_random_summary = self._initialize_intercept(
-                            ran_gf=gf,
-                            rangf_n_levels=self.rangf_n_levels[i]
-                        )
+                        intercept_random, intercept_random_summary = self.initialize_intercept(ran_gf=gf)
                         intercept_random *= mask_row
                         intercept_random_summary *= mask_row
 
@@ -719,10 +726,9 @@ class DTSR(object):
                         mask_col = tf.constant(mask_col_np, dtype=self.FLOAT_TF)
                         self.ransl = True
 
-                        coefficient_random, coefficient_random_summary = self._initialize_coefficient(
+                        coefficient_random, coefficient_random_summary = self.initialize_coefficient(
                             coef_ids=coef_ids,
                             ran_gf=gf,
-                            rangf_n_levels=self.rangf_n_levels[i]
                         )
 
                         coefficient_random *= mask_col
@@ -846,92 +852,92 @@ class DTSR(object):
 
                     if family == 'Exp':
                         beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=1)
-                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self.initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([beta], axis=1)
                         params_summary =  tf.stack([beta_mean], axis=1)
                     elif family == 'ExpRateGT1':
                         beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=2)
-                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=1, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self.initialize_irf_param('beta', irf_ids, mean=beta_init, lb=1, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([beta], axis=1)
                         params_summary =  tf.stack([beta_mean], axis=1)
                     elif family == 'Gamma':
                         alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=2)
                         beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=5)
-                        alpha, alpha_mean = self._initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        alpha, alpha_mean = self.initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self.initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([alpha, beta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean], axis=1)
                     elif family in ['GammaKgt1', 'GammaShapeGT1']:
                         alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=2)
                         beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=5)
-                        alpha, alpha_mean = self._initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=1, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        alpha, alpha_mean = self.initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=1, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self.initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([alpha, beta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean], axis=1)
                     elif family == 'SteepGamma':
                         alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=1)
                         beta_init = self._get_mean_init_vector('beta', 25)
-                        alpha, alpha_mean = self._initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        alpha, alpha_mean = self.initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self.initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([alpha, beta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean], axis=1)
                     elif family == 'ShiftedGamma':
                         alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=2)
                         beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=5)
                         delta_init = self._get_mean_init_vector('delta', -0.5)
-                        alpha, alpha_mean = self._initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        delta, delta_mean = self._initialize_irf_param('delta', irf_ids, mean=delta_init, ub=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        alpha, alpha_mean = self.initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self.initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        delta, delta_mean = self.initialize_irf_param('delta', irf_ids, mean=delta_init, ub=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([alpha, beta, delta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean, delta_mean], axis=1)
                     elif family in ['ShiftedGammaKgt1', 'ShiftedGammaShapeGT1']:
                         alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=2)
                         beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=5)
                         delta_init = self._get_mean_init_vector(irf_ids, 'delta', irf_param_init, default=-0.5)
-                        alpha, alpha_mean = self._initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=1, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        delta, delta_mean = self._initialize_irf_param('delta', irf_ids, mean=delta_init, ub=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        alpha, alpha_mean = self.initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=1, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self.initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        delta, delta_mean = self.initialize_irf_param('delta', irf_ids, mean=delta_init, ub=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([alpha, beta, delta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean, delta_mean], axis=1)
                     elif family == 'Normal':
                         mu_init = self._get_mean_init_vector(irf_ids, 'mu', irf_param_init, default=0)
                         sigma_init = self._get_mean_init_vector(irf_ids, 'sigma', irf_param_init, default=1)
-                        mu, mu_mean = self._initialize_irf_param('mu', irf_ids, mean=mu_init, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        sigma, sigma_mean = self._initialize_irf_param('sigma', irf_ids, mean=sigma_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        mu, mu_mean = self.initialize_irf_param('mu', irf_ids, mean=mu_init, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        sigma, sigma_mean = self.initialize_irf_param('sigma', irf_ids, mean=sigma_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([mu, sigma], axis=1)
                         params_summary = tf.stack([mu_mean, sigma_mean], axis=1)
                     elif family == 'SkewNormal':
                         mu_init = self._get_mean_init_vector(irf_ids, 'mu', irf_param_init, default=0)
                         sigma_init = self._get_mean_init_vector(irf_ids, 'sigma', irf_param_init, default=1)
                         alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=0)
-                        mu, mu_mean = self._initialize_irf_param('mu', irf_ids, mean=mu_init, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        sigma, sigma_mean = self._initialize_irf_param('sigma', irf_ids, mean=sigma_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        alpha, alpha_mean = self._initialize_irf_param('alpha', irf_ids, alpha=alpha_init, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        mu, mu_mean = self.initialize_irf_param('mu', irf_ids, mean=mu_init, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        sigma, sigma_mean = self.initialize_irf_param('sigma', irf_ids, mean=sigma_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        alpha, alpha_mean = self.initialize_irf_param('alpha', irf_ids, alpha=alpha_init, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([mu, sigma, alpha], axis=1)
                         params_summary = tf.stack([mu_mean, sigma_mean, alpha_mean], axis=1)
                     elif family == 'EMG':
                         mu_init = self._get_mean_init_vector(irf_ids, 'mu', irf_param_init, default=0)
                         sigma_init = self._get_mean_init_vector(irf_ids, 'sigma', irf_param_init, default=1)
                         beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=1)
-                        mu, mu_mean = self._initialize_irf_param('mu', irf_ids, mean=mu_init, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        sigma, sigma_mean = self._initialize_irf_param('sigma', irf_ids, mean=sigma_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        mu, mu_mean = self.initialize_irf_param('mu', irf_ids, mean=mu_init, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        sigma, sigma_mean = self.initialize_irf_param('sigma', irf_ids, mean=sigma_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self.initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([mu, sigma, beta], axis=1)
                         params_summary = tf.stack([mu_mean, sigma_mean, beta_mean], axis=1)
                     elif family == 'BetaPrime':
                         alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=1)
                         beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=1)
-                        alpha, alpha_mean = self._initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        alpha, alpha_mean = self.initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self.initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([alpha, beta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean], axis=1)
                     elif family == 'ShiftedBetaPrime':
                         alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=1)
                         beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=1)
                         delta_init = self._get_mean_init_vector('delta', -1)
-                        alpha, alpha_mean = self._initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        delta, delta_mean = self._initialize_irf_param('delta', irf_ids, mean=delta_init, ub=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        alpha, alpha_mean = self.initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self.initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        delta, delta_mean = self.initialize_irf_param('delta', irf_ids, mean=delta_init, ub=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([alpha, beta, delta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean, delta_mean], axis=1)
                     else:
@@ -942,9 +948,6 @@ class DTSR(object):
                         assert id not in self.irf_params, 'Duplicate IRF node name already in self.irf_params'
                         self.irf_params[id] = tf.gather(params, ix, axis=2)
                         self.irf_params_summary[id] = tf.gather(params_summary, ix, axis=2)
-
-    def _initialize_irf_param(self, param_name, ids, trainable=None, mean=0, lb=None, ub=None, irf_by_rangf=None):
-        raise NotImplementedError
 
     def _get_mean_init_vector(self, irf_ids, param_name, irf_param_init, default=0):
         mean = np.zeros(len(irf_ids))
@@ -1263,9 +1266,6 @@ class DTSR(object):
 
                 self.out = self.intercept + tf.reduce_sum(self.X_conv_scaled, axis=1)
 
-    def _initialize_objective(self):
-        raise NotImplementedError
-
     def _initialize_optimizer(self, name):
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -1304,7 +1304,18 @@ class DTSR(object):
                 }[name](self.lr)
 
     def _initialize_logging(self):
-        raise NotImplementedError
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                self.loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='loss_total')
+                tf.summary.scalar('loss', self.loss_total, collections=['loss'])
+                if self.log_graph:
+                    self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/dtsr', self.sess.graph)
+                else:
+                    self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/dtsr')
+                self.summary_params = tf.summary.merge_all(key='params')
+                self.summary_losses = tf.summary.merge_all(key='loss')
+                if self.log_random and len(self.rangf) > 0:
+                    self.summary_random = tf.summary.merge_all(key='random')
 
     def _initialize_saver(self):
         with self.sess.as_default():
@@ -1328,7 +1339,72 @@ class DTSR(object):
 
     ######################################################
     #
-    #  Private methods
+    #  Internal public network initialization methods.
+    #  These must be implemented by all subclasses and
+    #  should only be called at initialization.
+    #
+    ######################################################
+
+    def initialize_intercept(self, ran_gf=None):
+        """
+        Add an intercept to the DTSR model.
+        This method must be implemented by subclasses of ``DTSR`` and should only be called at model initialization.
+        Correct model behavior is not guaranteed if called at any other time.
+
+        :param ran_gf: ``str`` or ``None``; Name of random grouping factor for random intercept (if ``None``, constructs a fixed intercept)
+        :return: 2-tuple of ``Tensor`` ``(intercept, intercept_summary)``; ``intercept`` is the intercept for use by the model. ``intercept_summary`` is an identically-shaped representation of the current intercept value for logging and plotting (can be identical to ``intercept``). For fixed intercepts, should return scalars. For random intercepts, should return batch-length vector of zero-centered random intercept values for each input in the batch.
+        """
+        raise NotImplementedError
+
+    def initialize_coefficient(self, coef_ids=None, ran_gf=None):
+        """
+        Add a coefficient to the DTSR model.
+        This method must be implemented by subclasses of ``DTSR`` and should only be called at model initialization.
+        Correct model behavior is not guaranteed if called at any other time.
+
+        :param coef_ids: ``list`` of ``str``: List of coefficient IDs
+        :param ran_gf: ``str`` or ``None``: Name of random grouping factor for random coefficient (if ``None``, constructs a fixed coefficient)
+        :return: 2-tuple of ``Tensor`` ``(coefficient, coefficient_summary)``; ``coefficient`` is the coefficient for use by the model. ``coefficient_summary`` is an identically-shaped representation of the current coefficient values for logging and plotting (can be identical to ``coefficient``). For fixed coefficients, should return a vector of length ``len(coef_ids)``. For random coefficients, should return batch-length matrix of random coefficient values with ``len(coef_ids)`` zero-centered columns for each input in the batch.
+        """
+
+        raise NotImplementedError
+
+    def initialize_irf_param(self, param_name, ids, trainable=None, mean=0, lb=None, ub=None, irf_by_rangf=None):
+        """
+        Add a matrix of IRF parameters to the DTSR model.
+        This method must be implemented by subclasses of ``DTSR`` and should only be called at model initialization.
+        Correct model behavior is not guaranteed if called at any other time.
+
+        :param param_name: ``str``; Name of parameter (e.g. ``"alpha"``)
+        :param ids: ``list`` of ``str``; Names of IRF nodes to which this parameter applies
+        :param trainable: ``dict`` or ``None``; Keys correspond to IDs in **ids**, each associated with a list of names of trainable parameters. If ``None``, the parameter is treated as trainable for all members of **ids**.
+        :param mean: ``float``; Initial value for the parameter.
+        :param lb: ``float`` or ``None``; Upper bound on the parameter (if ``None``, no upper bound).
+        :param ub: ``float`` or ``None``; Lower bound on the parameter (if ``None``, no lower bound).
+        :param irf_by_rangf: ``dict`` or ``None``; Keys correspond to random grouping factors and are associated with a list of IDs (subset of **ids**) -- defines the random IRF structures associated with this parameter. If ``None``, the parameter is treated as fixed.
+        :return: 2-tuple of ``Tensor`` ``(param, param_summary)``; ``param`` is the parameter for use by the model. ``param_summary`` is an identically-shaped representation of the current param values for logging and plotting (can be identical to ``param``). For fixed params, should return a vector of length ``len(ids)``. For random params, should return batch-length matrix of **summed** fixed and random param values for each input in the batch.
+        """
+
+        raise NotImplementedError
+
+    def initialize_objective(self):
+        """
+        Add an objective function to the DTSR model.
+
+        :return: ``None``
+        """
+
+        raise NotImplementedError
+
+
+
+
+
+
+
+    ######################################################
+    #
+    #  Other private methods
     #
     ######################################################
 
@@ -1519,13 +1595,80 @@ class DTSR(object):
 
                 x_shape = (tf.shape(x)[0], tf.shape(x)[1], n)
 
+    ######################################################
+    #
+    #  Public methods that must be implemented by
+    #  subclasses
+    #
+    ######################################################
+
+    def run_train_step(self, feed_dict):
+        """
+        Update the model from a batch of training data.
+        **All subclasses must implement this method.**
+
+        :param feed_dict: ``dict``; A dictionary of predictor and response values
+        :param n_samples: ``int`` or ``None``; Number of posterior samples to use (ignored by DTSRMLE)
+        :return: ``numpy`` array; Predicted responses, one for each training sample
+        """
+
+        raise NotImplementedError
+
+    def run_predict_op(self, feed_dict, n_samples=None):
+        """
+        Generate predictions from a batch of data
+        **All subclasses must implement this method.**
+
+        :param feed_dict: ``dict``; A dictionary of predictor values.
+        :param n_samples: ``int`` or ``None``; Number of posterior samples to use (ignored by DTSRMLE)
+        :return: ``numpy`` array; Predicted responses, one for each training sample
+        """
+        raise NotImplementedError
+
+    def run_loglik_op(self, feed_dict, n_samples=None):
+        """
+        Compute the log-likelihoods of a batch of data.
+        **All subclasses must implement this method.**
+
+        :param feed_dict: ``dict``; A dictionary of predictor and response values
+        :param n_samples: ``int`` or ``None``; Number of posterior samples to use (ignored by DTSRMLE)
+        :return: ``numpy`` array; Pointwise log-likelihoods, one for each training sample
+        """
+
+        raise NotImplementedError
+
+    def run_conv_op(self, feed_dict, scaled=False, n_samples=None):
+        """
+        Convolve a batch of data in feed_dict with the model's latent IRF.
+        **All subclasses must implement this method.**
+
+        :param feed_dict: ``dict``; A dictionary of predictor variables
+        :param scaled: ``bool``; Whether to scale the outputs using the model's coefficients
+        :param n_samples: ``int`` or ``None``; Number of posterior samples to use (ignored by DTSRMLE)
+        :return: ``numpy`` array; The convolved inputs
+        """
+
+        raise NotImplementedError
+
+    def summary(self, fixed=True, random=False):
+        """
+        Generate a summary of the fitted model.
+        **All subclasses must implement this method.**
+
+        :param fixed: ``bool``; Report fixed effects parameters
+        :param random: ``bool``; Report random effects parameters
+        :return: ``str``; Formatted model summary for printing
+        """
+
+        raise NotImplementedError
+
 
 
 
 
     ######################################################
     #
-    #  Public methods
+    #  Shared public methods
     #
     ######################################################
 
@@ -1584,8 +1727,8 @@ class DTSR(object):
                 self._initialize_irf_lambdas()
                 self._initialize_irf_params()
                 self._construct_network()
-                self._initialize_objective()
                 self._initialize_logging()
+                self.initialize_objective()
                 self._initialize_ema()
                 self._initialize_saver()
                 self.load(restore=restore)
@@ -1742,50 +1885,6 @@ class DTSR(object):
                 upper = np.percentile(samples, 100 - (alpha / 2), axis=0)
 
                 return (mean, lower, upper)
-
-    def run_train_step(self, feed_dict):
-        """
-        Update the model from a batch of training data
-
-        :param feed_dict: ``dict``; A dictionary of predictor and response values
-        :param n_samples: ``int`` or ``None``; Number of posterior samples to use (ignored by DTSRMLE)
-        :return: ``numpy`` array; Predicted responses, one for each training sample
-        """
-
-        raise NotImplementedError
-
-    def run_predict_op(self, feed_dict, n_samples=None):
-        """
-        Generate predictions from a batch of data
-
-        :param feed_dict: ``dict``; A dictionary of predictor values
-        :param n_samples: ``int`` or ``None``; Number of posterior samples to use (ignored by DTSRMLE)
-        :return: ``numpy`` array; Predicted responses, one for each training sample
-        """
-        raise NotImplementedError
-
-    def run_loglik_op(self, feed_dict, n_samples=None):
-        """
-        Compute the log-likelihoods of a batch of data
-
-        :param feed_dict: ``dict``; A dictionary of predictor and response values
-        :param n_samples: ``int`` or ``None``; Number of posterior samples to use (ignored by DTSRMLE)
-        :return: ``numpy`` array; Pointwise log-likelihoods, one for each training sample
-        """
-
-        raise NotImplementedError
-
-    def run_conv_op(self, feed_dict, scaled=False, n_samples=None):
-        """
-        Convolve a batch of data in feed_dict with the model's latent IRF
-
-        :param feed_dict: ``dict``; A dictionary of predictor variables
-        :param scaled: ``bool``; Whether to scale the outputs using the model's coefficients
-        :param n_samples: ``int`` or ``None``; Number of posterior samples to use (ignored by DTSRMLE)
-        :return: ``numpy`` array; The convolved inputs
-        """
-
-        raise NotImplementedError
 
     def finalize(self):
         """
@@ -2465,8 +2564,5 @@ class DTSR(object):
         :return: ``None``
         """
         plot_heatmap(self.eigenvec, self.src_impulse_names_norate, self.impulse_names_norate, dir=self.outdir)
-
-    def summary(self, fixed=True, random=False):
-        raise NotImplementedError
 
 

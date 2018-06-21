@@ -1,7 +1,7 @@
 .. _dtsrbase:
 
-DTSR (Base class)
-=================
+DTSR (DTSR base class)
+======================
 
 .. autoclass:: dtsr.dtsr.DTSR
     :members:
