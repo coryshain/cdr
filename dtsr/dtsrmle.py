@@ -385,14 +385,6 @@ class DTSRMLE(DTSR):
                 return log_lik
 
     def run_conv_op(self, feed_dict, scaled=False, n_samples=None):
-        """
-        Feedforward a batch of data in feed_dict through the convolutional layer to produce convolved inputs
-
-        :param feed_dict: ``dict``; A dictionary of input variables
-        :param scale: ``bool``; Whether to scale the outputs using the latent coefficients
-        :return: ``numpy`` array; The convolved inputs
-        """
-
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 X_conv = self.sess.run(self.X_conv_scaled if scaled else self.X_conv, feed_dict=feed_dict)

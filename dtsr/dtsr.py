@@ -1744,15 +1744,47 @@ class DTSR(object):
                 return (mean, lower, upper)
 
     def run_train_step(self, feed_dict):
+        """
+        Update the model from a batch of training data
+
+        :param feed_dict: ``dict``; A dictionary of predictor and response values
+        :param n_samples: ``int`` or ``None``; Number of posterior samples to use (ignored by DTSRMLE)
+        :return: ``numpy`` array; Predicted responses, one for each training sample
+        """
+
         raise NotImplementedError
 
     def run_predict_op(self, feed_dict, n_samples=None):
+        """
+        Generate response predictions from a batch of data
+
+        :param feed_dict: ``dict``; A dictionary of predictor values
+        :param n_samples: ``int`` or ``None``; Number of posterior samples to use (ignored by DTSRMLE)
+        :return: ``numpy`` array; Predicted responses, one for each training sample
+        """
         raise NotImplementedError
 
     def run_loglik_op(self, feed_dict, n_samples=None):
+        """
+        Compute the log-likelihoods of a batch of data
+
+        :param feed_dict: ``dict``; A dictionary of predictor and response values
+        :param n_samples: ``int`` or ``None``; Number of posterior samples to use (ignored by DTSRMLE)
+        :return: ``numpy`` array; Pointwise log-likelihoods, one for each training sample
+        """
+
         raise NotImplementedError
 
-    def run_conv_op(self, feed_dict, scaled=False):
+    def run_conv_op(self, feed_dict, scaled=False, n_samples=None):
+        """
+        Convolve a batch of data in feed_dict with the latent IRF to produce convolved data
+
+        :param feed_dict: ``dict``; A dictionary of predictor variables
+        :param scaled: ``bool``; Whether to scale the outputs using the model's coefficients
+        :param n_samples: ``int`` or ``None``; Number of posterior samples to use (ignored by DTSRMLE)
+        :return: ``numpy`` array; The convolved inputs
+        """
+
         raise NotImplementedError
 
     def finalize(self):

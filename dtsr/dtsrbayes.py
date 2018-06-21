@@ -1603,14 +1603,6 @@ class DTSRBayes(DTSR):
                 return log_lik
 
     def run_conv_op(self, feed_dict, scaled=False, n_samples=None):
-        """
-        Feedforward a batch of data in feed_dict through the convolutional layer to produce convolved inputs
-
-        :param feed_dict: ``dict``; A dictionary of input variables
-        :param scale: ``bool``; Whether to scale the outputs using the latent coefficients
-        :return: ``pandas`` table; The convolved inputs
-        """
-
         if n_samples is None:
             n_samples = self.n_samples_eval
 

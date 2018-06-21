@@ -30,6 +30,7 @@ dtsr\.dtsrmle module
 
 .. automodule:: dtsr.dtsrmle
     :members:
+    :inherited-members:
     :show-inheritance:
 
 dtsr\.dtsrbayes module
@@ -37,6 +38,7 @@ dtsr\.dtsrbayes module
 
 .. automodule:: dtsr.dtsrbayes
     :members:
+    :inherited-members:
     :show-inheritance:
 
 dtsr\.formula module
