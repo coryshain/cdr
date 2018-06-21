@@ -290,9 +290,8 @@ class DTSR(object):
             keys = np.sort(y[gf].astype('str').unique())
             vals = np.arange(len(keys), dtype=getattr(np, self.int_type))
             rangf_map = pd.DataFrame({'id':vals},index=keys).to_dict()['id']
-            oov_id = len(keys)+1
             self.rangf_map_base.append(rangf_map)
-            self.rangf_n_levels.append(oov_id)
+            self.rangf_n_levels.append(len(keys) + 1)
 
         self._initialize_session()
 
@@ -1866,7 +1865,7 @@ class DTSR(object):
                     self.support_start: 0.,
                     self.n_time_units: n_time_units,
                     self.n_points_per_time_unit: n_points_per_time_unit,
-                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0)
+                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels - 1, dtype=self.INT_NP), 0)
                 }
 
                 alpha = 100 - float(level)
@@ -2458,7 +2457,7 @@ class DTSR(object):
                     self.support_start: 0.,
                     self.n_time_units: plot_n_time_units,
                     self.n_points_per_time_unit: plot_n_points_per_time_unit,
-                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0)
+                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels - 1, dtype=self.INT_NP), 0)
                 }
 
                 plot_x = self.sess.run(self.support, fd)
