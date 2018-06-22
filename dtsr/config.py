@@ -148,7 +148,7 @@ class Config(object):
             if out['optim_name'] == 'None':
                 out['optim_name'] = None
         if 'optim_epsilon' in settings or add_defaults:
-            out['optim_epsilon'] = settings.get('optim_epsilon', 0.01)
+            out['optim_epsilon'] = settings.get('optim_epsilon', 1e-8)
         if 'learning_rate' in settings or add_defaults:
             out['learning_rate'] = settings.getfloat('learning_rate', 0.001)
         if 'learning_rate_min' in settings or add_defaults:
