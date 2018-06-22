@@ -81,8 +81,14 @@ DTSR_INITIALIZATION_KWARGS = [
     Kwarg(
         'optim_name',
         'Adam',
-        "``float``",
+        "``str``",
         "Name of the optimizer to use. Choose from ``'SGD'``, ``'AdaGrad'``, ``'AdaDelta'``, ``'Adam'``, ``'FTRL'``, ``'RMSProp'``, ``'Nadam'``."
+    ),
+    Kwarg(
+        'optim_epsilon',
+        0.01,
+        "``float``",
+        "Epsilon parameter to use if **optim_name** in ``['Adam', 'Nadam']``, ignored otherwise."
     ),
     Kwarg(
         'learning_rate',
@@ -612,6 +618,8 @@ class DTSR(object):
 
                 if self.regularizer_name is not None:
                     self.regularizer = getattr(tf.contrib.layers, self.regularizer_name)(self.regularizer_scale)
+
+                self.loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='loss_total')
 
     def _initialize_intercepts_coefficients(self):
         with self.sess.as_default():
@@ -1276,14 +1284,22 @@ class DTSR(object):
                     lr_decay_steps = tf.constant(self.lr_decay_steps, dtype=self.INT_TF)
                     lr_decay_rate = tf.constant(self.lr_decay_rate, dtype=self.FLOAT_TF)
                     lr_decay_staircase = self.lr_decay_staircase
-                    self.lr = getattr(tf.train, self.lr_decay_family)(
-                        lr,
-                        self.global_step,
-                        lr_decay_steps,
-                        lr_decay_rate,
-                        staircase=lr_decay_staircase,
-                        name='learning_rate'
-                    )
+                    if 'cosine' in self.lr_decay_family:
+                        self.lr = getattr(tf.train, self.lr_decay_family)(
+                            lr,
+                            self.global_step,
+                            lr_decay_steps,
+                            name='learning_rate'
+                        )
+                    else:
+                        self.lr = getattr(tf.train, self.lr_decay_family)(
+                            lr,
+                            self.global_step,
+                            lr_decay_steps,
+                            lr_decay_rate,
+                            staircase=lr_decay_staircase,
+                            name='learning_rate'
+                        )
                     if np.isfinite(self.learning_rate_min):
                         lr_min = tf.constant(self.learning_rate_min, dtype=self.FLOAT_TF)
                         INF_TF = tf.constant(inf, dtype=self.FLOAT_TF)
@@ -1296,17 +1312,16 @@ class DTSR(object):
                     'Momentum': lambda x: tf.train.MomentumOptimizer(x, 0.9),
                     'AdaGrad': lambda x: tf.train.AdagradOptimizer(x),
                     'AdaDelta': lambda x: tf.train.AdadeltaOptimizer(x),
-                    'Adam': lambda x: tf.train.AdamOptimizer(x),
+                    'Adam': lambda x: tf.train.AdamOptimizer(x, epsilon=self.optim_epsilon),
                     'FTRL': lambda x: tf.train.FtrlOptimizer(x),
                     'RMSProp': lambda x: tf.train.RMSPropOptimizer(x),
-                    'Nadam': lambda x: tf.contrib.opt.NadamOptimizer(x)
+                    'Nadam': lambda x: tf.contrib.opt.NadamOptimizer(x, epsilon=self.optim_epsilon)
                 }[name](self.lr)
 
     def _initialize_logging(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                self.loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='loss_total')
-                tf.summary.scalar('loss', self.loss_total, collections=['loss'])
+                tf.summary.scalar('loss_by_iter', self.loss_total, collections=['loss'])
                 if self.log_graph:
                     self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/dtsr', self.sess.graph)
                 else:
@@ -1725,8 +1740,8 @@ class DTSR(object):
                 self._initialize_irf_lambdas()
                 self._initialize_irf_params()
                 self._construct_network()
-                self._initialize_logging()
                 self.initialize_objective()
+                self._initialize_logging()
                 self._initialize_ema()
                 self._initialize_saver()
                 self.load(restore=restore)
