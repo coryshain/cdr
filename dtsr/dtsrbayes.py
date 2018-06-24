@@ -1146,14 +1146,14 @@ class DTSRBayes(DTSR):
 
                             half_interval = None
                             if lb is not None:
-                                half_interval = param_summary - lb + self.epsilon
+                                half_interval = param_summary - lb
                             elif ub is not None:
                                 if half_interval is not None:
-                                    half_interval = tf.minimum(half_interval, ub - self.epsilon - param_summary)
+                                    half_interval = tf.minimum(half_interval, ub - param_summary)
                                 else:
-                                    half_interval = ub - self.epsilon - param_summary
+                                    half_interval = ub - self.epsilon
                             if half_interval is not None:
-                                param_ran_summary = tf.tanh(param_ran_summary) * half_interval
+                                param_ran_summary = tf.tanh(param_ran_summary) * (half_interval - 2 * self.epsilon)
 
                             for j in range(len(irf_by_rangf[gf])):
                                 irf_name = irf_by_rangf[gf][j]
