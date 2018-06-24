@@ -986,14 +986,14 @@ class DTSRBayes(DTSR):
                 if lb is None and ub is None:
                     param_out = param
                 elif lb is not None and ub is None:
-                    param_out = tf.nn.softplus(param) + lb + self.epsilon
-                    param_summary = tf.nn.softplus(param_summary) + lb + self.epsilon
+                    param_out = lb + self.epsilon + tf.nn.softplus(param)
+                    param_summary = lb + self.epsilon + tf.nn.softplus(param_summary)
                 elif lb is None and ub is not None:
-                    param_out = -tf.nn.softplus(param) + ub - self.epsilon
-                    param_summary = -tf.nn.softplus(param_summary) + ub - self.epsilon
+                    param_out = ub - self.epsilon - tf.nn.softplus(param)
+                    param_summary = ub - self.epsilon - tf.nn.softplus(param_summary)
                 else:
-                    param_out = tf.sigmoid(param) * ((ub-self.epsilon) - (lb+self.epsilon)) + lb + self.epsilon
-                    param_summary = tf.sigmoid(param_summary) * ((ub-self.epsilon) - (lb+self.epsilon)) + lb + self.epsilon
+                    param_out = lb + self.epsilon + tf.sigmoid(param) * ((ub-self.epsilon) - (lb+self.epsilon))
+                    param_summary = lb + self.epsilon + tf.sigmoid(param_summary) * ((ub-self.epsilon) - (lb+self.epsilon))
 
                 for i in range(dim):
                     tf.summary.scalar(
@@ -1008,11 +1008,11 @@ class DTSRBayes(DTSR):
                 if lb is None and ub is None:
                     param_untrainable_out = param_untrainable
                 elif lb is not None and ub is None:
-                    param_untrainable_out = tf.nn.softplus(param_untrainable) + lb + self.epsilon
+                    param_untrainable_out = lb + self.epsilon + tf.nn.softplus(param_untrainable)
                 elif lb is None and ub is not None:
-                    param_untrainable_out = -tf.nn.softplus(param_untrainable) + ub - self.epsilon
+                    param_untrainable_out = ub - self.epsilon - tf.nn.softplus(param_untrainable)
                 else:
-                    param_untrainable_out = tf.sigmoid(param_untrainable) * ((ub - self.epsilon) - (lb + self.epsilon)) + lb + self.epsilon
+                    param_untrainable_out = lb + self.epsilon + tf.sigmoid(param_untrainable) * ((ub - self.epsilon) - (lb + self.epsilon))
 
                 # Process any random IRF parameters
                 if len(irf_by_rangf) > 0:
@@ -1125,14 +1125,14 @@ class DTSRBayes(DTSR):
 
                         half_interval = None
                         if lb is not None:
-                            half_interval = param_out - lb + self.epsilon
+                            half_interval = param_out - lb
                         elif ub is not None:
                             if half_interval is not None:
-                                half_interval = tf.minimum(half_interval, ub - self.epsilon - param_out)
+                                half_interval = tf.minimum(half_interval, ub - param_out)
                             else:
-                                half_interval = ub - self.epsilon - param_out
+                                half_interval = ub - param_out
                         if half_interval is not None:
-                            param_ran = tf.tanh(param_ran) * half_interval
+                            param_ran = tf.tanh(param_ran) * (half_interval - 2 * self.epsilon)
 
                         param_out += tf.gather(param_ran, self.gf_y[:, i], axis=0)
 
