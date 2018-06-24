@@ -463,7 +463,7 @@ class DTSR(object):
                 if self.intercept_init is None:
                     self.intercept_init = self.y_train_mean
                 self.intercept_init_tf = tf.constant(self.intercept_init, dtype=self.FLOAT_TF)
-                self.epsilon = tf.constant(1e-35, dtype=self.FLOAT_TF)
+                self.epsilon = tf.constant(1e-20, dtype=self.FLOAT_TF)
 
     def __getstate__(self):
         md = self._pack_metadata()
