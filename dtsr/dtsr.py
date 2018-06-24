@@ -776,7 +776,7 @@ class DTSR(object):
                 def gamma(params):
                     pdf = tf.contrib.distributions.Gamma(concentration=params[:,0:1],
                                                          rate=params[:,1:2],
-                                                         validate_args=False).prob
+                                                         validate_args=True).prob
                     return lambda x: pdf(x + self.epsilon)
 
                 self.irf_lambdas['Gamma'] = gamma
@@ -787,7 +787,7 @@ class DTSR(object):
                 def shifted_gamma(params):
                     pdf = tf.contrib.distributions.Gamma(concentration=params[:,0:1],
                                                          rate=params[:,1:2],
-                                                         validate_args=False).prob
+                                                         validate_args=True).prob
                     return lambda x: pdf(x - params[:,2:3] + self.epsilon)
 
                 self.irf_lambdas['ShiftedGamma'] = shifted_gamma
@@ -2095,7 +2095,7 @@ class DTSR(object):
                                 )
                         t1_iter = pytime.time()
                         sys.stderr.write('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
-                        
+
                     except tf.errors.InvalidArgumentError as err:
                         sys.stderr.write('Encountered numerical instability during inference.\nRestarting from the most recent checkpoint.\nError details:\n%s' %err)
                         self.load()
