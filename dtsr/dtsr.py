@@ -859,92 +859,92 @@ class DTSR(object):
 
                     if family == 'Exp':
                         beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=1)
-                        beta, beta_mean = self.initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([beta], axis=1)
                         params_summary =  tf.stack([beta_mean], axis=1)
                     elif family == 'ExpRateGT1':
                         beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=2)
-                        beta, beta_mean = self.initialize_irf_param('beta', irf_ids, mean=beta_init, lb=1, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=1, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([beta], axis=1)
                         params_summary =  tf.stack([beta_mean], axis=1)
                     elif family == 'Gamma':
                         alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=2)
                         beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=5)
-                        alpha, alpha_mean = self.initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        beta, beta_mean = self.initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        alpha, alpha_mean = self._initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([alpha, beta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean], axis=1)
                     elif family in ['GammaKgt1', 'GammaShapeGT1']:
                         alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=2)
                         beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=5)
-                        alpha, alpha_mean = self.initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=1, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        beta, beta_mean = self.initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        alpha, alpha_mean = self._initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=1, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([alpha, beta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean], axis=1)
                     elif family == 'SteepGamma':
                         alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=1)
                         beta_init = self._get_mean_init_vector('beta', 25)
-                        alpha, alpha_mean = self.initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        beta, beta_mean = self.initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        alpha, alpha_mean = self._initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([alpha, beta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean], axis=1)
                     elif family == 'ShiftedGamma':
                         alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=2)
                         beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=5)
                         delta_init = self._get_mean_init_vector('delta', -0.5)
-                        alpha, alpha_mean = self.initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        beta, beta_mean = self.initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        delta, delta_mean = self.initialize_irf_param('delta', irf_ids, mean=delta_init, ub=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        alpha, alpha_mean = self._initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        delta, delta_mean = self._initialize_irf_param('delta', irf_ids, mean=delta_init, ub=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([alpha, beta, delta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean, delta_mean], axis=1)
                     elif family in ['ShiftedGammaKgt1', 'ShiftedGammaShapeGT1']:
                         alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=2)
                         beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=5)
                         delta_init = self._get_mean_init_vector(irf_ids, 'delta', irf_param_init, default=-0.5)
-                        alpha, alpha_mean = self.initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=1, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        beta, beta_mean = self.initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        delta, delta_mean = self.initialize_irf_param('delta', irf_ids, mean=delta_init, ub=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        alpha, alpha_mean = self._initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=1, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        delta, delta_mean = self._initialize_irf_param('delta', irf_ids, mean=delta_init, ub=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([alpha, beta, delta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean, delta_mean], axis=1)
                     elif family == 'Normal':
                         mu_init = self._get_mean_init_vector(irf_ids, 'mu', irf_param_init, default=0)
                         sigma_init = self._get_mean_init_vector(irf_ids, 'sigma', irf_param_init, default=1)
-                        mu, mu_mean = self.initialize_irf_param('mu', irf_ids, mean=mu_init, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        sigma, sigma_mean = self.initialize_irf_param('sigma', irf_ids, mean=sigma_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        mu, mu_mean = self._initialize_irf_param('mu', irf_ids, mean=mu_init, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        sigma, sigma_mean = self._initialize_irf_param('sigma', irf_ids, mean=sigma_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([mu, sigma], axis=1)
                         params_summary = tf.stack([mu_mean, sigma_mean], axis=1)
                     elif family == 'SkewNormal':
                         mu_init = self._get_mean_init_vector(irf_ids, 'mu', irf_param_init, default=0)
                         sigma_init = self._get_mean_init_vector(irf_ids, 'sigma', irf_param_init, default=1)
                         alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=0)
-                        mu, mu_mean = self.initialize_irf_param('mu', irf_ids, mean=mu_init, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        sigma, sigma_mean = self.initialize_irf_param('sigma', irf_ids, mean=sigma_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        alpha, alpha_mean = self.initialize_irf_param('alpha', irf_ids, alpha=alpha_init, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        mu, mu_mean = self._initialize_irf_param('mu', irf_ids, mean=mu_init, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        sigma, sigma_mean = self._initialize_irf_param('sigma', irf_ids, mean=sigma_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        alpha, alpha_mean = self._initialize_irf_param('alpha', irf_ids, alpha=alpha_init, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([mu, sigma, alpha], axis=1)
                         params_summary = tf.stack([mu_mean, sigma_mean, alpha_mean], axis=1)
                     elif family == 'EMG':
                         mu_init = self._get_mean_init_vector(irf_ids, 'mu', irf_param_init, default=0)
                         sigma_init = self._get_mean_init_vector(irf_ids, 'sigma', irf_param_init, default=1)
                         beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=1)
-                        mu, mu_mean = self.initialize_irf_param('mu', irf_ids, mean=mu_init, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        sigma, sigma_mean = self.initialize_irf_param('sigma', irf_ids, mean=sigma_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        beta, beta_mean = self.initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        mu, mu_mean = self._initialize_irf_param('mu', irf_ids, mean=mu_init, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        sigma, sigma_mean = self._initialize_irf_param('sigma', irf_ids, mean=sigma_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([mu, sigma, beta], axis=1)
                         params_summary = tf.stack([mu_mean, sigma_mean, beta_mean], axis=1)
                     elif family == 'BetaPrime':
                         alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=1)
                         beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=1)
-                        alpha, alpha_mean = self.initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        beta, beta_mean = self.initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        alpha, alpha_mean = self._initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([alpha, beta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean], axis=1)
                     elif family == 'ShiftedBetaPrime':
                         alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=1)
                         beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=1)
                         delta_init = self._get_mean_init_vector('delta', -1)
-                        alpha, alpha_mean = self.initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        beta, beta_mean = self.initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
-                        delta, delta_mean = self.initialize_irf_param('delta', irf_ids, mean=delta_init, ub=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        alpha, alpha_mean = self._initialize_irf_param('alpha', irf_ids, mean=alpha_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        beta, beta_mean = self._initialize_irf_param('beta', irf_ids, mean=beta_init, lb=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
+                        delta, delta_mean = self._initialize_irf_param('delta', irf_ids, mean=delta_init, ub=0, irf_by_rangf=irf_by_rangf, trainable=irf_param_trainable)
                         params = tf.stack([alpha, beta, delta], axis=1)
                         params_summary = tf.stack([alpha_mean, beta_mean, delta_mean], axis=1)
                     else:
@@ -955,6 +955,154 @@ class DTSR(object):
                         assert id not in self.irf_params, 'Duplicate IRF node name already in self.irf_params'
                         self.irf_params[id] = tf.gather(params, ix, axis=2)
                         self.irf_params_summary[id] = tf.gather(params_summary, ix, axis=2)
+
+    def _initialize_irf_param(self, param_name, ids, trainable=None, mean=0, lb=None, ub=None, irf_by_rangf=None):
+        if irf_by_rangf is None:
+            irf_by_rangf = []
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                param_mean_init, lb, ub = self._process_mean(mean, lb, ub)
+
+                if trainable is None:
+                    trainable_ix = np.array(list(range(len(ids))), dtype=self.INT_NP)
+                    untrainable_ix = []
+                else:
+                    trainable_ix = []
+                    untrainable_ix = []
+                    for i in range(len(ids)):
+                        name = ids[i]
+                        if param_name in trainable[name]:
+                            trainable_ix.append(i)
+                        else:
+                            untrainable_ix.append(i)
+                    trainable_ix = np.array(trainable_ix, dtype=self.INT_NP)
+                    untrainable_ix = np.array(untrainable_ix, dtype=self.INT_NP)
+
+                dim = len(trainable_ix)
+
+                # Initialize trainable IRF parameters as trainable variables
+
+                param, param_summary = self.initialize_irf_param_unconstrained(
+                    param_name,
+                    [x for x in ids if param_name in trainable[x]],
+                    mean=tf.expand_dims(tf.gather(param_mean_init, trainable_ix), 0)
+                )
+
+                if lb is None and ub is None:
+                    param_out = param
+                elif lb is not None and ub is None:
+                    param_out = lb + self.epsilon + tf.nn.softplus(param)
+                    param_summary = lb + self.epsilon + tf.nn.softplus(param_summary)
+                elif lb is None and ub is not None:
+                    param_out = ub - self.epsilon - tf.nn.softplus(param)
+                    param_summary = ub - self.epsilon - tf.nn.softplus(param_summary)
+                else:
+                    param_out = lb + self.epsilon + tf.sigmoid(param) * ((ub-self.epsilon) - (lb+self.epsilon))
+                    param_summary = lb + self.epsilon + tf.sigmoid(param_summary) * ((ub-self.epsilon) - (lb+self.epsilon))
+
+                for i in range(dim):
+                    tf.summary.scalar(
+                        sn('%s/%s' % (param_name, ids[i])),
+                        param_summary[0, i],
+                        collections=['params']
+                    )
+
+                # Initialize untrainable IRF parameters as constants
+
+                param_untrainable = tf.expand_dims(tf.gather(param_mean_init, untrainable_ix), 0)
+
+                if lb is None and ub is None:
+                    param_untrainable_out = param_untrainable
+                elif lb is not None and ub is None:
+                    param_untrainable_out = tf.nn.softplus(param_untrainable) + lb + self.epsilon
+                elif lb is None and ub is not None:
+                    param_untrainable_out = -tf.nn.softplus(param_untrainable) + ub - self.epsilon
+                else:
+                    param_untrainable_out = tf.sigmoid(param_untrainable) * ((ub - self.epsilon) - (lb + self.epsilon)) + lb + self.epsilon
+
+                # Process any random IRF parameters
+
+                if len(irf_by_rangf) > 0:
+                    for gf in irf_by_rangf:
+                        param_random, param_random_summary = self.initialize_irf_param_unconstrained(
+                            param_name,
+                            [x for x in ids if param_name in trainable[x]],
+                            mean=0.,
+                            ran_gf=gf
+                        )
+
+                        i = self.rangf.index(gf)
+                        mask_row_np = np.ones(self.rangf_n_levels[i], dtype=getattr(np, self.float_type))
+                        mask_row_np[self.rangf_n_levels[i] - 1] = 0
+                        mask_row = tf.constant(mask_row_np, dtype=self.FLOAT_TF)
+                        col_ix = names2ix(irf_by_rangf[gf], ids)
+                        mask_col_np = np.zeros([1, dim])
+                        mask_col_np[0, col_ix] = 1.
+                        mask_col = tf.constant(mask_col_np, dtype=self.FLOAT_TF)
+
+                        param_random *= mask_col
+                        param_random *= tf.expand_dims(mask_row, -1)
+
+                        param_random_mean = tf.reduce_sum(param_random, axis=0) / tf.reduce_sum(mask_row)
+                        param_random_centering_vector = tf.expand_dims(mask_row, -1) * param_random_mean
+                        param_random -= param_random_centering_vector
+
+                        half_interval = None
+                        if lb is not None:
+                            half_interval = param_out - lb
+                        elif ub is not None:
+                            if half_interval is not None:
+                                half_interval = tf.minimum(half_interval, ub - param_out)
+                            else:
+                                half_interval = ub - param_out
+                        if half_interval is not None:
+                            param_random = tf.tanh(param_random) * (half_interval - 2 * self.epsilon)
+
+                        if lb is not None:
+                            tf.Assert(param_out + param_random > lb)
+                        if ub is not None:
+                            tf.Assert(param_out + param_random < ub)
+
+                        param_out += tf.gather(param_random, self.gf_y[:, i], axis=0)
+
+                        if self.log_random:
+                            param_random_summary *= mask_col
+                            param_random_summary *= tf.expand_dims(mask_row, -1)
+
+                            param_ran_summary_mean = tf.reduce_sum(param_random_summary, axis=0) / tf.reduce_sum(mask_row)
+                            param_ran_summary_centering_vector = tf.expand_dims(mask_row, -1) * param_ran_summary_mean
+                            param_random_summary -= param_ran_summary_centering_vector
+
+                            half_interval = None
+                            if lb is not None:
+                                half_interval = param_summary - lb
+                            elif ub is not None:
+                                if half_interval is not None:
+                                    half_interval = tf.minimum(half_interval, ub - param_summary)
+                                else:
+                                    half_interval = ub - param_summary
+                            if half_interval is not None:
+                                param_random_summary = tf.tanh(param_random_summary) * (half_interval - 2 * self.epsilon)
+
+                            for j in range(len(irf_by_rangf[gf])):
+                                irf_name = irf_by_rangf[gf][j]
+                                ix = col_ix[j]
+                                tf.summary.histogram(
+                                    'by_%s/%s/%s' % (gf, param_name, irf_name),
+                                    param_random_summary[:, ix],
+                                    collections=['random']
+                                )
+
+                        # Combine trainable and untrainable parameters
+                    if len(untrainable_ix) > 0:
+                        param_out = tf.concat([param_out, param_untrainable_out], axis=1)
+                        param_summary = tf.concat([param_summary, param_untrainable_out], axis=1)
+
+                    param_out = tf.gather(param_out, np.concatenate([trainable_ix, untrainable_ix]), axis=1)
+                    param_summary = tf.gather(param_summary, np.concatenate([trainable_ix, untrainable_ix]), axis=1)
+
+                    return (param_out, param_summary)
 
     def _get_mean_init_vector(self, irf_ids, param_name, irf_param_init, default=0):
         mean = np.zeros(len(irf_ids))
@@ -1383,20 +1531,18 @@ class DTSR(object):
 
         raise NotImplementedError
 
-    def initialize_irf_param(self, param_name, ids, trainable=None, mean=0, lb=None, ub=None, irf_by_rangf=None):
+    def initialize_irf_param_unconstrained(self, param_name, ids, mean=0, ran_gf=None):
         """
-        Add IRF parameters to the DTSR model.
+        Add IRF parameters in the unconstrained space to the DTSR model.
+        DTSR will apply appropriate constraint transformations as needed.
         This method must be implemented by subclasses of ``DTSR`` and should only be called at model initialization.
         Correct model behavior is not guaranteed if called at any other time.
 
         :param param_name: ``str``; Name of parameter (e.g. ``"alpha"``)
         :param ids: ``list`` of ``str``; Names of IRF nodes to which this parameter applies
-        :param trainable: ``dict`` or ``None``; Keys correspond to IDs in **ids**, each associated with a list of names of trainable parameters. If ``None``, the parameter is treated as trainable for all members of **ids**.
-        :param mean: ``float``; Initial value for the parameter.
-        :param lb: ``float`` or ``None``; Upper bound on the parameter (if ``None``, no upper bound).
-        :param ub: ``float`` or ``None``; Lower bound on the parameter (if ``None``, no lower bound).
-        :param irf_by_rangf: ``dict`` or ``None``; Keys correspond to random grouping factors and are associated with a list of IDs (subset of **ids**) -- defines the random IRF structures associated with this parameter. If ``None``, the parameter is treated as fixed.
-        :return: 2-tuple of ``Tensor`` ``(param, param_summary)``; ``param`` is the parameter for use by the model. ``param_summary`` is an identically-shaped representation of the current param values for logging and plotting (can be identical to ``param``). For fixed params, should return a vector of length ``len(ids)``. For random params, should return batch-length matrix of **summed** fixed and random param values for each input in the batch.
+        :param mean: ``float`` or ``Tensor``; scalar (broadcasted) or 1D tensor (shape = ``(len(ids),)``) of parameter means on the transformed space.
+        :param ran_gf: ``str`` or ``None``: Name of random grouping factor for random coefficient (if ``None``, constructs a fixed coefficient)
+        :return: 2-tuple of ``Tensor`` ``(param, param_summary)``; ``param`` is the parameter for use by the model. ``param_summary`` is an identically-shaped representation of the current param values for logging and plotting (can be identical to ``param``). For fixed params, should return a vector of length ``len(ids)``. For random params, should return batch-length matrix of random param values with ``len(ids)`` zero-centered columns for each input in the batch.
         """
 
         raise NotImplementedError

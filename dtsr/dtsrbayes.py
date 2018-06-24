@@ -878,301 +878,175 @@ class DTSRBayes(DTSR):
 
                 return coefficient, coefficient_summary
 
-    def initialize_irf_param(self, param_name, ids, mean=0, lb=None, ub=None, irf_by_rangf=None, trainable=None):
-        dim = len(ids)
-        if irf_by_rangf is None:
-            irf_by_rangf = []
-
+    def initialize_irf_param_unconstrained(self, param_name, ids, mean=0., ran_gf=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if self.mv:
-                    names = ['%s_%s' %(param_name, id) for id in ids]
-                    ix = names2ix(names, self.full_joint_names)
-                    param_mean_init = self.full_joint_mu[ix[0]]
-                    param = tf.expand_dims(tf.gather(self.full_joint, ix), 0)
-                    param_summary = tf.expand_dims(tf.gather(self.full_joint_q.mean(), ix), 0)
-                else:
-                    param_mean_init, lb, ub = self._process_mean(mean, lb, ub)
-
-                    if trainable is None:
-                        trainable_ix = np.array(list(range(len(ids))), dtype=self.INT_NP)
-                        untrainable_ix = []
+                if ran_gf is None:
+                    if self.mv:
+                        names = ['%s_%s' %(param_name, id) for id in ids]
+                        ix = names2ix(names, self.full_joint_names)
+                        param_mean_init = self.full_joint_mu[ix[0]]
+                        param = tf.expand_dims(tf.gather(self.full_joint, ix), 0)
+                        param_summary = tf.expand_dims(tf.gather(self.full_joint_q.mean(), ix), 0)
                     else:
-                        trainable_ix = []
-                        untrainable_ix = []
-                        for i in range(len(ids)):
-                            name = ids[i]
-                            if param_name in trainable[name]:
-                                trainable_ix.append(i)
+                        if self.variational():
+                            # Posterior distribution
+                            param_q_loc = tf.Variable(
+                                tf.random_normal(
+                                    [1, len(ids)],
+                                    mean=mean,
+                                    stddev=self.init_sd,
+                                    dtype=self.FLOAT_TF
+                                ),
+                                name=sn('%s_q_loc_%s' % (param_name, '-'.join(ids)))
+                            )
+
+                            param_q_scale = tf.Variable(
+                                tf.random_normal(
+                                    [1, len(ids)],
+                                    mean=self.conv_posterior_scale_mean_init,
+                                    stddev=self.init_sd,
+                                    dtype=self.FLOAT_TF
+                                ),
+                                name=sn('%s_q_scale_%s' % (param_name, '-'.join(ids)))
+                            )
+
+                            param_q = Normal(
+                                loc=param_q_loc,
+                                scale=tf.nn.softplus(param_q_scale),
+                                name=sn('%s_q_%s' % (param_name, '-'.join(ids)))
+                            )
+
+                            param_summary = param_q.mean()
+
+                            if self.declare_priors:
+                                # Prior distribution
+                                param = Normal(
+                                    loc=mean,
+                                    scale=self.conv_prior_sd,
+                                    name=sn('%s_%s' % (param_name, '-'.join(ids)))
+                                )
+                                self.inference_map[param] = param_q
                             else:
-                                untrainable_ix.append(i)
-                        trainable_ix = np.array(trainable_ix, dtype=self.INT_NP)
-                        untrainable_ix = np.array(untrainable_ix, dtype=self.INT_NP)
-
-                    dim = len(trainable_ix)
-
-                    # Initialize trainable IRF parameters as random variables
-                    if self.variational():
-                        # Posterior distribution
-                        param_q_loc = tf.Variable(
-                            tf.random_normal(
-                                [1, dim],
-                                mean=tf.expand_dims(tf.gather(param_mean_init, trainable_ix), 0),
-                                stddev=self.init_sd,
-                                dtype=self.FLOAT_TF
-                            ),
-                            name=sn('%s_q_loc_%s' % (param_name, '-'.join(ids)))
-                        )
-
-                        param_q_scale = tf.Variable(
-                            tf.random_normal(
-                                [1, dim],
-                                mean=self.conv_posterior_scale_mean_init,
-                                stddev=self.init_sd,
-                                dtype=self.FLOAT_TF
-                            ),
-                            name=sn('%s_q_scale_%s' % (param_name, '-'.join(ids)))
-                        )
-
-                        param_q = Normal(
-                            loc=param_q_loc,
-                            scale=tf.nn.softplus(param_q_scale),
-                            name=sn('%s_q_%s' % (param_name, '-'.join(ids)))
-                        )
-
-                        param_summary = param_q.mean()
-
-                        if self.declare_priors:
+                                param = param_q
+                        else:
                             # Prior distribution
                             param = Normal(
-                                loc=tf.expand_dims(tf.gather(param_mean_init, trainable_ix), 0),
+                                loc=mean,
                                 scale=self.conv_prior_sd,
                                 name=sn('%s_%s' % (param_name, '-'.join(ids)))
                             )
-                            self.inference_map[param] = param_q
-                        else:
-                            param = param_q
-                    else:
-                        # Prior distribution
-                        param = Normal(
-                            loc=tf.expand_dims(tf.gather(param_mean_init, trainable_ix), 0),
-                            scale=self.conv_prior_sd,
-                            name=sn('%s_%s' % (param_name, '-'.join(ids)))
-                        )
 
-                        # Posterior distribution
-                        params_q_samples = tf.Variable(
-                            tf.zeros((self.n_samples, 1, dim), dtype=self.FLOAT_TF),
-                            name=sn('%s_q_%s_samples' % (param_name, '-'.join(ids)))
-                        )
-                        param_q = Empirical(
-                            params=params_q_samples,
-                            name=sn('%s_q_%s_samples' % (param_name, '-'.join(ids)))
-                        )
-
-                        if self.inference_name == 'MetropolisHastings':
-                            # Proposal distribution
-                            L_proposal = Normal(
-                                loc=param,
-                                scale=self.mh_proposal_sd,
-                                name=sn('%s_proposal_%s' % (param_name, '-'.join(ids)))
+                            # Posterior distribution
+                            params_q_samples = tf.Variable(
+                                tf.zeros((self.n_samples, 1, len(ids)), dtype=self.FLOAT_TF),
+                                name=sn('%s_q_%s_samples' % (param_name, '-'.join(ids)))
                             )
-                            self.proposal_map[param] = L_proposal
+                            param_q = Empirical(
+                                params=params_q_samples,
+                                name=sn('%s_q_%s_samples' % (param_name, '-'.join(ids)))
+                            )
 
-                        param_summary = param_q.params[self.global_batch_step - 1]
+                            if self.inference_name == 'MetropolisHastings':
+                                # Proposal distribution
+                                L_proposal = Normal(
+                                    loc=param,
+                                    scale=self.mh_proposal_sd,
+                                    name=sn('%s_proposal_%s' % (param_name, '-'.join(ids)))
+                                )
+                                self.proposal_map[param] = L_proposal
 
-                        self.inference_map[param] = param_q
+                            param_summary = param_q.params[self.global_batch_step - 1]
 
-                if lb is None and ub is None:
-                    param_out = param
-                elif lb is not None and ub is None:
-                    param_out = lb + self.epsilon + tf.nn.softplus(param)
-                    param_summary = lb + self.epsilon + tf.nn.softplus(param_summary)
-                elif lb is None and ub is not None:
-                    param_out = ub - self.epsilon - tf.nn.softplus(param)
-                    param_summary = ub - self.epsilon - tf.nn.softplus(param_summary)
+                            self.inference_map[param] = param_q
                 else:
-                    param_out = lb + self.epsilon + tf.sigmoid(param) * ((ub-self.epsilon) - (lb+self.epsilon))
-                    param_summary = lb + self.epsilon + tf.sigmoid(param_summary) * ((ub-self.epsilon) - (lb+self.epsilon))
+                    if self.mv_ran:
+                        param = []
+                        param_summary = []
+                        for ID in ids:
+                            names = ['%s_%s_by_%s_%s' % (param_name, ID, ran_gf, i) for i in range(self.rangf_n_levels[self.rangf.index(ran_gf)])]
+                            ix = names2ix(names, self.full_joint_names)
+                            param.append(tf.gather(self.full_joint, ix))
+                            param_summary.append(tf.gather(self.full_joint_q.mean(), ix))
+                        param = tf.stack(param, axis=1)
+                        param_summary = tf.stack(param_summary, axis=1)
+                    else:
+                        rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)]
+                        if self.variational():
+                            # Posterior distribution
+                            param_q_loc = tf.Variable(
+                                tf.random_normal(
+                                    [rangf_n_levels, len(ids)],
+                                    mean=0.,
+                                    stddev=self.init_sd,
+                                    dtype=self.FLOAT_TF
+                                ),
+                                name=sn('%s_q_loc_%s_by_%s' % (param_name, '-'.join(ids), ran_gf))
+                            )
 
-                for i in range(dim):
-                    tf.summary.scalar(
-                        sn('%s/%s' % (param_name, ids[i])),
-                        param_summary[0, i],
-                        collections=['params']
-                    )
+                            param_q_scale = tf.Variable(
+                                tf.random_normal(
+                                    [rangf_n_levels, len(ids)],
+                                    mean=self.conv_posterior_scale_mean_init,
+                                    stddev=self.init_sd,
+                                    dtype=self.FLOAT_TF
+                                ),
+                                name=sn('%s_q_scale_%s_by_%s' % (param_name, '-'.join(ids), ran_gf))
+                            )
 
-                # Initialize untrainable IRF parameters as constants
-                param_untrainable = tf.expand_dims(tf.gather(param_mean_init, untrainable_ix), 0)
+                            param_q = Normal(
+                                loc=param_q_loc,
+                                scale=tf.nn.softplus(param_q_scale) * self.ranef_to_fixef_prior_sd_ratio,
+                                name=sn('%s_q_%s_by_%s' % (param_name, '-'.join(ids), ran_gf))
+                            )
 
-                if lb is None and ub is None:
-                    param_untrainable_out = param_untrainable
-                elif lb is not None and ub is None:
-                    param_untrainable_out = lb + self.epsilon + tf.nn.softplus(param_untrainable)
-                elif lb is None and ub is not None:
-                    param_untrainable_out = ub - self.epsilon - tf.nn.softplus(param_untrainable)
-                else:
-                    param_untrainable_out = lb + self.epsilon + tf.sigmoid(param_untrainable) * ((ub - self.epsilon) - (lb + self.epsilon))
+                            param_summary = param_q.mean()
 
-                # Process any random IRF parameters
-                if len(irf_by_rangf) > 0:
-                    for gf in irf_by_rangf:
-                        i = self.rangf.index(gf)
-                        mask_row_np = np.ones(self.rangf_n_levels[i])
-                        mask_row_np[self.rangf_n_levels[i] - 1] = 0
-                        mask_row = tf.constant(mask_row_np, dtype=self.FLOAT_TF)
-                        col_ix = names2ix(irf_by_rangf[gf], ids)
-                        mask_col_np = np.zeros([1, dim])
-                        mask_col_np[0, col_ix] = 1.
-                        mask_col = tf.constant(mask_col_np, dtype=self.FLOAT_TF)
-
-                        if self.mv_ran:
-                            param_ran = []
-                            param_ran_summary = []
-                            for id in ids:
-                                names = ['%s_%s_by_%s_%s' % (param_name, id, gf, i) for i in range(self.rangf_n_levels[self.rangf.index(gf)])]
-                                ix = names2ix(names, self.full_joint_names)
-                                param_ran.append(tf.gather(self.full_joint, ix))
-                                param_ran_summary.append(tf.gather(self.full_joint_q.mean(), ix))
-                            param_ran = tf.stack(param_ran, axis=1)
-                            param_ran_summary = tf.stack(param_ran_summary, axis=1)
-                        else:
-                            if self.variational():
-                                # Posterior distribution
-                                param_ran_q_loc = tf.Variable(
-                                    tf.random_normal(
-                                        [self.rangf_n_levels[i], dim],
-                                        mean=0.,
-                                        stddev=self.init_sd,
-                                        dtype=self.FLOAT_TF
-                                    ),
-                                    name=sn('%s_q_loc_%s_by_%s' % (param_name, '-'.join(ids), gf))
-                                )
-
-                                param_ran_q_scale = tf.Variable(
-                                    tf.random_normal(
-                                        [self.rangf_n_levels[i], dim],
-                                        mean=self.conv_posterior_scale_mean_init,
-                                        stddev=self.init_sd,
-                                        dtype=self.FLOAT_TF
-                                    ),
-                                    name=sn('%s_q_scale_%s_by_%s' % (param_name, '-'.join(ids), gf))
-                                )
-
-                                param_ran_q = Normal(
-                                    loc=param_ran_q_loc,
-                                    scale=tf.nn.softplus(param_ran_q_scale) * self.ranef_to_fixef_prior_sd_ratio,
-                                    name=sn('%s_q_%s_by_%s' % (param_name, '-'.join(ids), gf))
-                                )
-                                if self.log_random:
-                                    param_ran_summary = tf.gather(param_ran_q.mean(), col_ix, axis=1)
-
-                                if self.declare_priors:
-                                    # Prior distribution
-                                    param_ran = Normal(
-                                        sample_shape=[self.rangf_n_levels[i], dim],
-                                        loc=0.,
-                                        scale=self.conv_prior_sd * self.ranef_to_fixef_prior_sd_ratio,
-                                        name='%s_by_%s' % (param_name, gf)
-                                    )
-                                    self.inference_map[param_ran] = param_ran_q
-                                else:
-                                    param_ran = param_ran_q
-
-                            else:
+                            if self.declare_priors:
                                 # Prior distribution
-                                param_ran = Normal(
-                                    sample_shape=[self.rangf_n_levels[i], dim],
+                                param = Normal(
+                                    sample_shape=[rangf_n_levels, len(ids)],
                                     loc=0.,
                                     scale=self.conv_prior_sd * self.ranef_to_fixef_prior_sd_ratio,
-                                    name='%s_by_%s' % (param_name, gf)
+                                    name='%s_by_%s' % (param_name, ran_gf)
                                 )
-
-                                # Posterior distribution
-                                param_ran_q_samples = tf.Variable(
-                                    tf.zeros((self.n_samples, self.rangf_n_levels[i], dim), dtype=self.FLOAT_TF),
-                                    name=sn('%s_q_%s_by_%s_samples' % (param_name, '-'.join(ids), gf))
-                                )
-                                param_ran_q = Empirical(
-                                    params=param_ran_q_samples,
-                                    name=sn('%s_q_%s_by_%s' % (param_name, '-'.join(ids), gf))
-                                )
-
-                                if self.inference_name == 'MetropolisHastings':
-                                    # Proposal distribution
-                                    param_ran_proposal = Normal(
-                                        loc=param_ran,
-                                        scale=self.mh_proposal_sd,
-                                        name=sn('%s_proposal_%s_by_%s' % (param_name, '-'.join(ids), gf))
-                                    )
-                                    self.proposal_map[param_ran] = param_ran_proposal
-
-                                if self.log_random:
-                                    param_ran_summary = tf.gather(
-                                        param_ran_q.params[self.global_batch_step - 1],
-                                        col_ix,
-                                        axis=1
-                                    )
-
-                                self.inference_map[param_ran] = param_ran_q
-
-                        param_ran *= mask_col
-                        param_ran *= tf.expand_dims(mask_row, -1)
-
-                        param_ran_mean = tf.reduce_sum(param_ran, axis=0) / tf.reduce_sum(mask_row)
-                        param_ran_centering_vector = tf.expand_dims(mask_row, -1) * param_ran_mean
-                        param_ran -= param_ran_centering_vector
-
-                        half_interval = None
-                        if lb is not None:
-                            half_interval = param_out - lb
-                        elif ub is not None:
-                            if half_interval is not None:
-                                half_interval = tf.minimum(half_interval, ub - param_out)
+                                self.inference_map[param] = param_q
                             else:
-                                half_interval = ub - param_out
-                        if half_interval is not None:
-                            param_ran = tf.tanh(param_ran) * (half_interval - 2 * self.epsilon)
+                                param = param_q
 
-                        param_out += tf.gather(param_ran, self.gf_y[:, i], axis=0)
+                        else:
+                            # Prior distribution
+                            param = Normal(
+                                sample_shape=[rangf_n_levels, len(ids)],
+                                loc=0.,
+                                scale=self.conv_prior_sd * self.ranef_to_fixef_prior_sd_ratio,
+                                name='%s_by_%s' % (param_name, ran_gf)
+                            )
 
-                        if self.log_random:
-                            param_ran_summary *= mask_col
-                            param_ran_summary *= tf.expand_dims(mask_row, -1)
+                            # Posterior distribution
+                            param_q_samples = tf.Variable(
+                                tf.zeros((self.n_samples, rangf_n_levels, len(ids)), dtype=self.FLOAT_TF),
+                                name=sn('%s_q_%s_by_%s_samples' % (param_name, '-'.join(ids), ran_gf))
+                            )
+                            param_q = Empirical(
+                                params=param_q_samples,
+                                name=sn('%s_q_%s_by_%s' % (param_name, '-'.join(ids), ran_gf))
+                            )
 
-                            param_ran_summary_mean = tf.reduce_sum(param_ran_summary, axis=0) / tf.reduce_sum(mask_row)
-                            param_ran_summary_centering_vector = tf.expand_dims(mask_row, -1) * param_ran_summary_mean
-                            param_ran_summary -= param_ran_summary_centering_vector
+                            param_summary = param_q.params[self.global_batch_step - 1]
 
-                            half_interval = None
-                            if lb is not None:
-                                half_interval = param_summary - lb
-                            elif ub is not None:
-                                if half_interval is not None:
-                                    half_interval = tf.minimum(half_interval, ub - param_summary)
-                                else:
-                                    half_interval = ub - self.epsilon
-                            if half_interval is not None:
-                                param_ran_summary = tf.tanh(param_ran_summary) * (half_interval - 2 * self.epsilon)
-
-                            for j in range(len(irf_by_rangf[gf])):
-                                irf_name = irf_by_rangf[gf][j]
-                                ix = col_ix[j]
-                                tf.summary.histogram(
-                                    'by_%s/%s/%s' % (gf, param_name, irf_name),
-                                    param_ran_summary[:, ix],
-                                    collections=['random']
+                            if self.inference_name == 'MetropolisHastings':
+                                # Proposal distribution
+                                param_proposal = Normal(
+                                    loc=param,
+                                    scale=self.mh_proposal_sd,
+                                    name=sn('%s_proposal_%s_by_%s' % (param_name, '-'.join(ids), ran_gf))
                                 )
+                                self.proposal_map[param] = param_proposal
 
-                # Combine trainable and untrainable parameters
-                if len(untrainable_ix) > 0:
-                    param_out = tf.concat([param_out, param_untrainable_out], axis=1)
-                    param_summary = tf.concat([param_summary, param_untrainable_out], axis=1)
+                            self.inference_map[param] = param_q
 
-                param_out = tf.gather(param_out, np.concatenate([trainable_ix, untrainable_ix]), axis=1)
-                param_summary = tf.gather(param_summary, np.concatenate([trainable_ix, untrainable_ix]), axis=1)
-
-                return (param_out, param_summary)
+                return (param, param_summary)
 
     def _initialize_output_model(self):
         with self.sess.as_default():
