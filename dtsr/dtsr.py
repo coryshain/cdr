@@ -463,7 +463,7 @@ class DTSR(object):
                 if self.intercept_init is None:
                     self.intercept_init = self.y_train_mean
                 self.intercept_init_tf = tf.constant(self.intercept_init, dtype=self.FLOAT_TF)
-                self.epsilon = tf.constant(1e-20, dtype=self.FLOAT_TF)
+                self.epsilon = tf.constant(np.finfo(self.FLOAT_NP).eps, dtype=self.FLOAT_TF)
 
     def __getstate__(self):
         md = self._pack_metadata()
@@ -1048,21 +1048,17 @@ class DTSR(object):
                         param_random_centering_vector = tf.expand_dims(mask_row, -1) * param_random_mean
                         param_random -= param_random_centering_vector
 
-                        half_interval = None
-                        if lb is not None:
-                            half_interval = param_out - lb
-                        elif ub is not None:
-                            if half_interval is not None:
-                                half_interval = tf.minimum(half_interval, ub - param_out)
-                            else:
-                                half_interval = ub - param_out
-                        if half_interval is not None:
-                            param_random = tf.tanh(param_random) * (half_interval - 2 * self.epsilon)
+                        if lb is None and ub is None:
+                            half_interval = None
+                        if lb is not None and ub is None:
+                            half_interval = tf.abs(param_out - lb)
+                        elif lb is None and ub is not None:
+                            half_interval = tf.abs(param_out - ub)
+                        else:
+                            half_interval = tf.minimum(tf.abs(param_out - lb), tf.abs(param_out - ub))
 
-                        if lb is not None:
-                            tf.Assert(param_out + param_random > lb)
-                        if ub is not None:
-                            tf.Assert(param_out + param_random < ub)
+                        if half_interval is not None:
+                            param_random = tf.tanh(param_random) * (half_interval - self.epsilon)
 
                         param_out += tf.gather(param_random, self.gf_y[:, i], axis=0)
 
@@ -1074,16 +1070,17 @@ class DTSR(object):
                             param_ran_summary_centering_vector = tf.expand_dims(mask_row, -1) * param_ran_summary_mean
                             param_random_summary -= param_ran_summary_centering_vector
 
-                            half_interval = None
-                            if lb is not None:
-                                half_interval = param_summary - lb
-                            elif ub is not None:
-                                if half_interval is not None:
-                                    half_interval = tf.minimum(half_interval, ub - param_summary)
-                                else:
-                                    half_interval = ub - param_summary
+                            if lb is None and ub is None:
+                                half_interval = None
+                            if lb is not None and ub is None:
+                                half_interval = tf.abs(param_summary - lb)
+                            elif lb is None and ub is not None:
+                                half_interval = tf.abs(param_summary - ub)
+                            else:
+                                half_interval = tf.minimum(tf.abs(param_summary - lb), tf.abs(param_summary - ub))
+
                             if half_interval is not None:
-                                param_random_summary = tf.tanh(param_random_summary) * (half_interval - 2 * self.epsilon)
+                                param_random_summary = tf.tanh(param_random_summary) * (half_interval - self.epsilon)
 
                             for j in range(len(irf_by_rangf[gf])):
                                 irf_name = irf_by_rangf[gf][j]
@@ -1101,7 +1098,7 @@ class DTSR(object):
 
                     param_out = tf.gather(param_out, np.concatenate([trainable_ix, untrainable_ix]), axis=1)
                     param_summary = tf.gather(param_summary, np.concatenate([trainable_ix, untrainable_ix]), axis=1)
-
+                    
                     return (param_out, param_summary)
 
     def _get_mean_init_vector(self, irf_ids, param_name, irf_param_init, default=0):
@@ -2165,86 +2162,81 @@ class DTSR(object):
                         self.writer.add_summary(summary_random, self.global_step.eval(session=self.sess))
 
                 while self.global_step.eval(session=self.sess) < n_iter:
-                    try:
-                        p, p_inv = get_random_permutation(len(y))
-                        t0_iter = pytime.time()
-                        sys.stderr.write('-' * 50 + '\n')
-                        sys.stderr.write('Iteration %d\n' % int(self.global_step.eval(session=self.sess) + 1))
-                        sys.stderr.write('\n')
-                        if self.optim_name is not None and self.lr_decay_family is not None:
-                            sys.stderr.write('Learning rate: %s\n' %self.lr.eval(session=self.sess))
+                    p, p_inv = get_random_permutation(len(y))
+                    t0_iter = pytime.time()
+                    sys.stderr.write('-' * 50 + '\n')
+                    sys.stderr.write('Iteration %d\n' % int(self.global_step.eval(session=self.sess) + 1))
+                    sys.stderr.write('\n')
+                    if self.optim_name is not None and self.lr_decay_family is not None:
+                        sys.stderr.write('Learning rate: %s\n' %self.lr.eval(session=self.sess))
 
-                        pb = tf.contrib.keras.utils.Progbar(self.n_train_minibatch)
+                    pb = tf.contrib.keras.utils.Progbar(self.n_train_minibatch)
 
-                        loss_total = 0.
+                    loss_total = 0.
 
-                        for j in range(0, len(y), minibatch_size):
+                    for j in range(0, len(y), minibatch_size):
 
-                            indices = p[j:j+minibatch_size]
-                            fd_minibatch = {
-                                self.X: X_2d[indices],
-                                self.time_X: time_X_2d[indices],
-                                self.y: y_dv[indices],
-                                self.time_y: time_y[indices],
-                                self.gf_y: gf_y[indices] if len(gf_y > 0) else gf_y
+                        indices = p[j:j+minibatch_size]
+                        fd_minibatch = {
+                            self.X: X_2d[indices],
+                            self.time_X: time_X_2d[indices],
+                            self.y: y_dv[indices],
+                            self.time_y: time_y[indices],
+                            self.gf_y: gf_y[indices] if len(gf_y > 0) else gf_y
+                        }
+
+                        info_dict = self.run_train_step(fd_minibatch)
+                        loss_cur = info_dict['loss']
+                        self.sess.run(self.ema_op)
+                        if not np.isfinite(loss_cur):
+                            loss_cur = 0
+                        loss_total += loss_cur
+
+                        pb.update((j/minibatch_size)+1, values=[('loss', loss_cur)])
+
+                    self.sess.run(self.incr_global_step)
+
+                    if self.log_freq > 0 and self.global_step.eval(session=self.sess) % self.log_freq == 0:
+                        loss_total /= n_minibatch
+                        summary_train_loss = self.sess.run(self.summary_losses, {self.loss_total: loss_total})
+                        summary_params = self.sess.run(self.summary_params)
+                        self.writer.add_summary(summary_params, self.global_step.eval(session=self.sess))
+                        self.writer.add_summary(summary_train_loss, self.global_step.eval(session=self.sess))
+                        if self.log_random and len(self.rangf) > 0:
+                            summary_random = self.sess.run(self.summary_random)
+                            self.writer.add_summary(summary_random, self.global_step.eval(session=self.sess))
+
+                    if self.save_freq > 0 and self.global_step.eval(session=self.sess) % self.save_freq == 0:
+                        self.save()
+                        self.make_plots(
+                            irf_name_map=irf_name_map,
+                            plot_n_time_units=plot_n_time_units,
+                            plot_n_points_per_time_unit=plot_n_points_per_time_unit,
+                            plot_x_inches=plot_x_inches,
+                            plot_y_inches=plot_y_inches,
+                            cmap=cmap
+                        )
+                        if type(self).__name__ == 'DTSRBayes':
+                            lb = self.sess.run(self.err_dist_lb)
+                            ub = self.sess.run(self.err_dist_ub)
+                            n_time_units = ub-lb
+                            fd_plot = {
+                                self.support_start: lb,
+                                self.n_time_units: n_time_units,
+                                self.n_points_per_time_unit: 500
                             }
-
-                            info_dict = self.run_train_step(fd_minibatch)
-                            loss_cur = info_dict['loss']
-                            self.sess.run(self.ema_op)
-                            if not np.isfinite(loss_cur):
-                                loss_cur = 0
-                            loss_total += loss_cur
-
-                            pb.update((j/minibatch_size)+1, values=[('loss', loss_cur)])
-
-                        self.sess.run(self.incr_global_step)
-
-                        if self.log_freq > 0 and self.global_step.eval(session=self.sess) % self.log_freq == 0:
-                            loss_total /= n_minibatch
-                            summary_train_loss = self.sess.run(self.summary_losses, {self.loss_total: loss_total})
-                            summary_params = self.sess.run(self.summary_params)
-                            self.writer.add_summary(summary_params, self.global_step.eval(session=self.sess))
-                            self.writer.add_summary(summary_train_loss, self.global_step.eval(session=self.sess))
-                            if self.log_random and len(self.rangf) > 0:
-                                summary_random = self.sess.run(self.summary_random)
-                                self.writer.add_summary(summary_random, self.global_step.eval(session=self.sess))
-
-                        if self.save_freq > 0 and self.global_step.eval(session=self.sess) % self.save_freq == 0:
-                            self.save()
-                            self.make_plots(
-                                irf_name_map=irf_name_map,
-                                plot_n_time_units=plot_n_time_units,
-                                plot_n_points_per_time_unit=plot_n_points_per_time_unit,
-                                plot_x_inches=plot_x_inches,
-                                plot_y_inches=plot_y_inches,
-                                cmap=cmap
+                            plot_x = self.sess.run(self.support, feed_dict=fd_plot)
+                            plot_y = self.sess.run(self.err_dist_plot, feed_dict=fd_plot)
+                            plot_irf(
+                                plot_x,
+                                plot_y,
+                                ['Error Distribution'],
+                                dir=self.outdir,
+                                filename='error_distribution.png',
+                                legend=False,
                             )
-                            if type(self).__name__ == 'DTSRBayes':
-                                lb = self.sess.run(self.err_dist_lb)
-                                ub = self.sess.run(self.err_dist_ub)
-                                n_time_units = ub-lb
-                                fd_plot = {
-                                    self.support_start: lb,
-                                    self.n_time_units: n_time_units,
-                                    self.n_points_per_time_unit: 500
-                                }
-                                plot_x = self.sess.run(self.support, feed_dict=fd_plot)
-                                plot_y = self.sess.run(self.err_dist_plot, feed_dict=fd_plot)
-                                plot_irf(
-                                    plot_x,
-                                    plot_y,
-                                    ['Error Distribution'],
-                                    dir=self.outdir,
-                                    filename='error_distribution.png',
-                                    legend=False,
-                                )
-                        t1_iter = pytime.time()
-                        sys.stderr.write('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
-
-                    except tf.errors.InvalidArgumentError as err:
-                        sys.stderr.write('Encountered numerical instability during inference.\nRestarting from the most recent checkpoint.\nError details:\n%s' %err)
-                        self.load()
+                    t1_iter = pytime.time()
+                    sys.stderr.write('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
 
                 self.save()
 
