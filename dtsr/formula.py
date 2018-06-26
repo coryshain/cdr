@@ -979,6 +979,14 @@ class IRFNode(object):
                     bw[t_pc.name()].append(t.name())
         return fw, bw
 
+    def ablate(self, terminal_name):
+        if self.terminal():
+            if self.impulse.ID == terminal_name:
+                self.fixed = False
+        else:
+            for c in self.children:
+                c.ablate(terminal_name)
+
     def formula_terms(self):
         if self.terminal():
             out = {}
