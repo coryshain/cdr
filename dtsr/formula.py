@@ -442,6 +442,16 @@ class Formula(object):
             X[col] = X[col].fillna(0)
         return X, y, X_2d_predictor_names, X_2d_predictors
 
+    def ablate(self, impulse_ids):
+        if not isinstance(impulse_ids, list):
+            impulse_ids = [impulse_ids]
+        self.t.ablate(impulse_ids)
+
+    def unablate(self, impulse_ids):
+        if not isinstance(impulse_ids, list):
+            impulse_ids = [impulse_ids]
+        self.t.unablate(impulse_ids)
+
     IRF = [
         'DiracDelta',
         'Exp',
@@ -979,13 +989,25 @@ class IRFNode(object):
                     bw[t_pc.name()].append(t.name())
         return fw, bw
 
-    def ablate(self, terminal_name):
+    def ablate(self, impulse_ids):
+        if not isinstance(impulse_ids, list):
+            impulse_ids = [impulse_ids]
         if self.terminal():
-            if self.impulse.ID == terminal_name:
+            if self.impulse.id in impulse_ids:
                 self.fixed = False
         else:
             for c in self.children:
-                c.ablate(terminal_name)
+                c.ablate(impulse_ids)
+
+    def unablate(self, impulse_ids):
+        if not isinstance(impulse_ids, list):
+            impulse_ids = [impulse_ids]
+        if self.terminal():
+            if self.impulse.id in impulse_ids:
+                self.fixed = True
+        else:
+            for c in self.children:
+                c.unablate(impulse_ids)
 
     def formula_terms(self):
         if self.terminal():
