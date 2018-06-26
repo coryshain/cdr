@@ -10,6 +10,7 @@ from .util import names2ix
 
 interact = re.compile('([^ ]+):([^ ]+)')
 spillover = re.compile('^.+S[0-9]+$')
+split_irf = re.compile('(.+)\(([^(]+)')
 
 class Formula(object):
     """
@@ -476,7 +477,34 @@ class Formula(object):
     }
 
     def __str__(self):
-        return self.bform_str
+        out = str(self.dv_term) + ' ~ '
+
+        terms = self.t.formula_terms()
+        term_strings = []
+
+        if None in terms:
+            fixed = terms.pop(None)
+            new_terms = {}
+            for term in fixed:
+                if term['irf'] in new_terms:
+                    new_terms[term['irf']]['impulses'] += term['impulses']
+                else:
+                    new_terms[term['irf']] = term
+            new_terms = [new_terms[x] for x in new_terms]
+            term_strings.append(' + '.join(['C(%s, %s)' %(' + '.join([x.name() for x in y['impulses']]), y['irf']) for y in new_terms]))
+
+        for rangf in terms:
+            ran = terms[rangf]
+            new_terms = {}
+            for term in ran:
+                if term['irf'] in new_terms:
+                    new_terms[term['irf']]['impulses'] += term['impulses']
+                else:
+                    new_terms[term['irf']] = term
+            new_terms = [new_terms[x] for x in new_terms]
+            term_strings.append('(' + ' + '.join(['C(%s, %s)' % (' + '.join([x.name() for x in y['impulses']]), y['irf']) for y in new_terms]) + ' | %s)' %rangf)
+
+        return out + ' + '.join(term_strings)
 
 class Impulse(object):
     def __init__(self, name, ops=None):
@@ -950,6 +978,61 @@ class IRFNode(object):
                 if not t_pc.name() in bw[t_pc.name()]:
                     bw[t_pc.name()].append(t.name())
         return fw, bw
+
+    def formula_terms(self):
+        if self.terminal():
+            out = {}
+            if self.fixed:
+                out[None] = [{
+                    'impulses': self.impulses(),
+                    'irf': ''
+                }]
+            for rangf in self.rangf:
+                out[rangf] = [{
+                    'impulses': self.impulses(),
+                    'irf': ''
+                }]
+
+            return out
+
+        out = {}
+        for c in self.children:
+            c_data = c.formula_terms()
+            for key in c_data:
+                if key in out:
+                    out[key] += c_data[key]
+                else:
+                    out[key] = c_data[key]
+
+        if self.family is not None:
+            for key in out:
+                for term in out[key]:
+                    outer = None
+                    if term['irf'] != '':
+                        outer = split_irf.match(term['irf']).groups()
+                    inner = []
+                    if self.irfID is not None:
+                        inner.append('irf_id=%s' %self.irfID)
+                    if self.coefID is not None:
+                        inner.append('coef_id=%s' %self.coefID)
+                    if key in self.rangf:
+                        inner.append('ran=T')
+                    if self.cont:
+                        inner.append('cont=T')
+                    if len(self.param_init) > 0:
+                        inner.append(', '.join(['%s=%s' %(x, self.param_init[x]) for x in self.param_init]))
+                    if self.trainable != Formula.IRF_PARAMS[self.family]:
+                        inner.append('trainable=%s' %self.trainable)
+                    new_irf = self.family + '(' + ', '.join(inner) + ')'
+                    if outer is not None:
+                        new_irf = outer[0] + '(' + new_irf
+                        if outer[1].startswith(')'):
+                            new_irf += outer[1]
+                        else:
+                            new_irf += ', ' + outer[1]
+                    term['irf'] = new_irf
+
+        return out
 
     def __str__(self):
         s = self.name()

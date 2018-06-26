@@ -1105,7 +1105,7 @@ class DTSR(object):
                     param_out = tf.gather(param_out, np.concatenate([trainable_ix, untrainable_ix]), axis=1)
                     param_summary = tf.gather(param_summary, np.concatenate([trainable_ix, untrainable_ix]), axis=1)
                     
-                    return (param_out, param_summary)
+                return (param_out, param_summary)
 
     def _get_mean_init_vector(self, irf_ids, param_name, irf_param_init, default=0):
         mean = np.zeros(len(irf_ids))
