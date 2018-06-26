@@ -521,7 +521,13 @@ class Formula(object):
             new_terms_str += ' + '.join(['C(%s, %s)' % (' + '.join([x.name() for x in y['impulses']]), y['irf']) for y in new_terms]) + ' | %s)' %rangf
             term_strings.append(new_terms_str)
 
-        return out + ' + '.join(term_strings)
+        out += ' + '.join(term_strings)
+
+        for key in self.has_intercept:
+            if not key in terms and self.has_intercept[key]:
+                out += ' + (1 | %s)' %key
+
+        return out
 
 class Impulse(object):
     def __init__(self, name, ops=None):
