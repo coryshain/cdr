@@ -489,6 +489,9 @@ class Formula(object):
     def __str__(self):
         out = str(self.dv_term) + ' ~ '
 
+        if not self.has_intercept[None]:
+            out += '0 + '
+
         terms = self.t.formula_terms()
         term_strings = []
 
@@ -512,7 +515,11 @@ class Formula(object):
                 else:
                     new_terms[term['irf']] = term
             new_terms = [new_terms[x] for x in new_terms]
-            term_strings.append('(' + ' + '.join(['C(%s, %s)' % (' + '.join([x.name() for x in y['impulses']]), y['irf']) for y in new_terms]) + ' | %s)' %rangf)
+            new_terms_str = '('
+            if not self.has_intercept[rangf]:
+                new_terms_str += '0 + '
+            new_terms_str += ' + '.join(['C(%s, %s)' % (' + '.join([x.name() for x in y['impulses']]), y['irf']) for y in new_terms]) + ' | %s)' %rangf
+            term_strings.append(new_terms_str)
 
         return out + ' + '.join(term_strings)
 
