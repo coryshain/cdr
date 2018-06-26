@@ -181,6 +181,12 @@ DTSR_INITIALIZATION_KWARGS = [
         "Number of threads for data dequeuing (currently not used)"
     ),
     Kwarg(
+        'validate_irf_args',
+        True,
+        "``bool``",
+        "Check whether inputs and parameters to IRF obey constraints. Imposes a small performance cost but helps catch and report bugs in the model."
+    ),
+    Kwarg(
         'save_freq',
         1,
         "``int``",
@@ -463,7 +469,7 @@ class DTSR(object):
                 if self.intercept_init is None:
                     self.intercept_init = self.y_train_mean
                 self.intercept_init_tf = tf.constant(self.intercept_init, dtype=self.FLOAT_TF)
-                self.epsilon = tf.constant(np.finfo(self.FLOAT_NP).eps, dtype=self.FLOAT_TF)
+                self.epsilon = tf.constant(2 * np.finfo(self.FLOAT_NP).eps, dtype=self.FLOAT_TF)
 
     def __getstate__(self):
         md = self._pack_metadata()
@@ -776,7 +782,7 @@ class DTSR(object):
                 def gamma(params):
                     pdf = tf.contrib.distributions.Gamma(concentration=params[:,0:1],
                                                          rate=params[:,1:2],
-                                                         validate_args=True).prob
+                                                         validate_args=self.validate_irf_args).prob
                     return lambda x: pdf(x + self.epsilon)
 
                 self.irf_lambdas['Gamma'] = gamma
@@ -787,7 +793,7 @@ class DTSR(object):
                 def shifted_gamma(params):
                     pdf = tf.contrib.distributions.Gamma(concentration=params[:,0:1],
                                                          rate=params[:,1:2],
-                                                         validate_args=True).prob
+                                                         validate_args=self.validate_irf_args).prob
                     return lambda x: pdf(x - params[:,2:3] + self.epsilon)
 
                 self.irf_lambdas['ShiftedGamma'] = shifted_gamma

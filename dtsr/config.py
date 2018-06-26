@@ -173,6 +173,8 @@ class Config(object):
             out['lr_decay_staircase'] = settings.getboolean('lr_decay_staircase', False)
         if 'ema_decay' in settings or add_defaults:
             out['ema_decay'] = settings.getfloat('ema_decay', 0.999)
+        if 'validate_irf_args' in settings or add_defaults:
+            out['validate_irf_args'] = settings.getboolean('validate_irf_args', True)
 
         # c. Model hyperparameters
         if 'network_type' in settings or add_defaults:
