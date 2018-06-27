@@ -141,7 +141,16 @@ DTSR_INITIALIZATION_KWARGS = [
         'optim_name',
         'Nadam',
         [str, None],
-        "Name of the optimizer to use. Choose from ``'SGD'``, ``'AdaGrad'``, ``'AdaDelta'``, ``'Adam'``, ``'FTRL'``, ``'RMSProp'``, ``'Nadam'``. For DTSRBayes only, can also be ``None``. This uses the default optimizer defined by Edward, which currently includes steep learning rate decay and is therefore not recommended in the general case."
+        """Name of the optimizer to use. Must be one of:
+        
+            - ``'SGD'``
+            - ``'AdaGrad'``
+            - ``'AdaDelta'``
+            - ``'Adam'``
+            - ``'FTRL'``
+            - ``'RMSProp'``
+            - ``'Nadam'``
+            - ``None`` (DTSRBayes only; uses the default optimizer defined by Edward, which currently includes steep learning rate decay and is therefore not recommended in the general case)"""
     ),
     Kwarg(
         'optim_epsilon',
@@ -446,18 +455,24 @@ DTSRBAYES_INITIALIZATION_KWARGS = [
     )
 ]
 
-if __name__ == '__main__':
-    path = 'workspace/ucl.ini'
-    config = configparser.ConfigParser()
-    config.optionxform = str
-    config.read(path)
 
-    for kw in DTSR_INITIALIZATION_KWARGS + DTSRMLE_INITIALIZATION_KWARGS + DTSRBAYES_INITIALIZATION_KWARGS:
-        print(kw.key)
-        print(kw.dtypes_str())
-        print(sorted(kw.dtypes, key=cmp_to_key(Kwarg.type_comparator)))
-        print(kw.kwarg_from_config(config['dtsr_settings']))
-        print()
+def dtsr_kwarg_docstring():
+    out = "**Both DTSRMLE and DTSRBayes**\n\n"
 
+    for kwarg in DTSR_INITIALIZATION_KWARGS:
+        if kwarg.key not in ['outdir', 'history_length']:
+            out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
 
+    out += '\n**DTSRMLE only**\n\n'
 
+    for kwarg in DTSRMLE_INITIALIZATION_KWARGS:
+        out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
+
+    out += '\n**DTSRBayes only**\n\n'
+
+    for kwarg in DTSRBAYES_INITIALIZATION_KWARGS:
+        out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
+
+    out += '\n'
+
+    return out

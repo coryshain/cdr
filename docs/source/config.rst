@@ -80,8 +80,8 @@ Section: ``[dtsr_settings]``
 The ``[dtsr_settings]`` section supports the following fields:
 
 .. exec::
-    from dtsr.config import Config
-    print(Config.dtsr_kwarg_docstring())
+    from dtsr.kwargs import dtsr_kwarg_docstring
+    print(dtsr_kwarg_docstring())
 
 
 

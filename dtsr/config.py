@@ -168,25 +168,4 @@ class Config(object):
 
         return out
 
-    @staticmethod
-    def dtsr_kwarg_docstring():
-        out = "**Both DTSRMLE and DTSRBayes**\n\n"
-
-        for kwarg in DTSR_INITIALIZATION_KWARGS:
-            if kwarg.key not in ['outdir', 'history_length']:
-                out += '- **%s**: %s; %s\n' %(kwarg.key, kwarg.dtypes_str(), kwarg.descr)
-
-        out += '\n**DTSRMLE only**\n\n'
-
-        for kwarg in DTSRMLE_INITIALIZATION_KWARGS:
-            out += '- **%s**: %s; %s\n' %(kwarg.key, kwarg.dtypes_str(), kwarg.descr)
-
-        out += '\n**DTSRBayes only**\n\n'
-
-        for kwarg in DTSRBAYES_INITIALIZATION_KWARGS:
-            out += '- **%s**: %s; %s\n' %(kwarg.key, kwarg.dtypes_str(), kwarg.descr)
-
-        out += '\n'
-
-        return out
 
