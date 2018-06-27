@@ -109,7 +109,7 @@ Section: ``[irf_name_map]``
 
 The optional ``[irf_name_map]`` section simply permits prettier variable naming in plots.
 For example, the internal name for a convolution applied to predictor ``A`` may be ``ShiftedGammaKgt1.s(A)-Terminal.s(A)``, which is not very readable.
-To address this, the string above can be mapped to a more readable name using an INI key-value pair, as shown:::
+To address this, the string above can be mapped to a more readable name using an INI key-value pair, as shown: ::
 
     ShiftedGammaKgt1.s(A)-Terminal.s(A) = A
 
@@ -127,7 +127,7 @@ The identifier ``DTSR_*`` will be used by the DTSR utilities to reference the fi
 
 For example, to define a DTSR model called ``readingtimes``, the section header ``[model_DTSR_readingtimes]`` is included in the config file along with an appropriate ``formula`` specification.
 To use this specific model once fitted, it can be referenced using the identifier ``DTSR_readingtimes``.
-For example, the following call will extract predictions on dev data from a fitted ``DTSR_readingtimes`` defined in config file **config.ini**:::
+For example, the following call will extract predictions on dev data from a fitted ``DTSR_readingtimes`` defined in config file **config.ini**: ::
 
     python -m dtsr.bin.predict config.ini -m DTSR_readingtimes -p dev
 
@@ -135,7 +135,7 @@ Additional fields from ``[dtsr_settings]`` may be specified for a given model, i
 For example, imagine that ``[dtsr_settings]`` contains the field ``n_iter = 1000``.
 All DTSR models subsequently specified in the config file will train for 1000 iterations.
 However, imagine that model ``[model_DTSR_longertrain]`` should train for 5000 iterations instead.
-This can be specified within the same config file as:::
+This can be specified within the same config file as: ::
 
     [model_DTSR_longertrain]
     n_iter = 5000
@@ -146,7 +146,7 @@ Distinct datasets require distinct config files.
 
 For hypothesis testing, fixed effect ablation can be conveniently automated using the ``ablate`` model field.
 For example, the following specification implicitly defines 7 unique models, one for each of the ``|powerset(a, b, c)| - 1 = 7``
-non-null ablations of ``a``, ``b``, and ``c``:::
+non-null ablations of ``a``, ``b``, and ``c``: ::
 
     [model_DTSR_example]
     n_iter = 5000
@@ -154,7 +154,7 @@ non-null ablations of ``a``, ``b``, and ``c``:::
     formula = C(a + b + c, Normal()) + (C(a + b + c, Normal()) | subject)
 
 The ablated models are named using ``'!'`` followed by the ablated impulse name for each ablated impulse.
-Therefore, the above specification is equivalent to (and much easier to write than) the following:::
+Therefore, the above specification is equivalent to (and much easier to write than) the following: ::
 
     [model_DTSR_example]
     n_iter = 5000

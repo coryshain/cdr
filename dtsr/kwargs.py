@@ -127,7 +127,7 @@ DTSR_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'init_sd',
-        .01,
+        .001,
         float,
         "Standard deviation of Gaussian initialization distribution for trainable variables."
     ),
@@ -144,6 +144,7 @@ DTSR_INITIALIZATION_KWARGS = [
         """Name of the optimizer to use. Must be one of:
         
             - ``'SGD'``
+            - ``'Momentum'``
             - ``'AdaGrad'``
             - ``'AdaDelta'``
             - ``'Adam'``
