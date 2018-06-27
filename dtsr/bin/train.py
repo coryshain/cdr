@@ -7,11 +7,12 @@ import numpy as np
 
 pd.options.mode.chained_assignment = None
 
+from dtsr.kwargs import DTSR_INITIALIZATION_KWARGS, DTSRMLE_INITIALIZATION_KWARGS, DTSRBAYES_INITIALIZATION_KWARGS
 from dtsr.config import Config
 from dtsr.io import read_data
 from dtsr.formula import Formula
 from dtsr.data import preprocess_data, compute_splitID, compute_partition
-from dtsr.util import mse, mae, load_dtsr
+from dtsr.util import mse, mae
 
 if __name__ == '__main__':
 
@@ -192,113 +193,50 @@ if __name__ == '__main__':
             dv = formula.strip().split('~')[0].strip()
             y_complete_cases = y[np.isfinite(y[dv])]
 
-            sys.stderr.write('Fitting model %s...\n\n' % m)
+            sys.stderr.write('\nInitializing model %s...\n\n' % m)
 
             if p['network_type'] in ['mle', 'nn']:
                 bayes = False
             else:
                 bayes = True
 
+            kwargs = {}
+            for kwarg in DTSR_INITIALIZATION_KWARGS:
+                if kwarg.key not in ['outdir', 'history_length']:
+                    kwargs[kwarg.key] = p[kwarg.key]
+
             if p['network_type'] in ['mle', 'nn']:
                 from dtsr.dtsrmle import DTSRMLE
+
+                for kwarg in DTSRMLE_INITIALIZATION_KWARGS:
+                    kwargs[kwarg.key] = p[kwarg.key]
+
                 dtsr_model = DTSRMLE(
                     formula,
                     X,
                     y_complete_cases,
                     outdir=p.outdir + '/' + m,
                     history_length=p.history_length,
-                    pc=p['pc'],
-                    float_type=p['float_type'],
-                    int_type=p['int_type'],
-                    validate_irf_args=p['validate_irf_args'],
-                    minibatch_size=p['minibatch_size'],
-                    eval_minibatch_size=p['eval_minibatch_size'],
-                    n_interp=p['n_interp'],
-                    log_random=p['log_random'],
-                    log_freq=p['log_freq'],
-                    save_freq=p['save_freq'],
-                    optim_name=p['optim_name'],
-                    optim_epsilon=p['optim_epsilon'],
-                    learning_rate=p['learning_rate'],
-                    learning_rate_min=p['learning_rate_min'],
-                    lr_decay_family=p['lr_decay_family'],
-                    lr_decay_steps=p['lr_decay_steps'],
-                    lr_decay_rate=p['lr_decay_rate'],
-                    lr_decay_staircase=p['lr_decay_staircase'],
-                    init_sd=p['init_sd'],
-                    ema_decay=p['ema_decay'],
-                    loss_type=p['loss_type'],
-                    regularizer_name=p['regularizer_name'],
-                    regularizer_scale=p['regularizer_scale'],
-                    intercept_regularizer_name=p['intercept_regularizer_name'],
-                    intercept_regularizer_scale=p['intercept_regularizer_scale'],
-                    coefficient_regularizer_name=p['coefficient_regularizer_name'],
-                    coefficient_regularizer_scale=p['coefficient_regularizer_scale'],
-                    irf_regularizer_name=p['irf_regularizer_name'],
-                    irf_regularizer_scale=p['irf_regularizer_scale'],
-                    ranef_regularizer_name=p['ranef_regularizer_name'],
-                    ranef_regularizer_scale=p['ranef_regularizer_scale']
+                    **kwargs
                 )
             elif p['network_type'].startswith('bayes'):
                 from dtsr.dtsrbayes import DTSRBayes
+
+                for kwarg in DTSRBAYES_INITIALIZATION_KWARGS:
+                    kwargs[kwarg.key] = p[kwarg.key]
+
                 dtsr_model = DTSRBayes(
                     formula,
                     X,
                     y_complete_cases,
                     outdir=p.outdir + '/' + m,
                     history_length=p.history_length,
-                    pc=p['pc'],
-                    float_type=p['float_type'],
-                    int_type=p['int_type'],
-                    validate_irf_args=p['validate_irf_args'],
-                    minibatch_size=p['minibatch_size'],
-                    eval_minibatch_size=p['eval_minibatch_size'],
-                    n_interp=p['n_interp'],
-                    inference_name=p['inference_name'],
-                    declare_priors=p['declare_priors'],
-                    n_samples=p['n_samples'],
-                    n_samples_eval=p['n_samples_eval'],
-                    n_iter=p['n_iter'],
-                    log_random=p['log_random'],
-                    log_freq=p['log_freq'],
-                    save_freq=p['save_freq'],
-                    optim_name=p['optim_name'],
-                    optim_epsilon=p['optim_epsilon'],
-                    learning_rate=p['learning_rate'],
-                    learning_rate_min=p['learning_rate_min'],
-                    lr_decay_family=p['lr_decay_family'],
-                    lr_decay_steps=p['lr_decay_steps'],
-                    lr_decay_rate=p['lr_decay_rate'],
-                    lr_decay_staircase=p['lr_decay_staircase'],
-                    intercept_prior_sd=p['intercept_prior_sd'],
-                    coef_prior_sd=p['coef_prior_sd'],
-                    conv_prior_sd=p['conv_prior_sd'],
-                    mv=p['mv'],
-                    mv_ran=p['mv_ran'],
-                    y_scale_init=p['y_scale_init'],
-                    y_scale_trainable=p['y_scale_trainable'],
-                    y_scale_prior_sd=p['y_scale_prior_sd'],
-                    prior_sd_scaling_coefficient=p['prior_sd_scaling_coefficient'],
-                    y_scale_prior_sd_scaling_coefficient=p['y_scale_prior_sd_scaling_coefficient'],
-                    ranef_to_fixef_prior_sd_ratio=p['ranef_to_fixef_prior_sd_ratio'],
-                    posterior_to_prior_sd_ratio=p['posterior_to_prior_sd_ratio'],
-                    init_sd=p['init_sd'],
-                    ema_decay=p['ema_decay'],
-                    regularizer_name=p['regularizer_name'],
-                    regularizer_scale=p['regularizer_scale'],
-                    intercept_regularizer_name=p['intercept_regularizer_name'],
-                    intercept_regularizer_scale=p['intercept_regularizer_scale'],
-                    coefficient_regularizer_name=p['coefficient_regularizer_name'],
-                    coefficient_regularizer_scale=p['coefficient_regularizer_scale'],
-                    irf_regularizer_name=p['irf_regularizer_name'],
-                    irf_regularizer_scale=p['irf_regularizer_scale'],
-                    ranef_regularizer_name=p['ranef_regularizer_name'],
-                    ranef_regularizer_scale=p['ranef_regularizer_scale'],
-                    mh_proposal_sd=p['mh_proposal_sd'],
-                    asymmetric_error=p['asymmetric_error']
+                    **kwargs
                 )
             else:
                 raise ValueError('Network type "%s" not supported' %p['network_type'])
+
+            sys.stderr.write('\nFitting model %s...\n\n' % m)
 
             dtsr_model.fit(
                 X,
@@ -328,11 +266,14 @@ if __name__ == '__main__':
             dtsr_mae = mae(y_complete_cases[dv], dtsr_preds)
             y_dv_mean = y_complete_cases[dv].mean()
 
+            summary = '*' * 50 + '\n\n'
             summary = '=' * 50 + '\n'
             summary += 'DTSR regression\n\n'
-            summary += 'Model name: %s\n\n' % m
-            summary += 'Formula:\n'
-            summary += '  ' + formula + '\n\n'
+            summary = '=' * 50 + '\n'
+            summary += 'MODEL NAME:\n'
+            summary +=  '  % s\n\n' % m
+
+            summary += dtsr_model.report_initialization_overview()
 
             dtsr_loglik_vector = dtsr_model.log_lik(
                 X,
@@ -355,10 +296,10 @@ if __name__ == '__main__':
                     posterior_summaries[i] += row
                 posterior_summaries = pd.DataFrame(posterior_summaries, index=terminal_names, columns=['Mean', '2.5%', '97.5%'])
 
-                summary += '\nPosterior integral summaries by predictor:\n'
+                summary += '\nPOSTERIOR INTEGRAL SUMMARIES BY PREDICTOR:\n'
                 summary += posterior_summaries.to_string() + '\n\n'
 
-            summary += 'Training set loss:\n'
+            summary += 'TRAINING SET EVALUATION:\n'
             summary += '  MSE: %.4f\n' % dtsr_mse
             summary += '  MAE: %.4f\n' % dtsr_mae
             summary += '=' * 50 + '\n'

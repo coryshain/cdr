@@ -6,6 +6,7 @@ import configparser
 from numpy import inf
 
 from dtsr.formula import Formula
+from dtsr.kwargs import DTSR_INITIALIZATION_KWARGS, DTSRMLE_INITIALIZATION_KWARGS, DTSRBAYES_INITIALIZATION_KWARGS
 
 
 # Thanks to Brice (https://stackoverflow.com/users/140264/brice) at Stack Overflow for this
@@ -87,9 +88,10 @@ class Config(object):
         ############
 
         self.models = {}
-        self.model_list = [m[6:] for m in config.sections() if m.startswith('model_')]
+        self.model_list = []
         for model_field in [m for m in config.keys() if m.startswith('model_')]:
             self.models[model_field[6:]] = self.build_dtsr_settings(config[model_field], add_defaults=False)
+            self.model_list.append(model_field[6:])
             if 'ablate' in config[model_field]:
                 for ablated in powerset(config[model_field]['ablate'].strip().split()):
                     ablated = list(ablated)
@@ -99,6 +101,7 @@ class Config(object):
                     new_model = self.models[model_field[6:]].copy()
                     new_model['formula'] = str(formula)
                     self.models[name] = new_model
+                    self.model_list.append(name)
 
         if 'irf_name_map' in config:
             self.irf_name_map = {}
@@ -130,97 +133,27 @@ class Config(object):
     def build_dtsr_settings(self, settings, add_defaults=True):
         out = {}
 
-        # a. Formula
+        # Core fields
         out['formula'] = settings.get('formula', None)
-
-        # b. Implementation
-        if 'float_type' in settings or add_defaults:
-            out['float_type'] = settings.get('float_type', 'float32')
-        if 'int_type' in settings or add_defaults:
-            out['int_type'] = settings.get('int_type', 'int32')
-        if 'n_iter' in settings or add_defaults:
-            out['n_iter'] = settings.getint('n_iter', 1000)
-        if 'minibatch_size' in settings or add_defaults:
-            out['minibatch_size'] = settings.get('minibatch_size', 1024)
-            if out['minibatch_size'] in ['None', 'inf']:
-                out['minibatch_size'] = inf
-            else:
-                try:
-                    out['minibatch_size'] = int(out['minibatch_size'])
-                except:
-                    raise ValueError('minibatch_size parameter invalid: %s' % out['minibatch_size'])
-        if 'eval_minibatch_size' in settings or add_defaults:
-            out['eval_minibatch_size'] = settings.get('eval_minibatch_size', 100000)
-            if out['eval_minibatch_size'] in ['None', 'inf']:
-                out['eval_minibatch_size'] = inf
-            else:
-                try:
-                    out['eval_minibatch_size'] = int(out['eval_minibatch_size'])
-                except:
-                    raise ValueError(
-                        'eval_minibatch_size parameter invalid: %s' % out['eval_minibatch_size'])
-        if 'n_interp' in settings or add_defaults:
-            out['n_interp'] = settings.getint('n_interp', 64)
-        if 'optim_name' in settings or add_defaults:
-            out['optim_name'] = settings.get('optim_name', 'Nadam')
-            if out['optim_name'] == 'None':
-                out['optim_name'] = None
-        if 'optim_epsilon' in settings or add_defaults:
-            out['optim_epsilon'] = settings.get('optim_epsilon', 1e-8)
-        if 'learning_rate' in settings or add_defaults:
-            out['learning_rate'] = settings.getfloat('learning_rate', 0.001)
-        if 'learning_rate_min' in settings or add_defaults:
-            out['learning_rate_min'] = settings.get('learning_rate_min', 1e-5)
-            if out['learning_rate_min'] in ['None', '-inf']:
-                out['learning_rate_min'] = -inf
-            else:
-                try:
-                    out['learning_rate_min'] = float(out['learning_rate_min'])
-                except:
-                    raise ValueError(
-                        'learning_rate_min parameter invalid: %s' % out['learning_rate_min'])
-        if 'lr_decay_family' in settings or add_defaults:
-            out['lr_decay_family'] = settings.get('lr_decay_family', None)
-            if out['lr_decay_family'] == 'None':
-                out['lr_decay_family'] = None
-        if 'lr_decay_steps' in settings or add_defaults:
-            out['lr_decay_steps'] = settings.getint('lr_decay_steps', 100)
-        if 'lr_decay_rate' in settings or add_defaults:
-            out['lr_decay_rate'] = settings.getfloat('lr_decay_rate', .5)
-        if 'lr_decay_staircase' in settings or add_defaults:
-            out['lr_decay_staircase'] = settings.getboolean('lr_decay_staircase', False)
-        if 'ema_decay' in settings or add_defaults:
-            out['ema_decay'] = settings.getfloat('ema_decay', 0.999)
-        if 'validate_irf_args' in settings or add_defaults:
-            out['validate_irf_args'] = settings.getboolean('validate_irf_args', True)
-
-        # c. Model hyperparameters
         if 'network_type' in settings or add_defaults:
             out['network_type'] = settings.get('network_type', 'bayes')
-        if 'pc' in settings or add_defaults:
-            out['pc'] = settings.getboolean('pc', False)
-        if 'init_sd' in settings or add_defaults:
-            out['init_sd'] = settings.getfloat('init_sd', 0.01)
-        if 'intercept_init' in settings or add_defaults:
-            out['intercept_init'] = settings.get('intercept_init', None)
-        if 'intercept_init' in settings or add_defaults:
-            if out['intercept_init'] in [None, 'None']:
-                out['intercept_init'] = None
-            else:
-                try:
-                    out['intercept_init'] = float(out['intercept_init'])
-                except:
-                    raise ValueError('intercept_init parameter invalid: %s' % out['intercept_init'])
 
-        # d. Logging
-        if 'log_freq' in settings or add_defaults:
-            out['log_freq'] = settings.getint('log_freq', 1)
-        if 'log_random' in settings or add_defaults:
-            out['log_random'] = settings.getboolean('log_random', True)
-        if 'save_freq' in settings or add_defaults:
-            out['save_freq'] = settings.getint('save_freq', 1)
+        # DTSR initialization keyword arguments
+        for kwarg in DTSR_INITIALIZATION_KWARGS:
+            if kwarg.key in settings or add_defaults:
+                out[kwarg.key] = kwarg.kwarg_from_config(settings)
 
-        # e. Plotting
+        # DTSRMLE initialization keyword arguments
+        for kwarg in DTSRMLE_INITIALIZATION_KWARGS:
+            if kwarg.key in settings or add_defaults:
+                out[kwarg.key] = kwarg.kwarg_from_config(settings)
+
+        # DTSRBayes initialization keyword arguments
+        for kwarg in DTSRBAYES_INITIALIZATION_KWARGS:
+            if kwarg.key in settings or add_defaults:
+                out[kwarg.key] = kwarg.kwarg_from_config(settings)
+
+        # Plotting defaults
         if 'plot_n_time_units' in settings or add_defaults:
             out['plot_n_time_units'] = settings.getfloat('plot_n_time_units', 2.5)
         if 'plot_n_points_per_time_unit' in settings or add_defaults:
@@ -233,150 +166,27 @@ class Config(object):
         if 'cmap' in settings or add_defaults:
             out['cmap'] = settings.get('cmap', 'gist_rainbow')
 
-        # f. MLE implementation
-        if 'loss_type' in settings or add_defaults:
-            out['loss_type'] = settings.get('loss_type', 'MSE')
-        if 'regularizer_name' in settings or add_defaults:
-            out['regularizer_name'] = settings.get('regularizer_name', None)
-            if out['regularizer_name'] == 'None':
-                out['regularizer_name'] = None
-        if 'regularizer_scale' in settings or add_defaults:
-            out['regularizer_scale'] = settings.getfloat('regularizer_scale', 0.01)
+        return out
 
-        if 'intercept_regularizer_name' in settings or add_defaults:
-            out['intercept_regularizer_name'] = settings.get('intercept_regularizer_name', 'inherit')
-            if out['intercept_regularizer_name'] == 'None':
-                out['intercept_regularizer_name'] = None
-        if 'intercept_regularizer_scale' in settings or add_defaults:
-            out['intercept_regularizer_scale'] = settings.get('intercept_regularizer_scale', 'inherit')
-            if out['intercept_regularizer_scale'] != 'inherit':
-                try:
-                    out['intercept_regularizer_scale'] = float(out['intercept_regularizer_scale'])
-                except:
-                    raise ValueError('intercept_regularizer_scale parameter invalid: %s' % out['intercept_regularizer_scale'])
-                
-        if 'coefficient_regularizer_name' in settings or add_defaults:
-            out['coefficient_regularizer_name'] = settings.get('coefficient_regularizer_name', 'inherit')
-            if out['coefficient_regularizer_name'] == 'None':
-                out['coefficient_regularizer_name'] = None
-        if 'coefficient_regularizer_scale' in settings or add_defaults:
-            out['coefficient_regularizer_scale'] = settings.get('coefficient_regularizer_scale', 'inherit')
-            if out['coefficient_regularizer_scale'] != 'inherit':
-                try:
-                    out['coefficient_regularizer_scale'] = float(out['coefficient_regularizer_scale'])
-                except:
-                    raise ValueError('coefficient_regularizer_scale parameter invalid: %s' % out['coefficient_regularizer_scale'])
-        
-        if 'irf_regularizer_name' in settings or add_defaults:
-            out['irf_regularizer_name'] = settings.get('irf_regularizer_name', 'inherit')
-            if out['irf_regularizer_name'] == 'None':
-                out['irf_regularizer_name'] = None
-        if 'irf_regularizer_scale' in settings or add_defaults:
-            out['irf_regularizer_scale'] = settings.get('irf_regularizer_scale', 'inherit')
-            if out['irf_regularizer_scale'] != 'inherit':
-                try:
-                    out['irf_regularizer_scale'] = float(out['irf_regularizer_scale'])
-                except:
-                    raise ValueError('irf_regularizer_scale parameter invalid: %s' % out['irf_regularizer_scale'])
-                
-        if 'ranef_regularizer_name' in settings or add_defaults:
-            out['ranef_regularizer_name'] = settings.get('ranef_regularizer_name', 'inherit')
-            if out['ranef_regularizer_name'] == 'None':
-                out['ranef_regularizer_name'] = None
-        if 'ranef_regularizer_scale' in settings or add_defaults:
-            out['ranef_regularizer_scale'] = settings.get('ranef_regularizer_scale', 'inherit')
-            if out['ranef_regularizer_scale'] != 'inherit':
-                try:
-                    out['ranef_regularizer_scale'] = float(out['ranef_regularizer_scale'])
-                except:
-                    raise ValueError('ranef_regularizer_scale parameter invalid: %s' % out['ranef_regularizer_scale'])
+    @staticmethod
+    def dtsr_kwarg_docstring():
+        out = "**Both DTSRMLE and DTSRBayes**\n\n"
 
+        for kwarg in DTSR_INITIALIZATION_KWARGS:
+            if kwarg.key not in ['outdir', 'history_length']:
+                out += '**%s**: %s; %s\n' %(kwarg.key, kwarg.dtypes_str(), kwarg.descr)
 
+        out += '\n**DTSRMLE only**\n\n'
 
+        for kwarg in DTSRMLE_INITIALIZATION_KWARGS:
+            out += '**%s**: %s; %s\n' %(kwarg.key, kwarg.dtypes_str(), kwarg.descr)
 
-        # g. Bayes net implementation
-        if 'inference_name' in settings or add_defaults:
-            out['inference_name'] = settings.get('inference_name', None)
-        if 'declare_priors' in settings or add_defaults:
-            out['declare_priors'] = settings.getboolean('declare_priors', True)
-        if 'n_samples' in settings or add_defaults:
-            out['n_samples'] = settings.getint('n_samples', 1)
-        if 'n_samples_eval' in settings or add_defaults:
-            out['n_samples_eval'] = settings.getint('n_samples_eval', 128)
+        out += '\n**DTSRBayes only**\n\n'
 
-        if 'intercept_prior_sd' in settings or add_defaults:
-            out['intercept_prior_sd'] = settings.get('intercept_prior_sd', None)
-            if out['intercept_prior_sd'] in [None, 'None']:
-                out['intercept_prior_sd'] = None
-            else:
-                try:
-                    out['intercept_prior_sd'] = float(out['intercept_prior_sd'])
-                except:
-                    raise ValueError(
-                        'intercept_prior_sd parameter invalid: %s' % out['intercept_prior_sd'])
+        for kwarg in DTSRBAYES_INITIALIZATION_KWARGS:
+            out += '**%s**: %s; %s\n' %(kwarg.key, kwarg.dtypes_str(), kwarg.descr)
 
-        if 'coef_prior_sd' in settings or add_defaults:
-            out['coef_prior_sd'] = settings.get('coef_prior_sd', None)
-            if out['coef_prior_sd'] in [None, 'None']:
-                out['coef_prior_sd'] = None
-            else:
-                try:
-                    out['coef_prior_sd'] = float(out['coef_prior_sd'])
-                except:
-                    raise ValueError('coef_prior_sd parameter invalid: %s' % out['coef_prior_sd'])
-
-        if 'prior_sd_scaling_coefficient' in settings or add_defaults:
-            out['prior_sd_scaling_coefficient'] = settings.getfloat('prior_sd_scaling_coefficient', 1.)
-
-        if 'conv_prior_sd' in settings or add_defaults:
-            out['conv_prior_sd'] = settings.getfloat('conv_prior_sd', 1.)
-
-        if 'y_scale_init' in settings or add_defaults:
-            out['y_scale_init'] = settings.get('y_scale_init', None)
-            if out['y_scale_init'] in [None, 'None']:
-                out['y_scale_init'] = None
-            else:
-                try:
-                    out['y_scale_init'] = float(out['y_scale_init'])
-                except:
-                    raise ValueError('y_scale_init parameter invalid: %s' % out['y_scale_init'])
-
-        if 'y_scale_trainable' in settings or add_defaults:
-            out['y_scale_trainable'] = settings.getboolean('y_scale_trainable', True)
-        if 'y_scale_prior_sd' in settings or add_defaults:
-            out['y_scale_prior_sd'] = settings.get('y_scale_prior_sd', None)
-            if out['y_scale_prior_sd'] in [None, 'None']:
-                out['y_scale_prior_sd'] = None
-            else:
-                try:
-                    out['y_scale_prior_sd'] = float(out['y_scale_prior_sd'])
-                except:
-                    raise ValueError(
-                        'y_scale_prior_sd parameter invalid: %s' % out['y_scale_prior_sd'])
-
-        if 'y_scale_prior_sd_scaling_coefficient' in settings or add_defaults:
-            out['y_scale_prior_sd_scaling_coefficient'] = settings.getfloat('y_scale_prior_sd_scaling_coefficient', 1.)
-        if 'ranef_to_fixef_prior_sd_ratio' in settings or add_defaults:
-            out['ranef_to_fixef_prior_sd_ratio'] = settings.getfloat('ranef_to_fixef_prior_sd_ratio', 1.)
-        if 'posterior_to_prior_sd_ratio' in settings or add_defaults:
-            out['posterior_to_prior_sd_ratio'] = settings.getfloat('posterior_to_prior_sd_ratio', 0.01)
-
-        if 'mh_proposal_sd' in settings or add_defaults:
-            out['mh_proposal_sd'] = settings.get('mh_proposal_sd', None)
-            if out['mh_proposal_sd'] in [None, 'None']:
-                out['mh_proposal_sd'] = None
-            else:
-                try:
-                    out['mh_proposal_sd'] = float(out['mh_proposal_sd'])
-                except:
-                    raise ValueError('mh_proposal_sd parameter invalid: %s' % out['mh_proposal_sd'])
-
-        if 'mv' in settings or add_defaults:
-            out['mv'] = settings.getboolean('mv', False)
-        if 'mv_ran' in settings or add_defaults:
-            out['mv_ran'] = settings.getboolean('mv_ran', False)
-        if 'asymmetric_error' in settings or add_defaults:
-            out['asymmetric_error'] = settings.getboolean('asymmetric_error', False)
+        out += '\n'
 
         return out
 

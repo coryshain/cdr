@@ -3,7 +3,8 @@ import os
 import numpy as np
 import pandas as pd
 
-from .dtsr import Kwarg, DTSR
+from .dtsr import DTSR
+from .kwargs import DTSRMLE_INITIALIZATION_KWARGS
 from .util import names2ix, sn
 
 import tensorflow as tf
@@ -22,15 +23,6 @@ pd.options.mode.chained_assignment = None
 #
 ######################################################
 
-DTSRMLE_INITIALIZATION_KWARGS = [
-    Kwarg(
-        'loss_type',
-        'mse',
-        "``str``",
-        "The optimization objective."
-    )
-]
-
 
 class DTSRMLE(DTSR):
     _INITIALIZATION_KWARGS = DTSRMLE_INITIALIZATION_KWARGS
@@ -40,7 +32,7 @@ class DTSRMLE(DTSR):
     """
     _doc_args = DTSR._doc_args
     _doc_kwargs = DTSR._doc_kwargs
-    _doc_kwargs += '\n' + '\n'.join([' ' * 8 + ':param %s' % x.key + ': ' + '; '.join([x.type, x.descr]) + ' **Default**: ``%s``.' %(x.default_value if not isinstance(x.default_value, str) else "'%s'" %x.default_value) for x in _INITIALIZATION_KWARGS])
+    _doc_kwargs += '\n' + '\n'.join([' ' * 8 + ':param %s' % x.key + ': ' + '; '.join([x.dtypes_str(), x.descr]) + ' **Default**: ``%s``.' % (x.default_value if not isinstance(x.default_value, str) else "'%s'" % x.default_value) for x in _INITIALIZATION_KWARGS])
     __doc__ = _doc_header + _doc_args + _doc_kwargs
 
     ######################################################
@@ -189,7 +181,7 @@ class DTSRMLE(DTSR):
             with self.sess.graph.as_default():
                 self.mae_loss = tf.losses.absolute_difference(self.y, self.out)
                 self.mse_loss = tf.losses.mean_squared_error(self.y, self.out)
-                if self.loss_type.lower() == 'mae':
+                if self.loss_name.lower() == 'mae':
                     self.loss_func = self.mae_loss
                 else:
                     self.loss_func = self.mse_loss
@@ -224,6 +216,16 @@ class DTSRMLE(DTSR):
     #  Public methods
     #
     ######################################################
+
+    def report_settings(self, indent=0):
+        out = super(DTSRMLE, self).report_settings(indent=indent)
+        for kwarg in DTSRMLE_INITIALIZATION_KWARGS:
+            val = getattr(self, kwarg.key)
+            out += ' ' * indent + '  %s: %s\n' %(kwarg.key, "\"%s\"" %val if isinstance(val, str) else val)
+
+        out += '\n'
+
+        return out
 
     def run_train_step(self, feed_dict):
         with self.sess.as_default():

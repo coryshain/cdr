@@ -5,6 +5,7 @@ import pandas as pd
 import time as pytime
 
 from .formula import *
+from .kwargs import DTSR_INITIALIZATION_KWARGS
 from .util import *
 from .data import build_DTSR_impulses, corr_dtsr
 from .plot import *
@@ -16,249 +17,12 @@ tf_config.gpu_options.allow_growth = True
 
 pd.options.mode.chained_assignment = None
 
-class Kwarg(object):
-    """
-    Data structure for storing keyword arguments and their documentation.
-
-    :param key: ``str``; Key
-    :param default_value: Any; Default value
-    :param type: ``str``; Description of data type of kwarg
-    :param descr: ``str``; Description of kwarg
-    """
-    def __init__(self, key, default_value, type, descr):
-        self.key = key
-        self.default_value = default_value
-        self.type = type
-        self.descr = descr
-
-
-
-
 
 ######################################################
 #
 #  ABSTRACT DTSR CLASS
 #
 ######################################################
-
-DTSR_INITIALIZATION_KWARGS = [
-    Kwarg(
-        'outdir',
-        './dtsr_model/',
-        "``str``",
-        "Path to output directory, where logs and model parameters are saved."
-    ),
-    Kwarg(
-        'history_length',
-        None,
-        "``int``",
-        "Length of the history window to use."
-    ),
-    Kwarg(
-        'pc',
-        False,
-        "``bool``",
-        "Transform input variables using principal components analysis (experimental, not thoroughly tested)."
-    ),
-    Kwarg(
-        'intercept_init',
-        None,
-        "``float`` or ``None``",
-        "Initial value to use for the intercept (if ``None``, use mean response in training data)"
-    ),
-    Kwarg(
-        'init_sd',
-        .01,
-        "``float``",
-        "Standard deviation of Gaussian initialization distribution for trainable variables."
-    ),
-    Kwarg(
-        'n_interp',
-        64,
-        "``int``",
-        "Number of interpolation points (ignored unless the model formula specification contains continuous inputs)."
-    ),
-    Kwarg(
-        'optim_name',
-        'Adam',
-        "``str``",
-        "Name of the optimizer to use. Choose from ``'SGD'``, ``'AdaGrad'``, ``'AdaDelta'``, ``'Adam'``, ``'FTRL'``, ``'RMSProp'``, ``'Nadam'``."
-    ),
-    Kwarg(
-        'optim_epsilon',
-        0.01,
-        "``float``",
-        "Epsilon parameter to use if **optim_name** in ``['Adam', 'Nadam']``, ignored otherwise."
-    ),
-    Kwarg(
-        'learning_rate',
-        0.01,
-        "``float``",
-        "Initial value for the learning rate."
-    ),
-    Kwarg(
-        'learning_rate_min',
-        1e-4,
-        "``float``",
-        "Minimum value for the learning rate."
-    ),
-    Kwarg(
-        'lr_decay_family',
-        None,
-        "``str`` or ``None``",
-        "Functional family for the learning rate decay schedule (no decay if ``None``)."
-    ),
-    Kwarg(
-        'lr_decay_rate',
-        0.,
-        "``float``",
-        "coefficient by which to decay the learning rate every ``lr_decay_steps`` (ignored if ``lr_decay_family==None``)."
-    ),
-    Kwarg(
-        'lr_decay_steps',
-        25,
-        "``int``",
-        "Span of iterations over which to decay the learning rate by ``lr_decay_rate`` (ignored if ``lr_decay_family==None``)."
-    ),
-    Kwarg(
-        'lr_decay_staircase',
-        False,
-        "``bool``",
-        "Keep learning rate flat between ``lr_decay_steps`` (ignored if ``lr_decay_family==None``)."
-    ),
-    Kwarg(
-        'regularizer_name',
-        None,
-        "``str`` or ``None``",
-        "Name of global regularizer; can be overridden by more regularizers for more specific parameters (e.g. ``l1_regularizer``, ``l2_regularizer``). If ``None``, no regularization."
-    ),
-    Kwarg(
-        'regularizer_scale',
-        0.01,
-        "``float``",
-        "Scale of global regularizer; can be overridden by more regularizers for more specific parameters (ignored if ``regularizer_name==None``)."
-    ),
-    Kwarg(
-        'intercept_regularizer_name',
-        'inherit',
-        "``str`` or ``None``",
-        "Name of intercept regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
-    ),
-    Kwarg(
-        'intercept_regularizer_scale',
-        'inherit',
-        "``float`` or ``'inherit'``",
-        "Scale of intercept regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
-    ),
-    Kwarg(
-        'coefficient_regularizer_name',
-        'inherit',
-        "``str`` or ``None``",
-        "Name of coefficient regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
-    ),
-    Kwarg(
-        'coefficient_regularizer_scale',
-        'inherit',
-        "``float``",
-        "Scale of coefficient regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
-    ),
-    Kwarg(
-        'irf_regularizer_name',
-        'inherit',
-        "``str`` or ``None``",
-        "Name of IRF parameter regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
-    ),
-    Kwarg(
-        'irf_regularizer_scale',
-        'inherit',
-        "``float``",
-        "Scale of IRF parameter regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
-    ),
-    Kwarg(
-        'ranef_regularizer_name',
-        'inherit',
-        "``str`` or ``None``",
-        "Name of random effects regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
-    ),
-    Kwarg(
-        'ranef_regularizer_scale',
-        'inherit',
-        "``float``",
-        "Scale of random effects regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
-    ),
-    Kwarg(
-        'ema_decay',
-        0.999,
-        "``float``",
-        "Decay factor to use for exponential moving average for parameters (used in prediction)."
-    ),
-    Kwarg(
-        'minibatch_size',
-        128,
-        "``int`` or ``None``",
-        "Size of minibatches to use for fitting (full-batch if ``None``)."
-    ),
-    Kwarg(
-        'eval_minibatch_size',
-        100000,
-        "``int`` or ``None``",
-        "Size of minibatches to use for prediction/evaluation (full-batch if ``None``)."
-    ),
-    Kwarg(
-        'float_type',
-        'float32',
-        "``str``",
-        "``float`` type to use throughout the network."
-    ),
-    Kwarg(
-        'int_type',
-        'int32',
-        "``str``",
-        "``int`` type to use throughout the network (used for tensor slicing)."
-    ),
-    Kwarg(
-        'queue_capacity',
-        100000,
-        "``int``",
-        "Queue capacity for data feeding (currently not used)."
-    ),
-    Kwarg(
-        'num_threads',
-        8,
-        "``int``",
-        "Number of threads for data dequeuing (currently not used)"
-    ),
-    Kwarg(
-        'validate_irf_args',
-        True,
-        "``bool``",
-        "Check whether inputs and parameters to IRF obey constraints. Imposes a small performance cost but helps catch and report bugs in the model."
-    ),
-    Kwarg(
-        'save_freq',
-        1,
-        "``int``",
-        "Frequency (in iterations) with which to save model checkpoints."
-    ),
-    Kwarg(
-        'log_random',
-        True,
-        "``bool``",
-        "Log random effects to Tensorboard."
-    ),
-    Kwarg(
-        'log_freq',
-        1,
-        "``int``",
-        "Frequency (in iterations) with which to log model params to Tensorboard."
-    ),
-    Kwarg(
-        'log_graph',
-        False,
-        "``bool``",
-        "Log the network graph to Tensorboard"
-    )
-]
 
 class DTSR(object):
 
@@ -299,7 +63,7 @@ class DTSR(object):
             * A column with the same name as the DV specified in ``form_str``
             * A column for each random grouping factor in the model specified in ``form_str``
     \n"""
-    _doc_kwargs = '\n'.join([' ' * 8 + ':param %s' %x.key + ': ' + '; '.join([x.type, x.descr]) + ' **Default**: ``%s``.' %(x.default_value if not isinstance(x.default_value, str) else "'%s'" %x.default_value) for x in _INITIALIZATION_KWARGS])
+    _doc_kwargs = '\n'.join([' ' * 8 + ':param %s' % x.key + ': ' + '; '.join([x.dtypes_str(), x.descr]) + ' **Default**: ``%s``.' % (x.default_value if not isinstance(x.default_value, str) else "'%s'" % x.default_value) for x in _INITIALIZATION_KWARGS])
     __doc__ = _doc_header + _doc_args + _doc_kwargs
 
     ######################################################
@@ -2008,17 +1772,24 @@ class DTSR(object):
 
         raise NotImplementedError
 
-    def summary(self, fixed=True, random=False):
+    def summary(self, fixed=True, random=False, indent=0):
         """
         Generate a summary of the fitted model.
-        **All DTSR subclasses must implement this method.**
 
         :param fixed: ``bool``; Report fixed effects parameters
         :param random: ``bool``; Report random effects parameters
         :return: ``str``; Formatted model summary for printing
         """
 
-        raise NotImplementedError
+        out = ' ' * indent + '############################\n'
+        out += ' ' * indent + '#                          #\n'
+        out += ' ' * indent + '#    DTSR MODEL SUMMARY    #\n'
+        out += ' ' * indent + '#                          #\n'
+        out += ' ' * indent + '############################\n\n\n'
+
+        out += self.report_initialization_overview(indent = indent + 2)
+
+        return out
 
 
 
@@ -2035,41 +1806,90 @@ class DTSR(object):
             with self.sess.graph.as_default():
                 self.load(predict=mode)
 
-    def report_n_params(self):
+    def report_formula_string(self, indent=0):
+        out = ' ' * indent + 'MODEL FORMULA:\n'
+        out += ' ' * indent + '  %s' %str(self.form)
+        for kwarg in DTSR_INITIALIZATION_KWARGS:
+            val = getattr(self, kwarg.key)
+            out += ' ' * indent + '  %s: %s\n' %(kwarg.key, "\"%s\"" %val if isinstance(val, str) else val)
+
+        return out
+
+    def report_settings(self, indent=0):
+        out = ' ' * indent + 'MODEL SETTINGS:\n'
+        for kwarg in DTSR_INITIALIZATION_KWARGS:
+            val = getattr(self, kwarg.key)
+            out += ' ' * indent + '  %s: %s\n' %(kwarg.key, "\"%s\"" %val if isinstance(val, str) else val)
+
+        return out
+
+    def report_irf_tree(self, indent=0):
+        out = ' ' * indent + 'IRF TREE:\n'
+        tree_str = str(self.t)
+        new_tree_str = ''
+        for line in tree_str.splitlines():
+            new_tree_str += ' ' * (indent + 2) + line + '\n'
+        out += new_tree_str + '\n'
+
+        if self.pc:
+            out = ' ' * indent + 'SOURCE IRF TREE:\n'
+            tree_str = str(self.t_src)
+            new_tree_str = ''
+            for line in tree_str.splitlines():
+                new_tree_str += ' ' * (indent + 2) + line
+            out += new_tree_str + '\n'
+
+        return out
+
+    def report_n_params(self, indent=0):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 n_params = 0
                 var_names = [v.name for v in tf.trainable_variables()]
                 var_vals = self.sess.run(tf.trainable_variables())
-                out = 'Trainable variables:\n'
+                out = ' ' * indent + 'TRAINABLE PARAMETERS:\n'
                 for i in range(len(var_names)):
                     v_name = var_names[i]
                     v_val = var_vals[i]
                     cur_params = np.prod(np.array(v_val).shape)
                     n_params += cur_params
-                    out += '  ' + v_name.split(':')[0] + ': %s\n' % str(cur_params)
-                out += 'Network contains %d total trainable parameters.\n\n' % n_params
+                    out += ' ' * indent + '  ' + v_name.split(':')[0] + ': %s\n' % str(cur_params)
+                out +=  ' ' * indent + '  TOTAL: %d\n\n' % n_params
 
                 return out
 
-    def report_regularized_variables(self):
+    def report_regularized_variables(self, indent=0):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 assert len(self.regularizer_losses) == len(self.regularizer_losses_names) == len(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)), 'Different numbers of regularized variables found in different places'
 
-                out = 'Regularization summary:\n'
+                out = ' ' * indent + 'REGULARIZATION:\n'
 
                 if len(self.regularizer_losses_names) == 0:
-                    out +=  'No regularized variables.\n\n'
+                    out +=  ' ' * indent + '  No regularized variables.\n\n'
                 else:
                     for i, name in enumerate(self.regularizer_losses_varnames):
-                        out += '  %s:\n' %name
-                        out += '    Regularizer: %s\n' %self.regularizer_losses_names[i]
-                        out += '    Scale: %s\n' %self.regularizer_losses_scales[i]
+                        out += ' ' * indent + '  %s:\n' %name
+                        out += ' ' * indent + '    Regularizer: %s\n' %self.regularizer_losses_names[i]
+                        out += ' ' * indent + '    Scale: %s\n' %self.regularizer_losses_scales[i]
 
                     out += '\n'
 
                 return out
+
+
+    def report_initialization_overview(self, indent=0):
+        out = ' ' * indent + '-----------------------------\n'
+        out += ' ' * indent + 'DTSR INITIALIZATION OVERVIEW:\n'
+        out += ' ' * indent + '-----------------------------\n\n'
+
+        out += self.report_settings(indent=indent+2)
+        out += self.report_irf_tree(indent=indent+2)
+        out += self.report_n_params(indent=indent+2)
+        out += self.report_regularized_variables(indent=indent+2)
+
+        return out
+
 
     def build(self, outdir=None, restore=True, verbose=True):
         """
@@ -2078,18 +1898,9 @@ class DTSR(object):
         ``build()`` can be used to reinitialize an existing network instance on the fly, but only if (1) no model checkpoint has been saved to the output directory or (2) ``restore`` is set to ``False``.
 
         :param restore: Restore saved network parameters if model checkpoint exists in the output directory.
-        :param verbose: Show the model tree when called.
+        :param verbose: Report model details after initialization.
         :return: ``None``
         """
-        if verbose:
-            sys.stderr.write('Constructing network from model tree:\n')
-            sys.stdout.write(str(self.t))
-            sys.stdout.write('\n\n')
-
-            if self.pc:
-                sys.stderr.write('Source model tree:\n')
-                sys.stdout.write(str(self.t_src))
-                sys.stdout.write('\n\n')
 
         if outdir is None:
             if not hasattr(self, 'outdir'):
@@ -2112,8 +1923,10 @@ class DTSR(object):
                 self.load(restore=restore)
 
                 self._collect_plots()
-                sys.stderr.write(self.report_n_params())
-                sys.stderr.write(self.report_regularized_variables())
+                if verbose:
+                    sys.stderr.write('*' * 50 + '\n')
+                    sys.stderr.write(self.report_initialization_overview())
+                    sys.stderr.write('*' * 50 + '\n')
 
     def save(self, dir=None):
         if dir is None:

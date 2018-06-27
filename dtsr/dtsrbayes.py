@@ -13,8 +13,8 @@ tf_config.gpu_options.allow_growth = True
 
 from .formula import *
 from .util import *
-from .dtsr import DTSR, Kwarg
-from .data import build_DTSR_impulses, corr_dtsr
+from .dtsr import DTSR
+from .kwargs import DTSRBAYES_INITIALIZATION_KWARGS
 
 import edward as ed
 from edward.models import Empirical, Exponential, Gamma, MultivariateNormalTriL, Normal, SinhArcsinh
@@ -29,135 +29,6 @@ from edward.models import Empirical, Exponential, Gamma, MultivariateNormalTriL,
 #
 ######################################################
 
-DTSRBAYES_INITIALIZATION_KWARGS = [
-    Kwarg(
-        'inference_name',
-        'KLqp',
-        "``str``",
-        "The Edward inference class to use for fitting."
-    ),
-    Kwarg(
-        'declare_priors',
-        True,
-        "``bool``",
-        "Specify Gaussian priors for all model parameters (if ``False``, use implicit improper uniform priors)."
-    ),
-    Kwarg(
-        'n_iter',
-        1000,
-        "``bool``",
-        "Number of training iterations. If using variational inference, this becomes the `expected` number of training iterations and is used only for Tensorboard logging, with no impact on training behavior."
-    ),
-    Kwarg(
-        'n_samples',
-        None,
-        "``int``",
-        "Number of posterior samples to draw at each training step during variational inference. If using MCMC inferences, the number of samples is set deterministically as ``n_iter * n_minibatch``, so this user-supplied parameter is overridden."
-    ),
-    Kwarg(
-        'n_samples_eval',
-        256,
-        "``int``",
-        "Number of posterior predictive samples to draw for prediction/evaluation."
-    ),
-    Kwarg(
-        'intercept_prior_sd',
-        None,
-        "``float`` or ``None``",
-        "Standard deviation of prior on fixed intercept. If ``None``, inferred as ``prior_sd_scaling_coefficient`` times the empirical variance of the response on the training set."
-    ),
-    Kwarg(
-        'coef_prior_sd',
-        None,
-        "``float`` or ``None``",
-        "Standard deviation of prior on fixed coefficients. If ``None``, inferred as ``prior_sd_scaling_coefficient`` times the empirical variance of the response on the training set."
-    ),
-    Kwarg(
-        'conv_prior_sd',
-        1,
-        "``float``",
-        "Standard deviation of prior on convolutional IRF parameters"
-    ),
-    Kwarg(
-        'y_scale_init',
-        None,
-        "``float`` or ``None``",
-        "Initial value for the standard deviation of the output model. If ``None``, inferred as the empirical standard deviation of the response on the training set."
-    ),
-    Kwarg(
-        'y_scale_trainable',
-        True,
-        "``bool``",
-        "Tune the standard deviation of the output model during training. If ``False``, remains fixed at ``y_scale_init``."
-    ),
-    Kwarg(
-        'y_scale_prior_sd',
-        None,
-        "``float`` or ``None``",
-        "Standard deviation of prior on standard deviation of output model. If ``None``, inferred as ``y_scale_prior_sd_scaling_coefficient`` times the empirical variance of the response on the training set."
-    ),
-    Kwarg(
-        'y_skewness_prior_sd',
-        1,
-        "``float``",
-        "Standard deviation of prior on skewness parameter of output model. Only used if ``asymmetric_error == True``, otherwise ignored."
-    ),
-    Kwarg(
-        'y_tailweight_prior_sd',
-        1,
-        "``float``",
-        "Standard deviation of prior on tailweight parameter of output model. Only used if ``asymmetric_error == True``, otherwise ignored."
-    ),
-    Kwarg(
-        'mh_proposal_sd',
-        None,
-        "``float`` or ``None``",
-        "Standard deviation of proposal distribution. If ``None``, inferred as standard deviation of corresponding prior. Only used if ``inference_name == 'MetropolisHastings', otherwise ignored."
-    ),
-    Kwarg(
-        'prior_sd_scaling_coefficient',
-        1,
-        "``float``",
-        "Factor by which to multiply priors on intercepts and coefficients if inferred from the empirical variance of the data (i.e. if ``intercept_prior_sd`` or ``coef_prior_sd`` is ``None``). Ignored for any prior widths that are explicitly specified."
-    ),
-    Kwarg(
-        'y_scale_prior_sd_scaling_coefficient',
-        1,
-        "``float``",
-        "Factor by which to multiply prior on output model variance if inferred from the empirical variance of the data (i.e. if ``y_scale_prior_sd`` is ``None``). Ignored if prior width is explicitly specified."
-    ),
-    Kwarg(
-        'ranef_to_fixef_prior_sd_ratio',
-        1,
-        "``float``",
-        "Ratio of widths of random to fixed effects priors. I.e. if less than 1, random effects have tighter priors."
-    ),
-    Kwarg(
-        'posterior_to_prior_sd_ratio',
-        0.01,
-        "``float``",
-        "Ratio of widths of priors to posterior initializations. Low values are often beneficial to stability, convergence speed, and optimality of the final model by avoiding erratic sampling and divergent behavior early in training."
-    ),
-    Kwarg(
-        'asymmetric_error',
-        False,
-        "``bool``",
-        "Allow an asymmetric error distribution by fitting a SinArcsinh transform of the normal error, adding trainable skewness and tailweight parameters."
-    ),
-    Kwarg(
-        'mv',
-        False,
-        "``bool``",
-        "Use multivariate model that fits covariances between fixed effects (experimental, not thoroughly tested). If ``False``, parameter distributions are treated as independent."
-    ),
-    Kwarg(
-        'mv_ran',
-        False,
-        "``bool``",
-        "Use multivariate model that fits covariances between random effects within a random grouping factor (experimental, not thoroughly tested). If ``False``, random parameter distributions are treated as independent."
-    )
-]
-
 class DTSRBayes(DTSR):
 
     _INITIALIZATION_KWARGS = DTSRBAYES_INITIALIZATION_KWARGS
@@ -167,7 +38,7 @@ class DTSRBayes(DTSR):
     """
     _doc_args = DTSR._doc_args
     _doc_kwargs = DTSR._doc_kwargs
-    _doc_kwargs += '\n' + '\n'.join([' ' * 8 + ':param %s' %x.key + ': ' + '; '.join([x.type, x.descr]) + ' **Default**: ``%s``.' %(x.default_value if not isinstance(x.default_value, str) else "'%s'" %x.default_value) for x in _INITIALIZATION_KWARGS])
+    _doc_kwargs += '\n' + '\n'.join([' ' * 8 + ':param %s' % x.key + ': ' + '; '.join([x.dtypes_str(), x.descr]) + ' **Default**: ``%s``.' % (x.default_value if not isinstance(x.default_value, str) else "'%s'" % x.default_value) for x in _INITIALIZATION_KWARGS])
     __doc__ = _doc_header + _doc_args + _doc_kwargs
 
 
@@ -1404,6 +1275,16 @@ class DTSRBayes(DTSR):
             'ScoreRBKLqp',
             'WakeSleep'
         ]
+
+    def report_settings(self, indent=0):
+        out = super(DTSRBayes, self).report_settings(indent=indent)
+        for kwarg in DTSRBAYES_INITIALIZATION_KWARGS:
+            val = getattr(self, kwarg.key)
+            out += ' ' * indent + '  %s: %s\n' %(kwarg.key, "\"%s\"" %val if isinstance(val, str) else val)
+
+        out += '\n'
+
+        return out
 
     def run_train_step(self, feed_dict):
         with self.sess.as_default():
