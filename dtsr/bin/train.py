@@ -229,7 +229,15 @@ if __name__ == '__main__':
                     ema_decay=p['ema_decay'],
                     loss_type=p['loss_type'],
                     regularizer_name=p['regularizer_name'],
-                    regularizer_scale=p['regularizer_scale']
+                    regularizer_scale=p['regularizer_scale'],
+                    intercept_regularizer_name=p['intercept_regularizer_name'],
+                    intercept_regularizer_scale=p['intercept_regularizer_scale'],
+                    coefficient_regularizer_name=p['coefficient_regularizer_name'],
+                    coefficient_regularizer_scale=p['coefficient_regularizer_scale'],
+                    irf_regularizer_name=p['irf_regularizer_name'],
+                    irf_regularizer_scale=p['irf_regularizer_scale'],
+                    ranef_regularizer_name=p['ranef_regularizer_name'],
+                    ranef_regularizer_scale=p['ranef_regularizer_scale']
                 )
             elif p['network_type'].startswith('bayes'):
                 from dtsr.dtsrbayes import DTSRBayes
@@ -276,6 +284,16 @@ if __name__ == '__main__':
                     posterior_to_prior_sd_ratio=p['posterior_to_prior_sd_ratio'],
                     init_sd=p['init_sd'],
                     ema_decay=p['ema_decay'],
+                    regularizer_name=p['regularizer_name'],
+                    regularizer_scale=p['regularizer_scale'],
+                    intercept_regularizer_name=p['intercept_regularizer_name'],
+                    intercept_regularizer_scale=p['intercept_regularizer_scale'],
+                    coefficient_regularizer_name=p['coefficient_regularizer_name'],
+                    coefficient_regularizer_scale=p['coefficient_regularizer_scale'],
+                    irf_regularizer_name=p['irf_regularizer_name'],
+                    irf_regularizer_scale=p['irf_regularizer_scale'],
+                    ranef_regularizer_name=p['ranef_regularizer_name'],
+                    ranef_regularizer_scale=p['ranef_regularizer_scale'],
                     mh_proposal_sd=p['mh_proposal_sd'],
                     asymmetric_error=p['asymmetric_error']
                 )

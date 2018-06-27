@@ -121,7 +121,6 @@ class DTSRMLE(DTSR):
                         ),
                         name='intercept_by_%s' % ran_gf
                     )
-                    self._regularize(intercept)
                     intercept_summary = intercept
                 return intercept, intercept_summary
 
@@ -152,7 +151,6 @@ class DTSRMLE(DTSR):
                         name='coefficient_by_%s' % ran_gf
                     )
                     coefficient_summary = coefficient
-                self._regularize(coefficient)
                 return coefficient, coefficient_summary
 
     def initialize_irf_param_unconstrained(self, param_name, ids, mean=0., ran_gf=None):
@@ -168,7 +166,6 @@ class DTSRMLE(DTSR):
                         ),
                         name=sn('%s_%s' % (param_name, '-'.join(ids)))
                     )
-                    self._regularize(param, mean)
                     param_summary = param
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)]
@@ -181,7 +178,6 @@ class DTSRMLE(DTSR):
                         ),
                         name='%s_by_%s' % (param_name, ran_gf)
                     )
-                    self._regularize(param)
                     param_summary = param
 
                 return (param, param_summary)

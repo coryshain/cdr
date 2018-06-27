@@ -215,9 +215,6 @@ class DTSRBayes(DTSR):
     def _initialize_metadata(self):
         super(DTSRBayes, self)._initialize_metadata()
 
-        self.regularizer_name = None
-        self.regularizer_scale = 0
-
         self.inference_map = {}
         if self.intercept_init is None:
             self.intercept_init = self.y_train_mean

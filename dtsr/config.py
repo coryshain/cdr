@@ -225,6 +225,57 @@ class Config(object):
         if 'regularizer_scale' in settings or add_defaults:
             out['regularizer_scale'] = settings.getfloat('regularizer_scale', 0.01)
 
+        if 'intercept_regularizer_name' in settings or add_defaults:
+            out['intercept_regularizer_name'] = settings.get('intercept_regularizer_name', 'inherit')
+            if out['intercept_regularizer_name'] == 'None':
+                out['intercept_regularizer_name'] = None
+        if 'intercept_regularizer_scale' in settings or add_defaults:
+            out['intercept_regularizer_scale'] = settings.get('intercept_regularizer_scale', 'inherit')
+            if out['intercept_regularizer_scale'] != 'inherit':
+                try:
+                    out['intercept_regularizer_scale'] = float(out['intercept_regularizer_scale'])
+                except:
+                    raise ValueError('intercept_regularizer_scale parameter invalid: %s' % out['intercept_regularizer_scale'])
+                
+        if 'coefficient_regularizer_name' in settings or add_defaults:
+            out['coefficient_regularizer_name'] = settings.get('coefficient_regularizer_name', 'inherit')
+            if out['coefficient_regularizer_name'] == 'None':
+                out['coefficient_regularizer_name'] = None
+        if 'coefficient_regularizer_scale' in settings or add_defaults:
+            out['coefficient_regularizer_scale'] = settings.get('coefficient_regularizer_scale', 'inherit')
+            if out['coefficient_regularizer_scale'] != 'inherit':
+                try:
+                    out['coefficient_regularizer_scale'] = float(out['coefficient_regularizer_scale'])
+                except:
+                    raise ValueError('coefficient_regularizer_scale parameter invalid: %s' % out['coefficient_regularizer_scale'])
+        
+        if 'irf_regularizer_name' in settings or add_defaults:
+            out['irf_regularizer_name'] = settings.get('irf_regularizer_name', 'inherit')
+            if out['irf_regularizer_name'] == 'None':
+                out['irf_regularizer_name'] = None
+        if 'irf_regularizer_scale' in settings or add_defaults:
+            out['irf_regularizer_scale'] = settings.get('irf_regularizer_scale', 'inherit')
+            if out['irf_regularizer_scale'] != 'inherit':
+                try:
+                    out['irf_regularizer_scale'] = float(out['irf_regularizer_scale'])
+                except:
+                    raise ValueError('irf_regularizer_scale parameter invalid: %s' % out['irf_regularizer_scale'])
+                
+        if 'ranef_regularizer_name' in settings or add_defaults:
+            out['ranef_regularizer_name'] = settings.get('ranef_regularizer_name', 'inherit')
+            if out['ranef_regularizer_name'] == 'None':
+                out['ranef_regularizer_name'] = None
+        if 'ranef_regularizer_scale' in settings or add_defaults:
+            out['ranef_regularizer_scale'] = settings.get('ranef_regularizer_scale', 'inherit')
+            if out['ranef_regularizer_scale'] != 'inherit':
+                try:
+                    out['ranef_regularizer_scale'] = float(out['ranef_regularizer_scale'])
+                except:
+                    raise ValueError('ranef_regularizer_scale parameter invalid: %s' % out['ranef_regularizer_scale'])
+
+
+
+
         # g. Bayes net implementation
         if 'inference_name' in settings or add_defaults:
             out['inference_name'] = settings.get('inference_name', None)

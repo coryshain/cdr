@@ -129,14 +129,62 @@ DTSR_INITIALIZATION_KWARGS = [
     Kwarg(
         'regularizer_name',
         None,
-        "``str``",
-        "Name of regularizer to use (e.g. ``l1``, ``l2``), or if ``None``, no regularization."
+        "``str`` or ``None``",
+        "Name of global regularizer; can be overridden by more regularizers for more specific parameters (e.g. ``l1_regularizer``, ``l2_regularizer``). If ``None``, no regularization."
     ),
     Kwarg(
         'regularizer_scale',
         0.01,
         "``float``",
-        "Regularizer scale (ignored if ``regularizer_name==None``)."
+        "Scale of global regularizer; can be overridden by more regularizers for more specific parameters (ignored if ``regularizer_name==None``)."
+    ),
+    Kwarg(
+        'intercept_regularizer_name',
+        'inherit',
+        "``str`` or ``None``",
+        "Name of intercept regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
+    ),
+    Kwarg(
+        'intercept_regularizer_scale',
+        'inherit',
+        "``float`` or ``'inherit'``",
+        "Scale of intercept regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
+    ),
+    Kwarg(
+        'coefficient_regularizer_name',
+        'inherit',
+        "``str`` or ``None``",
+        "Name of coefficient regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
+    ),
+    Kwarg(
+        'coefficient_regularizer_scale',
+        'inherit',
+        "``float``",
+        "Scale of coefficient regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
+    ),
+    Kwarg(
+        'irf_regularizer_name',
+        'inherit',
+        "``str`` or ``None``",
+        "Name of IRF parameter regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
+    ),
+    Kwarg(
+        'irf_regularizer_scale',
+        'inherit',
+        "``float``",
+        "Scale of IRF parameter regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
+    ),
+    Kwarg(
+        'ranef_regularizer_name',
+        'inherit',
+        "``str`` or ``None``",
+        "Name of random effects regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
+    ),
+    Kwarg(
+        'ranef_regularizer_scale',
+        'inherit',
+        "``float``",
+        "Scale of random effects regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
     Kwarg(
         'ema_decay',
@@ -331,6 +379,9 @@ class DTSR(object):
             self.n_train_minibatch = 1
             self.minibatch_scale = 1
         self.regularizer_losses = []
+        self.regularizer_losses_names = []
+        self.regularizer_losses_scales = []
+        self.regularizer_losses_varnames = []
 
         # Initialize lookup tables of network objects
         self.irf_lambdas = {}
@@ -622,8 +673,39 @@ class DTSR(object):
                     rate_ix = names2ix('rate', self.src_impulse_names)
                     self.X_rate = tf.gather(self.X, rate_ix, axis=-1)
 
-                if self.regularizer_name is not None:
+                # Initialize regularizers
+                if self.regularizer_name is None:
+                    self.regularizer = None
+                else:
                     self.regularizer = getattr(tf.contrib.layers, self.regularizer_name)(self.regularizer_scale)
+
+                if self.intercept_regularizer_name is None:
+                    self.intercept_regularizer = None
+                elif self.intercept_regularizer_name == 'inherit':
+                    self.intercept_regularizer = self.regularizer
+                else:
+                    self.intercept_regularizer = getattr(tf.contrib.layers, self.intercept_regularizer_name)(self.intercept_regularizer_scale)
+                    
+                if self.coefficient_regularizer_name is None:
+                    self.coefficient_regularizer = None
+                elif self.coefficient_regularizer_name == 'inherit':
+                    self.coefficient_regularizer = self.regularizer
+                else:
+                    self.coefficient_regularizer = getattr(tf.contrib.layers, self.coefficient_regularizer_name)(self.coefficient_regularizer_scale)
+                    
+                if self.irf_regularizer_name is None:
+                    self.irf_regularizer = None
+                elif self.irf_regularizer_name == 'inherit':
+                    self.irf_regularizer = self.regularizer
+                else:
+                    self.irf_regularizer = getattr(tf.contrib.layers, self.irf_regularizer_name)(self.irf_regularizer_scale)
+                    
+                if self.ranef_regularizer_name is None:
+                    self.ranef_regularizer = None
+                elif self.ranef_regularizer_name == 'inherit':
+                    self.ranef_regularizer = self.regularizer
+                else:
+                    self.ranef_regularizer = getattr(tf.contrib.layers, self.ranef_regularizer_name)(self.ranef_regularizer_scale)
 
                 self.loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='loss_total')
 
@@ -638,6 +720,7 @@ class DTSR(object):
                         self.intercept_summary,
                         collections=['params']
                     )
+                    self._regularize(self.intercept, type='intercept', var_name='intercept')
                 else:
                     self.intercept = tf.constant(0., dtype=self.FLOAT_TF, name='intercept')
 
@@ -653,7 +736,7 @@ class DTSR(object):
                 self.coefficient_fixed *= coefficient_fixed_mask
                 self.coefficient_summary *= coefficient_fixed_mask
                 self.coefficient = self.coefficient_fixed
-
+                self._regularize(self.coefficient, type='coefficient', var_name='coefficient')
 
                 for i in range(len(self.coef_names)):
                     tf.summary.scalar(
@@ -722,6 +805,8 @@ class DTSR(object):
 
                         intercept_random -= intercept_random_centering_vector
                         intercept_random_summary -= intercept_random_centering_vector
+                        self._regularize(intercept_random, type='ranef', var_name='intercept_by_%s' % gf)
+
                         self.intercept += tf.gather(intercept_random, self.gf_y[:, i])
 
                         if self.log_random:
@@ -750,10 +835,12 @@ class DTSR(object):
                         coefficient_random_summary *= tf.expand_dims(mask_row, -1)
 
                         coefficient_random_mean = tf.reduce_sum(coefficient_random_summary, axis=0) / tf.reduce_sum(mask_row)
-                        coefficient_random_centering_vector = tf.expand_dims(mask_row, -1) * coefficient_random_mean
+                        coefficient_random_centering_matrix = tf.expand_dims(mask_row, -1) * coefficient_random_mean
 
-                        coefficient_random -= coefficient_random_centering_vector
-                        coefficient_random_summary -= coefficient_random_centering_vector
+                        coefficient_random -= coefficient_random_centering_matrix
+                        coefficient_random_summary -= coefficient_random_centering_matrix
+                        self._regularize(coefficient_random, type='ranef', var_name='coefficient_by_%s' % gf)
+
                         self.coefficient += tf.gather(coefficient_random, self.gf_y[:, i], axis=0)
 
                         if self.log_random:
@@ -986,26 +1073,27 @@ class DTSR(object):
                     untrainable_ix = np.array(untrainable_ix, dtype=self.INT_NP)
 
                 dim = len(trainable_ix)
+                trainable_means = tf.expand_dims(tf.gather(param_mean_init, trainable_ix), 0)
 
                 # Initialize trainable IRF parameters as trainable variables
 
                 param, param_summary = self.initialize_irf_param_unconstrained(
                     param_name,
                     [x for x in ids if param_name in trainable[x]],
-                    mean=tf.expand_dims(tf.gather(param_mean_init, trainable_ix), 0)
+                    mean=trainable_means
                 )
 
-                if lb is None and ub is None:
-                    param_out = param
-                elif lb is not None and ub is None:
-                    param_out = lb + self.epsilon + tf.nn.softplus(param)
+                if lb is not None and ub is None:
+                    param = lb + self.epsilon + tf.nn.softplus(param)
                     param_summary = lb + self.epsilon + tf.nn.softplus(param_summary)
                 elif lb is None and ub is not None:
-                    param_out = ub - self.epsilon - tf.nn.softplus(param)
+                    param = ub - self.epsilon - tf.nn.softplus(param)
                     param_summary = ub - self.epsilon - tf.nn.softplus(param_summary)
-                else:
-                    param_out = lb + self.epsilon + tf.sigmoid(param) * ((ub-self.epsilon) - (lb+self.epsilon))
-                    param_summary = lb + self.epsilon + tf.sigmoid(param_summary) * ((ub-self.epsilon) - (lb+self.epsilon))
+                elif lb is not None and ub is not None:
+                    param = self._softplus_sigmoid(param, a=lb, b=ub)
+                    param_summary = self._softplus_sigmoid(param_summary, a=lb, b=ub)
+
+                self._regularize(param, trainable_means, type='irf', var_name='%s' % param_name)
 
                 for i in range(dim):
                     tf.summary.scalar(
@@ -1018,14 +1106,12 @@ class DTSR(object):
 
                 param_untrainable = tf.expand_dims(tf.gather(param_mean_init, untrainable_ix), 0)
 
-                if lb is None and ub is None:
-                    param_untrainable_out = param_untrainable
-                elif lb is not None and ub is None:
-                    param_untrainable_out = tf.nn.softplus(param_untrainable) + lb + self.epsilon
+                if lb is not None and ub is None:
+                    param_untrainable = tf.nn.softplus(param_untrainable) + lb + self.epsilon
                 elif lb is None and ub is not None:
-                    param_untrainable_out = -tf.nn.softplus(param_untrainable) + ub - self.epsilon
-                else:
-                    param_untrainable_out = tf.sigmoid(param_untrainable) * ((ub - self.epsilon) - (lb + self.epsilon)) + lb + self.epsilon
+                    param_untrainable = -tf.nn.softplus(param_untrainable) + ub - self.epsilon
+                elif lb is not None and ub is not None:
+                    param_untrainable = self._softplus_sigmoid(param_untrainable, a=lb, b=ub)
 
                 # Process any random IRF parameters
 
@@ -1047,46 +1133,28 @@ class DTSR(object):
                         mask_col_np[0, col_ix] = 1.
                         mask_col = tf.constant(mask_col_np, dtype=self.FLOAT_TF)
 
-                        param_random *= mask_col
-                        param_random *= tf.expand_dims(mask_row, -1)
+                        param_random = self._center_and_constrain(
+                            param_random,
+                            param,
+                            lb=lb,
+                            ub=ub,
+                            mask_row=mask_row,
+                            mask_col=mask_col
+                        )
+                        self._regularize(param_random, type='ranef', var_name='%s_by_%s' % (param_name, gf))
 
-                        param_random_mean = tf.reduce_sum(param_random, axis=0) / tf.reduce_sum(mask_row)
-                        param_random_centering_vector = tf.expand_dims(mask_row, -1) * param_random_mean
-                        param_random -= param_random_centering_vector
-
-                        if lb is None and ub is None:
-                            half_interval = None
-                        if lb is not None and ub is None:
-                            half_interval = tf.abs(param_out - lb)
-                        elif lb is None and ub is not None:
-                            half_interval = tf.abs(param_out - ub)
-                        else:
-                            half_interval = tf.minimum(tf.abs(param_out - lb), tf.abs(param_out - ub))
-
-                        if half_interval is not None:
-                            param_random = tf.tanh(param_random) * (half_interval - self.epsilon)
-
-                        param_out += tf.gather(param_random, self.gf_y[:, i], axis=0)
+                        param += tf.gather(param_random, self.gf_y[:, i], axis=0)
 
                         if self.log_random:
-                            param_random_summary *= mask_col
-                            param_random_summary *= tf.expand_dims(mask_row, -1)
 
-                            param_ran_summary_mean = tf.reduce_sum(param_random_summary, axis=0) / tf.reduce_sum(mask_row)
-                            param_ran_summary_centering_vector = tf.expand_dims(mask_row, -1) * param_ran_summary_mean
-                            param_random_summary -= param_ran_summary_centering_vector
-
-                            if lb is None and ub is None:
-                                half_interval = None
-                            if lb is not None and ub is None:
-                                half_interval = tf.abs(param_summary - lb)
-                            elif lb is None and ub is not None:
-                                half_interval = tf.abs(param_summary - ub)
-                            else:
-                                half_interval = tf.minimum(tf.abs(param_summary - lb), tf.abs(param_summary - ub))
-
-                            if half_interval is not None:
-                                param_random_summary = tf.tanh(param_random_summary) * (half_interval - self.epsilon)
+                            param_random_summary = self._center_and_constrain(
+                                param_random_summary,
+                                param_summary,
+                                lb=lb,
+                                ub=ub,
+                                mask_row=mask_row,
+                                mask_col=mask_col
+                            )
 
                             for j in range(len(irf_by_rangf[gf])):
                                 irf_name = irf_by_rangf[gf][j]
@@ -1099,13 +1167,13 @@ class DTSR(object):
 
                         # Combine trainable and untrainable parameters
                     if len(untrainable_ix) > 0:
-                        param_out = tf.concat([param_out, param_untrainable_out], axis=1)
-                        param_summary = tf.concat([param_summary, param_untrainable_out], axis=1)
+                        param = tf.concat([param, param_untrainable], axis=1)
+                        param_summary = tf.concat([param_summary, param_untrainable], axis=1)
 
-                    param_out = tf.gather(param_out, np.concatenate([trainable_ix, untrainable_ix]), axis=1)
+                        param = tf.gather(param, np.concatenate([trainable_ix, untrainable_ix]), axis=1)
                     param_summary = tf.gather(param_summary, np.concatenate([trainable_ix, untrainable_ix]), axis=1)
                     
-                return (param_out, param_summary)
+                return (param, param_summary)
 
     def _get_mean_init_vector(self, irf_ids, param_name, irf_param_init, default=0):
         mean = np.zeros(len(irf_ids))
@@ -1691,15 +1759,34 @@ class DTSR(object):
                 C = tf.reshape(C, C_shape)
                 return C
 
-    def _regularize(self, var, center=None):
-        if self.regularizer_name is not None:
+    def _regularize(self, var, center=None, type=None, var_name=None):
+        assert type in [None, 'intercept', 'coefficient', 'irf', 'ranef']
+        if type is None:
+            regularizer = self.regularizer
+        else:
+            regularizer = getattr(self, '%s_regularizer' %type)
+
+        if regularizer is not None:
             with self.sess.as_default():
                 with self.sess.graph.as_default():
                     if center is None:
-                        reg = tf.contrib.layers.apply_regularization(self.regularizer, [var])
+                        reg = tf.contrib.layers.apply_regularization(regularizer, [var])
                     else:
-                        reg = tf.contrib.layers.apply_regularization(self.regularizer, [var - center])
+                        reg = tf.contrib.layers.apply_regularization(regularizer, [var - center])
                     self.regularizer_losses.append(reg)
+                    self.regularizer_losses_varnames.append(str(var_name))
+                    if type is None:
+                        reg_name = self.regularizer_name
+                        reg_scale = self.regularizer_scale
+                    else:
+                        reg_name = getattr(self, '%s_regularizer_name' %type)
+                        reg_scale = getattr(self, '%s_regularizer_scale' %type)
+                    if reg_name == 'inherit':
+                        reg_name = self.regularizer_name
+                    if reg_scale == 'inherit':
+                        reg_scale = self.regularizer_scale
+                    self.regularizer_losses_names.append(reg_name)
+                    self.regularizer_losses_scales.append(reg_scale)
 
     def _reduce_interpolated_sum(self, X, time, axis=0):
         with self.sess.as_default():
@@ -1736,6 +1823,115 @@ class DTSR(object):
                 out = tf.reduce_sum((X_prev + X_cur) / 2 * time_diff, axis=axis)
 
                 return out
+
+    def _softplus_sigmoid(self, x, a=-1., b=1.):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                c = b - a
+                Z = -tf.log(tf.exp(c) + 1.) + c
+
+                f = (-tf.nn.softplus(-tf.nn.softplus(x - a) + c) + c - Z) * c / (c - Z) + a
+                return f
+
+    def _center_and_constrain(self, param_random, param_fixed, lb=None, ub=None, mask_row=None, mask_col=None, use_softplus_sigmoid=True):
+        with self.sess.as_default():
+            # If the parameter is constrained, passes random effects matrix first through a non-linearity, then
+            # mean-centers its columns. However, centering after constraint can cause the constraint to be violated,
+            # so the recentered weights must be renormalized proportionally to their pre-centering mean in order
+            # to guarantee that the constraint is obeyed. How this renormalization is done depends on whether
+            # the parameter is upper-bounded, lower-bounded, or both.
+
+            with self.sess.graph.as_default():
+
+                if lb is None and ub is None:
+                    if mask_row is None:
+                        param_random_centering_matrix = tf.reduce_mean(param_random, axis=0, keepdims=True)
+                    else:
+                        param_random_mean = tf.reduce_sum(param_random, axis=0) / tf.reduce_sum(mask_row)
+                        param_random_centering_matrix = tf.expand_dims(mask_row, -1) * param_random_mean
+                    param_random -= param_random_centering_matrix
+
+                    return param_random
+
+                elif lb is not None and ub is None:
+                    max_lower_offset = param_fixed - (lb + self.epsilon)
+
+                    # Non-linearity to enforce constraint
+                    param_random = tf.nn.softplus(param_random)
+
+                    if mask_col is not None:
+                        param_random *= mask_col
+                    if mask_row is not None:
+                        param_random *= tf.expand_dims(mask_row, -1)
+
+                    if mask_row is None:
+                        param_random_centering_matrix = tf.reduce_mean(param_random, axis=0, keepdims=True)
+                        param_random_mean = param_random_centering_matrix
+                    else:
+                        param_random_mean = tf.reduce_sum(param_random, axis=0) / tf.reduce_sum(mask_row)
+                        param_random_centering_matrix = tf.expand_dims(mask_row, -1) * param_random_mean
+                    param_random -= param_random_centering_matrix
+
+                    correction_factor = max_lower_offset / (param_random_mean + self.epsilon) # Add epsilon in case of underflow in softplus
+
+                    param_random *= correction_factor
+
+                    # with tf.control_dependencies(
+                    #         [tf.Assert(False, data=['max_lower_offset lb', max_lower_offset, 'param centering vector', param_random_centering_matrix, 'correction_factor lb', correction_factor, 'param_random lb after correction', param_random, 'min', tf.reduce_min(param_random, axis=0), 'max', tf.reduce_max(param_random, axis=0), 'mean', tf.reduce_mean(param_random, axis=0)], summarize=10)]):
+                    #     param_random *= 1
+
+                    return param_random
+
+                elif lb is None and ub is not None:
+                    max_upper_offset = ub - param_fixed - self.epsilon
+
+                    # Non-linearity to enforce constraint
+                    param_random = -tf.nn.softplus(param_random)
+
+                    if mask_col is not None:
+                        param_random *= mask_col
+                    if mask_row is not None:
+                        param_random *= tf.expand_dims(mask_row, -1)
+
+                    if mask_row is None:
+                        param_random_centering_matrix = tf.reduce_mean(param_random, axis=0, keepdims=True)
+                        param_random_mean = param_random_centering_matrix
+                    else:
+                        param_random_mean = tf.reduce_sum(param_random, axis=0) / tf.reduce_sum(mask_row)
+                        param_random_centering_matrix = tf.expand_dims(mask_row, -1) * param_random_mean
+                    param_random -= param_random_centering_matrix
+
+                    correction_factor = max_upper_offset / (-param_random_mean + self.epsilon) # Add epsilon in case of underflow in softplus
+
+                    param_random *= correction_factor
+                    return param_random
+
+                else:
+                    max_lower_offset = param_fixed - (lb + self.epsilon)
+
+                    if use_softplus_sigmoid:
+                        param_random = self._softplus_sigmoid(param_random, a=lb, b=ub)
+                    else:
+                        max_range_param = ub - lb
+                        param_random = tf.sigmoid(param_random) * max_range_param
+
+                    if mask_col is not None:
+                        param_random *= mask_col
+                    if mask_row is not None:
+                        param_random *= tf.expand_dims(mask_row, -1)
+
+                    if mask_row is None:
+                        param_random_centering_matrix = tf.reduce_mean(param_random, axis=0, keepdims=True)
+                        param_random_mean = param_random_centering_matrix
+                    else:
+                        param_random_mean = tf.reduce_sum(param_random, axis=0) / tf.reduce_sum(mask_row)
+                        param_random_centering_matrix = tf.expand_dims(mask_row, -1) * param_random_mean
+                    param_random -= param_random_centering_matrix
+
+                    correction_factor = max_lower_offset / (param_random_mean + self.epsilon) # Add epsilon in case of underflow in softplus
+
+                    param_random *= correction_factor
+                    return param_random
 
     def _lininterp(self, x, n):
         with self.sess.as_default():
@@ -1845,15 +2041,35 @@ class DTSR(object):
                 n_params = 0
                 var_names = [v.name for v in tf.trainable_variables()]
                 var_vals = self.sess.run(tf.trainable_variables())
-                sys.stderr.write('Trainable variables:\n')
+                out = 'Trainable variables:\n'
                 for i in range(len(var_names)):
                     v_name = var_names[i]
                     v_val = var_vals[i]
                     cur_params = np.prod(np.array(v_val).shape)
                     n_params += cur_params
-                    sys.stderr.write('  ' + v_name.split(':')[0] + ': %s\n' % str(cur_params))
-                sys.stderr.write('Network contains %d total trainable parameters.\n' % n_params)
-                sys.stderr.write('\n')
+                    out += '  ' + v_name.split(':')[0] + ': %s\n' % str(cur_params)
+                out += 'Network contains %d total trainable parameters.\n\n' % n_params
+
+                return out
+
+    def report_regularized_variables(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                assert len(self.regularizer_losses) == len(self.regularizer_losses_names) == len(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)), 'Different numbers of regularized variables found in different places'
+
+                out = 'Regularization summary:\n'
+
+                if len(self.regularizer_losses_names) == 0:
+                    out +=  'No regularized variables.\n\n'
+                else:
+                    for i, name in enumerate(self.regularizer_losses_varnames):
+                        out += '  %s:\n' %name
+                        out += '    Regularizer: %s\n' %self.regularizer_losses_names[i]
+                        out += '    Scale: %s\n' %self.regularizer_losses_scales[i]
+
+                    out += '\n'
+
+                return out
 
     def build(self, outdir=None, restore=True, verbose=True):
         """
@@ -1896,7 +2112,8 @@ class DTSR(object):
                 self.load(restore=restore)
 
                 self._collect_plots()
-                self.report_n_params()
+                sys.stderr.write(self.report_n_params())
+                sys.stderr.write(self.report_regularized_variables())
 
     def save(self, dir=None):
         if dir is None:
