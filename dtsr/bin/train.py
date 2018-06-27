@@ -199,8 +199,6 @@ if __name__ == '__main__':
             else:
                 bayes = True
 
-            print(formula)
-
             if p['network_type'] in ['mle', 'nn']:
                 from dtsr.dtsrmle import DTSRMLE
                 dtsr_model = DTSRMLE(

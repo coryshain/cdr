@@ -100,10 +100,6 @@ class Config(object):
                     new_model['formula'] = str(formula)
                     self.models[name] = new_model
 
-        print(self.models)
-
-
-
         if 'irf_name_map' in config:
             self.irf_name_map = {}
             for x in config['irf_name_map']:

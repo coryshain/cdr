@@ -271,7 +271,7 @@ class DTSR(object):
         
             * ``initialize_intercept()``
             * ``initialize_coefficient()``
-            * ``initialize_irf_param()``
+            * ``initialize_irf_param_unconstrained()``
             * ``initialize_objective()``
             * ``run_conv_op()``
             * ``run_loglik_op()``
@@ -1585,7 +1585,7 @@ class DTSR(object):
         Correct model behavior is not guaranteed if called at any other time.
 
         :param ran_gf: ``str`` or ``None``; Name of random grouping factor for random intercept (if ``None``, constructs a fixed intercept)
-        :return: 2-tuple of ``Tensor`` ``(intercept, intercept_summary)``; ``intercept`` is the intercept for use by the model. ``intercept_summary`` is an identically-shaped representation of the current intercept value for logging and plotting (can be identical to ``intercept``). For fixed intercepts, should return scalars. For random intercepts, should return batch-length vector of zero-centered random intercept values for each input in the batch.
+        :return: 2-tuple of ``Tensor`` ``(intercept, intercept_summary)``; ``intercept`` is the intercept for use by the model. ``intercept_summary`` is an identically-shaped representation of the current intercept value for logging and plotting (can be identical to ``intercept``). For fixed intercepts, should return a trainable scalar. For random intercepts, should return batch-length vector of trainable weights. Weights should be initialized around 0.
         """
         raise NotImplementedError
 
@@ -1597,7 +1597,7 @@ class DTSR(object):
 
         :param coef_ids: ``list`` of ``str``: List of coefficient IDs
         :param ran_gf: ``str`` or ``None``: Name of random grouping factor for random coefficient (if ``None``, constructs a fixed coefficient)
-        :return: 2-tuple of ``Tensor`` ``(coefficient, coefficient_summary)``; ``coefficient`` is the coefficient for use by the model. ``coefficient_summary`` is an identically-shaped representation of the current coefficient values for logging and plotting (can be identical to ``coefficient``). For fixed coefficients, should return a vector of length ``len(coef_ids)``. For random coefficients, should return batch-length matrix of random coefficient values with ``len(coef_ids)`` zero-centered columns for each input in the batch.
+        :return: 2-tuple of ``Tensor`` ``(coefficient, coefficient_summary)``; ``coefficient`` is the coefficient for use by the model. ``coefficient_summary`` is an identically-shaped representation of the current coefficient values for logging and plotting (can be identical to ``coefficient``). For fixed coefficients, should return a vector of ``len(coef_ids)`` trainable weights. For random coefficients, should return batch-length matrix of trainable weights with ``len(coef_ids)`` columns for each input in the batch. Weights should be initialized around 0.
         """
 
         raise NotImplementedError
@@ -1612,8 +1612,8 @@ class DTSR(object):
         :param param_name: ``str``; Name of parameter (e.g. ``"alpha"``)
         :param ids: ``list`` of ``str``; Names of IRF nodes to which this parameter applies
         :param mean: ``float`` or ``Tensor``; scalar (broadcasted) or 1D tensor (shape = ``(len(ids),)``) of parameter means on the transformed space.
-        :param ran_gf: ``str`` or ``None``: Name of random grouping factor for random coefficient (if ``None``, constructs a fixed coefficient)
-        :return: 2-tuple of ``Tensor`` ``(param, param_summary)``; ``param`` is the parameter for use by the model. ``param_summary`` is an identically-shaped representation of the current param values for logging and plotting (can be identical to ``param``). For fixed params, should return a vector of length ``len(ids)``. For random params, should return batch-length matrix of random param values with ``len(ids)`` zero-centered columns for each input in the batch.
+        :param ran_gf: ``str`` or ``None``: Name of random grouping factor for random IRF param (if ``None``, constructs a fixed coefficient)
+        :return: 2-tuple of ``Tensor`` ``(param, param_summary)``; ``param`` is the parameter for use by the model. ``param_summary`` is an identically-shaped representation of the current param values for logging and plotting (can be identical to ``param``). For fixed params, should return a vector of ``len(ids)`` trainable weights. For random params, should return batch-length matrix of trainable weights with ``len(ids)``. Weights should be initialized around **mean** (if fixed) or ``0`` (if random).
         """
 
         raise NotImplementedError
