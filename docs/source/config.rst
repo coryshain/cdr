@@ -209,3 +209,42 @@ This can be specified within the same config file as:::
 This setup allows a single config file to define a variety of DTSR models, as long as they all share the same data.
 Distinct datasets require distinct config files.
 
+For hypothesis testing, fixed effect ablation can be conveniently automated using the ``ablate`` model field.
+For example, the following specification implicitly defines 7 unique models, one for each of the ``|powerset(a, b, c)| - 1 = 7``
+non-null ablations of ``a``, ``b``, and ``c``:::
+
+    [model_DTSR_example]
+    n_iter = 5000
+    ablate = a b c
+    formula = C(a + b + c, Normal()) + (C(a + b + c, Normal()) | subject)
+
+The ablated models are named using ``'!'`` followed by the ablated impulse name for each ablated impulse.
+Therefore, the above specification is equivalent to (and much easier to write than) the following:::
+
+    [model_DTSR_example]
+    n_iter = 5000
+    formula = C(a + b + c, Normal()) + (C(a + b + c, Normal()) | subject)
+
+    [model_DTSR_example!a]
+    n_iter = 5000
+    formula = C(b + c, Normal()) + (C(a + b + c, Normal()) | subject)
+
+    [model_DTSR_example!b]
+    n_iter = 5000
+    formula = C(a + c, Normal()) + (C(a + b + c, Normal()) | subject)
+
+    [model_DTSR_example!c]
+    n_iter = 5000
+    formula = C(a + b, Normal()) + (C(a + b + c, Normal()) | subject)
+
+    [model_DTSR_example!a!b]
+    n_iter = 5000
+    formula = C(c, Normal()) + (C(a + b + c, Normal()) | subject)
+
+    [model_DTSR_example!a!c]
+    n_iter = 5000
+    formula = C(b, Normal()) + (C(a + b + c, Normal()) | subject)
+
+    [model_DTSR_example!b!c]
+    n_iter = 5000
+    formula = C(a, Normal()) + (C(a + b + c, Normal()) | subject)

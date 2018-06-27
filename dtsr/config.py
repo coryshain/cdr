@@ -1,8 +1,17 @@
 import sys
 import os
 import shutil
+from itertools import chain, combinations
 import configparser
 from numpy import inf
+
+from dtsr.formula import Formula
+
+
+# Thanks to Brice (https://stackoverflow.com/users/140264/brice) at Stack Overflow for this
+def powerset(iterable):
+    xs = list(iterable)
+    return chain.from_iterable(combinations(xs,n) for n in range(1, len(xs)+1))
 
 class Config(object):
     """
@@ -81,6 +90,19 @@ class Config(object):
         self.model_list = [m[6:] for m in config.sections() if m.startswith('model_')]
         for model_field in [m for m in config.keys() if m.startswith('model_')]:
             self.models[model_field[6:]] = self.build_dtsr_settings(config[model_field], add_defaults=False)
+            if 'ablate' in config[model_field]:
+                for ablated in powerset(config[model_field]['ablate'].strip().split()):
+                    ablated = list(ablated)
+                    name = model_field[6:] + '!' + '!'.join(ablated)
+                    formula = Formula(config[model_field]['formula'])
+                    formula.ablate_impulses(ablated + ['rate'])
+                    new_model = self.models[model_field[6:]].copy()
+                    new_model['formula'] = str(formula)
+                    self.models[name] = new_model
+
+        print(self.models)
+
+
 
         if 'irf_name_map' in config:
             self.irf_name_map = {}

@@ -543,7 +543,7 @@ class Formula(object):
         out += ' + '.join(term_strings)
 
         for key in self.has_intercept:
-            if not key in terms and self.has_intercept[key]:
+            if key is not None and not key in terms and self.has_intercept[key]:
                 out += ' + (1 | %s)' %key
 
         return out
@@ -1095,7 +1095,7 @@ class IRFNode(object):
                         inner.append('cont=T')
                     if len(self.param_init) > 0:
                         inner.append(', '.join(['%s=%s' %(x, self.param_init[x]) for x in self.param_init]))
-                    if self.trainable != Formula.IRF_PARAMS[self.family]:
+                    if set(self.trainable) != set(Formula.IRF_PARAMS[self.family]):
                         inner.append('trainable=%s' %self.trainable)
                     new_irf = self.family + '(' + ', '.join(inner) + ')'
                     if outer is not None:
