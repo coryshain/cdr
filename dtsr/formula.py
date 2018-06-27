@@ -20,6 +20,9 @@ class Formula(object):
         bform_str: String. An R-style mixed-effects model formula string
     """
     def __init__(self, bform_str):
+        self.build(bform_str)
+
+    def build(self, bform_str):
         self.bform_str = bform_str
 
         lhs, rhs = bform_str.strip().split('~')
@@ -442,15 +445,31 @@ class Formula(object):
             X[col] = X[col].fillna(0)
         return X, y, X_2d_predictor_names, X_2d_predictors
 
-    def ablate(self, impulse_ids):
+    def ablate_impulses(self, impulse_ids):
         if not isinstance(impulse_ids, list):
             impulse_ids = [impulse_ids]
-        self.t.ablate(impulse_ids)
+        self.t.ablate_impulses(impulse_ids)
 
-    def unablate(self, impulse_ids):
+    def unablate_impulses(self, impulse_ids):
         if not isinstance(impulse_ids, list):
             impulse_ids = [impulse_ids]
-        self.t.unablate(impulse_ids)
+        self.t.unablate_impulses(impulse_ids)
+
+    def insert_impulses(self, impulses, irf_str, rangf=['subject']):
+        if not isinstance(impulses, list):
+            impulses = [impulses]
+
+        bform = str(self)
+        bform += ' + C(' + ' + '.join(impulses) + ', ' + irf_str + ')'
+        for gf in rangf:
+            bform += ' + (C(' + ' + '.join(impulses) + ', ' + irf_str + ') | ' + gf + ')'
+
+        self.build(bform)
+
+    def remove_impulses(self, impulse_ids):
+        if not isinstance(impulse_ids, list):
+            impulse_ids = [impulse_ids]
+        self.t.remove_impulses(impulse_ids)
 
     IRF = [
         'DiracDelta',
@@ -1002,7 +1021,7 @@ class IRFNode(object):
                     bw[t_pc.name()].append(t.name())
         return fw, bw
 
-    def ablate(self, impulse_ids):
+    def ablate_impulses(self, impulse_ids):
         if not isinstance(impulse_ids, list):
             impulse_ids = [impulse_ids]
         if self.terminal():
@@ -1010,9 +1029,9 @@ class IRFNode(object):
                 self.fixed = False
         else:
             for c in self.children:
-                c.ablate(impulse_ids)
+                c.ablate_impulses(impulse_ids)
 
-    def unablate(self, impulse_ids):
+    def unablate_impulses(self, impulse_ids):
         if not isinstance(impulse_ids, list):
             impulse_ids = [impulse_ids]
         if self.terminal():
@@ -1020,7 +1039,19 @@ class IRFNode(object):
                 self.fixed = True
         else:
             for c in self.children:
-                c.unablate(impulse_ids)
+                c.unablate_impulses(impulse_ids)
+
+    def remove_impulses(self, impulse_ids):
+        if not isinstance(impulse_ids, list):
+            impulse_ids = [impulse_ids]
+        if not self.terminal():
+            new_children = []
+            for c in self.children:
+                if not (c.terminal() and c.impulse.id in impulse_ids):
+                    new_children.append(c)
+            self.children = new_children
+            for c in self.children:
+                c.remove_impulses(impulse_ids)
 
     def formula_terms(self):
         if self.terminal():
