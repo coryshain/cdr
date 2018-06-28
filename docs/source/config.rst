@@ -92,11 +92,11 @@ The optional ``[filters]`` section allows specification of simple data censoring
 All variables used in a filter must be contained in the data files indicated by the ``y_*`` parameters in the ``[data]`` section of the config file.
 The variable name is specified as an INI field, and the condition is specified as its value.
 Supported logical operators are ``<``, ``<=``, ``>``, ``>=``, ``==``, and ``!=``.
-For example, to keep only data points for which column ``foo`` is less or equal to 100, the following filter can be added:::
+For example, to keep only data points for which column ``foo`` is less or equal to 100, the following filter can be added::
 
     foo = <= 100
 
-To keep only data points for which the column ``foo`` does not equal ``bar``, the following filter can be added:::
+To keep only data points for which the column ``foo`` does not equal ``bar``, the following filter can be added::
 
     foo = != bar
 

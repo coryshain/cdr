@@ -627,10 +627,11 @@ class IRFNode(object):
             self.coefID = coefID
             self.fixed = fixed
             self.rangf = [] if rangf is None else rangf if isinstance(rangf, list) else [rangf]
-            if param_init is None:
-                self.param_init = {}
-            else:
-                self.param_init = param_init
+            self.param_init = {}
+            if param_init is not None:
+                for param in Formula.IRF_PARAMS.get(self.family, []):
+                    if param in param_init:
+                        self.param_init[param] = param_init[param]
         if trainable is None:
             self.trainable = Formula.IRF_PARAMS.get(self.family, [])
         else:
@@ -1048,10 +1049,10 @@ class IRFNode(object):
             new_children = []
             for c in self.children:
                 if not (c.terminal() and c.impulse.id in impulse_ids):
-                    new_children.append(c)
+                    c.remove_impulses(impulse_ids)
+                    if c.terminal() or len(c.children) > 0:
+                        new_children.append(c)
             self.children = new_children
-            for c in self.children:
-                c.remove_impulses(impulse_ids)
 
     def formula_terms(self):
         if self.terminal():
