@@ -1,5 +1,6 @@
 import os
 from collections import defaultdict
+import textwrap
 from numpy import inf
 import pandas as pd
 import time as pytime
@@ -1808,10 +1809,11 @@ class DTSR(object):
 
     def report_formula_string(self, indent=0):
         out = ' ' * indent + 'MODEL FORMULA:\n'
-        out += ' ' * indent + '  %s' %str(self.form)
-        for kwarg in DTSR_INITIALIZATION_KWARGS:
-            val = getattr(self, kwarg.key)
-            out += ' ' * indent + '  %s: %s\n' %(kwarg.key, "\"%s\"" %val if isinstance(val, str) else val)
+        form_str = textwrap.wrap(str(self.form), 150)
+        for line in form_str:
+            out += ' ' * indent + '  ' + line + '\n'
+
+        out += '\n'
 
         return out
 
@@ -1883,6 +1885,7 @@ class DTSR(object):
         out += ' ' * indent + 'DTSR INITIALIZATION OVERVIEW:\n'
         out += ' ' * indent + '-----------------------------\n\n'
 
+        out += self.report_formula_string(indent=indent+2)
         out += self.report_settings(indent=indent+2)
         out += self.report_irf_tree(indent=indent+2)
         out += self.report_n_params(indent=indent+2)
