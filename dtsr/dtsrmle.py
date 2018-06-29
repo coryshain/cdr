@@ -224,7 +224,7 @@ class DTSRMLE(DTSR):
 
         return out
 
-    def run_train_step(self, feed_dict):
+    def run_train_step(self, feed_dict, verbose=True):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 _, _, loss = self.sess.run(
@@ -238,7 +238,7 @@ class DTSRMLE(DTSR):
 
                 return out_dict
 
-    def run_predict_op(self, feed_dict, n_samples=None):
+    def run_predict_op(self, feed_dict, n_samples=None, verbose=True):
         if n_samples is not None:
             sys.stderr.write('Parameter n_samples is irrelevant to predict() from a DTSRMLE model and will be ignored')
 
@@ -247,7 +247,7 @@ class DTSRMLE(DTSR):
                 preds = self.sess.run(self.out, feed_dict=feed_dict)
                 return preds
 
-    def run_loglik_op(self, feed_dict, n_samples=None):
+    def run_loglik_op(self, feed_dict, n_samples=None, verbose=True):
         if n_samples is not None:
             sys.stderr.write('Parameter n_samples is irrelevant to log_lik() from a DTSRMLE model and will be ignored')
 
@@ -261,14 +261,3 @@ class DTSRMLE(DTSR):
             with self.sess.graph.as_default():
                 X_conv = self.sess.run(self.X_conv_scaled if scaled else self.X_conv, feed_dict=feed_dict)
                 return X_conv
-
-    def summary(self, fixed=True, random=False):
-        summary = '=' * 50 + '\n'
-        summary += 'DTSR regression\n\n'
-        summary += 'Output directory: %s\n\n' % self.outdir
-        summary += 'Formula:\n'
-        summary += '  ' + self.form_str + '\n\n'
-
-        # TODO: Fill this in
-
-        return (summary)

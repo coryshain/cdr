@@ -76,7 +76,7 @@ class DTSRBayes(DTSR):
                 sys.stderr.write('Parameter n_samples being overridden for sampling optimization\n')
             self.n_samples = self.n_iter*self.n_train_minibatch
 
-        if not self.declare_priors:
+        if not (self.declare_priors_fixef or self.declare_priors_ranef):
             assert self.variational(), 'Only variational inference can be used to fit parameters without declaring priors'
 
         self._initialize_metadata()
@@ -85,6 +85,8 @@ class DTSRBayes(DTSR):
 
     def _initialize_metadata(self):
         super(DTSRBayes, self)._initialize_metadata()
+
+        self.parameter_table_columns = ['Mean', '2.5%', '97.5%']
 
         self.inference_map = {}
         if self.intercept_init is None:
@@ -138,10 +140,6 @@ class DTSRBayes(DTSR):
                 self.y_tailweight_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.y_tailweight_prior_sd_tf)
                 self.y_tailweight_posterior_init_sd_tf = self.y_tailweight_prior_sd_tf * self.posterior_to_prior_sd_ratio
                 self.y_tailweight_posterior_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.y_tailweight_posterior_init_sd_tf)
-
-                self.saved_irf_integrals_in = tf.placeholder(dtype=self.FLOAT_TF, shape=[len(self.impulse_names), 3], name='saved_irf_integrals_in')
-                self.saved_irf_integrals = tf.Variable(tf.zeros([len(self.impulse_names), 3]), dtype=self.FLOAT_TF, trainable=False, name='saved_irf_integrals')
-                self.set_saved_irf_integrals = tf.assign(self.saved_irf_integrals, self.saved_irf_integrals_in)
 
         if self.mv:
             self._initialize_full_joint()
@@ -450,7 +448,7 @@ class DTSRBayes(DTSR):
 
                             intercept_summary = intercept_q.mean()
 
-                            if self.declare_priors:
+                            if self.declare_priors_fixef:
                                 # Prior distribution
                                 intercept = Normal(
                                     sample_shape=[],
@@ -532,7 +530,7 @@ class DTSRBayes(DTSR):
 
                             intercept_summary = intercept_q.mean()
 
-                            if self.declare_priors:
+                            if self.declare_priors_ranef:
                                 # Prior distribution
                                 intercept = Normal(
                                     sample_shape=[rangf_n_levels],
@@ -620,7 +618,7 @@ class DTSRBayes(DTSR):
                             )
                             coefficient_summary = coefficient_q.mean()
 
-                            if self.declare_priors:
+                            if self.declare_priors_fixef:
                                 # Prior distribution
                                 coefficient = Normal(
                                     sample_shape=[len(coef_ids)],
@@ -703,7 +701,7 @@ class DTSRBayes(DTSR):
                             )
                             coefficient_summary = coefficient_q.mean()
 
-                            if self.declare_priors:
+                            if self.declare_priors_ranef:
                                 # Prior distribution
                                 coefficient = Normal(
                                     sample_shape=[rangf_n_levels, len(coef_ids)],
@@ -792,7 +790,7 @@ class DTSRBayes(DTSR):
 
                             param_summary = param_q.mean()
 
-                            if self.declare_priors:
+                            if self.declare_priors_fixef:
                                 # Prior distribution
                                 param = Normal(
                                     loc=mean,
@@ -875,7 +873,7 @@ class DTSRBayes(DTSR):
 
                             param_summary = param_q.mean()
 
-                            if self.declare_priors:
+                            if self.declare_priors_ranef:
                                 # Prior distribution
                                 param = Normal(
                                     sample_shape=[rangf_n_levels, len(ids)],
@@ -962,7 +960,7 @@ class DTSRBayes(DTSR):
                             )
                             y_scale_summary = y_scale_q.mean()
 
-                            if self.declare_priors:
+                            if self.declare_priors_fixef:
                                 # Prior distribution
                                 y_scale = Normal(
                                     loc=y_scale_mean_init,
@@ -1083,7 +1081,7 @@ class DTSRBayes(DTSR):
                             collections=['params']
                         )
 
-                        if self.declare_priors:
+                        if self.declare_priors_fixef:
                             # Prior distributions
                             self.y_skewness = Normal(
                                 loc=0.,
@@ -1242,15 +1240,84 @@ class DTSRBayes(DTSR):
                     for a in self.irf_mc[x]:
                         for b in self.irf_mc[x][a]:
                             self.irf_mc[x][a][b] = ed.copy(self.irf_mc[x][a][b], self.inference_map)
-                for x in self.mc_integrals:
-                    self.mc_integrals[x] = ed.copy(self.mc_integrals[x], self.inference_map)
+                for x in self.irf_integral_tensors:
+                    self.irf_integral_tensors[x] = ed.copy(self.irf_integral_tensors[x], self.inference_map)
                 if self.pc:
                     for x in self.src_irf_mc:
                         for a in self.src_irf_mc[x]:
                             for b in self.src_irf_mc[x][a]:
                                 self.src_irf_mc[x][a][b] = ed.copy(self.src_irf_mc[x][a][b], self.inference_map)
-                    for x in self.src_mc_integrals:
-                        self.src_mc_integrals[x] = ed.copy(self.src_mc_integrals[x], self.inference_map)
+                    for x in self.src_irf_integral_tensors:
+                        self.src_irf_integral_tensors[x] = ed.copy(self.src_irf_integral_tensors[x], self.inference_map)
+
+    # Overload this method to perform parameter sampling and compute credible intervals
+    def _extract_parameter_values(self, fixed=True, level=95, n_samples=None):
+        if n_samples is None:
+            n_samples = self.n_samples_eval
+
+        alpha = 100 - float(level)
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if fixed:
+                    param_vector = self.parameter_table_fixed_values
+                else:
+                    param_vector = self.parameter_table_random_values
+
+            samples = [param_vector.eval(session=self.sess) for _ in range(n_samples)]
+            samples = np.stack(samples, axis=1)
+
+            mean = samples.mean(axis=1)
+            lower = np.percentile(samples, alpha / 2, axis=1)
+            upper = np.percentile(samples, 100 - (alpha / 2), axis=1)
+
+            out = np.stack([mean, lower, upper], axis=1)
+
+            return out
+
+    def _extract_irf_integral(
+            self,
+            terminal_name,
+            level=95,
+            n_samples=None,
+            n_time_units=2.5,
+            n_points_per_time_unit=1000
+    ):
+        if n_samples is None:
+            n_samples = self.n_samples_eval
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                fd = {
+                    self.support_start: 0.,
+                    self.n_time_units: n_time_units,
+                    self.n_points_per_time_unit: n_points_per_time_unit,
+                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1
+                }
+
+                alpha = 100 - float(level)
+
+                if terminal_name in self.irf_integral_tensors:
+                    posterior = self.irf_integral_tensors[terminal_name]
+                else:
+                    posterior = self.src_irf_integral_tensors[terminal_name]
+
+                samples = [np.squeeze(self.sess.run(posterior, feed_dict=fd)[0]) for _ in range(n_samples)]
+                samples = np.stack(samples, axis=0)
+
+                mean = samples.mean(axis=0)
+                lower = np.percentile(samples, alpha / 2, axis=0)
+                upper = np.percentile(samples, 100 - (alpha / 2), axis=0)
+
+                return (mean, lower, upper)
+
+    # Overload this method to use posterior distribution
+    def _initialize_parameter_tables(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                super(DTSRBayes, self)._initialize_parameter_tables()
+
+                self.parameter_table_fixed_values = ed.copy(self.parameter_table_fixed_values, self.inference_map)
+                self.parameter_table_random_values = ed.copy(self.parameter_table_random_values, self.inference_map)
 
 
 
@@ -1285,10 +1352,12 @@ class DTSRBayes(DTSR):
             self,
             posterior,
             level=95,
-            n_samples=1024,
+            n_samples=None,
             n_time_units=2.5,
             n_points_per_time_unit=1000
     ):
+        if n_samples is None:
+            n_samples = self.n_samples_eval
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 fd = {
@@ -1309,93 +1378,11 @@ class DTSRBayes(DTSR):
 
                 return (mean, lower, upper)
 
-    # TODO: Build this for MLE implementation, too (lacking CI)
-    def irf_integral(
-            self,
-            terminal_name,
-            level=95,
-            n_samples=1024,
-            n_time_units=2.5,
-            n_points_per_time_unit=1000
-    ):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                fd = {
-                    self.support_start: 0.,
-                    self.n_time_units: n_time_units,
-                    self.n_points_per_time_unit: n_points_per_time_unit,
-                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1
-                }
-
-                alpha = 100 - float(level)
-
-                if terminal_name in self.mc_integrals:
-                    posterior = self.mc_integrals[terminal_name]
-                else:
-                    posterior = self.src_mc_integrals[terminal_name]
-
-                samples = [np.squeeze(self.sess.run(posterior, feed_dict=fd)[0]) for _ in range(n_samples)]
-                samples = np.stack(samples, axis=0)
-
-                mean = samples.mean(axis=0)
-                lower = np.percentile(samples, alpha / 2, axis=0)
-                upper = np.percentile(samples, 100 - (alpha / 2), axis=0)
-
-                return (mean, lower, upper)
-
-    def irf_integrals(self, level=95, n_samples=None, n_time_units=10, n_points_per_time_unit=1000):
-        if n_samples is None:
-            n_samples = self.n_samples_eval
-        if self.pc:
-            terminal_names = self.src_terminal_names
-        else:
-            terminal_names = self.terminal_names
-        irf_integrals = np.zeros((len(terminal_names), 3))
-        for i in range(len(terminal_names)):
-            terminal = terminal_names[i]
-            row = np.array(
-                self.irf_integral(
-                    terminal,
-                    level=level,
-                    n_samples=n_samples,
-                    n_time_units=n_time_units,
-                    n_points_per_time_unit=n_points_per_time_unit
-                )
-            )
-            irf_integrals[i] += row
-        irf_integrals = pd.DataFrame(irf_integrals, index=terminal_names, columns=['Mean', '2.5%', '97.5%'])
-        return irf_integrals
-
     def report_settings(self, indent=0):
         out = super(DTSRBayes, self).report_settings(indent=indent)
         for kwarg in DTSRBAYES_INITIALIZATION_KWARGS:
             val = getattr(self, kwarg.key)
             out += ' ' * indent + '  %s: %s\n' %(kwarg.key, "\"%s\"" %val if isinstance(val, str) else val)
-
-        out += '\n'
-
-        return out
-
-    def report_irf_integrals(self, indent=0, resample=False):
-        if resample:
-            irf_integrals = self.irf_integrals()
-        else:
-            if self.pc:
-                terminal_names = self.src_terminal_names
-            else:
-                terminal_names = self.terminal_names
-            irf_integrals = pd.DataFrame(
-                self.saved_irf_integrals.eval(session=self.sess),
-                index=terminal_names,
-                columns=['Mean', '2.5%', '97.5%']
-            )
-
-        out = ' ' * indent + 'IRF INTEGRALS (EFFECT SIZES):\n'
-
-        ci_str = irf_integrals.to_string()
-
-        for line in ci_str.splitlines():
-            out += ' ' * (indent + 2) + line + '\n'
 
         out += '\n'
 

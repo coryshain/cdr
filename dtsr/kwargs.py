@@ -335,10 +335,16 @@ DTSRBAYES_INITIALIZATION_KWARGS = [
         "The Edward inference class to use for fitting."
     ),
     Kwarg(
-        'declare_priors',
+        'declare_priors_fixef',
         True,
         bool,
-        "Specify Gaussian priors for all model parameters (if ``False``, use implicit improper uniform priors)."
+        "Specify Gaussian priors for all fixed model parameters (if ``False``, use implicit improper uniform priors)."
+    ),
+    Kwarg(
+        'declare_priors_ranef',
+        True,
+        bool,
+        "Specify Gaussian priors for all random model parameters (if ``False``, use implicit improper uniform priors)."
     ),
     Kwarg(
         'n_iter',

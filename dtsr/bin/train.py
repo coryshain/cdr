@@ -21,6 +21,7 @@ if __name__ == '__main__':
     ''')
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default = [], help='Path to configuration (*.ini) file')
+    argparser.add_argument('-e', '--force_training_evaluation', action='store_true', help='Recompute training evaluation even for models that are already finished.')
     args, unknown = argparser.parse_known_args()
 
     p = Config(args.config_path)
@@ -244,6 +245,7 @@ if __name__ == '__main__':
                 n_iter=p['n_iter'],
                 X_2d_predictor_names=X_2d_predictor_names,
                 X_2d_predictors=X_2d_predictors,
+                force_training_evaluation=args.force_training_evaluation,
                 irf_name_map=p.irf_name_map,
                 plot_n_time_units=p['plot_n_time_units'],
                 plot_n_points_per_time_unit=p['plot_n_points_per_time_unit'],
