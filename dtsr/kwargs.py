@@ -354,7 +354,7 @@ DTSRBAYES_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'n_samples_eval',
-        256,
+        1024,
         [int],
         "Number of posterior predictive samples to draw for prediction/evaluation."
     ),

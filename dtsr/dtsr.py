@@ -42,7 +42,6 @@ class DTSR(object):
             * ``run_loglik_op()``
             * ``run_predict_op()``
             * ``run_train_step()``
-            * ``summary()``
             
         Additionally, if the subclass requires any keyword arguments beyond those provided by ``DTSR``, it must also implement ``__init__()``, ``_pack_metadata()`` and ``_unpack_metadata()`` to support model initialization, saving, and resumption, respectively.
         
@@ -425,6 +424,7 @@ class DTSR(object):
                     name='global_step'
                 )
                 self.incr_global_step = tf.assign(self.global_step, self.global_step + 1)
+
                 self.global_batch_step = tf.Variable(
                     0,
                     trainable=False,
@@ -432,6 +432,15 @@ class DTSR(object):
                     name='global_batch_step'
                 )
                 self.incr_global_batch_step = tf.assign(self.global_batch_step, self.global_batch_step + 1)
+
+                self.training_complete = tf.Variable(
+                    False,
+                    trainable=False,
+                    dtype=tf.bool,
+                    name='training_complete'
+                )
+                self.training_complete_true = tf.assign(self.training_complete, True)
+                self.training_complete_false = tf.assign(self.training_complete, False)
 
                 if self.pc:
                     self.e = tf.constant(self.eigenvec, dtype=self.FLOAT_TF)
@@ -473,6 +482,18 @@ class DTSR(object):
                     self.ranef_regularizer = getattr(tf.contrib.layers, self.ranef_regularizer_name)(self.ranef_regularizer_scale)
 
                 self.loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='loss_total')
+
+                self.training_mse_in = tf.placeholder(self.FLOAT_TF, shape=[], name='training_mse_in')
+                self.training_mse = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_mse')
+                self.set_training_mse = tf.assign(self.training_mse, self.training_mse_in)
+
+                self.training_mae_in = tf.placeholder(self.FLOAT_TF, shape=[], name='training_mae_in')
+                self.training_mae = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_mae')
+                self.set_training_mae = tf.assign(self.training_mae, self.training_mae_in)
+
+                self.training_loglik_in = tf.placeholder(self.FLOAT_TF, shape=[], name='training_loglik_in')
+                self.training_loglik = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_loglik')
+                self.set_training_loglik = tf.assign(self.training_loglik, self.training_loglik_in)
 
     def _initialize_intercepts_coefficients(self):
         with self.sess.as_default():
@@ -576,7 +597,7 @@ class DTSR(object):
 
                         if self.log_random:
                             tf.summary.histogram(
-                                'by_%s/intercept' % gf,
+                                sn('by_%s/intercept' % gf),
                                 intercept_random_summary,
                                 collections=['random']
                             )
@@ -615,7 +636,7 @@ class DTSR(object):
                                 coef_name = coefs[j]
                                 ix = coef_ix[j]
                                 tf.summary.histogram(
-                                    'by_%s/coefficient/%s' % (gf, coef_name),
+                                    sn('by_%s/coefficient/%s' % (gf, coef_name)),
                                     coefficient_random_summary[:, ix],
                                     collections=['random']
                                 )
@@ -858,7 +879,7 @@ class DTSR(object):
                     param = self._softplus_sigmoid(param, a=lb, b=ub)
                     param_summary = self._softplus_sigmoid(param_summary, a=lb, b=ub)
 
-                self._regularize(param, trainable_means, type='irf', var_name='%s' % param_name)
+                self._regularize(param, trainable_means, type='irf', var_name=param_name)
 
                 for i in range(dim):
                     tf.summary.scalar(
@@ -1719,6 +1740,58 @@ class DTSR(object):
 
                 x_shape = (tf.shape(x)[0], tf.shape(x)[1], n)
 
+    # Thanks to Ralph Mao (https://github.com/RalphMao) for this workaround
+    def _restore_allow_missing(self, path, predict=False):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                try:
+                    if predict:
+                        self.ema_saver.restore(self.sess, path)
+                    else:
+                        self.saver.restore(self.sess, path)
+                except tf.errors.DataLossError:
+                    sys.stderr.write('Read failure during load. Trying from backup...\n')
+                    if predict:
+                        self.ema_saver.restore(self.sess, path[:-5] + '_backup.ckpt')
+                    else:
+                        self.saver.restore(self.sess, path[:-5] + '_backup.ckpt')
+                except tf.errors.NotFoundError as err: # Model contains variables that are missing in checkpoint, special handling needed
+                    reader = tf.train.NewCheckpointReader(path)
+                    saved_shapes = reader.get_variable_to_shape_map()
+                    model_var_names = sorted([(var.name, var.name.split(':')[0]) for var in tf.global_variables()])
+                    ckpt_var_names = sorted([(var.name, var.name.split(':')[0]) for var in tf.global_variables()
+                                        if var.name.split(':')[0] in saved_shapes])
+
+                    model_var_names_set = set([x[1] for x in model_var_names])
+                    ckpt_var_names_set = set([x[1] for x in ckpt_var_names])
+
+                    missing_in_ckpt = model_var_names_set - ckpt_var_names_set
+                    if len(missing_in_ckpt) > 0:
+                        sys.stderr.write('Checkpoint file lacked the variables below. They will be left at their initializations.\n%s.\n\n' %(sorted(list(missing_in_ckpt))))
+                    missing_in_model = ckpt_var_names_set - model_var_names_set
+                    if len(missing_in_model) > 0:
+                        sys.stderr.write('Checkpoint file contained the variables below which do not exist in the current model. They will be ignored.\n%s.\n\n' % (sorted(list(missing_in_ckpt))))
+
+                    restore_vars = []
+                    name2var = dict(zip(map(lambda x: x.name.split(':')[0], tf.global_variables()), tf.global_variables()))
+
+                    with tf.variable_scope('', reuse=True):
+                        for var_name, saved_var_name in ckpt_var_names:
+                            curr_var = name2var[saved_var_name]
+                            var_shape = curr_var.get_shape().as_list()
+                            if var_shape == saved_shapes[saved_var_name]:
+                                restore_vars.append(curr_var)
+
+                    if predict:
+                        self.ema_map = {}
+                        for v in restore_vars:
+                            self.ema_map[self.ema.average_name(v)] = v
+                        saver_tmp = tf.train.Saver(self.ema_map)
+                    else:
+                        saver_tmp = tf.train.Saver(restore_vars)
+
+                    saver_tmp.restore(self.sess, path)
+
     ######################################################
     #
     #  Public methods that must be implemented by
@@ -1773,25 +1846,6 @@ class DTSR(object):
 
         raise NotImplementedError
 
-    def summary(self, fixed=True, random=False, indent=0):
-        """
-        Generate a summary of the fitted model.
-
-        :param fixed: ``bool``; Report fixed effects parameters
-        :param random: ``bool``; Report random effects parameters
-        :return: ``str``; Formatted model summary for printing
-        """
-
-        out = ' ' * indent + '############################\n'
-        out += ' ' * indent + '#                          #\n'
-        out += ' ' * indent + '#    DTSR MODEL SUMMARY    #\n'
-        out += ' ' * indent + '#                          #\n'
-        out += ' ' * indent + '############################\n\n\n'
-
-        out += self.report_initialization_overview(indent = indent + 2)
-
-        return out
-
 
 
 
@@ -1802,10 +1856,27 @@ class DTSR(object):
     #
     ######################################################
 
+    def initialized(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                uninitialized = self.sess.run(self.report_uninitialized)
+                if len(uninitialized) == 0:
+                    return True
+                else:
+                    return False
+
     def set_predict_mode(self, mode):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.load(predict=mode)
+
+    def set_training_complete(self, status):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if status:
+                    self.sess.run(self.training_complete_true)
+                else:
+                    self.sess.run(self.training_complete_false)
 
     def report_formula_string(self, indent=0):
         out = ' ' * indent + 'MODEL FORMULA:\n'
@@ -1879,11 +1950,58 @@ class DTSR(object):
 
                 return out
 
+    def report_training_mse(self, indent=0):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                training_mse = self.training_mse.eval(session=self.sess)
 
-    def report_initialization_overview(self, indent=0):
-        out = ' ' * indent + '-----------------------------\n'
-        out += ' ' * indent + 'DTSR INITIALIZATION OVERVIEW:\n'
-        out += ' ' * indent + '-----------------------------\n\n'
+                out = ' ' * indent + 'TRAINING MSE:\n'
+                out += ' ' * (indent + 2) + str(training_mse)
+                out += '\n\n'
+
+                return out
+
+    def report_training_mae(self, indent=0):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                training_mae = self.training_mae.eval(session=self.sess)
+
+                out = ' ' * indent + 'TRAINING MAE:\n'
+                out += ' ' * (indent + 2) + str(training_mae)
+                out += '\n\n'
+
+                return out
+
+    def report_training_loglik(self, indent=0):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                loglik_train = self.training_loglik.eval(session=self.sess)
+
+                out = ' ' * indent + 'TRAINING LOG LIKELIHOOD:\n'
+                out += ' ' * (indent + 2) + str(loglik_train)
+                out += '\n\n'
+
+                return out
+
+    def report_evaluation(self, mse=None, mae=None, loglik=None, indent=0):
+        out = ' ' * indent + 'MODEL EVALUATION STATISTICS:\n'
+        if mse is not None:
+            out += ' ' * (indent+2) + 'MSE: %s\n' %mse
+        if mae is not None:
+            out += ' ' * (indent+2) + 'MAE: %s\n' %mae
+        if loglik is not None:
+            out += ' ' * (indent+2) + 'Log likelihood: %s\n' %loglik
+
+        out += '\n'
+
+        return out
+
+
+
+    def initialization_summary(self, indent=0):
+        out = ' ' * indent + '----------------------\n'
+        out += ' ' * indent + 'INITIALIZATION SUMMARY\n'
+        out += ' ' * indent + '----------------------\n\n'
 
         out += self.report_formula_string(indent=indent+2)
         out += self.report_settings(indent=indent+2)
@@ -1893,6 +2011,53 @@ class DTSR(object):
 
         return out
 
+    def training_evaluation_summary(self, indent=0):
+        out = ' ' * indent + '---------------------------\n'
+        out += ' ' * indent + 'TRAINING EVALUATION SUMMARY\n'
+        out += ' ' * indent + '---------------------------\n\n'
+
+        out += self.report_training_mse(indent=indent+2)
+        out += self.report_training_mae(indent=indent+2)
+        out += self.report_training_loglik(indent=indent+2)
+
+        return out
+
+    def parameter_summary(self, random=False, indent=0):
+        out = ' ' * indent + '-----------------\n'
+        out += ' ' * indent + 'PARAMETER SUMMARY\n'
+        out += ' ' * indent + '-----------------\n\n'
+
+        if type(self).__name__ == 'DTSRBayes':
+            out += self.report_irf_integrals(indent=indent+2)
+
+        # TODO: Finish this
+
+        return out
+
+    def summary(self, random=False, indent=0):
+        """
+        Generate a summary of the fitted model.
+
+        :param random: ``bool``; Report random effects parameters
+        :return: ``str``; Formatted model summary for printing
+        """
+
+        out = '  ' * indent + '*' * 100 + '\n\n'
+        out += ' ' * indent + '############################\n'
+        out += ' ' * indent + '#                          #\n'
+        out += ' ' * indent + '#    DTSR MODEL SUMMARY    #\n'
+        out += ' ' * indent + '#                          #\n'
+        out += ' ' * indent + '############################\n\n\n'
+
+        out += self.initialization_summary(indent =indent + 2)
+        out += '\n'
+        out += self.training_evaluation_summary(indent =indent + 2)
+        out += '\n'
+        out += self.parameter_summary(indent =indent + 2)
+        out += '\n'
+        out += '  ' * indent + '*' * 100 + '\n\n'
+
+        return out
 
     def build(self, outdir=None, restore=True, verbose=True):
         """
@@ -1922,14 +2087,18 @@ class DTSR(object):
                 self.initialize_objective()
                 self._initialize_logging()
                 self._initialize_ema()
+
+                self.report_uninitialized = tf.report_uninitialized_variables(
+                    var_list=None
+                )
                 self._initialize_saver()
                 self.load(restore=restore)
 
                 self._collect_plots()
                 if verbose:
-                    sys.stderr.write('*' * 50 + '\n')
-                    sys.stderr.write(self.report_initialization_overview())
-                    sys.stderr.write('*' * 50 + '\n')
+                    sys.stderr.write('*' * 100 + '\n')
+                    sys.stderr.write(self.initialization_summary())
+                    sys.stderr.write('*' * 100 + '\n')
 
     def save(self, dir=None):
         if dir is None:
@@ -1955,27 +2124,19 @@ class DTSR(object):
                     self.saver.save(self.sess, dir + '/model_backup.ckpt')
                     with open(dir + '/m.obj', 'wb') as f:
                         pickle.dump(self, f)
-
-    def load(self, dir=None, predict=False, restore=True):
-        if dir is None:
-            dir = self.outdir
+    
+    def load(self, outdir=None, predict=False, restore=True):
+        if outdir is None:
+            outdir = self.outdir
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if restore and os.path.exists(dir + '/checkpoint'):
-                    try:
-                        if predict:
-                            self.ema_saver.restore(self.sess, dir + '/model.ckpt')
-                        else:
-                            self.saver.restore(self.sess, dir + '/model.ckpt')
-                    except:
-                        if predict:
-                            self.ema_saver.restore(self.sess, dir + '/model_backup.ckpt')
-                        else:
-                            self.saver.restore(self.sess, dir + '/model_backup.ckpt')
+                if not self.initialized():
+                    self.sess.run(tf.global_variables_initializer())
+                if restore and os.path.exists(outdir + '/checkpoint'):
+                    self._restore_allow_missing(outdir + '/model.ckpt', predict=predict)
                 else:
                     if predict:
                         sys.stderr.write('No EMA checkpoint available. Leaving internal variables unchanged.\n')
-                    self.sess.run(tf.global_variables_initializer())
 
     def assign_training_data(self, X, time_X, y, time_y, gf_y):
         self.X_in = X
@@ -2020,67 +2181,6 @@ class DTSR(object):
 
         return X_history, time_X_history
 
-    def ci_curve(
-            self,
-            posterior,
-            level=95,
-            n_samples=1024,
-            n_time_units=2.5,
-            n_points_per_time_unit=1000
-    ):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                fd = {
-                    self.support_start: 0.,
-                    self.n_time_units: n_time_units,
-                    self.n_points_per_time_unit: n_points_per_time_unit,
-                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1
-                }
-
-                alpha = 100-float(level)
-
-                samples = [self.sess.run(posterior, feed_dict=fd) for _ in range(n_samples)]
-                samples = np.concatenate(samples, axis=1)
-
-                mean = samples.mean(axis=1)
-                lower = np.percentile(samples, alpha/2, axis=1)
-                upper = np.percentile(samples, 100-(alpha/2), axis=1)
-
-                return (mean, lower, upper)
-
-    def ci_integral(
-            self,
-            terminal_name,
-            level=95,
-            n_samples=1024,
-            n_time_units=2.5,
-            n_points_per_time_unit=1000
-    ):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                fd = {
-                    self.support_start: 0.,
-                    self.n_time_units: n_time_units,
-                    self.n_points_per_time_unit: n_points_per_time_unit,
-                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1
-                }
-
-                alpha = 100 - float(level)
-
-                if terminal_name in self.mc_integrals:
-                    posterior = self.mc_integrals[terminal_name]
-                else:
-                    posterior = self.src_mc_integrals[terminal_name]
-
-                samples = [np.squeeze(self.sess.run(posterior, feed_dict=fd)[0]) for _ in range(n_samples)]
-                samples = np.stack(samples, axis=0)
-
-                mean = samples.mean(axis=0)
-                lower = np.percentile(samples, alpha / 2, axis=0)
-                upper = np.percentile(samples, 100 - (alpha / 2), axis=0)
-
-                return (mean, lower, upper)
-
     def finalize(self):
         """
         Close the DTSR instance to prevent memory leaks.
@@ -2108,7 +2208,8 @@ class DTSR(object):
             plot_n_points_per_time_unit=500,
             plot_x_inches=28,
             plot_y_inches=5,
-            cmap='gist_rainbow'):
+            cmap='gist_rainbow'
+    ):
         """
         Fit the DTSR model.
 
@@ -2185,133 +2286,194 @@ class DTSR(object):
         with self.sess.as_default():
             with self.sess.graph.as_default():
 
-                fd = {
-                    self.X: X_2d,
-                    self.time_X: time_X_2d,
-                    self.y: y_dv,
-                    self.time_y: time_y,
-                    self.gf_y: gf_y
-                }
+                if self.global_step.eval(session=self.sess) < n_iter:
+                    self.set_training_complete(False)
 
-                if self.global_step.eval(session=self.sess) == 0:
-                    summary_params = self.sess.run(self.summary_params)
-                    self.writer.add_summary(summary_params, self.global_step.eval(session=self.sess))
-                    if self.log_random and len(self.rangf) > 0:
-                        summary_random = self.sess.run(self.summary_random)
-                        self.writer.add_summary(summary_random, self.global_step.eval(session=self.sess))
-
-                while self.global_step.eval(session=self.sess) < n_iter:
-                    p, p_inv = get_random_permutation(len(y))
-                    t0_iter = pytime.time()
-                    sys.stderr.write('-' * 50 + '\n')
-                    sys.stderr.write('Iteration %d\n' % int(self.global_step.eval(session=self.sess) + 1))
-                    sys.stderr.write('\n')
-                    if self.optim_name is not None and self.lr_decay_family is not None:
-                        sys.stderr.write('Learning rate: %s\n' %self.lr.eval(session=self.sess))
-
-                    pb = tf.contrib.keras.utils.Progbar(self.n_train_minibatch)
-
-                    loss_total = 0.
-
-                    for j in range(0, len(y), minibatch_size):
-
-                        indices = p[j:j+minibatch_size]
-                        fd_minibatch = {
-                            self.X: X_2d[indices],
-                            self.time_X: time_X_2d[indices],
-                            self.y: y_dv[indices],
-                            self.time_y: time_y[indices],
-                            self.gf_y: gf_y[indices] if len(gf_y > 0) else gf_y
-                        }
-
-                        info_dict = self.run_train_step(fd_minibatch)
-                        loss_cur = info_dict['loss']
-                        self.sess.run(self.ema_op)
-                        if not np.isfinite(loss_cur):
-                            loss_cur = 0
-                        loss_total += loss_cur
-
-                        pb.update((j/minibatch_size)+1, values=[('loss', loss_cur)])
-
-                    self.sess.run(self.incr_global_step)
-
-                    if self.log_freq > 0 and self.global_step.eval(session=self.sess) % self.log_freq == 0:
-                        loss_total /= n_minibatch
-                        summary_train_loss = self.sess.run(self.summary_losses, {self.loss_total: loss_total})
+                if self.training_complete.eval(session=self.sess):
+                    sys.stderr.write('Model training is already complete; exiting fit(). To train for additional iterations, re-run fit() with a larger n_iter.\n\n')
+                else:
+                    if self.global_step.eval(session=self.sess) == 0:
                         summary_params = self.sess.run(self.summary_params)
                         self.writer.add_summary(summary_params, self.global_step.eval(session=self.sess))
-                        self.writer.add_summary(summary_train_loss, self.global_step.eval(session=self.sess))
                         if self.log_random and len(self.rangf) > 0:
                             summary_random = self.sess.run(self.summary_random)
                             self.writer.add_summary(summary_random, self.global_step.eval(session=self.sess))
+                    else:
+                        sys.stderr.write('Resuming training from most recent checkpoint...\n\n')
 
-                    if self.save_freq > 0 and self.global_step.eval(session=self.sess) % self.save_freq == 0:
-                        self.save()
-                        self.make_plots(
-                            irf_name_map=irf_name_map,
-                            plot_n_time_units=plot_n_time_units,
-                            plot_n_points_per_time_unit=plot_n_points_per_time_unit,
-                            plot_x_inches=plot_x_inches,
-                            plot_y_inches=plot_y_inches,
-                            cmap=cmap
-                        )
-                        if type(self).__name__ == 'DTSRBayes':
-                            lb = self.sess.run(self.err_dist_lb)
-                            ub = self.sess.run(self.err_dist_ub)
-                            n_time_units = ub-lb
-                            fd_plot = {
-                                self.support_start: lb,
-                                self.n_time_units: n_time_units,
-                                self.n_points_per_time_unit: 500
+                    while self.global_step.eval(session=self.sess) < n_iter:
+                        p, p_inv = get_random_permutation(len(y))
+                        t0_iter = pytime.time()
+                        sys.stderr.write('-' * 50 + '\n')
+                        sys.stderr.write('Iteration %d\n' % int(self.global_step.eval(session=self.sess) + 1))
+                        sys.stderr.write('\n')
+                        if self.optim_name is not None and self.lr_decay_family is not None:
+                            sys.stderr.write('Learning rate: %s\n' %self.lr.eval(session=self.sess))
+
+                        pb = tf.contrib.keras.utils.Progbar(self.n_train_minibatch)
+
+                        loss_total = 0.
+
+                        for j in range(0, len(y), minibatch_size):
+
+                            indices = p[j:j+minibatch_size]
+                            fd_minibatch = {
+                                self.X: X_2d[indices],
+                                self.time_X: time_X_2d[indices],
+                                self.y: y_dv[indices],
+                                self.time_y: time_y[indices],
+                                self.gf_y: gf_y[indices] if len(gf_y > 0) else gf_y
                             }
-                            plot_x = self.sess.run(self.support, feed_dict=fd_plot)
-                            plot_y = self.sess.run(self.err_dist_plot, feed_dict=fd_plot)
-                            plot_irf(
-                                plot_x,
-                                plot_y,
-                                ['Error Distribution'],
-                                dir=self.outdir,
-                                filename='error_distribution.png',
-                                legend=False,
+
+                            info_dict = self.run_train_step(fd_minibatch)
+                            loss_cur = info_dict['loss']
+                            self.sess.run(self.ema_op)
+                            if not np.isfinite(loss_cur):
+                                loss_cur = 0
+                            loss_total += loss_cur
+
+                            pb.update((j/minibatch_size)+1, values=[('loss', loss_cur)])
+
+                        self.sess.run(self.incr_global_step)
+
+                        if self.log_freq > 0 and self.global_step.eval(session=self.sess) % self.log_freq == 0:
+                            loss_total /= n_minibatch
+                            summary_train_loss = self.sess.run(self.summary_losses, {self.loss_total: loss_total})
+                            summary_params = self.sess.run(self.summary_params)
+                            self.writer.add_summary(summary_params, self.global_step.eval(session=self.sess))
+                            self.writer.add_summary(summary_train_loss, self.global_step.eval(session=self.sess))
+                            if self.log_random and len(self.rangf) > 0:
+                                summary_random = self.sess.run(self.summary_random)
+                                self.writer.add_summary(summary_random, self.global_step.eval(session=self.sess))
+
+                        if self.save_freq > 0 and self.global_step.eval(session=self.sess) % self.save_freq == 0:
+                            self.save()
+                            self.make_plots(
+                                irf_name_map=irf_name_map,
+                                plot_n_time_units=plot_n_time_units,
+                                plot_n_points_per_time_unit=plot_n_points_per_time_unit,
+                                plot_x_inches=plot_x_inches,
+                                plot_y_inches=plot_y_inches,
+                                cmap=cmap
                             )
-                    t1_iter = pytime.time()
-                    sys.stderr.write('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
+                            if type(self).__name__ == 'DTSRBayes':
+                                lb = self.sess.run(self.err_dist_lb)
+                                ub = self.sess.run(self.err_dist_ub)
+                                n_time_units = ub-lb
+                                fd_plot = {
+                                    self.support_start: lb,
+                                    self.n_time_units: n_time_units,
+                                    self.n_points_per_time_unit: 500
+                                }
+                                plot_x = self.sess.run(self.support, feed_dict=fd_plot)
+                                plot_y = self.sess.run(self.err_dist_plot, feed_dict=fd_plot)
+                                plot_irf(
+                                    plot_x,
+                                    plot_y,
+                                    ['Error Distribution'],
+                                    dir=self.outdir,
+                                    filename='error_distribution.png',
+                                    legend=False,
+                                )
+                        t1_iter = pytime.time()
+                        sys.stderr.write('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
 
-                self.save()
+                    self.save()
 
-                self.make_plots(
-                    irf_name_map=irf_name_map,
-                    plot_n_time_units=plot_n_time_units,
-                    plot_n_points_per_time_unit=plot_n_points_per_time_unit,
-                    plot_x_inches=plot_x_inches,
-                    plot_y_inches=plot_y_inches,
-                    cmap=cmap
-                )
 
-                if type(self).__name__ == 'DTSRBayes':
-                    # Generate plots with 95% credible intervals
+
+
+                    # End of training plotting and evaluation.
+                    # For DTSRMLE, this is a crucial step in the model definition because it provides the
+                    # variance of the output distribution for computing log likelihood.
+
                     self.make_plots(
                         irf_name_map=irf_name_map,
                         plot_n_time_units=plot_n_time_units,
                         plot_n_points_per_time_unit=plot_n_points_per_time_unit,
                         plot_x_inches=plot_x_inches,
                         plot_y_inches=plot_y_inches,
-                        cmap=cmap,
-                        mc=True
+                        cmap=cmap
                     )
-                else:
-                    # Compute and store the model variance for log likelihood computation
-                    loss_total = 0.
-                    for j in range(0, len(y), self.minibatch_size):
-                        fd_minibatch[self.y] = y_dv[j:j + minibatch_size]
-                        fd_minibatch[self.time_y] = time_y[j:j + minibatch_size]
-                        fd_minibatch[self.gf_y] = gf_y[j:j + minibatch_size]
-                        fd_minibatch[self.X] = X_2d[j:j + minibatch_size]
-                        fd_minibatch[self.time_X] = time_X_2d[j:j + minibatch_size]
-                        loss_total += self.sess.run(self.mse_loss, feed_dict=fd_minibatch) * len(fd_minibatch[self.y])
-                    loss_total /= len(y)
-                    self.sess.run(self.set_y_scale, feed_dict={self.loss_total: math.sqrt(loss_total)})
-                sys.stderr.write('%s\n\n' % ('='*50))
+
+                    if type(self).__name__ == 'DTSRBayes':
+                        # Generate plots with 95% credible intervals
+                        self.make_plots(
+                            irf_name_map=irf_name_map,
+                            plot_n_time_units=plot_n_time_units,
+                            plot_n_points_per_time_unit=plot_n_points_per_time_unit,
+                            plot_x_inches=plot_x_inches,
+                            plot_y_inches=plot_y_inches,
+                            cmap=cmap,
+                            mc=True
+                        )
+
+                    # Extract and save predictions
+                    preds = self.predict(
+                        X,
+                        y.time,
+                        y[self.form.rangf],
+                        y.first_obs,
+                        y.last_obs,
+                        X_2d_predictor_names=X_2d_predictor_names,
+                        X_2d_predictors=X_2d_predictors,
+                    )
+
+                    with open(self.outdir + '/preds_train.txt', 'w') as p_file:
+                        for i in range(len(preds)):
+                            p_file.write(str(preds[i]) + '\n')
+
+                    # Extract and save losses
+                    training_se = np.array((y[self.dv] - preds) ** 2)
+                    training_mse = training_se.mean()
+                    with open(self.outdir + '/mse_losses_train.txt','w') as l_file:
+                        for i in range(len(training_se)):
+                            l_file.write(str(training_se[i]) + '\n')
+
+                    training_ae = np.array(np.abs(y[self.dv] - preds))
+                    training_mae = training_ae.mean()
+                    with open(self.outdir + '/mae_losses_train.txt','w') as l_file:
+                        for i in range(len(training_ae)):
+                            l_file.write(str(training_ae[i]) + '\n')
+
+                    # Extract and save log likelihoods
+                    training_logliks = self.log_lik(
+                        X,
+                        y,
+                        X_2d_predictor_names=X_2d_predictor_names,
+                        X_2d_predictors=X_2d_predictors,
+                    )
+                    with open(self.outdir + '/loglik_train.txt','w') as l_file:
+                        for i in range(len(training_logliks)):
+                            l_file.write(str(training_logliks[i]) + '\n')
+                    training_loglik = training_logliks.sum()
+
+                    # Store training evaluation statistics in the graph
+                    self.sess.run(
+                        [self.set_training_mse, self.set_training_mae, self.set_training_loglik],
+                        feed_dict={
+                            self.training_mse_in: training_mse,
+                            self.training_mae_in: training_mae,
+                            self.training_loglik_in: training_loglik
+                        }
+                    )
+
+                    # Extract and save IRF integrals
+                    if type(self).__name__ == 'DTSRBayes':
+                        irf_integrals = self.irf_integrals()
+                        self.sess.run(self.set_saved_irf_integrals, feed_dict={self.saved_irf_integrals_in: irf_integrals})
+
+                    with open(self.outdir + '/eval_train.txt', 'w') as e_file:
+                        eval_train = '------------------------\n'
+                        eval_train += 'DTSR TRAINING EVALUATION\n'
+                        eval_train += '------------------------\n\n'
+                        eval_train += self.report_formula_string(indent=2)
+                        eval_train += self.report_evaluation(mse=training_mse, mae=training_mae, loglik=training_loglik, indent=2)
+
+                        e_file.write(eval_train)
+
+                    self.set_training_complete(True)
+                    self.save()
 
     def predict(
             self,
@@ -2322,7 +2484,8 @@ class DTSR(object):
             last_obs,
             X_2d_predictor_names=None,
             X_2d_predictors=None,
-            n_samples=None
+            n_samples=None,
+            verbose=True
     ):
         """
         Predict from the pre-trained DTSR model.
@@ -2355,7 +2518,7 @@ class DTSR(object):
         else:
             impulse_names  = self.impulse_names
 
-        sys.stderr.write('Sampling per-datum predictions/errors from posterior predictive distribution...\n')
+        sys.stderr.write('Computing predictions...\n')
 
         for i in range(len(self.rangf)):
             c = self.rangf[i]
@@ -2389,7 +2552,7 @@ class DTSR(object):
 
 
                 if not np.isfinite(self.eval_minibatch_size):
-                    preds = self.run_predict_op(fd, n_samples=n_samples)
+                    preds = self.run_predict_op(fd, n_samples=n_samples, verbose=verbose)
                 else:
                     preds = np.zeros((len(y_time),))
                     n_eval_minibatch = math.ceil(len(y_time) / self.eval_minibatch_size)
@@ -2402,7 +2565,7 @@ class DTSR(object):
                             self.time_y: time_y[i:i + self.eval_minibatch_size],
                             self.gf_y: gf_y[i:i + self.eval_minibatch_size] if len(gf_y) > 0 else gf_y
                         }
-                        preds[i:i + self.eval_minibatch_size] = self.run_predict_op(fd_minibatch, n_samples=n_samples)
+                        preds[i:i + self.eval_minibatch_size] = self.run_predict_op(fd_minibatch, n_samples=n_samples, verbose=verbose)
 
                 sys.stderr.write('\n\n')
 
@@ -2416,7 +2579,8 @@ class DTSR(object):
             y,
             X_2d_predictor_names=None,
             X_2d_predictors=None,
-            n_samples=None
+            n_samples=None,
+            verbose=True
     ):
         """
         Compute log-likelihood of data from predictive posterior.
@@ -2446,7 +2610,7 @@ class DTSR(object):
         else:
             impulse_names  = self.impulse_names
 
-        sys.stderr.write('Sampling per-datum likelihoods from posterior predictive distribution...\n')
+        sys.stderr.write('Computing likelihoods...\n')
 
         y_rangf = y[self.rangf]
         for i in range(len(self.rangf)):
@@ -2482,7 +2646,7 @@ class DTSR(object):
 
 
                 if not np.isfinite(self.eval_minibatch_size):
-                    log_lik = self.run_loglik_op(fd, n_samples=n_samples)
+                    log_lik = self.run_loglik_op(fd, n_samples=n_samples, verbose=verbose)
                 else:
                     log_lik = np.zeros((len(time_y),))
                     n_eval_minibatch = math.ceil(len(y) / self.eval_minibatch_size)
@@ -2496,7 +2660,7 @@ class DTSR(object):
                             self.gf_y: gf_y[i:i + self.eval_minibatch_size] if len(gf_y) > 0 else gf_y,
                             self.y: y_dv[i:i+self.eval_minibatch_size]
                         }
-                        log_lik[i:i+self.eval_minibatch_size] = self.run_loglik_op(fd_minibatch, n_samples=n_samples)
+                        log_lik[i:i+self.eval_minibatch_size] = self.run_loglik_op(fd_minibatch, n_samples=n_samples, verbose=verbose)
 
                 self.set_predict_mode(False)
 
@@ -2511,7 +2675,8 @@ class DTSR(object):
             X_2d_predictor_names=None,
             X_2d_predictors=None,
             scaled=False,
-            n_samples=None
+            n_samples=None,
+            verbose=True
     ):
 
         usingGPU = tf.test.is_gpu_available()
@@ -2567,7 +2732,7 @@ class DTSR(object):
                     fd_minibatch[self.gf_y] = gf_y[j:j + self.eval_minibatch_size]
                     fd_minibatch[self.X] = X_2d[j:j + self.eval_minibatch_size]
                     fd_minibatch[self.time_X] = time_X_2d[j:j + self.eval_minibatch_size]
-                    X_conv_cur = self.run_conv_op(fd_minibatch, scaled=scaled, n_samples=n_samples)
+                    X_conv_cur = self.run_conv_op(fd_minibatch, scaled=scaled, n_samples=n_samples, verbose=verbose)
                     X_conv.append(X_conv_cur)
                 names = [sn(''.join(x.split('-')[:-1])) for x in self.terminal_names]
                 X_conv = np.concatenate(X_conv, axis=0)
@@ -2612,7 +2777,7 @@ class DTSR(object):
             plot_y_inches=5.,
             cmap=None,
             mc=False,
-            n_samples=1000,
+            n_samples=None,
             level=95,
             prefix='',
             legend=True,
@@ -2644,6 +2809,11 @@ class DTSR(object):
         :return: ``None``
         """
 
+        assert not mc or type(self).__name__ == 'DTSRBayes', 'Monte Carlo estimation of credible intervals (mc=True) is only supported for DTSRBayes models.'
+
+        if n_samples is None:
+            n_samples = self.n_samples_eval
+
         if prefix != '':
             prefix += '_'
         with self.sess.as_default():
@@ -2672,6 +2842,8 @@ class DTSR(object):
                             for name in names:
                                 mean_cur, lq_cur, uq_cur = self.ci_curve(
                                     self.irf_mc[name][a][b],
+                                    level=level,
+                                    n_samples=n_samples,
                                     n_time_units=plot_n_time_units,
                                     n_points_per_time_unit=plot_n_points_per_time_unit,
                                 )
@@ -2717,7 +2889,13 @@ class DTSR(object):
                                     lq = []
                                     uq = []
                                     for name in names:
-                                        mean_cur, lq_cur, uq_cur = self.ci_curve(self.src_irf_mc[name][a][b])
+                                        mean_cur, lq_cur, uq_cur = self.ci_curve(
+                                            self.src_irf_mc[name][a][b],
+                                            level=level,
+                                            n_samples=n_samples,
+                                            n_time_units=plot_n_time_units,
+                                            n_points_per_time_unit=plot_n_points_per_time_unit,
+                                        )
                                         plot_y.append(mean_cur)
                                         lq.append(lq_cur)
                                         uq.append(uq_cur)

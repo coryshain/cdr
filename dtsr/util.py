@@ -184,5 +184,5 @@ def load_dtsr(dir_path):
     with open(dir_path + '/m.obj', 'rb') as f:
         m = pickle.load(f)
     m.build(outdir=dir_path)
-    m.load(dir=dir_path)
+    m.load(outdir=dir_path)
     return m

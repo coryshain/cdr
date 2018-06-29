@@ -139,6 +139,10 @@ class DTSRBayes(DTSR):
                 self.y_tailweight_posterior_init_sd_tf = self.y_tailweight_prior_sd_tf * self.posterior_to_prior_sd_ratio
                 self.y_tailweight_posterior_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.y_tailweight_posterior_init_sd_tf)
 
+                self.saved_irf_integrals_in = tf.placeholder(dtype=self.FLOAT_TF, shape=[len(self.impulse_names), 3], name='saved_irf_integrals_in')
+                self.saved_irf_integrals = tf.Variable(tf.zeros([len(self.impulse_names), 3]), dtype=self.FLOAT_TF, trainable=False, name='saved_irf_integrals')
+                self.set_saved_irf_integrals = tf.assign(self.saved_irf_integrals, self.saved_irf_integrals_in)
+
         if self.mv:
             self._initialize_full_joint()
 
@@ -146,6 +150,7 @@ class DTSRBayes(DTSR):
         md = super(DTSRBayes, self)._pack_metadata()
         for kwarg in DTSRBayes._INITIALIZATION_KWARGS:
             md[kwarg.key] = getattr(self, kwarg.key)
+
         return md
 
     def _unpack_metadata(self, md):
@@ -1276,11 +1281,121 @@ class DTSRBayes(DTSR):
             'WakeSleep'
         ]
 
+    def ci_curve(
+            self,
+            posterior,
+            level=95,
+            n_samples=1024,
+            n_time_units=2.5,
+            n_points_per_time_unit=1000
+    ):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                fd = {
+                    self.support_start: 0.,
+                    self.n_time_units: n_time_units,
+                    self.n_points_per_time_unit: n_points_per_time_unit,
+                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1
+                }
+
+                alpha = 100-float(level)
+
+                samples = [self.sess.run(posterior, feed_dict=fd) for _ in range(n_samples)]
+                samples = np.concatenate(samples, axis=1)
+
+                mean = samples.mean(axis=1)
+                lower = np.percentile(samples, alpha/2, axis=1)
+                upper = np.percentile(samples, 100-(alpha/2), axis=1)
+
+                return (mean, lower, upper)
+
+    # TODO: Build this for MLE implementation, too (lacking CI)
+    def irf_integral(
+            self,
+            terminal_name,
+            level=95,
+            n_samples=1024,
+            n_time_units=2.5,
+            n_points_per_time_unit=1000
+    ):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                fd = {
+                    self.support_start: 0.,
+                    self.n_time_units: n_time_units,
+                    self.n_points_per_time_unit: n_points_per_time_unit,
+                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1
+                }
+
+                alpha = 100 - float(level)
+
+                if terminal_name in self.mc_integrals:
+                    posterior = self.mc_integrals[terminal_name]
+                else:
+                    posterior = self.src_mc_integrals[terminal_name]
+
+                samples = [np.squeeze(self.sess.run(posterior, feed_dict=fd)[0]) for _ in range(n_samples)]
+                samples = np.stack(samples, axis=0)
+
+                mean = samples.mean(axis=0)
+                lower = np.percentile(samples, alpha / 2, axis=0)
+                upper = np.percentile(samples, 100 - (alpha / 2), axis=0)
+
+                return (mean, lower, upper)
+
+    def irf_integrals(self, level=95, n_samples=None, n_time_units=10, n_points_per_time_unit=1000):
+        if n_samples is None:
+            n_samples = self.n_samples_eval
+        if self.pc:
+            terminal_names = self.src_terminal_names
+        else:
+            terminal_names = self.terminal_names
+        irf_integrals = np.zeros((len(terminal_names), 3))
+        for i in range(len(terminal_names)):
+            terminal = terminal_names[i]
+            row = np.array(
+                self.irf_integral(
+                    terminal,
+                    level=level,
+                    n_samples=n_samples,
+                    n_time_units=n_time_units,
+                    n_points_per_time_unit=n_points_per_time_unit
+                )
+            )
+            irf_integrals[i] += row
+        irf_integrals = pd.DataFrame(irf_integrals, index=terminal_names, columns=['Mean', '2.5%', '97.5%'])
+        return irf_integrals
+
     def report_settings(self, indent=0):
         out = super(DTSRBayes, self).report_settings(indent=indent)
         for kwarg in DTSRBAYES_INITIALIZATION_KWARGS:
             val = getattr(self, kwarg.key)
             out += ' ' * indent + '  %s: %s\n' %(kwarg.key, "\"%s\"" %val if isinstance(val, str) else val)
+
+        out += '\n'
+
+        return out
+
+    def report_irf_integrals(self, indent=0, resample=False):
+        if resample:
+            irf_integrals = self.irf_integrals()
+        else:
+            if self.pc:
+                terminal_names = self.src_terminal_names
+            else:
+                terminal_names = self.terminal_names
+            irf_integrals = pd.DataFrame(
+                self.saved_irf_integrals.eval(session=self.sess),
+                index=terminal_names,
+                columns=['Mean', '2.5%', '97.5%']
+            )
+
+        out = ' ' * indent + 'IRF INTEGRALS (EFFECT SIZES):\n'
+
+        ci_str = irf_integrals.to_string()
+
+        for line in ci_str.splitlines():
+            out += ' ' * (indent + 2) + line + '\n'
 
         out += '\n'
 
@@ -1303,17 +1418,17 @@ class DTSRBayes(DTSR):
             with self.sess.graph.as_default():
                 if n_samples is None:
                     n_samples = self.n_samples_eval
-                pb = tf.contrib.keras.utils.Progbar(n_samples)
+
+                if verbose:
+                    pb = tf.contrib.keras.utils.Progbar(n_samples)
 
                 preds = np.zeros((len(feed_dict[self.time_y]), n_samples))
                 for i in range(n_samples):
                     preds[:, i] = self.sess.run(self.out_post, feed_dict=feed_dict)
-                    pb.update(i + 1, force=True)
+                    if verbose:
+                        pb.update(i + 1, force=True)
 
                 preds = preds.mean(axis=1)
-
-                if verbose:
-                    sys.stderr.write('\n')
 
                 return preds
 
@@ -1326,21 +1441,21 @@ class DTSRBayes(DTSR):
             with self.sess.graph.as_default():
                 if n_samples is None:
                     n_samples = self.n_samples_eval
-                pb = tf.contrib.keras.utils.Progbar(n_samples)
+
+                if verbose:
+                    pb = tf.contrib.keras.utils.Progbar(n_samples)
 
                 log_lik = np.zeros((len(feed_dict[self.time_y]), n_samples))
                 for i in range(n_samples):
                     log_lik[:, i] = self.sess.run(self.ll_post, feed_dict=feed_dict)
-                    pb.update(i + 1, force=True)
+                    if verbose:
+                        pb.update(i + 1, force=True)
 
                 log_lik = log_lik.mean(axis=1)
 
-                if verbose:
-                    sys.stderr.write('\n')
-
                 return log_lik
 
-    def run_conv_op(self, feed_dict, scaled=False, n_samples=None):
+    def run_conv_op(self, feed_dict, scaled=False, n_samples=None, verbose=True):
         if n_samples is None:
             n_samples = self.n_samples_eval
 
@@ -1349,41 +1464,15 @@ class DTSRBayes(DTSR):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 sys.stderr.write('Convolving input features...\n')
-                pb = tf.contrib.keras.utils.Progbar(n_samples)
+                if verbose:
+                    pb = tf.contrib.keras.utils.Progbar(n_samples)
                 for i in range(0, n_samples):
                     X_conv[..., i] = self.sess.run(self.X_conv_scaled if scaled else self.X_conv, feed_dict=feed_dict)
-                    pb.update(i + 1, force=True)
+                    if verbose:
+                        pb.update(i + 1, force=True)
                 X_conv = X_conv.mean(axis=2)
                 return X_conv
 
-    def summary(self, fixed=True, random=False):
-        summary = '=' * 50 + '\n'
-        summary += 'DTSR regression\n\n'
-        summary += 'Output directory: %s\n\n' % self.outdir
-        summary += 'Formula:\n'
-        summary += '  ' + self.form_str + '\n\n'
-
-        if fixed:
-            if self.pc:
-                terminal_names = self.src_terminal_names
-            else:
-                terminal_names = self.terminal_names
-            posterior_summaries = np.zeros((len(terminal_names), 3))
-            for i in range(len(terminal_names)):
-                terminal = terminal_names[i]
-                row = np.array(self.ci_integral(terminal, n_time_units=10))
-                posterior_summaries[i] += row
-            posterior_summaries = pd.DataFrame(posterior_summaries, index=terminal_names,
-                                               columns=['Mean', '2.5%', '97.5%'])
-
-            summary += '\nPosterior integral summaries by predictor:\n'
-            summary += posterior_summaries.to_string() + '\n\n'
-
-        #TODO: Fill the rest of this in
-
-        summary += '=' * 50 + '\n'
-
-        return(summary)
 
 
 

@@ -3,7 +3,7 @@ from setuptools import setup
 from setuptools import find_packages
 
 setup(name='DTSR',
-      version='0.1.0',
+      version='0.1.1',
       description='A toolkit for Deconvolutional Time Series Regression (DTSR)',
       author='Cory Shain',
       author_email='cory.shain@gmail.com',

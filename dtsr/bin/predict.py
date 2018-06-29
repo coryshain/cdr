@@ -215,6 +215,8 @@ if __name__ == '__main__':
             summary += 'Formula:\n'
             summary += '  ' + formula + '\n'
 
+            dtsr_mse = dtsr_mae = dtsr_loglik = None
+
             if args.mode in [None, 'response']:
                 dtsr_preds = dtsr_model.predict(
                     X,
@@ -242,9 +244,6 @@ if __name__ == '__main__':
                 dtsr_mse = mse(y[dv], dtsr_preds)
                 dtsr_mae = mae(y[dv], dtsr_preds)
                 y_dv_mean = y[dv].mean()
-                summary += 'Loss (%s set):\n' % args.partition
-                summary += '  MSE: %.4f\n' % dtsr_mse
-                summary += '  MAE: %.4f\n' % dtsr_mae
 
             if args.mode in [None, 'loglik']:
                 dtsr_loglik_vector = dtsr_model.log_lik(
@@ -258,7 +257,6 @@ if __name__ == '__main__':
                     for i in range(len(dtsr_loglik_vector)):
                         l_file.write(str(dtsr_loglik_vector[i]) + '\n')
                 dtsr_loglik = dtsr_loglik_vector.sum()
-                summary += 'Log likelihood: %s\n' % dtsr_loglik
 
             if bayes:
                 if dtsr_model.pc:
@@ -268,13 +266,13 @@ if __name__ == '__main__':
                 posterior_summaries = np.zeros((len(terminal_names), 3))
                 for i in range(len(terminal_names)):
                     terminal = terminal_names[i]
-                    row = np.array(dtsr_model.ci_integral(terminal, n_time_units=10))
+                    row = np.array(dtsr_model.irf_integral(terminal, n_time_units=10))
                     posterior_summaries[i] += row
                 posterior_summaries = pd.DataFrame(posterior_summaries, index=terminal_names,
                                                    columns=['Mean', '2.5%', '97.5%'])
 
-                summary += '\nPosterior integral summaries by predictor:\n'
-                summary += posterior_summaries.to_string() + '\n\n'
+
+            summary += dtsr_model.report_evaluation(mse=dtsr_mse, mae=dtsr_mae, loglik=dtsr_loglik)
 
             summary += '=' * 50 + '\n'
 

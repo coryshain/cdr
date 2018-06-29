@@ -205,10 +205,7 @@ class DTSRMLE(DTSR):
                 )
 
                 ## Likelihood ops
-                self.y_scale = tf.Variable(self.y_train_sd, dtype=self.FLOAT_TF)
-                self.set_y_scale = tf.assign(self.y_scale, self.loss_total)
-                s = self.y_scale
-                y_dist = tf.distributions.Normal(loc=self.out, scale=self.y_scale)
+                y_dist = tf.distributions.Normal(loc=self.out, scale=tf.sqrt(self.training_mse))
                 self.ll = y_dist.log_prob(self.y)
 
     ######################################################

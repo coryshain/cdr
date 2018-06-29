@@ -252,57 +252,7 @@ if __name__ == '__main__':
                 cmap=p['cmap']
             )
 
-            dtsr_preds = dtsr_model.predict(
-                X,
-                y_complete_cases.time,
-                y_complete_cases[dtsr_model.form.rangf],
-                y_complete_cases.first_obs,
-                y_complete_cases.last_obs,
-                X_2d_predictor_names=X_2d_predictor_names,
-                X_2d_predictors=X_2d_predictors,
-            )
-
-            dtsr_mse = mse(y_complete_cases[dv], dtsr_preds)
-            dtsr_mae = mae(y_complete_cases[dv], dtsr_preds)
-            y_dv_mean = y_complete_cases[dv].mean()
-
-            summary = '*' * 50 + '\n\n'
-            summary = '=' * 50 + '\n'
-            summary += 'DTSR regression\n\n'
-            summary = '=' * 50 + '\n'
-            summary += 'MODEL NAME:\n'
-            summary +=  '  % s\n\n' % m
-
-            summary += dtsr_model.report_initialization_overview()
-
-            dtsr_loglik_vector = dtsr_model.log_lik(
-                X,
-                y_complete_cases,
-                X_2d_predictor_names=X_2d_predictor_names,
-                X_2d_predictors=X_2d_predictors,
-            )
-            dtsr_loglik = dtsr_loglik_vector.sum()
-            summary += 'Log likelihood: %s\n' %dtsr_loglik
-
-            if bayes:
-                if dtsr_model.pc:
-                    terminal_names = dtsr_model.src_terminal_names
-                else:
-                    terminal_names = dtsr_model.terminal_names
-                posterior_summaries = np.zeros((len(terminal_names), 3))
-                for i in range(len(terminal_names)):
-                    terminal = terminal_names[i]
-                    row = np.array(dtsr_model.ci_integral(terminal, n_time_units=10))
-                    posterior_summaries[i] += row
-                posterior_summaries = pd.DataFrame(posterior_summaries, index=terminal_names, columns=['Mean', '2.5%', '97.5%'])
-
-                summary += '\nPOSTERIOR INTEGRAL SUMMARIES BY PREDICTOR:\n'
-                summary += posterior_summaries.to_string() + '\n\n'
-
-            summary += 'TRAINING SET EVALUATION:\n'
-            summary += '  MSE: %.4f\n' % dtsr_mse
-            summary += '  MAE: %.4f\n' % dtsr_mae
-            summary += '=' * 50 + '\n'
+            summary = dtsr_model.summary()
 
             with open(p.outdir + '/' + m + '/summary.txt', 'w') as f_out:
                 f_out.write(summary)
