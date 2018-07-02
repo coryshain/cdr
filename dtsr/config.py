@@ -140,17 +140,17 @@ class Config(object):
 
         # DTSR initialization keyword arguments
         for kwarg in DTSR_INITIALIZATION_KWARGS:
-            if kwarg.key in settings or add_defaults:
+            if kwarg.in_settings(settings) or add_defaults:
                 out[kwarg.key] = kwarg.kwarg_from_config(settings)
 
         # DTSRMLE initialization keyword arguments
         for kwarg in DTSRMLE_INITIALIZATION_KWARGS:
-            if kwarg.key in settings or add_defaults:
+            if kwarg.in_settings(settings) or add_defaults:
                 out[kwarg.key] = kwarg.kwarg_from_config(settings)
 
         # DTSRBayes initialization keyword arguments
         for kwarg in DTSRBAYES_INITIALIZATION_KWARGS:
-            if kwarg.key in settings or add_defaults:
+            if kwarg.in_settings(settings) or add_defaults:
                 out[kwarg.key] = kwarg.kwarg_from_config(settings)
 
         # Plotting defaults

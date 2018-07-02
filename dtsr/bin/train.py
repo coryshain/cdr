@@ -261,5 +261,7 @@ if __name__ == '__main__':
             sys.stderr.write(summary)
             sys.stderr.write('\n\n')
 
+            dtsr_model.save_parameter_table()
+
             dtsr_model.finalize()
 

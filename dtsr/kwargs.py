@@ -11,7 +11,9 @@ class Kwarg(object):
     :param descr: ``str``; Description of kwarg
     """
 
-    def __init__(self, key, default_value, dtypes, descr):
+    def __init__(self, key, default_value, dtypes, descr, aliases=None):
+        if aliases is None:
+            aliases = []
         self.key = key
         self.default_value = default_value
         if not isinstance(dtypes, list):
@@ -20,6 +22,7 @@ class Kwarg(object):
             self.dtypes = dtypes
         self.dtypes = sorted(self.dtypes, key=cmp_to_key(Kwarg.type_comparator))
         self.descr = descr
+        self.aliases = aliases
 
     def dtypes_str(self):
         if len(self.dtypes) == 1:
@@ -38,6 +41,18 @@ class Kwarg(object):
             return '"%s"' %x
         return str(x)
 
+    def in_settings(self, settings):
+        out = False
+        if self.key in settings:
+            out = True
+        if not out:
+            for alias in self.aliases:
+                if alias in settings:
+                    out = True
+                    break
+
+        return out
+
     def kwarg_from_config(self, settings):
         if len(self.dtypes) == 1:
             val = {
@@ -45,9 +60,29 @@ class Kwarg(object):
                 int: settings.getint,
                 float: settings.getfloat,
                 bool: settings.getboolean
-            }[self.dtypes[0]](self.key, self.default_value)
+            }[self.dtypes[0]](self.key, None)
+
+            if val is None:
+                for alias in self.aliases:
+                    val = {
+                        str: settings.get,
+                        int: settings.getint,
+                        float: settings.getfloat,
+                        bool: settings.getboolean
+                    }[self.dtypes[0]](alias, self.default_value)
+                    if val is not None:
+                        break
+
+            if val is None:
+                val = self.default_value
+
         else:
             from_settings = settings.get(self.key, None)
+            for alias in self.aliases:
+                from_settings = settings.get(alias, None)
+                if from_settings is not None:
+                    break
+
             if from_settings is None:
                 val = self.default_value
             else:
@@ -120,6 +155,18 @@ DTSR_INITIALIZATION_KWARGS = [
         "Transform input variables using principal components analysis (experimental, not thoroughly tested)."
     ),
     Kwarg(
+        'mv',
+        False,
+        bool,
+        "Use multivariate model that fits covariances between fixed parameters (experimental, not thoroughly tested). If ``False``, parameter distributions are treated as independent."
+    ),
+    Kwarg(
+        'mv_ran',
+        False,
+        bool,
+        "Use multivariate model that fits covariances between random parameters within a random grouping factor (experimental, not thoroughly tested). If ``False``, random parameter distributions are treated as independent."
+    ),
+    Kwarg(
         'intercept_init',
         None,
         [float, None],
@@ -155,7 +202,7 @@ DTSR_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'optim_epsilon',
-        0.01,
+        1e-8,
         float,
         "Epsilon parameter to use if **optim_name** in ``['Adam', 'Nadam']``, ignored otherwise."
     ),
@@ -338,13 +385,15 @@ DTSRBAYES_INITIALIZATION_KWARGS = [
         'declare_priors_fixef',
         True,
         bool,
-        "Specify Gaussian priors for all fixed model parameters (if ``False``, use implicit improper uniform priors)."
+        "Specify Gaussian priors for all fixed model parameters (if ``False``, use implicit improper uniform priors).",
+        aliases=['declare_priors']
     ),
     Kwarg(
         'declare_priors_ranef',
         True,
         bool,
-        "Specify Gaussian priors for all random model parameters (if ``False``, use implicit improper uniform priors)."
+        "Specify Gaussian priors for all random model parameters (if ``False``, use implicit improper uniform priors).",
+        aliases=['declare_priors']
     ),
     Kwarg(
         'n_iter',
@@ -377,28 +426,32 @@ DTSRBAYES_INITIALIZATION_KWARGS = [
         "Standard deviation of prior on fixed coefficients. If ``None``, inferred as ``prior_sd_scaling_coefficient`` times the empirical variance of the response on the training set."
     ),
     Kwarg(
-        'conv_prior_sd',
+        'irf_param_prior_sd',
         1,
         float,
-        "Standard deviation of prior on convolutional IRF parameters"
+        "Standard deviation of prior on convolutional IRF parameters",
+        aliases=['conv_prior_sd']
     ),
     Kwarg(
-        'y_scale_init',
+        'y_sd_init',
         None,
         [float, None],
-        "Initial value for the standard deviation of the output model. If ``None``, inferred as the empirical standard deviation of the response on the training set."
+        "Initial value for the standard deviation of the output model. If ``None``, inferred as the empirical standard deviation of the response on the training set.",
+        aliases=['y_scale_init']
     ),
     Kwarg(
-        'y_scale_trainable',
+        'y_sd_trainable',
         True,
         bool,
-        "Tune the standard deviation of the output model during training. If ``False``, remains fixed at ``y_scale_init``."
+        "Tune the standard deviation of the output model during training. If ``False``, remains fixed at ``y_sd_init``.",
+        aliases=['y_scale_trainable']
     ),
     Kwarg(
-        'y_scale_prior_sd',
+        'y_sd_prior_sd',
         None,
         [float, None],
-        "Standard deviation of prior on standard deviation of output model. If ``None``, inferred as ``y_scale_prior_sd_scaling_coefficient`` times the empirical variance of the response on the training set."
+        "Standard deviation of prior on standard deviation of output model. If ``None``, inferred as ``y_sd_prior_sd_scaling_coefficient`` times the empirical variance of the response on the training set.",
+        aliases=['y_scale_prior_sd']
     ),
     Kwarg(
         'y_skewness_prior_sd',
@@ -425,10 +478,11 @@ DTSRBAYES_INITIALIZATION_KWARGS = [
         "Factor by which to multiply priors on intercepts and coefficients if inferred from the empirical variance of the data (i.e. if ``intercept_prior_sd`` or ``coef_prior_sd`` is ``None``). Ignored for any prior widths that are explicitly specified."
     ),
     Kwarg(
-        'y_scale_prior_sd_scaling_coefficient',
+        'y_sd_prior_sd_scaling_coefficient',
         1,
         float,
-        "Factor by which to multiply prior on output model variance if inferred from the empirical variance of the data (i.e. if ``y_scale_prior_sd`` is ``None``). Ignored if prior width is explicitly specified."
+        "Factor by which to multiply prior on output model variance if inferred from the empirical variance of the data (i.e. if ``y_sd_prior_sd`` is ``None``). Ignored if prior width is explicitly specified.",
+        aliases=['y_scale_prior_sd_scaling_coefficient']
     ),
     Kwarg(
         'ranef_to_fixef_prior_sd_ratio',
@@ -447,18 +501,6 @@ DTSRBAYES_INITIALIZATION_KWARGS = [
         False,
         bool,
         "Allow an asymmetric error distribution by fitting a SinArcsinh transform of the normal error, adding trainable skewness and tailweight parameters."
-    ),
-    Kwarg(
-        'mv',
-        False,
-        bool,
-        "Use multivariate model that fits covariances between fixed effects (experimental, not thoroughly tested). If ``False``, parameter distributions are treated as independent."
-    ),
-    Kwarg(
-        'mv_ran',
-        False,
-        bool,
-        "Use multivariate model that fits covariances between random effects within a random grouping factor (experimental, not thoroughly tested). If ``False``, random parameter distributions are treated as independent."
     )
 ]
 

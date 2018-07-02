@@ -95,10 +95,10 @@ class DTSRBayes(DTSR):
             self.intercept_prior_sd = self.y_train_sd * self.prior_sd_scaling_coefficient
         if self.coef_prior_sd is None:
             self.coef_prior_sd = self.y_train_sd * self.prior_sd_scaling_coefficient
-        if self.y_scale_init is None:
-            self.y_scale_init = self.y_train_sd
-        if self.y_scale_prior_sd is None:
-            self.y_scale_prior_sd = self.y_train_sd * self.y_scale_prior_sd_scaling_coefficient
+        if self.y_sd_init is None:
+            self.y_sd_init = self.y_train_sd
+        if self.y_sd_prior_sd is None:
+            self.y_sd_prior_sd = self.y_train_sd * self.y_sd_prior_sd_scaling_coefficient
 
         if self.inference_name == 'MetropolisHastings':
             self.proposal_map = {}
@@ -109,37 +109,37 @@ class DTSRBayes(DTSR):
             with self.sess.graph.as_default():
 
                 self.intercept_prior_sd_tf = tf.constant(float(self.intercept_prior_sd), dtype=self.FLOAT_TF)
-                self.intercept_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.intercept_prior_sd_tf)
-                self.intercept_posterior_init_sd_tf = self.intercept_prior_sd_tf * self.posterior_to_prior_sd_ratio
-                self.intercept_posterior_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.intercept_posterior_init_sd_tf)
+                self.intercept_prior_sd_unconstrained = tf.contrib.distributions.softplus_inverse(self.intercept_prior_sd_tf)
+                self.intercept_posterior_sd_init = self.intercept_prior_sd_tf * self.posterior_to_prior_sd_ratio
+                self.intercept_posterior_sd_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.intercept_posterior_sd_init)
 
                 self.coef_prior_sd_tf = tf.constant(float(self.coef_prior_sd), dtype=self.FLOAT_TF)
-                self.coef_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.coef_prior_sd_tf)
-                self.coef_posterior_init_sd_tf = self.coef_prior_sd_tf * self.posterior_to_prior_sd_ratio
-                self.coef_posterior_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.coef_posterior_init_sd_tf)
+                self.coef_prior_sd_unconstrained = tf.contrib.distributions.softplus_inverse(self.coef_prior_sd_tf)
+                self.coef_posterior_sd_init = self.coef_prior_sd_tf * self.posterior_to_prior_sd_ratio
+                self.coef_posterior_sd_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.coef_posterior_sd_init)
 
-                self.conv_prior_sd_tf = tf.constant(float(self.conv_prior_sd), dtype=self.FLOAT_TF)
-                self.conv_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.conv_prior_sd_tf)
-                self.conv_posterior_init_sd_tf = self.conv_prior_sd_tf * self.posterior_to_prior_sd_ratio
-                self.conv_posterior_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.conv_posterior_init_sd_tf)
+                self.irf_param_prior_sd_tf = tf.constant(float(self.irf_param_prior_sd), dtype=self.FLOAT_TF)
+                self.irf_param_prior_sd_unconstrained = tf.contrib.distributions.softplus_inverse(self.irf_param_prior_sd_tf)
+                self.irf_param_posterior_sd_init = self.irf_param_prior_sd_tf * self.posterior_to_prior_sd_ratio
+                self.irf_param_posterior_sd_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.irf_param_posterior_sd_init)
 
-                self.y_scale_init_tf = tf.constant(float(self.y_scale_init), dtype=self.FLOAT_TF)
-                self.y_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.y_scale_init_tf)
+                self.y_sd_init_tf = tf.constant(float(self.y_sd_init), dtype=self.FLOAT_TF)
+                self.y_sd_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.y_sd_init_tf)
 
-                self.y_scale_prior_sd_tf = tf.constant(float(self.y_scale_prior_sd), dtype=self.FLOAT_TF)
-                self.y_scale_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.y_scale_prior_sd_tf)
-                self.y_scale_posterior_init_sd_tf = self.y_scale_prior_sd_tf * self.posterior_to_prior_sd_ratio
-                self.y_scale_posterior_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.y_scale_posterior_init_sd_tf)
+                self.y_sd_prior_sd_tf = tf.constant(float(self.y_sd_prior_sd), dtype=self.FLOAT_TF)
+                self.y_sd_prior_sd_unconstrained = tf.contrib.distributions.softplus_inverse(self.y_sd_prior_sd_tf)
+                self.y_sd_posterior_sd_init = self.y_sd_prior_sd_tf * self.posterior_to_prior_sd_ratio
+                self.y_sd_posterior_sd_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.y_sd_posterior_sd_init)
 
                 self.y_skewness_prior_sd_tf = tf.constant(float(self.y_skewness_prior_sd), dtype=self.FLOAT_TF)
-                self.y_skewness_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.y_skewness_prior_sd_tf)
-                self.y_skewness_posterior_init_sd_tf = self.y_skewness_prior_sd_tf * self.posterior_to_prior_sd_ratio
-                self.y_skewness_posterior_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.y_skewness_posterior_init_sd_tf)
+                self.y_skewness_prior_sd_unconstrained = tf.contrib.distributions.softplus_inverse(self.y_skewness_prior_sd_tf)
+                self.y_skewness_posterior_sd_init = self.y_skewness_prior_sd_tf * self.posterior_to_prior_sd_ratio
+                self.y_skewness_posterior_sd_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.y_skewness_posterior_sd_init)
 
                 self.y_tailweight_prior_sd_tf = tf.constant(float(self.y_tailweight_prior_sd), dtype=self.FLOAT_TF)
-                self.y_tailweight_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.y_tailweight_prior_sd_tf)
-                self.y_tailweight_posterior_init_sd_tf = self.y_tailweight_prior_sd_tf * self.posterior_to_prior_sd_ratio
-                self.y_tailweight_posterior_scale_mean_init = tf.contrib.distributions.softplus_inverse(self.y_tailweight_posterior_init_sd_tf)
+                self.y_tailweight_prior_sd_unconstrained = tf.contrib.distributions.softplus_inverse(self.y_tailweight_prior_sd_tf)
+                self.y_tailweight_posterior_sd_init = self.y_tailweight_prior_sd_tf * self.posterior_to_prior_sd_ratio
+                self.y_tailweight_posterior_sd_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.y_tailweight_posterior_sd_init)
 
         if self.mv:
             self._initialize_full_joint()
@@ -174,12 +174,12 @@ class DTSRBayes(DTSR):
         if self.has_intercept[None]:
             name.append('intercept')
             mean_init.append(self.intercept_init_tf)
-            sd_init.append(self.intercept_scale_mean_init)
+            sd_init.append(self.intercept_prior_sd_unconstrained)
         for i in range(len(self.coef_names)):
             coef = self.coef_names[i]
             name.append(coef)
             mean_init.append(0.)
-            sd_init.append(self.coef_scale_mean_init)
+            sd_init.append(self.coef_prior_sd_unconstrained)
         if self.mv_ran:
             for i in range(len(self.rangf)):
                 gf = self.rangf[i]
@@ -187,11 +187,11 @@ class DTSRBayes(DTSR):
                 if self.has_intercept[gf]:
                     name += ['intercept_by_%s_%s' % (gf, j) for j in levels]
                     mean_init += [0.] * self.rangf_n_levels[i]
-                    sd_init += [self.intercept_scale_mean_init] * self.rangf_n_levels[i]
+                    sd_init += [self.intercept_prior_sd_unconstrained] * self.rangf_n_levels[i]
                 for coef in self.coef_names:
                     name += ['%s_by_%s_%s' % (coef, gf, j) for j in levels]
                     mean_init += [0.] * self.rangf_n_levels[i]
-                    sd_init += [self.coef_scale_mean_init] * self.rangf_n_levels[i]
+                    sd_init += [self.coef_prior_sd_unconstrained] * self.rangf_n_levels[i]
 
         name_conv, mean_init_conv, sd_init_conv = self._initialize_conv_param_list()
 
@@ -199,10 +199,10 @@ class DTSRBayes(DTSR):
         mean_init += mean_init_conv
         sd_init += sd_init_conv
 
-        if self.y_scale_init is None:
+        if self.y_sd_init is None:
             name.append('y_scale')
-            mean_init.append(self.y_scale_init_tf)
-            sd_init.append(self.y_scale_prior_sd_tf)
+            mean_init.append(self.y_sd_init_tf)
+            sd_init.append(self.y_sd_prior_sd_tf)
 
         assert len(name) == len(mean_init) == len(sd_init), 'Error: lengths of computed lists of parameter names, means, and sds do not match'
 
@@ -233,13 +233,13 @@ class DTSRBayes(DTSR):
                 beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=1)
                 beta, _, _ = self._process_mean(beta_init, lb=0)
                 param_mean = [beta]
-                param_sd = [self.conv_prior_sd_tf]
+                param_sd = [self.irf_param_prior_sd_tf]
             elif family == 'SteepExp':
                 param_name = ['beta']
                 beta_init = self._get_mean_init_vector(irf_ids, 'beta', irf_param_init, default=1)
                 beta, _, _ = self._process_mean(beta_init, lb=0)
                 param_mean = [beta]
-                param_sd = [self.conv_prior_sd_tf]
+                param_sd = [self.irf_param_prior_sd_tf]
             elif family == 'Gamma':
                 param_name = ['alpha', 'beta']
                 alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=2)
@@ -247,7 +247,7 @@ class DTSRBayes(DTSR):
                 alpha, _, _ = self._process_mean(alpha_init, lb=0)
                 beta, _, _ = self._process_mean(beta_init, lb=0)
                 param_mean = [alpha, beta]
-                param_sd = [self.conv_prior_sd_tf] * 2
+                param_sd = [self.irf_param_prior_sd_tf] * 2
             elif family in ['GammaKgt1', 'GammaShapeGT1']:
                 param_name = ['alpha', 'beta']
                 alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=2)
@@ -255,7 +255,7 @@ class DTSRBayes(DTSR):
                 alpha, _, _ = self._process_mean(alpha_init, lb=1)
                 beta, _, _ = self._process_mean(beta_init, lb=0)
                 param_mean = [alpha, beta]
-                param_sd = [self.conv_prior_sd_tf] * 2
+                param_sd = [self.irf_param_prior_sd_tf] * 2
             elif family == 'SteepGamma':
                 param_name = ['alpha', 'beta']
                 alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=2)
@@ -263,7 +263,7 @@ class DTSRBayes(DTSR):
                 alpha, _, _ = self._process_mean(alpha_init, lb=0)
                 beta, _, _ = self._process_mean(beta_init, lb=0)
                 param_mean = [alpha, beta]
-                param_sd = [self.conv_prior_sd_tf] * 2
+                param_sd = [self.irf_param_prior_sd_tf] * 2
             elif family == 'ShiftedGamma':
                 param_name = ['alpha', 'beta', 'delta']
                 alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=2)
@@ -273,7 +273,7 @@ class DTSRBayes(DTSR):
                 beta, _, _ = self._process_mean(beta_init, lb=0)
                 delta, _, _ = self._process_mean(delta_init, ub=0)
                 param_mean = [alpha, beta, delta]
-                param_sd = [self.conv_prior_sd_tf] * 3
+                param_sd = [self.irf_param_prior_sd_tf] * 3
             elif family in ['ShiftedGammaKgt1', 'ShiftedGammaShapeGT1']:
                 param_name = ['alpha', 'beta', 'delta']
                 alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=2)
@@ -283,7 +283,7 @@ class DTSRBayes(DTSR):
                 beta, _, _ = self._process_mean(beta_init, lb=0)
                 delta, _, _ = self._process_mean(delta_init, ub=0)
                 param_mean = [alpha, beta, delta]
-                param_sd = [self.conv_prior_sd_tf] * 3
+                param_sd = [self.irf_param_prior_sd_tf] * 3
             elif family == 'Normal':
                 param_name = ['mu', 'sigma']
                 mu_init = self._get_mean_init_vector(irf_ids, 'mu', irf_param_init, default=0)
@@ -291,7 +291,7 @@ class DTSRBayes(DTSR):
                 mu, _, _ = self._process_mean(mu_init)
                 sigma, _, _ = self._process_mean(sigma_init, lb=0)
                 param_mean = [mu, sigma]
-                param_sd = [self.conv_prior_sd_tf] * 2
+                param_sd = [self.irf_param_prior_sd_tf] * 2
             elif family == 'SkewNormal':
                 param_name = ['mu', 'sigma', 'alpha']
                 mu_init = self._get_mean_init_vector(irf_ids, 'mu', irf_param_init, default=0)
@@ -301,7 +301,7 @@ class DTSRBayes(DTSR):
                 sigma, _, _ = self._process_mean(sigma_init, lb=0)
                 alpha, _, _ = self._process_mean(alpha_init)
                 param_mean = [mu, sigma, alpha]
-                param_sd = [self.conv_prior_sd_tf] * 3
+                param_sd = [self.irf_param_prior_sd_tf] * 3
             elif family == 'EMG':
                 param_name = ['mu', 'sigma', 'beta']
                 mu_init = self._get_mean_init_vector(irf_ids, 'mu', irf_param_init, default=0)
@@ -311,7 +311,7 @@ class DTSRBayes(DTSR):
                 sigma, _, _ = self._process_mean(sigma_init, lb=0)
                 beta, _, _ = self._process_mean(beta_init, lb=0)
                 param_mean = [mu, sigma, beta]
-                param_sd = [self.conv_prior_sd_tf] * 3
+                param_sd = [self.irf_param_prior_sd_tf] * 3
             elif family == 'BetaPrime':
                 param_name = ['alpha', 'beta']
                 alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=1)
@@ -319,7 +319,7 @@ class DTSRBayes(DTSR):
                 alpha, _, _ = self._process_mean(alpha_init, lb=0)
                 beta, _, _ = self._process_mean(beta_init, lb=0)
                 param_mean = [alpha, beta]
-                param_sd = [self.conv_prior_sd_tf] * 2
+                param_sd = [self.irf_param_prior_sd_tf] * 2
             elif family == 'ShiftedBetaPrime':
                 param_name = ['alpha', 'beta', 'delta']
                 alpha_init = self._get_mean_init_vector(irf_ids, 'alpha', irf_param_init, default=1)
@@ -329,7 +329,7 @@ class DTSRBayes(DTSR):
                 beta, _, _ = self._process_mean(beta_init, lb=0)
                 delta, _, _ = self._process_mean(delta_init, ub=0)
                 param_mean = [alpha, beta, delta]
-                param_sd = [self.conv_prior_sd_tf] * 3
+                param_sd = [self.irf_param_prior_sd_tf] * 3
 
             for i in range(len(irf_ids)):
                 id = irf_ids[i]
@@ -343,7 +343,7 @@ class DTSRBayes(DTSR):
                             levels = list(range(self.rangf_n_levels[i]))
                             name += ['%s_%s_by_%s_%s' % (p, id, gf, j) for j in levels for p in param_name]
                             mean_init += [0.] * self.rangf_n_levels[i] * len(param_name)
-                            sd_init += [self.conv_scale_mean_init] * self.rangf_n_levels[i] * len(param_name)
+                            sd_init += [self.irf_param_prior_sd_unconstrained] * self.rangf_n_levels[i] * len(param_name)
 
         return(name, mean_init, sd_init)
 
@@ -433,7 +433,7 @@ class DTSRBayes(DTSR):
                             intercept_q_scale = tf.Variable(
                                 tf.random_normal(
                                     [],
-                                    mean=self.intercept_posterior_scale_mean_init,
+                                    mean=self.intercept_posterior_sd_init_unconstrained,
                                     stddev=self.init_sd,
                                     dtype=self.FLOAT_TF
                                 ),
@@ -515,7 +515,7 @@ class DTSRBayes(DTSR):
                             intercept_q_scale = tf.Variable(
                                 tf.random_normal(
                                     [rangf_n_levels],
-                                    mean=self.intercept_posterior_scale_mean_init,
+                                    mean=self.intercept_posterior_sd_init_unconstrained,
                                     stddev=self.init_sd,
                                     dtype=self.FLOAT_TF
                                 ),
@@ -604,7 +604,7 @@ class DTSRBayes(DTSR):
                             coefficient_q_scale = tf.Variable(
                                 tf.random_normal(
                                     [len(coef_ids)],
-                                    mean=self.coef_posterior_scale_mean_init,
+                                    mean=self.coef_posterior_sd_init_unconstrained,
                                     stddev=self.init_sd,
                                     dtype=self.FLOAT_TF
                                 ),
@@ -687,7 +687,7 @@ class DTSRBayes(DTSR):
                             coefficient_q_scale = tf.Variable(
                                 tf.random_normal(
                                     [rangf_n_levels, len(coef_ids)],
-                                    mean=self.coef_posterior_scale_mean_init,
+                                    mean=self.coef_posterior_sd_init_unconstrained,
                                     stddev=self.init_sd,
                                     dtype=self.FLOAT_TF
                                 ),
@@ -775,7 +775,7 @@ class DTSRBayes(DTSR):
                             param_q_scale = tf.Variable(
                                 tf.random_normal(
                                     [1, len(ids)],
-                                    mean=self.conv_posterior_scale_mean_init,
+                                    mean=self.irf_param_posterior_sd_init_unconstrained,
                                     stddev=self.init_sd,
                                     dtype=self.FLOAT_TF
                                 ),
@@ -858,7 +858,7 @@ class DTSRBayes(DTSR):
                             param_q_scale = tf.Variable(
                                 tf.random_normal(
                                     [rangf_n_levels, len(ids)],
-                                    mean=self.conv_posterior_scale_mean_init,
+                                    mean=self.irf_param_posterior_sd_init_unconstrained,
                                     stddev=self.init_sd,
                                     dtype=self.FLOAT_TF
                                 ),
@@ -922,100 +922,100 @@ class DTSRBayes(DTSR):
     def _initialize_output_model(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if self.y_scale_trainable:
+                if self.y_sd_trainable:
                     if self.mv:
-                        ix = names2ix('y_scale', self.full_joint_names)
-                        assert len(ix) == 1, 'There should be exactly 1 parameter called "y_scale"'
+                        ix = names2ix('y_sd', self.full_joint_names)
+                        assert len(ix) == 1, 'There should be exactly 1 parameter called "y_sd"'
                         ix = ix[0]
-                        y_scale = self.full_joint[ix]
-                        y_scale_summary = tf.nn.softplus(self.full_joint_q.mean()[ix])
+                        y_sd = self.full_joint[ix]
+                        y_sd_summary = tf.nn.softplus(self.full_joint_q.mean()[ix])
                     else:
-                        y_scale_mean_init = self.y_scale_mean_init
+                        y_sd_init_unconstrained = self.y_sd_init_unconstrained
 
                         if self.variational():
                             # Posterior distribution
-                            y_scale_loc_q = tf.Variable(
+                            y_sd_loc_q = tf.Variable(
                                 tf.random_normal(
                                     [],
-                                    mean=y_scale_mean_init,
+                                    mean=y_sd_init_unconstrained,
                                     stddev=self.init_sd,
                                     dtype=self.FLOAT_TF
                                 ),
-                                name='y_scale_loc_q'
+                                name='y_sd_loc_q'
                             )
 
-                            y_scale_scale_q = tf.Variable(
+                            y_sd_scale_q = tf.Variable(
                                 tf.random_normal(
                                     [],
-                                    mean=self.y_scale_posterior_scale_mean_init,
+                                    mean=self.y_sd_posterior_sd_init_unconstrained,
                                     stddev=self.init_sd,
                                     dtype=self.FLOAT_TF
                                 ),
-                                name='y_scale_scale_q'
+                                name='y_sd_scale_q'
                             )
-                            y_scale_q = Normal(
-                                loc=y_scale_loc_q,
-                                scale=tf.nn.softplus(y_scale_scale_q),
-                                name='y_scale_q'
+                            y_sd_q = Normal(
+                                loc=y_sd_loc_q,
+                                scale=tf.nn.softplus(y_sd_scale_q),
+                                name='y_sd_q'
                             )
-                            y_scale_summary = y_scale_q.mean()
+                            y_sd_summary = y_sd_q.mean()
 
                             if self.declare_priors_fixef:
                                 # Prior distribution
-                                y_scale = Normal(
-                                    loc=y_scale_mean_init,
-                                    scale=self.y_scale_prior_sd_tf,
-                                    name='y_scale'
+                                y_sd = Normal(
+                                    loc=y_sd_init_unconstrained,
+                                    scale=self.y_sd_prior_sd_tf,
+                                    name='y_sd'
                                 )
-                                self.inference_map[y_scale] = y_scale_q
+                                self.inference_map[y_sd] = y_sd_q
                             else:
-                                y_scale = y_scale_q
+                                y_sd = y_sd_q
                         else:
                             # Prior distribution
-                            y_scale = Normal(
-                                loc=y_scale_mean_init,
-                                scale=self.y_scale_prior_sd_tf,
-                                name='y_scale'
+                            y_sd = Normal(
+                                loc=y_sd_init_unconstrained,
+                                scale=self.y_sd_prior_sd_tf,
+                                name='y_sd'
                             )
 
                             # Posterior distribution
-                            y_scale_q_samples = tf.Variable(
+                            y_sd_q_samples = tf.Variable(
                                 tf.zeros([self.n_samples], dtype=self.FLOAT_TF),
-                                name=sn('y_scale_q_samples')
+                                name=sn('y_sd_q_samples')
                             )
-                            y_scale_q = Empirical(
-                                params=y_scale_q_samples,
-                                name=sn('y_scale_q')
+                            y_sd_q = Empirical(
+                                params=y_sd_q_samples,
+                                name=sn('y_sd_q')
                             )
 
                             if self.inference_name == 'MetropolisHastings':
                                 # Proposal distribution
-                                y_scale_proposal = Normal(
-                                    loc=y_scale,
+                                y_sd_proposal = Normal(
+                                    loc=y_sd,
                                     scale=self.mh_proposal_sd,
-                                    name=sn('y_scale_proposal')
+                                    name=sn('y_sd_proposal')
                                 )
-                                self.proposal_map[y_scale] = y_scale_proposal
+                                self.proposal_map[y_sd] = y_sd_proposal
 
-                            y_scale_summary = y_scale_q.params[self.global_batch_step - 1]
+                            y_sd_summary = y_sd_q.params[self.global_batch_step - 1]
 
-                            self.inference_map[y_scale] = y_scale_q
+                            self.inference_map[y_sd] = y_sd_q
 
-                    y_scale = tf.nn.softplus(y_scale)
-                    y_scale_summary = tf.nn.softplus(y_scale_summary)
+                    y_sd = tf.nn.softplus(y_sd)
+                    y_sd_summary = tf.nn.softplus(y_sd_summary)
 
                     tf.summary.scalar(
-                        'y_scale',
-                        y_scale_summary,
+                        'y_sd',
+                        y_sd_summary,
                         collections=['params']
                     )
                 else:
-                    sys.stderr.write('Fixed y scale: %s\n' % self.y_scale_init)
-                    y_scale = self.y_scale_init_tf
-                    y_scale_summary = y_scale
+                    sys.stderr.write('Fixed y scale: %s\n' % self.y_sd_init)
+                    y_sd = self.y_sd_init_tf
+                    y_sd_summary = y_sd
 
-                self.y_scale = y_scale
-                self.y_scale_summary = y_scale_summary
+                self.y_sd = y_sd
+                self.y_sd_summary = y_sd_summary
 
                 if self.asymmetric_error:
                     if self.variational():
@@ -1032,7 +1032,7 @@ class DTSRBayes(DTSR):
                         y_skewness_scale_q = tf.Variable(
                             tf.random_normal(
                                 [],
-                                mean=self.y_skewness_posterior_scale_mean_init,
+                                mean=self.y_skewness_posterior_sd_init_unconstrained,
                                 stddev=self.init_sd,
                                 dtype=self.FLOAT_TF
                             ),
@@ -1063,7 +1063,7 @@ class DTSRBayes(DTSR):
                         y_tailweight_scale_q = tf.Variable(
                             tf.random_normal(
                                 [],
-                                mean=self.y_tailweight_posterior_scale_mean_init,
+                                mean=self.y_tailweight_posterior_sd_init_unconstrained,
                                 stddev=self.init_sd,
                                 dtype=self.FLOAT_TF
                             ),
@@ -1165,14 +1165,14 @@ class DTSRBayes(DTSR):
 
                     self.out = SinhArcsinh(
                         loc=self.out,
-                        scale=y_scale,
+                        scale=y_sd,
                         skewness=self.y_skewness,
                         tailweight=tf.nn.softplus(self.y_tailweight),
                         name='output'
                     )
                     self.err_dist = SinhArcsinh(
                         loc=0.,
-                        scale=y_scale_summary,
+                        scale=y_sd_summary,
                         skewness=self.y_skewness_summary,
                         tailweight=tf.nn.softplus(self.y_tailweight_summary),
                         name='err_dist'
@@ -1182,18 +1182,18 @@ class DTSRBayes(DTSR):
                 else:
                     self.out = Normal(
                         loc=self.out,
-                        scale=self.y_scale,
+                        scale=self.y_sd,
                         name='output'
                     )
                     self.err_dist = Normal(
                         loc=0.,
-                        scale=self.y_scale_summary,
+                        scale=self.y_sd_summary,
                         name='err_dist'
                     )
                     self.err_dist_plot = tf.exp(self.err_dist.log_prob(self.support))
 
-                self.err_dist_lb = -3 * y_scale_summary
-                self.err_dist_ub = 3 * y_scale_summary
+                self.err_dist_lb = -3 * y_sd_summary
+                self.err_dist_ub = 3 * y_sd_summary
 
     def initialize_objective(self):
         with self.sess.as_default():
