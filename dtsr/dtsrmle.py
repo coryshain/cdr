@@ -104,7 +104,7 @@ class DTSRMLE(DTSR):
                     )
                     intercept_summary = intercept
                 else:
-                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)]
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     intercept = tf.Variable(
                         tf.random_normal(
                             shape=[rangf_n_levels],
@@ -133,7 +133,7 @@ class DTSRMLE(DTSR):
                     )
                     coefficient_summary = coefficient
                 else:
-                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)]
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     coefficient = tf.Variable(
                         tf.random_normal(
                             shape=[rangf_n_levels, len(coef_ids)],
@@ -160,7 +160,7 @@ class DTSRMLE(DTSR):
                     )
                     param_summary = param
                 else:
-                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)]
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     param = tf.Variable(
                         tf.random_normal(
                             shape=[rangf_n_levels, len(ids)],
@@ -168,11 +168,54 @@ class DTSRMLE(DTSR):
                             stddev=self.init_sd,
                             dtype=self.FLOAT_TF
                         ),
-                        name='%s_by_%s' % (param_name, ran_gf)
+                        name=sn('%s_%s_by_%s' % (param_name, '-'.join(ids), ran_gf))
                     )
                     param_summary = param
 
-                return (param, param_summary)
+                return param, param_summary
+
+    def initialize_joint_distribution(self, means, sds, ran_gf=None):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                sds_unconstrained = tf.sqrt(tf.contrib.distributions.softplus_inverse(sds ** 2))
+
+                dim = int(means.shape[0])
+
+                joint_loc = tf.Variable(
+                    tf.random_normal(
+                        [dim],
+                        mean=means,
+                        stddev=self.init_sd,
+                        dtype=self.FLOAT_TF
+                    ),
+                    name='joint_loc' if ran_gf is None else 'joint_loc_by_%s' % ran_gf
+                )
+
+                # Scatter diagonal elements in sds into a lower-triangular matrix
+                n_scale = int(dim * (dim + 1) / 2)
+                diag_ix = self._tril_diag_ix(dim)
+                scale_mean = self._scatter_along_axis(diag_ix, sds_unconstrained, [n_scale])
+
+                joint_scale = tf.Variable(
+                    tf.random_normal(
+                        [n_scale],
+                        mean=scale_mean,
+                        stddev=self.init_sd,
+                        dtype=self.FLOAT_TF
+                    ),
+                    name='joint_scale' if ran_gf is None else 'joint_scale_by_%s' % ran_gf
+                )
+
+                joint_dist = tf.distributions.MultivariateNormalTriL(
+                    loc=joint_loc,
+                    scale_tril=tf.contrib.distributions.fill_triangular(tf.nn.softplus(joint_scale)),
+                    name='joint' if ran_gf is None else 'joint_by_%s' % ran_gf
+                )
+
+                joint = joint_dist.sample()
+                joint_summary = joint_dist.mean()
+
+                return joint, joint_summary
 
     def initialize_objective(self):
         f = self.form

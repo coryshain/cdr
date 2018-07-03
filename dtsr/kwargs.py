@@ -158,13 +158,13 @@ DTSR_INITIALIZATION_KWARGS = [
         'mv',
         False,
         bool,
-        "Use multivariate model that fits covariances between fixed parameters (experimental, not thoroughly tested). If ``False``, parameter distributions are treated as independent."
+        "Use multivariate model that fits covariances between fixed parameters. Experimental, not thoroughly tested, and currently only functional for DTSRBayes. If ``False``, parameter distributions are treated as independent."
     ),
     Kwarg(
         'mv_ran',
         False,
         bool,
-        "Use multivariate model that fits covariances between random parameters within a random grouping factor (experimental, not thoroughly tested). If ``False``, random parameter distributions are treated as independent."
+        "Use multivariate model that fits covariances between random parameters within a random grouping factor. Experimental, not thoroughly tested, and currently only functional for DTSRBayes. If ``False``, random parameter distributions are treated as independent."
     ),
     Kwarg(
         'intercept_init',
