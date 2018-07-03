@@ -146,6 +146,7 @@ class DTSR(object):
         self.irf_lambdas = {}
         self.irf_params_means = {} # {family: {param_name: mean_vector}}
         self.irf_params_means_unconstrained = {} # {family: {param_name: mean_init_vector}}
+        self.irf_params_random_means = {} # {rangf: {family: {param_name: mean_vector}}}
         self.irf_params_lb = {} # {family: {param_name: value}}
         self.irf_params_ub = {} # {family: {param_name: value}}
         self.irf_params = {} # {irf_id: param_vector}
@@ -490,13 +491,13 @@ class DTSR(object):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if self.has_intercept[None]:
-                    if not self.mv:
+                    if not self.covarying_fixef:
                         self.intercept_fixed_base, self.intercept_fixed_base_summary = self.initialize_intercept()
                 else:
                     self.intercept_fixed_base = tf.constant(0., dtype=self.FLOAT_TF, name='intercept')
 
                 coef_ids = self.fixed_coef_names
-                if len(coef_ids) > 0 and not self.mv:
+                if len(coef_ids) > 0 and not self.covarying_fixef:
                     self.coefficient_fixed_base, self.coefficient_fixed_base_summary = self.initialize_coefficient(coef_ids=coef_ids)
 
                 self.intercept_random_base = {}
@@ -509,11 +510,11 @@ class DTSR(object):
                     gf = self.rangf[i]
 
                     if self.has_intercept[gf]:
-                        if not self.mv_ran:
+                        if not self.covarying_ranef:
                             self.intercept_random_base[gf], self.intercept_random_base_summary[gf] = self.initialize_intercept(ran_gf=gf)
 
                     coef_ids = self.coef_by_rangf.get(gf, [])
-                    if len(coef_ids) > 0 and not self.mv_ran:
+                    if len(coef_ids) > 0 and not self.covarying_ranef:
                         self.coefficient_random_base[gf], self.coefficient_random_base_summary[gf] = self.initialize_coefficient(
                             coef_ids=coef_ids,
                             ran_gf=gf,
@@ -611,13 +612,15 @@ class DTSR(object):
 
                 self.intercept = self.intercept_fixed
                 self.intercept_summary = self.intercept_fixed_summary
-                self.intercept_random = {}
-                self.intercept_random_summary = {}
-
                 self.coefficient = self.coefficient_fixed
                 self.coefficient_summary = self.coefficient_fixed_summary
+
+                self.intercept_random = {}
+                self.intercept_random_summary = {}
+                self.intercept_random_means = {}
                 self.coefficient_random = {}
                 self.coefficient_random_summary = {}
+                self.coefficient_random_means = {}
 
                 self.coefficient = tf.expand_dims(self.coefficient, 0)
 
@@ -626,23 +629,31 @@ class DTSR(object):
                     levels_ix = np.arange(self.rangf_n_levels[i] - 1)
 
                     if self.has_intercept[gf]:
+                        intercept_random = self.intercept_random_base[gf]
+                        intercept_random_summary = self.intercept_random_base_summary[gf]
+
+                        intercept_random_means = tf.reduce_mean(intercept_random, axis=0, keepdims=True)
+                        intercept_random_summary_means = tf.reduce_mean(intercept_random_summary, axis=0, keepdims=True)
+
+                        intercept_random -= intercept_random_means
+                        intercept_random_summary -= intercept_random_summary_means
+
+                        self._regularize(intercept_random, type='ranef', var_name='intercept_by_%s' % gf)
+
                         intercept_random = self._scatter_along_axis(
                             levels_ix,
-                            self.intercept_random_base[gf],
+                            intercept_random,
                             [self.rangf_n_levels[i]]
                         )
                         intercept_random_summary = self._scatter_along_axis(
                             levels_ix,
-                            self.intercept_random_base_summary[gf],
+                            intercept_random_summary,
                             [self.rangf_n_levels[i]]
                         )
 
-                        intercept_random -= tf.reduce_mean(intercept_random, axis=0, keepdims=True)
-                        intercept_random_summary -= tf.reduce_mean(intercept_random_summary, axis=0, keepdims=True)
-                        self._regularize(intercept_random, type='ranef', var_name='intercept_by_%s' % gf)
-
                         self.intercept_random[gf] = intercept_random
                         self.intercept_random_summary[gf] = intercept_random_summary
+                        self.intercept_random_means[gf] = tf.reduce_mean(intercept_random_summary, axis=0)
 
                         self.intercept += tf.gather(intercept_random, self.gf_y[:, i])
 
@@ -657,11 +668,21 @@ class DTSR(object):
                     if len(coefs) > 0:
                         coef_ix = names2ix(coefs, self.coef_names)
 
+                        coefficient_random = self.coefficient_random_base[gf]
+                        coefficient_random_summary = self.coefficient_random_base_summary[gf]
+
+                        coefficient_random_means = tf.reduce_mean(coefficient_random, axis=0, keepdims=True)
+                        coefficient_random_summary_means = tf.reduce_mean(coefficient_random_summary, axis=0, keepdims=True)
+
+                        coefficient_random -= coefficient_random_means
+                        coefficient_random_summary -= coefficient_random_summary_means
+                        self._regularize(coefficient_random, type='ranef', var_name='coefficient_by_%s' % gf)
+
                         coefficient_random = self._scatter_along_axis(
                             coef_ix,
                             self._scatter_along_axis(
                                 levels_ix,
-                                self.coefficient_random_base[gf],
+                                coefficient_random,
                                 [self.rangf_n_levels[i], len(coefs)]
                             ),
                             [self.rangf_n_levels[i], len(self.coef_names)],
@@ -671,19 +692,16 @@ class DTSR(object):
                             coef_ix,
                             self._scatter_along_axis(
                                 levels_ix,
-                                self.coefficient_random_base_summary[gf],
+                                coefficient_random_summary,
                                 [self.rangf_n_levels[i], len(coefs)]
                             ),
                             [self.rangf_n_levels[i], len(self.coef_names)],
                             axis=1
                         )
 
-                        coefficient_random -= tf.reduce_mean(coefficient_random, axis=0)
-                        coefficient_random_summary -= tf.reduce_mean(coefficient_random_summary, axis=0)
-                        self._regularize(coefficient_random, type='ranef', var_name='coefficient_by_%s' % gf)
-
                         self.coefficient_random[gf] = coefficient_random
                         self.coefficient_random_summary[gf] = coefficient_random_summary
+                        self.coefficient_random_means[gf] = tf.reduce_mean(coefficient_random_summary, axis=0)
 
                         self.coefficient += tf.gather(coefficient_random, self.gf_y[:, i], axis=0)
 
@@ -895,8 +913,8 @@ class DTSR(object):
                                 irf_by_rangf[gf] = []
                             irf_by_rangf[gf].append(id)
 
-                irf_param_random = {}
-                irf_param_random_summary = {}
+                param_random_by_rangf = {}
+                param_random_summary_by_rangf = {}
 
                 if len(irf_by_rangf) > 0:
                     for i, gf in enumerate(irf_by_rangf):
@@ -909,6 +927,15 @@ class DTSR(object):
                             lb=param_lb,
                             ub=param_ub
                         )
+                        param_random_summary = self._center_and_constrain(
+                            self.irf_params_random_base_summary[gf][family][param_name],
+                            tf.gather(param_summary, irfs_ix, axis=1),
+                            lb=param_lb,
+                            ub=param_ub
+                        )
+
+                        self._regularize(param_random, type='ranef', var_name='%s_by_%s' % (param_name, gf))
+
                         param_random = self._scatter_along_axis(
                             irfs_ix,
                             self._scatter_along_axis(
@@ -918,13 +945,6 @@ class DTSR(object):
                             ),
                             [self.rangf_n_levels[i], len(irf_ids)],
                             axis=1
-                        )
-
-                        param_random_summary = self._center_and_constrain(
-                            self.irf_params_random_base_summary[gf][family][param_name],
-                            tf.gather(param_summary, irfs_ix, axis=1),
-                            lb=param_lb,
-                            ub=param_ub
                         )
                         param_random_summary = self._scatter_along_axis(
                             irfs_ix,
@@ -937,11 +957,13 @@ class DTSR(object):
                             axis=1
                         )
 
-                        self._regularize(param_random, type='ranef', var_name='%s_by_%s' % (param_name, gf))
-
-
-                        irf_param_random[gf] = param_random
-                        irf_param_random_summary[gf] = param_random_summary
+                        param_random_by_rangf[gf] = param_random
+                        param_random_summary_by_rangf[gf] = param_random_summary
+                        if gf not in self.irf_params_random_means:
+                            self.irf_params_random_means[gf] = {}
+                        if family not in self.irf_params_random_means[gf]:
+                            self.irf_params_random_means[gf][family] = {}
+                        self.irf_params_random_means[gf][family][param_name] = tf.reduce_mean(param_random_summary, axis=0)
 
                         param += tf.gather(param_random, self.gf_y[:, i], axis=0)
 
@@ -962,8 +984,8 @@ class DTSR(object):
 
                         param = tf.gather(param, np.concatenate([trainable_ix, untrainable_ix]), axis=1)
                     param_summary = tf.gather(param_summary, np.concatenate([trainable_ix, untrainable_ix]), axis=1)
-                    
-                return param, param_summary, param_fixed, param_fixed_summary, irf_param_random, irf_param_random_summary
+
+                return param, param_summary, param_fixed, param_fixed_summary, param_random_by_rangf, param_random_summary_by_rangf
 
     def _initialize_base_irf_param(self, param_name, family, lb=None, ub=None, default=0.):
         with self.sess.as_default():
@@ -1002,7 +1024,7 @@ class DTSR(object):
                 trainable_means = tf.expand_dims(tf.gather(param_mean_unconstrained, trainable_ix), axis=0)
 
 
-                if not self.mv:
+                if not self.covarying_fixef:
                     # Initialize and store fixed params on the unconstrained space
                     param_fixed_base, param_fixed_base_summary = self.initialize_irf_param_unconstrained(
                         param_name,
@@ -1019,7 +1041,7 @@ class DTSR(object):
                     self.irf_params_fixed_base_summary[family][param_name] = param_fixed_base_summary
 
 
-                if not self.mv_ran:
+                if not self.covarying_ranef:
                     # Initialize and store random params on the unconstrained space
                     irf_by_rangf = {}
                     for id in irf_ids:
@@ -1053,7 +1075,7 @@ class DTSR(object):
         with self.sess.as_default():
             with self.sess.graph.as_default():
 
-                if self.mv:
+                if self.covarying_fixef:
                     joint_fixed_means = []
                     joint_fixed_sds = []
                     joint_fixed_ix = {}
@@ -1062,13 +1084,13 @@ class DTSR(object):
 
                     if self.has_intercept[None]:
                         joint_fixed_means.append(tf.expand_dims(self.intercept_init_tf, axis=0))
-                        joint_fixed_sds.append(tf.expand_dims(self.intercept_prior_sd, axis=0))
+                        joint_fixed_sds.append(tf.expand_dims(self.intercept_joint_sd, axis=0))
                         joint_fixed_ix['intercept'] = (i, i + 1)
                         i += 1
 
                     coef_ids = self.fixed_coef_names
                     joint_fixed_means.append(tf.zeros((len(coef_ids), ), dtype=self.FLOAT_TF))
-                    joint_fixed_sds.append(tf.ones((len(coef_ids), ), dtype=self.FLOAT_TF) * self.coef_prior_sd)
+                    joint_fixed_sds.append(tf.ones((len(coef_ids), ), dtype=self.FLOAT_TF) * self.coef_joint_sd)
                     joint_fixed_ix['coefficient'] = (i, i + len(coef_ids))
                     i += len(coef_ids)
 
@@ -1092,7 +1114,7 @@ class DTSR(object):
                                 )
                             )
                             joint_fixed_sds.append(
-                                tf.ones((len(trainable_ix),), dtype=self.FLOAT_TF) * self.irf_param_prior_sd
+                                tf.ones((len(trainable_ix),), dtype=self.FLOAT_TF) * self.irf_param_joint_sd
                             )
                             joint_fixed_ix[family][param_name] = (i,  i + len(trainable_ix))
                             i += len(trainable_ix)
@@ -1107,7 +1129,7 @@ class DTSR(object):
 
                     self.joint_fixed_ix = joint_fixed_ix
 
-                if self.mv_ran:
+                if self.covarying_ranef:
                     joint_random = {}
                     joint_random_summary = {}
                     joint_random_means = {}
@@ -1124,14 +1146,14 @@ class DTSR(object):
 
                         if self.has_intercept[gf]:
                             joint_random_means[gf].append(tf.zeros([n_levels,], dtype=self.FLOAT_TF))
-                            joint_random_sds[gf].append(tf.ones([n_levels,], dtype=self.FLOAT_TF) * self.intercept_prior_sd)
+                            joint_random_sds[gf].append(tf.ones([n_levels,], dtype=self.FLOAT_TF) * self.intercept_joint_sd)
                             joint_random_ix[gf]['intercept'] = (i, i + n_levels)
                             i += n_levels
 
                         coef_ids = self.coef_by_rangf.get(gf, [])
                         if len(coef_ids) > 0:
                             joint_random_means[gf].append(tf.zeros([n_levels * len(coef_ids)], dtype=self.FLOAT_TF))
-                            joint_random_sds[gf].append(tf.ones([n_levels * len(coef_ids)], dtype=self.FLOAT_TF) * self.coef_prior_sd)
+                            joint_random_sds[gf].append(tf.ones([n_levels * len(coef_ids)], dtype=self.FLOAT_TF) * self.coef_joint_sd)
                             joint_random_ix[gf]['coefficient'] = (i, i + n_levels * len(coef_ids))
                             i += n_levels * len(coef_ids)
 
@@ -1159,13 +1181,13 @@ class DTSR(object):
                                         tf.zeros([n_levels * len(trainable_ix)], dtype=self.FLOAT_TF)
                                     )
                                     joint_random_sds[gf].append(
-                                        tf.ones([n_levels * len(trainable_ix)], dtype=self.FLOAT_TF) * self.irf_param_prior_sd
+                                        tf.ones([n_levels * len(trainable_ix)], dtype=self.FLOAT_TF) * self.irf_param_joint_sd
                                     )
                                     joint_random_ix[gf][family][param_name] = (i, i + n_levels * len(trainable_ix))
                                     i += n_levels * len(trainable_ix)
 
                         joint_random_means[gf] = tf.concat(joint_random_means[gf], axis=0)
-                        joint_random_sds[gf] = tf.concat(joint_random_sds[gf], axis=0) * self.ranef_to_fixef_prior_sd_ratio
+                        joint_random_sds[gf] = tf.concat(joint_random_sds[gf], axis=0)
 
                         joint_random[gf], joint_random_summary[gf] = self.initialize_joint_distribution(
                             joint_random_means[gf],
@@ -1180,7 +1202,7 @@ class DTSR(object):
     def _initialize_joint_distribution_slices(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if self.mv:
+                if self.covarying_fixef:
                     if self.has_intercept[None]:
                         s, e = self.joint_fixed_ix['intercept']
                         self.intercept_fixed_base = self.joint_fixed[s]
@@ -1200,7 +1222,7 @@ class DTSR(object):
                             self.irf_params_fixed_base[family][param_name] = tf.expand_dims(self.joint_fixed[s:e], axis=0)
                             self.irf_params_fixed_base_summary[family][param_name] = tf.expand_dims(self.joint_fixed_summary[s:e], axis=0)
 
-                if self.mv_ran:
+                if self.covarying_ranef:
                     for i, gf in enumerate(self.rangf):
                         rangf_n_levels = self.rangf_n_levels[i] - 1
 
@@ -1375,6 +1397,22 @@ class DTSR(object):
                     self.parameter_table_random_rangf = parameter_table_random_rangf
                     self.parameter_table_random_rangf_levels = parameter_table_random_rangf_levels
                     self.parameter_table_random_values = tf.concat(parameter_table_random_values, 0)
+
+    def _initialize_random_mean_vector(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if len(self.rangf) > 0:
+                    means = []
+                    for gf in self.intercept_random_means:
+                        means.append(tf.expand_dims(self.intercept_random_means[gf], 0))
+                    for gf in self.coefficient_random_means:
+                        means.append(self.coefficient_random_means[gf])
+                    for gf in self.irf_params_random_means:
+                        for family in self.irf_params_random_means[gf]:
+                            for param_name in self.irf_params_random_means[gf][family]:
+                                means.append(self.irf_params_random_means[gf][family][param_name])
+
+                    self.random_means = tf.concat(means, axis=0)
 
     def _initialize_irfs(self, t):
         with self.sess.as_default():
@@ -1842,11 +1880,9 @@ class DTSR(object):
 
 
 
-
-
     ######################################################
     #
-    #  Other private methods
+    #  Model construction subroutines
     #
     ######################################################
 
@@ -1974,6 +2010,130 @@ class DTSR(object):
                                 'plot': plot_y
                             }
 
+    def _regularize(self, var, center=None, type=None, var_name=None):
+        assert type in [None, 'intercept', 'coefficient', 'irf', 'ranef']
+        if type is None:
+            regularizer = self.regularizer
+        else:
+            regularizer = getattr(self, '%s_regularizer' %type)
+
+        if regularizer is not None:
+            with self.sess.as_default():
+                with self.sess.graph.as_default():
+                    if center is None:
+                        reg = tf.contrib.layers.apply_regularization(regularizer, [var])
+                    else:
+                        reg = tf.contrib.layers.apply_regularization(regularizer, [var - center])
+                    self.regularizer_losses.append(reg)
+                    self.regularizer_losses_varnames.append(str(var_name))
+                    if type is None:
+                        reg_name = self.regularizer_name
+                        reg_scale = self.regularizer_scale
+                    else:
+                        reg_name = getattr(self, '%s_regularizer_name' %type)
+                        reg_scale = getattr(self, '%s_regularizer_scale' %type)
+                    if reg_name == 'inherit':
+                        reg_name = self.regularizer_name
+                    if reg_scale == 'inherit':
+                        reg_scale = self.regularizer_scale
+                    self.regularizer_losses_names.append(reg_name)
+                    self.regularizer_losses_scales.append(reg_scale)
+
+    def _extract_parameter_values(self, fixed=True, level=95, n_samples=None):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if fixed:
+                    out = self.parameter_table_fixed_values.eval(session=self.sess)
+                else:
+                    out = self.parameter_table_random_values.eval(session=self.sess)
+
+            return out
+
+    def _extract_irf_integral(self, terminal_name, level=95, n_samples=None, n_time_units=2.5, n_points_per_time_unit=1000):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                fd = {
+                    self.support_start: 0.,
+                    self.n_time_units: n_time_units,
+                    self.n_points_per_time_unit: n_points_per_time_unit,
+                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1
+                }
+
+                if terminal_name in self.irf_integral_tensors:
+                    irf_integral = self.irf_integral_tensors[terminal_name]
+                else:
+                    irf_integral = self.src_irf_integral_tensors[terminal_name]
+
+                out = self.sess.run(irf_integral, feed_dict=fd)[0]
+
+                return out
+
+    # Thanks to Ralph Mao (https://github.com/RalphMao) for this workaround
+    def _restore_allow_missing(self, path, predict=False):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                try:
+                    if predict:
+                        self.ema_saver.restore(self.sess, path)
+                    else:
+                        self.saver.restore(self.sess, path)
+                except tf.errors.DataLossError:
+                    sys.stderr.write('Read failure during load. Trying from backup...\n')
+                    if predict:
+                        self.ema_saver.restore(self.sess, path[:-5] + '_backup.ckpt')
+                    else:
+                        self.saver.restore(self.sess, path[:-5] + '_backup.ckpt')
+                except tf.errors.NotFoundError as err:  # Model contains variables that are missing in checkpoint, special handling needed
+                    reader = tf.train.NewCheckpointReader(path)
+                    saved_shapes = reader.get_variable_to_shape_map()
+                    model_var_names = sorted([(var.name, var.name.split(':')[0]) for var in tf.global_variables()])
+                    ckpt_var_names = sorted([(var.name, var.name.split(':')[0]) for var in tf.global_variables()
+                                             if var.name.split(':')[0] in saved_shapes])
+
+                    model_var_names_set = set([x[1] for x in model_var_names])
+                    ckpt_var_names_set = set([x[1] for x in ckpt_var_names])
+
+                    missing_in_ckpt = model_var_names_set - ckpt_var_names_set
+                    if len(missing_in_ckpt) > 0:
+                        sys.stderr.write(
+                            'Checkpoint file lacked the variables below. They will be left at their initializations.\n%s.\n\n' % (
+                            sorted(list(missing_in_ckpt))))
+                    missing_in_model = ckpt_var_names_set - model_var_names_set
+                    if len(missing_in_model) > 0:
+                        sys.stderr.write(
+                            'Checkpoint file contained the variables below which do not exist in the current model. They will be ignored.\n%s.\n\n' % (
+                            sorted(list(missing_in_ckpt))))
+
+                    restore_vars = []
+                    name2var = dict(
+                        zip(map(lambda x: x.name.split(':')[0], tf.global_variables()), tf.global_variables()))
+
+                    with tf.variable_scope('', reuse=True):
+                        for var_name, saved_var_name in ckpt_var_names:
+                            curr_var = name2var[saved_var_name]
+                            var_shape = curr_var.get_shape().as_list()
+                            if var_shape == saved_shapes[saved_var_name]:
+                                restore_vars.append(curr_var)
+
+                    if predict:
+                        self.ema_map = {}
+                        for v in restore_vars:
+                            self.ema_map[self.ema.average_name(v)] = v
+                        saver_tmp = tf.train.Saver(self.ema_map)
+                    else:
+                        saver_tmp = tf.train.Saver(restore_vars)
+
+                    saver_tmp.restore(self.sess, path)
+
+
+
+
+    ######################################################
+    #
+    #  Math subroutines
+    #
+    ######################################################
+
     def _matmul(self, A, B):
         """
         Matmul operation that supports broadcasting of A
@@ -2016,35 +2176,6 @@ class DTSR(object):
                     out = tf.transpose(out, inverse_transpose_axes)
 
                 return out
-
-    def _regularize(self, var, center=None, type=None, var_name=None):
-        assert type in [None, 'intercept', 'coefficient', 'irf', 'ranef']
-        if type is None:
-            regularizer = self.regularizer
-        else:
-            regularizer = getattr(self, '%s_regularizer' %type)
-
-        if regularizer is not None:
-            with self.sess.as_default():
-                with self.sess.graph.as_default():
-                    if center is None:
-                        reg = tf.contrib.layers.apply_regularization(regularizer, [var])
-                    else:
-                        reg = tf.contrib.layers.apply_regularization(regularizer, [var - center])
-                    self.regularizer_losses.append(reg)
-                    self.regularizer_losses_varnames.append(str(var_name))
-                    if type is None:
-                        reg_name = self.regularizer_name
-                        reg_scale = self.regularizer_scale
-                    else:
-                        reg_name = getattr(self, '%s_regularizer_name' %type)
-                        reg_scale = getattr(self, '%s_regularizer_scale' %type)
-                    if reg_name == 'inherit':
-                        reg_name = self.regularizer_name
-                    if reg_scale == 'inherit':
-                        reg_scale = self.regularizer_scale
-                    self.regularizer_losses_names.append(reg_name)
-                    self.regularizer_losses_scales.append(reg_scale)
 
     def _reduce_interpolated_sum(self, X, time, axis=0):
         with self.sess.as_default():
@@ -2190,86 +2321,8 @@ class DTSR(object):
 
                 x_shape = (tf.shape(x)[0], tf.shape(x)[1], n)
 
-    def _extract_parameter_values(self, fixed=True, level=95, n_samples=None):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                if fixed:
-                    out = self.parameter_table_fixed_values.eval(session=self.sess)
-                else:
-                    out = self.parameter_table_random_values.eval(session=self.sess)
 
-            return out
 
-    def _extract_irf_integral(self, terminal_name, level=95, n_samples=None, n_time_units=2.5, n_points_per_time_unit=1000):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                fd = {
-                    self.support_start: 0.,
-                    self.n_time_units: n_time_units,
-                    self.n_points_per_time_unit: n_points_per_time_unit,
-                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1
-                }
-
-                if terminal_name in self.irf_integral_tensors:
-                    irf_integral = self.irf_integral_tensors[terminal_name]
-                else:
-                    irf_integral = self.src_irf_integral_tensors[terminal_name]
-
-                out = self.sess.run(irf_integral, feed_dict=fd)[0]
-
-                return out
-
-    # Thanks to Ralph Mao (https://github.com/RalphMao) for this workaround
-    def _restore_allow_missing(self, path, predict=False):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                try:
-                    if predict:
-                        self.ema_saver.restore(self.sess, path)
-                    else:
-                        self.saver.restore(self.sess, path)
-                except tf.errors.DataLossError:
-                    sys.stderr.write('Read failure during load. Trying from backup...\n')
-                    if predict:
-                        self.ema_saver.restore(self.sess, path[:-5] + '_backup.ckpt')
-                    else:
-                        self.saver.restore(self.sess, path[:-5] + '_backup.ckpt')
-                except tf.errors.NotFoundError as err: # Model contains variables that are missing in checkpoint, special handling needed
-                    reader = tf.train.NewCheckpointReader(path)
-                    saved_shapes = reader.get_variable_to_shape_map()
-                    model_var_names = sorted([(var.name, var.name.split(':')[0]) for var in tf.global_variables()])
-                    ckpt_var_names = sorted([(var.name, var.name.split(':')[0]) for var in tf.global_variables()
-                                        if var.name.split(':')[0] in saved_shapes])
-
-                    model_var_names_set = set([x[1] for x in model_var_names])
-                    ckpt_var_names_set = set([x[1] for x in ckpt_var_names])
-
-                    missing_in_ckpt = model_var_names_set - ckpt_var_names_set
-                    if len(missing_in_ckpt) > 0:
-                        sys.stderr.write('Checkpoint file lacked the variables below. They will be left at their initializations.\n%s.\n\n' %(sorted(list(missing_in_ckpt))))
-                    missing_in_model = ckpt_var_names_set - model_var_names_set
-                    if len(missing_in_model) > 0:
-                        sys.stderr.write('Checkpoint file contained the variables below which do not exist in the current model. They will be ignored.\n%s.\n\n' % (sorted(list(missing_in_ckpt))))
-
-                    restore_vars = []
-                    name2var = dict(zip(map(lambda x: x.name.split(':')[0], tf.global_variables()), tf.global_variables()))
-
-                    with tf.variable_scope('', reuse=True):
-                        for var_name, saved_var_name in ckpt_var_names:
-                            curr_var = name2var[saved_var_name]
-                            var_shape = curr_var.get_shape().as_list()
-                            if var_shape == saved_shapes[saved_var_name]:
-                                restore_vars.append(curr_var)
-
-                    if predict:
-                        self.ema_map = {}
-                        for v in restore_vars:
-                            self.ema_map[self.ema.average_name(v)] = v
-                        saver_tmp = tf.train.Saver(self.ema_map)
-                    else:
-                        saver_tmp = tf.train.Saver(restore_vars)
-
-                    saver_tmp.restore(self.sess, path)
 
     ######################################################
     #
@@ -2328,7 +2381,6 @@ class DTSR(object):
 
 
 
-
     ######################################################
     #
     #  Shared public methods
@@ -2343,6 +2395,15 @@ class DTSR(object):
                     return True
                 else:
                     return False
+
+    def verify_random_centering(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if len(self.rangf) > 0:
+                    means = self.random_means.eval(session=self.sess)
+                    epsilon = self.epsilon.eval(session=self.sess)
+                    centered = np.allclose(means, 0., rtol=epsilon, atol=epsilon * 10)
+                    assert centered, 'Some random parameters are not properly centered\n. Current random parameter means:\n %s' %means
 
     def build(self, outdir=None, restore=True, verbose=True):
         """
@@ -2372,6 +2433,7 @@ class DTSR(object):
                 self._initialize_irf_lambdas()
                 self._initialize_irf_params()
                 self._initialize_parameter_tables()
+                self._initialize_random_mean_vector()
                 self._construct_network()
                 self.initialize_objective()
                 self._initialize_logging()
@@ -2924,6 +2986,8 @@ class DTSR(object):
 
                         self.sess.run(self.incr_global_step)
 
+                        self.verify_random_centering()
+
                         if self.log_freq > 0 and self.global_step.eval(session=self.sess) % self.log_freq == 0:
                             loss_total /= n_minibatch
                             summary_train_loss = self.sess.run(self.summary_losses, {self.loss_total: loss_total})
@@ -2963,6 +3027,8 @@ class DTSR(object):
                                     filename='error_distribution.png',
                                     legend=False,
                                 )
+                            self.verify_random_centering()
+
                         t1_iter = pytime.time()
                         sys.stderr.write('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
 

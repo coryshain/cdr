@@ -71,6 +71,13 @@ class DTSRMLE(DTSR):
     def _initialize_metadata(self):
         super(DTSRMLE, self)._initialize_metadata()
 
+        if self.intercept_init is None:
+            self.intercept_init = self.y_train_mean
+        if self.intercept_joint_sd is None:
+            self.intercept_joint_sd = self.y_train_sd * self.joint_sd_scaling_coefficient
+        if self.coef_joint_sd is None:
+            self.coef_joint_sd = self.y_train_sd * self.joint_sd_scaling_coefficient
+
     def _pack_metadata(self):
         md = super(DTSRMLE, self)._pack_metadata()
         for kwarg in DTSRMLE._INITIALIZATION_KWARGS:
@@ -177,8 +184,6 @@ class DTSRMLE(DTSR):
     def initialize_joint_distribution(self, means, sds, ran_gf=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                sds_unconstrained = tf.sqrt(tf.contrib.distributions.softplus_inverse(sds ** 2))
-
                 dim = int(means.shape[0])
 
                 joint_loc = tf.Variable(
@@ -191,28 +196,34 @@ class DTSRMLE(DTSR):
                     name='joint_loc' if ran_gf is None else 'joint_loc_by_%s' % ran_gf
                 )
 
-                # Scatter diagonal elements in sds into a lower-triangular matrix
+                # Construct cholesky decomposition of initial covariance using sds, then use for initialization
                 n_scale = int(dim * (dim + 1) / 2)
-                diag_ix = self._tril_diag_ix(dim)
-                scale_mean = self._scatter_along_axis(diag_ix, sds_unconstrained, [n_scale])
+                if ran_gf is not None:
+                    sds *= self.ranef_to_fixef_joint_sd_ratio
+                cholesky = tf.diag(sds)
+                tril_ix = np.ravel_multi_index(
+                    np.tril_indices(dim),
+                    (dim, dim)
+                )
+                scale_init = tf.gather(tf.reshape(cholesky, [dim * dim]), tril_ix)
 
                 joint_scale = tf.Variable(
                     tf.random_normal(
                         [n_scale],
-                        mean=scale_mean,
+                        mean=scale_init,
                         stddev=self.init_sd,
                         dtype=self.FLOAT_TF
                     ),
                     name='joint_scale' if ran_gf is None else 'joint_scale_by_%s' % ran_gf
                 )
 
-                joint_dist = tf.distributions.MultivariateNormalTriL(
+                joint_dist = tf.contrib.distributions.MultivariateNormalTriL(
                     loc=joint_loc,
-                    scale_tril=tf.contrib.distributions.fill_triangular(tf.nn.softplus(joint_scale)),
+                    scale_tril=tf.contrib.distributions.fill_triangular(joint_scale),
                     name='joint' if ran_gf is None else 'joint_by_%s' % ran_gf
                 )
 
-                joint = joint_dist.sample()
+                joint = tf.reduce_mean(joint_dist.sample(sample_shape=[100]), axis=0)
                 joint_summary = joint_dist.mean()
 
                 return joint, joint_summary

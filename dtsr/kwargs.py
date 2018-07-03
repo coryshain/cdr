@@ -152,19 +152,27 @@ DTSR_INITIALIZATION_KWARGS = [
         'pc',
         False,
         bool,
-        "Transform input variables using principal components analysis (experimental, not thoroughly tested)."
+        "Transform input variables using principal components analysis. Experimental, not thoroughly tested."
     ),
     Kwarg(
-        'mv',
+        'covarying_fixef',
         False,
         bool,
-        "Use multivariate model that fits covariances between fixed parameters. Experimental, not thoroughly tested, and currently only functional for DTSRBayes. If ``False``, parameter distributions are treated as independent."
+        "Use multivariate model that fits covariances between fixed parameters. Experimental, not thoroughly tested. If ``False``, fixed parameter distributions are treated as independent.",
+        aliases=['mv']
     ),
     Kwarg(
-        'mv_ran',
+        'covarying_ranef',
         False,
         bool,
-        "Use multivariate model that fits covariances between random parameters within a random grouping factor. Experimental, not thoroughly tested, and currently only functional for DTSRBayes. If ``False``, random parameter distributions are treated as independent."
+        "Use multivariate model that fits covariances between random parameters within a random grouping factor. Experimental, not thoroughly tested. If ``False``, random parameter distributions are treated as independent.",
+        aliases=['mv_ran']
+    ),
+    Kwarg(
+        'n_samples',
+        2,
+        int,
+        "For DTSRMLE, number of samples from joint distribution (used only if either **covarying_fixef** or **covarying_ranef** is ``True``, otherwise ignored). For BBVI, number of posterior samples to draw at each training step during variational inference. If using MCMC inferences, the number of samples is set deterministically as ``n_iter * n_minibatch``, so this user-supplied parameter is overridden."
     ),
     Kwarg(
         'intercept_init',
@@ -370,6 +378,41 @@ DTSRMLE_INITIALIZATION_KWARGS = [
         'mse',
         str,
         "The optimization objective."
+    ),
+    Kwarg(
+        'intercept_joint_sd',
+        None,
+        [float, None],
+        "Square root of variance of intercept in initial variance-covariance matrix of joint distributions. Used only if either **covarying_fixef** or **covarying_ranef** is ``True``, otherwise ignored. If ``None``, inferred as **joint_sd_scaling_coefficient** times the empirical variance of the response on the training set.",
+        aliases=['intercept_prior_sd']
+    ),
+    Kwarg(
+        'coef_joint_sd',
+        None,
+        [float, None],
+        "Square root of variance of coefficients in initial variance-covariance matrix of joint distributions. Used only if either **covarying_fixef** or **covarying_ranef** is ``True``, otherwise ignored. If ``None``, inferred as **joint_sd_scaling_coefficient** times the empirical variance of the response on the training set.",
+        aliases=['coef_prior_sd']
+    ),
+    Kwarg(
+        'irf_param_joint_sd',
+        1,
+        float,
+        "Square root of variance of intercept in initial variance-covariance matrix of joint distributions. Used only if either **covarying_fixef** or **covarying_ranef** is ``True``, otherwise ignored.",
+        aliases=['irf_param_prior_sd, conv_param_joint_sd, conv_prior_sd']
+    ),
+    Kwarg(
+        'joint_sd_scaling_coefficient',
+        1,
+        float,
+        "Factor by which to multiply square roots of variances on intercepts and coefficients if inferred from the empirical variance of the data (i.e. if **intercept_joint_sd** or **coef_joint_sd** is ``None``). Ignored for any prior widths that are explicitly specified.",
+        aliases=['prior_sd_scaling_coefficient']
+    ),
+    Kwarg(
+        'ranef_to_fixef_joint_sd_ratio',
+        1,
+        float,
+        "Ratio of widths of random to fixed effects root-variances in joint distributions. I.e. if less than 1, random effects have tighter distributions. Used only if either **covarying_fixef** or **covarying_ranef** is ``True``, otherwise ignored.",
+        aliases=['ranef_to_fixef_prior_sd_ratio']
     )
 ]
 
@@ -402,12 +445,6 @@ DTSRBAYES_INITIALIZATION_KWARGS = [
         "Number of training iterations. If using variational inference, this becomes the `expected` number of training iterations and is used only for Tensorboard logging, with no impact on training behavior."
     ),
     Kwarg(
-        'n_samples',
-        None,
-        int,
-        "Number of posterior samples to draw at each training step during variational inference. If using MCMC inferences, the number of samples is set deterministically as ``n_iter * n_minibatch``, so this user-supplied parameter is overridden."
-    ),
-    Kwarg(
         'n_samples_eval',
         1024,
         [int],
@@ -417,13 +454,13 @@ DTSRBAYES_INITIALIZATION_KWARGS = [
         'intercept_prior_sd',
         None,
         [float, None],
-        "Standard deviation of prior on fixed intercept. If ``None``, inferred as ``prior_sd_scaling_coefficient`` times the empirical variance of the response on the training set."
+        "Standard deviation of prior on fixed intercept. If ``None``, inferred as **prior_sd_scaling_coefficient** times the empirical variance of the response on the training set."
     ),
     Kwarg(
         'coef_prior_sd',
         None,
         [float, None],
-        "Standard deviation of prior on fixed coefficients. If ``None``, inferred as ``prior_sd_scaling_coefficient`` times the empirical variance of the response on the training set."
+        "Standard deviation of prior on fixed coefficients. If ``None``, inferred as **prior_sd_scaling_coefficient** times the empirical variance of the response on the training set."
     ),
     Kwarg(
         'irf_param_prior_sd',
@@ -450,7 +487,7 @@ DTSRBAYES_INITIALIZATION_KWARGS = [
         'y_sd_prior_sd',
         None,
         [float, None],
-        "Standard deviation of prior on standard deviation of output model. If ``None``, inferred as ``y_sd_prior_sd_scaling_coefficient`` times the empirical variance of the response on the training set.",
+        "Standard deviation of prior on standard deviation of output model. If ``None``, inferred as **y_sd_prior_sd_scaling_coefficient** times the empirical variance of the response on the training set.",
         aliases=['y_scale_prior_sd']
     ),
     Kwarg(
@@ -469,19 +506,19 @@ DTSRBAYES_INITIALIZATION_KWARGS = [
         'mh_proposal_sd',
         None,
         [float, None],
-        "Standard deviation of proposal distribution. If ``None``, inferred as standard deviation of corresponding prior. Only used if ``inference_name == 'MetropolisHastings', otherwise ignored."
+        "Standard deviation of proposal distribution. If ``None``, inferred as standard deviation of corresponding prior. Only used if ``inference_name == 'MetropolisHastings'``, otherwise ignored."
     ),
     Kwarg(
         'prior_sd_scaling_coefficient',
         1,
         float,
-        "Factor by which to multiply priors on intercepts and coefficients if inferred from the empirical variance of the data (i.e. if ``intercept_prior_sd`` or ``coef_prior_sd`` is ``None``). Ignored for any prior widths that are explicitly specified."
+        "Factor by which to multiply priors on intercepts and coefficients if inferred from the empirical variance of the data (i.e. if **intercept_prior_sd** or **coef_prior_sd** is ``None``). Ignored for any prior widths that are explicitly specified."
     ),
     Kwarg(
         'y_sd_prior_sd_scaling_coefficient',
         1,
         float,
-        "Factor by which to multiply prior on output model variance if inferred from the empirical variance of the data (i.e. if ``y_sd_prior_sd`` is ``None``). Ignored if prior width is explicitly specified.",
+        "Factor by which to multiply prior on output model variance if inferred from the empirical variance of the data (i.e. if **y_sd_prior_sd** is ``None``). Ignored if prior width is explicitly specified.",
         aliases=['y_scale_prior_sd_scaling_coefficient']
     ),
     Kwarg(

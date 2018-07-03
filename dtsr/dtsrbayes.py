@@ -135,6 +135,12 @@ class DTSRBayes(DTSR):
                 self.y_tailweight_posterior_sd_init = self.y_tailweight_prior_sd_tf * self.posterior_to_prior_sd_ratio
                 self.y_tailweight_posterior_sd_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.y_tailweight_posterior_sd_init)
 
+                # Alias prior widths for use in multivariate mode
+                self.intercept_joint_sd = self.intercept_prior_sd
+                self.coef_joint_sd = self.coef_prior_sd
+                self.irf_param_joint_sd = self.irf_param_prior_sd
+                self.ranef_to_fixef_joint_sd_ratio = self.ranef_to_fixef_prior_sd_ratio
+
     def _pack_metadata(self):
         md = super(DTSRBayes, self)._pack_metadata()
         for kwarg in DTSRBayes._INITIALIZATION_KWARGS:
@@ -623,8 +629,6 @@ class DTSRBayes(DTSR):
     def initialize_joint_distribution(self, means, sds, ran_gf=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                sds_unconstrained = tf.contrib.distributions.softplus_inverse(sds)
-
                 dim = int(means.shape[0])
 
                 if self.variational():
@@ -670,7 +674,7 @@ class DTSRBayes(DTSR):
 
                     joint_summary = joint_q.mean()
 
-                    if self.declare_priors_fixef:
+                    if (ran_gf is None and self.declare_priors_fixef) or (ran_gf is not None and self.declare_priors_ranef):
                         # Prior distribution
                         joint = MultivariateNormalTriL(
                             loc=means,
