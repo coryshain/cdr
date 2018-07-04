@@ -97,7 +97,7 @@ class Config(object):
                     ablated = list(ablated)
                     name = model_field[6:] + '!' + '!'.join(ablated)
                     formula = Formula(config[model_field]['formula'])
-                    formula.ablate_impulses(ablated + ['rate'])
+                    formula.ablate_impulses(ablated)
                     new_model = self.models[model_field[6:]].copy()
                     new_model['formula'] = str(formula)
                     self.models[name] = new_model
