@@ -385,6 +385,12 @@ class DTSR(object):
                     name='time_X'
                 )
 
+                self.time_X_mask = tf.placeholder(
+                    shape=[None, self.history_length],
+                    dtype=tf.bool,
+                    name='time_X_mask'
+                )
+
                 self.y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('y'))
                 self.time_y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('time_y'))
                 self.gf_y = tf.placeholder(shape=[None, len(self.rangf)], dtype=self.INT_TF)
@@ -1683,8 +1689,13 @@ class DTSR(object):
                             else:
                                 irf = irf[0]
 
-                            impulse_interp = self._lininterp(impulse, self.n_interp)
-                            t_delta_interp = self._lininterp(self.t_delta, self.n_interp)
+                            impulse_interp, t_interp = self._lininterp_fixed_frequency(
+                                impulse,
+                                self.time_X,
+                                self.time_X_mask,
+                                hz = self.interp_hz
+                            )
+                            t_delta_interp = tf.expand_dims(tf.expand_dims(self.time_y, -1) - t_interp, -1)
                             irf_seq = irf(t_delta_interp)
 
                             self.convolutions[name] = tf.reduce_sum(impulse_interp * irf_seq, axis=1)
@@ -2300,7 +2311,7 @@ class DTSR(object):
 
                     return param_random
 
-    def _lininterp(self, x, n):
+    def _lininterp_fixed_n_points(self, x, n):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 n_input = tf.shape(x)[1]
@@ -2309,17 +2320,101 @@ class DTSR(object):
                 interp = tf.squeeze(tf.squeeze(interp, -1), -1)[..., :-n]
                 return interp
 
-    def _lininterp_2(self, x, time, hz):
+    def _lininterp_fixed_frequency(self, x, time, time_mask, hz=1000):
+        # Performs a linear interpolation at a fixed frequency between impulses that are variably spaced in time.
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                time = tf.round(time * hz)
-                time_ix = tf.expand_dims(tf.cast(time, dtype=self.INT_TF), -1)
-                n = tf.reduce_max(time_ix)
+                # Reverse arrays so that max time is left-aligned
+                x = tf.reverse(x, axis=[1])
+                x_deltas = x[:, 1:, :] - x[:, :-1, :]
+                time = tf.reverse(time, axis=[1])
+                time_mask = tf.reverse(time_mask, axis=[1])
+                time_mask_int = tf.cast(time_mask, dtype=self.INT_TF)
 
-                time_shape = (tf.shape(time), n)
-                time_new = tf.scatter_nd(time_ix, time, time_shape)
+                # Round timestamps to integers so they can be used to index the interpolated array
+                time_int = tf.cast(tf.round(time * hz), dtype=self.INT_TF)
 
-                x_shape = (tf.shape(x)[0], tf.shape(x)[1], n)
+                # Compute intervals by subtracting the lower bound
+                end_ix = tf.reduce_sum(time_mask_int, axis=1) - 1
+                time_minima = tf.gather_nd(time_int, tf.stack([tf.range(tf.shape(x)[0]), end_ix], axis=1))
+                time_delta_int = time_int - time_minima[..., None]
+
+                # Compute the minimum number of interpolation points needed for each data point
+                impulse_ix_max_batch = tf.reduce_max(time_delta_int, axis=1, keepdims=True)
+
+                # Compute the largest number of interpolation points in the batch, which will be used to compute the length of the interpolation
+                impulse_ix_max = tf.reduce_max(impulse_ix_max_batch)
+
+                # Since events are now temporally reversed, reverse indices by subtracting the max and negating
+                impulse_ix = -(time_delta_int - impulse_ix_max_batch)
+
+                # Rescale the deltas by the number of timesteps over which they will be interpolated
+                n_steps = impulse_ix[:, 1:] - impulse_ix[:, :-1]
+                x_deltas = tf.where(
+                    tf.tile(tf.not_equal(n_steps, 0)[..., None], [1, 1, tf.shape(x)[2]]),
+                    x_deltas / tf.cast(n_steps, dtype=self.FLOAT_TF)[..., None],
+                    tf.zeros_like(x_deltas)
+                )
+
+                # Pad x_deltas
+                x_deltas = tf.concat([x_deltas, tf.zeros([tf.shape(x)[0], 1, tf.shape(x)[2]])], axis=1)
+
+                # Compute a mask for the interpolated output
+                time_mask_interp = tf.cast(tf.range(impulse_ix_max + 1)[None, ...] <= impulse_ix_max_batch, dtype=self.FLOAT_TF)
+
+                # Compute an array of indices for scattering impulses into the interpolation array
+                row_ix = tf.tile(tf.range(tf.shape(x)[0])[..., None], [1, tf.shape(x)[1]])
+                scatter_ix = tf.stack([row_ix, impulse_ix], axis=2)
+
+                # Create an array for use by gather_nd by taking the cumsum of an array with ones at indices with impulses, zeros otherwise
+                gather_ix = tf.cumsum(
+                    tf.scatter_nd(
+                        scatter_ix,
+                        tf.ones_like(impulse_ix, dtype=self.INT_TF) * time_mask_int,
+                        [tf.shape(x)[0], impulse_ix_max + 1]
+                    ),
+                    axis=1
+                ) - 1
+                row_ix = tf.tile(tf.range(tf.shape(x)[0])[..., None], [1, impulse_ix_max + 1])
+                gather_ix = tf.stack([row_ix, gather_ix], axis=2)
+
+                x_interp_base = tf.gather_nd(
+                    x,
+                    gather_ix
+                )
+
+                interp_factor = tf.cast(
+                    tf.range(impulse_ix_max + 1)[None, ...] - tf.gather_nd(
+                        impulse_ix,
+                        gather_ix
+                    ),
+                    dtype=self.FLOAT_TF
+                )
+
+
+                interp_delta = tf.cast(interp_factor, dtype=self.FLOAT_TF)[..., None] * tf.gather_nd(
+                    x_deltas,
+                    gather_ix
+                )
+
+                x_interp = (x_interp_base + interp_delta) * time_mask_interp[..., None]
+
+                x_interp = tf.reverse(x_interp, axis=[1])
+                time_interp = tf.cast(
+                    tf.reverse(
+                        tf.maximum(
+                            (tf.range(0, -impulse_ix_max - 1, delta=-1)[None, ...] + impulse_ix_max_batch),
+                            tf.zeros([impulse_ix_max + 1], dtype=self.INT_TF)
+                        ) + time_minima[..., None],
+                        axis=[1]
+                    ),
+                    dtype=self.FLOAT_TF
+                ) * tf.reverse(time_mask_interp, axis=[1]) / hz
+
+                return x_interp, time_interp
+
+
+
 
 
 
@@ -2514,23 +2609,6 @@ class DTSR(object):
                 self.gf_y_in[j]
             )
             j += 1
-
-    def expand_history(self, X, X_time, first_obs, last_obs):
-        last_obs = np.array(last_obs, dtype=self.INT_NP)
-        first_obs = np.maximum(np.array(first_obs, dtype=self.INT_NP), last_obs - self.history_length)
-        X_time = np.array(X_time, dtype=self.FLOAT_NP)
-        X = np.array(X, dtype=self.FLOAT_NP)
-
-        X_history = np.zeros((first_obs.shape[0], self.history_length, X.shape[1]))
-        time_X_history = np.zeros((first_obs.shape[0], self.history_length))
-
-        for i, first, last in zip(np.arange(first_obs.shape[0]), first_obs, last_obs):
-            sX = X[first:last]
-            sXt = X_time[first:last]
-            X_history[i, -sX.shape[0]:] += sX
-            time_X_history[i][-len(sXt):] += sXt
-
-        return X_history, time_X_history
 
     def finalize(self):
         """
@@ -2913,7 +2991,7 @@ class DTSR(object):
             c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
 
-        X_2d, time_X_2d, time_mask = build_DTSR_impulses(
+        X_2d, time_X_2d, time_X_mask = build_DTSR_impulses(
             X,
             y.first_obs,
             y.last_obs,
@@ -2931,7 +3009,7 @@ class DTSR(object):
 
         sys.stderr.write('Correlation matrix for input variables:\n')
         impulse_names_2d = [x for x in impulse_names if x in X_2d_predictor_names]
-        rho = corr_dtsr(X_2d, impulse_names, impulse_names_2d, time_mask)
+        rho = corr_dtsr(X_2d, impulse_names, impulse_names_2d, time_X_mask)
         sys.stderr.write(str(rho) + '\n\n')
 
         with self.sess.as_default():
@@ -2965,11 +3043,11 @@ class DTSR(object):
                         loss_total = 0.
 
                         for j in range(0, len(y), minibatch_size):
-
                             indices = p[j:j+minibatch_size]
                             fd_minibatch = {
                                 self.X: X_2d[indices],
                                 self.time_X: time_X_2d[indices],
+                                self.time_X_mask: time_X_mask[indices],
                                 self.y: y_dv[indices],
                                 self.time_y: time_y[indices],
                                 self.gf_y: gf_y[indices] if len(gf_y > 0) else gf_y
@@ -3183,7 +3261,7 @@ class DTSR(object):
             c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
 
-        X_2d, time_X_2d, time_mask = build_DTSR_impulses(
+        X_2d, time_X_2d, time_X_mask = build_DTSR_impulses(
             X,
             first_obs,
             last_obs,
@@ -3221,6 +3299,7 @@ class DTSR(object):
                         fd_minibatch = {
                             self.X: X_2d[i:i + self.eval_minibatch_size],
                             self.time_X: time_X_2d[i:i + self.eval_minibatch_size],
+                            self.time_X_mask: time_X_mask[i:i + self.eval_minibatch_size],
                             self.time_y: time_y[i:i + self.eval_minibatch_size],
                             self.gf_y: gf_y[i:i + self.eval_minibatch_size] if len(gf_y) > 0 else gf_y
                         }
@@ -3276,7 +3355,7 @@ class DTSR(object):
             c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
 
-        X_2d, time_X_2d, time_mask = build_DTSR_impulses(
+        X_2d, time_X_2d, time_X_mask = build_DTSR_impulses(
             X,
             y['first_obs'],
             y['last_obs'],
@@ -3298,6 +3377,7 @@ class DTSR(object):
                 fd = {
                     self.X: X_2d,
                     self.time_X: time_X_2d,
+                    self.time_X_mask: time_X_mask,
                     self.time_y: time_y,
                     self.gf_y: gf_y,
                     self.y: y_dv
@@ -3315,6 +3395,7 @@ class DTSR(object):
                         fd_minibatch = {
                             self.X: X_2d[i:i + self.eval_minibatch_size],
                             self.time_X: time_X_2d[i:i + self.eval_minibatch_size],
+                            self.time_X_mask: time_X_mask[i:i + self.eval_minibatch_size],
                             self.time_y: time_y[i:i + self.eval_minibatch_size],
                             self.gf_y: gf_y[i:i + self.eval_minibatch_size] if len(gf_y) > 0 else gf_y,
                             self.y: y_dv[i:i+self.eval_minibatch_size]
@@ -3351,7 +3432,7 @@ class DTSR(object):
             c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
 
-        X_2d, time_X_2d, time_mask = build_DTSR_impulses(
+        X_2d, time_X_2d, time_X_mask = build_DTSR_impulses(
             X,
             y['first_obs'],
             y['last_obs'],
@@ -3366,9 +3447,6 @@ class DTSR(object):
         time_y = np.array(y.time, dtype=self.FLOAT_NP)
         gf_y = np.array(y_rangf, dtype=self.INT_NP)
 
-        if isinstance(X, pd.DataFrame):
-            X_2d, time_X_2d = self.expand_history(X[impulse_names], X.time, y.first_obs, y.last_obs)
-
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.set_predict_mode(True)
@@ -3377,7 +3455,8 @@ class DTSR(object):
                     self.time_y: time_y,
                     self.gf_y: gf_y,
                     self.X: X_2d,
-                    self.time_X: time_X_2d
+                    self.time_X: time_X_2d,
+                    self.time_X_mask: time_X_mask
                 }
 
                 fd_minibatch = {
@@ -3391,6 +3470,7 @@ class DTSR(object):
                     fd_minibatch[self.gf_y] = gf_y[j:j + self.eval_minibatch_size]
                     fd_minibatch[self.X] = X_2d[j:j + self.eval_minibatch_size]
                     fd_minibatch[self.time_X] = time_X_2d[j:j + self.eval_minibatch_size]
+                    fd_minibatch[self.time_X_mask] = time_X_mask[j:j + self.eval_minibatch_size]
                     X_conv_cur = self.run_conv_op(fd_minibatch, scaled=scaled, n_samples=n_samples, verbose=verbose)
                     X_conv.append(X_conv_cur)
                 names = [sn(''.join(x.split('-')[:-1])) for x in self.terminal_names]

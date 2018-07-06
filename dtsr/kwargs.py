@@ -187,10 +187,10 @@ DTSR_INITIALIZATION_KWARGS = [
         "Standard deviation of Gaussian initialization distribution for trainable variables."
     ),
     Kwarg(
-        'n_interp',
-        64,
-        int,
-        "Number of interpolation points (ignored unless the model formula specification contains continuous inputs)."
+        'interp_hz',
+        1000,
+        float,
+        "Frequency in Hz at which to interpolate continuous impulses for approximating the IRF integral."
     ),
     Kwarg(
         'optim_name',

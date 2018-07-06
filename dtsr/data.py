@@ -115,9 +115,9 @@ def corr_dtsr(X_2d, impulse_names, impulse_names_2d, time_mask):
                 n = n_3d
                 x1_mean = x1.sum() / n
                 x2_mean = x2.sum() / n
-                cor = ((x1 - x1_mean) * (x2 - x2_mean) * time_mask[..., 0]).sum() / \
-                      np.sqrt(((x1 - x1_mean) ** 2 * time_mask[..., 0]).sum() * (
-                              (x2 - x2_mean) ** 2 * time_mask[..., 0]).sum())
+                cor = ((x1 - x1_mean) * (x2 - x2_mean) * time_mask).sum() / \
+                      np.sqrt(((x1 - x1_mean) ** 2 * time_mask).sum() * (
+                              (x2 - x2_mean) ** 2 * time_mask).sum())
             else:
                 x1 = X_2d[:, -1, i]
                 x2 = X_2d[:, -1, j]
@@ -188,14 +188,14 @@ def expand_history(X, X_time, first_obs, last_obs, history_length, int_type='int
 
     X_2d = np.full((first_obs.shape[0], history_length, X.shape[1]), fill)
     time_X_2d = np.zeros((first_obs.shape[0], history_length), dtype=FLOAT_NP)
-    time_mask = np.zeros((first_obs.shape[0], history_length, 1), dtype=FLOAT_NP)
+    time_mask = np.zeros((first_obs.shape[0], history_length), dtype=FLOAT_NP)
 
     for i, first, last in zip(np.arange(first_obs.shape[0]), first_obs, last_obs):
         sX = X[first:last]
         sXt = X_time[first:last]
         X_2d[i, -sX.shape[0]:] = sX
         time_X_2d[i][-len(sXt):] = sXt
-        time_mask[i][-len(sXt):, 0] = 1
+        time_mask[i][-len(sXt):] = 1
 
     return X_2d, time_X_2d, time_mask
 
@@ -206,11 +206,11 @@ def compute_time_mask(X_time, first_obs, last_obs, history_length, int_type='int
     first_obs = np.maximum(np.array(first_obs, dtype=INT_NP), last_obs - history_length)
     X_time = np.array(X_time, dtype=FLOAT_NP)
 
-    time_mask = np.zeros((first_obs.shape[0], history_length, 1), dtype=FLOAT_NP)
+    time_mask = np.zeros((first_obs.shape[0], history_length), dtype=FLOAT_NP)
 
     for i, first, last in zip(np.arange(first_obs.shape[0]), first_obs, last_obs):
         sXt = X_time[first:last]
-        time_mask[i][-len(sXt):, 0] = 1
+        time_mask[i][-len(sXt):] = 1
 
     return time_mask
 

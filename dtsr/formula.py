@@ -360,6 +360,7 @@ class Formula(object):
     def apply_op_2d(self, op, arr, time_mask):
         with np.errstate(invalid='ignore'):
             n = time_mask.sum()
+            time_mask = time_mask[..., None]
             if op in ['c', 'c.']:
                 mean = arr.sum() / n
                 out = (arr - mean) * time_mask
