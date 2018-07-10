@@ -13,8 +13,10 @@ def read_data(path_X, path_y, series_ids, categorical_columns=None):
 
     if categorical_columns is not None:
         for col in categorical_columns:
-            X[col] = X[col].astype('category')
-            y[col] = y[col].astype('category')
+            if col in X.columns:
+                X[col] = X[col].astype('category')
+            if col in y.columns:
+                y[col] = y[col].astype('category')
 
     X['rate'] = 1.
     X['trial'] = X.groupby(series_ids).rate.cumsum()

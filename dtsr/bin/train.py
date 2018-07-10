@@ -192,7 +192,7 @@ if __name__ == '__main__':
 
         elif m.startswith('DTSR'):
             dv = formula.strip().split('~')[0].strip()
-            y_complete_cases = y[np.isfinite(y[dv])]
+            y_complete_cases = y[np.isfinite(y[dv]) & (y.last_obs > y.first_obs)]
 
             sys.stderr.write('\nInitializing model %s...\n\n' % m)
 

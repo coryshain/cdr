@@ -58,46 +58,58 @@ def build_DTSR_impulses(
     return X_2d, time_X_2d, time_mask
 
 def compute_history_intervals(X, y, series_ids):
-    id_vectors_X = np.zeros((len(X), len(series_ids))).astype('int32')
-    id_vectors_y = np.zeros((len(y), len(series_ids))).astype('int32')
-
+    m = len(X)
     n = len(y)
 
     time_X = np.array(X.time)
     time_y = np.array(y.time)
 
+    id_vectors_X = []
+    id_vectors_y = []
+
     for i in range(len(series_ids)):
         col = series_ids[i]
-        id_vectors_X[:, i] = np.array(X[col].cat.codes)
-        id_vectors_y[:, i] = np.array(y[col].cat.codes)
+        id_vectors_X.append(np.array(X[col]))
+        id_vectors_y.append(np.array(y[col]))
+    id_vectors_X = np.stack(id_vectors_X, axis=1)
+    id_vectors_y = np.stack(id_vectors_y, axis=1)
+
     cur_ids = id_vectors_y[0]
 
     first_obs = np.zeros(len(y)).astype('int32')
     last_obs = np.zeros(len(y)).astype('int32')
 
-    i = j = 0
+    # i iterates y, j iterates X
+    i = 0
+    j = -1
     start = 0
     end = 0
-    epsilon = 1e-10
-    while i < n and j < len(X):
+    epsilon = np.finfo(np.float32).eps
+    while i < n and j < m:
         sys.stderr.write('\r%d/%d' %(i+1, n))
         sys.stderr.flush()
+
+        # Check if we've entered a new series in y
         if (id_vectors_y[i] != cur_ids).any():
-            start = end = j
             cur_ids = id_vectors_y[i]
-        while j < len(X) and not (id_vectors_X[j] == cur_ids).all():
-            start += 1
-            end += 1
+
+        # Move the X pointer forward until we are either in the same series as y or at the end of the table
+        while j < m and not (id_vectors_X[j] == cur_ids).all():
             j += 1
-        while j < len(X) and time_X[j] <= time_y[i] + epsilon and (id_vectors_X[j] == cur_ids).all():
-            end += 1
+            start = end = j
+
+        # Move the X pointer forward until we are either at the end of the series or have moved later in time than y
+        while j < (m-1) and time_X[j+1] <= (time_y[i] + epsilon) and (id_vectors_X[j+1] == cur_ids).all():
             j += 1
+            end = j + 1
+
         first_obs[i] = start
         last_obs[i] = end
 
         i += 1
 
     sys.stderr.write('\n')
+    
     return first_obs, last_obs
 
 def corr_dtsr(X_2d, impulse_names, impulse_names_2d, time_mask):
@@ -232,15 +244,16 @@ def preprocess_data(X, y, p, formula_list, compute_history=True, debug=False):
 
         # Floating point precision issues can allow the response to precede the impulse for simultaneous X/y,
         # which can break downstream convolution. The correction below to y.time prevents this.
-        y.time = np.maximum(np.array(X.time)[last_obs - 1], y.time)
+        y.time = np.where(last_obs > first_obs, np.maximum(np.array(X.time)[last_obs - 1], y.time), y.time)
 
         if debug:
             sample = np.random.randint(0, len(y), 10)
+            sample = np.concatenate([np.zeros((1,), dtype='int'), sample, np.ones((1,), dtype='int') * (len(y)-1)], axis=0)
             for i in sample:
                 print(i)
                 row = y.iloc[i]
-                print(row[['subject', 'docid', 'sentid', 'word']])
-                print(X[['subject', 'docid', 'sentid', 'word']][row.first_obs:row.last_obs])
+                print(row[['subject', 'docid', 'time']])
+                print(X[['subject', 'docid', 'word', 'time']][row.first_obs:row.last_obs])
 
         for x in formula_list:
             X, y, X_2d_predictor_names, X_2d_predictors = x.apply_formula(
