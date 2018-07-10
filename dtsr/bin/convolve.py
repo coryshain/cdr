@@ -21,7 +21,7 @@ if __name__ == '__main__':
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
     argparser.add_argument('-n', '--nsamples', type=int, default=1024, help='Number of posterior samples to average (only used for DTSRBayes)')
     argparser.add_argument('-s', '--scaled', action='store_true', help='Multiply outputs by DTSR-fitted coefficients')
-    argparser.add_argument('-a', '--algorithm', type=str, default='sampling', help='Algorithm ("sampling" or "MAP") to use for extracting predictions.')
+    argparser.add_argument('-a', '--algorithm', type=str, default='MAP', help='Algorithm ("sampling" or "MAP") to use for extracting predictions.')
     args, unknown = argparser.parse_known_args()
 
     p = Config(args.config_path)
