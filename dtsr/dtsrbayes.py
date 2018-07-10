@@ -83,6 +83,7 @@ class DTSRBayes(DTSR):
         self.parameter_table_columns = ['Mean', '2.5%', '97.5%']
 
         self.inference_map = {}
+        self.MAP_map = {}
         if self.intercept_init is None:
             self.intercept_init = self.y_train_mean
         if self.intercept_prior_sd is None:
@@ -318,6 +319,8 @@ class DTSRBayes(DTSR):
 
                         self.inference_map[intercept] = intercept_q
 
+                self.MAP_map[intercept] = intercept_summary
+
                 return intercept, intercept_summary
 
     def initialize_coefficient(self, coef_ids=None, ran_gf=None):
@@ -472,6 +475,8 @@ class DTSRBayes(DTSR):
 
                         self.inference_map[coefficient] = coefficient_q
 
+                self.MAP_map[coefficient] = coefficient_summary
+
                 return coefficient, coefficient_summary
 
     def initialize_irf_param_unconstrained(self, param_name, ids, mean=0., ran_gf=None):
@@ -624,6 +629,8 @@ class DTSRBayes(DTSR):
 
                         self.inference_map[param] = param_q
 
+                self.MAP_map[param] = param_summary
+
                 return param, param_summary
 
     def initialize_joint_distribution(self, means, sds, ran_gf=None):
@@ -726,6 +733,8 @@ class DTSRBayes(DTSR):
 
                     self.inference_map[joint] = joint_q
 
+                self.MAP_map[joint] = joint_summary
+
                 return joint, joint_summary
 
     def _initialize_output_model(self):
@@ -803,6 +812,8 @@ class DTSRBayes(DTSR):
 
                         self.inference_map[y_sd] = y_sd_q
 
+                    self.MAP_map[y_sd] = y_sd_summary
+
                     y_sd = tf.nn.softplus(y_sd)
                     y_sd_summary = tf.nn.softplus(y_sd_summary)
 
@@ -811,6 +822,7 @@ class DTSRBayes(DTSR):
                         y_sd_summary,
                         collections=['params']
                     )
+
                 else:
                     sys.stderr.write('Fixed y scale: %s\n' % self.y_sd_init)
                     y_sd = self.y_sd_init_tf
@@ -965,6 +977,9 @@ class DTSRBayes(DTSR):
                         self.inference_map[self.y_skewness] = self.y_skewness_q
                         self.inference_map[self.y_tailweight] = self.y_tailweight_q
 
+                    self.MAP_map[self.y_skewness] = self.y_skewness_summary
+                    self.MAP_map[self.y_tailweight] = self.y_tailweight_summary
+
                     self.out = SinhArcsinh(
                         loc=self.out,
                         scale=y_sd,
@@ -1032,12 +1047,24 @@ class DTSRBayes(DTSR):
                         scale={self.out: self.minibatch_scale}
                     )
 
+                ## Set up posteriors for MC sampling
+                self.X_conv_prior = self.X_conv
+                self.X_conv_scaled_prior = self.X_conv
+                self.X_conv_post = ed.copy(self.X_conv, self.inference_map)
+                self.X_conv_scaled_post = ed.copy(self.X_conv_scaled, self.inference_map)
+                self.X_conv_MAP = ed.copy(self.X_conv, self.MAP_map, scope='MAP')
+                self.X_conv_scaled_MAP = ed.copy(self.X_conv_scaled, self.MAP_map, scope='MAP')
+
+                self.out_prior = self.out
                 self.out_post = ed.copy(self.out, self.inference_map)
+                self.MAP_map[self.out] = self.out.mean()
+                self.out_MAP = tf.identity(self.MAP_map[self.out])
+                self.out_MAP = ed.copy(self.out_MAP, self.MAP_map, scope='MAP')
 
-                self.llprior = self.out.log_prob(self.y)
+                self.ll_prior = self.out_prior.log_prob(self.y)
                 self.ll_post = self.out_post.log_prob(self.y)
+                self.ll_MAP = ed.copy(self.out.log_prob(self.y), self.MAP_map, scope='MAP')
 
-                ## Set up posteriors for post-hoc MC sampling
                 for x in self.irf_mc:
                     for a in self.irf_mc[x]:
                         for b in self.irf_mc[x][a]:
@@ -1196,66 +1223,92 @@ class DTSRBayes(DTSR):
 
                 return out_dict
 
-    def run_predict_op(self, feed_dict, n_samples=None, verbose=True):
+    def run_predict_op(self, feed_dict, n_samples=None, algorithm='MAP', verbose=True):
+        if algorithm in ['map', 'MAP'] and self.variational():
+            MAP = True
+        else:
+            MAP = False
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if n_samples is None:
-                    n_samples = self.n_samples_eval
+                if MAP:
+                    preds = self.sess.run(self.out_MAP, feed_dict=feed_dict)
+                else:
+                    if n_samples is None:
+                        n_samples = self.n_samples_eval
 
-                if verbose:
-                    pb = tf.contrib.keras.utils.Progbar(n_samples)
-
-                preds = np.zeros((len(feed_dict[self.time_y]), n_samples))
-                for i in range(n_samples):
-                    preds[:, i] = self.sess.run(self.out_post, feed_dict=feed_dict)
                     if verbose:
-                        pb.update(i + 1, force=True)
+                        pb = tf.contrib.keras.utils.Progbar(n_samples)
 
-                preds = preds.mean(axis=1)
+                    preds = np.zeros((len(feed_dict[self.time_y]), n_samples))
+
+                    for i in range(n_samples):
+                        preds[:, i] = self.sess.run(self.out_post, feed_dict=feed_dict)
+                        if verbose:
+                            pb.update(i + 1, force=True)
+
+                    preds = preds.mean(axis=1)
 
                 return preds
+
+    def run_loglik_op(self, feed_dict, n_samples=None, algorithm='MAP', verbose=True):
+        if algorithm in ['map', 'MAP'] and self.variational():
+            MAP = True
+        else:
+            MAP = False
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if MAP:
+                    log_lik = self.sess.run(self.ll_MAP, feed_dict=feed_dict)
+                else:
+                    if n_samples is None:
+                        n_samples = self.n_samples_eval
+
+                    if verbose:
+                        pb = tf.contrib.keras.utils.Progbar(n_samples)
+
+                    log_lik = np.zeros((len(feed_dict[self.time_y]), n_samples))
+
+                    for i in range(n_samples):
+                        log_lik[:, i] = self.sess.run(self.ll_post, feed_dict=feed_dict)
+                        if verbose:
+                            pb.update(i + 1, force=True)
+
+                    log_lik = log_lik.mean(axis=1)
+
+                return log_lik
+
+    def run_conv_op(self, feed_dict, scaled=False, n_samples=None, algorithm='MAP', verbose=True):
+        if algorithm in ['map', 'MAP'] and self.variational():
+            MAP = True
+        else:
+            MAP = False
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if MAP:
+                    X_conv = self.sess.run(self.X_conv_scaled_MAP if scaled else self.X_conv_MAP, feed_dict=feed_dict)
+                else:
+                    if n_samples is None:
+                        n_samples = self.n_samples_eval
+                    if verbose:
+                        pb = tf.contrib.keras.utils.Progbar(n_samples)
+
+                    X_conv = np.zeros((len(feed_dict[self.X]), self.X_conv.shape[-1], n_samples))
+
+                    for i in range(0, n_samples):
+                        X_conv[..., i] = self.sess.run(self.X_conv_scaled_post if scaled else self.X_conv_post, feed_dict=feed_dict)
+                        if verbose:
+                            pb.update(i + 1, force=True)
+
+                    X_conv = X_conv.mean(axis=2)
+
+                return X_conv
 
     def finalize(self):
         super(DTSRBayes, self).finalize()
         self.inference.finalize()
-
-    def run_loglik_op(self, feed_dict, n_samples=None, verbose=True):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                if n_samples is None:
-                    n_samples = self.n_samples_eval
-
-                if verbose:
-                    pb = tf.contrib.keras.utils.Progbar(n_samples)
-
-                log_lik = np.zeros((len(feed_dict[self.time_y]), n_samples))
-                for i in range(n_samples):
-                    log_lik[:, i] = self.sess.run(self.ll_post, feed_dict=feed_dict)
-                    if verbose:
-                        pb.update(i + 1, force=True)
-
-                log_lik = log_lik.mean(axis=1)
-
-                return log_lik
-
-    def run_conv_op(self, feed_dict, scaled=False, n_samples=None, verbose=True):
-        if n_samples is None:
-            n_samples = self.n_samples_eval
-
-        X_conv = np.zeros((len(feed_dict[self.X]), self.X_conv.shape[-1], n_samples))
-
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                sys.stderr.write('Convolving input features...\n')
-                if verbose:
-                    pb = tf.contrib.keras.utils.Progbar(n_samples)
-                for i in range(0, n_samples):
-                    X_conv[..., i] = self.sess.run(self.X_conv_scaled if scaled else self.X_conv, feed_dict=feed_dict)
-                    if verbose:
-                        pb.update(i + 1, force=True)
-                X_conv = X_conv.mean(axis=2)
-                return X_conv
-
 
 
 

@@ -2437,37 +2437,43 @@ class DTSR(object):
 
         raise NotImplementedError
 
-    def run_predict_op(self, feed_dict, n_samples=None):
+    def run_predict_op(self, feed_dict, n_samples=None, algorithm='MAP', verbose=True):
         """
         Generate predictions from a batch of data.
         **All DTSR subclasses must implement this method.**
 
         :param feed_dict: ``dict``; A dictionary of predictor values.
-        :param n_samples: ``int`` or ``None``; Number of posterior samples to use (ignored by DTSRMLE)
+        :param n_samples: ``int`` or ``None``; Number of posterior samples to use. Only relevant for Bayesian models.
+        :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
+        :param verbose: ``bool``; Send progress reports to standard error.
         :return: ``numpy`` array; Predicted responses, one for each training sample
         """
         raise NotImplementedError
 
-    def run_loglik_op(self, feed_dict, n_samples=None):
+    def run_loglik_op(self, feed_dict, n_samples=None, algorithm='MAP', verbose=True):
         """
         Compute the log-likelihoods of a batch of data.
         **All DTSR subclasses must implement this method.**
 
         :param feed_dict: ``dict``; A dictionary of predictor and response values
-        :param n_samples: ``int`` or ``None``; Number of posterior samples to use (ignored by DTSRMLE)
+        :param n_samples: ``int`` or ``None``; Number of posterior samples to use. Only relevant for Bayesian models.
+        :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
+        :param verbose: ``bool``; Send progress reports to standard error.
         :return: ``numpy`` array; Pointwise log-likelihoods, one for each training sample
         """
 
         raise NotImplementedError
 
-    def run_conv_op(self, feed_dict, scaled=False, n_samples=None):
+    def run_conv_op(self, feed_dict, scaled=False, n_samples=None, algorithm='MAP', verbose=True):
         """
         Convolve a batch of data in feed_dict with the model's latent IRF.
         **All DTSR subclasses must implement this method.**
 
         :param feed_dict: ``dict``; A dictionary of predictor variables
         :param scaled: ``bool``; Whether to scale the outputs using the model's coefficients
-        :param n_samples: ``int`` or ``None``; Number of posterior samples to use (ignored by DTSRMLE)
+        :param n_samples: ``int`` or ``None``; Number of posterior samples to use. Only relevant for Bayesian models.
+        :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
+        :param verbose: ``bool``; Send progress reports to standard error.
         :return: ``numpy`` array; The convolved inputs
         """
 
@@ -2496,8 +2502,7 @@ class DTSR(object):
             with self.sess.graph.as_default():
                 if len(self.rangf) > 0:
                     means = self.random_means.eval(session=self.sess)
-                    epsilon = self.epsilon.eval(session=self.sess)
-                    centered = np.allclose(means, 0., rtol=epsilon, atol=epsilon * 10)
+                    centered = np.allclose(means, 0., rtol=1e-3, atol=1e-3)
                     assert centered, 'Some random parameters are not properly centered\n. Current random parameter means:\n %s' %means
 
     def build(self, outdir=None, restore=True, verbose=True):
@@ -3222,6 +3227,7 @@ class DTSR(object):
             X_2d_predictor_names=None,
             X_2d_predictors=None,
             n_samples=None,
+            algorithm='MAP',
             verbose=True
     ):
         """
@@ -3289,7 +3295,7 @@ class DTSR(object):
 
 
                 if not np.isfinite(self.eval_minibatch_size):
-                    preds = self.run_predict_op(fd, n_samples=n_samples, verbose=verbose)
+                    preds = self.run_predict_op(fd, n_samples=n_samples, algorithm=algorithm, verbose=verbose)
                 else:
                     preds = np.zeros((len(y_time),))
                     n_eval_minibatch = math.ceil(len(y_time) / self.eval_minibatch_size)
@@ -3303,7 +3309,7 @@ class DTSR(object):
                             self.time_y: time_y[i:i + self.eval_minibatch_size],
                             self.gf_y: gf_y[i:i + self.eval_minibatch_size] if len(gf_y) > 0 else gf_y
                         }
-                        preds[i:i + self.eval_minibatch_size] = self.run_predict_op(fd_minibatch, n_samples=n_samples, verbose=verbose)
+                        preds[i:i + self.eval_minibatch_size] = self.run_predict_op(fd_minibatch, n_samples=n_samples, algorithm=algorithm, verbose=verbose)
 
                 sys.stderr.write('\n\n')
 
@@ -3318,6 +3324,7 @@ class DTSR(object):
             X_2d_predictor_names=None,
             X_2d_predictors=None,
             n_samples=None,
+            algorithm='MAP',
             verbose=True
     ):
         """
@@ -3385,7 +3392,7 @@ class DTSR(object):
 
 
                 if not np.isfinite(self.eval_minibatch_size):
-                    log_lik = self.run_loglik_op(fd, n_samples=n_samples, verbose=verbose)
+                    log_lik = self.run_loglik_op(fd, n_samples=n_samples, algorithm=algorithm, verbose=verbose)
                 else:
                     log_lik = np.zeros((len(time_y),))
                     n_eval_minibatch = math.ceil(len(y) / self.eval_minibatch_size)
@@ -3400,7 +3407,7 @@ class DTSR(object):
                             self.gf_y: gf_y[i:i + self.eval_minibatch_size] if len(gf_y) > 0 else gf_y,
                             self.y: y_dv[i:i+self.eval_minibatch_size]
                         }
-                        log_lik[i:i+self.eval_minibatch_size] = self.run_loglik_op(fd_minibatch, n_samples=n_samples, verbose=verbose)
+                        log_lik[i:i+self.eval_minibatch_size] = self.run_loglik_op(fd_minibatch, n_samples=n_samples, algorithm=algorithm, verbose=verbose)
 
                 self.set_predict_mode(False)
 
@@ -3416,6 +3423,7 @@ class DTSR(object):
             X_2d_predictors=None,
             scaled=False,
             n_samples=None,
+            algorithm='MAP',
             verbose=True
     ):
 
@@ -3471,7 +3479,7 @@ class DTSR(object):
                     fd_minibatch[self.X] = X_2d[j:j + self.eval_minibatch_size]
                     fd_minibatch[self.time_X] = time_X_2d[j:j + self.eval_minibatch_size]
                     fd_minibatch[self.time_X_mask] = time_X_mask[j:j + self.eval_minibatch_size]
-                    X_conv_cur = self.run_conv_op(fd_minibatch, scaled=scaled, n_samples=n_samples, verbose=verbose)
+                    X_conv_cur = self.run_conv_op(fd_minibatch, scaled=scaled, n_samples=n_samples, algorithm=algorithm, verbose=verbose)
                     X_conv.append(X_conv_cur)
                 names = [sn(''.join(x.split('-')[:-1])) for x in self.terminal_names]
                 X_conv = np.concatenate(X_conv, axis=0)

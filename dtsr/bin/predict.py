@@ -24,6 +24,7 @@ if __name__ == '__main__':
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
     argparser.add_argument('-n', '--nsamples', type=int, default=1024, help='Number of posterior samples to average (only used for DTSRBayes)')
     argparser.add_argument('-M', '--mode', type=str, default=None, help='Predict mode ("response" or "loglik") or default None, which does both')
+    argparser.add_argument('-a', '--algorithm', type=str, default='sampling', help='Algorithm ("sampling" or "MAP") to use for extracting predictions.')
     args, unknown = argparser.parse_known_args()
 
     p = Config(args.config_path)
@@ -227,6 +228,7 @@ if __name__ == '__main__':
                     X_2d_predictor_names=X_2d_predictor_names,
                     X_2d_predictors=X_2d_predictors,
                     n_samples=args.nsamples,
+                    algorithm=args.algorithm
                 )
                 with open(p.outdir + '/' + m + '/preds_%s.txt' % args.partition, 'w') as p_file:
                     for i in range(len(dtsr_preds)):
@@ -251,7 +253,8 @@ if __name__ == '__main__':
                     y,
                     X_2d_predictor_names=X_2d_predictor_names,
                     X_2d_predictors=X_2d_predictors,
-                    n_samples=args.nsamples
+                    n_samples=args.nsamples,
+                    algorithm=args.algorithm
                 )
                 with open(p.outdir + '/' + m + '/loglik_%s.txt' % args.partition, 'w') as l_file:
                     for i in range(len(dtsr_loglik_vector)):

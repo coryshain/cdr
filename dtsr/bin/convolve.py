@@ -21,6 +21,7 @@ if __name__ == '__main__':
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
     argparser.add_argument('-n', '--nsamples', type=int, default=1024, help='Number of posterior samples to average (only used for DTSRBayes)')
     argparser.add_argument('-s', '--scaled', action='store_true', help='Multiply outputs by DTSR-fitted coefficients')
+    argparser.add_argument('-a', '--algorithm', type=str, default='sampling', help='Algorithm ("sampling" or "MAP") to use for extracting predictions.')
     args, unknown = argparser.parse_known_args()
 
     p = Config(args.config_path)
@@ -66,7 +67,8 @@ if __name__ == '__main__':
             X_2d_predictor_names=X_2d_predictor_names,
             X_2d_predictors=X_2d_predictors,
             scaled=args.scaled,
-            n_samples=args.nsamples
+            n_samples=args.nsamples,
+            algorithm=args.algorithm
         )
 
         X_conv.to_csv(p.outdir + '/' + m + '/X_conv_%s.csv' %args.partition, sep=' ', index=False, na_rep='nan')
