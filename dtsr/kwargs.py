@@ -1,5 +1,4 @@
 from functools import cmp_to_key
-import configparser
 
 class Kwarg(object):
     """

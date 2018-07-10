@@ -5,8 +5,8 @@ from itertools import chain, combinations
 import configparser
 from numpy import inf
 
-from dtsr.formula import Formula
-from dtsr.kwargs import DTSR_INITIALIZATION_KWARGS, DTSRMLE_INITIALIZATION_KWARGS, DTSRBAYES_INITIALIZATION_KWARGS
+from .formula import Formula
+from .kwargs import DTSR_INITIALIZATION_KWARGS, DTSRMLE_INITIALIZATION_KWARGS, DTSRBAYES_INITIALIZATION_KWARGS
 
 
 # Thanks to Brice (https://stackoverflow.com/users/140264/brice) at Stack Overflow for this
