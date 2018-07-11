@@ -228,9 +228,11 @@ def compute_time_mask(X_time, first_obs, last_obs, history_length, int_type='int
 def preprocess_data(X, y, p, formula_list, compute_history=True, debug=False):
     sys.stderr.write('Pre-processing data...\n')
 
-    select = compute_filters(y, p.filter_map)
-
-    y = y[select]
+    if hasattr(p, 'filter_map'):
+        select = compute_filters(y, p.filter_map)
+        y = y[select]
+    else:
+        select = np.full((len(y),), True, dtype='bool')
 
     X_2d_predictor_names = None
     X_2d_predictors = None
