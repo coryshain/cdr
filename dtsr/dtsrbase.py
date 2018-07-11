@@ -1990,17 +1990,19 @@ class DTSR(object):
             with self.sess.graph.as_default():
                 self.plots = {}
                 irf_names = [x for x in self.node_table if x in self.irf_plot and not (len(self.node_table[x].children) == 1 and self.node_table[x].children[0].terminal())]
+                irf_names_terminal = [x for x in self.node_table if x in self.irf_plot and self.node_table[x].terminal()]
 
                 for a in switches[0]:
                     if a not in self.plots:
                         self.plots[a] = {}
                     for b in switches[1]:
                         plot_y = []
-                        for x in irf_names:
+                        names = irf_names if b == 'unscaled' else irf_names_terminal
+                        for x in names:
                             plot_y.append(self.irf_plot[x][a][b])
 
                         self.plots[a][b] = {
-                            'names': irf_names,
+                            'names': names,
                             'plot': plot_y
                         }
 
@@ -2013,11 +2015,12 @@ class DTSR(object):
                             self.src_plot_tensors[a] = {}
                         for b in switches[1]:
                             plot_y = []
-                            for x in irf_names:
+                            names = irf_names if b == 'unscaled' else irf_names_terminal
+                            for x in names:
                                 plot_y.append(self.src_irf_plot[x][a][b])
 
                             self.src_plot_tensors[a][b] = {
-                                'names': irf_names,
+                                'names': names,
                                 'plot': plot_y
                             }
 

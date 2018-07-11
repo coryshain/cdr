@@ -459,7 +459,8 @@ DTSRBAYES_INITIALIZATION_KWARGS = [
         'coef_prior_sd',
         None,
         [float, None],
-        "Standard deviation of prior on fixed coefficients. If ``None``, inferred as **prior_sd_scaling_coefficient** times the empirical variance of the response on the training set."
+        "Standard deviation of prior on fixed coefficients. If ``None``, inferred as **prior_sd_scaling_coefficient** times the empirical variance of the response on the training set.",
+        aliases=['coefficient_prior_sd']
     ),
     Kwarg(
         'irf_param_prior_sd',
