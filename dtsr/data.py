@@ -79,9 +79,10 @@ def compute_history_intervals(X, y, series_ids):
     first_obs = np.zeros(len(y)).astype('int32')
     last_obs = np.zeros(len(y)).astype('int32')
 
-    # i iterates y, j iterates X
+    # i iterates y
     i = 0
-    j = -1
+    # j iterates X
+    j = 0
     start = 0
     end = 0
     epsilon = np.finfo(np.float32).eps
@@ -91,17 +92,19 @@ def compute_history_intervals(X, y, series_ids):
 
         # Check if we've entered a new series in y
         if (id_vectors_y[i] != cur_ids).any():
+            start = end = j
             cur_ids = id_vectors_y[i]
 
         # Move the X pointer forward until we are either in the same series as y or at the end of the table
-        while j < m and not (id_vectors_X[j] == cur_ids).all():
-            j += 1
-            start = end = j
+        if j == 0 or (j > 0 and (id_vectors_X[j-1] != cur_ids).any()):
+            while j < m and (id_vectors_X[j] != cur_ids).any():
+                j += 1
+                start = end = j
 
         # Move the X pointer forward until we are either at the end of the series or have moved later in time than y
-        while j < (m-1) and time_X[j+1] <= (time_y[i] + epsilon) and (id_vectors_X[j+1] == cur_ids).all():
+        while j < m and time_X[j] <= (time_y[i] + epsilon) and (id_vectors_X[j] == cur_ids).all():
             j += 1
-            end = j + 1
+            end = j
 
         first_obs[i] = start
         last_obs[i] = end
@@ -110,6 +113,49 @@ def compute_history_intervals(X, y, series_ids):
 
     sys.stderr.write('\n')
     
+    return first_obs, last_obs
+
+def compute_history_intervals_2(X, y, series_ids):
+    id_vectors_X = np.zeros((len(X), len(series_ids))).astype('int32')
+    id_vectors_y = np.zeros((len(y), len(series_ids))).astype('int32')
+
+    n = len(y)
+
+    time_X = np.array(X.time)
+    time_y = np.array(y.time)
+
+    for i in range(len(series_ids)):
+        col = series_ids[i]
+        id_vectors_X[:, i] = np.array(X[col].cat.codes)
+        id_vectors_y[:, i] = np.array(y[col].cat.codes)
+    cur_ids = id_vectors_y[0]
+
+    first_obs = np.zeros(len(y)).astype('int32')
+    last_obs = np.zeros(len(y)).astype('int32')
+
+    i = j = 0
+    start = 0
+    end = 0
+    epsilon = 1e-10
+    while i < n and j < len(X):
+        sys.stderr.write('\r%d/%d' %(i+1, n))
+        sys.stderr.flush()
+        if (id_vectors_y[i] != cur_ids).any():
+            start = end = j
+            cur_ids = id_vectors_y[i]
+        while j < len(X) and not (id_vectors_X[j] == cur_ids).all():
+            start += 1
+            end += 1
+            j += 1
+        while j < len(X) and time_X[j] <= time_y[i] + epsilon and (id_vectors_X[j] == cur_ids).all():
+            end += 1
+            j += 1
+        first_obs[i] = start
+        last_obs[i] = end
+
+        i += 1
+
+    sys.stderr.write('\n')
     return first_obs, last_obs
 
 def corr_dtsr(X_2d, impulse_names, impulse_names_2d, time_mask):
@@ -241,6 +287,24 @@ def preprocess_data(X, y, p, formula_list, compute_history=True, debug=False):
         first_obs, last_obs = compute_history_intervals(X, y, p.series_ids)
         y['first_obs'] = first_obs
         y['last_obs'] = last_obs
+        first_obs_2, last_obs_2 = compute_history_intervals_2(X, y, p.series_ids)
+        y['first_obs_2'] = first_obs_2
+        y['last_obs_2'] = last_obs_2
+        y['first_obs_diff'] = first_obs - first_obs_2
+        y['last_obs_diff'] = last_obs - last_obs_2
+        bugged = np.where(first_obs != first_obs_2)[0]
+        print(y[['word', 'subject', 'docid', 'sentid', 'time', 'first_obs', 'first_obs_2']].iloc[bugged])
+        print(len(y))
+        print(y.first_obs_diff.sum())
+        # print(len(y[np.isclose(y.time, 0.)]))
+        assert (first_obs == first_obs_2).all()
+        bugged = np.where(last_obs != last_obs_2)[0]
+        print(y[['word', 'subject', 'docid', 'sentid', 'time', 'first_obs', 'first_obs_2', 'last_obs', 'last_obs_2', 'last_obs_diff']]) #.iloc[bugged])
+        print(len(y))
+        print(y.last_obs_diff.sum())
+        print(y.first_obs_diff.sum())
+        print(len(y[np.isclose(y.time, 0.)]))
+        assert (last_obs == last_obs_2).all()
 
         # Floating point precision issues can allow the response to precede the impulse for simultaneous X/y,
         # which can break downstream convolution. The correction below to y.time prevents this.
