@@ -3,7 +3,7 @@ import os
 import numpy as np
 import pandas as pd
 
-from .dtsr import DTSR
+from .dtsrbase import DTSR
 from .kwargs import DTSRMLE_INITIALIZATION_KWARGS
 from .util import names2ix, sn
 

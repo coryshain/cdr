@@ -4,7 +4,7 @@ DTSR
 ====
 DTSR base class
 
-.. autoclass:: dtsr.dtsr.DTSR
+.. autoclass:: dtsr.dtsrbase.DTSR
     :members:
     :inherited-members:
     :show-inheritance:

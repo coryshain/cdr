@@ -16,10 +16,10 @@ dtsr\.data module
     :members:
     :show-inheritance:
 
-dtsr\.dtsr module
+dtsr\.dtsrbase module
 -----------------
 
-.. automodule:: dtsr.dtsr
+.. automodule:: dtsr.dtsrbase
     :members:
     :show-inheritance:
 
