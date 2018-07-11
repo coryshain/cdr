@@ -86,7 +86,7 @@ def compute_history_intervals(X, y, series_ids):
     start = 0
     end = 0
     epsilon = np.finfo(np.float32).eps
-    while i < n and j < m:
+    while i < n:
         sys.stderr.write('\r%d/%d' %(i+1, n))
         sys.stderr.flush()
 
@@ -272,7 +272,7 @@ def compute_time_mask(X_time, first_obs, last_obs, history_length, int_type='int
 
     return time_mask
 
-def preprocess_data(X, y, p, formula_list, compute_history=True, debug=False):
+def preprocess_data(X, y, p, formula_list, compute_history=True, debug=True):
     sys.stderr.write('Pre-processing data...\n')
 
     select = compute_filters(y, p.filter_map)
@@ -287,24 +287,11 @@ def preprocess_data(X, y, p, formula_list, compute_history=True, debug=False):
         first_obs, last_obs = compute_history_intervals(X, y, p.series_ids)
         y['first_obs'] = first_obs
         y['last_obs'] = last_obs
-        first_obs_2, last_obs_2 = compute_history_intervals_2(X, y, p.series_ids)
-        y['first_obs_2'] = first_obs_2
-        y['last_obs_2'] = last_obs_2
-        y['first_obs_diff'] = first_obs - first_obs_2
-        y['last_obs_diff'] = last_obs - last_obs_2
-        bugged = np.where(first_obs != first_obs_2)[0]
-        print(y[['word', 'subject', 'docid', 'sentid', 'time', 'first_obs', 'first_obs_2']].iloc[bugged])
-        print(len(y))
-        print(y.first_obs_diff.sum())
-        # print(len(y[np.isclose(y.time, 0.)]))
-        assert (first_obs == first_obs_2).all()
-        bugged = np.where(last_obs != last_obs_2)[0]
-        print(y[['word', 'subject', 'docid', 'sentid', 'time', 'first_obs', 'first_obs_2', 'last_obs', 'last_obs_2', 'last_obs_diff']]) #.iloc[bugged])
-        print(len(y))
-        print(y.last_obs_diff.sum())
-        print(y.first_obs_diff.sum())
-        print(len(y[np.isclose(y.time, 0.)]))
-        assert (last_obs == last_obs_2).all()
+#        first_obs_2, last_obs_2 = compute_history_intervals_2(X, y, p.series_ids)
+#        y['first_obs_2'] = first_obs_2
+#        y['last_obs_2'] = last_obs_2
+#        y['first_obs_diff'] = first_obs - first_obs_2
+#        y['last_obs_diff'] = last_obs - last_obs_2
 
         # Floating point precision issues can allow the response to precede the impulse for simultaneous X/y,
         # which can break downstream convolution. The correction below to y.time prevents this.
