@@ -44,6 +44,7 @@ class Kwarg(object):
         out = False
         if self.key in settings:
             out = True
+
         if not out:
             for alias in self.aliases:
                 if alias in settings:
@@ -77,10 +78,11 @@ class Kwarg(object):
 
         else:
             from_settings = settings.get(self.key, None)
-            for alias in self.aliases:
-                from_settings = settings.get(alias, None)
-                if from_settings is not None:
-                    break
+            if from_settings is None:
+                for alias in self.aliases:
+                    from_settings = settings.get(alias, None)
+                    if from_settings is not None:
+                        break
 
             if from_settings is None:
                 val = self.default_value
