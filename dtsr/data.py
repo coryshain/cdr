@@ -1,5 +1,4 @@
 import sys
-import re
 import numpy as np
 import pandas as pd
 from .util import names2ix
@@ -12,6 +11,9 @@ def c(df):
 
 def s(df):
     return df/df.std(axis=0)
+
+def filter_invalid_responses(y, dv):
+    return y[np.isfinite(y[dv]) & (y.last_obs > y.first_obs)]
 
 def build_DTSR_impulses(
         X,
@@ -47,14 +49,6 @@ def build_DTSR_impulses(
         X_2d = np.concatenate([X_2d_from_1d, X_2d_predictors], axis=2)
         X_2d = X_2d[:, :, names2ix(impulse_names, impulse_names_1d + impulse_names_2d)]
 
-    # ix = names2ix(impulse_names_1d, impulse_names)
-    # print('Output check')
-    # print(np.equal(X_2d[:,-1,ix], np.array(X[impulse_names_1d])[last_obs-1]).mean())
-    # print(X_2d[:,-1,ix].shape)
-    # print(X_2d[:10,-1,ix])
-    # print(np.array(X[impulse_names_2d])[last_obs-1].shape)
-    # print(np.array(X[impulse_names_2d])[last_obs-1][:10])
-
     return X_2d, time_X_2d, time_mask
 
 def compute_history_intervals(X, y, series_ids):
@@ -74,7 +68,7 @@ def compute_history_intervals(X, y, series_ids):
     id_vectors_X = np.stack(id_vectors_X, axis=1)
     id_vectors_y = np.stack(id_vectors_y, axis=1)
 
-    cur_ids = id_vectors_y[0]
+    y_cur_ids = id_vectors_y[0]
 
     first_obs = np.zeros(len(y)).astype('int32')
     last_obs = np.zeros(len(y)).astype('int32')
@@ -91,18 +85,20 @@ def compute_history_intervals(X, y, series_ids):
         sys.stderr.flush()
 
         # Check if we've entered a new series in y
-        if (id_vectors_y[i] != cur_ids).any():
+        if (id_vectors_y[i] != y_cur_ids).any():
             start = end = j
-            cur_ids = id_vectors_y[i]
+            X_cur_ids = id_vectors_X[j]
+            y_cur_ids = id_vectors_y[i]
 
-        # Move the X pointer forward until we are either in the same series as y or at the end of the table
-        if j == 0 or (j > 0 and (id_vectors_X[j-1] != cur_ids).any()):
-            while j < m and (id_vectors_X[j] != cur_ids).any():
+        # Move the X pointer forward until we are either in the same series as y or at the end of the table.
+        # However, if we are already at the end of the current time series, stay put in case there are subsequent observations of the response.
+        if j == 0 or (j > 0 and (id_vectors_X[j-1] != y_cur_ids).any()):
+            while j < m and (id_vectors_X[j] != y_cur_ids).any():
                 j += 1
                 start = end = j
 
         # Move the X pointer forward until we are either at the end of the series or have moved later in time than y
-        while j < m and time_X[j] <= (time_y[i] + epsilon) and (id_vectors_X[j] == cur_ids).all():
+        while j < m and time_X[j] <= (time_y[i] + epsilon) and (id_vectors_X[j] == y_cur_ids).all():
             j += 1
             end = j
 
@@ -113,49 +109,6 @@ def compute_history_intervals(X, y, series_ids):
 
     sys.stderr.write('\n')
     
-    return first_obs, last_obs
-
-def compute_history_intervals_2(X, y, series_ids):
-    id_vectors_X = np.zeros((len(X), len(series_ids))).astype('int32')
-    id_vectors_y = np.zeros((len(y), len(series_ids))).astype('int32')
-
-    n = len(y)
-
-    time_X = np.array(X.time)
-    time_y = np.array(y.time)
-
-    for i in range(len(series_ids)):
-        col = series_ids[i]
-        id_vectors_X[:, i] = np.array(X[col].cat.codes)
-        id_vectors_y[:, i] = np.array(y[col].cat.codes)
-    cur_ids = id_vectors_y[0]
-
-    first_obs = np.zeros(len(y)).astype('int32')
-    last_obs = np.zeros(len(y)).astype('int32')
-
-    i = j = 0
-    start = 0
-    end = 0
-    epsilon = 1e-10
-    while i < n and j < len(X):
-        sys.stderr.write('\r%d/%d' %(i+1, n))
-        sys.stderr.flush()
-        if (id_vectors_y[i] != cur_ids).any():
-            start = end = j
-            cur_ids = id_vectors_y[i]
-        while j < len(X) and not (id_vectors_X[j] == cur_ids).all():
-            start += 1
-            end += 1
-            j += 1
-        while j < len(X) and time_X[j] <= time_y[i] + epsilon and (id_vectors_X[j] == cur_ids).all():
-            end += 1
-            j += 1
-        first_obs[i] = start
-        last_obs[i] = end
-
-        i += 1
-
-    sys.stderr.write('\n')
     return first_obs, last_obs
 
 def corr_dtsr(X_2d, impulse_names, impulse_names_2d, time_mask):
@@ -272,7 +225,7 @@ def compute_time_mask(X_time, first_obs, last_obs, history_length, int_type='int
 
     return time_mask
 
-def preprocess_data(X, y, p, formula_list, compute_history=True, debug=True):
+def preprocess_data(X, y, p, formula_list, compute_history=True, debug=False):
     sys.stderr.write('Pre-processing data...\n')
 
     select = compute_filters(y, p.filter_map)
@@ -287,11 +240,6 @@ def preprocess_data(X, y, p, formula_list, compute_history=True, debug=True):
         first_obs, last_obs = compute_history_intervals(X, y, p.series_ids)
         y['first_obs'] = first_obs
         y['last_obs'] = last_obs
-#        first_obs_2, last_obs_2 = compute_history_intervals_2(X, y, p.series_ids)
-#        y['first_obs_2'] = first_obs_2
-#        y['last_obs_2'] = last_obs_2
-#        y['first_obs_diff'] = first_obs - first_obs_2
-#        y['last_obs_diff'] = last_obs - last_obs_2
 
         # Floating point precision issues can allow the response to precede the impulse for simultaneous X/y,
         # which can break downstream convolution. The correction below to y.time prevents this.

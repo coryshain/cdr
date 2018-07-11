@@ -11,7 +11,7 @@ from dtsr.kwargs import DTSR_INITIALIZATION_KWARGS, DTSRMLE_INITIALIZATION_KWARG
 from dtsr.config import Config
 from dtsr.io import read_data
 from dtsr.formula import Formula
-from dtsr.data import preprocess_data, compute_splitID, compute_partition
+from dtsr.data import filter_invalid_responses, preprocess_data, compute_splitID, compute_partition
 from dtsr.util import mse, mae
 
 if __name__ == '__main__':
@@ -192,7 +192,7 @@ if __name__ == '__main__':
 
         elif m.startswith('DTSR'):
             dv = formula.strip().split('~')[0].strip()
-            y_complete_cases = y[np.isfinite(y[dv]) & (y.last_obs > y.first_obs)]
+            y_valid = filter_invalid_responses(y, dv)
 
             sys.stderr.write('\nInitializing model %s...\n\n' % m)
 
@@ -215,7 +215,7 @@ if __name__ == '__main__':
                 dtsr_model = DTSRMLE(
                     formula,
                     X,
-                    y_complete_cases,
+                    y_valid,
                     outdir=p.outdir + '/' + m,
                     history_length=p.history_length,
                     **kwargs
@@ -229,7 +229,7 @@ if __name__ == '__main__':
                 dtsr_model = DTSRBayes(
                     formula,
                     X,
-                    y_complete_cases,
+                    y_valid,
                     outdir=p.outdir + '/' + m,
                     history_length=p.history_length,
                     **kwargs
@@ -241,7 +241,7 @@ if __name__ == '__main__':
 
             dtsr_model.fit(
                 X,
-                y_complete_cases,
+                y_valid,
                 n_iter=p['n_iter'],
                 X_2d_predictor_names=X_2d_predictor_names,
                 X_2d_predictors=X_2d_predictors,

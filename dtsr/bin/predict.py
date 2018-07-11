@@ -10,7 +10,7 @@ pd.options.mode.chained_assignment = None
 from dtsr.config import Config
 from dtsr.io import read_data
 from dtsr.formula import Formula
-from dtsr.data import preprocess_data, compute_splitID, compute_partition
+from dtsr.data import filter_invalid_responses, preprocess_data, compute_splitID, compute_partition
 from dtsr.util import mse, mae
 from dtsr.util import load_dtsr
 
@@ -204,6 +204,7 @@ if __name__ == '__main__':
                 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
             dv = formula.strip().split('~')[0].strip()
+            y_valid = filter_invalid_responses(y, dv)
 
             sys.stderr.write('Retrieving saved model %s...\n' % m)
             dtsr_model = load_dtsr(p.outdir + '/' + m)
@@ -221,10 +222,10 @@ if __name__ == '__main__':
             if args.mode in [None, 'response']:
                 dtsr_preds = dtsr_model.predict(
                     X,
-                    y.time,
-                    y[dtsr_model.form.rangf],
-                    y.first_obs,
-                    y.last_obs,
+                    y_valid.time,
+                    y_valid[dtsr_model.form.rangf],
+                    y_valid.first_obs,
+                    y_valid.last_obs,
                     X_2d_predictor_names=X_2d_predictor_names,
                     X_2d_predictors=X_2d_predictors,
                     n_samples=args.nsamples,
@@ -234,23 +235,23 @@ if __name__ == '__main__':
                     for i in range(len(dtsr_preds)):
                         p_file.write(str(dtsr_preds[i]) + '\n')
                 if p['loss_name'].lower() == 'mae':
-                    losses = np.array(y[dv] - dtsr_preds).abs()
+                    losses = np.array(y_valid[dv] - dtsr_preds).abs()
                 else:
-                    losses = np.array(y[dv] - dtsr_preds) ** 2
+                    losses = np.array(y_valid[dv] - dtsr_preds) ** 2
                 with open(p.outdir + '/' + m + '/%s_losses_%s.txt' % (p['loss_name'], args.partition), 'w') as l_file:
                     for i in range(len(losses)):
                         l_file.write(str(losses[i]) + '\n')
                 with open(p.outdir + '/' + m + '/obs_%s.txt' % args.partition, 'w') as p_file:
-                    for i in range(len(y[dv])):
-                        p_file.write(str(y[dv].iloc[i]) + '\n')
-                dtsr_mse = mse(y[dv], dtsr_preds)
-                dtsr_mae = mae(y[dv], dtsr_preds)
-                y_dv_mean = y[dv].mean()
+                    for i in range(len(y_valid[dv])):
+                        p_file.write(str(y_valid[dv].iloc[i]) + '\n')
+                dtsr_mse = mse(y_valid[dv], dtsr_preds)
+                dtsr_mae = mae(y_valid[dv], dtsr_preds)
+                y_dv_mean = y_valid[dv].mean()
 
             if args.mode in [None, 'loglik']:
                 dtsr_loglik_vector = dtsr_model.log_lik(
                     X,
-                    y,
+                    y_valid,
                     X_2d_predictor_names=X_2d_predictor_names,
                     X_2d_predictors=X_2d_predictors,
                     n_samples=args.nsamples,
