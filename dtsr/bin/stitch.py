@@ -1,3 +1,4 @@
+import os
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 import argparse
 from dtsr.config import Config
@@ -25,6 +26,7 @@ if __name__ == '__main__':
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='Path to configuration (*.ini) file')
     argparser.add_argument('-i', '--irftype', type=str, default='atomic_scaled', help='Type of plot to paste. Choose from "atomic_scaled", "atomic_unscaled", "composite_scaled", and "composite_unscaled".')
+    argparser.add_argument('-M', '--mc', action='store_true', help='Use Monte Carlo (MC) IRF plots with credible intervals (DTSRBayes only).')
     args, unknown = argparser.parse_known_args()
 
     assert args.irftype in ["atomic_scaled", "atomic_unscaled", "composite_scaled", "composite_unscaled"], 'Unrecognized argument "%s" to -i/--irftype' %args.irftype
@@ -37,6 +39,11 @@ if __name__ == '__main__':
 
     paths = []
     for m in models:
-        paths.append(p.outdir + '/' + m)
+        path = p.outdir + '/' + m
+        if os.path.exists(path):
+            paths.append(path)
 
-    stitch(paths, 'irf_' + args.irftype + '.png', p.outdir + '/irf_' + args.irftype + '.pdf')
+    if args.mc:
+        stitch(paths, 'mc_irf_' + args.irftype + '.png', p.outdir + '/irf_' + args.irftype + '.pdf')
+    else:
+        stitch(paths, 'irf_' + args.irftype + '.png', p.outdir + '/irf_' + args.irftype + '.pdf')
