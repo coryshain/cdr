@@ -48,36 +48,37 @@ if __name__ == '__main__':
         }
 
     for s in comparison_sets:
-        if s is not None:
-            sys.stderr.write('Comparing models within ablation set "%s"...\n' %s)
         model_set = comparison_sets[s]
-        for i in range(len(model_set)):
-            m1 = model_set[i]
-            p.set_model(m1)
+        if len(model_set) > 1:
+            if s is not None:
+                sys.stderr.write('Comparing models within ablation set "%s"...\n' %s)
+            for i in range(len(model_set)):
+                m1 = model_set[i]
+                p.set_model(m1)
 
-            if args.metric == 'loss':
-                file_name = '/%s_losses_%s.txt' % (p['loss_name'], args.partition)
-            else:
-                file_name = '/loglik_%s.txt' % args.partition
+                if args.metric == 'loss':
+                    file_name = '/%s_losses_%s.txt' % (p['loss_name'], args.partition)
+                else:
+                    file_name = '/loglik_%s.txt' % args.partition
 
-            for j in range(i+1, len(model_set)):
-                m2 = model_set[j]
-                name = '%s_v_%s' %(m1, m2)
-                a = pd.read_csv(p.outdir + '/' + m1 + file_name, sep=' ', header=None, skipinitialspace=True)
-                b = pd.read_csv(p.outdir + '/' + m2 + file_name, sep=' ', header=None, skipinitialspace=True)
-                select = np.logical_and(np.isfinite(np.array(a)), np.isfinite(np.array(b)))
-                diff = float(len(a) - select.sum())
-                p_value, base_diff, diffs = bootstrap(a[select], b[select], n_iter=10000, n_tails=args.tails, mode=args.metric)
-                sys.stderr.write('\n')
-                with open(p.outdir + '/' + name + '_' + args.partition + '.txt', 'w') as f:
-                    f.write('='*50 + '\n')
-                    f.write('Model comparison: %s vs %s\n' %(m1, m2))
-                    if diff > 0:
-                        f.write('%d NaN rows filtered out (out of %d)\n' %(diff, len(a)))
-                    f.write('Partition: %s\n' %args.partition)
-                    f.write('Loss difference: %.4f\n' %base_diff)
-                    f.write('p: %.4e\n' %p_value)
-                    f.write('='*50 + '\n')
-                plt.hist(diffs, bins=1000)
-                plt.savefig(p.outdir + '/' + name + '_' + args.partition + '.png')
-                plt.close('all')
+                for j in range(i+1, len(model_set)):
+                    m2 = model_set[j]
+                    name = '%s_v_%s' %(m1, m2)
+                    a = pd.read_csv(p.outdir + '/' + m1 + file_name, sep=' ', header=None, skipinitialspace=True)
+                    b = pd.read_csv(p.outdir + '/' + m2 + file_name, sep=' ', header=None, skipinitialspace=True)
+                    select = np.logical_and(np.isfinite(np.array(a)), np.isfinite(np.array(b)))
+                    diff = float(len(a) - select.sum())
+                    p_value, base_diff, diffs = bootstrap(a[select], b[select], n_iter=10000, n_tails=args.tails, mode=args.metric)
+                    sys.stderr.write('\n')
+                    with open(p.outdir + '/' + name + '_' + args.partition + '.txt', 'w') as f:
+                        f.write('='*50 + '\n')
+                        f.write('Model comparison: %s vs %s\n' %(m1, m2))
+                        if diff > 0:
+                            f.write('%d NaN rows filtered out (out of %d)\n' %(diff, len(a)))
+                        f.write('Partition: %s\n' %args.partition)
+                        f.write('Loss difference: %.4f\n' %base_diff)
+                        f.write('p: %.4e\n' %p_value)
+                        f.write('='*50 + '\n')
+                    plt.hist(diffs, bins=1000)
+                    plt.savefig(p.outdir + '/' + name + '_' + args.partition + '.png')
+                    plt.close('all')
