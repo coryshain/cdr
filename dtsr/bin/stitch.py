@@ -1,22 +1,24 @@
 import os
+import matplotlib
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 import argparse
 from dtsr.config import Config
 
 def stitch(dir_paths, filename, output_path):
-     imgs = []
-     for dir_path in dir_paths:
-         im = Image.open(dir_path + '/' + filename)
-         if im.mode == 'RGBA':
-             im = im.convert('RGB')
-         im = ImageOps.expand(im, 300, fill='white')
-         x = im.size[0]
-         pt = int(x / 50)
-         font = ImageFont.truetype("arial.ttf", pt)
-         draw = ImageDraw.Draw(im)
-         draw.text((pt,pt), dir_path.split('/')[-1], fill=(0,0,0,0), font=font)
-         imgs.append(im)
-     imgs[0].save(output_path, 'PDF', resolution=100, save_all=True, append_images=imgs[1:])
+    fontpath = matplotlib.rcParams['datapath'] + '/fonts/ttf/DejaVuSans.ttf'
+    imgs = []
+    for dir_path in dir_paths:
+        im = Image.open(dir_path + '/' + filename)
+        if im.mode == 'RGBA':
+            im = im.convert('RGB')
+        im = ImageOps.expand(im, 300, fill='white')
+        x = im.size[0]
+        pt = int(x / 50)
+        font = ImageFont.truetype(fontpath, pt)
+        draw = ImageDraw.Draw(im)
+        draw.text((pt,pt), dir_path.split('/')[-1], fill=(0,0,0,0), font=font)
+        imgs.append(im)
+    imgs[0].save(output_path, 'PDF', resolution=100, save_all=True, append_images=imgs[1:])
 
 
 if __name__ == '__main__':
