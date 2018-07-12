@@ -6,7 +6,7 @@ import itertools
 import numpy as np
 
 from .data import z, c, s, compute_time_mask, expand_history
-from .util import names2ix
+from .util import names2ix, sn
 
 interact = re.compile('([^ ]+):([^ ]+)')
 spillover = re.compile('^.+S[0-9]+$')
@@ -546,6 +546,33 @@ class Formula(object):
         for key in self.has_intercept:
             if key is not None and not key in terms and self.has_intercept[key]:
                 out += ' + (1 | %s)' %key
+
+        return out
+
+    def to_lmer_formula_string(self, z=False):
+        fixed = []
+        random = {}
+
+        for terminal in self.t.terminals():
+            name = sn(terminal.name().split('-')[0])
+            if z:
+                name = 'z.(' + name + ')'
+
+            if terminal.fixed:
+                fixed.append(name)
+            for gf in terminal.rangf:
+                if gf not in random:
+                    random[gf] = []
+                random[gf].append(name)
+
+        out = str(self.dv_term) + ' ~ '
+
+        if not self.has_intercept[None]:
+            out += '0 + '
+
+        out += ' + '.join([x for x in fixed])
+        for gf in random:
+            out += ' + (' + ('1 + ' if self.has_intercept[gf] else '0 + ') + ' + '.join([x for x in random[gf]]) + ' | ' + gf + ')'
 
         return out
 

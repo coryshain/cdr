@@ -2508,7 +2508,7 @@ class DTSR(object):
                     centered = np.allclose(means, 0., rtol=1e-3, atol=1e-3)
                     assert centered, 'Some random parameters are not properly centered\n. Current random parameter means:\n %s' %means
 
-    def build(self, outdir=None, restore=True, verbose=True):
+    def build(self, outdir=None, restore=True):
         """
         Construct the DTSR network and initialize/load model parameters.
         ``build()`` is called by default at initialization and unpickling, so users generally do not need to call this method.
@@ -2549,10 +2549,6 @@ class DTSR(object):
                 self.load(restore=restore)
 
                 self._collect_plots()
-                if verbose:
-                    sys.stderr.write('*' * 100 + '\n')
-                    sys.stderr.write(self.initialization_summary())
-                    sys.stderr.write('*' * 100 + '\n')
 
     def save(self, dir=None):
         if dir is None:
@@ -2977,6 +2973,10 @@ class DTSR(object):
         :param cmap: ``str``; name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot).
         :return: ``None``
         """
+
+        sys.stderr.write('*' * 100 + '\n')
+        sys.stderr.write(self.initialization_summary())
+        sys.stderr.write('*' * 100 + '\n\n')
 
         usingGPU = tf.test.is_gpu_available()
         sys.stderr.write('Using GPU: %s\n' % usingGPU)
@@ -3487,9 +3487,6 @@ class DTSR(object):
                 names = [sn(''.join(x.split('-')[:-1])) for x in self.terminal_names]
                 X_conv = np.concatenate(X_conv, axis=0)
                 out = pd.DataFrame(X_conv, columns=names, dtype=self.FLOAT_NP)
-                for c in y.columns:
-                    if c not in out:
-                        out[c] = y[c]
 
                 self.set_predict_mode(False)
 
@@ -3502,6 +3499,12 @@ class DTSR(object):
                 select = np.where(np.isclose(time_X_2d[:,-1], time_y))[0]
 
                 X_input = X_2d[:,-1,:][select]
+
+                extra_cols = []
+                for c in y.columns:
+                    if c not in out:
+                        extra_cols.append(c)
+                out = pd.concat([y[extra_cols].reset_index(), out], axis=1)
 
                 if X_input.shape[0] > 0:
                     out_plus = out

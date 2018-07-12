@@ -33,6 +33,22 @@ rstring = '''
 scale = robjects.r(rstring)
 robjects.globalenv["s."] = scale
 
+rstring = '''
+    function(a, b) {
+        return(anova(a, b))
+    }
+'''
+
+anova = robjects.r(rstring)
+
+rstring = '''
+    function(df) {
+        print(dim(df))
+    }
+'''
+
+inspect_df = robjects.r(rstring)
+
 class LM(object):
     def __init__(self, formula, X):
         fit, summary, predict = self.instance_methods()

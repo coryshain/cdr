@@ -1,12 +1,11 @@
 import argparse
 import sys
 import os
-import pickle
 import pandas as pd
 from dtsr.config import Config
 from dtsr.io import read_data
 from dtsr.formula import Formula
-from dtsr.data import preprocess_data
+from dtsr.data import preprocess_data, filter_invalid_responses
 from dtsr.util import load_dtsr
 
 pd.options.mode.chained_assignment = None
@@ -19,7 +18,7 @@ if __name__ == '__main__':
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='Path to configuration (*.ini) file')
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
-    argparser.add_argument('-n', '--nsamples', type=int, default=1024, help='Number of posterior samples to average (only used for DTSRBayes)')
+    argparser.add_argument('-n', '--nsamples', type=int, default=None, help='Number of posterior samples to average (only used for DTSRBayes)')
     argparser.add_argument('-s', '--scaled', action='store_true', help='Multiply outputs by DTSR-fitted coefficients')
     argparser.add_argument('-a', '--algorithm', type=str, default='MAP', help='Algorithm ("sampling" or "MAP") to use for extracting predictions.')
     args, unknown = argparser.parse_known_args()
@@ -57,13 +56,14 @@ if __name__ == '__main__':
         formula = p.models[m]['formula']
 
         dv = formula.strip().split('~')[0].strip()
+        y_valid = filter_invalid_responses(y, dv)
 
         sys.stderr.write('Retrieving saved model %s...\n' % m)
         dtsr_model = load_dtsr(p.outdir + '/' + m)
 
         X_conv, X_conv_summary = dtsr_model.convolve_inputs(
             X,
-            y,
+            y_valid,
             X_2d_predictor_names=X_2d_predictor_names,
             X_2d_predictors=X_2d_predictors,
             scaled=args.scaled,
