@@ -42,6 +42,7 @@ if __name__ == '__main__':
         for model_name in dtsr_models:
             if len(model_name.split('!')) == 1: #No ablated variables, which are flagged with "!"
                 dtsr_models_new.append(model_name)
+        dtsr_models = dtsr_models_new
 
     if args.partition == 'train':
         X, y = read_data(p.X_train, p.y_train, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in dtsr_formula_list for v in x.rangf])))
