@@ -45,11 +45,18 @@ if __name__ == '__main__':
             p.set_model(m)
             f = Formula(p['formula'])
             lmeform = f.to_lmer_formula_string(z=args.zscore)
+            lmeform = lmeform.replace('-', '_')
 
             df = pd.read_csv(data_path, sep=' ', skipinitialspace=True)
             for c in df.columns:
                 if df[c].dtype.name == 'object':
                     df[c] = df[c].astype(str)
+
+            new_cols = []
+            for c in df.columns:
+                new_cols.append(c.replace('-', '_'))
+            df.columns = new_cols
+
             df_r = py2ri(df)
 
             dv = f.dv

@@ -68,6 +68,12 @@ if __name__ == '__main__':
                         summary = '='*50 + '\n'
                         summary += 'Model comparison: %s vs %s\n' % (model_name_1, model_name_2)
                         summary += 'Partition: %s\n\n' %args.partition
+                        if not lme1.converged():
+                            summary += 'Model %s had the following convergence warnings:\n' %model_name_1
+                            summary += '%s\n\n' %lme1.convergence_warnings()
+                        if not lme2.converged():
+                            summary += 'Model %s had the following convergence warnings:\n' %model_name_2
+                            summary += '%s\n\n' %lme2.convergence_warnings()
                         summary += anova_summary + '\n'
 
                         f.write(summary)
