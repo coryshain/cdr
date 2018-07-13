@@ -70,7 +70,9 @@ if __name__ == '__main__':
                     diff = float(len(a) - select.sum())
                     p_value, base_diff, diffs = bootstrap(a[select], b[select], n_iter=10000, n_tails=args.tails, mode=args.metric)
                     sys.stderr.write('\n')
-                    with open(p.outdir + '/' + name + '_ptsignif_' + args.partition + '.txt', 'w') as f:
+                    out_path = p.outdir + '/' + name + '_2stepLRT_' + args.partition + '.txt'
+                    with open(out_path, 'w') as f:
+                        sys.stderr.write('Saving output to %s' %out_path)
                         f.write('='*50 + '\n')
                         f.write('Model comparison: %s vs %s\n' %(m1, m2))
                         if diff > 0:

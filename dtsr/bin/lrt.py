@@ -62,7 +62,9 @@ if __name__ == '__main__':
                         lme2 = pickle.load(m_file)
                     anova_summary = anova(lme1, lme2)
                     name = '%s_v_%s' %(model_name_1, model_name_2)
-                    with open(p.outdir + '/' + name + '_2stepLRT_' + args.partition + '.txt', 'w') as f:
+                    out_path = p.outdir + '/' + name + '_2stepLRT_' + args.partition + '.txt'
+                    with open(out_path, 'w') as f:
+                        sys.stderr.write('Saving output to %s' %out_path)
                         f.write('='*50 + '\n')
                         f.write('Model comparison: %s vs %s\n' % (model_name_1, model_name_2))
                         f.write('Partition: %s\n\n' %args.partition)
