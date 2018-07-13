@@ -3484,7 +3484,12 @@ class DTSR(object):
                     fd_minibatch[self.time_X_mask] = time_X_mask[j:j + self.eval_minibatch_size]
                     X_conv_cur = self.run_conv_op(fd_minibatch, scaled=scaled, n_samples=n_samples, algorithm=algorithm, verbose=verbose)
                     X_conv.append(X_conv_cur)
-                names = [sn(''.join(x.split('-')[:-1])) for x in self.terminal_names]
+                names = []
+                for x in self.terminal_names:
+                    if self.node_table[x].irfID is None:
+                        names.append(''.join(x.split('-')[:-1]))
+                    else:
+                        names.append(x)
                 X_conv = np.concatenate(X_conv, axis=0)
                 out = pd.DataFrame(X_conv, columns=names, dtype=self.FLOAT_NP)
 
