@@ -3487,9 +3487,9 @@ class DTSR(object):
                 names = []
                 for x in self.terminal_names:
                     if self.node_table[x].p.irfID is None:
-                        names.append(''.join(x.split('-')[:-1]))
+                        names.append(sn(''.join(x.split('-')[:-1])))
                     else:
-                        names.append(x)
+                        names.append(sn(x))
                 X_conv = np.concatenate(X_conv, axis=0)
                 out = pd.DataFrame(X_conv, columns=names, dtype=self.FLOAT_NP)
 

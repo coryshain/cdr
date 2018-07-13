@@ -554,7 +554,10 @@ class Formula(object):
         random = {}
 
         for terminal in self.t.terminals():
-            name = sn(terminal.name().split('-')[0])
+            if terminal.p.irfID is None:
+                name = sn('-'.join(terminal.name().split('-')[:-1]))
+            else:
+                name = sn(terminal.name())
             if z:
                 name = 'z.(' + name + ')'
 
