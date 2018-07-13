@@ -19,6 +19,7 @@ if __name__ == '__main__':
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='Path to configuration (*.ini) file')
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
     argparser.add_argument('-z', '--zscore', action='store_true', help='Z-transform (center and scale) the convolved predictors prior to fitting')
+    argparser.add_argument('-A', '--ablated_models', action='store_true', help='Fit ablated models to data convolved using the ablated model. Otherwise fits ablated models to data convolved using the full model.')
     args, unknown = argparser.parse_known_args()
 
     p = Config(args.config_path)
@@ -32,7 +33,12 @@ if __name__ == '__main__':
 
     for m in models:
         dir_path = p.outdir + '/' + m
-        data_path = dir_path + '/X_conv_' + args.partition + '.csv'
+        if args.ablated_models:
+            data_path = dir_path + '/X_conv_' + args.partition + '.csv'
+        else:
+            data_path = p.outdir + '/' + m.split('!')[0] + '/X_conv_' + args.partition + '.csv'
+
+        sys.stderr.write('Two-step analysis using data file %s\n' %data_path)
 
         if os.path.exists(data_path):
             p.set_model(m)

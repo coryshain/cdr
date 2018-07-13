@@ -21,6 +21,7 @@ if __name__ == '__main__':
     argparser.add_argument('-n', '--nsamples', type=int, default=None, help='Number of posterior samples to average (only used for DTSRBayes)')
     argparser.add_argument('-s', '--scaled', action='store_true', help='Multiply outputs by DTSR-fitted coefficients')
     argparser.add_argument('-a', '--algorithm', type=str, default='MAP', help='Algorithm ("sampling" or "MAP") to use for extracting predictions.')
+    argparser.add_argument('-A', '--ablated_models', action='store_true', help='Perform convolution using ablated models. Otherwise only convolves using the full model in each ablation set.')
     args, unknown = argparser.parse_known_args()
 
     p = Config(args.config_path)
@@ -34,7 +35,13 @@ if __name__ == '__main__':
         models = p.model_list[:]
 
     dtsr_formula_list = [Formula(p.models[m]['formula']) for m in models if m.startswith('DTSR')]
-    dtsr_formula_name_list = [m for m in models if m.startswith('DTSR')]
+    dtsr_models = [m for m in models if m.startswith('DTSR')]
+
+    if not args.ablated_models:
+        dtsr_models_new = []
+        for model_name in dtsr_models:
+            if len(model_name.split('!')) == 1: #No ablated variables, which are flagged with "!"
+                dtsr_models_new.append(model_name)
 
     if args.partition == 'train':
         X, y = read_data(p.X_train, p.y_train, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in dtsr_formula_list for v in x.rangf])))
@@ -52,7 +59,7 @@ if __name__ == '__main__':
         compute_history=True
     )
 
-    for m in dtsr_formula_name_list:
+    for m in dtsr_models:
         formula = p.models[m]['formula']
 
         dv = formula.strip().split('~')[0].strip()
