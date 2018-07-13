@@ -60,7 +60,7 @@ if __name__ == '__main__':
                     lme_path_2 = p.outdir + '/' + model_name_2 + '/lmer_%s.obj' % args.partition
                     with open(lme_path_2, 'rb') as m_file:
                         lme2 = pickle.load(m_file)
-                    anova_summary = anova(lme1, lme2)
+                    anova_summary = str(anova(lme1.m, lme2.m))
                     name = '%s_v_%s' %(model_name_1, model_name_2)
                     out_path = p.outdir + '/' + name + '_2stepLRT_' + args.partition + '.txt'
                     with open(out_path, 'w') as f:
