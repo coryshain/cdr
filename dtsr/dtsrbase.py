@@ -3486,7 +3486,7 @@ class DTSR(object):
                     X_conv.append(X_conv_cur)
                 names = []
                 for x in self.terminal_names:
-                    if self.node_table[x].irfID is None:
+                    if self.node_table[x].p.irfID is None:
                         names.append(''.join(x.split('-')[:-1]))
                     else:
                         names.append(x)
