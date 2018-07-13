@@ -61,14 +61,17 @@ if __name__ == '__main__':
 
             dv = f.dv
 
-            if not args.force and os.path.exists(dir_path + '/lmer_%s.obj' %args.partition):
+            model_path = dir_path + '/lmer_%s.obj' %args.partition
+            model_summary_path = dir_path + '/lmer_%s_summary.txt' %args.partition
+
+            if not args.force and os.path.exists(model_path):
                 sys.stderr.write('Retrieving saved LMER regression of DTSR model %s...\n' % m)
-                with open(dir_path + '/lmer_%s.obj' %args.partition, 'rb') as m_file:
+                with open(model_path, 'rb') as m_file:
                     lme = pickle.load(m_file)
             else:
                 sys.stderr.write('Fitting LMER regression of DTSR model %s...\n' % m)
                 lme = LME(lmeform, df_r)
-                with open(dir_path + '/lmer_%s.obj' %args.partition, 'wb') as m_file:
+                with open(model_path, 'wb') as m_file:
                     pickle.dump(lme, m_file)
 
             lme_preds = lme.predict(df_r)
@@ -84,7 +87,7 @@ if __name__ == '__main__':
             summary += '  MSE: %.4f\n' % lme_mse
             summary += '  MAE: %.4f\n' % lme_mae
             summary += '=' * 50 + '\n'
-            with open(p.outdir + '/' + m + '/lmer_%s_summary.txt' %args.partition, 'w') as f_out:
+            with open(model_summary_path, 'w') as f_out:
                 f_out.write(summary)
             sys.stderr.write(summary)
             sys.stderr.write('\n\n')
