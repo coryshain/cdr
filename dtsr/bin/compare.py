@@ -37,6 +37,11 @@ if __name__ == '__main__':
             if model_basename not in comparison_sets:
                 comparison_sets[model_basename] = []
             comparison_sets[model_basename].append(model_name)
+        for model_name in p.model_list:
+            model_basename = model_name.split('!')[0]
+            if model_basename in comparison_sets and model_name not in comparison_sets[model_basename]:
+                comparison_sets[model_basename].append(model_name)
+
     else:
         comparison_sets = {
             None: dtsr_models
