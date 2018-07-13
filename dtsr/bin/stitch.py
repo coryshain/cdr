@@ -32,8 +32,6 @@ if __name__ == '__main__':
     argparser.add_argument('-i', '--image_suffix', type=str, default='irf_atomic_scaled.png', help='Name of image file to search for in each output directory.')
     args, unknown = argparser.parse_known_args()
 
-    assert args.irftype in ["atomic_scaled", "atomic_unscaled", "composite_scaled", "composite_unscaled"], 'Unrecognized argument "%s" to -i/--irftype' %args.irftype
-
     p = Config(args.config_path)
     if len(args.models) > 0:
         models = args.models
