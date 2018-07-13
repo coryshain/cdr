@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import rpy2.robjects as robjects
 from rpy2.robjects.packages import importr
@@ -40,6 +41,45 @@ rstring = '''
 '''
 
 anova = robjects.r(rstring)
+
+rstring = '''
+    function (x, mean = rep(0, p), sigma = diag(p), log = FALSE) {
+        if (is.vector(x))
+            x <- matrix(x, ncol = length(x))
+        p <- ncol(x)
+        if (!missing(mean)) {
+            if (!is.null(dim(mean)))
+                dim(mean) <- NULL
+            if (length(mean) != p)
+                stop("mean and sigma have non-conforming size")
+        }
+        if (!missing(sigma)) {
+            if (p != ncol(sigma))
+                stop("x and sigma have non-conforming size")
+            if (!isSymmetric(sigma, tol = sqrt(.Machine$double.eps),
+                check.attributes = FALSE))
+                stop("sigma must be a symmetric matrix")
+        }
+        dec <- tryCatch(chol(sigma), error = function(e) e)
+        if (inherits(dec, "error")) {
+            x.is.mu <- colSums(t(x) != mean) == 0
+            logretval <- rep.int(-Inf, nrow(x))
+            logretval[x.is.mu] <- Inf
+        }
+        else {
+            tmp <- backsolve(dec, t(x) - mean, transpose = TRUE)
+            rss <- tmp^2
+            logretval <- -log(diag(dec)) - 0.5 * log(2 *
+                pi) - 0.5 * rss
+        }
+        names(logretval) <- rownames(x)
+        if (log)
+            logretval
+        else exp(logretval)
+    }
+'''
+dvector_mvnorm = robjects.r(rstring)
+robjects.globalenv["dvector_mvnorm"] = dvector_mvnorm
 
 class LM(object):
     def __init__(self, formula, X):
@@ -91,11 +131,12 @@ class LME(object):
 
     def __init__(self, formula, X):
         lmer = importr('lme4')
-        fit, summary, convergence_warnings, predict = self.instance_methods()
+        fit, summary, convergence_warnings, predict, log_lik_base = self.instance_methods()
         self.m = fit(formula, X)
         self.summary = lambda: str(summary(self.m)) + '\nConvergence warnings:\n  %s\n\n' % ''.join(convergence_warnings(self.m))
         self.convergence_warnings = lambda: ''.join(convergence_warnings(self.m))
         self.predict = lambda x: predict(self.m, x)
+        self.log_lik = lambda newdata=None, summed=True: log_lik_base(self.m, newdata=newdata, summed=summed)
 
     def __getstate__(self):
         return self.m
@@ -107,10 +148,11 @@ class LME(object):
     def __setstate__(self, state):
         lmer = importr('lme4')
         self.m = state
-        fit, summary, convergence_warnings, predict = self.instance_methods()
+        fit, summary, convergence_warnings, predict, log_lik_base = self.instance_methods()
         self.summary = lambda: str(summary(self.m)) + '\nConvergence warnings:\n  %s\n\n' % ''.join(convergence_warnings(self.m))
         self.convergence_warnings = lambda: ''.join(convergence_warnings(self.m))
         self.predict = lambda x: predict(self.m, x)
+        self.log_lik = lambda newdata=None, summed=True: np.array(log_lik_base(self.m, newdata=newdata, summed=summed))
 
     def instance_methods(self):
         rstring = '''
@@ -150,7 +192,49 @@ class LME(object):
 
         predict = robjects.r(rstring)
 
-        return fit, summary, convergence_warnings, predict
+        rstring = '''   
+            library(mvtnorm)   
+            logLik2 <- function(model, newdata=NULL, summed=TRUE) {
+                if (is.null(newdata) && summed) {
+                    return(logLik(m))
+                } else {
+                    if (is.null(newdata)) {
+                        newdata = m@frame
+                    }
+                    
+                    dv <- as.character(formula(model))[[2]]
+                    if (! dv %in% colnames(newdata)) {
+                        dv <- gsub('(','.', gsub(')', '.', dv, fixed=TRUE), fixed=TRUE)
+                    }
+                    dv <- newdata[[dv]]
+                                
+                    z <- getME(model, "Z")
+                    zt <- getME(model, "Zt")
+                    psi <- list()
+                    for (i in 1:length(names(model@flist))) {
+                        psi[[i]] <- replicate(length(unique(newdata[[names(model@flist)[[i]]]])), VarCorr(model)[[names(model@flist)[[i]]]], simplify = FALSE)
+                    }
+                    psi <- Reduce(c, psi)
+                    psi = bdiag(psi)
+            
+                    betw <- z %*% psi %*% zt
+                    err <- Diagonal(nrow(newdata), sigma(model) ^ 2)
+                    v <- betw + err
+            
+                    preds <- predict(model, newdata=newdata, allow.new.levels=TRUE, re.form = NA)
+            
+                    lls <- dvector_mvnorm(dv, preds, as.matrix(v), log = TRUE)
+                    if (summed) {
+                        return(sum(lls))
+                    } else {
+                        return(lls)
+                    }
+                }
+            }
+        '''
+        log_lik = robjects.r(rstring)
+
+        return fit, summary, convergence_warnings, predict, log_lik
 
 class GAM(object):
     def __init__(self, formula, X, ran_gf=None):

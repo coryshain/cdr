@@ -2682,7 +2682,9 @@ class DTSR(object):
         out = ' ' * indent + 'MODEL SETTINGS:\n'
         for kwarg in DTSR_INITIALIZATION_KWARGS:
             val = getattr(self, kwarg.key)
-            out += ' ' * indent + '  %s: %s\n' %(kwarg.key, "\"%s\"" %val if isinstance(val, str) else val)
+            out += ' ' * (indent + 2) + '%s: %s\n' %(kwarg.key, "\"%s\"" %val if isinstance(val, str) else val)
+
+        out += '\n' + '  ' * (indent + 2) + 'Training iterations completed: %d' %self.global_step.eval(session=self.sess)
 
         return out
 

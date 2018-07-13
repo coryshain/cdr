@@ -19,7 +19,7 @@ if __name__ == '__main__':
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='Path to configuration (*.ini) file')
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
     argparser.add_argument('-n', '--nsamples', type=int, default=None, help='Number of posterior samples to average (only used for DTSRBayes)')
-    argparser.add_argument('-s', '--scaled', action='store_true', help='Multiply outputs by DTSR-fitted coefficients')
+    argparser.add_argument('-u', '--unscaled', action='store_true', help='Do not multiply outputs by DTSR-fitted coefficients')
     argparser.add_argument('-a', '--algorithm', type=str, default='MAP', help='Algorithm ("sampling" or "MAP") to use for extracting predictions.')
     argparser.add_argument('-A', '--ablated_models', action='store_true', help='Perform convolution using ablated models. Otherwise only convolves using the full model in each ablation set.')
     args, unknown = argparser.parse_known_args()
@@ -74,7 +74,7 @@ if __name__ == '__main__':
             y_valid,
             X_2d_predictor_names=X_2d_predictor_names,
             X_2d_predictors=X_2d_predictors,
-            scaled=args.scaled,
+            scaled=not args.unscaled,
             n_samples=args.nsamples,
             algorithm=args.algorithm
         )
