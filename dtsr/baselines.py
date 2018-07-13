@@ -41,14 +41,6 @@ rstring = '''
 
 anova = robjects.r(rstring)
 
-rstring = '''
-    function(df) {
-        print(dim(df))
-    }
-'''
-
-inspect_df = robjects.r(rstring)
-
 class LM(object):
     def __init__(self, formula, X):
         fit, summary, predict = self.instance_methods()
@@ -95,21 +87,29 @@ class LM(object):
 
 
 class LME(object):
+    NO_CONVERGENCE_WARNINGS = 'No convergence warnings.'
+
     def __init__(self, formula, X):
         lmer = importr('lme4')
-        fit, summary, predict = self.instance_methods()
+        fit, summary, convergence_warnings, predict = self.instance_methods()
         self.m = fit(formula, X)
-        self.summary = lambda: summary(self.m)
+        self.summary = lambda: str(summary(self.m)) + '\nConvergence warnings:\n  %s\n\n' % ''.join(convergence_warnings(self.m))
+        self.convergence_warnings = lambda: ''.join(convergence_warnings(self.m))
         self.predict = lambda x: predict(self.m, x)
 
     def __getstate__(self):
         return self.m
 
+    def converged(self):
+        warnings = str(self.convergence_warnings())
+        return warnings == LME.NO_CONVERGENCE_WARNINGS
+
     def __setstate__(self, state):
         lmer = importr('lme4')
         self.m = state
-        fit, summary, predict = self.instance_methods()
-        self.summary = lambda: summary(self.m)
+        fit, summary, convergence_warnings, predict = self.instance_methods()
+        self.summary = lambda: str(summary(self.m)) + '\nConvergence warnings:\n  %s\n\n' % ''.join(convergence_warnings(self.m))
+        self.convergence_warnings = lambda: ''.join(convergence_warnings(self.m))
         self.predict = lambda x: predict(self.m, x)
 
     def instance_methods(self):
@@ -124,16 +124,23 @@ class LME(object):
         rstring = '''
             function(model) {
                 s = summary(model)
-                convWarn <- model@optinfo$conv$lme4$messages
-                if (is.null(convWarn)) {
-                    convWarn <- 'No convergence warnings.'
-                }
-                s$convWarn = convWarn
                 return(s)
             }
         '''
 
         summary = robjects.r(rstring)
+
+        rstring = '''
+            function(model) {
+                convWarn <- model@optinfo$conv$lme4$messages
+                if (is.null(convWarn)) {
+                    convWarn <- "%s"
+                }
+                return(convWarn)
+            }
+        ''' % LME.NO_CONVERGENCE_WARNINGS
+
+        convergence_warnings = robjects.r(rstring)
 
         rstring = '''
             function(model, df) {
@@ -143,7 +150,7 @@ class LME(object):
 
         predict = robjects.r(rstring)
 
-        return fit, summary, predict
+        return fit, summary, convergence_warnings, predict
 
 class GAM(object):
     def __init__(self, formula, X, ran_gf=None):

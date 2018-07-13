@@ -4,7 +4,7 @@ import os
 import pickle
 import pandas as pd
 from dtsr.config import Config
-from dtsr.baselines import py2ri, LME, inspect_df
+from dtsr.baselines import py2ri, LME
 from dtsr.formula import Formula
 from dtsr.util import mse, mae
 
@@ -20,6 +20,7 @@ if __name__ == '__main__':
     argparser.add_argument('-p', '--partition', type=str, default='train', help='Name of partition to use (one of "train", "dev", "test")')
     argparser.add_argument('-z', '--zscore', action='store_true', help='Z-transform (center and scale) the convolved predictors prior to fitting')
     argparser.add_argument('-A', '--ablated_models', action='store_true', help='Fit ablated models to data convolved using the ablated model. Otherwise fits ablated models to data convolved using the full model.')
+    argparser.add_argument('-f', '--force', action='store_true', help='Refit and overwrite any previously trained models. Otherwise, previously trained models are skipped.')
     args, unknown = argparser.parse_known_args()
 
     p = Config(args.config_path)
@@ -53,7 +54,7 @@ if __name__ == '__main__':
 
             dv = f.dv
 
-            if os.path.exists(dir_path + '/lmer_%s.obj' %args.partition):
+            if not args.force and os.path.exists(dir_path + '/lmer_%s.obj' %args.partition):
                 sys.stderr.write('Retrieving saved LMER regression of DTSR model %s...\n' % m)
                 with open(dir_path + '/lmer_%s.obj' %args.partition, 'rb') as m_file:
                     lme = pickle.load(m_file)
@@ -80,6 +81,4 @@ if __name__ == '__main__':
                 f_out.write(summary)
             sys.stderr.write(summary)
             sys.stderr.write('\n\n')
-
-
 
