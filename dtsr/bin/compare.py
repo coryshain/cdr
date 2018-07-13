@@ -72,7 +72,7 @@ if __name__ == '__main__':
                             f.write('%d NaN rows filtered out (out of %d)\n' %(diff, len(a)))
                         f.write('Partition: %s\n' %args.partition)
                         f.write('Loss difference: %.4f\n' %base_diff)
-                        f.write('p: %.4e\n' %p_value)
+                        f.write('p: %.4e%s\n' %(p_value, '' if p_value > 0.05 else '*' if p_value > 0.01 else '**' if p_value > 0.001 else '***'))
                         f.write('='*50 + '\n')
                     plt.hist(diffs, bins=1000)
                     plt.savefig(p.outdir + '/' + name + '_' + args.partition + '.png')
