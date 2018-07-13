@@ -72,15 +72,20 @@ if __name__ == '__main__':
                     sys.stderr.write('\n')
                     out_path = p.outdir + '/' + name + '_2stepLRT_' + args.partition + '.txt'
                     with open(out_path, 'w') as f:
-                        sys.stderr.write('Saving output to %s' %out_path)
-                        f.write('='*50 + '\n')
-                        f.write('Model comparison: %s vs %s\n' %(m1, m2))
+                        sys.stderr.write('Saving output to %s...\n' %out_path)
+
+                        summary = '='*50 + '\n'
+                        summary += 'Model comparison: %s vs %s\n' %(m1, m2)
                         if diff > 0:
-                            f.write('%d NaN rows filtered out (out of %d)\n' %(diff, len(a)))
-                        f.write('Partition: %s\n' %args.partition)
-                        f.write('Loss difference: %.4f\n' %base_diff)
-                        f.write('p: %.4e%s\n' %(p_value, '' if p_value > 0.05 else '*' if p_value > 0.01 else '**' if p_value > 0.001 else '***'))
-                        f.write('='*50 + '\n')
+                            summary += '%d NaN rows filtered out (out of %d)\n' %(diff, len(a))
+                        summary += 'Partition: %s\n' %args.partition
+                        summary += 'Loss difference: %.4f\n' %base_diff
+                        summary += 'p: %.4e%s\n' %(p_value, '' if p_value > 0.05 else '*' if p_value > 0.01 else '**' if p_value > 0.001 else '***')
+                        summary += '='*50 + '\n'
+
+                        f.write(summary)
+                        sys.stdout.write(summary)
+
                     plt.hist(diffs, bins=1000)
                     plt.savefig(p.outdir + '/' + name + '_' + args.partition + '.png')
                     plt.close('all')
