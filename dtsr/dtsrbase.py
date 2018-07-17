@@ -94,6 +94,11 @@ class DTSR(object):
         self.n_train = len(y)
         self.y_train_mean = float(y[dv].mean())
         self.y_train_sd = float(y[dv].std())
+        last_obs = np.array(y.last_obs - 1, dtype=getattr(np, self.int_type))
+        first_obs = np.maximum(np.array(y.first_obs, dtype=getattr(np, self.int_type)), last_obs - self.history_length + 1)
+        X_time = np.array(X.time, dtype=getattr(np, self.float_type))
+        t_delta = X_time[last_obs] - X_time[first_obs]
+        self.max_tdelta = (t_delta).max()
 
         if self.pc:
             _, self.eigenvec, self.eigenval, self.impulse_means, self.impulse_sds = pca(X[self.src_impulse_names_norate])
@@ -339,6 +344,7 @@ class DTSR(object):
             'n_train': self.n_train,
             'y_train_mean': self.y_train_mean,
             'y_train_sd': self.y_train_sd,
+            'max_tdelta': self.max_tdelta,
             'rangf_map_base': self.rangf_map_base,
             'rangf_n_levels': self.rangf_n_levels,
             'outdir': self.outdir,
@@ -352,6 +358,7 @@ class DTSR(object):
         self.n_train = md.pop('n_train')
         self.y_train_mean = md.pop('y_train_mean')
         self.y_train_sd = md.pop('y_train_sd')
+        self.max_tdelta = md.pop('max_tdelta', 10.)
         self.rangf_map_base = md.pop('rangf_map_base')
         self.rangf_n_levels = md.pop('rangf_n_levels')
         self.outdir = md.pop('outdir', './dtsr_model/')
@@ -398,11 +405,11 @@ class DTSR(object):
                 # Linspace tensor used for plotting
                 self.support_start = tf.placeholder(self.FLOAT_TF, shape=[], name='support_start')
                 self.n_time_units = tf.placeholder(self.FLOAT_TF, shape=[], name='n_time_units')
-                self.n_points_per_time_unit = tf.placeholder(self.INT_TF, shape=[], name='n_points_per_time_unit')
+                self.n_time_points = tf.placeholder(self.INT_TF, shape=[], name='n_time_points')
                 self.support = tf.lin_space(
                     self.support_start,
                     self.n_time_units+self.support_start,
-                    tf.cast(self.n_time_units * tf.cast(self.n_points_per_time_unit, self.FLOAT_TF), self.INT_TF) + 1,
+                    tf.cast(self.n_time_points, self.INT_TF) + 1,
                     name='support'
                 )
                 self.support = tf.expand_dims(self.support, -1)
@@ -577,6 +584,16 @@ class DTSR(object):
                         self._initialize_base_irf_param('beta', family, lb=0., default=1.)
                         self._initialize_base_irf_param('delta', family, ub=0., default=-1.)
 
+                    elif family == 'HRFSingleGamma':
+                        self._initialize_base_irf_param('alpha', family, lb=0., default=6.)
+                        self._initialize_base_irf_param('beta', family, lb=0., default=1.)
+
+                    elif family == 'HRFDoubleGamma':
+                        self._initialize_base_irf_param('alpha_main', family, lb=0., default=6.)
+                        self._initialize_base_irf_param('beta_main', family, lb=0., default=1.)
+                        self._initialize_base_irf_param('alpha_undershoot_offset', family, lb=0., default=10.)
+                        self._initialize_base_irf_param('c', family, lb=0., ub=1., default=1./6.)
+
     def _initialize_intercepts_coefficients(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -733,20 +750,25 @@ class DTSR(object):
                 self.irf_lambdas['ExpRateGT1'] = exponential
 
                 def gamma(params):
-                    pdf = tf.contrib.distributions.Gamma(concentration=params[:,0:1],
-                                                         rate=params[:,1:2],
-                                                         validate_args=self.validate_irf_args).prob
+                    pdf = tf.contrib.distributions.Gamma(
+                        concentration=params[:,0:1],
+                        rate=params[:,1:2],
+                        validate_args=self.validate_irf_args
+                    ).prob
                     return lambda x: pdf(x + self.epsilon)
 
                 self.irf_lambdas['Gamma'] = gamma
                 self.irf_lambdas['SteepGamma'] = gamma
                 self.irf_lambdas['GammaShapeGT1'] = gamma
                 self.irf_lambdas['GammaKgt1'] = gamma
+                self.irf_lambdas['HRFSingleGamma'] = gamma
 
                 def shifted_gamma(params):
-                    pdf = tf.contrib.distributions.Gamma(concentration=params[:,0:1],
-                                                         rate=params[:,1:2],
-                                                         validate_args=self.validate_irf_args).prob
+                    pdf = tf.contrib.distributions.Gamma(
+                        concentration=params[:,0:1],
+                        rate=params[:,1:2],
+                        validate_args=self.validate_irf_args
+                    ).prob
                     return lambda x: pdf(x - params[:,2:3] + self.epsilon)
 
                 self.irf_lambdas['ShiftedGamma'] = shifted_gamma
@@ -796,6 +818,27 @@ class DTSR(object):
                         tf.lbeta(tf.transpose(tf.stack([alpha, beta], axis=0))))
 
                 self.irf_lambdas['ShiftedBetaPrime'] = shifted_beta_prime
+
+                def double_gamma(params):
+                    alpha_main = params[:, 0:1]
+                    beta = params[:, 1:2]
+                    alpha_undershoot_offset = params[:, 2:3]
+                    c = params[:, 3:4]
+
+                    pdf_main = tf.contrib.distributions.Gamma(
+                        concentration=alpha_main,
+                        rate=beta,
+                        validate_args=self.validate_irf_args
+                    ).prob
+                    pdf_undershoot = tf.contrib.distributions.Gamma(
+                        concentration=alpha_main + alpha_undershoot_offset,
+                        rate=beta,
+                        validate_args=self.validate_irf_args
+                    ).prob
+
+                    return lambda x: pdf_main(x + self.epsilon) - c * pdf_undershoot(x + self.epsilon)
+
+                self.irf_lambdas['HRFDoubleGamma'] = double_gamma
 
     def _initialize_irf_params(self):
         with self.sess.as_default():
@@ -2063,13 +2106,15 @@ class DTSR(object):
 
             return out
 
-    def _extract_irf_integral(self, terminal_name, level=95, n_samples=None, n_time_units=2.5, n_points_per_time_unit=1000):
+    def _extract_irf_integral(self, terminal_name, level=95, n_samples=None, n_time_units=None, n_time_points=1000):
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                if n_time_units is None:
+                    n_time_units = self.max_tdelta
                 fd = {
                     self.support_start: 0.,
                     self.n_time_units: n_time_units,
-                    self.n_points_per_time_unit: n_points_per_time_unit,
+                    self.n_time_points: n_time_points,
                     self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1
                 }
 
@@ -2622,7 +2667,7 @@ class DTSR(object):
         """
         self.sess.close()
 
-    def irf_integrals(self, level=95, n_samples=None, n_time_units=10, n_points_per_time_unit=1000):
+    def irf_integrals(self, level=95, n_samples=None, n_time_units=None, n_time_points=1000):
         if self.pc:
             terminal_names = self.src_terminal_names
         else:
@@ -2636,7 +2681,7 @@ class DTSR(object):
                     level=level,
                     n_samples=n_samples,
                     n_time_units=n_time_units,
-                    n_points_per_time_unit=n_points_per_time_unit
+                    n_time_points=n_time_points
                 )
             )
             irf_integrals.append(integral)
@@ -2644,7 +2689,7 @@ class DTSR(object):
 
         return irf_integrals
 
-    def irf_integral(self, terminal_name, level=95, n_samples=None, n_time_units=2.5, n_points_per_time_unit=1000):
+    def irf_integral(self, terminal_name, level=95, n_samples=None, n_time_units=None, n_time_points=1000):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 return self._extract_irf_integral(
@@ -2652,7 +2697,7 @@ class DTSR(object):
                     level=level,
                     n_samples=n_samples,
                     n_time_units=n_time_units,
-                    n_points_per_time_unit=n_points_per_time_unit
+                    n_time_points=n_time_points
                 )
 
     def set_predict_mode(self, mode):
@@ -2835,12 +2880,15 @@ class DTSR(object):
 
         return out
 
-    def report_irf_integrals(self, level=95, n_samples=None,  indent=0):
+    def report_irf_integrals(self, level=95, n_samples=None, n_time_units=None, indent=0):
+        if n_time_units is None:
+            n_time_units = self.max_tdelta
+
         irf_integrals = self.irf_integrals(
-            level=95,
-            n_samples=None,
-            n_time_units=10,
-            n_points_per_time_unit=1000
+            level=level,
+            n_samples=n_samples,
+            n_time_units=n_time_units,
+            n_time_points=1000
         )
         if self.pc:
             terminal_names = self.src_terminal_names
@@ -2853,6 +2901,7 @@ class DTSR(object):
         )
 
         out = ' ' * indent + 'IRF INTEGRALS (EFFECT SIZES):\n'
+        out += ' ' * (indent + 2) + 'Integral upper bound (time): %s\n\n' %n_time_units
 
         ci_str = irf_integrals.to_string()
 
@@ -2940,11 +2989,11 @@ class DTSR(object):
             force_training_evaluation=True,
             irf_name_map=None,
             plot_n_time_units=2.5,
-            plot_n_points_per_time_unit=500,
+            plot_n_time_points=500,
             plot_x_inches=28,
             plot_y_inches=5,
             cmap='gist_rainbow'
-    ):
+            ):
         """
         Fit the DTSR model.
 
@@ -2969,7 +3018,7 @@ class DTSR(object):
         :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
             If ``None``, IRF tree node string ID's will be used.
         :param plot_n_time_units: ``float``; number if time units to use in plotting.
-        :param plot_n_points_per_time_unit: ``float``; number of plot points to use per time unit.
+        :param plot_n_time_points: ``float``; number of plot points to use per time unit.
         :param plot_x_inches: ``int``; width of plot in inches.
         :param plot_y_inches: ``int``; height of plot in inches.
         :param cmap: ``str``; name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot).
@@ -3091,7 +3140,7 @@ class DTSR(object):
                             self.make_plots(
                                 irf_name_map=irf_name_map,
                                 plot_n_time_units=plot_n_time_units,
-                                plot_n_points_per_time_unit=plot_n_points_per_time_unit,
+                                plot_n_time_points=plot_n_time_points,
                                 plot_x_inches=plot_x_inches,
                                 plot_y_inches=plot_y_inches,
                                 cmap=cmap
@@ -3103,7 +3152,7 @@ class DTSR(object):
                                 fd_plot = {
                                     self.support_start: lb,
                                     self.n_time_units: n_time_units,
-                                    self.n_points_per_time_unit: 500
+                                    self.n_time_points: 1000
                                 }
                                 plot_x = self.sess.run(self.support, feed_dict=fd_plot)
                                 plot_y = self.sess.run(self.err_dist_plot, feed_dict=fd_plot)
@@ -3132,7 +3181,7 @@ class DTSR(object):
                     self.make_plots(
                         irf_name_map=irf_name_map,
                         plot_n_time_units=plot_n_time_units,
-                        plot_n_points_per_time_unit=plot_n_points_per_time_unit,
+                        plot_n_time_points=plot_n_time_points,
                         plot_x_inches=plot_x_inches,
                         plot_y_inches=plot_y_inches,
                         cmap=cmap
@@ -3143,7 +3192,7 @@ class DTSR(object):
                         self.make_plots(
                             irf_name_map=irf_name_map,
                             plot_n_time_units=plot_n_time_units,
-                            plot_n_points_per_time_unit=plot_n_points_per_time_unit,
+                            plot_n_time_points=plot_n_time_points,
                             plot_x_inches=plot_x_inches,
                             plot_y_inches=plot_y_inches,
                             cmap=cmap,
@@ -3532,7 +3581,7 @@ class DTSR(object):
             self,
             irf_name_map=None,
             plot_n_time_units=2.5,
-            plot_n_points_per_time_unit=1000,
+            plot_n_time_points=1000,
             plot_x_inches=7.,
             plot_y_inches=5.,
             cmap=None,
@@ -3583,7 +3632,7 @@ class DTSR(object):
                 fd = {
                     self.support_start: 0.,
                     self.n_time_units: plot_n_time_units,
-                    self.n_points_per_time_unit: plot_n_points_per_time_unit,
+                    self.n_time_points: plot_n_time_points,
                     self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1
                 }
 
@@ -3605,7 +3654,7 @@ class DTSR(object):
                                     level=level,
                                     n_samples=n_samples,
                                     n_time_units=plot_n_time_units,
-                                    n_points_per_time_unit=plot_n_points_per_time_unit,
+                                    n_time_points=plot_n_time_points,
                                 )
                                 plot_y.append(mean_cur)
                                 lq.append(lq_cur)
@@ -3654,7 +3703,7 @@ class DTSR(object):
                                             level=level,
                                             n_samples=n_samples,
                                             n_time_units=plot_n_time_units,
-                                            n_points_per_time_unit=plot_n_points_per_time_unit,
+                                            n_time_points=plot_n_time_points,
                                         )
                                         plot_y.append(mean_cur)
                                         lq.append(lq_cur)

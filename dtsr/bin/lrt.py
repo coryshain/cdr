@@ -10,9 +10,10 @@ from dtsr.signif import bootstrap
 if __name__ == '__main__':
 
     argparser = argparse.ArgumentParser('''
-        Pairwise likelihood ratio test between LMER models fitted to DTSR-convolved data.
-        Facilitates 2-step analysis in which DTSR learns the transform and LME/LRT performs the hypothesis test.
-    ''')
+            Performs pairwise likelihood ratio test for significance of differences in prediction quality between LME models fitted to data convolved using DTSR ("2-step" hypothesis test).
+            Can be used for in-sample and out-of-sample evaluation.
+            Can be used either to compare arbitrary sets of LME models or (using the "-a" flag) to perform hypothesis testing between DTSR models within one or more ablation sets. 
+        ''')
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='Path to configuration (*.ini) file')
     argparser.add_argument('-a', '--ablation', action='store_true', help='Only compare models within an ablation set (those defined using the "ablate" param in the config file)')

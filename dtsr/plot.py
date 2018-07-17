@@ -1,3 +1,4 @@
+import sys
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
@@ -53,7 +54,10 @@ def plot_irf(
 
     plt.gcf().set_size_inches(plot_x_inches, plot_y_inches)
     plt.tight_layout()
-    plt.savefig(dir+'/'+filename, dpi=600, transparent=transparent_background)
+    try:
+        plt.savefig(dir+'/'+filename, dpi=600, transparent=transparent_background)
+    except:
+        sys.stderr.write('Error saving plot to file %s. Skipping...' %(dir+'/'+filename))
     plt.close('all')
 
 def plot_legend(
@@ -75,7 +79,10 @@ def plot_heatmap(m, row_names, col_names, dir='.', filename='eigenvectors.png', 
     plt.colorbar(heatmap)
     plt.gcf().set_size_inches(plot_x_inches, plot_y_inches)
     plt.gcf().subplots_adjust(bottom=0.25,left=0.25)
-    plt.savefig(dir+'/'+filename)
+    try:
+        plt.savefig(dir+'/'+filename)
+    except:
+        sys.stderr.write('Error saving plot to file %s. Skipping...' %(dir+'/'+filename))
     plt.close('all')
 
 

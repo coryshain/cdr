@@ -486,7 +486,9 @@ class Formula(object):
         'SkewNormal',
         'EMG',
         'BetaPrime',
-        'ShiftedBetaPrime'
+        'ShiftedBetaPrime',
+        'HRFSingleGamma',
+        'HRFDoubleGamma'
     ]
 
     IRF_PARAMS = {
@@ -503,7 +505,10 @@ class Formula(object):
         'SkewNormal': ['mu', 'sigma', 'alpha'],
         'EMG': ['mu', 'sigma', 'beta'],
         'BetaPrime': ['alpha', 'beta'],
-        'ShiftedBetaPrime': ['alpha', 'beta', 'delta']
+        'ShiftedBetaPrime': ['alpha', 'beta', 'delta'],
+        'HRFSingleGamma': ['alpha', 'beta'],
+        'HRFDoubleGamma': ['alpha_main', 'beta', 'alpha_undershoot_offset', 'c']
+
     }
 
     def __str__(self):

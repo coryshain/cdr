@@ -11,7 +11,9 @@ from matplotlib import pyplot as plt
 if __name__ == '__main__':
 
     argparser = argparse.ArgumentParser('''
-        Computes pairwise significance of error differences between DTSR models and competitors.
+        Performs pairwise permutation test for significance of differences in prediction quality between models.
+        Can be used for in-sample and out-of-sample evaluation.
+        Can be used either to compare arbitrary sets of models (e.g. DTSR vs. LME) or (using the "-a" flag) to perform hypothesis testing between DTSR models within one or more ablation sets. 
     ''')
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='Path to configuration (*.ini) file')
@@ -70,7 +72,7 @@ if __name__ == '__main__':
                     diff = float(len(a) - select.sum())
                     p_value, base_diff, diffs = bootstrap(a[select], b[select], n_iter=10000, n_tails=args.tails, mode=args.metric)
                     sys.stderr.write('\n')
-                    out_path = p.outdir + '/' + name + '_2stepLRT_' + args.partition + '.txt'
+                    out_path = p.outdir + '/' + name + '_PT_' + args.partition + '.txt'
                     with open(out_path, 'w') as f:
                         sys.stderr.write('Saving output to %s...\n' %out_path)
 
@@ -87,5 +89,5 @@ if __name__ == '__main__':
                         sys.stdout.write(summary)
 
                     plt.hist(diffs, bins=1000)
-                    plt.savefig(p.outdir + '/' + name + '_' + args.partition + '.png')
+                    plt.savefig(p.outdir + '/' + name + '_PT_' + args.partition + '.png')
                     plt.close('all')

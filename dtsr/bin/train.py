@@ -247,7 +247,7 @@ if __name__ == '__main__':
                 force_training_evaluation=args.force_training_evaluation,
                 irf_name_map=p.irf_name_map,
                 plot_n_time_units=p['plot_n_time_units'],
-                plot_n_points_per_time_unit=p['plot_n_points_per_time_unit'],
+                plot_n_time_points=p['plot_n_time_points'],
                 plot_x_inches=p['plot_x_inches'],
                 plot_y_inches=p['plot_y_inches'],
                 cmap=p['cmap']

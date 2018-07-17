@@ -1104,15 +1104,17 @@ class DTSRBayes(DTSR):
 
             return out
 
-    def _extract_irf_integral(self, terminal_name, level=95, n_samples=None, n_time_units=2.5, n_points_per_time_unit=1000):
+    def _extract_irf_integral(self, terminal_name, level=95, n_samples=None, n_time_units=None, n_time_points=1000):
         if n_samples is None:
             n_samples = self.n_samples_eval
+        if n_time_units is None:
+            n_time_units = self.max_tdelta
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 fd = {
                     self.support_start: 0.,
                     self.n_time_units: n_time_units,
-                    self.n_points_per_time_unit: n_points_per_time_unit,
+                    self.n_time_points: n_time_points,
                     self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1
                 }
 
@@ -1177,7 +1179,7 @@ class DTSRBayes(DTSR):
             level=95,
             n_samples=None,
             n_time_units=2.5,
-            n_points_per_time_unit=1000
+            n_time_points=1000
     ):
         if n_samples is None:
             n_samples = self.n_samples_eval
@@ -1186,7 +1188,7 @@ class DTSRBayes(DTSR):
                 fd = {
                     self.support_start: 0.,
                     self.n_time_units: n_time_units,
-                    self.n_points_per_time_unit: n_points_per_time_unit,
+                    self.n_time_points: n_time_points,
                     self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1
                 }
 

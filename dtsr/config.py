@@ -156,9 +156,8 @@ class Config(object):
         # Plotting defaults
         if 'plot_n_time_units' in settings or add_defaults:
             out['plot_n_time_units'] = settings.getfloat('plot_n_time_units', 2.5)
-        if 'plot_n_points_per_time_unit' in settings or add_defaults:
-            out['plot_n_points_per_time_unit'] = settings.getfloat('plot_n_points_per_time_unit',
-                                                                                          500)
+        if 'plot_n_time_points' in settings or add_defaults:
+            out['plot_n_time_points'] = settings.getfloat('plot_n_time_points', 1000)
         if 'plot_x_inches' in settings or add_defaults:
             out['plot_x_inches'] = settings.getfloat('plot_x_inches', 7)
         if 'plot_y_inches' in settings or add_defaults:
