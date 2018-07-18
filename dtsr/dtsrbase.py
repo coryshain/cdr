@@ -1602,14 +1602,13 @@ class DTSR(object):
                     if len(irf_plot) > 1:
                         composite_irf_mc = irf[0]
                         for p_irf in irf[1:]:
-                            composite_irf_mc = self._merge_irf(composite_irf_mc, p_irf, self.t_delta)
-                        composite_irf_mc = composite_irf_mc(self.support)[0]
+                            composite_irf_mc = self._compose_irf(p_irf, composite_irf_mc)
+                        composite_irf_mc = composite_irf_mc(self.support[None, ...])[0]
 
                         composite_irf_plot = irf_plot[0]
                         for p_irf in irf_plot[1:]:
-                            composite_irf_plot = self._merge_irf(composite_irf_plot, p_irf, self.t_delta)
-                        composite_irf_plot = composite_irf_plot(self.support)[0]
-
+                            composite_irf_plot = self._compose_irf(p_irf, composite_irf_plot)
+                        composite_irf_plot = composite_irf_plot(self.support[None, ...])[0]
                     else:
                         composite_irf_mc = atomic_irf_mc
                         composite_irf_plot = atomic_irf_plot
@@ -1767,8 +1766,8 @@ class DTSR(object):
                             if len(irf) > 1:
                                 cur_irf = irf[0]
                                 for p_irf in irf[1:]:
-                                    cur_irf = self._merge_irf(cur_irf, p_irf, self.t_delta)
-                                irf = cur_irf(self.support)[0]
+                                    cur_irf = self._compose_irf(p_irf, cur_irf)
+                                irf = cur_irf[:,:,-1,:]
                             else:
                                 irf = irf[0]
 
@@ -1789,8 +1788,8 @@ class DTSR(object):
                             if len(irf) > 1:
                                 cur_irf = irf[0]
                                 for p_irf in irf[1:]:
-                                    cur_irf = self._merge_irf(cur_irf, p_irf, self.t_delta)
-                                irf = cur_irf(self.support)[0]
+                                    cur_irf = self._compose_irf(p_irf, cur_irf)
+                                irf = cur_irf
                             else:
                                 irf = irf[0]
 
@@ -1801,7 +1800,7 @@ class DTSR(object):
     def _construct_network(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                self.t_delta = tf.expand_dims(tf.expand_dims(self.time_y, -1) - self.time_X, -1)  # Tensor of temporal offsets with shape (?,history_length)
+                self.t_delta = tf.expand_dims(tf.expand_dims(self.time_y, -1) - self.time_X, -1)  # Tensor of temporal offsets with shape (?, history_length, 1)
                 self._initialize_irfs(self.t)
                 self._initialize_impulses()
                 self._initialize_convolutions()
@@ -1990,11 +1989,28 @@ class DTSR(object):
                 return irf(parent_irf(x))
         return new_irf
 
-    def _merge_irf(self, A, B, t_delta):
-        raise ValueError('Hierarchical convolutions are not yet supported.')
+    def _compose_irf(self, f, g):
+        def composed_irf(t):
+            input_rank = len(t.shape)
+            assert input_rank < 4, 'Tensor t must be of rank 2 or 3.'
+            if input_rank > 2:
+                t_squeezed = tf.squeeze(t, axis=2)
+            else:
+                t_squeezed = t
+                t = t_squeezed[..., None]
 
-        # ode = lambda y, t: A(t) * B(t)
-        # A_conv_B = tf.contrib.integrate.odeint(ode, , tf.reverse(self.t_delta))
+            tau = self._linspace_nd(t_squeezed, axis=2)
+            out = f(tau) * g(t - tau) # Pointwise product
+            out = tf.reduce_sum((out[:,:,1:] + out[:,:,:-1]), axis=2) / 2. # Summed linear interpolation
+            step_size = t_squeezed / tf.cast(self.n_interp, dtype=self.FLOAT_TF) # Rescaling
+            out = out * step_size
+
+            if input_rank == 3:
+                out = out[..., None]
+
+            return out
+
+        return composed_irf
 
     def _apply_pc(self, inputs, src_ix=None, pc_ix=None, inv=False):
         with self.sess.as_default():
@@ -2398,6 +2414,28 @@ class DTSR(object):
                     param_random *= correction_factor
 
                     return param_random
+
+    def _linspace_nd(self, B, A=None, axis=0, n_interp=None):
+        if n_interp is None:
+            n_interp = self.n_interp
+        if axis < 0:
+            axis = len(B.shape) + axis
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                linspace_support = tf.cast(tf.range(n_interp), dtype=self.FLOAT_TF)
+                B = tf.expand_dims(B, axis)
+                rank = len(B.shape)
+                assert axis < rank, 'Tried to perform linspace_nd on axis %s, which exceeds rank %s of tensor' %(axis, rank)
+                expansion = ([None] * axis) + [slice(None)] + ([None] * (rank - axis - 1))
+                linspace_support = linspace_support[expansion]
+
+                if A is None:
+                    out = B * linspace_support / n_interp
+                else:
+                    A = tf.expand_dims(A, axis)
+                    assert A.shape == B.shape, 'A and B must have the same shape, got %s and %s' %(A.shape, B.shape)
+                    out = A + ((B-A) * linspace_support / n_interp)
+                return out
 
     def _lininterp_fixed_n_points(self, x, n):
         with self.sess.as_default():
@@ -3384,6 +3422,7 @@ class DTSR(object):
                     self.time_X: time_X_2d,
                     self.time_y: time_y,
                     self.gf_y: gf_y,
+                    self.y: np.zeros((len(time_y),)) # Only needed for shape
                 }
 
 
@@ -3400,7 +3439,8 @@ class DTSR(object):
                             self.time_X: time_X_2d[i:i + self.eval_minibatch_size],
                             self.time_X_mask: time_X_mask[i:i + self.eval_minibatch_size],
                             self.time_y: time_y[i:i + self.eval_minibatch_size],
-                            self.gf_y: gf_y[i:i + self.eval_minibatch_size] if len(gf_y) > 0 else gf_y
+                            self.gf_y: gf_y[i:i + self.eval_minibatch_size] if len(gf_y) > 0 else gf_y,
+                            self.y: np.zeros((len(time_y[i:i + self.eval_minibatch_size]),))  # Only needed for shape
                         }
                         preds[i:i + self.eval_minibatch_size] = self.run_predict_op(fd_minibatch, n_samples=n_samples, algorithm=algorithm, verbose=verbose)
 

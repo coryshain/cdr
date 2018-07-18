@@ -1115,7 +1115,8 @@ class DTSRBayes(DTSR):
                     self.support_start: 0.,
                     self.n_time_units: n_time_units,
                     self.n_time_points: n_time_points,
-                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1
+                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1,
+                    self.y: np.zeros((1,)) # Only needed for shape
                 }
 
                 alpha = 100 - float(level)
@@ -1178,18 +1179,21 @@ class DTSRBayes(DTSR):
             posterior,
             level=95,
             n_samples=None,
-            n_time_units=2.5,
+            n_time_units=None,
             n_time_points=1000
     ):
         if n_samples is None:
             n_samples = self.n_samples_eval
+        if n_time_units is None:
+            n_time_units = self.max_tdelta
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 fd = {
                     self.support_start: 0.,
                     self.n_time_units: n_time_units,
                     self.n_time_points: n_time_points,
-                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1
+                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1,
+                    self.y: np.zeros((1,)) # Only needed for shape
                 }
 
                 alpha = 100-float(level)
