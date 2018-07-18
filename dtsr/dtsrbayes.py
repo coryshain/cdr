@@ -1104,6 +1104,7 @@ class DTSRBayes(DTSR):
 
             return out
 
+    # Overload this method to perform parameter sampling and compute credible intervals
     def _extract_irf_integral(self, terminal_name, level=95, n_samples=None, n_time_units=None, n_time_points=1000):
         if n_samples is None:
             n_samples = self.n_samples_eval
@@ -1116,7 +1117,8 @@ class DTSRBayes(DTSR):
                     self.n_time_units: n_time_units,
                     self.n_time_points: n_time_points,
                     self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1,
-                    self.y: np.zeros((1,)) # Only needed for shape
+                    self.time_y: [n_time_units],
+                    self.time_X: np.zeros((1, self.history_length))
                 }
 
                 alpha = 100 - float(level)
@@ -1193,7 +1195,8 @@ class DTSRBayes(DTSR):
                     self.n_time_units: n_time_units,
                     self.n_time_points: n_time_points,
                     self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1,
-                    self.y: np.zeros((1,)) # Only needed for shape
+                    self.time_y: np.ones((1,)) * n_time_units,
+                    self.time_X: np.zeros((1, self.history_length))
                 }
 
                 alpha = 100-float(level)

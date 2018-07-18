@@ -400,7 +400,12 @@ class DTSR(object):
 
                 self.y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('y'))
                 self.time_y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('time_y'))
+                self.t_delta = tf.expand_dims(tf.expand_dims(self.time_y, -1) - self.time_X, -1)  # Tensor of temporal offsets with shape (?, history_length, 1)
                 self.gf_y = tf.placeholder(shape=[None, len(self.rangf)], dtype=self.INT_TF)
+
+                # Tensors used for interpolated IRF composition
+                self.max_tdelta_batch = tf.reduce_max(self.t_delta)
+                self.interpolation_support = tf.linspace(0., self.max_tdelta_batch, self.n_interp)[..., None]
 
                 # Linspace tensor used for plotting
                 self.support_start = tf.placeholder(self.FLOAT_TF, shape=[], name='support_start')
@@ -411,8 +416,7 @@ class DTSR(object):
                     self.n_time_units+self.support_start,
                     tf.cast(self.n_time_points, self.INT_TF) + 1,
                     name='support'
-                )
-                self.support = tf.expand_dims(self.support, -1)
+                )[..., None]
                 self.support = tf.cast(self.support, dtype=self.FLOAT_TF)
                 self.dd_support = tf.concat(
                     [
@@ -499,6 +503,15 @@ class DTSR(object):
                 self.training_loglik_in = tf.placeholder(self.FLOAT_TF, shape=[], name='training_loglik_in')
                 self.training_loglik = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_loglik')
                 self.set_training_loglik = tf.assign(self.training_loglik, self.training_loglik_in)
+
+                # self.normal_loc_test_1 = tf.placeholder(self.FLOAT_TF, shape=[1, 1, 1])
+                # self.normal_scale_test_1 = tf.placeholder(self.FLOAT_TF, shape=[1, 1, 1])
+                # self.normal_loc_test_2 = tf.placeholder(self.FLOAT_TF, shape=[1, 1, 1])
+                # self.normal_scale_test_2 = tf.placeholder(self.FLOAT_TF, shape=[1, 1, 1])
+                # normal_test_1 = tf.contrib.distributions.Normal(loc=self.normal_loc_test_1, scale=self.normal_scale_test_1).prob
+                # normal_test_2 = tf.contrib.distributions.Normal(loc=self.normal_loc_test_2, scale=self.normal_scale_test_2).prob
+                # conv_test = self._compose_irf([normal_test_1, normal_test_2])
+                # self.conv_test_plot = conv_test(self.support[None, ...])[0]
 
     def _initialize_base_params(self):
         with self.sess.as_default():
@@ -888,7 +901,7 @@ class DTSR(object):
                             param = params[i]
                             if param.shape.is_fully_defined():
                                 assert param.shape[0] == 1, 'Parameter with shape %s not broadcastable to batch length' %param.shape
-                                params[i] =  tf.tile(param, [tf.shape(self.y)[0], 1])
+                                params[i] =  tf.tile(param, [tf.shape(self.time_y)[0], 1])
 
                     params = tf.stack(params, axis=1)
                     params_summary = tf.stack(params_summary, axis=1)
@@ -1599,18 +1612,13 @@ class DTSR(object):
                     atomic_irf_mc = atomic_irf(self.support)[0]
                     atomic_irf_plot = atomic_irf_plot(self.support)[0]
 
-                    if len(irf_plot) > 1:
-                        composite_irf_mc = irf[0]
-                        for p_irf in irf[1:]:
-                            composite_irf_mc = self._compose_irf(p_irf, composite_irf_mc)
-                        composite_irf_mc = composite_irf_mc(self.support[None, ...])[0]
-
-                        composite_irf_plot = irf_plot[0]
-                        for p_irf in irf_plot[1:]:
-                            composite_irf_plot = self._compose_irf(p_irf, composite_irf_plot)
-                        composite_irf_plot = composite_irf_plot(self.support[None, ...])[0]
+                    if len(irf) > 1:
+                        composite_irf_mc = self._compose_irf(irf)(self.support[None, ...])[0]
                     else:
                         composite_irf_mc = atomic_irf_mc
+                    if len(irf_plot) > 1:
+                        composite_irf_plot = self._compose_irf(irf_plot)(self.support[None, ...])[0]
+                    else:
                         composite_irf_plot = atomic_irf_plot
 
                     assert t.name() not in self.irf_mc, 'Duplicate IRF node name already in self.irf_mc'
@@ -1764,10 +1772,7 @@ class DTSR(object):
                             impulse = self.irf_impulses[name]
                             irf = self.irf[name]
                             if len(irf) > 1:
-                                cur_irf = irf[0]
-                                for p_irf in irf[1:]:
-                                    cur_irf = self._compose_irf(p_irf, cur_irf)
-                                irf = cur_irf[:,:,-1,:]
+                                irf = self._compose_irf(irf)
                             else:
                                 irf = irf[0]
 
@@ -1786,10 +1791,7 @@ class DTSR(object):
 
                             irf = self.irf[name]
                             if len(irf) > 1:
-                                cur_irf = irf[0]
-                                for p_irf in irf[1:]:
-                                    cur_irf = self._compose_irf(p_irf, cur_irf)
-                                irf = cur_irf
+                                irf = self._compose_irf(irf)
                             else:
                                 irf = irf[0]
 
@@ -1800,7 +1802,6 @@ class DTSR(object):
     def _construct_network(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                self.t_delta = tf.expand_dims(tf.expand_dims(self.time_y, -1) - self.time_X, -1)  # Tensor of temporal offsets with shape (?, history_length, 1)
                 self._initialize_irfs(self.t)
                 self._initialize_impulses()
                 self._initialize_convolutions()
@@ -1989,7 +1990,37 @@ class DTSR(object):
                 return irf(parent_irf(x))
         return new_irf
 
-    def _compose_irf(self, f, g):
+    def _compose_irf(self, f_list):
+        if not isinstance(f_list, list):
+            f_list = [f_list]
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                f = f_list[0](self.interpolation_support)[..., 0]
+                for g in f_list[1:]:
+                    # Transpositions are because FFT expects time dimension to be innermost,
+                    # while DTSR time series have shape [batch, time, irfID]
+                    _f = tf.spectral.rfft(f)
+                    _g = tf.spectral.rfft(g(self.interpolation_support)[..., 0])
+                    f = tf.spectral.irfft(
+                        _f * _g
+                    ) * self.max_tdelta_batch / tf.cast(self.n_interp, dtype=self.FLOAT_TF)
+
+                def make_composed_irf(seq):
+                    def composed_irf(t):
+                        t = tf.squeeze(t, axis=-1)
+                        ix = tf.cast(tf.round(t * tf.cast(self.n_interp - 1, self.FLOAT_TF) / self.max_tdelta_batch), dtype=self.INT_TF)
+                        row_ix = tf.tile(tf.range(tf.shape(t)[0])[..., None], [1, tf.shape(t)[1]])
+                        ix = tf.stack([row_ix, ix], axis=-1)
+                        out = tf.gather_nd(seq, ix)[..., None]
+
+                        return out
+
+                    return composed_irf
+
+                return make_composed_irf(f)
+
+
+    def _compose_irf_old(self, f, g):
         def composed_irf(t):
             input_rank = len(t.shape)
             assert input_rank < 4, 'Tensor t must be of rank 2 or 3.'
@@ -2000,6 +2031,7 @@ class DTSR(object):
                 t = t_squeezed[..., None]
 
             tau = self._linspace_nd(t_squeezed, axis=2)
+
             out = f(tau) * g(t - tau) # Pointwise product
             out = tf.reduce_sum((out[:,:,1:] + out[:,:,:-1]), axis=2) / 2. # Summed linear interpolation
             step_size = t_squeezed / tf.cast(self.n_interp, dtype=self.FLOAT_TF) # Rescaling
@@ -2171,7 +2203,9 @@ class DTSR(object):
                     self.support_start: 0.,
                     self.n_time_units: n_time_units,
                     self.n_time_points: n_time_points,
-                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1
+                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1,
+                    self.time_y: [n_time_units],
+                    self.time_X: np.zeros((1, self.history_length))
                 }
 
                 if terminal_name in self.irf_integral_tensors:
@@ -3150,6 +3184,33 @@ class DTSR(object):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
+
+                # normal_loc_test_1 = .01
+                # normal_scale_test_1 = .05
+                # normal_loc_test_2 = 1.
+                # normal_scale_test_2 = 3.
+                #
+                # support, conv_test_plot_1 = self.sess.run([self.support, self.conv_test_plot], feed_dict={
+                #     self.support_start: 0.,
+                #     self.n_time_units: 20,
+                #     self.n_time_points: plot_n_time_points,
+                #     self.time_y: [20],
+                #     self.time_X: np.zeros((1, self.history_length)),
+                #     self.normal_loc_test_1: [[[normal_loc_test_1]]],
+                #     self.normal_scale_test_1: [[[normal_scale_test_1]]],
+                #     self.normal_loc_test_2: [[[normal_loc_test_2]]],
+                #     self.normal_scale_test_2: [[[normal_scale_test_2]]]
+                # })
+                #
+                # from scipy.stats import norm
+                #
+                # norm_1 = norm.pdf(support, normal_loc_test_1, normal_scale_test_1)
+                # norm_2 = norm.pdf(support, normal_loc_test_2, normal_scale_test_2)
+                # conv_test_plot_2 = norm.pdf(support, normal_loc_test_1 + normal_loc_test_2, np.sqrt(normal_scale_test_1**2 + normal_scale_test_2**2))
+                # plot_irf(support, np.concatenate([norm_1, norm_2, conv_test_plot_1, conv_test_plot_2], axis=1), ['ZConvolution', 'Reference'], dir=self.outdir, filename='fft_conv_test.png',)
+
+
+
                 if self.global_step.eval(session=self.sess) < n_iter:
                     self.set_training_complete(False)
 
@@ -3421,8 +3482,7 @@ class DTSR(object):
                     self.X: X_2d,
                     self.time_X: time_X_2d,
                     self.time_y: time_y,
-                    self.gf_y: gf_y,
-                    self.y: np.zeros((len(time_y),)) # Only needed for shape
+                    self.gf_y: gf_y
                 }
 
 
@@ -3439,8 +3499,7 @@ class DTSR(object):
                             self.time_X: time_X_2d[i:i + self.eval_minibatch_size],
                             self.time_X_mask: time_X_mask[i:i + self.eval_minibatch_size],
                             self.time_y: time_y[i:i + self.eval_minibatch_size],
-                            self.gf_y: gf_y[i:i + self.eval_minibatch_size] if len(gf_y) > 0 else gf_y,
-                            self.y: np.zeros((len(time_y[i:i + self.eval_minibatch_size]),))  # Only needed for shape
+                            self.gf_y: gf_y[i:i + self.eval_minibatch_size] if len(gf_y) > 0 else gf_y
                         }
                         preds[i:i + self.eval_minibatch_size] = self.run_predict_op(fd_minibatch, n_samples=n_samples, algorithm=algorithm, verbose=verbose)
 
@@ -3712,7 +3771,8 @@ class DTSR(object):
                     self.support_start: 0.,
                     self.n_time_units: plot_n_time_units,
                     self.n_time_points: plot_n_time_points,
-                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1
+                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1,
+                    self.max_tdelta_batch: plot_n_time_units
                 }
 
                 plot_x = self.sess.run(self.support, fd)
