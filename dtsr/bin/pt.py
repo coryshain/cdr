@@ -163,7 +163,7 @@ if __name__ == '__main__':
                     p_value, diff, diffs = bootstrap(df1, df2, n_iter=10000, n_tails=args.tails, mode=args.metric)
                     sys.stderr.write('\n')
                     name = '%s_v_%s' % ('FULL' if m1 == '' else '!' + m1, 'FULL' if m2 == '' else '!' + m2)
-                    out_path = p.outdir + '/' + name + '_PT_' + args.partition + '.txt'
+                    out_path = p.outdir + '/' + name + '_pooled_PT_' + args.partition + '.txt'
                     with open(out_path, 'w') as f:
                         sys.stderr.write('Saving output to %s...\n' % out_path)
 
