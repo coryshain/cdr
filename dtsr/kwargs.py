@@ -177,7 +177,7 @@ DTSR_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'n_interp',
-        100,
+        1000,
         int,
         "Number of interpolation points to use for composing IRF."
     ),
