@@ -15,6 +15,7 @@ if __name__ == '__main__':
     ''')
     argparser.add_argument('paths', nargs='+', help='Path(s) to config file(s) defining experiments')
     argparser.add_argument('-m', '--models', nargs='*', default = [], help='Model names to plot (if unspecified, plots all DTSR models)')
+    argparser.add_argument('-i', '--irf_ids', nargs='*', default = [], help='List of IDs for IRF to include in the plot. Regex supported.')
     argparser.add_argument('-s', '--plot_true_synthetic', action='store_true', help='If the models are fit to synthetic data, also generate plots of the true IRF')
     argparser.add_argument('-p', '--prefix', type=str, default='', help='Filename prefix to use for outputs')
     argparser.add_argument('-u', '--ntimeunits', type=float, default=None, help='Number of time units on x-axis')
@@ -83,7 +84,7 @@ if __name__ == '__main__':
 
             kwargs = {
                 'plot_n_time_units': p['plot_n_time_units'] if n_time_units is None else n_time_units,
-                'plot_n_points_per_time_unit': p['plot_n_points_per_time_unit'] if resolution is None else resolution,
+                'plot_n_time_points': p['plot_n_time_points'] if resolution is None else resolution,
                 'plot_x_inches': p['plot_x_inches'] if x_inches is None else x_inches,
                 'plot_y_inches': p['plot_y_inches'] if y_inches is None else y_inches,
                 'cmap': p['cmap'] if cmap is None else cmap
@@ -91,6 +92,7 @@ if __name__ == '__main__':
 
             dtsr_model.make_plots(
                 irf_name_map=name_map,
+                irf_ids=args.irf_ids,
                 prefix=prefix + m,
                 legend=legend,
                 xlab=args.xlab,
@@ -101,6 +103,7 @@ if __name__ == '__main__':
             if hasattr(dtsr_model, 'inference_name'):
                 dtsr_model.make_plots(
                     irf_name_map=name_map,
+                    irf_ids=args.irf_ids,
                     mc=True,
                     prefix=prefix + m,
                     legend=legend,

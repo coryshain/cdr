@@ -171,6 +171,16 @@ def lrt(ll1, ll2, df):
     m = ll1 if ll1 < ll2 else ll1
     return chi2.pdf(2 * (M - m), df)
 
+def nested(model_name_1, model_name_2):
+    split = (model_name_1.split('!'), model_name_2.split('!'))
+    m_base = [x[0] for x in split]
+    m_ablated = [set(x[1:]) for x in split]
+    a = 0 if len(m_ablated[0]) < len(m_ablated[1]) else 1
+    b = 1 - a
+
+    return m_base[a] == m_base[b] and len(m_ablated[b] - m_ablated[a]) == 1 and len(m_ablated[a] - m_ablated[b]) == 0
+
+
 def load_dtsr(dir_path):
     """
     Convenience method for reconstructing a saved DTSR object. First loads in metadata from ``m.obj``, then uses

@@ -598,11 +598,11 @@ class DTSR(object):
                         self._initialize_base_irf_param('delta', family, ub=0., default=-1.)
 
                     elif family == 'HRFSingleGamma':
-                        self._initialize_base_irf_param('alpha', family, lb=0., default=6.)
+                        self._initialize_base_irf_param('alpha', family, lb=1., default=6.)
                         self._initialize_base_irf_param('beta', family, lb=0., default=1.)
 
                     elif family == 'HRFDoubleGamma':
-                        self._initialize_base_irf_param('alpha_main', family, lb=0., default=6.)
+                        self._initialize_base_irf_param('alpha_main', family, lb=1., default=6.)
                         self._initialize_base_irf_param('beta', family, lb=0., default=1.)
                         self._initialize_base_irf_param('alpha_undershoot_offset', family, lb=0., default=10.)
                         self._initialize_base_irf_param('c', family, lb=0., ub=1., default=1./6.)
@@ -1997,8 +1997,6 @@ class DTSR(object):
             with self.sess.graph.as_default():
                 f = f_list[0](self.interpolation_support)[..., 0]
                 for g in f_list[1:]:
-                    # Transpositions are because FFT expects time dimension to be innermost,
-                    # while DTSR time series have shape [batch, time, irfID]
                     _f = tf.spectral.rfft(f)
                     _g = tf.spectral.rfft(g(self.interpolation_support)[..., 0])
                     f = tf.spectral.irfft(
@@ -2007,42 +2005,23 @@ class DTSR(object):
 
                 def make_composed_irf(seq):
                     def composed_irf(t):
-                        t = tf.squeeze(t, axis=-1)
+                        squeezed = 0
+                        while t.shape[-1] == 1:
+                            t = tf.squeeze(t, axis=-1)
+                            squeezed += 1
                         ix = tf.cast(tf.round(t * tf.cast(self.n_interp - 1, self.FLOAT_TF) / self.max_tdelta_batch), dtype=self.INT_TF)
                         row_ix = tf.tile(tf.range(tf.shape(t)[0])[..., None], [1, tf.shape(t)[1]])
                         ix = tf.stack([row_ix, ix], axis=-1)
-                        out = tf.gather_nd(seq, ix)[..., None]
+                        out = tf.gather_nd(seq, ix)
+
+                        for _ in range(squeezed):
+                            out = out[..., None]
 
                         return out
 
                     return composed_irf
 
                 return make_composed_irf(f)
-
-
-    def _compose_irf_old(self, f, g):
-        def composed_irf(t):
-            input_rank = len(t.shape)
-            assert input_rank < 4, 'Tensor t must be of rank 2 or 3.'
-            if input_rank > 2:
-                t_squeezed = tf.squeeze(t, axis=2)
-            else:
-                t_squeezed = t
-                t = t_squeezed[..., None]
-
-            tau = self._linspace_nd(t_squeezed, axis=2)
-
-            out = f(tau) * g(t - tau) # Pointwise product
-            out = tf.reduce_sum((out[:,:,1:] + out[:,:,:-1]), axis=2) / 2. # Summed linear interpolation
-            step_size = t_squeezed / tf.cast(self.n_interp, dtype=self.FLOAT_TF) # Rescaling
-            out = out * step_size
-
-            if input_rank == 3:
-                out = out[..., None]
-
-            return out
-
-        return composed_irf
 
     def _apply_pc(self, inputs, src_ix=None, pc_ix=None, inv=False):
         with self.sess.as_default():
@@ -3100,8 +3079,8 @@ class DTSR(object):
             force_training_evaluation=True,
             irf_name_map=None,
             plot_n_time_units=2.5,
-            plot_n_time_points=500,
-            plot_x_inches=28,
+            plot_n_time_points=1000,
+            plot_x_inches=7,
             plot_y_inches=5,
             cmap='gist_rainbow'
             ):
@@ -3475,7 +3454,6 @@ class DTSR(object):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
-
                 self.set_predict_mode(True)
 
                 fd = {
@@ -3718,6 +3696,7 @@ class DTSR(object):
     def make_plots(
             self,
             irf_name_map=None,
+            irf_ids=None,
             plot_n_time_units=2.5,
             plot_n_time_points=1000,
             plot_x_inches=7.,
@@ -3783,48 +3762,56 @@ class DTSR(object):
                     for b in switches[1]:
                         plot_name = 'irf_%s_%s.png' %(a, b)
                         names = self.plots[a][b]['names']
-                        if mc:
-                            plot_y = []
-                            lq = []
-                            uq = []
-                            for name in names:
-                                mean_cur, lq_cur, uq_cur = self.ci_curve(
-                                    self.irf_mc[name][a][b],
-                                    level=level,
-                                    n_samples=n_samples,
-                                    n_time_units=plot_n_time_units,
-                                    n_time_points=plot_n_time_points,
-                                )
-                                plot_y.append(mean_cur)
-                                lq.append(lq_cur)
-                                uq.append(uq_cur)
-                            lq = np.stack(lq, axis=1)
-                            uq = np.stack(uq, axis=1)
-                            plot_y = np.stack(plot_y, axis=1)
-                            plot_name = 'mc_' + plot_name
-                        else:
-                            plot_y = [self.sess.run(x, feed_dict=fd) for x in self.plots[a][b]['plot']]
-                            lq = None
-                            uq = None
-                            plot_y = np.concatenate(plot_y, axis=1)
+                        if irf_ids is not None and len(irf_ids) > 0:
+                            new_names = []
+                            for i, name in enumerate(names):
+                                for ID in irf_ids:
+                                    if ID==name or re.match(ID if ID.endswith('$') else ID + '$', name) is not None:
+                                        new_names.append(name)
+                            names = new_names
+                        if len(names) > 0:
+                            if mc:
+                                plot_y = []
+                                lq = []
+                                uq = []
+                                for name in names:
+                                    mean_cur, lq_cur, uq_cur = self.ci_curve(
+                                        self.irf_mc[name][a][b],
+                                        level=level,
+                                        n_samples=n_samples,
+                                        n_time_units=plot_n_time_units,
+                                        n_time_points=plot_n_time_points,
+                                    )
+                                    plot_y.append(mean_cur)
+                                    lq.append(lq_cur)
+                                    uq.append(uq_cur)
+                                lq = np.stack(lq, axis=1)
+                                uq = np.stack(uq, axis=1)
+                                plot_y = np.stack(plot_y, axis=1)
+                                plot_name = 'mc_' + plot_name
+                            else:
+                                plot_y = [self.sess.run(self.plots[a][b]['plot'][i], feed_dict=fd) for i in range(len(self.plots[a][b]['plot'])) if self.plots[a][b]['names'][i] in names]
+                                lq = None
+                                uq = None
+                                plot_y = np.concatenate(plot_y, axis=1)
 
-                        plot_irf(
-                            plot_x,
-                            plot_y,
-                            names,
-                            lq=lq,
-                            uq=uq,
-                            dir=self.outdir,
-                            filename=prefix + plot_name,
-                            irf_name_map=irf_name_map,
-                            plot_x_inches=plot_x_inches,
-                            plot_y_inches=plot_y_inches,
-                            cmap=cmap,
-                            legend=legend,
-                            xlab=xlab,
-                            ylab=ylab,
-                            transparent_background=transparent_background
-                        )
+                            plot_irf(
+                                plot_x,
+                                plot_y,
+                                names,
+                                lq=lq,
+                                uq=uq,
+                                dir=self.outdir,
+                                filename=prefix + plot_name,
+                                irf_name_map=irf_name_map,
+                                plot_x_inches=plot_x_inches,
+                                plot_y_inches=plot_y_inches,
+                                cmap=cmap,
+                                legend=legend,
+                                xlab=xlab,
+                                ylab=ylab,
+                                transparent_background=transparent_background
+                            )
 
                 if self.pc:
                     for a in switches[0]:
@@ -3832,48 +3819,57 @@ class DTSR(object):
                             if b == 'scaled':
                                 plot_name = 'src_irf_%s_%s.png' % (a, b)
                                 names = self.src_plot_tensors[a][b]['names']
-                                if mc:
-                                    plot_y = []
-                                    lq = []
-                                    uq = []
-                                    for name in names:
-                                        mean_cur, lq_cur, uq_cur = self.ci_curve(
-                                            self.src_irf_mc[name][a][b],
-                                            level=level,
-                                            n_samples=n_samples,
-                                            n_time_units=plot_n_time_units,
-                                            n_time_points=plot_n_time_points,
-                                        )
-                                        plot_y.append(mean_cur)
-                                        lq.append(lq_cur)
-                                        uq.append(uq_cur)
-                                    lq = np.stack(lq, axis=1)
-                                    uq = np.stack(uq, axis=1)
-                                    plot_y = np.stack(plot_y, axis=1)
-                                    plot_name = 'mc_' + plot_name
-                                else:
-                                    plot_y = [self.sess.run(x, feed_dict=fd) for x in self.src_plot_tensors[a][b]['plot']]
-                                    lq = None
-                                    uq = None
-                                    plot_y = np.concatenate(plot_y, axis=1)
+                                if irf_ids is not None and len(irf_ids) > 0:
+                                    new_names = []
+                                    for i, name in enumerate(names):
+                                        for ID in irf_ids:
+                                            if ID == name or re.match(ID if ID.endswith('$') else ID + '$',
+                                                                      name) is not None:
+                                                new_names.append(name)
+                                    names = new_names
+                                if len(names) > 0:
+                                    if mc:
+                                        plot_y = []
+                                        lq = []
+                                        uq = []
+                                        for name in names:
+                                            mean_cur, lq_cur, uq_cur = self.ci_curve(
+                                                self.src_irf_mc[name][a][b],
+                                                level=level,
+                                                n_samples=n_samples,
+                                                n_time_units=plot_n_time_units,
+                                                n_time_points=plot_n_time_points,
+                                            )
+                                            plot_y.append(mean_cur)
+                                            lq.append(lq_cur)
+                                            uq.append(uq_cur)
+                                        lq = np.stack(lq, axis=1)
+                                        uq = np.stack(uq, axis=1)
+                                        plot_y = np.stack(plot_y, axis=1)
+                                        plot_name = 'mc_' + plot_name
+                                    else:
+                                        plot_y = [self.sess.run(self.src_plot_tensors[a][b]['plot'][i], feed_dict=fd) for i in range(len(self.src_plot_tensors[a][b]['plot'])) if self.src_plot_tensors[a][b]['names'][i] in names]
+                                        lq = None
+                                        uq = None
+                                        plot_y = np.concatenate(plot_y, axis=1)
 
-                                plot_irf(
-                                    plot_x,
-                                    plot_y,
-                                    names,
-                                    lq=lq,
-                                    uq=uq,
-                                    dir=self.outdir,
-                                    filename=prefix + plot_name,
-                                    irf_name_map=irf_name_map,
-                                    plot_x_inches=plot_x_inches,
-                                    plot_y_inches=plot_y_inches,
-                                    cmap=cmap,
-                                    legend=legend,
-                                    xlab=xlab,
-                                    ylab=ylab,
-                                    transparent_background=transparent_background
-                                )
+                                    plot_irf(
+                                        plot_x,
+                                        plot_y,
+                                        names,
+                                        lq=lq,
+                                        uq=uq,
+                                        dir=self.outdir,
+                                        filename=prefix + plot_name,
+                                        irf_name_map=irf_name_map,
+                                        plot_x_inches=plot_x_inches,
+                                        plot_y_inches=plot_y_inches,
+                                        cmap=cmap,
+                                        legend=legend,
+                                        xlab=xlab,
+                                        ylab=ylab,
+                                        transparent_background=transparent_background
+                                    )
 
                 self.set_predict_mode(False)
 
