@@ -133,26 +133,28 @@ class LME(object):
         lmer = importr('lme4')
         fit, summary, convergence_warnings, predict, log_lik_base = self.instance_methods()
         self.m = fit(formula, X)
-        self.summary = lambda: str(summary(self.m)) + '\nConvergence warnings:\n  %s\n\n' % ''.join(convergence_warnings(self.m))
-        self.convergence_warnings = lambda: ''.join(convergence_warnings(self.m))
+        self.convergence_warnings = lambda: '\n'.join([str(x) for x in convergence_warnings(self.m)])
+        self.summary = lambda: str(summary(self.m)) + '\nConvergence warnings:\n%s\n\n' % self.convergence_warnings()
         self.predict = lambda x: predict(self.m, x)
         self.log_lik = lambda newdata=None, summed=True: log_lik_base(self.m, newdata=newdata, summed=summed)
+        print(self.converged())
 
     def __getstate__(self):
         return self.m
 
     def converged(self):
-        warnings = str(self.convergence_warnings())
+        warnings = self.convergence_warnings()
         return warnings == LME.NO_CONVERGENCE_WARNINGS
 
     def __setstate__(self, state):
         lmer = importr('lme4')
         self.m = state
         fit, summary, convergence_warnings, predict, log_lik_base = self.instance_methods()
-        self.summary = lambda: str(summary(self.m)) + '\nConvergence warnings:\n  %s\n\n' % ''.join(convergence_warnings(self.m))
-        self.convergence_warnings = lambda: ''.join(convergence_warnings(self.m))
+        self.convergence_warnings = lambda: '\n'.join([str(x) for x in convergence_warnings(self.m)])
+        self.summary = lambda: str(summary(self.m)) + '\nConvergence warnings:\n%s\n\n' % self.convergence_warnings()
         self.predict = lambda x: predict(self.m, x)
         self.log_lik = lambda newdata=None, summed=True: np.array(log_lik_base(self.m, newdata=newdata, summed=summed))
+        print(self.converged())
 
     def instance_methods(self):
         rstring = '''
