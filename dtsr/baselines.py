@@ -137,7 +137,6 @@ class LME(object):
         self.summary = lambda: str(summary(self.m)) + '\nConvergence warnings:\n%s\n\n' % self.convergence_warnings()
         self.predict = lambda x: predict(self.m, x)
         self.log_lik = lambda newdata=None, summed=True: log_lik_base(self.m, newdata=newdata, summed=summed)
-        print(self.converged())
 
     def __getstate__(self):
         return self.m
@@ -154,7 +153,6 @@ class LME(object):
         self.summary = lambda: str(summary(self.m)) + '\nConvergence warnings:\n%s\n\n' % self.convergence_warnings()
         self.predict = lambda x: predict(self.m, x)
         self.log_lik = lambda newdata=None, summed=True: np.array(log_lik_base(self.m, newdata=newdata, summed=summed))
-        print(self.converged())
 
     def instance_methods(self):
         rstring = '''
