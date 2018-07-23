@@ -10,6 +10,7 @@ from .kwargs import DTSR_INITIALIZATION_KWARGS
 from .util import *
 from .data import build_DTSR_impulses, corr_dtsr
 from .plot import *
+from .interpolate_spline import interpolate_spline
 
 import tensorflow as tf
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -605,7 +606,31 @@ class DTSR(object):
                         self._initialize_base_irf_param('alpha_main', family, lb=1., default=6.)
                         self._initialize_base_irf_param('beta', family, lb=0., default=1.)
                         self._initialize_base_irf_param('alpha_undershoot_offset', family, lb=0., default=10.)
-                        self._initialize_base_irf_param('c', family, lb=0., ub=1., default=1./6.)
+                        # self._initialize_base_irf_param('c', family, lb=0., ub=1., default=1./6.)
+                        self._initialize_base_irf_param('c', family, default=1./6.)
+
+                    elif family == 'HRFDoubleGammaUnconstrained':
+                        self._initialize_base_irf_param('alpha_main', family, lb=1., default=6.)
+                        self._initialize_base_irf_param('beta_main', family, lb=0., default=1.)
+                        self._initialize_base_irf_param('alpha_undershoot', family, lb=0., default=16.)
+                        self._initialize_base_irf_param('beta_undershoot', family, lb=0., default=1.)
+                        self._initialize_base_irf_param('c', family, default=1./6.)
+
+                    elif Formula.is_spline(family):
+                        bases = Formula.bases(family)
+                        spacing_power = Formula.spacing_power(family)
+
+                        x_init = np.cumsum(np.ones(bases-1)) ** spacing_power
+                        x_init *= self.max_tdelta / x_init[-1]
+                        x_init[1:] -= x_init[:-1]
+
+                        for param_name in Formula.irf_params(family):
+                            if param_name.startswith('x'):
+                                n = int(param_name[1:])
+                                default = x_init[n-2]
+                            else:
+                                default = 0
+                            self._initialize_base_irf_param(param_name, family, default=default)
 
     def _initialize_intercepts_coefficients(self):
         with self.sess.as_default():
@@ -853,6 +878,105 @@ class DTSR(object):
 
                 self.irf_lambdas['HRFDoubleGamma'] = double_gamma
 
+                def double_gamma_unconstrained(params):
+                    alpha_main = params[:, 0:1]
+                    beta_main = params[:, 1:2]
+                    alpha_undershoot = params[:, 2:3]
+                    beta_undershoot = params[:, 3:4]
+                    c = params[:, 4:5]
+
+                    pdf_main = tf.contrib.distributions.Gamma(
+                        concentration=alpha_main,
+                        rate=beta_main,
+                        validate_args=self.validate_irf_args
+                    ).prob
+                    pdf_undershoot = tf.contrib.distributions.Gamma(
+                        concentration=alpha_undershoot,
+                        rate=beta_undershoot,
+                        validate_args=self.validate_irf_args
+                    ).prob
+
+                    return lambda x: pdf_main(x + self.epsilon) - c * pdf_undershoot(x + self.epsilon)
+
+                self.irf_lambdas['HRFDoubleGammaUnconstrained'] = double_gamma_unconstrained
+
+    def _initialize_spline(self, order, bases, instantaneous=True, roughness_penalty=0.):
+        def spline(params):
+            target_shape = bases * 2 - 2 - (1-int(instantaneous))
+            assert params.shape[1] == target_shape, 'Incorrect number of parameters for spline with bases "%d". Should be %s, got %s.' %(bases, target_shape)
+
+            # Build knot locations
+            c = params[:, 0:bases-1]
+            c_endpoint_shape = [tf.shape(params)[0], 1, tf.shape(params)[2]]
+            zero = tf.zeros(c_endpoint_shape, dtype=self.FLOAT_TF)
+            c = tf.cumsum(tf.abs(tf.concat([zero, c], axis=1)), axis=1)
+            c = tf.unstack(c, axis=2)
+
+            # Build values at knots
+            y = [params[:, bases-1:], zero]
+            if not instantaneous:
+                y = [zero] + y
+            y = tf.concat(y, axis=1)
+            y = tf.unstack(y, axis=2)
+
+            assert len(c) == len(y), 'c and y coordinates of spline unpacked into lists of different lengths (%s and %s, respectively)' %(len(c), len(y))
+
+            def apply_spline(x):
+                splines = []
+
+                if len(x.shape) == 1:
+                    x = x[None, :, None]
+                elif len(x.shape) == 2:
+                    x = x[None, ...]
+                if len(x.shape) != 3:
+                    raise ValueError('Query to spline IRF must be exactly rank 3')
+
+                for i in range(len(c)):
+                    if c[i].shape[0] == 1:
+                        c_ = tf.tile(c[i][..., None], [tf.shape(x)[0], 1, 1])
+                    else:
+                        c_ = c[i][..., None]
+                    if y[i].shape[0] == 1:
+                        y_ = tf.tile(y[i][..., None], [tf.shape(x)[0], 1, 1])
+                    else:
+                        y_ = y[i][..., None]
+
+                    splines.append(
+                        lambda x: interpolate_spline(
+                            c_,
+                            y_,
+                            x,
+                            order,
+                            regularization_weight=roughness_penalty
+                        )
+                    )
+
+                out = tf.concat([s(x) for s in splines], axis=2)
+                # out = tf.where(x <= self.max_tdelta, out, tf.zeros_like(out))
+
+                return out
+
+            return apply_spline
+
+        return spline
+
+    def _get_irf_lambda(self, family):
+        if family in self.irf_lambdas:
+            return self.irf_lambdas[family]
+        elif Formula.is_spline(family):
+            order = Formula.order(family)
+            bases = Formula.bases(family)
+            instantaneous = Formula.instantaneous(family)
+            roughness_penalty = Formula.roughness_penalty(family)
+            return self._initialize_spline(
+                order,
+                bases,
+                instantaneous=instantaneous,
+                roughness_penalty=roughness_penalty
+            )
+        else:
+            raise ValueError('No IRF lamdba found for family "%s"' % family)
+
     def _initialize_irf_params(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -869,7 +993,7 @@ class DTSR(object):
                     params_random = {}
                     params_random_summary = {}
 
-                    for param_name in Formula.IRF_PARAMS[family]:
+                    for param_name in Formula.irf_params(family):
                         param_vals = self._initialize_irf_param(param_name, family)
                         params.append(param_vals[0])
 
@@ -916,7 +1040,7 @@ class DTSR(object):
                         assert id not in self.irf_params, 'Duplicate IRF node name already in self.irf_params'
                         self.irf_params[id] = tf.gather(params, ix, axis=2)
                         self.irf_params_summary[id] = tf.gather(params_summary, ix, axis=2)
-                        trainable_param_ix = names2ix(self.atomic_irf_param_trainable_by_family[family][id], Formula.IRF_PARAMS[family])
+                        trainable_param_ix = names2ix(self.atomic_irf_param_trainable_by_family[family][id], Formula.irf_params(family))
                         if len(trainable_param_ix) > 0:
                             self.irf_params_fixed[id] = tf.gather(tf.gather(params_fixed, ix, axis=2), trainable_param_ix, axis=1)
                             self.irf_params_fixed_summary[id] = tf.gather(tf.gather(params_fixed_summary, ix, axis=2), trainable_param_ix, axis=1)
@@ -1189,7 +1313,7 @@ class DTSR(object):
                     for family in self.atomic_irf_names_by_family:
                         if family not in joint_fixed_ix:
                             joint_fixed_ix[family] = {}
-                        for param_name in Formula.IRF_PARAMS[family]:
+                        for param_name in Formula.irf_params(family):
                             irf_ids = self.atomic_irf_names_by_family[family]
                             param_trainable = self.atomic_irf_param_trainable_by_family[family]
 
@@ -1253,7 +1377,7 @@ class DTSR(object):
                             i += n_levels * len(coef_ids)
 
                         for family in self.atomic_irf_names_by_family:
-                            for param_name in Formula.IRF_PARAMS[family]:
+                            for param_name in Formula.irf_params(family):
                                 irf_ids_src = self.atomic_irf_names_by_family[family]
 
                                 irf_ids = []
@@ -1315,7 +1439,7 @@ class DTSR(object):
                             self.irf_params_fixed_base[family] = {}
                         if family not in self.irf_params_fixed_base_summary:
                             self.irf_params_fixed_base_summary[family] = {}
-                        for param_name in Formula.IRF_PARAMS[family]:
+                        for param_name in Formula.irf_params(family):
                             bounds = self.joint_fixed_ix[family][param_name]
                             if bounds is not None:
                                 s, e = bounds
@@ -1369,7 +1493,7 @@ class DTSR(object):
                                     self.irf_params_random_base[gf][family] = {}
                                 if family not in self.irf_params_random_base_summary[gf]:
                                     self.irf_params_random_base_summary[gf][family] = {}
-                                for param_name in Formula.IRF_PARAMS[family]:
+                                for param_name in Formula.irf_params(family):
                                     if gf in self.irf_by_rangf:
                                         if param_name not in self.irf_params_random_base[gf][family]:
                                             self.irf_params_random_base[gf][family][param_name] = {}
@@ -1399,7 +1523,6 @@ class DTSR(object):
                         tf.expand_dims(self.intercept_fixed, axis=0)
                     )
                 for coef_name in self.fixed_coef_names:
-                    coef_ix = names2ix(coef_name, self.coef_names)
                     coef_name_str = coef_name.split('-')
                     if len(coef_name_str) > 1:
                         coef_name_str = ' '.join(coef_name_str[:-1])
@@ -1413,7 +1536,7 @@ class DTSR(object):
                 for irf_id in self.irf_params_fixed:
                     family = self.atomic_irf_family_by_name[irf_id]
                     for param in self.atomic_irf_param_trainable_by_family[family][irf_id]:
-                        param_ix = names2ix(param, Formula.IRF_PARAMS[family])
+                        param_ix = names2ix(param, Formula.irf_params(family))
                         irf_id_str = irf_id.split('-')
                         if len(irf_id_str) > 1:
                             irf_id_str = ' '.join(irf_id_str[:-1])
@@ -1475,7 +1598,7 @@ class DTSR(object):
                             for irf_id in self.irf_params_random[gf]:
                                 family = self.atomic_irf_family_by_name[irf_id]
                                 for param in self.atomic_irf_param_trainable_by_family[family][irf_id]:
-                                    param_ix = names2ix(param, Formula.IRF_PARAMS[family])
+                                    param_ix = names2ix(param, Formula.irf_params(family))
                                     irf_id_str = irf_id.split('-')
                                     if len(irf_id_str) > 1:
                                         irf_id_str = ' '.join(irf_id_str[:-1])
@@ -1597,8 +1720,9 @@ class DTSR(object):
                     params = self.irf_params[t.irf_id()]
                     params_summary = self.irf_params_summary[t.irf_id()]
 
-                    atomic_irf = self._new_irf(self.irf_lambdas[t.family], params)
-                    atomic_irf_plot = self._new_irf(self.irf_lambdas[t.family], params_summary)
+                    atomic_irf = self._new_irf(self._get_irf_lambda(t.family), params)
+                    atomic_irf_plot = self._new_irf(self._get_irf_lambda(t.family), params_summary)
+
                     if t.p.name() in self.irf:
                         irf = self.irf[t.p.name()][:] + [atomic_irf]
                         irf_plot = self.irf[t.p.name()][:] + [atomic_irf_plot]
@@ -3759,117 +3883,119 @@ class DTSR(object):
                 switches = [['atomic', 'composite'], ['scaled', 'unscaled']]
 
                 for a in switches[0]:
-                    for b in switches[1]:
-                        plot_name = 'irf_%s_%s.png' %(a, b)
-                        names = self.plots[a][b]['names']
-                        if irf_ids is not None and len(irf_ids) > 0:
-                            new_names = []
-                            for i, name in enumerate(names):
-                                for ID in irf_ids:
-                                    if ID==name or re.match(ID if ID.endswith('$') else ID + '$', name) is not None:
-                                        new_names.append(name)
-                            names = new_names
-                        if len(names) > 0:
-                            if mc:
-                                plot_y = []
-                                lq = []
-                                uq = []
-                                for name in names:
-                                    mean_cur, lq_cur, uq_cur = self.ci_curve(
-                                        self.irf_mc[name][a][b],
-                                        level=level,
-                                        n_samples=n_samples,
-                                        n_time_units=plot_n_time_units,
-                                        n_time_points=plot_n_time_points,
-                                    )
-                                    plot_y.append(mean_cur)
-                                    lq.append(lq_cur)
-                                    uq.append(uq_cur)
-                                lq = np.stack(lq, axis=1)
-                                uq = np.stack(uq, axis=1)
-                                plot_y = np.stack(plot_y, axis=1)
-                                plot_name = 'mc_' + plot_name
-                            else:
-                                plot_y = [self.sess.run(self.plots[a][b]['plot'][i], feed_dict=fd) for i in range(len(self.plots[a][b]['plot'])) if self.plots[a][b]['names'][i] in names]
-                                lq = None
-                                uq = None
-                                plot_y = np.concatenate(plot_y, axis=1)
+                    if self.t.has_composed_irf() or a == 'atomic':
+                        for b in switches[1]:
+                            plot_name = 'irf_%s_%s.png' %(a, b)
+                            names = self.plots[a][b]['names']
+                            if irf_ids is not None and len(irf_ids) > 0:
+                                new_names = []
+                                for i, name in enumerate(names):
+                                    for ID in irf_ids:
+                                        if ID==name or re.match(ID if ID.endswith('$') else ID + '$', name) is not None:
+                                            new_names.append(name)
+                                names = new_names
+                            if len(names) > 0:
+                                if mc:
+                                    plot_y = []
+                                    lq = []
+                                    uq = []
+                                    for name in names:
+                                        mean_cur, lq_cur, uq_cur = self.ci_curve(
+                                            self.irf_mc[name][a][b],
+                                            level=level,
+                                            n_samples=n_samples,
+                                            n_time_units=plot_n_time_units,
+                                            n_time_points=plot_n_time_points,
+                                        )
+                                        plot_y.append(mean_cur)
+                                        lq.append(lq_cur)
+                                        uq.append(uq_cur)
+                                    lq = np.stack(lq, axis=1)
+                                    uq = np.stack(uq, axis=1)
+                                    plot_y = np.stack(plot_y, axis=1)
+                                    plot_name = 'mc_' + plot_name
+                                else:
+                                    plot_y = [self.sess.run(self.plots[a][b]['plot'][i], feed_dict=fd) for i in range(len(self.plots[a][b]['plot'])) if self.plots[a][b]['names'][i] in names]
+                                    lq = None
+                                    uq = None
+                                    plot_y = np.concatenate(plot_y, axis=1)
 
-                            plot_irf(
-                                plot_x,
-                                plot_y,
-                                names,
-                                lq=lq,
-                                uq=uq,
-                                dir=self.outdir,
-                                filename=prefix + plot_name,
-                                irf_name_map=irf_name_map,
-                                plot_x_inches=plot_x_inches,
-                                plot_y_inches=plot_y_inches,
-                                cmap=cmap,
-                                legend=legend,
-                                xlab=xlab,
-                                ylab=ylab,
-                                transparent_background=transparent_background
-                            )
+                                plot_irf(
+                                    plot_x,
+                                    plot_y,
+                                    names,
+                                    lq=lq,
+                                    uq=uq,
+                                    dir=self.outdir,
+                                    filename=prefix + plot_name,
+                                    irf_name_map=irf_name_map,
+                                    plot_x_inches=plot_x_inches,
+                                    plot_y_inches=plot_y_inches,
+                                    cmap=cmap,
+                                    legend=legend,
+                                    xlab=xlab,
+                                    ylab=ylab,
+                                    transparent_background=transparent_background
+                                )
 
                 if self.pc:
                     for a in switches[0]:
-                        for b in switches[1]:
-                            if b == 'scaled':
-                                plot_name = 'src_irf_%s_%s.png' % (a, b)
-                                names = self.src_plot_tensors[a][b]['names']
-                                if irf_ids is not None and len(irf_ids) > 0:
-                                    new_names = []
-                                    for i, name in enumerate(names):
-                                        for ID in irf_ids:
-                                            if ID == name or re.match(ID if ID.endswith('$') else ID + '$',
-                                                                      name) is not None:
-                                                new_names.append(name)
-                                    names = new_names
-                                if len(names) > 0:
-                                    if mc:
-                                        plot_y = []
-                                        lq = []
-                                        uq = []
-                                        for name in names:
-                                            mean_cur, lq_cur, uq_cur = self.ci_curve(
-                                                self.src_irf_mc[name][a][b],
-                                                level=level,
-                                                n_samples=n_samples,
-                                                n_time_units=plot_n_time_units,
-                                                n_time_points=plot_n_time_points,
-                                            )
-                                            plot_y.append(mean_cur)
-                                            lq.append(lq_cur)
-                                            uq.append(uq_cur)
-                                        lq = np.stack(lq, axis=1)
-                                        uq = np.stack(uq, axis=1)
-                                        plot_y = np.stack(plot_y, axis=1)
-                                        plot_name = 'mc_' + plot_name
-                                    else:
-                                        plot_y = [self.sess.run(self.src_plot_tensors[a][b]['plot'][i], feed_dict=fd) for i in range(len(self.src_plot_tensors[a][b]['plot'])) if self.src_plot_tensors[a][b]['names'][i] in names]
-                                        lq = None
-                                        uq = None
-                                        plot_y = np.concatenate(plot_y, axis=1)
+                        if self.t.has_composed_irf() or a == 'atomic':
+                            for b in switches[1]:
+                                if b == 'scaled':
+                                    plot_name = 'src_irf_%s_%s.png' % (a, b)
+                                    names = self.src_plot_tensors[a][b]['names']
+                                    if irf_ids is not None and len(irf_ids) > 0:
+                                        new_names = []
+                                        for i, name in enumerate(names):
+                                            for ID in irf_ids:
+                                                if ID == name or re.match(ID if ID.endswith('$') else ID + '$',
+                                                                          name) is not None:
+                                                    new_names.append(name)
+                                        names = new_names
+                                    if len(names) > 0:
+                                        if mc:
+                                            plot_y = []
+                                            lq = []
+                                            uq = []
+                                            for name in names:
+                                                mean_cur, lq_cur, uq_cur = self.ci_curve(
+                                                    self.src_irf_mc[name][a][b],
+                                                    level=level,
+                                                    n_samples=n_samples,
+                                                    n_time_units=plot_n_time_units,
+                                                    n_time_points=plot_n_time_points,
+                                                )
+                                                plot_y.append(mean_cur)
+                                                lq.append(lq_cur)
+                                                uq.append(uq_cur)
+                                            lq = np.stack(lq, axis=1)
+                                            uq = np.stack(uq, axis=1)
+                                            plot_y = np.stack(plot_y, axis=1)
+                                            plot_name = 'mc_' + plot_name
+                                        else:
+                                            plot_y = [self.sess.run(self.src_plot_tensors[a][b]['plot'][i], feed_dict=fd) for i in range(len(self.src_plot_tensors[a][b]['plot'])) if self.src_plot_tensors[a][b]['names'][i] in names]
+                                            lq = None
+                                            uq = None
+                                            plot_y = np.concatenate(plot_y, axis=1)
 
-                                    plot_irf(
-                                        plot_x,
-                                        plot_y,
-                                        names,
-                                        lq=lq,
-                                        uq=uq,
-                                        dir=self.outdir,
-                                        filename=prefix + plot_name,
-                                        irf_name_map=irf_name_map,
-                                        plot_x_inches=plot_x_inches,
-                                        plot_y_inches=plot_y_inches,
-                                        cmap=cmap,
-                                        legend=legend,
-                                        xlab=xlab,
-                                        ylab=ylab,
-                                        transparent_background=transparent_background
-                                    )
+                                        plot_irf(
+                                            plot_x,
+                                            plot_y,
+                                            names,
+                                            lq=lq,
+                                            uq=uq,
+                                            dir=self.outdir,
+                                            filename=prefix + plot_name,
+                                            irf_name_map=irf_name_map,
+                                            plot_x_inches=plot_x_inches,
+                                            plot_y_inches=plot_y_inches,
+                                            cmap=cmap,
+                                            legend=legend,
+                                            xlab=xlab,
+                                            ylab=ylab,
+                                            transparent_background=transparent_background
+                                        )
 
                 self.set_predict_mode(False)
 

@@ -11,6 +11,8 @@ from .util import names2ix, sn
 interact = re.compile('([^ ]+):([^ ]+)')
 spillover = re.compile('^.+S[0-9]+$')
 split_irf = re.compile('(.+)\(([^(]+)')
+spline = re.compile('S((o([0-9]+))?(b([0-9]+))?(l([0-9]+))?(p([0-9]+))?(i([0-1]))?)?$')
+
 
 class Formula(object):
     """
@@ -19,6 +21,145 @@ class Formula(object):
     # Arguments
         bform_str: String. An R-style mixed-effects model formula string
     """
+
+    IRF = [
+        'DiracDelta',
+        'Exp',
+        'ExpRateGT1',
+        'Gamma',
+        'ShiftedGamma',
+        'GammaKgt1',
+        'GammaShapeGT1',
+        'ShiftedGammaKgt1',
+        'ShiftedGammaShapeGT1',
+        'Normal',
+        'SkewNormal',
+        'EMG',
+        'BetaPrime',
+        'ShiftedBetaPrime',
+        'HRFSingleGamma',
+        'HRFDoubleGamma',
+        'HRFDoubleGammaUnconstrained'
+    ]
+
+    IRF_PARAMS = {
+        'DiracDelta': [],
+        'Exp': ['beta'],
+        'ExpRateGT1': ['beta'],
+        'Gamma': ['alpha', 'beta'],
+        'ShiftedGamma': ['alpha', 'beta', 'delta'],
+        'GammaKgt1': ['alpha', 'beta'],
+        'GammaShapeGT1': ['alpha', 'beta'],
+        'ShiftedGammaKgt1': ['alpha', 'beta', 'delta'],
+        'ShiftedGammaShapeGT1': ['alpha', 'beta', 'delta'],
+        'Normal': ['mu', 'sigma'],
+        'SkewNormal': ['mu', 'sigma', 'alpha'],
+        'EMG': ['mu', 'sigma', 'beta'],
+        'BetaPrime': ['alpha', 'beta'],
+        'ShiftedBetaPrime': ['alpha', 'beta', 'delta'],
+        'HRFSingleGamma': ['alpha', 'beta'],
+        'HRFDoubleGamma': ['alpha_main', 'beta', 'alpha_undershoot_offset', 'c'],
+        'HRFDoubleGammaUnconstrained': ['alpha_main', 'beta_main', 'alpha_undershoot', 'beta_undershoot', 'c']
+    }
+
+    SPLINE_DEFAULT_ORDER = 2
+    SPLINE_DEFAULT_BASES = 10
+    SPLINE_DEFAULT_ROUGHNESS_PENALTY = 0.001
+    SPLINE_DEFAULT_SPACING_POWER = 1
+    SPLINE_DEFAULT_INSTANTANEOUS = True
+
+    @staticmethod
+    def irf_params(family):
+        if family in Formula.IRF_PARAMS:
+            out = Formula.IRF_PARAMS[family]
+        elif Formula.is_spline(family):
+            bs = Formula.bases(family)
+            instantaneous = Formula.instantaneous(family)
+            out = ['x%s' % i for i in range(2, bs + 1)] + ['y%s' % i for i in range(1 + (1-instantaneous), bs)]
+        else:
+            out = []
+
+        return out
+
+    @staticmethod
+    def is_spline(family):
+        if family is None:
+            out = False
+        else:
+            out = spline.match(family) is not None
+        return out
+
+    @staticmethod
+    def order(family):
+        if family is None:
+            out = None
+        else:
+            if Formula.is_spline(family):
+                order = spline.match(family).group(3)
+                if order is None:
+                    order = Formula.SPLINE_DEFAULT_ORDER
+                out = int(order)
+            else:
+                out = None
+        return out
+
+    @staticmethod
+    def bases(family):
+        if family is None:
+            out = None
+        else:
+            if Formula.is_spline(family):
+                bases = spline.match(family).group(5)
+                if bases is None:
+                    bases = Formula.SPLINE_DEFAULT_BASES
+                out = int(bases)
+            else:
+                out = None
+        return out
+
+    @staticmethod
+    def roughness_penalty(family):
+        if family is None:
+            out = None
+        else:
+            if Formula.is_spline(family):
+                roughness_penalty = spline.match(family).group(7)
+                if roughness_penalty is None:
+                    out = Formula.SPLINE_DEFAULT_ROUGHNESS_PENALTY
+                else:
+                    out = float('0.' + roughness_penalty)
+            else:
+                out = None
+        return out
+
+    @staticmethod
+    def spacing_power(family):
+        if family is None:
+            out = None
+        else:
+            if Formula.is_spline(family):
+                spacing_power = spline.match(family).group(9)
+                if spacing_power is None:
+                    spacing_power = Formula.SPLINE_DEFAULT_SPACING_POWER
+                out = int(spacing_power)
+            else:
+                out = None
+        return out
+
+    @staticmethod
+    def instantaneous(family):
+        if family is None:
+            out = None
+        else:
+            if Formula.is_spline(family):
+                instantaneous = spline.match(family).group(11)
+                if instantaneous is None:
+                    instantaneous = Formula.SPLINE_DEFAULT_BASES
+                out = bool(int(instantaneous))
+            else:
+                out = None
+        return out
+
     def __init__(self, bform_str):
         self.build(bform_str)
 
@@ -72,7 +213,7 @@ class Formula(object):
                 self.process_ast(t.left, terms=subterms, has_intercept=has_intercept, rangf=rangf)
                 self.process_ast(t.right, terms=subterms, has_intercept=has_intercept, rangf=rangf)
                 for x in subterms:
-                    if type(x).__name__ == 'IRFTreeNode':
+                    if type(x).__name__ == 'IRFNode':
                         raise ValueError('Interaction terms may not dominate IRF terms in DTSR formula strings')
                 new = InteractionImpulse(terms=subterms, ops=ops)
                 terms.append(new)
@@ -82,7 +223,7 @@ class Formula(object):
                 self.process_ast(t.left, terms=subterms, has_intercept=has_intercept, rangf=rangf)
                 self.process_ast(t.right, terms=subterms, has_intercept=has_intercept, rangf=rangf)
                 for x in subterms:
-                    if type(x).__name__ == 'IRFTreeNode':
+                    if type(x).__name__ == 'IRFNode':
                         raise ValueError('Term expansions may not dominate IRF terms in DTSR formula strings')
                 new = InteractionImpulse(terms=subterms, ops=ops)
                 terms += subterms
@@ -92,7 +233,7 @@ class Formula(object):
                 subterms = []
                 self.process_ast(t.left, terms=subterms, has_intercept=has_intercept, rangf=rangf)
                 for x in subterms:
-                    if type(x).__name__ == 'IRFTreeNode':
+                    if type(x).__name__ == 'IRFNode':
                         raise ValueError('Term expansions may not dominate IRF terms in DTSR formula strings')
                 order = min(int(t.right.n), len(subterms))
                 for i in range(1, order + 1):
@@ -111,7 +252,7 @@ class Formula(object):
                 for x in subterms:
                     new = self.process_irf(t.args[1], input=x, ops=None, rangf=rangf)
                     terms.append(new)
-            elif t.func.id in Formula.IRF:
+            elif t.func.id in Formula.IRF or spline.match(t.func.id) is not None:
                 raise ValueError('IRF calls can only occur as inputs to C() in DTSR formula strings')
             else:
                 assert len(t.args) <= 1, 'Only unary ops on variables supported in DTSR formula strings'
@@ -143,13 +284,14 @@ class Formula(object):
     ):
         if ops is None:
             ops = []
-        assert t.func.id in Formula.IRF, 'Ill-formed model string: process_irf() called on non-IRF node'
+        assert t.func.id in Formula.IRF or spline.match(t.func.id) is not None, 'Ill-formed model string: process_irf() called on non-IRF node'
         irf_id = None
         coef_id = None
         cont = False
         ranirf = False
         trainable = None
         param_init={}
+        order = None
         if len(t.keywords) > 0:
             for k in t.keywords:
                 if k.arg == 'irf_id':
@@ -472,45 +614,6 @@ class Formula(object):
             impulse_ids = [impulse_ids]
         self.t.remove_impulses(impulse_ids)
 
-    IRF = [
-        'DiracDelta',
-        'Exp',
-        'ExpRateGT1',
-        'Gamma',
-        'ShiftedGamma',
-        'GammaKgt1',
-        'GammaShapeGT1',
-        'ShiftedGammaKgt1',
-        'ShiftedGammaShapeGT1',
-        'Normal',
-        'SkewNormal',
-        'EMG',
-        'BetaPrime',
-        'ShiftedBetaPrime',
-        'HRFSingleGamma',
-        'HRFDoubleGamma'
-    ]
-
-    IRF_PARAMS = {
-        'DiracDelta': [],
-        'Exp': ['beta'],
-        'ExpRateGT1': ['beta'],
-        'Gamma': ['alpha', 'beta'],
-        'ShiftedGamma': ['alpha', 'beta', 'delta'],
-        'GammaKgt1': ['alpha', 'beta'],
-        'GammaShapeGT1': ['alpha', 'beta'],
-        'ShiftedGammaKgt1': ['alpha', 'beta', 'delta'],
-        'ShiftedGammaShapeGT1': ['alpha', 'beta', 'delta'],
-        'Normal': ['mu', 'sigma'],
-        'SkewNormal': ['mu', 'sigma', 'alpha'],
-        'EMG': ['mu', 'sigma', 'beta'],
-        'BetaPrime': ['alpha', 'beta'],
-        'ShiftedBetaPrime': ['alpha', 'beta', 'delta'],
-        'HRFSingleGamma': ['alpha', 'beta'],
-        'HRFDoubleGamma': ['alpha_main', 'beta', 'alpha_undershoot_offset', 'c']
-
-    }
-
     def __str__(self):
         out = str(self.dv_term) + ' ~ '
 
@@ -663,15 +766,21 @@ class IRFNode(object):
             self.coefID = coefID
             self.fixed = fixed
             self.rangf = [] if rangf is None else rangf if isinstance(rangf, list) else [rangf]
+
             self.param_init = {}
             if param_init is not None:
-                for param in Formula.IRF_PARAMS.get(self.family, []):
+                for param in Formula.irf_params(self.family):
                     if param in param_init:
                         self.param_init[param] = param_init[param]
+
         if trainable is None:
-            self.trainable = Formula.IRF_PARAMS.get(self.family, [])
+            self.trainable = Formula.irf_params(self.family)
         else:
-            self.trainable = trainable
+            new_trainable = []
+            for param in Formula.irf_params(self.family):
+                if param in trainable:
+                    new_trainable.append(param)
+            self.trainable = new_trainable
 
         self.children = []
         self.p = p
@@ -735,6 +844,34 @@ class IRFNode(object):
 
     def terminal(self):
         return self.family == 'Terminal'
+
+    def depth(self):
+        d = 1
+        for c in self.children:
+            if c.depth() + 1 > d:
+                d = c.depth() + 1
+        return d
+
+    def has_composed_irf(self):
+        return self.depth() > 3
+
+    def is_spline(self):
+        return Formula.is_spline(self.family)
+
+    def order(self):
+        return Formula.order(self.family)
+
+    def bases(self):
+        return Formula.bases(self.family)
+
+    def spacing_power(self):
+        return Formula.spacing_power(self.family)
+
+    def roughness_penalty(self):
+        return Formula.roughness_penalty(self.family)
+
+    def instantaneous(self):
+        return Formula.instantaneous(self.family)
 
     def impulses(self):
         out = []
@@ -1132,7 +1269,7 @@ class IRFNode(object):
                         inner.append('cont=T')
                     if len(self.param_init) > 0:
                         inner.append(', '.join(['%s=%s' %(x, self.param_init[x]) for x in self.param_init]))
-                    if set(self.trainable) != set(Formula.IRF_PARAMS[self.family]):
+                    if set(self.trainable) != set(Formula.irf_params(self.family)):
                         inner.append('trainable=%s' %self.trainable)
                     new_irf = self.family + '(' + ', '.join(inner) + ')'
                     if outer is not None:
