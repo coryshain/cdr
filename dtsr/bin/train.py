@@ -45,7 +45,7 @@ if __name__ == '__main__':
     dtsr_formula_name_list = [m for m in p.model_list if m.startswith('DTSR')]
     all_rangf = [v for x in dtsr_formula_list for v in x.rangf]
     X, y = read_data(p.X_train, p.y_train, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in dtsr_formula_list for v in x.rangf])))
-    X, y, select, X_2d_predictor_names, X_2d_predictors = preprocess_data(
+    X, y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors = preprocess_data(
         X,
         y,
         p,
@@ -191,7 +191,10 @@ if __name__ == '__main__':
 
         elif m.startswith('DTSR'):
             dv = formula.strip().split('~')[0].strip()
-            y_valid = filter_invalid_responses(y, dv)
+            y_valid, select_y_valid = filter_invalid_responses(y, dv)
+            X_response_aligned_predictors_valid = X_response_aligned_predictors
+            if X_response_aligned_predictors_valid is not None:
+                X_response_aligned_predictors_valid = X_response_aligned_predictors_valid[select_y_valid]
 
             sys.stderr.write('\nInitializing model %s...\n\n' % m)
 
@@ -242,6 +245,8 @@ if __name__ == '__main__':
                 X,
                 y_valid,
                 n_iter=p['n_iter'],
+                X_response_aligned_predictor_names=X_response_aligned_predictor_names,
+                X_response_aligned_predictors=X_response_aligned_predictors_valid,
                 X_2d_predictor_names=X_2d_predictor_names,
                 X_2d_predictors=X_2d_predictors,
                 force_training_evaluation=args.force_training_evaluation,

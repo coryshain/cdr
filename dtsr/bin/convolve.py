@@ -52,7 +52,7 @@ if __name__ == '__main__':
         X, y = read_data(p.X_test, p.y_test, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in dtsr_formula_list for v in x.rangf])))
     else:
         raise ValueError('Unrecognized value for "partition" argument: %s' %args.partition)
-    X, y, select, X_2d_predictor_names, X_2d_predictors = preprocess_data(
+    X, y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors = preprocess_data(
         X,
         y,
         p,
@@ -64,7 +64,10 @@ if __name__ == '__main__':
         formula = p.models[m]['formula']
 
         dv = formula.strip().split('~')[0].strip()
-        y_valid = filter_invalid_responses(y, dv)
+        y_valid, select_y_valid = filter_invalid_responses(y, dv)
+        X_response_aligned_predictors_valid = X_response_aligned_predictors
+        if X_response_aligned_predictors_valid is not None:
+            X_response_aligned_predictors_valid = X_response_aligned_predictors_valid[select_y_valid]
 
         sys.stderr.write('Retrieving saved model %s...\n' % m)
         dtsr_model = load_dtsr(p.outdir + '/' + m)
@@ -72,6 +75,8 @@ if __name__ == '__main__':
         X_conv, X_conv_summary = dtsr_model.convolve_inputs(
             X,
             y_valid,
+            X_response_aligned_predictor_names=X_response_aligned_predictor_names,
+            X_response_aligned_predictors=X_response_aligned_predictors_valid,
             X_2d_predictor_names=X_2d_predictor_names,
             X_2d_predictors=X_2d_predictors,
             scaled=not args.unscaled,

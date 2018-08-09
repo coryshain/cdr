@@ -540,13 +540,24 @@ class Formula(object):
             X_2d_predictors = np.concatenate([X_2d_predictors, new_2d_predictor], axis=2)
         return X_2d_predictor_names, X_2d_predictors
 
-    def apply_formula(self, X, y, X_2d_predictor_names=None, X_2d_predictors=None, history_length=128):
+    def apply_formula(
+            self,
+            X,
+            y,
+            X_response_aligned_predictor_names=None,
+            X_response_aligned_predictors=None,
+            X_2d_predictor_names=None,
+            X_2d_predictors=None,
+            history_length=128
+    ):
         if self.dv not in y.columns:
             y = self.apply_ops(self.dv_term, y)
         impulses = self.t.impulses()
 
         if X_2d_predictor_names is None:
             X_2d_predictor_names = []
+        if X_response_aligned_predictor_names is None:
+            X_response_aligned_predictor_names = []
 
         time_mask = None
 
@@ -582,11 +593,19 @@ class Formula(object):
                     history_length=history_length
                 )
 
+            elif impulse.id not in X.columns:
+                if impulse.name() not in X_response_aligned_predictor_names:
+                    X_response_aligned_predictor_names.append(impulse.name())
+                    if X_response_aligned_predictors is None:
+                        X_response_aligned_predictors = y[[impulse.id]]
+                    else:
+                        X_response_aligned_predictors[[impulse.id]] = y[[impulse.id]]
+                    X_response_aligned_predictors = self.apply_ops(impulse, X_response_aligned_predictors)
             else:
                 X = self.apply_ops(impulse, X)
         for col in [x for x in X.columns if spillover.match(x)]:
             X[col] = X[col].fillna(0)
-        return X, y, X_2d_predictor_names, X_2d_predictors
+        return X, y, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors
 
     def ablate_impulses(self, impulse_ids):
         if not isinstance(impulse_ids, list):

@@ -932,24 +932,36 @@ class DTSR(object):
                     raise ValueError('Query to spline IRF must be exactly rank 3')
 
                 for i in range(len(c)):
-                    if c[i].shape[0] == 1:
-                        c_ = tf.tile(c[i][..., None], [tf.shape(x)[0], 1, 1])
-                    else:
-                        c_ = c[i][..., None]
-                    if y[i].shape[0] == 1:
-                        y_ = tf.tile(y[i][..., None], [tf.shape(x)[0], 1, 1])
-                    else:
-                        y_ = y[i][..., None]
+                    if order == 1:
+                        rise = y[i][:,1:] - y[i][:,:-1]
+                        run = c[i][:,1:] - c[i][:,:-1]
+                        a_ = (rise / run)
+                        self.rise_ = rise
+                        self.run_ = run
+                        self.a_ = a_
+                        c_ = c[i][:,:-1]
 
-                    splines.append(
-                        lambda x: interpolate_spline(
+                        out = lambda x: tf.reduce_sum(tf.cast(x >= c_, dtype=self.FLOAT_TF) * (x - c_) * a_, axis=2, keepdims=True)
+
+                    else:
+                        if c[i].shape[0] == 1:
+                            c_ = tf.tile(c[i][..., None], [tf.shape(x)[0], 1, 1])
+                        else:
+                            c_ = c[i][..., None]
+                        if y[i].shape[0] == 1:
+                            y_ = tf.tile(y[i][..., None], [tf.shape(x)[0], 1, 1])
+                        else:
+                            y_ = y[i][..., None]
+
+                        out = lambda x: interpolate_spline(
                             c_,
                             y_,
                             x,
                             order,
                             regularization_weight=roughness_penalty
                         )
-                    )
+
+                    splines.append(out)
 
                 out = tf.concat([s(x) for s in splines], axis=2)
                 # out = tf.where(x <= self.max_tdelta, out, tf.zeros_like(out))
@@ -3198,6 +3210,8 @@ class DTSR(object):
             X,
             y,
             n_iter=100,
+            X_response_aligned_predictor_names=None,
+            X_response_aligned_predictors=None,
             X_2d_predictor_names=None,
             X_2d_predictors=None,
             force_training_evaluation=True,
@@ -3249,7 +3263,7 @@ class DTSR(object):
 
         if self.pc:
             impulse_names = self.src_impulse_names
-            assert X_2d_predictors is None, 'Principal components regression not support for models with 3d predictors'
+            assert X_2d_predictors is None, 'Principal components regression not supported for models with 2d predictors'
         else:
             impulse_names  = self.impulse_names
 
@@ -3270,6 +3284,8 @@ class DTSR(object):
             y.last_obs,
             impulse_names,
             history_length=128,
+            X_response_aligned_predictor_names=X_response_aligned_predictor_names,
+            X_response_aligned_predictors=X_response_aligned_predictors,
             X_2d_predictor_names=X_2d_predictor_names,
             X_2d_predictors=X_2d_predictors,
             int_type=self.int_type,
@@ -3287,33 +3303,6 @@ class DTSR(object):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
-
-                # normal_loc_test_1 = .01
-                # normal_scale_test_1 = .05
-                # normal_loc_test_2 = 1.
-                # normal_scale_test_2 = 3.
-                #
-                # support, conv_test_plot_1 = self.sess.run([self.support, self.conv_test_plot], feed_dict={
-                #     self.support_start: 0.,
-                #     self.n_time_units: 20,
-                #     self.n_time_points: plot_n_time_points,
-                #     self.time_y: [20],
-                #     self.time_X: np.zeros((1, self.history_length)),
-                #     self.normal_loc_test_1: [[[normal_loc_test_1]]],
-                #     self.normal_scale_test_1: [[[normal_scale_test_1]]],
-                #     self.normal_loc_test_2: [[[normal_loc_test_2]]],
-                #     self.normal_scale_test_2: [[[normal_scale_test_2]]]
-                # })
-                #
-                # from scipy.stats import norm
-                #
-                # norm_1 = norm.pdf(support, normal_loc_test_1, normal_scale_test_1)
-                # norm_2 = norm.pdf(support, normal_loc_test_2, normal_scale_test_2)
-                # conv_test_plot_2 = norm.pdf(support, normal_loc_test_1 + normal_loc_test_2, np.sqrt(normal_scale_test_1**2 + normal_scale_test_2**2))
-                # plot_irf(support, np.concatenate([norm_1, norm_2, conv_test_plot_1, conv_test_plot_2], axis=1), ['ZConvolution', 'Reference'], dir=self.outdir, filename='fft_conv_test.png',)
-
-
-
                 if self.global_step.eval(session=self.sess) < n_iter:
                     self.set_training_complete(False)
 
@@ -3449,8 +3438,10 @@ class DTSR(object):
                         y[self.form.rangf],
                         y.first_obs,
                         y.last_obs,
+                        X_response_aligned_predictor_names=X_response_aligned_predictor_names,
+                        X_response_aligned_predictors=X_response_aligned_predictors,
                         X_2d_predictor_names=X_2d_predictor_names,
-                        X_2d_predictors=X_2d_predictors,
+                        X_2d_predictors=X_2d_predictors
                     )
 
                     with open(self.outdir + '/preds_train.txt', 'w') as p_file:
@@ -3474,6 +3465,8 @@ class DTSR(object):
                     training_logliks = self.log_lik(
                         X,
                         y,
+                        X_response_aligned_predictor_names=X_response_aligned_predictor_names,
+                        X_response_aligned_predictors=X_response_aligned_predictors,
                         X_2d_predictor_names=X_2d_predictor_names,
                         X_2d_predictors=X_2d_predictors,
                     )
@@ -3519,6 +3512,8 @@ class DTSR(object):
             y_rangf,
             first_obs,
             last_obs,
+            X_response_aligned_predictor_names=None,
+            X_response_aligned_predictors=None,
             X_2d_predictor_names=None,
             X_2d_predictors=None,
             n_samples=None,
@@ -3568,6 +3563,8 @@ class DTSR(object):
             last_obs,
             impulse_names,
             history_length=128,
+            X_response_aligned_predictor_names=X_response_aligned_predictor_names,
+            X_response_aligned_predictors=X_response_aligned_predictors,
             X_2d_predictor_names=X_2d_predictor_names,
             X_2d_predictors=X_2d_predictors,
             int_type=self.int_type,
@@ -3615,6 +3612,8 @@ class DTSR(object):
             self,
             X,
             y,
+            X_response_aligned_predictor_names=None,
+            X_response_aligned_predictors=None,
             X_2d_predictor_names=None,
             X_2d_predictors=None,
             n_samples=None,
@@ -3662,6 +3661,8 @@ class DTSR(object):
             y['last_obs'],
             impulse_names,
             history_length=128,
+            X_response_aligned_predictor_names=X_response_aligned_predictor_names,
+            X_response_aligned_predictors=X_response_aligned_predictors,
             X_2d_predictor_names=X_2d_predictor_names,
             X_2d_predictors=X_2d_predictors,
             int_type=self.int_type,
@@ -3713,6 +3714,8 @@ class DTSR(object):
             self,
             X,
             y,
+            X_response_aligned_predictor_names=None,
+            X_response_aligned_predictors=None,
             X_2d_predictor_names=None,
             X_2d_predictors=None,
             scaled=False,
@@ -3740,6 +3743,8 @@ class DTSR(object):
             y['last_obs'],
             impulse_names,
             history_length=128,
+            X_response_aligned_predictor_names=X_response_aligned_predictor_names,
+            X_response_aligned_predictors=X_response_aligned_predictors,
             X_2d_predictor_names=X_2d_predictor_names,
             X_2d_predictors=X_2d_predictors,
             int_type=self.int_type,

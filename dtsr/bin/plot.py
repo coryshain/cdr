@@ -19,7 +19,7 @@ if __name__ == '__main__':
     argparser.add_argument('-s', '--plot_true_synthetic', action='store_true', help='If the models are fit to synthetic data, also generate plots of the true IRF')
     argparser.add_argument('-p', '--prefix', type=str, default='', help='Filename prefix to use for outputs')
     argparser.add_argument('-u', '--ntimeunits', type=float, default=None, help='Number of time units on x-axis')
-    argparser.add_argument('-r', '--resolution', type=float, default=None, help='Number of points per time unit')
+    argparser.add_argument('-r', '--resolution', type=float, default=None, help='Number of points on x-axis')
     argparser.add_argument('-x', '--x', type=float, default=None, help='Width of plot in inches')
     argparser.add_argument('-X', '--xlab', type=str, default=None, help='x-axis label (if default -- None -- no label)')
     argparser.add_argument('-y', '--y', type=float, default=None, help='Height of plot in inches')

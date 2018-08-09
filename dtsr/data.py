@@ -13,7 +13,8 @@ def s(df):
     return df/df.std(axis=0)
 
 def filter_invalid_responses(y, dv):
-    return y[np.isfinite(y[dv]) & (y.last_obs > y.first_obs)]
+    select_y_valid = np.isfinite(y[dv]) & (y.last_obs > y.first_obs)
+    return y[select_y_valid], select_y_valid
 
 def build_DTSR_impulses(
         X,
@@ -21,17 +22,20 @@ def build_DTSR_impulses(
         last_obs,
         impulse_names,
         history_length=128,
+        X_response_aligned_predictor_names=None,
+        X_response_aligned_predictors=None,
         X_2d_predictor_names=None,
         X_2d_predictors=None,
         int_type='int32',
         float_type='float32',
 ):
+    if X_response_aligned_predictor_names is None:
+        X_response_aligned_predictor_names = []
     assert (X_2d_predictors is None and (X_2d_predictor_names is None or len(X_2d_predictor_names) == 0)) or (X_2d_predictors.shape[-1] == len(X_2d_predictor_names)), 'Shape mismatch between X_2d_predictors and X_2d_predictor_names'
     if X_2d_predictor_names is None:
         X_2d_predictor_names = []
-    impulse_names_1d = list(set(impulse_names).difference(set(X_2d_predictor_names)))
-    impulse_names_2d = list(set(impulse_names).intersection(set(X_2d_predictor_names)))
-    assert len(impulse_names) == len(impulse_names_1d) + len(impulse_names_2d), 'Mismatch between 1d and 2d predictor sets'
+
+    impulse_names_1d = sorted(list(set(impulse_names).difference(set(X_response_aligned_predictor_names)).difference(set(X_2d_predictor_names))))
 
     X_2d_from_1d, time_X_2d, time_mask = expand_history(
         X[impulse_names_1d],
@@ -43,11 +47,18 @@ def build_DTSR_impulses(
         float_type=float_type
     )
 
-    if X_2d_predictors is None:
-        X_2d = X_2d_from_1d[:, :, names2ix(impulse_names, impulse_names_1d)]
-    else:
-        X_2d = np.concatenate([X_2d_from_1d, X_2d_predictors], axis=2)
-        X_2d = X_2d[:, :, names2ix(impulse_names, impulse_names_1d + impulse_names_2d)]
+    X_2d = X_2d_from_1d
+
+    if X_response_aligned_predictors is not None:
+        print(X_response_aligned_predictors.columns)
+        X_response_aligned_predictors_new = np.zeros((X_2d_from_1d.shape[0], X_2d_from_1d.shape[1], len(X_response_aligned_predictor_names)))
+        X_response_aligned_predictors_new[:, -1, :] = X_response_aligned_predictors[X_response_aligned_predictor_names]
+        X_2d = np.concatenate([X_2d, X_response_aligned_predictors_new], axis=2)
+
+    if X_2d_predictors is not None:
+        X_2d = np.concatenate([X_2d, X_2d_predictors], axis=2)
+
+    X_2d = X_2d[:,:,names2ix(impulse_names, impulse_names_1d + X_response_aligned_predictor_names + X_2d_predictor_names)]
 
     return X_2d, time_X_2d, time_mask
 
@@ -234,6 +245,8 @@ def preprocess_data(X, y, p, formula_list, compute_history=True, debug=False):
     else:
         select = np.full((len(y),), True, dtype='bool')
 
+    X_response_aligned_predictor_names = None
+    X_response_aligned_predictors = None
     X_2d_predictor_names = None
     X_2d_predictors = None
 
@@ -257,13 +270,15 @@ def preprocess_data(X, y, p, formula_list, compute_history=True, debug=False):
                 print(X[['subject', 'docid', 'word', 'time']][row.first_obs:row.last_obs])
 
         for x in formula_list:
-            X, y, X_2d_predictor_names, X_2d_predictors = x.apply_formula(
+            X, y, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors = x.apply_formula(
                 X,
                 y,
                 X_2d_predictor_names=X_2d_predictor_names,
                 X_2d_predictors=X_2d_predictors,
+                X_response_aligned_predictor_names=X_response_aligned_predictor_names,
+                X_response_aligned_predictors=X_response_aligned_predictors,
                 history_length=p.history_length
             )
 
-    return X, y, select, X_2d_predictor_names, X_2d_predictors
+    return X, y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors
 
