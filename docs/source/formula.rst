@@ -192,7 +192,7 @@ The keyword arguments are defined as follows:
   - **o** (order): ``int``, the order of the spline. Order 1 is linear interpolation, order 2 is a thin-plate spline, order 3 is a cubic spline, etc. **Default**: 2.
   - **b** (bases): ``int``, number of bases (control points). **Default**: 10.
   - **l** (roughness penalty): ``int``, digits following the decimal representing the roughness penalty (regularization against wiggliness). For example, ``l01`` specifies a roughness penalty of 0.01. **Default**: 001.
-  - **p** (spacing power): ``int``, power to use for initial spacing of control points in time between 0 and the maximum time offset attested in the training data. If 1, control points will be initialized as evenly spaced. If 2, control points will be quadratically spaced, etc. Initially concentrating more control points toward smaller time offsets is motivated in most cases by the fact that (1) many real-world IRF have more complex dynamics closer to the time of the impulse and (2) most datasets will contain more training data for smaller time offsets than longer ones, possibly resulting in decreasing precision of the IRF estimate at long latencies. **Default**: 1.
+  - **p** (spacing power): ``int``, power to use for initial spacing of control points in time between 0 and the maximum time offset attested in the training data. If 1, control points will be initialized as evenly spaced. If 2, control points will be quadratically spaced, etc. Initially concentrating more control points toward smaller time offsets is motivated in many cases by the fact that (1) many real-world IRF have more complex dynamics closer to the time of the impulse and (2) most datasets will contain more training data for smaller time offsets than longer ones, possibly resulting in decreasing precision of the IRF estimate at long latencies. **Default**: 1.
   - **i** (instantaneous response): ``int`` (0 or 1), whether to allow an instantaneous response. If 0, the response at time 0 is forced to be 0. **Default**: 1.
 
 
@@ -201,7 +201,7 @@ IRF Composition
 ---------------
 
 In some cases it may be desirable to decompose the response into multiple convolutions of an impulse.
-For example, it is reasonable to suppose that the BOLD response in fMRI may underlyingly consist of 2 convolutional responses: a **neural response** may convolve the impulse into a timecourse of neural activation which is then convolved with a **hemodynamic response** into a BOLD signal.
+For example, it is possible that the BOLD response in fMRI consists underlyingly of 2 convolutional responses: a **neural response** that convolves the impulse into a timecourse of neural activation, which is then convolved with a **hemodynamic response** into a BOLD signal.
 In this case, it would be desirable to be able to model the BOLD response as a composition of neural and hemodynamic responses.
 
 Exact parametric composition of IRF is not possible in the general case because many pairs of IRF do not have a tractable analytical convolution.
