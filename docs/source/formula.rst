@@ -36,74 +36,138 @@ The currently supported parametric IRF families are:
 
 - ``DiracDelta``: Stick function (equivalent to a predictor in linear regression)
 
-  - Parameters: None
+  - Parameters:
+
+    - None
+
   - Definition: :math:`1` at :math:`x=0`, :math:`0` otherwise
 
 - ``Exp``: PDF of exponential distribution
 
-  - Parameters: :math:`\beta > 0` (``beta``, rate)
+  - Parameters:
+
+    - :math:`\beta > 0` (``beta``, rate)
+
   - Definition: :math:`\beta e^{-\beta x}`
 
 - ``Gamma``: PDF of gamma distribution
 
-  - Parameters: :math:`\alpha > 0` (``alpha``, shape), :math:`\beta > 0` (``beta``, rate)
+  - Parameters:
+
+    - :math:`\alpha > 0` (``alpha``, shape)
+    - :math:`\beta > 0` (``beta``, rate)
+
   - Definition: :math:`\frac{\beta^{\alpha}x^{\alpha-1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha)}`
 
 - ``ShiftedGamma``: PDF of gamma distribution with support starting at :math:`0 + \delta`
 
-  - Parameters: :math:`\alpha > 0` (``alpha``, shape), :math:`\beta > 0` (``beta``, rate), :math:`\delta < 0` (``delta``, shift)
+  - Parameters:
+
+    - :math:`\alpha > 0` (``alpha``, shape)
+    - :math:`\beta > 0` (``beta``, rate)
+    - :math:`\delta < 0` (``delta``, shift)
+
   - Definition: :math:`\frac{\beta^{\alpha}(x - \delta)^{\alpha-1}e^{-\frac{x - \delta}{\beta}}}{\Gamma(\alpha)}`
 
 - ``GammaShapeGT1``: PDF of gamma distribution, :math:`\alpha > 1` (enforces rising-then-falling shape)
 
-  - Parameters: :math:`\alpha > 1` (``alpha``, shape), :math:`\beta > 1` (``beta``, rate)
+  - Parameters:
+
+    - :math:`\alpha > 1` (``alpha``, shape)
+    - :math:`\beta > 1` (``beta``, rate)
+
   - Definition: :math:`\frac{\beta^{\alpha}x^{\alpha-1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha)}`
 
 - ``ShiftedGammaShapeGT1``: PDF of gamma distribution with support starting at :math:`0 + \delta`, :math:`\alpha > 1` (enforces rising-then-falling shape)
 
-  - Parameters: :math:`\alpha > 1` (``alpha``, shape), :math:`\beta > 0` (``beta``, rate), :math:`\delta < 0` (``delta``, shift)
+  - Parameters:
+
+    - :math:`\alpha > 1` (``alpha``, shape)
+    - :math:`\beta > 0` (``beta``, rate)
+    - :math:`\delta < 0` (``delta``, shift)
+
   - Definition: :math:`\frac{\beta^{\alpha}(x - \delta)^{\alpha-1}e^{-\frac{x - \delta}{\beta}}}{\Gamma(\alpha)}`
 
 - ``Normal``: PDF of Gaussian (normal) distribution
 
-  - Parameters: :math:`\mu` (``mu``, mean), :math:`\sigma > 0` (``sigma``, standard deviation)
+  - Parameters:
+
+    - :math:`\mu` (``mu``, mean)
+    - :math:`\sigma > 0` (``sigma``, standard deviation)
+
   - Definition: :math:`\frac{1}{\sqrt{2\pi\sigma^2}}e^{-\frac{(x - \mu) ^ 2}{2 \sigma ^ 2}}`
 
 - ``SkewNormal``: PDF of SkewNormal distribution (normal distribution augmented with left/right skew parameter)
 
-  - Parameters: :math:`\mu` (mean), :math:`\sigma` (standard deviation), :math:`\alpha` (skew)
+  - Parameters:
+
+    - :math:`\mu` (mean)
+    - :math:`\sigma` (standard deviation)
+    - :math:`\alpha` (skew)
+
   - Definition: Let :math:`\phi` and :math:`\Phi` denote the PDF and CDF (respectively) of the standard normal distribution.
     Then the SkewNormal distribution is:
     :math:`\frac{2}{\sigma} \phi\left(\frac{x-\mu}{\sigma}\right) \Phi(\alpha \frac{x-\mu}{\sigma})`
 
 - ``EMG``: PDF of exponentially modified gaussian distribution (convolution of a normal with an exponential distribution, can be right-skewed)
 
-  - Parameters: :math:`\mu` (``mu``, mean), :math:`\sigma > 0` (``sigma``, standard deviation), :math:`\beta > 0` (``beta``, rate)
+  - Parameters:
+
+    - :math:`\mu` (``mu``, mean)
+    - :math:`\sigma > 0` (``sigma``, standard deviation)
+    - :math:`\beta > 0` (``beta``, rate)
+
   - Definition: :math:`\frac{\beta}{2}e^{\frac{\beta}{2}\left(2\mu + \beta \sigma^2 - 2x \right)} \mathrm{erfc} \left(\frac{m + \beta \sigma ^2 - x}{\sqrt{2}\sigma}\right)`, where :math:`\mathrm{erfc}(x) = \frac{2}{\sqrt{\pi}}\int_x^{\infty} e^{-t^2}dt`.
 
 - ``BetaPrime``: PDF of BetaPrime (inverted beta) distribution
 
-  - Parameters: :math:`\alpha > 0` (``alpha``, shape), :math:`\beta > 0` (``beta``, shape)
+  - Parameters:
+
+    - :math:`\alpha > 0` (``alpha``, shape)
+    - :math:`\beta > 0` (``beta``, shape)
+
   - Definition: :math:`\frac{x^{\alpha - 1}(1 + x)^{-\alpha - \beta}}{B(\alpha, \beta)}`
 
 - ``ShiftedBetaPrime``: PDF of BetaPrime (inverted beta) distribution with support starting at :math:`0 + \delta`
 
-  - Parameters: :math:`\alpha > 0` (``alpha``, shape), :math:`\beta > 0` (``beta``, shape), :math:`\delta < 0` (``delta``, shift)
+  - Parameters:
+
+    - :math:`\alpha > 0` (``alpha``, shape)
+    - :math:`\beta > 0` (``beta``, shape)
+    - :math:`\delta < 0` (``delta``, shift)
+
   - Definition: :math:`\frac{(x-\delta)^{\alpha - 1}(1 + (x - \delta))^{-\alpha - \beta}}{B(\alpha, \beta)}`
 
 - ``HRFSingleGamma``: Single-gamma hemodynamic response function (fMRI). Identical to ``GammaShapeGT1`` except in its initial parameter values, which are inherited from the peak response model of the canonical HRF in SPM (:math:`\alpha = 6` and :math:`\beta = 1`)
 
-  - Parameters: :math:`\alpha > 0` (``alpha``, shape), :math:`\beta > 0` (``beta``, rate)
+  - Parameters:
+
+    - :math:`\alpha > 0` (``alpha``, shape)
+    - :math:`\beta > 0` (``beta``, rate)
+
   - Definition: :math:`\frac{\beta^{\alpha}x^{\alpha-1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha)}`
 
 - ``HRFDoubleGamma``: Double-gamma hemodynamic response function (fMRI, peak response with undershoot) with constraints against implausible undershoot models. Specifically, the shape parameter :math:`\alpha` of the undershoot is constrained to be at least as large as the shape parameter of the peak response, the rate parameter :math:`\beta` is tied between the peak response and the undershoot, and the constant coefficient :math:`c` is constrained to be between 0 and 1, ensuring that the undershoot will be both negative and smaller in magnitude than the peak response. In some applications it can also be useful to simply leave the shape of the undershoot and the coefficient of the undershoot untrained, resulting in a two-parameter model with a global shape and rate. This can be accomplished using the keyword specification ``trainable=[alpha, beta]`` in the IRF call in the model formula.
 
-  - Parameters: :math:`\alpha_1 > 0` (``alpha_main``, peak response shape), :math:`\beta > 0` (``beta``, rate), :math:`\alpha_2 > 0` (``alpha_undershoot_offset``, offset for undershoot shape), :math:`0 < \c < 1` (``c``, undershoot coefficient)
+  - Parameters:
+
+    - :math:`\alpha_1 > 0` (``alpha_main``, peak response shape)
+    - :math:`\beta > 0` (``beta``, rate)
+    - :math:`\alpha_2 > 0` (``alpha_undershoot_offset``, offset for undershoot shape)
+    - :math:`0 < c < 1` (``c``, undershoot coefficient)
+
   - Definition: :math:`\frac{\beta^{\alpha_1}x^{\alpha_1-1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha_1)} - c\frac{\beta^{\alpha_1 + \alpha_2}x^{\alpha_1 + \alpha_2 -1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha_1 + \alpha_2)}`
 
 - ``HRFDoubleGammaUnconstrained``: Double-gamma hemodynamic response function (fMRI, peak response with undershoot) without constraints on the undershoot models.
 
-  - Parameters: :math:`\alpha_1 > 0` (``alpha_main``, peak response shape), :math:`\beta_1 > 0` (``beta_main``, peak response rate), :math:`\alpha_2 > 0` (``alpha_undershoot``, undershoot shape), :math:`\beta_2 > 0` (``beta_undershoot``, undershoot rate), :math:`\c` (``c``, undershoot coefficient)
+  - Parameters:
+
+    - :math:`\alpha_1 > 0` (``alpha_main``, peak response shape)
+    - :math:`\beta_1 > 0` (``beta_main``, peak response rate)
+    - :math:`\alpha_2 > 0` (``alpha_undershoot``, undershoot shape)
+    - :math:`\beta_2 > 0` (``beta_undershoot``, undershoot rate)
+    - :math:`c` (``c``, undershoot coefficient)
+
   - Definition: :math:`\frac{\beta^{\alpha_1}x^{\alpha_1-1}e^{-\frac{x}{\beta_1}}}{\Gamma(\alpha_1)} - c\frac{\beta^{\alpha_2}x^{\alpha_2 - 1}e^{-\frac{x}{\beta_2}}}{\Gamma(\alpha_2)}`
 
 
