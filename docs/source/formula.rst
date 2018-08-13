@@ -102,7 +102,7 @@ The currently supported parametric IRF families are:
   - Parameters:
 
     - :math:`\mu` (mean)
-    - :math:`\sigma` (standard deviation)
+    - :math:`\sigma > 0` (standard deviation)
     - :math:`\alpha` (skew)
 
   - Definition: Let :math:`\phi` and :math:`\Phi` denote the PDF and CDF (respectively) of the standard normal distribution.
@@ -181,7 +181,7 @@ The advantage of spline IRF is that they do not require precommitment to a parti
 The disadvantage is that fitting them is much more computationally expensive because computing the spline function between the control points requires matrix inversion.
 
 The splines themselves have a number of free parameters which are specified by the name of the spline in the IRF call of the model formula.
-The syntax for a spline IRF kernal is as follows::
+The syntax for a spline IRF kernel is as follows::
 
     S(o([0-9]+))?(b([0-9]+))?(l([0-9]+))?(p([0-9]+))?(i([0-1]))?
 
