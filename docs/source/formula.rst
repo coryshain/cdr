@@ -29,7 +29,7 @@ For example, to add a Gaussian convolution of predictor ``B``, the RHS above bec
 
 
 
-Supported parametric IRF
+Supported Parametric IRF
 -------------
 
 The currently supported parametric IRF families are:
@@ -46,7 +46,7 @@ The currently supported parametric IRF families are:
 
   - Parameters:
 
-    - :math:`\beta > 0` (``beta``, rate)
+    - :math:`\beta > 0`: ``beta`` (rate)
 
   - Definition: :math:`\beta e^{-\beta x}`
 
@@ -54,8 +54,8 @@ The currently supported parametric IRF families are:
 
   - Parameters:
 
-    - :math:`\alpha > 0` (``alpha``, shape)
-    - :math:`\beta > 0` (``beta``, rate)
+    - :math:`\alpha > 0`: ``alpha`` (shape)
+    - :math:`\beta > 0`: ``beta`` (rate)
 
   - Definition: :math:`\frac{\beta^{\alpha}x^{\alpha-1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha)}`
 
@@ -63,9 +63,9 @@ The currently supported parametric IRF families are:
 
   - Parameters:
 
-    - :math:`\alpha > 0` (``alpha``, shape)
-    - :math:`\beta > 0` (``beta``, rate)
-    - :math:`\delta < 0` (``delta``, shift)
+    - :math:`\alpha > 0`: ``alpha`` (shape)
+    - :math:`\beta > 0`: ``beta`` (rate)
+    - :math:`\delta < 0`: ``delta`` (shift)
 
   - Definition: :math:`\frac{\beta^{\alpha}(x - \delta)^{\alpha-1}e^{-\frac{x - \delta}{\beta}}}{\Gamma(\alpha)}`
 
@@ -73,8 +73,8 @@ The currently supported parametric IRF families are:
 
   - Parameters:
 
-    - :math:`\alpha > 1` (``alpha``, shape)
-    - :math:`\beta > 1` (``beta``, rate)
+    - :math:`\alpha > 1`: ``alpha`` (shape)
+    - :math:`\beta > 1`: ``beta`` (rate)
 
   - Definition: :math:`\frac{\beta^{\alpha}x^{\alpha-1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha)}`
 
@@ -82,9 +82,9 @@ The currently supported parametric IRF families are:
 
   - Parameters:
 
-    - :math:`\alpha > 1` (``alpha``, shape)
-    - :math:`\beta > 0` (``beta``, rate)
-    - :math:`\delta < 0` (``delta``, shift)
+    - :math:`\alpha > 1`: ``alpha`` (shape)
+    - :math:`\beta > 0`: ``beta`` (rate)
+    - :math:`\delta < 0`: ``delta`` (shift)
 
   - Definition: :math:`\frac{\beta^{\alpha}(x - \delta)^{\alpha-1}e^{-\frac{x - \delta}{\beta}}}{\Gamma(\alpha)}`
 
@@ -92,8 +92,8 @@ The currently supported parametric IRF families are:
 
   - Parameters:
 
-    - :math:`\mu` (``mu``, mean)
-    - :math:`\sigma > 0` (``sigma``, standard deviation)
+    - :math:`\mu`: ``mu`` (mean)
+    - :math:`\sigma > 0`: ``sigma`` (standard deviation)
 
   - Definition: :math:`\frac{1}{\sqrt{2\pi\sigma^2}}e^{-\frac{(x - \mu) ^ 2}{2 \sigma ^ 2}}`
 
@@ -113,9 +113,9 @@ The currently supported parametric IRF families are:
 
   - Parameters:
 
-    - :math:`\mu` (``mu``, mean)
-    - :math:`\sigma > 0` (``sigma``, standard deviation)
-    - :math:`\beta > 0` (``beta``, rate)
+    - :math:`\mu`: ``mu`` (mean)
+    - :math:`\sigma > 0`: ``sigma`` (standard deviation)
+    - :math:`\beta > 0`: ``beta`` (rate)
 
   - Definition: :math:`\frac{\beta}{2}e^{\frac{\beta}{2}\left(2\mu + \beta \sigma^2 - 2x \right)} \mathrm{erfc} \left(\frac{m + \beta \sigma ^2 - x}{\sqrt{2}\sigma}\right)`, where :math:`\mathrm{erfc}(x) = \frac{2}{\sqrt{\pi}}\int_x^{\infty} e^{-t^2}dt`.
 
@@ -123,8 +123,8 @@ The currently supported parametric IRF families are:
 
   - Parameters:
 
-    - :math:`\alpha > 0` (``alpha``, shape)
-    - :math:`\beta > 0` (``beta``, shape)
+    - :math:`\alpha > 0`: ``alpha`` (shape)
+    - :math:`\beta > 0`: ``beta`` (shape)
 
   - Definition: :math:`\frac{x^{\alpha - 1}(1 + x)^{-\alpha - \beta}}{B(\alpha, \beta)}`
 
@@ -132,9 +132,9 @@ The currently supported parametric IRF families are:
 
   - Parameters:
 
-    - :math:`\alpha > 0` (``alpha``, shape)
-    - :math:`\beta > 0` (``beta``, shape)
-    - :math:`\delta < 0` (``delta``, shift)
+    - :math:`\alpha > 0`: ``alpha`` (shape)
+    - :math:`\beta > 0`: ``beta`` (shape)
+    - :math:`\delta < 0`: ``delta`` (shift)
 
   - Definition: :math:`\frac{(x-\delta)^{\alpha - 1}(1 + (x - \delta))^{-\alpha - \beta}}{B(\alpha, \beta)}`
 
@@ -142,8 +142,8 @@ The currently supported parametric IRF families are:
 
   - Parameters:
 
-    - :math:`\alpha > 0` (``alpha``, shape)
-    - :math:`\beta > 0` (``beta``, rate)
+    - :math:`\alpha > 0`: ``alpha`` (shape)
+    - :math:`\beta > 0`: ``beta`` (rate)
 
   - Definition: :math:`\frac{\beta^{\alpha}x^{\alpha-1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha)}`
 
@@ -151,10 +151,10 @@ The currently supported parametric IRF families are:
 
   - Parameters:
 
-    - :math:`\alpha_1 > 0` (``alpha_main``, peak response shape)
-    - :math:`\beta > 0` (``beta``, rate)
-    - :math:`\alpha_2 > 0` (``alpha_undershoot_offset``, offset for undershoot shape)
-    - :math:`0 < c < 1` (``c``, undershoot coefficient)
+    - :math:`\alpha_1 > 0`: ``alpha_main`` (peak response shape)
+    - :math:`\beta > 0`: ``beta`` (rate)
+    - :math:`\alpha_2 > 0`: ``alpha_undershoot_offset`` (offset for undershoot shape)
+    - :math:`0 < c < 1`: ``c`` (undershoot coefficient)
 
   - Definition: :math:`\frac{\beta^{\alpha_1}x^{\alpha_1-1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha_1)} - c\frac{\beta^{\alpha_1 + \alpha_2}x^{\alpha_1 + \alpha_2 -1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha_1 + \alpha_2)}`
 
@@ -162,11 +162,11 @@ The currently supported parametric IRF families are:
 
   - Parameters:
 
-    - :math:`\alpha_1 > 0` (``alpha_main``, peak response shape)
-    - :math:`\beta_1 > 0` (``beta_main``, peak response rate)
-    - :math:`\alpha_2 > 0` (``alpha_undershoot``, undershoot shape)
-    - :math:`\beta_2 > 0` (``beta_undershoot``, undershoot rate)
-    - :math:`c` (``c``, undershoot coefficient)
+    - :math:`\alpha_1 > 0`: ``alpha_main`` (peak response shape)
+    - :math:`\beta_1 > 0`: ``beta_main`` (peak response rate)
+    - :math:`\alpha_2 > 0`: ``alpha_undershoot`` (undershoot shape)
+    - :math:`\beta_2 > 0`: ``beta_undershoot`` (undershoot rate)
+    - :math:`c`: ``c`` (undershoot coefficient)
 
   - Definition: :math:`\frac{\beta^{\alpha_1}x^{\alpha_1-1}e^{-\frac{x}{\beta_1}}}{\Gamma(\alpha_1)} - c\frac{\beta^{\alpha_2}x^{\alpha_2 - 1}e^{-\frac{x}{\beta_2}}}{\Gamma(\alpha_2)}`
 
@@ -191,7 +191,7 @@ The keyword arguments are defined as follows:
 
   - **o** (order): ``int``, the order of the spline. Order 1 is linear interpolation, order 2 is a thin-plate spline, order 3 is a cubic spline, etc. **Default**: 2.
   - **b** (bases): ``int``, number of bases (control points). **Default**: 10.
-  - **l** (roughness penalty): ``int``, digits following the decimal representing the roughness penalty (regularization against wiggliness). For example, ``l01`` specifies a roughness penalty of 0.01. **Default**: 001
+  - **l** (roughness penalty): ``int``, digits following the decimal representing the roughness penalty (regularization against wiggliness). For example, ``l01`` specifies a roughness penalty of 0.01. **Default**: 001.
   - **p** (spacing power): ``int``, power to use for initial spacing of control points in time between 0 and the maximum time offset attested in the training data. If 1, control points will be initialized as evenly spaced. If 2, control points will be quadratically spaced, etc. Initially concentrating more control points toward smaller time offsets is motivated in most cases by the fact that (1) many real-world IRF have more complex dynamics closer to the time of the impulse and (2) most datasets will contain more training data for smaller time offsets than longer ones, possibly resulting in decreasing precision of the IRF estimate at long latencies. **Default**: 1.
   - **i** (instantaneous response): ``int`` (0 or 1), whether to allow an instantaneous response. If 0, the response at time 0 is forced to be 0. **Default**: 1.
 
