@@ -87,18 +87,22 @@ The currently supported parametric IRF families are:
   - Definition: :math:`\frac{x^{\alpha - 1}(1 + x)^{-\alpha - \beta}}{B(\alpha, \beta)}`
 
 - ``ShiftedBetaPrime``: PDF of BetaPrime (inverted beta) distribution with support starting at :math:`0 + \delta`
+
   - Parameters: :math:`\alpha > 0` (``alpha``, shape), :math:`\beta > 0` (``beta``, shape), :math:`\delta < 0` (``delta``, shift)
   - Definition: :math:`\frac{(x-\delta)^{\alpha - 1}(1 + (x - \delta))^{-\alpha - \beta}}{B(\alpha, \beta)}`
 
 - ``HRFSingleGamma``: Single-gamma hemodynamic response function (fMRI). Identical to ``GammaShapeGT1`` except in its initial parameter values, which are inherited from the peak response model of the canonical HRF in SPM (:math:`\alpha = 6` and :math:`\beta = 1`)
+
   - Parameters: :math:`\alpha > 0` (``alpha``, shape), :math:`\beta > 0` (``beta``, rate)
   - Definition: :math:`\frac{\beta^{\alpha}x^{\alpha-1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha)}`
 
 - ``HRFDoubleGamma``: Double-gamma hemodynamic response function (fMRI, peak response with undershoot) with constraints against implausible undershoot models. Specifically, the shape parameter :math:`\alpha` of the undershoot is constrained to be at least as large as the shape parameter of the peak response, the rate parameter :math:`\beta` is tied between the peak response and the undershoot, and the constant coefficient :math:`c` is constrained to be between 0 and 1, ensuring that the undershoot will be both negative and smaller in magnitude than the peak response. In some applications it can also be useful to simple leave the shape of the undershoot and the coefficient of the undershoot untrained, resulting in a two-parameter model with a global shape and rate. This can be accomplished using the keyword specification ``trainable=[alpha, beta]`` in the IRF call in the model formula.
+
   - Parameters: :math:`\alpha_1 > 0` (``alpha_main``, peak response shape), :math:`\beta > 0` (``beta``, rate), :math:`\alpha_2 > 0` (``alpha_undershoot_offset``, offset for undershoot shape), :math:`0 < \c < 1` (``c``, undershoot coefficient)
   - Definition: :math:`\frac{\beta^{\alpha_1}x^{\alpha_1-1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha_1)} - c\frac{\beta^{\alpha_1 + \alpha_2}x^{\alpha_1 + \alpha_2 -1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha_1 + \alpha_2)}`
 
 - ``HRFDoubleGammaUnconstrained``: Double-gamma hemodynamic response function (fMRI, peak response with undershoot) without constrains on the undershoot models.
+
   - Parameters: :math:`\alpha_1 > 0` (``alpha_main``, peak response shape), :math:`\beta_1 > 0` (``beta_main``, peak response rate), :math:`\alpha_2 > 0` (``alpha_undershoot``, undershoot shape), :math:`\beta_2 > 0` (``beta_undershoot``, undershoot rate), :math:`\c` (``c``, undershoot coefficient)
   - Definition: :math:`\frac{\beta^{\alpha_1}x^{\alpha_1-1}e^{-\frac{x}{\beta_1}}}{\Gamma(\alpha_1)} - c\frac{\beta^{\alpha_2}x^{\alpha_2 - 1}e^{-\frac{x}{\beta_2}}}{\Gamma(\alpha_2)}`
 
