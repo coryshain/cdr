@@ -96,12 +96,12 @@ The currently supported parametric IRF families are:
   - Parameters: :math:`\alpha > 0` (``alpha``, shape), :math:`\beta > 0` (``beta``, rate)
   - Definition: :math:`\frac{\beta^{\alpha}x^{\alpha-1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha)}`
 
-- ``HRFDoubleGamma``: Double-gamma hemodynamic response function (fMRI, peak response with undershoot) with constraints against implausible undershoot models. Specifically, the shape parameter :math:`\alpha` of the undershoot is constrained to be at least as large as the shape parameter of the peak response, the rate parameter :math:`\beta` is tied between the peak response and the undershoot, and the constant coefficient :math:`c` is constrained to be between 0 and 1, ensuring that the undershoot will be both negative and smaller in magnitude than the peak response. In some applications it can also be useful to simple leave the shape of the undershoot and the coefficient of the undershoot untrained, resulting in a two-parameter model with a global shape and rate. This can be accomplished using the keyword specification ``trainable=[alpha, beta]`` in the IRF call in the model formula.
+- ``HRFDoubleGamma``: Double-gamma hemodynamic response function (fMRI, peak response with undershoot) with constraints against implausible undershoot models. Specifically, the shape parameter :math:`\alpha` of the undershoot is constrained to be at least as large as the shape parameter of the peak response, the rate parameter :math:`\beta` is tied between the peak response and the undershoot, and the constant coefficient :math:`c` is constrained to be between 0 and 1, ensuring that the undershoot will be both negative and smaller in magnitude than the peak response. In some applications it can also be useful to simply leave the shape of the undershoot and the coefficient of the undershoot untrained, resulting in a two-parameter model with a global shape and rate. This can be accomplished using the keyword specification ``trainable=[alpha, beta]`` in the IRF call in the model formula.
 
   - Parameters: :math:`\alpha_1 > 0` (``alpha_main``, peak response shape), :math:`\beta > 0` (``beta``, rate), :math:`\alpha_2 > 0` (``alpha_undershoot_offset``, offset for undershoot shape), :math:`0 < \c < 1` (``c``, undershoot coefficient)
   - Definition: :math:`\frac{\beta^{\alpha_1}x^{\alpha_1-1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha_1)} - c\frac{\beta^{\alpha_1 + \alpha_2}x^{\alpha_1 + \alpha_2 -1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha_1 + \alpha_2)}`
 
-- ``HRFDoubleGammaUnconstrained``: Double-gamma hemodynamic response function (fMRI, peak response with undershoot) without constrains on the undershoot models.
+- ``HRFDoubleGammaUnconstrained``: Double-gamma hemodynamic response function (fMRI, peak response with undershoot) without constraints on the undershoot models.
 
   - Parameters: :math:`\alpha_1 > 0` (``alpha_main``, peak response shape), :math:`\beta_1 > 0` (``beta_main``, peak response rate), :math:`\alpha_2 > 0` (``alpha_undershoot``, undershoot shape), :math:`\beta_2 > 0` (``beta_undershoot``, undershoot rate), :math:`\c` (``c``, undershoot coefficient)
   - Definition: :math:`\frac{\beta^{\alpha_1}x^{\alpha_1-1}e^{-\frac{x}{\beta_1}}}{\Gamma(\alpha_1)} - c\frac{\beta^{\alpha_2}x^{\alpha_2 - 1}e^{-\frac{x}{\beta_2}}}{\Gamma(\alpha_2)}`
@@ -119,7 +119,7 @@ The disadvantage is that fitting them is much more computationally expensive bec
 The splines themselves have a number of free parameters which are specified by the name of the spline in the IRF call of the model formula.
 The syntax for a spline IRF kernal is as follows::
 
-    S((o([0-9]+))?(b([0-9]+))?(l([0-9]+))?(p([0-9]+))?(i([0-1]))?)?
+    S(o([0-9]+))?(b([0-9]+))?(l([0-9]+))?(p([0-9]+))?(i([0-1]))?
 
 This is a string representation of a function call ``S`` with optional keyword arguments ``o``, ``b``, ``l``, ``p``, and ``i``, in that order.
 
@@ -127,7 +127,7 @@ The keyword arguments are defined as follows:
 
   - **o** (order): ``int``, the order of the spline. Order 1 is linear interpolation, order 2 is a thin-plate spline, order 3 is a cubic spline, etc. **Default**: 2.
   - **b** (bases): ``int``, number of bases (control points). **Default**: 10.
-  - **l** (roughness penalty): ``int``, digits following the decimal representing the roughness penalty (regularization toward less wiggliness). For example l01 specifies a roughness penalty of 0.01. **Default**: 001
+  - **l** (roughness penalty): ``int``, digits following the decimal representing the roughness penalty (regularization against wiggliness). For example, ``l01`` specifies a roughness penalty of 0.01. **Default**: 001
   - **p** (spacing power): ``int``, power to use for initial spacing of control points in time between 0 and the maximum time offset attested in the training data. If 1, control points will be initialized as evenly spaced. If 2, control points will be quadratically spaced, etc. Initially concentrating more control points toward smaller time offsets is motivated in most cases by the fact that (1) many real-world IRF have more complex dynamics closer to the time of the impulse and (2) most datasets will contain more training data for smaller time offsets than longer ones, possibly resulting in decreasing precision of the IRF estimate at long latencies. **Default**: 1.
   - **i** (instantaneous response): ``int`` (0 or 1), whether to allow an instantaneous response. If 0, the response at time 0 is forced to be 0. **Default**: 1.
 
