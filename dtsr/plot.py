@@ -28,6 +28,7 @@ def plot_irf(
     plt.gca().spines['right'].set_visible(False)
     plt.gca().spines['bottom'].set_visible(False)
     plt.gca().spines['left'].set_visible(False)
+    plt.gca().tick_params(top='off', bottom='off', left='off', right='off', labelleft='on', labelbottom='on')
     plt.grid(b=True, which='major', axis='both', ls='--', lw=.5, c='k', alpha=.3)
     plt.axhline(y=0, lw=1, c='gray', alpha=1)
     plt.axvline(x=0, lw=1, c='gray', alpha=1)

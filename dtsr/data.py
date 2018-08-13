@@ -50,7 +50,6 @@ def build_DTSR_impulses(
     X_2d = X_2d_from_1d
 
     if X_response_aligned_predictors is not None:
-        print(X_response_aligned_predictors.columns)
         X_response_aligned_predictors_new = np.zeros((X_2d_from_1d.shape[0], X_2d_from_1d.shape[1], len(X_response_aligned_predictor_names)))
         X_response_aligned_predictors_new[:, -1, :] = X_response_aligned_predictors[X_response_aligned_predictor_names]
         X_2d = np.concatenate([X_2d, X_response_aligned_predictors_new], axis=2)

@@ -36,8 +36,8 @@ if __name__ == '__main__':
             else:
                 s_name = s
             cur_dir = dir + '/' + s_name + '_' + t + '/'
-            if os.path.exists(cur_dir + 'summary.txt'):
-                with open(cur_dir + 'summary.txt', 'r') as s_file:
+            if os.path.exists(cur_dir + 'eval_train.txt'):
+                with open(cur_dir + 'eval_train.txt', 'r') as s_file:
                     for line in s_file.readlines():
                         if 'failed to converge' in line:
                             converged = False

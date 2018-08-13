@@ -496,6 +496,7 @@ class DTSR(object):
                 self.training_mse_in = tf.placeholder(self.FLOAT_TF, shape=[], name='training_mse_in')
                 self.training_mse = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_mse')
                 self.set_training_mse = tf.assign(self.training_mse, self.training_mse_in)
+                self.training_percent_variance_explained = tf.maximum(0., 1. - self.training_mse / (self.y_train_sd ** 2) * 100.)
 
                 self.training_mae_in = tf.placeholder(self.FLOAT_TF, shape=[], name='training_mae_in')
                 self.training_mae = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_mae')
@@ -504,15 +505,6 @@ class DTSR(object):
                 self.training_loglik_in = tf.placeholder(self.FLOAT_TF, shape=[], name='training_loglik_in')
                 self.training_loglik = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_loglik')
                 self.set_training_loglik = tf.assign(self.training_loglik, self.training_loglik_in)
-
-                # self.normal_loc_test_1 = tf.placeholder(self.FLOAT_TF, shape=[1, 1, 1])
-                # self.normal_scale_test_1 = tf.placeholder(self.FLOAT_TF, shape=[1, 1, 1])
-                # self.normal_loc_test_2 = tf.placeholder(self.FLOAT_TF, shape=[1, 1, 1])
-                # self.normal_scale_test_2 = tf.placeholder(self.FLOAT_TF, shape=[1, 1, 1])
-                # normal_test_1 = tf.contrib.distributions.Normal(loc=self.normal_loc_test_1, scale=self.normal_scale_test_1).prob
-                # normal_test_2 = tf.contrib.distributions.Normal(loc=self.normal_loc_test_2, scale=self.normal_scale_test_2).prob
-                # conv_test = self._compose_irf([normal_test_1, normal_test_2])
-                # self.conv_test_plot = conv_test(self.support[None, ...])[0]
 
     def _initialize_base_params(self):
         with self.sess.as_default():
@@ -3045,7 +3037,18 @@ class DTSR(object):
 
                 return out
 
-    def report_evaluation(self, mse=None, mae=None, loglik=None, indent=0):
+    def report_training_percent_variance_explained(self, indent=0):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                training_percent_variance_explained = self.training_percent_variance_explained.eval(session=self.sess)
+
+                out = ' ' * indent + 'TRAINING PERCENT VARIANCE EXPLAINED:\n'
+                out += ' ' * (indent + 2) + '%.2f' %training_percent_variance_explained + '%'
+                out += '\n\n'
+
+                return out
+
+    def report_evaluation(self, mse=None, mae=None, loglik=None, percent_variance_explained=None, indent=0):
         out = ' ' * indent + 'MODEL EVALUATION STATISTICS:\n'
         if mse is not None:
             out += ' ' * (indent+2) + 'MSE: %s\n' %mse
@@ -3053,6 +3056,8 @@ class DTSR(object):
             out += ' ' * (indent+2) + 'MAE: %s\n' %mae
         if loglik is not None:
             out += ' ' * (indent+2) + 'Log likelihood: %s\n' %loglik
+        if percent_variance_explained is not None:
+            out += ' ' * (indent+2) + 'Percent variance explained: %.2f%%\n' %percent_variance_explained
 
         out += '\n'
 
@@ -3159,6 +3164,7 @@ class DTSR(object):
         out += self.report_training_mse(indent=indent+2)
         out += self.report_training_mae(indent=indent+2)
         out += self.report_training_loglik(indent=indent+2)
+        out += self.report_training_percent_variance_explained(indent=indent+2)
 
         return out
 

@@ -11,7 +11,7 @@ from dtsr.config import Config
 from dtsr.io import read_data
 from dtsr.formula import Formula
 from dtsr.data import filter_invalid_responses, preprocess_data, compute_splitID, compute_partition
-from dtsr.util import mse, mae
+from dtsr.util import mse, mae, percent_variance_explained
 from dtsr.util import load_dtsr
 
 def predict_LME(model_path, outdir, X, y, dv, model_name=''):
@@ -273,9 +273,10 @@ if __name__ == '__main__':
                 summary += 'DTSR regression\n\n'
                 summary += 'Model name: %s\n\n' % m
                 summary += 'Formula:\n'
-                summary += '  ' + formula + '\n'
+                summary += '  ' + formula + '\n\n'
+                summary += 'Partition: %s\n\n' % args.partition
 
-                dtsr_mse = dtsr_mae = dtsr_loglik = None
+                dtsr_mse = dtsr_mae = dtsr_loglik = dtsr_percent_variance_explained = None
 
                 if args.mode in [None, 'response']:
                     dtsr_preds = dtsr_model.predict(
@@ -306,6 +307,7 @@ if __name__ == '__main__':
                             p_file.write(str(y_valid[dv].iloc[i]) + '\n')
                     dtsr_mse = mse(y_valid[dv], dtsr_preds)
                     dtsr_mae = mae(y_valid[dv], dtsr_preds)
+                    dtsr_percent_variance_explained = percent_variance_explained(y_valid[dv], dtsr_preds)
                     y_dv_mean = y_valid[dv].mean()
 
                 if args.mode in [None, 'loglik']:
@@ -338,7 +340,12 @@ if __name__ == '__main__':
                                                        columns=['Mean', '2.5%', '97.5%'])
 
 
-                summary += dtsr_model.report_evaluation(mse=dtsr_mse, mae=dtsr_mae, loglik=dtsr_loglik)
+                summary += dtsr_model.report_evaluation(
+                    mse=dtsr_mse,
+                    mae=dtsr_mae,
+                    loglik=dtsr_loglik,
+                    percent_variance_explained=dtsr_percent_variance_explained
+                )
 
                 summary += '=' * 50 + '\n'
 

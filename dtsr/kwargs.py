@@ -179,7 +179,7 @@ DTSR_INITIALIZATION_KWARGS = [
         'n_interp',
         1000,
         int,
-        "Number of interpolation points to use for composing IRF."
+        "Number of interpolation points to use for discrete approximation of composed IRF. Ignored unless IRF composition is required by the model."
     ),
     Kwarg(
         'intercept_init',

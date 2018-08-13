@@ -70,6 +70,7 @@ if __name__ == '__main__':
 
     systems = sorted(list(systems))
     dtsr_models = [x for x in systems if x.startswith('DTSR')]
+    print(losses.keys())
     for m1 in dtsr_models:
         competitors = [x for x in systems if not x == m1]
         for m2 in competitors:

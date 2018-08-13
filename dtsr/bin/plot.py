@@ -38,7 +38,7 @@ if __name__ == '__main__':
         if len(args.models) > 0:
             models = [m for m in args.models if (m in p.model_list and m.startswith('DTSR'))]
         else:
-            models = p.model_list[:]
+            models = [m for m in p.model_list[:] if (m in p.model_list and m.startswith('DTSR'))]
         prefix = args.prefix
         if prefix != '':
             prefix += '_'
@@ -54,7 +54,10 @@ if __name__ == '__main__':
         if args.plot_true_synthetic and os.path.exists(synth_path):
             params = read_params(synth_path)
 
-            x = np.linspace(0, n_time_units, resolution * n_time_units)
+            a = p['plot_n_time_units'] if n_time_units is None else n_time_units
+            b = p['plot_n_time_points'] if resolution is None else resolution
+
+            x = np.linspace(0, a, a * b)
 
             y = convolve(x, np.expand_dims(params.k, -1), np.expand_dims(params.theta, -1), np.expand_dims(params.delta, -1), coefficient=np.expand_dims(params.beta, -1))
             y = y.transpose([1, 0])
@@ -67,9 +70,9 @@ if __name__ == '__main__':
                 names,
                 dir=p.outdir,
                 filename=prefix + 'synthetic_true.png',
-                plot_x_inches=x_inches,
-                plot_y_inches=y_inches,
-                cmap=cmap,
+                plot_x_inches=p['plot_x_inches'] if x_inches is None else x_inches,
+                plot_y_inches=p['plot_y_inches'] if y_inches is None else y_inches,
+                cmap=p['cmap'] if cmap is None else cmap,
                 legend=legend,
                 xlab=args.xlab,
                 ylab=args.ylab,

@@ -26,6 +26,7 @@ class Config(object):
 
         config = configparser.ConfigParser()
         config.optionxform = str
+        assert os.path.exists(path), 'Config file %s does not exist' %path
         config.read(path)
 
         data = config['data']
