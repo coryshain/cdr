@@ -30,7 +30,7 @@ For example, to add a Gaussian convolution of predictor ``B``, the RHS above bec
 
 
 Supported Parametric IRF
--------------
+------------------------
 
 The currently supported parametric IRF families are:
 
@@ -294,7 +294,7 @@ Random effects fit for grouping factors that vary during the experiment should t
 
 
 Parameter Initialization
----------------
+------------------------
 IRF parameters can be initialized for a given convolutional term by specifying their initial values in the IRF call, using the parameter name as the keyword (see supported IRF and their associated parameters above).
 For example, to initialize a Gamma IRF with :math:`\alpha = 2` and :math:`\beta = 2` for predictor ``A``, use the following call::
 
@@ -318,7 +318,7 @@ The correctness of initializations can be checked in the Tensorboard logs.
 
 
 Using Constant (Non-trainable) Parameters
-------------------------------
+-----------------------------------------
 By default, DTSR trains all the variables that parameterize an IRF kernel (e.g. both :math:`\mu` and :math:`\sigma` for a Gaussian IRF kernel).
 But in some cases it's useful to treat certain IRF parameters as constants and leave them untrained.
 To do this, specify a list of trainable parameters with the keyword argument ``trainable``, using Python list syntax.
