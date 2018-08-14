@@ -1158,9 +1158,9 @@ class DTSRBayes(DTSR):
 
     def variational(self):
         """
-        Check whether the DTSR model uses variational Bayes.
+        Report whether the DTSR model uses variational Bayes.
 
-        :return: ``True`` if the model is variational, ``False`` otherwise.
+        :return: ``bool``; ``True`` if the model is variational, ``False`` otherwise.
         """
         return self.inference_name in [
             'KLpq',
@@ -1184,6 +1184,16 @@ class DTSRBayes(DTSR):
             n_time_units=None,
             n_time_points=1000
     ):
+        """
+        Extract an IRF with Monte Carlo credible intervals for plotting
+
+        :param posterior: the IRF node in the model's graph
+        :param level: ``float``; level of the credible interval.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw. If ``None``, use model defaults.
+        :param n_time_units: ``float``; number of time units over which to plot the curve.
+        :param n_time_points: ``float``; number of points to use in the plot.
+        :return: ``tuple`` of 3 ``numpy`` vectors; mean, lower bound, and upper bound at the desired level for each plot point.
+        """
         if n_samples is None:
             n_samples = self.n_samples_eval
         if n_time_units is None:

@@ -2890,8 +2890,8 @@ class DTSR(object):
 
         :param level: ``float``; level of the credible interval if Bayesian, ignored otherwise.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
-        :param plot_n_time_units: ``float``; number if time units to use for plotting.
-        :param plot_n_time_points: ``float``; number of points to use for plotting.
+        :param n_time_units: ``float``; number of time units over which to take the integral.
+        :param n_time_points: ``float``; number of points to use in the discrete approximation of the integral.
         :return: ``numpy`` array; IRF integrals, one IRF per row. If Bayesian, array also contains credible interval bounds.
         """
         if self.pc:
@@ -2922,8 +2922,8 @@ class DTSR(object):
         :param terminal_name: ``str``; string ID of IRF to extract.
         :param level: ``float``; level of the credible interval if Bayesian, ignored otherwise.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
-        :param plot_n_time_units: ``float``; number if time units to use for plotting.
-        :param plot_n_time_points: ``float``; number of points to use for plotting.
+        :param n_time_units: ``float``; number of time units over which to take the integral.
+        :param n_time_points: ``float``; number of points to use in the discrete approximation of the integral.
         :return: ``numpy`` array; IRF integral (scalar), or (if Bayesian) IRF 3x1 vector with mean, lower bound, and upper bound of credible interval.
         """
         with self.sess.as_default():

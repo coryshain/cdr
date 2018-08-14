@@ -382,7 +382,7 @@ DTSR_INITIALIZATION_KWARGS = [
         'keep_plot_history',
         False,
         bool,
-        "Keep IRF plots from each checkpoint of a run, which can help evaluate learning but can also consume a lot of disk space. If ``False``, images are overwritten by the most recent plot of that type."
+        "Keep IRF plots from each checkpoint of a run, which can help evaluate learning but can also consume a lot of disk space. If ``False``, only the most recent plot of each type is kept."
     )
 ]
 

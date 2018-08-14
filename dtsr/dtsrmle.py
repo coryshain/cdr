@@ -310,7 +310,7 @@ class DTSRMLE(DTSR):
                 log_lik = self.sess.run(self.ll, feed_dict=feed_dict)
                 return log_lik
 
-    def run_conv_op(self, feed_dict, scaled=False, n_samples=None, algorithm='MAP'):
+    def run_conv_op(self, feed_dict, scaled=False, n_samples=None, algorithm='MAP', verbose=True):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 X_conv = self.sess.run(self.X_conv_scaled if scaled else self.X_conv, feed_dict=feed_dict)
