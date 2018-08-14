@@ -26,9 +26,6 @@ class Mock(MagicMock):
         return MagicMock()
 
 MOCK_MODULES = [
-    'tensorflow',
-    'tensorflow.python',
-    'tensorflow.python.framework',
     'edward',
     'edward.models'
 ]
