@@ -3419,9 +3419,9 @@ class DTSR(object):
             This must hold for MCMC inference, since the number of minibatches is built into the model architecture.
             However, it is not necessary for variational inference.
         :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
-        :param X_response_aligned_predictors:``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
+        :param X_response_aligned_predictors: ``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
         :param X_2d_predictor_names: ``list`` or ``None``; List of column names 2D predictors (predictors whose values at each time point differ for each regression target) if applicable, ``None`` otherwise.
-        :param X_2d_predictors:``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
+        :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
         :param force_training_evaluation: ``bool``; (Re-)run post-fitting evaluation, even if resuming a model whose training is already complete.
         :param n_iter: ``int``; the number of training iterations
         :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
@@ -3731,9 +3731,9 @@ class DTSR(object):
         :param last_obs: ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the most recent observation in the series associated with the current regression target.
             Sort order and number of observations must be identical to that of ``y_time``.
         :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
-        :param X_response_aligned_predictors:``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
+        :param X_response_aligned_predictors: ``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
         :param X_2d_predictor_names: ``list`` or ``None``; List of column names 2D predictors (predictors whose values at each time point differ for each regression target) if applicable, ``None`` otherwise.
-        :param X_2d_predictors:``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
+        :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
         :param verbose: ``bool``; Report progress and metrics to standard error.
