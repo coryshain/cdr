@@ -20,6 +20,6 @@ See :ref:`config` for more information on how to do this.
 
 This package provides (1) an API for programming with DTSR and (2) executables that allow users to train and evaluate DTSR models out of the box, without needing to write any code.
 
-This package was built and tested using Python 3.6.4, Tensorflow 1.6.0, and Edward 1.3.4.
+This package was built and tested using Python 3.6.4, Tensorflow 1.6.0, and Edward 1.3.5.
 Python 2.7.* support is not guaranteed, although certain DTSR features may still work.
 If you run into issues using DTSR with other versions of these tools, you may report them in the issue tracker on `Github <https://github.com/coryshain/dtsr>`_.

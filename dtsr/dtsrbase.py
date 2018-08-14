@@ -3841,9 +3841,9 @@ class DTSR(object):
             * A column for each random grouping factor in the model specified in ``form_str``.
 
         :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
-        :param X_response_aligned_predictors:``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
+        :param X_response_aligned_predictors: ``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
         :param X_2d_predictor_names: ``list`` or ``None``; List of column names 2D predictors (predictors whose values at each time point differ for each regression target) if applicable, ``None`` otherwise.
-        :param X_2d_predictors:``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
+        :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
         :param verbose: ``bool``; Report progress and metrics to standard error.
@@ -3955,9 +3955,9 @@ class DTSR(object):
             * A column for each random grouping factor in the model specified in ``form_str``.
 
         :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
-        :param X_response_aligned_predictors:``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
+        :param X_response_aligned_predictors: ``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
         :param X_2d_predictor_names: ``list`` or ``None``; List of column names 2D predictors (predictors whose values at each time point differ for each regression target) if applicable, ``None`` otherwise.
-        :param X_2d_predictors:``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
+        :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
         :param verbose: ``bool``; Report progress and metrics to standard error.
@@ -4100,7 +4100,7 @@ class DTSR(object):
 
         :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
             If ``None``, IRF tree node string ID's will be used.
-        :param irf_ids= ``list`` or ``None``; List of irf ID's to plot. If ``None``, all IRF's are plotted.
+        :param irf_ids: ``list`` or ``None``; List of irf ID's to plot. If ``None``, all IRF's are plotted.
         :param plot_n_time_units: ``float``; number if time units to use for plotting.
         :param plot_n_time_points: ``float``; number of points to use for plotting.
         :param plot_x_inches: ``int``; width of plot in inches.
