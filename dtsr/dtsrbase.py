@@ -496,7 +496,7 @@ class DTSR(object):
                 self.training_mse_in = tf.placeholder(self.FLOAT_TF, shape=[], name='training_mse_in')
                 self.training_mse = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_mse')
                 self.set_training_mse = tf.assign(self.training_mse, self.training_mse_in)
-                self.training_percent_variance_explained = tf.maximum(0., 1. - self.training_mse / (self.y_train_sd ** 2) * 100.)
+                self.training_percent_variance_explained = tf.maximum(0., (1. - self.training_mse / (self.y_train_sd ** 2)) * 100.)
 
                 self.training_mae_in = tf.placeholder(self.FLOAT_TF, shape=[], name='training_mae_in')
                 self.training_mae = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_mae')
@@ -2710,7 +2710,7 @@ class DTSR(object):
         **All DTSR subclasses must implement this method.**
 
         :param feed_dict: ``dict``; A dictionary of predictor values.
-        :param n_samples: ``int`` or ``None``; Number of posterior samples to use. Only relevant for Bayesian models.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
         :param verbose: ``bool``; Send progress reports to standard error.
         :return: ``numpy`` array; Predicted responses, one for each training sample
@@ -2723,7 +2723,7 @@ class DTSR(object):
         **All DTSR subclasses must implement this method.**
 
         :param feed_dict: ``dict``; A dictionary of predictor and response values
-        :param n_samples: ``int`` or ``None``; Number of posterior samples to use. Only relevant for Bayesian models.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
         :param verbose: ``bool``; Send progress reports to standard error.
         :return: ``numpy`` array; Pointwise log-likelihoods, one for each training sample
@@ -2738,7 +2738,7 @@ class DTSR(object):
 
         :param feed_dict: ``dict``; A dictionary of predictor variables
         :param scaled: ``bool``; Whether to scale the outputs using the model's coefficients
-        :param n_samples: ``int`` or ``None``; Number of posterior samples to use. Only relevant for Bayesian models.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
         :param verbose: ``bool``; Send progress reports to standard error.
         :return: ``numpy`` array; The convolved inputs
@@ -2756,6 +2756,11 @@ class DTSR(object):
     ######################################################
 
     def initialized(self):
+        """
+        Check whether model has been initialized.
+
+        :return: ``bool``; whether the model has been initialized.
+        """
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 uninitialized = self.sess.run(self.report_uninitialized)
@@ -2765,6 +2770,11 @@ class DTSR(object):
                     return False
 
     def verify_random_centering(self):
+        """
+        Assert that all random effects are properly centered (means sufficiently close to zero).
+
+        :return: ``None``
+        """
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if len(self.rangf) > 0:
@@ -2789,7 +2799,6 @@ class DTSR(object):
         else:
             self.outdir = outdir
 
-        self.reset_training_data()
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self._initialize_inputs()
@@ -2815,6 +2824,12 @@ class DTSR(object):
                 self._collect_plots()
 
     def save(self, dir=None):
+        """
+        Save the DTSR model.
+
+        :param dir: ``str``; output directory. If ``None``, use model default.
+        :return: ``None``
+        """
         if dir is None:
             dir = self.outdir
         with self.sess.as_default():
@@ -2840,6 +2855,15 @@ class DTSR(object):
                         pickle.dump(self, f)
     
     def load(self, outdir=None, predict=False, restore=True):
+        """
+        Load weights from a DTSR checkpoint and/or initialize the DTSR model.
+        Missing weights in the checkpoint will be kept at their initializations, and unneeded weights in the checkpoint will be ignored.
+
+        :param outdir: ``str``; directory in which to search for weights. If ``None``, use model defaults.
+        :param predict: ``bool``; load EMA weights because the model is being used for prediction. If ``False`` load training weights.
+        :param restore: ``bool``; restore weights from a checkpoint file if available, otherwise initialize the model. If ``False``, no weights will be loaded even if a checkpoint is found.
+        :return:
+        """
         if outdir is None:
             outdir = self.outdir
         with self.sess.as_default():
@@ -2852,32 +2876,6 @@ class DTSR(object):
                     if predict:
                         sys.stderr.write('No EMA checkpoint available. Leaving internal variables unchanged.\n')
 
-    def assign_training_data(self, X, time_X, y, time_y, gf_y):
-        self.X_in = X
-        self.time_X_in = time_X
-        self.y_in = y
-        self.time_y_in = time_y
-        self.gf_y_in = gf_y
-
-    def reset_training_data(self):
-        self.X_in = None
-        self.time_X_in = None
-        self.y_in = None
-        self.time_y_in = None
-        self.gf_y_in = None
-
-    def data_generator(self):
-        j = 0
-        while j < self.y_in.shape[0]:
-            yield (
-                self.X_in[j],
-                self.time_X_in[j],
-                self.y_in[j],
-                self.time_y_in[j],
-                self.gf_y_in[j]
-            )
-            j += 1
-
     def finalize(self):
         """
         Close the DTSR instance to prevent memory leaks.
@@ -2887,6 +2885,15 @@ class DTSR(object):
         self.sess.close()
 
     def irf_integrals(self, level=95, n_samples=None, n_time_units=None, n_time_points=1000):
+        """
+        Generate effect size estimates by computing the area under each IRF curve in the model via discrete approximation.
+
+        :param level: ``float``; level of the credible interval if Bayesian, ignored otherwise.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param plot_n_time_units: ``float``; number if time units to use for plotting.
+        :param plot_n_time_points: ``float``; number of points to use for plotting.
+        :return: ``numpy`` array; IRF integrals, one IRF per row. If Bayesian, array also contains credible interval bounds.
+        """
         if self.pc:
             terminal_names = self.src_terminal_names
         else:
@@ -2909,6 +2916,16 @@ class DTSR(object):
         return irf_integrals
 
     def irf_integral(self, terminal_name, level=95, n_samples=None, n_time_units=None, n_time_points=1000):
+        """
+        Generate effect size estimates by computing the area under a specific IRF curve via discrete approximation.
+
+        :param terminal_name: ``str``; string ID of IRF to extract.
+        :param level: ``float``; level of the credible interval if Bayesian, ignored otherwise.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param plot_n_time_units: ``float``; number if time units to use for plotting.
+        :param plot_n_time_points: ``float``; number of points to use for plotting.
+        :return: ``numpy`` array; IRF integral (scalar), or (if Bayesian) IRF 3x1 vector with mean, lower bound, and upper bound of credible interval.
+        """
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 return self._extract_irf_integral(
@@ -2920,11 +2937,28 @@ class DTSR(object):
                 )
 
     def set_predict_mode(self, mode):
+        """
+        Set predict mode.
+        If set to ``True``, the model enters predict mode and replaces parameters with the exponential moving average of their training iterates.
+        If set to ``False``, the model exits predict mode and replaces parameters with their most recently saved values.
+        To avoid data loss, always save the model before entering predict mode.
+
+        :param mode: ``bool``; if ``True``, enter predict mode. If ``False``, exit predict mode.
+        :return: ``None``
+        """
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.load(predict=mode)
 
     def set_training_complete(self, status):
+        """
+        Change internal record of whether training is complete.
+        Training is recorded as complete when fit() terminates.
+        If fit() is called again with a larger number of iterations, training is recorded as incomplete and will not change back to complete until either fit() is called or set_training_complete() is called and the model is saved.
+
+        :param status: ``bool``; Target state (``True`` if training is complete, ``False`` otherwise).
+        :return: ``None``
+        """
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if status:
@@ -2933,6 +2967,12 @@ class DTSR(object):
                     self.sess.run(self.training_complete_false)
 
     def report_formula_string(self, indent=0):
+        """
+        Generate a string representation of the model formula.
+
+        :param indent: ``int``; indentation level
+        :return: ``str``; the formula report
+        """
         out = ' ' * indent + 'MODEL FORMULA:\n'
         form_str = textwrap.wrap(str(self.form), 150)
         for line in form_str:
@@ -2943,6 +2983,12 @@ class DTSR(object):
         return out
 
     def report_settings(self, indent=0):
+        """
+        Generate a string representation of the model settings.
+
+        :param indent: ``int``; indentation level
+        :return: ``str``; the settings report
+        """
         out = ' ' * indent + 'MODEL SETTINGS:\n'
         for kwarg in DTSR_INITIALIZATION_KWARGS:
             val = getattr(self, kwarg.key)
@@ -2951,6 +2997,12 @@ class DTSR(object):
         return out
 
     def report_irf_tree(self, indent=0):
+        """
+        Generate a string representation of the model's IRF tree structure.
+
+        :param indent: ``int``; indentation level
+        :return: ``str``; the IRF tree report
+        """
         out = ' ' * indent + 'IRF TREE:\n'
         tree_str = str(self.t)
         new_tree_str = ''
@@ -2969,6 +3021,12 @@ class DTSR(object):
         return out
 
     def report_n_params(self, indent=0):
+        """
+        Generate a string representation of the number of trainable model parameters
+
+        :param indent: ``int``; indentation level
+        :return: ``str``; the num. parameters report
+        """
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 n_params = 0
@@ -2986,6 +3044,12 @@ class DTSR(object):
                 return out
 
     def report_regularized_variables(self, indent=0):
+        """
+        Generate a string representation of the model's regularization structure.
+
+        :param indent: ``int``; indentation level
+        :return: ``str``; the regularization report
+        """
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 assert len(self.regularizer_losses) == len(self.regularizer_losses_names) == len(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)), 'Different numbers of regularized variables found in different places'
@@ -3005,6 +3069,12 @@ class DTSR(object):
                 return out
 
     def report_training_mse(self, indent=0):
+        """
+        Generate a string representation of the model's training MSE.
+
+        :param indent: ``int``; indentation level
+        :return: ``str``; the training MSE report
+        """
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 training_mse = self.training_mse.eval(session=self.sess)
@@ -3016,6 +3086,12 @@ class DTSR(object):
                 return out
 
     def report_training_mae(self, indent=0):
+        """
+        Generate a string representation of the model's training MAE.
+
+        :param indent: ``int``; indentation level
+        :return: ``str``; the training MAE report
+        """
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 training_mae = self.training_mae.eval(session=self.sess)
@@ -3027,6 +3103,12 @@ class DTSR(object):
                 return out
 
     def report_training_loglik(self, indent=0):
+        """
+        Generate a string representation of the model's training log likelihood.
+
+        :param indent: ``int``; indentation level
+        :return: ``str``; the training log likelihood report
+        """
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 loglik_train = self.training_loglik.eval(session=self.sess)
@@ -3038,6 +3120,12 @@ class DTSR(object):
                 return out
 
     def report_training_percent_variance_explained(self, indent=0):
+        """
+        Generate a string representation of the percent variance explained by the model on training data.
+
+        :param indent: ``int``; indentation level
+        :return: ``str``; the training percent variance explained report
+        """
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 training_percent_variance_explained = self.training_percent_variance_explained.eval(session=self.sess)
@@ -3049,6 +3137,16 @@ class DTSR(object):
                 return out
 
     def report_evaluation(self, mse=None, mae=None, loglik=None, percent_variance_explained=None, indent=0):
+        """
+        Generate a string representation of pre-comupted evaluation metrics.
+
+        :param mse: ``float`` or ``None``; mean squared error, skipped if ``None``.
+        :param mae: ``float`` or ``None``; mean absolute error, skipped if ``None``.
+        :param loglik: ``float`` or ``None``; log likelihood, skipped if ``None``.
+        :param percent_variance_explained: ``float`` or ``None``; percent variance explained, skipped if ``None``.
+        :param indent: ``int``; indentation level
+        :return: ``str``; the evaluation report
+        """
         out = ' ' * indent + 'MODEL EVALUATION STATISTICS:\n'
         if mse is not None:
             out += ' ' * (indent+2) + 'MSE: %s\n' %mse
@@ -3063,12 +3161,25 @@ class DTSR(object):
 
         return out
 
-    def report_parameter_values(self, random=False, indent=0):
+    def report_parameter_values(self, random=False, level=95, n_samples=None, indent=0):
+        """
+        Generate a string representation of the model's parameter table.
+
+        :param random: ``bool``; report random effects estimates.
+        :param level: ``float``; significance level for credible intervals if Bayesian, otherwise ignored.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param indent: ``int``; indentation level.
+        :return: ``str``; the parameter table report
+        """
         left_justified_formatter = lambda df, col: '{{:<{}s}}'.format(df[col].str.len().max()).format
 
         pd.set_option("display.max_colwidth", 10000)
         out = ' ' * indent + 'FITTED PARAMETER VALUES:\n'
-        parameter_table = self.parameter_table(fixed=True)
+        parameter_table = self.parameter_table(
+            fixed=True,
+            level=level,
+            n_samples=n_samples
+        )
         formatters = {
             'Parameter': left_justified_formatter(parameter_table, 'Parameter')
         }
@@ -3084,7 +3195,11 @@ class DTSR(object):
         out += '\n'
 
         if random:
-            parameter_table = self.parameter_table(fixed=False)
+            parameter_table = self.parameter_table(
+                fixed=False,
+                level=level,
+                n_samples=n_samples
+            )
             parameter_table = pd.concat(
                 [
                     pd.DataFrame({'Parameter': parameter_table['Parameter'] + ' | ' + parameter_table['Group'] + ' | ' + parameter_table['Level']}),
@@ -3110,14 +3225,24 @@ class DTSR(object):
 
         return out
 
-    def report_irf_integrals(self, level=95, n_samples=None, n_time_units=None, indent=0):
-        if n_time_units is None:
-            n_time_units = self.max_tdelta
+    def report_irf_integrals(self, level=95, n_samples=None, integral_n_time_units=None, indent=0):
+        """
+        Generate a string representation of the model's IRF integrals (effect sizes)
+
+        :param level: ``float``; significance level for credible intervals if Bayesian, otherwise ignored.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param integral_n_time_units: ``float``; number if time units over which to take the integral.
+        :param indent: ``int``; indentation level.
+        :return: ``str``; the IRF integrals report
+        """
+
+        if integral_n_time_units is None:
+            integral_n_time_units = self.max_tdelta
 
         irf_integrals = self.irf_integrals(
             level=level,
             n_samples=n_samples,
-            n_time_units=n_time_units,
+            n_time_units=integral_n_time_units,
             n_time_points=1000
         )
         if self.pc:
@@ -3131,7 +3256,7 @@ class DTSR(object):
         )
 
         out = ' ' * indent + 'IRF INTEGRALS (EFFECT SIZES):\n'
-        out += ' ' * (indent + 2) + 'Integral upper bound (time): %s\n\n' %n_time_units
+        out += ' ' * (indent + 2) + 'Integral upper bound (time): %s\n\n' % integral_n_time_units
 
         ci_str = irf_integrals.to_string()
 
@@ -3143,6 +3268,13 @@ class DTSR(object):
         return out
 
     def initialization_summary(self, indent=0):
+        """
+        Generate a string representation of the model's initialization details
+
+        :param indent: ``int``; indentation level.
+        :return: ``str``; the initialization summary
+        """
+
         out = ' ' * indent + '----------------------\n'
         out += ' ' * indent + 'INITIALIZATION SUMMARY\n'
         out += ' ' * indent + '----------------------\n\n'
@@ -3157,6 +3289,14 @@ class DTSR(object):
         return out
 
     def training_evaluation_summary(self, indent=0):
+        """
+        Generate a string representation of the model's training metrics.
+        Correctness is not guaranteed until fit() has successfully exited.
+
+        :param indent: ``int``; indentation level.
+        :return: ``str``; the training evaluation summary
+        """
+
         out = ' ' * indent + '---------------------------\n'
         out += ' ' * indent + 'TRAINING EVALUATION SUMMARY\n'
         out += ' ' * indent + '---------------------------\n\n'
@@ -3168,23 +3308,47 @@ class DTSR(object):
 
         return out
 
-    def parameter_summary(self, random=False, indent=0):
+    def parameter_summary(self, random=False, level=95, n_samples=None, integral_n_time_units=None, indent=0):
+        """
+        Generate a string representation of the model's effect sizes and parameter values.
+
+        :param random: ``bool``; report random effects estimates
+        :param level: ``float``; significance level for credible intervals if Bayesian, otherwise ignored.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param integral_n_time_units: ``float``; number if time units over which to take the integral.
+        :param indent: ``int``; indentation level.
+        :return: ``str``; the parameter summary
+        """
+
         out = ' ' * indent + '-----------------\n'
         out += ' ' * indent + 'PARAMETER SUMMARY\n'
         out += ' ' * indent + '-----------------\n\n'
 
-        out += self.report_irf_integrals(indent=indent+2)
+        out += self.report_irf_integrals(
+            level=level,
+            n_samples=n_samples,
+            integral_n_time_units=integral_n_time_units,
+            indent=indent+2
+        )
 
-        out += self.report_parameter_values(random=random, indent=indent+2)
+        out += self.report_parameter_values(
+            random=random,
+            level=level,
+            n_samples=level,
+            indent=indent+2
+        )
 
         return out
 
-    def summary(self, random=False, indent=0):
+    def summary(self, random=False, level=95, n_samples=None, integral_n_time_units=None, indent=0):
         """
         Generate a summary of the fitted model.
 
-        :param random: ``bool``; Report random effects parameters
-        :return: ``str``; Formatted model summary for printing
+        :param random: ``bool``; report random effects estimates
+        :param level: ``float``; significance level for credible intervals if Bayesian, otherwise ignored.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param integral_n_time_units: ``float``; number if time units over which to take the integral.
+        :return: ``str``; the model summary
         """
 
         out = '  ' * indent + '*' * 100 + '\n\n'
@@ -3198,7 +3362,13 @@ class DTSR(object):
         out += '\n'
         out += self.training_evaluation_summary(indent =indent + 2)
         out += '\n'
-        out += self.parameter_summary(indent =indent + 2)
+        out += self.parameter_summary(
+            random=random,
+            level=level,
+            n_samples=n_samples,
+            integral_n_time_units=integral_n_time_units,
+            indent=indent + 2
+        )
         out += '\n'
         out += '  ' * indent + '*' * 100 + '\n\n'
 
@@ -3248,11 +3418,16 @@ class DTSR(object):
             In general, **y** will be identical to the parameter **y** provided at model initialization.
             This must hold for MCMC inference, since the number of minibatches is built into the model architecture.
             However, it is not necessary for variational inference.
-        :param n_epoch_train: ``int``; the number of training iterations
+        :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
+        :param X_response_aligned_predictors:``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
+        :param X_2d_predictor_names: ``list`` or ``None``; List of column names 2D predictors (predictors whose values at each time point differ for each regression target) if applicable, ``None`` otherwise.
+        :param X_2d_predictors:``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
+        :param force_training_evaluation: ``bool``; (Re-)run post-fitting evaluation, even if resuming a model whose training is already complete.
+        :param n_iter: ``int``; the number of training iterations
         :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
             If ``None``, IRF tree node string ID's will be used.
-        :param plot_n_time_units: ``float``; number if time units to use in plotting.
-        :param plot_n_time_points: ``float``; number of plot points to use per time unit.
+        :param plot_n_time_units: ``float``; number if time units to use for plotting.
+        :param plot_n_time_points: ``float``; number of points to use for plotting.
         :param plot_x_inches: ``int``; width of plot in inches.
         :param plot_y_inches: ``int``; height of plot in inches.
         :param cmap: ``str``; name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot).
@@ -3379,9 +3554,10 @@ class DTSR(object):
                                 plot_n_time_points=plot_n_time_points,
                                 plot_x_inches=plot_x_inches,
                                 plot_y_inches=plot_y_inches,
-                                cmap=cmap
+                                cmap=cmap,
+                                keep_plot_history=self.keep_plot_history
                             )
-                            if type(self).__name__ == 'DTSRBayes':
+                            if type(self).__name__ == 'DTSRBayes' and self.asymmetric_error:
                                 lb = self.sess.run(self.err_dist_lb)
                                 ub = self.sess.run(self.err_dist_ub)
                                 n_time_units = ub-lb
@@ -3392,12 +3568,13 @@ class DTSR(object):
                                 }
                                 plot_x = self.sess.run(self.support, feed_dict=fd_plot)
                                 plot_y = self.sess.run(self.err_dist_plot, feed_dict=fd_plot)
+                                err_dist_filename = 'error_distribution_%s.png' %self.global_step.eval(sess=self.sess) if self.keep_plot_history else 'error_distribution.png'
                                 plot_irf(
                                     plot_x,
                                     plot_y,
                                     ['Error Distribution'],
                                     dir=self.outdir,
-                                    filename='error_distribution.png',
+                                    filename=err_dist_filename,
                                     legend=False,
                                 )
                             self.verify_random_centering()
@@ -3420,7 +3597,8 @@ class DTSR(object):
                         plot_n_time_points=plot_n_time_points,
                         plot_x_inches=plot_x_inches,
                         plot_y_inches=plot_y_inches,
-                        cmap=cmap
+                        cmap=cmap,
+                        keep_plot_history=self.keep_plot_history
                     )
 
                     if type(self).__name__ == 'DTSRBayes':
@@ -3432,7 +3610,8 @@ class DTSR(object):
                             plot_x_inches=plot_x_inches,
                             plot_y_inches=plot_y_inches,
                             cmap=cmap,
-                            mc=True
+                            mc=True,
+                            keep_plot_history=self.keep_plot_history
                         )
 
 
@@ -3460,6 +3639,7 @@ class DTSR(object):
                     with open(self.outdir + '/mse_losses_train.txt','w') as l_file:
                         for i in range(len(training_se)):
                             l_file.write(str(training_se[i]) + '\n')
+                    training_percent_variance_explained = percent_variance_explained(y[self.dv], preds)
 
                     training_ae = np.array(np.abs(y[self.dv] - preds))
                     training_mae = training_ae.mean()
@@ -3502,7 +3682,13 @@ class DTSR(object):
                         eval_train += 'DTSR TRAINING EVALUATION\n'
                         eval_train += '------------------------\n\n'
                         eval_train += self.report_formula_string(indent=2)
-                        eval_train += self.report_evaluation(mse=training_mse, mae=training_mae, loglik=training_loglik, indent=2)
+                        eval_train += self.report_evaluation(
+                            mse=training_mse,
+                            mae=training_mae,
+                            loglik=training_loglik,
+                            percent_variance_explained=training_percent_variance_explained,
+                            indent=2
+                        )
 
                         e_file.write(eval_train)
 
@@ -3544,20 +3730,29 @@ class DTSR(object):
             Sort order and number of observations must be identical to that of ``y_time``.
         :param last_obs: ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the most recent observation in the series associated with the current regression target.
             Sort order and number of observations must be identical to that of ``y_time``.
+        :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
+        :param X_response_aligned_predictors:``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
+        :param X_2d_predictor_names: ``list`` or ``None``; List of column names 2D predictors (predictors whose values at each time point differ for each regression target) if applicable, ``None`` otherwise.
+        :param X_2d_predictors:``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
+        :param verbose: ``bool``; Report progress and metrics to standard error.
         :return: 1D ``numpy`` array; mean network predictions for regression targets (same length and sort order as ``y_time``).
         """
 
         assert len(y_time) == len(y_rangf) == len(first_obs) == len(last_obs), 'y_time, y_rangf, first_obs, and last_obs must be of identical length. Got: len(y_time) = %d, len(y_rangf) = %d, len(first_obs) = %d, len(last_obs) = %d' % (len(y_time), len(y_rangf), len(first_obs), len(last_obs))
 
-        usingGPU = tf.test.is_gpu_available()
-        sys.stderr.write('Using GPU: %s\n' % usingGPU)
+        if verbose:
+            usingGPU = tf.test.is_gpu_available()
+            sys.stderr.write('Using GPU: %s\n' % usingGPU)
 
         if self.pc:
             impulse_names = self.src_impulse_names
         else:
             impulse_names  = self.impulse_names
 
-        sys.stderr.write('Computing predictions...\n')
+        if verbose:
+            sys.stderr.write('Computing predictions...\n')
 
         for i in range(len(self.rangf)):
             c = self.rangf[i]
@@ -3597,8 +3792,9 @@ class DTSR(object):
                     preds = np.zeros((len(y_time),))
                     n_eval_minibatch = math.ceil(len(y_time) / self.eval_minibatch_size)
                     for i in range(0, len(y_time), self.eval_minibatch_size):
-                        sys.stderr.write('\rMinibatch %d/%d\n' %((i/self.eval_minibatch_size)+1, n_eval_minibatch))
-                        sys.stderr.flush()
+                        if verbose:
+                            sys.stderr.write('\rMinibatch %d/%d\n' %((i/self.eval_minibatch_size)+1, n_eval_minibatch))
+                            sys.stderr.flush()
                         fd_minibatch = {
                             self.X: X_2d[i:i + self.eval_minibatch_size],
                             self.time_X: time_X_2d[i:i + self.eval_minibatch_size],
@@ -3608,7 +3804,8 @@ class DTSR(object):
                         }
                         preds[i:i + self.eval_minibatch_size] = self.run_predict_op(fd_minibatch, n_samples=n_samples, algorithm=algorithm, verbose=verbose)
 
-                sys.stderr.write('\n\n')
+                if verbose:
+                    sys.stderr.write('\n\n')
 
                 self.set_predict_mode(False)
 
@@ -3643,18 +3840,27 @@ class DTSR(object):
             * A column with the same name as the DV specified in ``form_str``
             * A column for each random grouping factor in the model specified in ``form_str``.
 
+        :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
+        :param X_response_aligned_predictors:``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
+        :param X_2d_predictor_names: ``list`` or ``None``; List of column names 2D predictors (predictors whose values at each time point differ for each regression target) if applicable, ``None`` otherwise.
+        :param X_2d_predictors:``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
+        :param verbose: ``bool``; Report progress and metrics to standard error.
         :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
         """
 
-        usingGPU = tf.test.is_gpu_available()
-        sys.stderr.write('Using GPU: %s\n' % usingGPU)
+        if verbose:
+            usingGPU = tf.test.is_gpu_available()
+            sys.stderr.write('Using GPU: %s\n' % usingGPU)
 
         if self.pc:
             impulse_names = self.src_impulse_names
         else:
             impulse_names  = self.impulse_names
 
-        sys.stderr.write('Computing likelihoods...\n')
+        if verbose:
+            sys.stderr.write('Computing likelihoods...\n')
 
         y_rangf = y[self.rangf]
         for i in range(len(self.rangf)):
@@ -3698,8 +3904,9 @@ class DTSR(object):
                     log_lik = np.zeros((len(time_y),))
                     n_eval_minibatch = math.ceil(len(y) / self.eval_minibatch_size)
                     for i in range(0, len(time_y), self.eval_minibatch_size):
-                        sys.stderr.write('\rMinibatch %d/%d\n' %((i/self.eval_minibatch_size)+1, n_eval_minibatch))
-                        sys.stderr.flush()
+                        if verbose:
+                            sys.stderr.write('\rMinibatch %d/%d\n' %((i/self.eval_minibatch_size)+1, n_eval_minibatch))
+                            sys.stderr.flush()
                         fd_minibatch = {
                             self.X: X_2d[i:i + self.eval_minibatch_size],
                             self.time_X: time_X_2d[i:i + self.eval_minibatch_size],
@@ -3710,9 +3917,10 @@ class DTSR(object):
                         }
                         log_lik[i:i+self.eval_minibatch_size] = self.run_loglik_op(fd_minibatch, n_samples=n_samples, algorithm=algorithm, verbose=verbose)
 
-                self.set_predict_mode(False)
+                if verbose:
+                    sys.stderr.write('\n\n')
 
-                sys.stderr.write('\n\n')
+                self.set_predict_mode(False)
 
                 return log_lik
 
@@ -3729,9 +3937,36 @@ class DTSR(object):
             algorithm='MAP',
             verbose=True
     ):
+        """
+        Convolve input data using the fitted DTSR model.
 
-        usingGPU = tf.test.is_gpu_available()
-        sys.stderr.write('Using GPU: %s\n' % usingGPU)
+        :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
+            ``X`` must contain the following columns (additional columns are ignored):
+
+            * ``time``: Timestamp associated with each observation in ``X``
+            * A column for each independent variable in the DTSR ``form_str`` provided at iniialization
+
+        :param y: ``pandas`` table; the dependent variable. Must contain the following columns:
+
+            * ``time``: Timestamp associated with each observation in ``y``
+            * ``first_obs``:  Index in the design matrix `X` of the first observation in the time series associated with each entry in ``y``
+            * ``last_obs``:  Index in the design matrix `X` of the immediately preceding observation in the time series associated with each entry in ``y``
+            * A column with the same name as the DV specified in ``form_str``
+            * A column for each random grouping factor in the model specified in ``form_str``.
+
+        :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
+        :param X_response_aligned_predictors:``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
+        :param X_2d_predictor_names: ``list`` or ``None``; List of column names 2D predictors (predictors whose values at each time point differ for each regression target) if applicable, ``None`` otherwise.
+        :param X_2d_predictors:``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
+        :param verbose: ``bool``; Report progress and metrics to standard error.
+        :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
+        """
+
+        if verbose:
+            usingGPU = tf.test.is_gpu_available()
+            sys.stderr.write('Using GPU: %s\n' % usingGPU)
 
         if self.pc:
             impulse_names = self.src_impulse_names
@@ -3778,12 +4013,16 @@ class DTSR(object):
                 }
 
                 X_conv = []
-                for j in range(0, len(y), self.eval_minibatch_size):
-                    fd_minibatch[self.time_y] = time_y[j:j + self.eval_minibatch_size]
-                    fd_minibatch[self.gf_y] = gf_y[j:j + self.eval_minibatch_size]
-                    fd_minibatch[self.X] = X_2d[j:j + self.eval_minibatch_size]
-                    fd_minibatch[self.time_X] = time_X_2d[j:j + self.eval_minibatch_size]
-                    fd_minibatch[self.time_X_mask] = time_X_mask[j:j + self.eval_minibatch_size]
+                n_eval_minibatch = math.ceil(len(y) / self.eval_minibatch_size)
+                for i in range(0, len(y), self.eval_minibatch_size):
+                    if verbose:
+                        sys.stderr.write('\rMinibatch %d/%d\n' % ((i / self.eval_minibatch_size) + 1, n_eval_minibatch))
+                        sys.stderr.flush()
+                    fd_minibatch[self.time_y] = time_y[i:i + self.eval_minibatch_size]
+                    fd_minibatch[self.gf_y] = gf_y[i:i + self.eval_minibatch_size]
+                    fd_minibatch[self.X] = X_2d[i:i + self.eval_minibatch_size]
+                    fd_minibatch[self.time_X] = time_X_2d[i:i + self.eval_minibatch_size]
+                    fd_minibatch[self.time_X_mask] = time_X_mask[i:i + self.eval_minibatch_size]
                     X_conv_cur = self.run_conv_op(fd_minibatch, scaled=scaled, n_samples=n_samples, algorithm=algorithm, verbose=verbose)
                     X_conv.append(X_conv_cur)
                 names = []
@@ -3834,39 +4073,48 @@ class DTSR(object):
             irf_ids=None,
             plot_n_time_units=2.5,
             plot_n_time_points=1000,
-            plot_x_inches=7.,
-            plot_y_inches=5.,
+            plot_x_inches=6.,
+            plot_y_inches=4.,
             cmap=None,
             mc=False,
-            n_samples=None,
             level=95,
-            prefix='',
+            n_samples=None,
+            prefix=None,
             legend=True,
             xlab=None,
             ylab=None,
-            transparent_background=False
+            transparent_background=False,
+            keep_plot_history=False
     ):
         """
         Generate plots of current state of deconvolution.
-        Saves four plots to the output directory:
-
-            * ``irf_atomic_scaled.jpg``: One line for each IRF kernel in the model (ignoring preconvolution in any composite kernels), scaled by the relevant coefficients
-            * ``irf_atomic_unscaled.jpg``: One line for each IRF kernel in the model (ignoring preconvolution in any composite kernels), unscaled
-            * ``irf_composite_scaled.jpg``: One line for each IRF kernel in the model (including preconvolution in any composite kernels), scaled by the relevant coefficients
-            * ``irf_composite_unscaled.jpg``: One line for each IRF kernel in the model (including preconvolution in any composite kernels), unscaled
-
-        If the model contains no composite IRF, corresponding atomic and composite plots will be identical.
-
-        To save space, successive calls to ``make_plots()`` overwrite existing plots.
-        Thus, plots only show the most recently plotted state of learning.
-
-        For simplicity, plots for DTSRBayes models use the posterior mean, abstracting away from other characteristics of the posterior distribution (e.g. variance).
+        DTSR distinguishes plots based on two orthogonal criteria: "atomic" vs. "composite" and "scaled" vs. "unscaled".
+        The "atomic"/"composite" distinction is only relevant in models containing composed IRF.
+        In such models, "atomic" plots represent the shape of the IRF irrespective of any other IRF with which they are composed, while "composite" plots represent the shape of the IRF composed with any upstream IRF in the model.
+        In models without composed IRF, only "atomic" plots are generated.
+        The "scaled"/"unscaled" distinction concerns whether the impulse coefficients are represented in the plot ("scaled") or not ("unscaled").
+        Only pre-terminal IRF (i.e. the final IRF in all IRF compositions) have coefficients, so only preterminal IRF are represented in "scaled" plots, while "unscaled" plots also contain all intermediate IRF.
+        In addition, Bayesian DTSR implementations also support MC sampling of credible intervals around all curves.
+        Outputs are saved to the model's output directory as PNG files with names indicating which plot type is represented.
+        All plot types relevant to a given model are generated.
 
         :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
             If ``None``, IRF tree node string ID's will be used.
+        :param irf_ids= ``list`` or ``None``; List of irf ID's to plot. If ``None``, all IRF's are plotted.
+        :param plot_n_time_units: ``float``; number if time units to use for plotting.
+        :param plot_n_time_points: ``float``; number of points to use for plotting.
         :param plot_x_inches: ``int``; width of plot in inches.
         :param plot_y_inches: ``int``; height of plot in inches.
         :param cmap: ``str``; name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot).
+        :param mc: ``bool``; compute and plot Monte Carlo credible intervals (only supported for DTSRBayes).
+        :param level: ``float``; significance level for credible intervals, ignored unless **mc** is ``True``.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param prefix: ``str`` or ``None``; prefix appended to output filenames. If ``None``, no prefix added.
+        :param legend: ``bool``; generate a plot legend.
+        :param xlab: ``str`` or ``None``; x-axis label. If ``None``, no label.
+        :param ylab: ``str`` or ``None``; y-axis label. If ``None``, no label.
+        :param transparent_background: ``bool``; use a transparent background. If ``False``, uses a white background.
+        :param keep_plot_history: ``bool``; keep the history of all plots by adding a suffix with the iteration number. Can help visualize learning but can also consume a lot of disk space. If ``False``, always overwrite with most recent plot.
         :return: ``None``
         """
 
@@ -3875,6 +4123,8 @@ class DTSR(object):
         if len(self.terminal_names) == 0:
             return
 
+        if prefix is None:
+            prefix = ''
         if prefix != '':
             prefix += '_'
         with self.sess.as_default():
@@ -3896,7 +4146,7 @@ class DTSR(object):
                 for a in switches[0]:
                     if self.t.has_composed_irf() or a == 'atomic':
                         for b in switches[1]:
-                            plot_name = 'irf_%s_%s.png' %(a, b)
+                            plot_name = 'irf_%s_%s_%d.png' %(a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'irf_%s_%s.png' %(a, b)
                             names = self.plots[a][b]['names']
                             if irf_ids is not None and len(irf_ids) > 0:
                                 new_names = []
@@ -3954,7 +4204,7 @@ class DTSR(object):
                         if self.t.has_composed_irf() or a == 'atomic':
                             for b in switches[1]:
                                 if b == 'scaled':
-                                    plot_name = 'src_irf_%s_%s.png' % (a, b)
+                                    plot_name = 'src_irf_%s_%s_%d.png' % (a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'src_irf_%s_%s.png' % (a, b)
                                     names = self.src_plot_tensors[a][b]['names']
                                     if irf_ids is not None and len(irf_ids) > 0:
                                         new_names = []
@@ -4024,6 +4274,8 @@ class DTSR(object):
         Generate a pandas table of parameter names and values.
 
         :param fixed: ``bool``; Return a table of fixed parameters (otherwise returns a table of random parameters).
+        :param level: ``float``; significance level for credible intervals if model is Bayesian, ignored otherwise.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :return: ``pandas`` ``DataFrame``; The parameter table.
         """
 
@@ -4061,20 +4313,30 @@ class DTSR(object):
 
                 return out
 
-    def save_parameter_table(self, random=True):
+    def save_parameter_table(self, random=True, level=95, n_samples=None):
         """
         Save space-delimited parameter table to the model's output directory.
 
         :param random: Include random parameters.
+        :param level: ``float``; significance level for credible intervals if model is Bayesian, ignored otherwise.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :return: ``None``
         """
 
-        parameter_table = self.parameter_table(fixed=True)
+        parameter_table = self.parameter_table(
+            fixed=True,
+            level=level,
+            n_samples=n_samples
+        )
         if random and len(self.rangf) > 0:
             parameter_table = pd.concat(
                 [
                     parameter_table,
-                    self.parameter_table(fixed=False)
+                    self.parameter_table(
+                        fixed=False,
+                        level=level,
+                        n_samples=n_samples
+                    )
                 ],
             axis=0
             )

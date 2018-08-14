@@ -4,11 +4,11 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 import argparse
 from dtsr.config import Config
 
-def stitch(dir_paths, filename_suffix, output_path):
+def stitch(dir_paths, image_names, output_path):
     fontpath = matplotlib.rcParams['datapath'] + '/fonts/ttf/DejaVuSans.ttf'
     imgs = []
     for dir_path in dir_paths:
-        matches = [x for x in os.listdir(dir_path) if x.endswith(filename_suffix)]
+        matches = [x for x in os.listdir(dir_path) if x in image_names]
         for match in matches:
             im = Image.open(dir_path + '/' + match)
             if im.mode == 'RGBA':
@@ -20,7 +20,12 @@ def stitch(dir_paths, filename_suffix, output_path):
             draw = ImageDraw.Draw(im)
             draw.text((pt,pt), dir_path.split('/')[-1], fill=(0,0,0,0), font=font)
             imgs.append(im)
-    imgs[0].save(output_path, 'PDF', resolution=100, save_all=True, append_images=imgs[1:])
+    if len(imgs) > 0:
+        if len(imgs) > 1:
+            append_images = imgs[1:]
+        else:
+            append_images = []
+        imgs[0].save(output_path, 'PDF', resolution=100, save_all=True, append_images=append_images)
 
 
 if __name__ == '__main__':
@@ -29,7 +34,8 @@ if __name__ == '__main__':
         ''')
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='Path to configuration (*.ini) file')
-    argparser.add_argument('-i', '--image_suffix', type=str, default='irf_atomic_scaled.png', help='Name of image file to search for in each output directory.')
+    argparser.add_argument('-i', '--image_names', nargs='+', default='irf_atomic_scaled.png', help='Name(s) of image file(s) to search for in each output directory.')
+    argparser.add_argument('-o', '--output_name', type=str, default='DTSR_plots_stitched.pdf', help='Name of output file.')
     args, unknown = argparser.parse_known_args()
 
     p = Config(args.config_path)
@@ -44,4 +50,4 @@ if __name__ == '__main__':
         if os.path.exists(path):
             paths.append(path)
 
-    stitch(paths, args.image_suffix, p.outdir + '/' + '.'.join(args.image_suffix.split('.')[:-1]) + '.pdf')
+    stitch(paths, args.image_names, p.outdir + '/' + args.output_name)

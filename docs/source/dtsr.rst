@@ -17,14 +17,14 @@ dtsr\.data module
     :show-inheritance:
 
 dtsr\.dtsrbase module
------------------
+---------------------
 
 .. automodule:: dtsr.dtsrbase
     :members:
     :show-inheritance:
 
 dtsr\.dtsrmle module
------------------
+--------------------
 
 .. automodule:: dtsr.dtsrmle
     :members:
@@ -32,7 +32,7 @@ dtsr\.dtsrmle module
     :show-inheritance:
 
 dtsr\.dtsrbayes module
-------------------
+----------------------
 
 .. automodule:: dtsr.dtsrbayes
     :members:
@@ -50,6 +50,13 @@ dtsr\.io module
 ---------------
 
 .. automodule:: dtsr.io
+    :members:
+    :show-inheritance:
+
+dtsr\.kwargs module
+---------------
+
+.. automodule:: dtsr.kwargs
     :members:
     :show-inheritance:
 
