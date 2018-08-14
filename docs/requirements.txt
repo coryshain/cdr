@@ -1,5 +1,5 @@
 numpy==1.14.5
 scipy
 pandas
-tensorflow
+tensorflow==1.5.0
 edward

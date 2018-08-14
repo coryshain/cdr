@@ -117,6 +117,7 @@ class Kwarg(object):
     def type_comparator(a, b):
         '''
         Types precede strings, which precede ``None``
+
         :param a: First element
         :param b: Second element
         :return: ``-1``, ``0``, or ``1``, depending on outcome of comparison
