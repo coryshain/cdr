@@ -704,6 +704,10 @@ class Formula(object):
         for gf in random:
             out += ' + (' + ('1 + ' if self.has_intercept[gf] else '0 + ') + ' + '.join([x for x in random[gf]]) + ' | ' + gf + ')'
 
+        for gf in self.has_intercept:
+            if gf is not None and gf not in random and self.has_intercept[gf]:
+                out += ' + (1 | ' + gf + ')'
+
         return out
 
 class Impulse(object):
