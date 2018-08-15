@@ -24,6 +24,12 @@ class Kwarg(object):
         self.aliases = aliases
 
     def dtypes_str(self):
+        """
+        String representation of dtypes permitted for kwarg.
+
+        :return: ``str``; dtypes string.
+        """
+
         if len(self.dtypes) == 1:
             out = '``%s``' %self.get_type_name(self.dtypes[0])
         elif len(self.dtypes) == 2:
@@ -34,6 +40,13 @@ class Kwarg(object):
         return out
 
     def get_type_name(self, x):
+        """
+        String representation of name of a dtype
+
+        :param x: dtype; the dtype to name.
+        :return: ``str``; name of dtype.
+        """
+
         if isinstance(x, type):
             return x.__name__
         if isinstance(x, str):
@@ -41,6 +54,13 @@ class Kwarg(object):
         return str(x)
 
     def in_settings(self, settings):
+        """
+        Check whether kwarg is specified in a settings object parsed from a config file.
+
+        :param settings: settings from a ``ConfigParser`` object.
+        :return: ``bool``; whether kwarg is found in **settings**.
+        """
+
         out = False
         if self.key in settings:
             out = True
@@ -54,6 +74,14 @@ class Kwarg(object):
         return out
 
     def kwarg_from_config(self, settings):
+        """
+        Given a settings object parsed from a config file, return value of kwarg cast to appropriate dtype.
+        If missing from settings, return default.
+
+        :param settings: settings from a ``ConfigParser`` object.
+        :return: value of kwarg
+        """
+
         if len(self.dtypes) == 1:
             val = {
                 str: settings.get,
@@ -558,6 +586,12 @@ DTSRBAYES_INITIALIZATION_KWARGS = [
 
 
 def dtsr_kwarg_docstring():
+    """
+    Generate docstring snippet summarizing all DTSR kwargs, dtypes, and defaults.
+
+    :return: ``str``; docstring snippet
+    """
+
     out = "**Both DTSRMLE and DTSRBayes**\n\n"
 
     for kwarg in DTSR_INITIALIZATION_KWARGS:

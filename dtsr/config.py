@@ -126,12 +126,28 @@ class Config(object):
         return out
 
     def set_model(self, model_name=None):
+        """
+        Change internal state to that of model named **model_name**.
+        ``Config`` instances can store settings for multiple models.
+        ``set_model()`` determines which model's settings are returned by ``Config`` getter methods.
+
+        :param model_name: ``str``; name of target model
+        :return: ``None``
+        """
         if model_name is None or model_name in self.models:
             self.current_model = model_name
         else:
             raise ValueError('There is no model named "%s" defined in the config file.' %model_name)
 
     def build_dtsr_settings(self, settings, add_defaults=True):
+        """
+        Given a settings object parsed from a config file, compute DTSR parameter dictionary.
+
+        :param settings: settings from a ``ConfigParser`` object.
+        :param add_defaults: ``bool``; whether to supply defaults for parameters missing from **settings**.
+        :return: ``dict``; dictionary of settings key-value pairs.
+        """
+
         out = {}
 
         # Core fields

@@ -57,7 +57,7 @@ if __name__ == '__main__':
             a = p['plot_n_time_units'] if n_time_units is None else n_time_units
             b = p['plot_n_time_points'] if resolution is None else resolution
 
-            x = np.linspace(0, a, a * b)
+            x = np.linspace(0, a, b)
 
             y = convolve(x, np.expand_dims(params.k, -1), np.expand_dims(params.theta, -1), np.expand_dims(params.delta, -1), coefficient=np.expand_dims(params.beta, -1))
             y = y.transpose([1, 0])

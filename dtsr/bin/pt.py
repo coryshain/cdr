@@ -20,7 +20,7 @@ if __name__ == '__main__':
     argparser = argparse.ArgumentParser('''
         Performs pairwise permutation test for significance of differences in prediction quality between models.
         Can be used for in-sample and out-of-sample evaluation.
-        Can be used either to compare arbitrary sets of models (e.g. DTSR vs. LME) or (using the "-a" flag) to perform hypothesis testing between DTSR models within one or more ablation sets. 
+        Can be used (1) to compare models of different structure (e.g. DTSR vs. LME), (2) (using the "-a" flag) to perform hypothesis testing between DTSR models within one or more ablation sets, or (3) (using the "-P" flag) to perform a pooled test comparing DTSR models fitted to multiple responses. 
     ''')
     argparser.add_argument('config_paths', nargs='*', help='Path(s) to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='Models (or model basenames if using -a) to compare. Defaults to all models in the config file.')
