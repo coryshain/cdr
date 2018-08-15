@@ -34,7 +34,7 @@ if __name__ == '__main__':
         ''')
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='Path to configuration (*.ini) file')
-    argparser.add_argument('-i', '--image_names', nargs='+', default='irf_atomic_scaled.png', help='Name(s) of image file(s) to search for in each output directory.')
+    argparser.add_argument('-i', '--image_names', nargs='+', default=['irf_atomic_scaled.png'], help='Name(s) of image file(s) to search for in each output directory.')
     argparser.add_argument('-o', '--output_name', type=str, default='DTSR_plots_stitched.pdf', help='Name of output file.')
     args, unknown = argparser.parse_known_args()
 
