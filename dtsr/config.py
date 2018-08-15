@@ -16,9 +16,9 @@ def powerset(iterable):
 
 class Config(object):
     """
-    Parses an *.ini file and stores settings needed to define a set of DTSR experiments.
+    Parses an \*.ini file and stores settings needed to define a set of DTSR experiments.
 
-    :param path: Path to *.ini file
+    :param path: Path to \*.ini file
     """
 
     def __init__(self, path):
