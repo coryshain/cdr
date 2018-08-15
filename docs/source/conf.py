@@ -26,6 +26,8 @@ class Mock(MagicMock):
         return MagicMock()
 
 MOCK_MODULES = [
+    'rpy2'
+    'rpy2.globalenv'
     'edward',
     'edward.models'
 ]
