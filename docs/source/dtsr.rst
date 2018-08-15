@@ -3,7 +3,7 @@ DTSR Module Index
 
 
 dtsr\.baselines module
--------------------
+----------------------
 
 .. automodule:: dtsr.baselines
     :members:
