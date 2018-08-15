@@ -4,15 +4,44 @@ import pandas as pd
 from .util import names2ix
 
 def z(df):
+    """
+    Z-transform pandas series or data frame
+
+    :param df: ``pandas`` ``Series`` or ``DataFrame``; input date
+    :return: ``pandas`` ``Series`` or ``DataFrame``; z-transformed data
+    """
+
     return (df-df.mean(axis=0))/df.std(axis=0)
 
 def c(df):
+    """
+    Zero-center pandas series or data frame
+
+    :param df: ``pandas`` ``Series`` or ``DataFrame``; input date
+    :return: ``pandas`` ``Series`` or ``DataFrame``; centered data
+    """
+
     return df-df.mean(axis=0)
 
 def s(df):
+    """
+    Rescale pandas series or data frame by its standard deviation
+
+    :param df: ``pandas`` ``Series`` or ``DataFrame``; input date
+    :return: ``pandas`` ``Series`` or ``DataFrame``; rescaled data
+    """
+
     return df/df.std(axis=0)
 
 def filter_invalid_responses(y, dv):
+    """
+    Filter out rows with non-finite responses.
+
+    :param y: ``pandas`` ``DataFrame``; response data.
+    :param dv: ``str``; name of column containing the dependent variable
+    :return: 2-tuple of ``pandas`` ``DataFrame`` and ``pandas`` ``Series``; valid data and indicator vector used to filter out invalid data.
+    """
+
     select_y_valid = np.isfinite(y[dv]) & (y.last_obs > y.first_obs)
     return y[select_y_valid], select_y_valid
 
@@ -29,6 +58,23 @@ def build_DTSR_impulses(
         int_type='int32',
         float_type='float32',
 ):
+    """
+    Construct 3D array of shape ``(batch_len, history_length, n_impulses)`` to use as predictor data for DTSR fitting.
+
+    :param X: ``pandas`` ``DataFrame``; impulse (predictor) data.
+    :param first_obs: ``pandas`` ``Series``; vector of row indices in **X** of the first impulse in the time series associated with each response.
+    :param last_obs: ``pandas`` ``Series``; vector of row indices in **X** of the last preceding impulse in the time series associated with each response.
+    :param impulse_names: ``list`` of ``str``; names of columns in **X** to be used as impulses by the model.
+    :param history_length: ``int``; maximum number of history observations.
+    :param X_response_aligned_predictor_names: ``list`` of ``str``; names of predictors measured synchronously with the response rather than the impulses. If ``None``, no such impulses.
+    :param X_response_aligned_predictors: ``pandas`` ``DataFrame`` or ``None``; table of predictors measured synchronously with the response rather than the impulses. If ``None``, no such impulses.
+    :param X_2d_predictor_names: ``list`` of ``str``; names of 2D impulses (i.e. impulses whose values can differ for each response). If ``None``, no such impulses.
+    :param X_2d_predictors: ``pandas`` ``DataFrame`` or ``None``; table of 2D impulses. If ``None``, no such impulses.
+    :param int_type: ``str``; name of int type.
+    :param float_type: ``str``; name of float type.
+    :return: 3-tuple of ``numpy`` arrays; the expanded impulse array, the expanded timestamp array, and a boolean mask zeroing out locations of non-existent impulses.
+    """
+
     if X_response_aligned_predictor_names is None:
         X_response_aligned_predictor_names = []
     assert (X_2d_predictors is None and (X_2d_predictor_names is None or len(X_2d_predictor_names) == 0)) or (X_2d_predictors.shape[-1] == len(X_2d_predictor_names)), 'Shape mismatch between X_2d_predictors and X_2d_predictor_names'
@@ -62,6 +108,15 @@ def build_DTSR_impulses(
     return X_2d, time_X_2d, time_mask
 
 def compute_history_intervals(X, y, series_ids):
+    """
+    Compute row indices in **X** of initial and final impulses for each element of **y**.
+
+    :param X: ``pandas`` ``DataFrame``; impulse (predictor) data.
+    :param y: ``pandas`` ``DataFrame``; response data.
+    :param series_ids: ``list`` of ``str``; column names whose jointly unique values define unique time series.
+    :return: 2-tuple of ``numpy`` vectors; first and last impulse observations (respectively) for each response in **y**
+    """
+
     m = len(X)
     n = len(y)
 
@@ -122,6 +177,16 @@ def compute_history_intervals(X, y, series_ids):
     return first_obs, last_obs
 
 def corr_dtsr(X_2d, impulse_names, impulse_names_2d, time_mask):
+    """
+    Compute correlation matrix, including correlations across time where necessitated by 2D predictors.
+
+    :param X_2d: ``numpy`` array; the impulse data. Must be of shape ``(batch_len, history_length, n_impulses)``, can be computed from sources by ``build_DTSR_impulses()``.
+    :param impulse_names: ``list`` of ``str``; names of columns in **X_2d** to be used as impulses by the model.
+    :param impulse_names_2d: ``list`` of ``str``; names of columns in **X_2d** that designate to 2D predictors.
+    :param time_mask: 2D ``numpy`` boolean array; mask of shape ``(batch_len, history_length)`` with zeros in each cell corresponding to a non-existent impulse.
+    :return: ``pandas`` ``DataFrame``; the correlation matrix.
+    """
+
     rho = pd.DataFrame(np.zeros((len(impulse_names), len(impulse_names))), index=impulse_names, columns=impulse_names)
 
     n_2d = X_2d.shape[0]
@@ -156,6 +221,14 @@ def corr_dtsr(X_2d, impulse_names, impulse_names_2d, time_mask):
     return rho
 
 def compute_filters(y, filter_map=None):
+    """
+    Compute filters given a filter map.
+
+    :param y: ``pandas`` ``DataFrame``; response data.
+    :param filter_map: ``dict``; maps column names to filtering criteria for their values.
+    :return: ``numpy`` vector; boolean mask to use for ``pandas`` subsetting operations.
+    """
+
     if filter_map is None:
         return y
     select = np.ones(len(y), dtype=bool)
@@ -166,6 +239,15 @@ def compute_filters(y, filter_map=None):
     return select
 
 def compute_filter(y, field, cond):
+    """
+    Compute filter given a field and condition
+
+    :param y: ``pandas`` ``DataFrame``; response data.
+    :param field: ``str``; name of column on whose values to filter.
+    :param cond: ``str``; string representation of condition to use for filtering.
+    :return: ``numpy`` vector; boolean mask to use for ``pandas`` subsetting operations.
+    """
+
     cond = cond.strip()
     if cond.startswith('<='):
         return y[field] <= (np.inf if cond[2:].strip() == 'inf' else float(cond[2:].strip()))
@@ -188,18 +270,49 @@ def compute_filter(y, field, cond):
     raise ValueError('Unsupported comparator in filter "%s"' %cond)
 
 def compute_splitID(y, split_fields):
+    """
+    Map tuples in columns designated by **split_fields** into integer ID to use for data partitioning.
+
+    :param y: ``pandas`` ``DataFrame``; response data.
+    :param split_fields: ``list`` of ``str``; column names to use for computing split ID.
+    :return: ``numpy`` vector; integer vector of split ID's.
+    """
+
     splitID = np.zeros(len(y), dtype='int32')
     for col in split_fields:
         splitID += y[col].cat.codes
     return splitID
 
 def compute_partition(y, modulus, n):
+    """
+    Given a ``splitID`` column, use modular arithmetic to partition data into **n** subparts.
+
+    :param y: ``pandas`` ``DataFrame``; response data.
+    :param modulus: ``int``; modulus to use for splitting, must be at least as large as **n**.
+    :param n: ``int``; number of subparts in the partition.
+    :return: ``list`` of ``numpy`` vectors; one boolean vector per subpart of the partition, selecting only those elements of **y** that belong.
+    """
+
     partition = [((y.splitID) % modulus) <= (modulus - n)]
     for i in range(n-1, 0, -1):
         partition.append(((y.splitID) % modulus) == (modulus - i))
     return partition
 
 def expand_history(X, X_time, first_obs, last_obs, history_length, int_type='int32', float_type='float32', fill=0.):
+    """
+    Expand out impulse stream in **X** for each response in the target data.
+
+    :param X: ``pandas`` ``DataFrame``; impulse (predictor) data.
+    :param X_time: ``pandas`` ``Series``; timestamps associated with each impulse in **X**.
+    :param first_obs: ``pandas`` ``Series``; vector of row indices in **X** of the first impulse in the time series associated with each response.
+    :param last_obs: ``pandas`` ``Series``; vector of row indices in **X** of the last preceding impulse in the time series associated with each response.
+    :param history_length: ``int``; maximum number of history observations.
+    :param int_type: ``str``; name of int type.
+    :param float_type: ``str``; name of float type.
+    :param fill: ``float``; fill value for padding cells.
+    :return: 3-tuple of ``numpy`` arrays; the expanded impulse array, the expanded timestamp array, and a boolean mask zeroing out locations of non-existent impulses.
+    """
+
     INT_NP = getattr(np, int_type)
     FLOAT_NP = getattr(np, float_type)
     last_obs = np.array(last_obs, dtype=INT_NP)
@@ -221,6 +334,18 @@ def expand_history(X, X_time, first_obs, last_obs, history_length, int_type='int
     return X_2d, time_X_2d, time_mask
 
 def compute_time_mask(X_time, first_obs, last_obs, history_length, int_type='int32', float_type='float32'):
+    """
+    Compute mask for expanded impulse data zeroing out non-existent impulses.
+
+    :param X_time: ``pandas`` ``Series``; timestamps associated with each impulse in **X**.
+    :param first_obs: ``pandas`` ``Series``; vector of row indices in **X** of the first impulse in the time series associated with each response.
+    :param last_obs: ``pandas`` ``Series``; vector of row indices in **X** of the last preceding impulse in the time series associated with each response.
+    :param history_length: ``int``; maximum number of history observations.
+    :param int_type: ``str``; name of int type.
+    :param float_type: ``str``; name of float type.
+    :return: ``numpy`` array; boolean impulse mask.
+    """
+
     INT_NP = getattr(np, int_type)
     FLOAT_NP = getattr(np, float_type)
     last_obs = np.array(last_obs, dtype=INT_NP)
@@ -236,6 +361,18 @@ def compute_time_mask(X_time, first_obs, last_obs, history_length, int_type='int
     return time_mask
 
 def preprocess_data(X, y, p, formula_list, compute_history=True, debug=False):
+    """
+    Preprocess DTSR data.
+
+    :param X: ``pandas`` ``DataFrame``; impulse (predictor) data.
+    :param y: ``pandas`` ``DataFrame``; response data.
+    :param p: ``Config`` object; configuration containing preprocessing instructions parsed from config file.
+    :param formula_list: ``list`` of ``Formula``; DTSR formula for which to preprocess data.
+    :param compute_history: ``bool``; compute history intervals for each regression target.
+    :param debug: ``bool``; print debugging information
+    :return: 7-tuple; predictor data, response data, filtering mask, response-aligned predictor names, response-aligned predictors, 2D predictor names, and 2D predictors
+    """
+    
     sys.stderr.write('Pre-processing data...\n')
 
     if hasattr(p, 'filter_map'):

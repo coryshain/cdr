@@ -1,11 +1,21 @@
 import sys
 import pandas as pd
-import numpy as np
 
-def read_data(path_X, path_y, series_ids, categorical_columns=None):
+def read_data(path_X, path_y, series_ids, categorical_columns=None, sep=' '):
+    """
+    Read impulse and response data into pandas dataframes and perform basic pre-processing.
+
+    :param path_X: ``str``; path to impulse (predictor) data.
+    :param path_y: ``str``; path to response data.
+    :param series_ids: ``list`` of ``str``; column names whose jointly unique values define unique time series.
+    :param categorical_columns: ``list`` of ``str``; column names that should be treated as categorical.
+    :param sep: ``str``; string representation of field delimiter in input data.
+    :return: 2-tuple of ``pandas`` ``DataFrame``; (impulse data, response data)
+    """
+
     sys.stderr.write('Loading data...\n')
-    X = pd.read_csv(path_X, sep=' ', skipinitialspace=True)
-    y = pd.read_csv(path_y, sep=' ', skipinitialspace=True)
+    X = pd.read_csv(path_X, sep=sep, skipinitialspace=True)
+    y = pd.read_csv(path_y, sep=sep, skipinitialspace=True)
 
     sys.stderr.write('Ensuring sort order...\n')
     X.sort_values(series_ids + ['time'], inplace=True)
