@@ -82,6 +82,12 @@ dvector_mvnorm = robjects.r(rstring)
 robjects.globalenv["dvector_mvnorm"] = dvector_mvnorm
 
 class LM(object):
+    """
+    Ordinary least squares linear model
+
+    :param: formula: ``str``; formula string defining the linear model.
+    :param: X: ``pandas`` table or R dataframe; the training data.
+    """
     def __init__(self, formula, X):
         fit, summary, predict = self.instance_methods()
         self.m = fit(formula, X)
