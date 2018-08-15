@@ -8,3 +8,4 @@ DTSR base class
     :members:
     :inherited-members:
     :show-inheritance:
+    :noindex:

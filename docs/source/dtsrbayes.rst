@@ -9,3 +9,4 @@ DTSR with Bayesian inference.
     :members:
     :inherited-members:
     :show-inheritance:
+    :noindex:

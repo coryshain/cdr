@@ -28,8 +28,6 @@ class Mock(MagicMock):
 MOCK_MODULES = [
     'rpy2'
     'rpy2.globalenv'
-    'edward',
-    'edward.models'
 ]
 sys.modules.update((mod_name, Mock()) for mod_name in MOCK_MODULES)
 

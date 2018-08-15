@@ -9,3 +9,4 @@ DTSR with maximum likelihood estimation.
     :members:
     :inherited-members:
     :show-inheritance:
+    :noindex:
