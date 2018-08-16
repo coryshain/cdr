@@ -16,10 +16,9 @@ spline = re.compile('S((o([0-9]+))?(b([0-9]+))?(l([0-9]+))?(p([0-9]+))?(i([0-1])
 
 class Formula(object):
     """
-    A class for parsing R-style mixed-effects model formula strings and applying them to DTSR design matrices.
+    A class for parsing R-style mixed-effects DTSR model formula strings and applying them to DTSR data matrices.
     
-    # Arguments
-        bform_str: String. An R-style mixed-effects model formula string
+    :param bform_str: ``str``; an R-style mixed-effects DTSR model formula string
     """
 
     IRF = [
