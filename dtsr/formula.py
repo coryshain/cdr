@@ -70,6 +70,12 @@ class Formula(object):
 
     @staticmethod
     def irf_params(family):
+        """
+        Return list of parameter names for a given IRF family.
+
+        :param family: ``str``; name of IRF family
+        :return: ``list`` of ``str``; parameter names
+        """
         if family in Formula.IRF_PARAMS:
             out = Formula.IRF_PARAMS[family]
         elif Formula.is_spline(family):
@@ -83,6 +89,13 @@ class Formula(object):
 
     @staticmethod
     def is_spline(family):
+        """
+        Check whether a family name designates a spline kernel.
+
+        :param family: ``str``; name of IRF family
+        :return: ``bool``; ``True`` if spline kernel, ``False`` otherwise
+        """
+
         if family is None:
             out = False
         else:
@@ -91,6 +104,13 @@ class Formula(object):
 
     @staticmethod
     def order(family):
+        """
+        Return the order of a spline kernel.
+
+        :param family: ``str``; name of IRF family
+        :return: ``int`` or ``None``; order of spline kernel, or ``None`` if **family** is not a spline.
+        """
+
         if family is None:
             out = None
         else:
@@ -105,6 +125,13 @@ class Formula(object):
 
     @staticmethod
     def bases(family):
+        """
+        Return the number of bases of a spline kernel.
+
+        :param family: ``str``; name of IRF family
+        :return: ``int`` or ``None``; number of bases of spline kernel, or ``None`` if **family** is not a spline.
+        """
+
         if family is None:
             out = None
         else:
@@ -119,6 +146,13 @@ class Formula(object):
 
     @staticmethod
     def roughness_penalty(family):
+        """
+        Return the roughness penalty of a spline kernel.
+
+        :param family: ``str``; name of IRF family
+        :return: ``float`` or ``None``; roughness penalty of spline kernel, or ``None`` if **family** is not a spline.
+        """
+
         if family is None:
             out = None
         else:
@@ -134,6 +168,15 @@ class Formula(object):
 
     @staticmethod
     def spacing_power(family):
+        """
+        Return the spacing power of a spline kernel.
+        Spacing power governs how control points are initially spaced in time.
+        ``1`` means equidistant spacing, ``2`` means quadratic spacing, etc.
+
+        :param family: ``str``; name of IRF family
+        :return: ``int`` or ``None``; spacing power of spline kernel, or ``None`` if **family** is not a spline.
+        """
+
         if family is None:
             out = None
         else:
@@ -148,6 +191,13 @@ class Formula(object):
 
     @staticmethod
     def instantaneous(family):
+        """
+        Check whether a spline kernel permits a non-zero instantaneous response.
+
+        :param family: ``str``; name of IRF family
+        :return: ``bool`` or ``None``; whether the spline kernel permits a non-zero instantaneous response, or ``None`` if **family** is not a spline.
+        """
+
         if family is None:
             out = None
         else:
@@ -164,6 +214,13 @@ class Formula(object):
         self.build(bform_str)
 
     def build(self, bform_str):
+        """
+        Construct internal data from formula string
+
+        :param bform_str: ``str``; source string.
+        :return: ``None``
+        """
+
         self.bform_str = bform_str
 
         lhs, rhs = bform_str.strip().split('~')
@@ -191,6 +248,18 @@ class Formula(object):
             ops=None,
             rangf=None
     ):
+        """
+        Process a node of the Python abstract syntax tree (AST) representation of the formula string and insert data into internal representation of model formula.
+        Recursive.
+
+        :param t: AST node.
+        :param terms: ``list`` or ``None``; DTSR terms computed so far, or ``None`` if no DTSR terms computed.
+        :param has_intercept: ``dict``; map from random grouping factors to boolean values representing whether that grouping factor has a random intercept. ``None`` is used as a key to refer to the population-level intercept.
+        :param ops: ``list``; names of ops computed so far, or ``None`` if no ops computed.
+        :param rangf: ``str`` or ``None``; name of rangf for random term currently being processed, or ``None`` if currently processing fixed effects portion of model.
+        :return: ``None``
+        """
+
         if terms is None:
             terms = []
         if has_intercept is None:
@@ -282,6 +351,16 @@ class Formula(object):
             ops=None,
             rangf=None
     ):
+        """
+        Process data from AST node representing part of an IRF definition and insert data into internal representation of the model.
+
+        :param t: AST node.
+        :param input: ``IRFNode`` object; child IRF of current node
+        :param ops: ``list`` of ``str``, or ``None``; ops applied to IRF. If ``None``, no ops applied
+        :param rangf: ``str`` or ``None``; name of rangf for random term currently being processed, or ``None`` if currently processing fixed effects portion of model.
+        :return: ``IRFNode`` object; the IRF node
+        """
+
         if ops is None:
             ops = []
         assert t.func.id in Formula.IRF or spline.match(t.func.id) is not None, 'Ill-formed model string: process_irf() called on non-IRF node'
@@ -395,6 +474,14 @@ class Formula(object):
         return new
 
     def apply_op(self, op, arr):
+        """
+        Apply op **op** to array **arr**.
+
+        :param op: ``str``; name of op.
+        :param arr: ``numpy`` or ``pandas`` array; source data.
+        :return: ``numpy`` array; transformed data.
+        """
+
         arr.fillna(0, inplace=True)
         arr[arr == np.inf] = 0
         if op in ['c', 'c.']:
@@ -414,7 +501,16 @@ class Formula(object):
         return out
 
     def apply_ops(self, impulse, df):
+        """
+        Apply all ops defined for an impulse
+
+        :param impulse: ``Impulse`` object; the impulse.
+        :param df: ``pandas`` table; table containing the impulse data.
+        :return: ``pandas`` table; table augmented with transformed impulse.
+        """
+
         ops = impulse.ops
+
         if impulse.name() not in df.columns:
             if impulse.id not in df.columns:
                 if type(impulse).__name__ == 'InteractionTerm':
@@ -439,6 +535,17 @@ class Formula(object):
             history_length=128,
             minibatch_size=50000
     ):
+        """
+        Compute 2D predictor (predictor whose value depends on properties of the response).
+
+        :param predictor_name: ``str``; name of predictor
+        :param X: ``pandas`` table; input data
+        :param first_obs: ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the start of the series associated with each regression target.
+        :param last_obs: ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the most recent observation in the series associated with each regression target.
+        :param minibatch_size: ``int``; minibatch size for computing predictor, can help with memory footprint
+        :return: 2-tuple; new predictor name, ``numpy`` array of predictor values
+        """
+
         supported = [
             'cosdist2D',
             'eucldist2D'
@@ -500,6 +607,15 @@ class Formula(object):
         return new_2d_predictor_name, new_2d_predictor
 
     def apply_op_2d(self, op, arr, time_mask):
+        """
+        Apply op to 2D predictor (predictor whose value depends on properties of the response).
+
+        :param op: ``str``; name of op.
+        :param arr: ``numpy`` or array; source data.
+        :param time_mask: ``numpy`` array; mask for padding cells
+        :return: ``numpy`` array; transformed data
+        """
+
         with np.errstate(invalid='ignore'):
             n = time_mask.sum()
             time_mask = time_mask[..., None]
@@ -524,7 +640,17 @@ class Formula(object):
                 raise ValueError('Unrecognized op: "%s".' % op)
             return out
 
-    def apply_ops_2d(self, impulse, X_2d_predictor_names, X_2d_predictors, time_mask, history_length=128):
+    def apply_ops_2d(self, impulse, X_2d_predictor_names, X_2d_predictors, time_mask):
+        """
+        Apply all ops defined for a 2D predictor (predictor whose value depends on properties of the response).
+
+        :param impulse: ``Impulse`` object; the impulse.
+        :param X_2d_predictor_names: ``list`` of ``str``; names of 2D predictors.
+        :param X_2d_predictors: ``numpy`` array; source data.
+        :param time_mask: ``numpy`` array; mask for padding cells
+        :return: 2-tuple; ``list`` of new predictor name, ``numpy`` array of predictor values
+        """
+
         assert time_mask is not None, 'Trying to compute 2D predictor but no time mask provided'
         ops = impulse.ops
         if impulse.name() not in X_2d_predictor_names:
@@ -550,6 +676,19 @@ class Formula(object):
             X_2d_predictors=None,
             history_length=128
     ):
+        """
+        Extract all data and compute all transforms required by the model formula.
+
+        :param X: ``pandas`` table; impulse data.
+        :param y: ``pandas`` table; response data.
+        :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
+        :param X_response_aligned_predictors: ``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
+        :param X_2d_predictor_names: ``list`` or ``None``; List of column names 2D predictors (predictors whose values at each time point differ for each regression target) if applicable, ``None`` otherwise.
+        :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
+        :param history_length: ``int``; maximum number of timesteps in the history dimension.
+        :return: 6-tuple; transformed **X**, transformed **y**, transformed response-aligned predictor names, transformed response-aligned predictors, transformed 2D predictor names, transformed 2D predictors
+        """
+
         if self.dv not in y.columns:
             y = self.apply_ops(self.dv_term, y)
         impulses = self.t.impulses()
@@ -590,7 +729,6 @@ class Formula(object):
                     X_2d_predictor_names,
                     X_2d_predictors,
                     time_mask,
-                    history_length=history_length
                 )
 
             elif impulse.id not in X.columns:
@@ -608,16 +746,49 @@ class Formula(object):
         return X, y, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors
 
     def ablate_impulses(self, impulse_ids):
+        """
+        Remove impulses in **impulse_ids** from fixed effects (retaining in any random effects).
+
+        :param impulse_ids: ``list`` of ``str``; impulse ID's
+        :return: ``None``
+        """
+
         if not isinstance(impulse_ids, list):
             impulse_ids = [impulse_ids]
         self.t.ablate_impulses(impulse_ids)
 
     def unablate_impulses(self, impulse_ids):
+        """
+        Insert impulses in **impulse_ids** into fixed effects (leaving random effects structure unchanged).
+
+        :param impulse_ids: ``list`` of ``str``; impulse ID's
+        :return: ``None``
+        """
+
         if not isinstance(impulse_ids, list):
             impulse_ids = [impulse_ids]
         self.t.unablate_impulses(impulse_ids)
 
+    def remove_impulses(self, impulse_ids):
+        """
+        Remove impulses in **impulse_ids** from the model (both fixed and random effects).
+
+        :param impulse_ids: ``list`` of ``str``; impulse ID's
+        :return:  ``None``
+        """
+
+        if not isinstance(impulse_ids, list):
+            impulse_ids = [impulse_ids]
+        self.t.remove_impulses(impulse_ids)
+
     def insert_impulses(self, impulses, irf_str, rangf=['subject']):
+        """
+        Insert impulses in **impulse_ids** into fixed effects and all random terms.
+
+        :param impulse_ids: ``list`` of ``str``; impulse ID's
+        :return: ``None``
+        """
+
         if not isinstance(impulses, list):
             impulses = [impulses]
 
@@ -627,11 +798,6 @@ class Formula(object):
             bform += ' + (C(' + ' + '.join(impulses) + ', ' + irf_str + ') | ' + gf + ')'
 
         self.build(bform)
-
-    def remove_impulses(self, impulse_ids):
-        if not isinstance(impulse_ids, list):
-            impulse_ids = [impulse_ids]
-        self.t.remove_impulses(impulse_ids)
 
     def __str__(self):
         out = str(self.dv_term) + ' ~ '
@@ -677,6 +843,14 @@ class Formula(object):
         return out
 
     def to_lmer_formula_string(self, z=False):
+        """
+        Generate an ``lme4``-style LMER model string representing the structure of the current DTSR model.
+        Useful for 2-step analysis in which data are transformed using DTSR, then fitted using LME.
+
+        :param z: ``bool``; z-transform convolved predictors.
+        :return: ``str``; the LMER formula string.
+        """
+
         fixed = []
         random = {}
 

@@ -3,7 +3,7 @@ import argparse
 import numpy as np
 import pandas as pd
 from dtsr.config import Config
-from dtsr.signif import bootstrap
+from dtsr.signif import permutation_test
 
 def scale(a, b):
     df = np.stack([np.array(a), np.array(b)], axis=1)
@@ -84,7 +84,7 @@ if __name__ == '__main__':
                     m2_scaled_losses.append(b)
             m1_scaled_losses = np.concatenate(m1_scaled_losses, axis=0)
             m2_scaled_losses = np.concatenate(m2_scaled_losses, axis=0)
-            p_value, base_diff = bootstrap(m1_scaled_losses, m2_scaled_losses, n_iter=10000)
+            p_value, base_diff = permutation_test(m1_scaled_losses, m2_scaled_losses, n_iter=10000)
 
             print('='*50)
             print('Model comparison: %s vs %s' %(m1, m2))

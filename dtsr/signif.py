@@ -2,7 +2,19 @@ import sys
 import numpy as np
 import math
 
-def bootstrap(err_1, err_2, n_iter=10000, n_tails=2, mode='loss', verbose=False):
+def permutation_test(err_1, err_2, n_iter=10000, n_tails=2, mode='loss', verbose=False):
+    """
+    Perform a paired permutation test for significance.
+
+    :param err_1: ``numpy`` vector; first error/loss vector.
+    :param err_2: ``numpy`` vector; second error/loss vector.
+    :param n_iter: ``int``; number of resampling iterations.
+    :param n_tails: ``int``; number of tails.
+    :param mode: ``str``; one of ``["loss", "loglik"]``, the type of error used (losses are averaged while loglik's are summed).
+    :param verbose: ``bool``; report progress logs to standard error.
+    :return:
+    """
+
     err_table = np.stack([err_1, err_2], 1)
     if mode == 'loss':
         base_diff = err_table[:,0].mean() - err_table[:,1].mean()
@@ -17,7 +29,7 @@ def bootstrap(err_1, err_2, n_iter=10000, n_tails=2, mode='loss', verbose=False)
     hits = 0
     if verbose:
         sys.stderr.write('Difference in test statistic: %s\n' %base_diff)
-    sys.stderr.write('Permutation testing...\n')
+        sys.stderr.write('Permutation testing...\n')
 
     diffs = np.zeros((n_iter,))
 

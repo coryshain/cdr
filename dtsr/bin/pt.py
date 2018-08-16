@@ -3,7 +3,7 @@ import argparse
 import numpy as np
 import pandas as pd
 from dtsr.config import Config
-from dtsr.signif import bootstrap
+from dtsr.signif import permutation_test
 import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
@@ -106,7 +106,7 @@ if __name__ == '__main__':
                                 b = pd.read_csv(p.outdir + '/' + m2 + '/' + file_name, sep=' ', header=None, skipinitialspace=True)
                                 select = np.logical_and(np.isfinite(np.array(a)), np.isfinite(np.array(b)))
                                 diff = float(len(a) - select.sum())
-                                p_value, base_diff, diffs = bootstrap(a[select], b[select], n_iter=10000, n_tails=args.tails, mode=args.metric)
+                                p_value, base_diff, diffs = permutation_test(a[select], b[select], n_iter=10000, n_tails=args.tails, mode=args.metric)
                                 sys.stderr.write('\n')
                                 out_path = p.outdir + '/' + name + '_PT_' + args.partition + '.txt'
                                 with open(out_path, 'w') as f:
@@ -160,7 +160,7 @@ if __name__ == '__main__':
                         df1.shape,
                         df2.shape
                     )
-                    p_value, diff, diffs = bootstrap(df1, df2, n_iter=10000, n_tails=args.tails, mode=args.metric)
+                    p_value, diff, diffs = permutation_test(df1, df2, n_iter=10000, n_tails=args.tails, mode=args.metric)
                     sys.stderr.write('\n')
                     name = '%s_v_%s' % ('FULL' if m1 == '' else '!' + m1, 'FULL' if m2 == '' else '!' + m2)
                     out_path = p.outdir + '/' + name + '_PT_pooled_' + args.partition + '.txt'

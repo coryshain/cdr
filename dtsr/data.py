@@ -372,7 +372,7 @@ def preprocess_data(X, y, p, formula_list, compute_history=True, debug=False):
     :param debug: ``bool``; print debugging information
     :return: 7-tuple; predictor data, response data, filtering mask, response-aligned predictor names, response-aligned predictors, 2D predictor names, and 2D predictors
     """
-    
+
     sys.stderr.write('Pre-processing data...\n')
 
     if hasattr(p, 'filter_map'):
