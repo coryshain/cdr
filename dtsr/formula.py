@@ -884,7 +884,16 @@ class Formula(object):
 
         return out
 
+
+
 class Impulse(object):
+    """
+    Data structure representing an impulse in a DTSR model.
+
+    :param name: ``str``; name of impulse
+    :param ops: ``list`` of ``str``, or ``None``; ops to apply to impulse. If ``None``, no ops.
+    """
+
     def __init__(self, name, ops=None):
         if ops is None:
             ops = []
@@ -899,9 +908,22 @@ class Impulse(object):
         return self.name_str
 
     def name(self):
+        """
+        Get name of term.
+
+        :return: ``str``; name.
+        """
+
         return self.name_str
 
 class InteractionImpulse(object):
+    """
+    Data structure representing an interaction of multiple impulses in a DTSR model.
+
+    :param terms: ``list`` of ``Impulse``; impulses to interact.
+    :param ops: ``list`` of ``str``, or ``None``; ops to apply to impulse. If ``None``, no ops.
+    """
+
     def __init__(self, terms, ops=None):
         if ops is None:
             ops = []
@@ -921,6 +943,12 @@ class InteractionImpulse(object):
         return self.name_str
 
     def name(self):
+        """
+        Get name of term.
+
+        :return: ``str``; name.
+        """
+
         return self.name_str
 
 class IRFNode(object):
