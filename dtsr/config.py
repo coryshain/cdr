@@ -83,6 +83,8 @@ class Config(object):
             self.filter_map = {}
             for f in filters:
                 self.filter_map[f] = [x.strip() for x in filters[f].strip().split(',')]
+        else:
+            self.filter_map = None
 
         ############
         # Model(s) #

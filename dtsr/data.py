@@ -68,7 +68,7 @@ def build_DTSR_impulses(
     :param history_length: ``int``; maximum number of history observations.
     :param X_response_aligned_predictor_names: ``list`` of ``str``; names of predictors measured synchronously with the response rather than the impulses. If ``None``, no such impulses.
     :param X_response_aligned_predictors: ``pandas`` ``DataFrame`` or ``None``; table of predictors measured synchronously with the response rather than the impulses. If ``None``, no such impulses.
-    :param X_2d_predictor_names: ``list`` of ``str``; names of 2D impulses (i.e. impulses whose values can differ for each response). If ``None``, no such impulses.
+    :param X_2d_predictor_names: ``list`` of ``str``; names of 2D impulses (impulses whose value depends on properties of the most recent impulse). If ``None``, no such impulses.
     :param X_2d_predictors: ``pandas`` ``DataFrame`` or ``None``; table of 2D impulses. If ``None``, no such impulses.
     :param int_type: ``str``; name of int type.
     :param float_type: ``str``; name of float type.
@@ -360,26 +360,28 @@ def compute_time_mask(X_time, first_obs, last_obs, history_length, int_type='int
 
     return time_mask
 
-def preprocess_data(X, y, p, formula_list, compute_history=True, debug=False):
+def preprocess_data(X, y, formula_list, series_ids, filter_map=None, compute_history=True, history_length=128, debug=False):
     """
     Preprocess DTSR data.
 
     :param X: ``pandas`` ``DataFrame``; impulse (predictor) data.
     :param y: ``pandas`` ``DataFrame``; response data.
-    :param p: ``Config`` object; configuration containing preprocessing instructions parsed from config file.
     :param formula_list: ``list`` of ``Formula``; DTSR formula for which to preprocess data.
+    :param series_ids: ``list`` of ``str``; column names whose jointly unique values define unique time series.
+    :param filter_map: ``dict``; map from column names to string representations of filters to apply using those columns' values. See the DTSR config file reference for details.
     :param compute_history: ``bool``; compute history intervals for each regression target.
+    :param history_length: ``int``; maximum number of history observations.
     :param debug: ``bool``; print debugging information
     :return: 7-tuple; predictor data, response data, filtering mask, response-aligned predictor names, response-aligned predictors, 2D predictor names, and 2D predictors
     """
 
     sys.stderr.write('Pre-processing data...\n')
 
-    if hasattr(p, 'filter_map'):
-        select = compute_filters(y, p.filter_map)
-        y = y[select]
-    else:
+    if filter_map is None:
         select = np.full((len(y),), True, dtype='bool')
+    else:
+        select = compute_filters(y, filter_map)
+        y = y[select]
 
     X_response_aligned_predictor_names = None
     X_response_aligned_predictors = None
@@ -388,7 +390,7 @@ def preprocess_data(X, y, p, formula_list, compute_history=True, debug=False):
 
     if compute_history:
         sys.stderr.write('Computing history intervals for each regression target...\n')
-        first_obs, last_obs = compute_history_intervals(X, y, p.series_ids)
+        first_obs, last_obs = compute_history_intervals(X, y, series_ids)
         y['first_obs'] = first_obs
         y['last_obs'] = last_obs
 
@@ -413,7 +415,7 @@ def preprocess_data(X, y, p, formula_list, compute_history=True, debug=False):
                 X_2d_predictors=X_2d_predictors,
                 X_response_aligned_predictor_names=X_response_aligned_predictor_names,
                 X_response_aligned_predictors=X_response_aligned_predictors,
-                history_length=p.history_length
+                history_length=history_length
             )
 
     return X, y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors
