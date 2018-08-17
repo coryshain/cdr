@@ -94,15 +94,21 @@ DTSR tree summaries
 -------------------
 
 In the DTSR model summary, the IRF tree is printed in string format with indentation representing dominance.
-The ID of each IRF on the tree is printed on its own line, along with other metadata when relevant (such as associated random grouping factors).
+The ID of each IRF on the tree is printed on its own line, along with other metadata when relevant (such as trainable params and associated random grouping factors).
 For example, Tree (1) above would be represented as follows::
 
   ROOT
-  S.A; trainable params: x2, x3, x4, x5, x6, x7, x8, x9, x10, y1, y2, y3, y4, y5, y6, y7, y8, y9
-    S.A-Terminal.A
-  S.B; trainable params: x2, x3, x4, x5, x6, x7, x8, x9, x10, y1, y2, y3, y4, y5, y6, y7, y8, y9
-    S.B-Terminal.B
-  S.C; trainable params: x2, x3, x4, x5, x6, x7, x8, x9, x10, y1, y2, y3, y4, y5, y6, y7, y8, y9
-    S.C-Terminal.C
+    Normal.A; trainable params: mu, sigma
+      Normal.A-Terminal.A
+    Normal.B; trainable params: mu, sigma
+      Normal.B-Terminal.B
+    Normal.C; trainable params: mu, sigma
+      Normal.C-Terminal.C
 
+while Tree (2) would be represented as follows::
 
+  ROOT
+    Normal; trainable params: mu, sigma
+      Normal-Terminal.A
+      Normal-Terminal.B
+      Normal-Terminal.C
