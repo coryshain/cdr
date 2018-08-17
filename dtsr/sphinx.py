@@ -1,3 +1,5 @@
+# Code taken from post by Stack Overflow user alex.forencich (https://stackoverflow.com/users/839411/alex-forencich)
+
 import sys
 from os.path import basename
 

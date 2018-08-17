@@ -11,7 +11,7 @@ from dtsr.config import Config
 from dtsr.io import read_data
 from dtsr.formula import Formula
 from dtsr.data import filter_invalid_responses, preprocess_data, compute_splitID, compute_partition
-from dtsr.util import mse, mae
+from dtsr.util import mse, mae, filter_models
 
 if __name__ == '__main__':
 
@@ -28,10 +28,7 @@ if __name__ == '__main__':
     if not p.use_gpu_if_available:
         os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
-    if len(args.models) > 0:
-        models = args.models
-    else:
-        models = p.model_list[:]
+    models = filter_models(p.model_list, args.models)
 
     run_baseline = False
     run_dtsr = False
@@ -48,9 +45,11 @@ if __name__ == '__main__':
     X, y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors = preprocess_data(
         X,
         y,
-        p,
         dtsr_formula_list,
-        compute_history=run_dtsr
+        p.series_ids,
+        filter_map=p.filter_map,
+        compute_history=run_dtsr,
+        history_length=p.history_length
     )
 
     if run_baseline:

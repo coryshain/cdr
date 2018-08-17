@@ -13,6 +13,7 @@ Documentation for the ``dtsr`` Python package.
    formula
    config
    api
+   irftree
    dtsr
 
 

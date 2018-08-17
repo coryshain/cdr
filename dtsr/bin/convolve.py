@@ -6,7 +6,7 @@ from dtsr.config import Config
 from dtsr.io import read_data
 from dtsr.formula import Formula
 from dtsr.data import preprocess_data, filter_invalid_responses
-from dtsr.util import load_dtsr
+from dtsr.util import load_dtsr, filter_models
 
 pd.options.mode.chained_assignment = None
 
@@ -29,10 +29,7 @@ if __name__ == '__main__':
     if not p.use_gpu_if_available:
         os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
-    if len(args.models) > 0:
-        models = args.models
-    else:
-        models = p.model_list[:]
+    models = filter_models(p.model_list, args.models)
 
     dtsr_formula_list = [Formula(p.models[m]['formula']) for m in models if m.startswith('DTSR')]
     dtsr_models = [m for m in models if m.startswith('DTSR')]
@@ -55,9 +52,11 @@ if __name__ == '__main__':
     X, y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors = preprocess_data(
         X,
         y,
-        p,
         dtsr_formula_list,
-        compute_history=True
+        p.series_ids,
+        filter_map=p.filter_map,
+        compute_history=True,
+        history_length=p.history_length
     )
 
     for m in dtsr_models:

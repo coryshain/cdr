@@ -2,9 +2,8 @@ import argparse
 import sys
 import os
 import numpy as np
-import pandas as pd
 from dtsr.config import Config
-from dtsr.util import load_dtsr
+from dtsr.util import load_dtsr, filter_models
 from dtsr.bin.synth import read_params, convolve
 from dtsr.plot import plot_irf
 
@@ -14,7 +13,7 @@ if __name__ == '__main__':
         Generates predictions from data given saved model(s)
     ''')
     argparser.add_argument('paths', nargs='+', help='Path(s) to config file(s) defining experiments')
-    argparser.add_argument('-m', '--models', nargs='*', default = [], help='Model names to plot (if unspecified, plots all DTSR models)')
+    argparser.add_argument('-m', '--models', nargs='*', default = [], help='Model names to plot. Regex permitted. If unspecified, plots all DTSR models.')
     argparser.add_argument('-i', '--irf_ids', nargs='*', default = [], help='List of IDs for IRF to include in the plot. Regex supported.')
     argparser.add_argument('-s', '--plot_true_synthetic', action='store_true', help='If the models are fit to synthetic data, also generate plots of the true IRF')
     argparser.add_argument('-p', '--prefix', type=str, default='', help='Filename prefix to use for outputs')
@@ -35,10 +34,8 @@ if __name__ == '__main__':
         if not p.use_gpu_if_available:
             os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
-        if len(args.models) > 0:
-            models = [m for m in args.models if (m in p.model_list and m.startswith('DTSR'))]
-        else:
-            models = [m for m in p.model_list[:] if (m in p.model_list and m.startswith('DTSR'))]
+        models = filter_models(p.model_list, args.models, dtsr_only=True)
+
         prefix = args.prefix
         if prefix != '':
             prefix += '_'
@@ -57,7 +54,7 @@ if __name__ == '__main__':
             a = p['plot_n_time_units'] if n_time_units is None else n_time_units
             b = p['plot_n_time_points'] if resolution is None else resolution
 
-            x = np.linspace(0, a, a * b)
+            x = np.linspace(0, a, b)
 
             y = convolve(x, np.expand_dims(params.k, -1), np.expand_dims(params.theta, -1), np.expand_dims(params.delta, -1), coefficient=np.expand_dims(params.beta, -1))
             y = y.transpose([1, 0])

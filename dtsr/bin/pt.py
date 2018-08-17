@@ -3,7 +3,8 @@ import argparse
 import numpy as np
 import pandas as pd
 from dtsr.config import Config
-from dtsr.signif import bootstrap
+from dtsr.signif import permutation_test
+from dtsr.util import filter_models
 import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
@@ -20,10 +21,10 @@ if __name__ == '__main__':
     argparser = argparse.ArgumentParser('''
         Performs pairwise permutation test for significance of differences in prediction quality between models.
         Can be used for in-sample and out-of-sample evaluation.
-        Can be used either to compare arbitrary sets of models (e.g. DTSR vs. LME) or (using the "-a" flag) to perform hypothesis testing between DTSR models within one or more ablation sets. 
+        Can be used (1) to compare models of different structure (e.g. DTSR vs. LME), (2) (using the "-a" flag) to perform hypothesis testing between DTSR models within one or more ablation sets, or (3) (using the "-P" flag) to perform a pooled test comparing DTSR models fitted to multiple responses. 
     ''')
     argparser.add_argument('config_paths', nargs='*', help='Path(s) to configuration (*.ini) file')
-    argparser.add_argument('-m', '--models', nargs='*', default=[], help='Models (or model basenames if using -a) to compare. Defaults to all models in the config file.')
+    argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of models (or model basenames if using -a) to compare. Regex permitted. If unspecified, uses all models.')
     argparser.add_argument('-P', '--pool', action='store_true', help='Pool test statistic across models by basename using all ablation configurations common to all basenames, forces -a. Evaluation data must already exist for all ablation configurations common to all basenames.')
     argparser.add_argument('-a', '--ablation', action='store_true', help='Only compare models within an ablation set (those defined using the "ablate" param in the config file)')
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
@@ -39,10 +40,8 @@ if __name__ == '__main__':
 
     for path in args.config_paths:
         p = Config(path)
-        if len(args.models) > 0:
-            models = args.models
-        else:
-            models = p.model_list[:]
+
+        models = filter_models(p.model_list, args.models)
 
         if args.metric == 'loss':
             file_name = '%s_losses_%s.txt' % (p['loss_name'], args.partition)
@@ -106,7 +105,7 @@ if __name__ == '__main__':
                                 b = pd.read_csv(p.outdir + '/' + m2 + '/' + file_name, sep=' ', header=None, skipinitialspace=True)
                                 select = np.logical_and(np.isfinite(np.array(a)), np.isfinite(np.array(b)))
                                 diff = float(len(a) - select.sum())
-                                p_value, base_diff, diffs = bootstrap(a[select], b[select], n_iter=10000, n_tails=args.tails, mode=args.metric)
+                                p_value, base_diff, diffs = permutation_test(a[select], b[select], n_iter=10000, n_tails=args.tails, mode=args.metric)
                                 sys.stderr.write('\n')
                                 out_path = p.outdir + '/' + name + '_PT_' + args.partition + '.txt'
                                 with open(out_path, 'w') as f:
@@ -160,7 +159,7 @@ if __name__ == '__main__':
                         df1.shape,
                         df2.shape
                     )
-                    p_value, diff, diffs = bootstrap(df1, df2, n_iter=10000, n_tails=args.tails, mode=args.metric)
+                    p_value, diff, diffs = permutation_test(df1, df2, n_iter=10000, n_tails=args.tails, mode=args.metric)
                     sys.stderr.write('\n')
                     name = '%s_v_%s' % ('FULL' if m1 == '' else '!' + m1, 'FULL' if m2 == '' else '!' + m2)
                     out_path = p.outdir + '/' + name + '_PT_pooled_' + args.partition + '.txt'

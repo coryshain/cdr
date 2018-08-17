@@ -44,7 +44,7 @@ if __name__ == '__main__':
     Generates plots of fitted spillover estimates for "fullS" baseline models, visualizing those models' estimates of temporal diffusion.
     ''')
     argparser.add_argument('paths', nargs='+', help='Paths to config files defining baseline models to plot')
-    argparser.add_argument('-m', '--models', nargs='*', default=None, help='List of models to plot. If none specified, plots all relevant models in the config files')
+    argparser.add_argument('-m', '--models', nargs='*', default=None, help='List of models to plot. Regex permitted. If unspecified, plots all relevant models in the config files.')
     argparser.add_argument('-x', '--x', type=float, default=6, help='Width of plots in inches')
     argparser.add_argument('-X', '--xlab', type=str, default=None, help='x-axis label (if default -- None -- no label)')
     argparser.add_argument('-y', '--y', type=float, default=4, help='Height of plots in inches')
@@ -61,7 +61,7 @@ if __name__ == '__main__':
         models = []
     else:
         models = [x for x in args.models if ('LMfullS' in x or 'LMEfullS' in x)]
-        assert len(models > 0), 'No valid models in script call. Models must be linear fullS models.'
+        assert len(models) > 0, 'No valid models in script call. Models must be linear fullS models.'
 
     cm = plt.get_cmap(args.cmap)
     legend = not args.nolegend
