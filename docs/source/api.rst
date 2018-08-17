@@ -10,4 +10,5 @@ This API reference is designed to support these kinds of cases.
 .. toctree::
    :caption: API Contents:
 
+   data
    models

@@ -2,6 +2,7 @@
 
 DTSR
 ====
+
 DTSR base class
 
 .. autoclass:: dtsr.dtsrbase.DTSR
