@@ -123,7 +123,7 @@ class LM(object):
 
         rstring = '''
             function(model, df) {
-                return(predict(model, df, allow.new.levels=TRUE))
+                return(predict(model, df, allow.new.levels=TRUE, na.action=na.pas))
             }
         '''
 
@@ -192,7 +192,7 @@ class LME(object):
 
         rstring = '''
             function(model, df) {
-                return(predict(model, df, allow.new.levels=TRUE))
+                return(predict(model, df, allow.new.levels=TRUE, na.action=na.pass))
             }
         '''
 
@@ -331,7 +331,7 @@ class GAM(object):
                 if (grepl('word', bform) & !is.null(words)) {
                     select = select & (word %in% words)
                 }
-                preds = predict(model, df[select,])
+                preds = predict(model, df[select,], na.action=na.pass)
                 df$preds = NA
                 df[select,]$preds = preds
                 return(df$preds)
