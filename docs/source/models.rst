@@ -1,6 +1,6 @@
 .. _models:
 
-DTSR Model classes
+DTSR model classes
 ==================
 
 This package implements two inference algorithms for DTSR: ``DTSRMLE`` (:ref:`dtsrmle`) and ``DTSRBayes`` (:ref:`dtsrbayes`).

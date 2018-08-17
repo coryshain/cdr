@@ -12,6 +12,7 @@ Since ``build_DTSR_impulses()`` is run internally by all DTSR instances methods 
 However, for expository purposes, the following is an example of a pipeline that converts text data from files into DTSR-ready model inputs:
 
 .. code-block:: python
+
   X_train_path = ['X_train.csv']
   y_train_path = ['y_train.csv']
   series_ids = ['subject', 'documentID']
