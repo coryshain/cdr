@@ -1,5 +1,7 @@
+import os
 import argparse
 from dtsr.config import Config
+from dtsr.util import filter_models
 
 def print_table(beta_summaries, names, beta_names):
     table_str = '''
@@ -38,15 +40,16 @@ if __name__ == '__main__':
     Generates a LaTeX table of beta summaries for one or more DTSR models
     ''')
     argparser.add_argument('config', help='Path to config file defining models')
-    argparser.add_argument('-m', '--models', nargs='+', default=[], help='Folder name(s) containing model eval summaries (if blank applies to all models described in config file).')
+    argparser.add_argument('-m', '--models', nargs='+', default=[], help='List of model names from which to extract betas. Regex permitted. If unspecified, extracts betas from all DTSR models.')
     argparser.add_argument('-n', '--names', nargs='*', default=[], help='Model names to print in table (must be omitted or same length as --models).')
     args = argparser.parse_args()
 
     p = Config(args.config)
-    if len(args.models) == 0:
-        models = p.model_list[:]
-    else:
-        models = args.models[:]
+
+    if not p.use_gpu_if_available:
+        os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+
+    models = filter_models(p.model_list, args.models, dtsr_only=True)
 
     if len(args.names) == 0:
         names = p.model_list[:]

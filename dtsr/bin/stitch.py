@@ -3,6 +3,7 @@ import matplotlib
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 import argparse
 from dtsr.config import Config
+from dtsr.util import filter_models
 
 def stitch(dir_paths, image_names, output_path):
     fontpath = matplotlib.rcParams['datapath'] + '/fonts/ttf/DejaVuSans.ttf'
@@ -33,16 +34,14 @@ if __name__ == '__main__':
         Stitches plots from DTSR models into a single PDF, making it easy to page through estimated IRF.
     ''')
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
-    argparser.add_argument('-m', '--models', nargs='*', default=[], help='Path to configuration (*.ini) file')
+    argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of models for which to stitch plots. Regex permitted. If unspecified, stitches all DTSR models.')
     argparser.add_argument('-i', '--image_names', nargs='+', default=['irf_atomic_scaled.png'], help='Name(s) of image file(s) to search for in each output directory.')
     argparser.add_argument('-o', '--output_name', type=str, default='DTSR_plots_stitched.pdf', help='Name of output file.')
     args, unknown = argparser.parse_known_args()
 
     p = Config(args.config_path)
-    if len(args.models) > 0:
-        models = args.models
-    else:
-        models = p.model_list[:]
+
+    models = filter_models(p.model_list, args.models, dtsr_only=True)
 
     paths = []
     for m in models:

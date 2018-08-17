@@ -4,7 +4,7 @@ import pickle
 
 from dtsr.baselines import anova
 from dtsr.config import Config
-from dtsr.util import nested
+from dtsr.util import nested, filter_models
 
 if __name__ == '__main__':
 
@@ -14,23 +14,20 @@ if __name__ == '__main__':
             Can be used either to compare arbitrary sets of LME models or (using the "-a" flag) to perform hypothesis testing between DTSR models within one or more ablation sets. 
         ''')
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
-    argparser.add_argument('-m', '--models', nargs='*', default=[], help='Path to configuration (*.ini) file')
+    argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of model names for which to compute LRT tests. Regex permitted. If unspecified, uses all DTSR models.')
     argparser.add_argument('-a', '--ablation', action='store_true', help='Only compare models within an ablation set (those defined using the "ablate" param in the config file)')
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
     args, unknown = argparser.parse_known_args()
 
     p = Config(args.config_path)
-    if len(args.models) > 0:
-        models = args.models
-    else:
-        models = p.model_list[:]
+
+    models = filter_models(p.model_list, args.models, dtsr_only=True)
 
     sys.stderr.write('\n')
-    dtsr_models = [x for x in models if x.startswith('DTSR')]
 
     if args.ablation:
         comparison_sets = {}
-        for model_name in dtsr_models:
+        for model_name in models:
             model_basename = model_name.split('!')[0]
             if model_basename not in comparison_sets:
                 comparison_sets[model_basename] = []
@@ -41,7 +38,7 @@ if __name__ == '__main__':
                 comparison_sets[model_basename].append(model_name)
     else:
         comparison_sets = {
-            None: dtsr_models
+            None: models
         }
 
     for s in comparison_sets:

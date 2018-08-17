@@ -1,6 +1,8 @@
 DTSR Module Index
 =================
 
+Complete alphabetic API for all public classes and methods in this package, grouped by module.
+
 
 dtsr\.config module
 -------------------

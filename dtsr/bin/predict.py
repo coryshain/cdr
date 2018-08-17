@@ -12,7 +12,7 @@ from dtsr.io import read_data
 from dtsr.formula import Formula
 from dtsr.data import filter_invalid_responses, preprocess_data, compute_splitID, compute_partition
 from dtsr.util import mse, mae, percent_variance_explained
-from dtsr.util import load_dtsr
+from dtsr.util import load_dtsr, filter_models
 
 def predict_LME(model_path, outdir, X, y, dv, model_name=''):
     sys.stderr.write('Retrieving saved model %s...\n' % m)
@@ -66,7 +66,7 @@ if __name__ == '__main__':
         Generates predictions from data given saved model(s)
     ''')
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
-    argparser.add_argument('-m', '--models', nargs='*', default=[], help='Path to configuration (*.ini) file')
+    argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of model names from which to predict. Regex permitted. If unspecified, predicts from all models.')
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
     argparser.add_argument('-n', '--nsamples', type=int, default=1024, help='Number of posterior samples to average (only used for DTSRBayes)')
     argparser.add_argument('-M', '--mode', type=str, default=None, help='Predict mode ("response" or "loglik") or default None, which does both')
@@ -76,10 +76,8 @@ if __name__ == '__main__':
     args, unknown = argparser.parse_known_args()
 
     p = Config(args.config_path)
-    if len(args.models) > 0:
-        models = args.models
-    else:
-        models = p.model_list[:]
+
+    models = filter_models(p.model_list, args.models)
 
     run_baseline = False
     run_dtsr = False

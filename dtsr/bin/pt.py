@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from dtsr.config import Config
 from dtsr.signif import permutation_test
+from dtsr.util import filter_models
 import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
@@ -23,7 +24,7 @@ if __name__ == '__main__':
         Can be used (1) to compare models of different structure (e.g. DTSR vs. LME), (2) (using the "-a" flag) to perform hypothesis testing between DTSR models within one or more ablation sets, or (3) (using the "-P" flag) to perform a pooled test comparing DTSR models fitted to multiple responses. 
     ''')
     argparser.add_argument('config_paths', nargs='*', help='Path(s) to configuration (*.ini) file')
-    argparser.add_argument('-m', '--models', nargs='*', default=[], help='Models (or model basenames if using -a) to compare. Defaults to all models in the config file.')
+    argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of models (or model basenames if using -a) to compare. Regex permitted. If unspecified, uses all models.')
     argparser.add_argument('-P', '--pool', action='store_true', help='Pool test statistic across models by basename using all ablation configurations common to all basenames, forces -a. Evaluation data must already exist for all ablation configurations common to all basenames.')
     argparser.add_argument('-a', '--ablation', action='store_true', help='Only compare models within an ablation set (those defined using the "ablate" param in the config file)')
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
@@ -39,10 +40,8 @@ if __name__ == '__main__':
 
     for path in args.config_paths:
         p = Config(path)
-        if len(args.models) > 0:
-            models = args.models
-        else:
-            models = p.model_list[:]
+
+        models = filter_models(p.model_list, args.models)
 
         if args.metric == 'loss':
             file_name = '%s_losses_%s.txt' % (p['loss_name'], args.partition)

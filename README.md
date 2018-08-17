@@ -22,7 +22,29 @@ Once the data are in hand, the paths to them in the appropriate experiment confi
 
 ### EMNLP18
 The EMNLP18 experiments (Shain & Schuler, to appear) are defined in the `experiments_emnlp18` directory.
-The files `natstor_emnlp18.ini`, `dundee_emnlp18.ini`, and `ucl_emnlp18.ini` each contain pointers to data files which will need to be updated by hand.
+The files `natstor_emnlp18.ini`, `dundee_emnlp18.ini`, and `ucl_emnlp18.ini` define the experiments and contain pointers to data.
+These experiments depend on the following 12 data files that are not distributed with this repository, but can be provided upon request:
+
+  - `natstor_X.csv`
+  - `natstor_y_train.csv`
+  - `natstor_y_dev.csv`
+  - `natstor_y_test.csv`
+  - `dundee_X.csv`
+  - `dundee_y_train.csv`
+  - `dundee_y_dev.csv`
+  - `dundee_y_test.csv`
+  - `ucl_X.csv`
+  - `ucl_y_train.csv`
+  - `ucl_y_dev.csv`
+  - `ucl_y_test.csv`
+  
+The ``*.ini`` files expect to find these resources in the ``experiments_emnlp18`` directory of the DTSR repository.
+Once the source data are in hand, there are three ways to link them up so you can run the experiments:
+
+  - Place the source data files in the ``experiments_emnlp18`` directory.
+  - Put symbolic links in the ``experiments_emnlp18`` directory to source files stored elsewhere.
+  - Change the data pointers in the ``*.ini`` files above to point to the locations of the data files.
+
 Once this step is complete, results can be reproduced on UNIX-based systems by navigating to the repository root and invoking the following command:
 
 `make emnlp18`

@@ -6,7 +6,7 @@ import pandas as pd
 from dtsr.config import Config
 from dtsr.baselines import py2ri, LME
 from dtsr.formula import Formula
-from dtsr.util import mse, mae
+from dtsr.util import mse, mae, filter_models
 
 pd.options.mode.chained_assignment = None
 
@@ -16,7 +16,7 @@ if __name__ == '__main__':
         Run LME follow-up regression on DTSR models in config for which convolved input data has been generated. 
     ''')
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
-    argparser.add_argument('-m', '--models', nargs='*', default=[], help='Path to configuration (*.ini) file')
+    argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of model names to use for LMER fitting. Regex permitted. If unspecified, fits LMER to all DTSR models.')
     argparser.add_argument('-p', '--partition', type=str, default='train', help='Name of partition to use (one of "train", "dev", "test")')
     argparser.add_argument('-z', '--zscore', action='store_true', help='Z-transform (center and scale) the convolved predictors prior to fitting')
     argparser.add_argument('-A', '--ablated_models', action='store_true', help='Fit ablated models to data convolved using the ablated model. Otherwise fits ablated models to data convolved using the full model.')
@@ -25,10 +25,7 @@ if __name__ == '__main__':
 
     p = Config(args.config_path)
 
-    if len(args.models) > 0:
-        models = args.models
-    else:
-        models = p.model_list[:]
+    models = filter_models(p.model_list, args.models, dtsr_only=True)
 
     models = [x for x in models if x.startswith('DTSR_')]
 

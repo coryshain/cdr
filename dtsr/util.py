@@ -125,6 +125,57 @@ def nested(model_name_1, model_name_2):
 
     return m_base[a] == m_base[b] and len(m_ablated[b] - m_ablated[a]) == 1 and len(m_ablated[a] - m_ablated[b]) == 0
 
+def filter_names(names, filters):
+    """
+    Return elements of **names** permitted by **filters**, preserving order in which filters were matched.
+    Filters can be ordinary strings, regular expression objects, or string representations of regular expressions.
+    For a regex filter to be considered a match, the expression must entirely match the name.
+
+    :param names: ``list`` of ``str``; pool of names to filter.
+    :param filters: ``list`` of ``{str, SRE_Pattern}``; filters to apply in order
+    :return: ``list`` of ``str``; names in **names** that pass at least one filter
+    """
+
+    filters_regex = [re.compile(f if f.endswith('$') else f + '$') for f in filters]
+
+    out = []
+
+    for i in range(len(filters)):
+        filter = filters[i]
+        filter_regex = filters_regex[i]
+        for name in names:
+            if name not in out:
+                if name == filter:
+                    out.append(name)
+                elif filter_regex.match(name):
+                    out.append(name)
+
+    return out
+
+def filter_models(names, filters, dtsr_only=False):
+    """
+    Return models contained in **names** that are permitted by **filters**, preserving order in which filters were matched.
+    Filters can be ordinary strings, regular expression objects, or string representations of regular expressions.
+    For a regex filter to be considered a match, the expression must entirely match the name.
+    If ``filters`` is zero-length, returns **names**.
+
+    :param names: ``list`` of ``str``; pool of model names to filter.
+    :param filters: ``list`` of ``{str, SRE_Pattern}``; filters to apply in order
+    :param dtsr_only: ``bool``; if ``True``, only returns DTSR models. If ``False``, returns all models admitted by **filters**.
+    :return: ``list`` of ``str``; names in **names** that pass at least one filter, or all of **names** if no filters are applied.
+    """
+
+    if dtsr_only:
+        names = [name for name in names if name.startswith('DTSR')]
+
+    if len(filters) > 0:
+        out = filter_names(names, filters)
+    else:
+        out = names
+    return out
+
+
+
 
 def load_dtsr(dir_path):
     """
