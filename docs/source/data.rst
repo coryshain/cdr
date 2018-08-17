@@ -8,7 +8,7 @@ The ``read_data()`` method loads data from source tables into memory and perform
 The ``preprocess_data()`` method performs any preprocessing steps required by the model structure and hyperparameters.
 The ``build_DTSR_impulses()`` compiles the data into arrays that are ready to be passed to DTSR instances for training or evaluation.
 
-Since ``build_DTSR_impulses()`` is run internally by all DTSR instances methods that deal with training or prediction, it should generally not need to be called by hand.
+Since ``build_DTSR_impulses()`` is run internally by all DTSR instance methods that deal with training or prediction, it should generally not need to be called by hand.
 However, for expository purposes, the following is an example of a pipeline that converts text data from files into DTSR-ready model inputs:
 
 .. code-block:: python
