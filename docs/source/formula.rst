@@ -158,13 +158,51 @@ The currently supported parametric IRF families are:
 
   - Definition: :math:`\frac{\beta^{\alpha_1}x^{\alpha_1-1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha_1)} - c\frac{\beta^{\alpha_1 + \alpha_2}x^{\alpha_1 + \alpha_2 -1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha_1 + \alpha_2)}`
 
-- ``HRFDoubleGammaUnconstrained``: Double-gamma hemodynamic response function (fMRI, peak response with undershoot) without constraints on the undershoot models.
+- ``HRFDoubleGamma1``: 1-parameter double-gamma hemodynamic response function (fMRI). Shape parameters are fixed at SPM's defaults for both the first and second gammas (6 and 16, respectively). Parameter :math:`\beta` is tied between both gammas. The coefficient on the second gamma is fixed at SPM's default (:math:`\frac{1}{6}`). This is a "stretchable" canonical HRF.
 
   - Parameters:
 
-    - :math:`\alpha_1 > 0`: ``alpha_main`` (peak response shape)
-    - :math:`\beta_1 > 0`: ``beta_main`` (peak response rate)
-    - :math:`\alpha_2 > 0`: ``alpha_undershoot`` (undershoot shape)
+    - :math:`\beta > 0`: ``beta`` (peak and undershoot rate)
+
+- ``HRFDoubleGamma2``: 2-parameter double-gamma hemodynamic response function (fMRI). Parameter :math:`\alpha` of the second gamma is fixed to the :math:`alpha` of the first gamma at SPM
+s default ratio (:math:`\frac{16}{6}`). Parameter :math:`\beta` is tied between both gammas. The coefficient on the second gamma is fixed at SPM's default (:math:`\frac{1}{6}`).
+
+  - Parameters:
+
+    - :math:`\alpha > 1`: ``alpha`` (peak shape)
+    - :math:`\beta > 0`: ``beta`` (peak and undershoot rate)
+
+  - Definition: :math:`\frac{\beta^{\alpha}x^{\alpha-1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha)} - \frac{1}{6}\frac{\beta^{\frac{16}{6}\alpha}x^{\frac{16}{6}\alpha - 1}e^{-\frac{x}{\beta}}}{\Gamma(\frac{16}{6}\alpha)}`
+
+- ``HRFDoubleGamma3``: 3-parameter double-gamma hemodynamic response function (fMRI). Parameter :math:`\alpha` of the second gamma is fixed to the :math:`alpha` of the first gamma at SPM
+s default ratio (:math:`\frac{16}{6}`). Parameter :math:`\beta` is tied between both gammas.
+
+  - Parameters:
+
+    - :math:`\alpha > 1`: ``alpha`` (peak shape)
+    - :math:`\beta > 0`: ``beta`` (peak and undershoot rate)
+    - :math:`c`: ``c`` (undershoot coefficient)
+
+  - Definition: :math:`\frac{\beta^{\alpha}x^{\alpha-1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha)} - c\frac{\beta^{\frac{16}{6}\alpha}x^{\frac{16}{6}\alpha - 1}e^{-\frac{x}{\beta}}}{\Gamma(\frac{16}{6}\alpha)}`
+
+- ``HRFDoubleGamma4``: 4-parameter double-gamma hemodynamic response function (fMRI). Parameter :math:`\beta` is tied between both gammas.
+
+  - Parameters:
+
+    - :math:`\alpha_1 > 1`: ``alpha_main`` (peak shape)
+    - :math:`\alpha_2 > 1`: ``alpha_undershoot`` (undershoot shape)
+    - :math:`\beta > 0`: ``beta`` (peak and undershoot rate)
+    - :math:`c`: ``c`` (undershoot coefficient)
+
+  - Definition: :math:`\frac{\beta^{\alpha_1}x^{\alpha_1-1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha_1)} - c\frac{\beta^{\alpha_2}x^{\alpha_2 - 1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha_2)}`
+
+- ``HRFDoubleGamma5``: 5-parameter double-gamma hemodynamic response function (fMRI). All parameters are free.
+
+  - Parameters:
+
+    - :math:`\alpha_1 > 1`: ``alpha_main`` (peak shape)
+    - :math:`\alpha_2 > 1`: ``alpha_undershoot`` (undershoot shape)
+    - :math:`\beta_1 > 0`: ``beta_main`` (peak rate)
     - :math:`\beta_2 > 0`: ``beta_undershoot`` (undershoot rate)
     - :math:`c`: ``c`` (undershoot coefficient)
 
@@ -252,7 +290,17 @@ As above, IRF distribute across the expansion of interaction terms, such that th
     C((A + B + C)**3, Gamma())
     C(A, Gamma()) + C(B, Gamma()) + C(C, Gamma()) + C(A:B, Gamma()) + C(B:C, Gamma()) + C(A:C, Gamma()) + C(A:B:C, Gamma())
 
-Unlike **R**, categorical variables are not yet handled automatically in DTSR.
+Categorical variables are automatically discovered and expanded in DTSR models.
+This process imposes a transformation on the model.
+For example, imagine that predictor ``B`` in the following model turns out to be categorical in the data set with categories ``B1``, ``B2``, and ``B3``::
+
+    C(A + B, EMG())
+
+When the DTSR model is initialized, the categorical nature of ``B`` is detected and the model is expanded out as::
+
+    C(A + B2 + B3, EMG())
+
+
 However, they can be included simply by adding binary indicator vectors for each of :math:`n-1` of the levels of the variable to the input data as a preprocessing step, then defining the model in terms of the binary indicators.
 
 Note that the term expansions described above add `separate` IRF for each term in the expansion.

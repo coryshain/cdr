@@ -88,6 +88,9 @@ class DTSR(object):
 
         # Parse and store model data from formula
         form = Formula(self.form_str)
+        form = form.categorical_transform(X)
+        form = form.categorical_transform(y)
+        self.form = form
         dv = form.dv
         rangf = form.rangf
 
@@ -102,8 +105,8 @@ class DTSR(object):
         self.max_tdelta = (t_delta).max()
 
         if self.pc:
+            self.src_impulse_names_norate = list(filter(lambda x: x != 'rate', self.form.t.impulse_names()))
             _, self.eigenvec, self.eigenval, self.impulse_means, self.impulse_sds = pca(X[self.src_impulse_names_norate])
-            self.plot_eigenvectors()
         else:
             self.eigenvec = self.eigenval = self.impulse_means = self.impulse_sds = None
 
@@ -131,7 +134,6 @@ class DTSR(object):
         self.INT_TF = getattr(tf, self.int_type)
         self.INT_NP = getattr(np, self.int_type)
 
-        self.form = Formula(self.form_str)
         f = self.form
         self.dv = f.dv
         self.has_intercept = f.has_intercept
@@ -210,7 +212,8 @@ class DTSR(object):
             if self.has_rate:
                 self.n_pc -= 1
             pointers = {}
-            self.t = self.t_src.pc_transform(self.n_pc, pointers)[0]
+            self.form_pc = self.form.pc_transform(self.n_pc, pointers)
+            self.t = self.form_pc.t
             self.fw_pointers, self.bw_pointers = IRFNode.pointers2namemmaps(pointers)
             t = self.t
             self.node_table = t.node_table()
@@ -236,7 +239,6 @@ class DTSR(object):
             self.irf_by_rangf = t.irf_by_rangf()
 
             # Compute names and indices of source impulses excluding rate term
-            self.src_impulse_names_norate = list(filter(lambda x: x != 'rate', self.src_impulse_names))
             self.src_terminal_ix_norate = names2ix(self.src_impulse_names_norate, self.src_impulse_names)
             self.src_terminal_ix_rate = np.setdiff1d(np.arange(len(self.src_impulse_names)),
                                                      self.src_impulse_names_norate)
@@ -269,6 +271,9 @@ class DTSR(object):
                 self.coef_names
             ))
             self.coef_ix_rate = names2ix(self.coef_names_rate, self.coef_names)
+
+            self.plot_eigenvectors()
+
         else:
             # Initialize tree metadata
             self.t = self.form.t
@@ -342,6 +347,7 @@ class DTSR(object):
     def _pack_metadata(self):
         md = {
             'form_str': self.form_str,
+            'form': self.form,
             'n_train': self.n_train,
             'y_train_mean': self.y_train_mean,
             'y_train_sd': self.y_train_sd,
@@ -356,6 +362,7 @@ class DTSR(object):
 
     def _unpack_metadata(self, md):
         self.form_str = md.pop('form_str')
+        self.form = md.pop('form', Formula(self.form))
         self.n_train = md.pop('n_train')
         self.y_train_mean = md.pop('y_train_mean')
         self.y_train_sd = md.pop('y_train_sd')
@@ -599,6 +606,31 @@ class DTSR(object):
                         self._initialize_base_irf_param('beta', family, lb=0., default=1.)
                         self._initialize_base_irf_param('alpha_undershoot_offset', family, lb=0., default=10.)
                         # self._initialize_base_irf_param('c', family, lb=0., ub=1., default=1./6.)
+                        self._initialize_base_irf_param('c', family, default=1./6.)
+
+                    elif family == 'HRFDoubleGamma1':
+                        self._initialize_base_irf_param('beta', family, lb=0., default=1.)
+
+                    elif family == 'HRFDoubleGamma2':
+                        self._initialize_base_irf_param('alpha', family, lb=1., default=6.)
+                        self._initialize_base_irf_param('beta', family, lb=0., default=1.)
+
+                    elif family == 'HRFDoubleGamma3':
+                        self._initialize_base_irf_param('alpha', family, lb=1., default=6.)
+                        self._initialize_base_irf_param('beta', family, lb=0., default=1.)
+                        self._initialize_base_irf_param('c', family, default=1./6.)
+
+                    elif family == 'HRFDoubleGamma4':
+                        self._initialize_base_irf_param('alpha_main', family, lb=1., default=6.)
+                        self._initialize_base_irf_param('alpha_undershoot', family, lb=1., default=16.)
+                        self._initialize_base_irf_param('beta', family, lb=0., default=1.)
+                        self._initialize_base_irf_param('c', family, default=1./6.)
+
+                    elif family == 'HRFDoubleGamma5':
+                        self._initialize_base_irf_param('alpha_main', family, lb=1., default=6.)
+                        self._initialize_base_irf_param('alpha_undershoot', family, lb=1., default=16.)
+                        self._initialize_base_irf_param('beta_main', family, lb=0., default=1.)
+                        self._initialize_base_irf_param('beta_undershoot', family, lb=0., default=1.)
                         self._initialize_base_irf_param('c', family, default=1./6.)
 
                     elif family == 'HRFDoubleGammaUnconstrained':
@@ -869,6 +901,106 @@ class DTSR(object):
                     return lambda x: pdf_main(x + self.epsilon) - c * pdf_undershoot(x + self.epsilon)
 
                 self.irf_lambdas['HRFDoubleGamma'] = double_gamma
+
+                def double_gamma_1(params):
+                    beta = params[:, 1:2]
+
+                    pdf_main = tf.contrib.distributions.Gamma(
+                        concentration=6.,
+                        rate=beta,
+                        validate_args=self.validate_irf_args
+                    ).prob
+                    pdf_undershoot = tf.contrib.distributions.Gamma(
+                        concentration=16.,
+                        rate=beta,
+                        validate_args=self.validate_irf_args
+                    ).prob
+
+                    return lambda x: pdf_main(x + self.epsilon) - 1. / 6. * pdf_undershoot(x + self.epsilon)
+
+                self.irf_lambdas['HRFDoubleGamma1'] = double_gamma_1
+
+                def double_gamma_2(params):
+                    alpha = params[:, 0:1]
+                    beta = params[:, 1:2]
+
+                    pdf_main = tf.contrib.distributions.Gamma(
+                        concentration=alpha,
+                        rate=beta,
+                        validate_args=self.validate_irf_args
+                    ).prob
+                    pdf_undershoot = tf.contrib.distributions.Gamma(
+                        concentration=alpha * 16. / 6.,
+                        rate=beta,
+                        validate_args=self.validate_irf_args
+                    ).prob
+
+                    return lambda x: pdf_main(x + self.epsilon) - 1. / 6. * pdf_undershoot(x + self.epsilon)
+
+                self.irf_lambdas['HRFDoubleGamma2'] = double_gamma_2
+
+                def double_gamma_3(params):
+                    alpha = params[:, 0:1]
+                    beta = params[:, 1:2]
+                    c = params[:, 2:3]
+
+                    pdf_main = tf.contrib.distributions.Gamma(
+                        concentration=alpha,
+                        rate=beta,
+                        validate_args=self.validate_irf_args
+                    ).prob
+                    pdf_undershoot = tf.contrib.distributions.Gamma(
+                        concentration=alpha * 16. / 6.,
+                        rate=beta,
+                        validate_args=self.validate_irf_args
+                    ).prob
+
+                    return lambda x: pdf_main(x + self.epsilon) - c * pdf_undershoot(x + self.epsilon)
+
+                self.irf_lambdas['HRFDoubleGamma3'] = double_gamma_3
+
+                def double_gamma_4(params):
+                    alpha_main = params[:, 0:1]
+                    alpha_undershoot = params[:, 1:2]
+                    beta = params[:, 2:3]
+                    c = params[:, 3:4]
+
+                    pdf_main = tf.contrib.distributions.Gamma(
+                        concentration=alpha_main,
+                        rate=beta,
+                        validate_args=self.validate_irf_args
+                    ).prob
+                    pdf_undershoot = tf.contrib.distributions.Gamma(
+                        concentration=alpha_undershoot,
+                        rate=beta,
+                        validate_args=self.validate_irf_args
+                    ).prob
+
+                    return lambda x: pdf_main(x + self.epsilon) - c * pdf_undershoot(x + self.epsilon)
+
+                self.irf_lambdas['HRFDoubleGamma4'] = double_gamma_4
+
+                def double_gamma_5(params):
+                    alpha_main = params[:, 0:1]
+                    alpha_undershoot = params[:, 1:2]
+                    beta_main = params[:, 2:3]
+                    beta_undershoot = params[:, 3:4]
+                    c = params[:, 4:5]
+
+                    pdf_main = tf.contrib.distributions.Gamma(
+                        concentration=alpha_main,
+                        rate=beta_main,
+                        validate_args=self.validate_irf_args
+                    ).prob
+                    pdf_undershoot = tf.contrib.distributions.Gamma(
+                        concentration=alpha_undershoot,
+                        rate=beta_undershoot,
+                        validate_args=self.validate_irf_args
+                    ).prob
+
+                    return lambda x: pdf_main(x + self.epsilon) - c * pdf_undershoot(x + self.epsilon)
+
+                self.irf_lambdas['HRFDoubleGamma5'] = double_gamma_5
 
                 def double_gamma_unconstrained(params):
                     alpha_main = params[:, 0:1]
@@ -2247,6 +2379,9 @@ class DTSR(object):
                 if self.pc:
                     self.src_plot_tensors = {}
                     irf_names = [x for x in self.src_node_table if x in self.src_irf_plot and not (len(self.src_node_table[x].children) == 1 and self.src_node_table[x].children[0].terminal())]
+                    irf_names_terminal = [x for x in self.src_node_table if x in self.src_irf_plot and self.src_node_table[x].terminal()]
+
+                    print(irf_names)
 
                     for a in switches[0]:
                         if a not in self.src_plot_tensors:
@@ -2254,6 +2389,7 @@ class DTSR(object):
                         for b in switches[1]:
                             plot_y = []
                             names = irf_names if b == 'unscaled' else irf_names_terminal
+                            print(names)
                             for x in names:
                                 plot_y.append(self.src_irf_plot[x][a][b])
 
@@ -3003,7 +3139,10 @@ class DTSR(object):
         :param indent: ``int``; indentation level
         :return: ``str``; the IRF tree report
         """
-        out = ' ' * indent + 'IRF TREE:\n'
+
+        out = ''
+
+        out += ' ' * indent + 'IRF TREE:\n'
         tree_str = str(self.t)
         new_tree_str = ''
         for line in tree_str.splitlines():
@@ -3011,11 +3150,11 @@ class DTSR(object):
         out += new_tree_str + '\n'
 
         if self.pc:
-            out = ' ' * indent + 'SOURCE IRF TREE:\n'
+            out += ' ' * indent + 'SOURCE IRF TREE:\n'
             tree_str = str(self.t_src)
             new_tree_str = ''
             for line in tree_str.splitlines():
-                new_tree_str += ' ' * (indent + 2) + line
+                new_tree_str += ' ' * (indent + 2) + line + '\n'
             out += new_tree_str + '\n'
 
         return out

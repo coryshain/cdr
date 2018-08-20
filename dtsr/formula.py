@@ -12,6 +12,22 @@ interact = re.compile('([^ ]+):([^ ]+)')
 spillover = re.compile('^.+S[0-9]+$')
 split_irf = re.compile('(.+)\(([^(]+)')
 spline = re.compile('S((o([0-9]+))?(b([0-9]+))?(l([0-9]+))?(p([0-9]+))?(i([0-1]))?)?$')
+starts_numeric = re.compile('^[0-9]')
+non_alphanumeric = re.compile('[^0-9a-zA-Z_]')
+
+def pythonize_string(s):
+    """
+    Convert string to valid python variable name
+
+    :param s: ``str``; source string
+    :return: ``str``; pythonized string
+    """
+
+    # Remove whitespace
+    s = ''.join(s.split())
+    s = non_alphanumeric.sub('_', s)
+    return s
+
 
 
 class Formula(object):
@@ -20,26 +36,6 @@ class Formula(object):
     
     :param bform_str: ``str``; an R-style mixed-effects DTSR model formula string
     """
-
-    IRF = [
-        'DiracDelta',
-        'Exp',
-        'ExpRateGT1',
-        'Gamma',
-        'ShiftedGamma',
-        'GammaKgt1',
-        'GammaShapeGT1',
-        'ShiftedGammaKgt1',
-        'ShiftedGammaShapeGT1',
-        'Normal',
-        'SkewNormal',
-        'EMG',
-        'BetaPrime',
-        'ShiftedBetaPrime',
-        'HRFSingleGamma',
-        'HRFDoubleGamma',
-        'HRFDoubleGammaUnconstrained'
-    ]
 
     IRF_PARAMS = {
         'DiracDelta': [],
@@ -58,7 +54,12 @@ class Formula(object):
         'ShiftedBetaPrime': ['alpha', 'beta', 'delta'],
         'HRFSingleGamma': ['alpha', 'beta'],
         'HRFDoubleGamma': ['alpha_main', 'beta', 'alpha_undershoot_offset', 'c'],
-        'HRFDoubleGammaUnconstrained': ['alpha_main', 'beta_main', 'alpha_undershoot', 'beta_undershoot', 'c']
+        'HRFDoubleGamma1': ['beta'],
+        'HRFDoubleGamma2': ['alpha', 'beta'],
+        'HRFDoubleGamma3': ['alpha', 'beta', 'c'],
+        'HRFDoubleGamma4': ['alpha_main', 'alpha_undershoot', 'beta', 'c'],
+        'HRFDoubleGamma5': ['alpha_main', 'alpha_undershoot', 'beta_main', 'beta_undershoot', 'c'],
+        'HRFDoubleGammaUnconstrained': ['alpha_main', 'beta_main', 'beta_undershoot', 'c']
     }
 
     SPLINE_DEFAULT_ORDER = 2
@@ -283,7 +284,7 @@ class Formula(object):
                 for x in subterms:
                     if type(x).__name__ == 'IRFNode':
                         raise ValueError('Interaction terms may not dominate IRF terms in DTSR formula strings')
-                new = InteractionImpulse(terms=subterms, ops=ops)
+                new = InteractionImpulse(impulses=subterms, ops=ops)
                 terms.append(new)
             elif type(t.op).__name__ == 'Mult':
                 assert len(ops) == 0, 'Transformation of term expansions is not supported in DTSR formula strings'
@@ -293,7 +294,7 @@ class Formula(object):
                 for x in subterms:
                     if type(x).__name__ == 'IRFNode':
                         raise ValueError('Term expansions may not dominate IRF terms in DTSR formula strings')
-                new = InteractionImpulse(terms=subterms, ops=ops)
+                new = InteractionImpulse(impulses=subterms, ops=ops)
                 terms += subterms
                 terms.append(new)
             elif type(t.op).__name__ == 'Pow':
@@ -320,7 +321,7 @@ class Formula(object):
                 for x in subterms:
                     new = self.process_irf(t.args[1], input=x, ops=None, rangf=rangf)
                     terms.append(new)
-            elif t.func.id in Formula.IRF or spline.match(t.func.id) is not None:
+            elif t.func.id in Formula.IRF_PARAMS.keys() or spline.match(t.func.id) is not None:
                 raise ValueError('IRF calls can only occur as inputs to C() in DTSR formula strings')
             else:
                 assert len(t.args) <= 1, 'Only unary ops on variables supported in DTSR formula strings'
@@ -362,7 +363,7 @@ class Formula(object):
 
         if ops is None:
             ops = []
-        assert t.func.id in Formula.IRF or spline.match(t.func.id) is not None, 'Ill-formed model string: process_irf() called on non-IRF node'
+        assert t.func.id in Formula.IRF_PARAMS.keys() or spline.match(t.func.id) is not None, 'Ill-formed model string: process_irf() called on non-IRF node'
         irf_id = None
         coef_id = None
         cont = False
@@ -510,19 +511,28 @@ class Formula(object):
 
         ops = impulse.ops
 
-        if impulse.name() not in df.columns:
-            if impulse.id not in df.columns:
-                if type(impulse).__name__ == 'InteractionTerm':
-                    for t in impulse.terms:
-                        df = self.apply_ops(t, df)
-                    df[impulse.id] = df[[x.name() for x in impulse.terms]].product(axis=1)
-                else:
-                    raise ValueError('Unrecognized term "%s" in model formula' %impulse.id)
+        if impulse.id not in df.columns:
+            if type(impulse).__name__ == 'InteractionImpulse':
+                df, expanded_impulses, expanded_atomic_impulses = impulse.expand_categorical(df)
+                for x in expanded_atomic_impulses:
+                    for a in x:
+                        df = self.apply_ops(a, df)
+                for x in expanded_impulses:
+                    if x.name() not in df.columns:
+                        df[x.id] = df[[y.name() for y in x.atomic_impulses]].product(axis=1)
             else:
-                df[impulse.name()] = df[impulse.id]
-            for i in range(len(ops)):
-                op = ops[i]
-                df[impulse.name()] = self.apply_op(op, df[impulse.name()])
+                raise ValueError('Unrecognized term "%s" in model formula' %impulse.id)
+        else:
+            df, expanded_impulses = impulse.expand_categorical(df)
+
+        for x in expanded_impulses:
+            if x.name() not in df.columns:
+                new_col = df[x.id]
+                for i in range(len(ops)):
+                    op = ops[i]
+                    new_col = self.apply_op(op, new_col)
+                df[x.name()] = new_col
+
         return df
 
     def compute_2d_predictor(
@@ -700,46 +710,55 @@ class Formula(object):
         time_mask = None
 
         for impulse in impulses:
-            if impulse.is_2d:
-                if time_mask is None:
-                    time_mask = compute_time_mask(
-                        X.time,
-                        y.first_obs,
-                        y.last_obs,
-                        history_length=history_length
-                    )
-
-                if impulse.id not in X_2d_predictor_names:
-                    new_2d_predictor_name, new_2d_predictor = self.compute_2d_predictor(
-                        impulse.id,
-                        X,
-                        y.first_obs,
-                        y.last_obs,
-                        history_length=history_length
-                    )
-                    X_2d_predictor_names.append(new_2d_predictor_name)
-                    if X_2d_predictors is None:
-                        X_2d_predictors = new_2d_predictor
-                    else:
-                        X_2d_predictors = np.concatenate([X_2d_predictors, new_2d_predictor], axis=2)
-
-                X_2d_predictor_names, X_2d_predictors = self.apply_ops_2d(
-                    impulse,
-                    X_2d_predictor_names,
-                    X_2d_predictors,
-                    time_mask,
-                )
-
-            elif impulse.id not in X.columns:
-                if impulse.name() not in X_response_aligned_predictor_names:
-                    X_response_aligned_predictor_names.append(impulse.name())
-                    if X_response_aligned_predictors is None:
-                        X_response_aligned_predictors = y[[impulse.id]]
-                    else:
-                        X_response_aligned_predictors[[impulse.id]] = y[[impulse.id]]
-                    X_response_aligned_predictors = self.apply_ops(impulse, X_response_aligned_predictors)
+            if type(impulse).__name__ == 'InteractionImpulse':
+                to_process = impulse.impulses()
             else:
+                to_process = [impulse]
+            for x in to_process:
+                if x.is_2d:
+                    if time_mask is None:
+                        time_mask = compute_time_mask(
+                            X.time,
+                            y.first_obs,
+                            y.last_obs,
+                            history_length=history_length
+                        )
+
+                    if x.id not in X_2d_predictor_names:
+                        new_2d_predictor_name, new_2d_predictor = self.compute_2d_predictor(
+                            x.id,
+                            X,
+                            y.first_obs,
+                            y.last_obs,
+                            history_length=history_length
+                        )
+                        X_2d_predictor_names.append(new_2d_predictor_name)
+                        if X_2d_predictors is None:
+                            X_2d_predictors = new_2d_predictor
+                        else:
+                            X_2d_predictors = np.concatenate([X_2d_predictors, new_2d_predictor], axis=2)
+
+                    X_2d_predictor_names, X_2d_predictors = self.apply_ops_2d(
+                        x,
+                        X_2d_predictor_names,
+                        X_2d_predictors,
+                        time_mask,
+                    )
+
+                elif x.id not in X.columns:
+                    if x.name() not in X_response_aligned_predictor_names:
+                        X_response_aligned_predictor_names.append(x.name())
+                        if X_response_aligned_predictors is None:
+                            X_response_aligned_predictors = y[[x.id]]
+                        else:
+                            X_response_aligned_predictors[[x.id]] = y[[x.id]]
+                        X_response_aligned_predictors = self.apply_ops(x, X_response_aligned_predictors)
+                else:
+                    X = self.apply_ops(x, X)
+
+            if type(impulse).__name__ == 'InteractionImpulse':
                 X = self.apply_ops(impulse, X)
+
         for col in [x for x in X.columns if spillover.match(x)]:
             X[col] = X[col].fillna(0)
         return X, y, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors
@@ -780,7 +799,7 @@ class Formula(object):
             impulse_ids = [impulse_ids]
         self.t.remove_impulses(impulse_ids)
 
-    def insert_impulses(self, impulses, irf_str, rangf=['subject']):
+    def insert_impulses(self, impulses, irf_str, rangf=None):
         """
         Insert impulses in **impulse_ids** into fixed effects and all random terms.
 
@@ -791,55 +810,17 @@ class Formula(object):
         if not isinstance(impulses, list):
             impulses = [impulses]
 
+        if rangf is None:
+            rangf = []
+        elif not isinstance(rangf, list):
+            rangf = [rangf]
+
         bform = str(self)
         bform += ' + C(' + ' + '.join(impulses) + ', ' + irf_str + ')'
         for gf in rangf:
             bform += ' + (C(' + ' + '.join(impulses) + ', ' + irf_str + ') | ' + gf + ')'
 
         self.build(bform)
-
-    def __str__(self):
-        out = str(self.dv_term) + ' ~ '
-
-        if not self.has_intercept[None]:
-            out += '0 + '
-
-        terms = self.t.formula_terms()
-        term_strings = []
-
-        if None in terms:
-            fixed = terms.pop(None)
-            new_terms = {}
-            for term in fixed:
-                if term['irf'] in new_terms:
-                    new_terms[term['irf']]['impulses'] += term['impulses']
-                else:
-                    new_terms[term['irf']] = term
-            new_terms = [new_terms[x] for x in new_terms]
-            term_strings.append(' + '.join(['C(%s, %s)' %(' + '.join([x.name() for x in y['impulses']]), y['irf']) for y in new_terms]))
-
-        for rangf in terms:
-            ran = terms[rangf]
-            new_terms = {}
-            for term in ran:
-                if term['irf'] in new_terms:
-                    new_terms[term['irf']]['impulses'] += term['impulses']
-                else:
-                    new_terms[term['irf']] = term
-            new_terms = [new_terms[x] for x in new_terms]
-            new_terms_str = '('
-            if not self.has_intercept[rangf]:
-                new_terms_str += '0 + '
-            new_terms_str += ' + '.join(['C(%s, %s)' % (' + '.join([x.name() for x in y['impulses']]), y['irf']) for y in new_terms]) + ' | %s)' %rangf
-            term_strings.append(new_terms_str)
-
-        out += ' + '.join(term_strings)
-
-        for key in self.has_intercept:
-            if key is not None and not key in terms and self.has_intercept[key]:
-                out += ' + (1 | %s)' %key
-
-        return out
 
     def to_lmer_formula_string(self, z=False):
         """
@@ -883,6 +864,95 @@ class Formula(object):
 
         return out
 
+    def _rhs_str(self, t=None):
+        if t == None:
+            t = self.t
+        out = ''
+
+        if not self.has_intercept[None]:
+            out += '0 + '
+
+        terms = t.formula_terms()
+        term_strings = []
+
+        if None in terms:
+            fixed = terms.pop(None)
+            new_terms = {}
+            for term in fixed:
+                if term['irf'] in new_terms:
+                    new_terms[term['irf']]['impulses'] += term['impulses']
+                else:
+                    new_terms[term['irf']] = term
+            new_terms = [new_terms[x] for x in new_terms]
+            term_strings.append(' + '.join(['C(%s, %s)' %(' + '.join([x.name() for x in y['impulses']]), y['irf']) for y in new_terms]))
+
+        for rangf in terms:
+            ran = terms[rangf]
+            new_terms = {}
+            for term in ran:
+                if term['irf'] in new_terms:
+                    new_terms[term['irf']]['impulses'] += term['impulses']
+                else:
+                    new_terms[term['irf']] = term
+            new_terms = [new_terms[x] for x in new_terms]
+            new_terms_str = '('
+            if not self.has_intercept[rangf]:
+                new_terms_str += '0 + '
+            new_terms_str += ' + '.join(['C(%s, %s)' % (' + '.join([x.name() for x in y['impulses']]), y['irf']) for y in new_terms]) + ' | %s)' %rangf
+            term_strings.append(new_terms_str)
+
+        out += ' + '.join(term_strings)
+
+        for key in self.has_intercept:
+            if key is not None and not key in terms and self.has_intercept[key]:
+                out += ' + (1 | %s)' %key
+
+        return out
+
+    def to_string(self, t=None):
+        """
+        Stringify the formula, using **t** as the RHS.
+
+        :param t: ``IRFNode`` or ``None``; IRF node to use as RHS. If ``None``, uses root IRF associated with ``Formula`` instance.
+        :return: ``str``; stringified formula.
+        """
+        if t == None:
+            t = self.t
+
+        out = str(self.dv_term) + ' ~ ' + self._rhs_str(t=t)
+
+        return out
+
+    def pc_transform(self, n_pc, pointers=None):
+        """
+        Get transformed formula with impulses replaced by principal components.
+
+        :param n_pc: ``int``; number of principal components in transform.
+        :param pointers: ``dict``; map from source nodes to transformed nodes.
+        :return: ``list`` of ``IRFNode``; tree forest representing current state of the transform.
+        """
+
+        new_t = self.t.pc_transform(n_pc, pointers=pointers)[0]
+        new_formstring = self.to_string(t=new_t)
+        new_form = Formula(new_formstring)
+        return new_form
+
+    def categorical_transform(self, df):
+        """
+        Get transformed formula with categorical predictors in **df** expanded.
+
+        :param df: ``pandas`` table; input data.
+        :return: ``Formula``; transformed ``Formula`` object
+        """
+
+        new_t = self.t.categorical_transform(df)[0]
+        new_formstring = self.to_string(t=new_t)
+        new_form = Formula(new_formstring)
+        return new_form
+
+    def __str__(self):
+        return self.to_string()
+
 
 
 class Impulse(object):
@@ -915,6 +985,38 @@ class Impulse(object):
 
         return self.name_str
 
+    def categorical(self, df):
+        """
+        Checks whether impulse is categorical in a dataset
+
+        :param df: ``pandas`` table; data to to check.
+        :return: ``bool``; ``True`` if impulse is categorical in **X**, ``False`` otherwise.
+        """
+
+        if self.id in df and not np.issubdtype(df[self.id].dtype, np.number):
+            return True
+        return False
+
+    def expand_categorical(self, df):
+        """
+        Expand any categorical predictors in **df** into 1-hot columns.
+
+        :param df: ``pandas`` table; input data
+        :return: 2-tuple of ``pandas`` table, ``list`` of ``Impulse``; expanded data, list of expanded ``Impulse`` objects
+        """
+        impulses = [self]
+
+        if self.id in df.columns and self.categorical(df):
+            impulses = [Impulse('_'.join([self.id, pythonize_string(str(val))]), ops=self.ops) for val in df[self.id].unique()[1:]]
+            expanded_value_names = [str(val) for val in df[self.id].unique()[1:]]
+            for i in range(len(impulses)):
+                x = impulses[i]
+                val = expanded_value_names[i]
+                if x.id not in df.columns:
+                    df[x.id] = (df[self.id] == val).astype('float')
+
+        return df, impulses
+
 class InteractionImpulse(object):
     """
     Data structure representing an interaction of multiple impulses in a DTSR model.
@@ -923,32 +1025,57 @@ class InteractionImpulse(object):
     :param ops: ``list`` of ``str``, or ``None``; ops to apply to interaction. If ``None``, no ops.
     """
 
-    def __init__(self, terms, ops=None):
+    def __init__(self, impulses, ops=None):
         if ops is None:
             ops = []
         self.ops = ops[:]
-        self.terms = []
+        self.atomic_impulses = []
         names = set()
-        for t in terms:
-            if t.name() not in names:
-                names.add(t.name())
-                self.terms.append(t)
-        self.name_str = ':'.join([t.name() for t in terms])
+        for x in impulses:
+            if x.name() not in names:
+                names.add(x.name())
+                self.atomic_impulses.append(x)
+        self.name_str = ':'.join([x.name() for x in impulses])
         for op in self.ops:
             self.name_str = op + '(' + self.name_str + ')'
-        self.id = ':'.join([x.name() for x in self.terms])
+        self.id = ':'.join([x.name() for x in self.atomic_impulses])
 
     def __str__(self):
         return self.name_str
 
     def name(self):
         """
-        Get name of term.
+        Get name of interation impulse.
 
         :return: ``str``; name.
         """
 
         return self.name_str
+
+    def impulses(self):
+        """
+        Get list of impulses dominated by interaction.
+
+        :return: ``list`` of ``Impulse``; impulses dominated by interaction.
+        """
+
+        return self.atomic_impulses
+
+    def expand_categorical(self, df):
+        """
+        Expand any categorical predictors in **df** into 1-hot columns.
+
+        :param df: ``pandas`` table; input data.
+        :return: 3-tuple of ``pandas`` table, ``list`` of ``InteractionImpulse``, ``list`` of ``list`` of ``Impulse``; expanded data, list of expanded ``InteractionImpulse`` objects, list of lists of expanded ``Impulse`` objects, one list for each interaction.
+        """
+
+        expanded_atomic_impulses = []
+        for x in self.impulses():
+            df, expanded_atomic_impulses_cur = x.expand_categorical(df)
+            expanded_atomic_impulses.append(expanded_atomic_impulses_cur)
+        expanded_interaction_impulses = [InteractionImpulse(x, ops=self.ops) for x in itertools.product(*expanded_atomic_impulses)]
+
+        return df, expanded_interaction_impulses, expanded_atomic_impulses
 
 class IRFNode(object):
     """
@@ -1573,7 +1700,9 @@ class IRFNode(object):
                     coefID=self.coefID,
                     cont=self.cont,
                     fixed=self.fixed,
-                    rangf=self.rangf[:]
+                    rangf=self.rangf[:],
+                    param_init=self.param_init,
+                    trainable=self.trainable
                 )
                 self_transformed.append(self_pc)
                 if pointers is not None:
@@ -1589,13 +1718,16 @@ class IRFNode(object):
                         coefID=self.coefID,
                         cont=self.cont,
                         fixed=self.fixed,
-                        rangf=self.rangf[:]
+                        rangf=self.rangf[:],
+                        param_init=self.param_init,
+                        trainable=self.trainable
                     )
                     self_transformed.append(self_pc)
                     if pointers is not None:
                         if self not in pointers:
                             pointers[self] = []
                         pointers[self].append(self_pc)
+
         elif self.family is None:
             ## ROOT node
             children = []
@@ -1615,6 +1747,7 @@ class IRFNode(object):
                 if self not in pointers:
                     pointers[self] = []
                 pointers[self].append(self_pc)
+
         else:
             children = []
             for c in self.children:
@@ -1625,7 +1758,9 @@ class IRFNode(object):
                     family=self.family,
                     irfID=self.irfID,
                     fixed=self.fixed,
-                    rangf=self.rangf
+                    rangf=self.rangf,
+                    param_init=self.param_init,
+                    trainable=self.trainable
                 )
                 c_new = self_pc.add_child(c)
                 if c_new != c:
@@ -1638,6 +1773,78 @@ class IRFNode(object):
                     if self not in pointers:
                         pointers[self] = []
                     pointers[self].append(self_pc)
+        return self_transformed
+
+    def categorical_transform(self, df):
+        """
+        Generate transformed copy of node with categorical predictors in **df** expanded.
+        Recursive.
+        Returns a tree forest representing the current state of the transform.
+        When run from ROOT, should always return a length-1 list representing a single-tree forest, in which case the transformed tree is accessible as the 0th element.
+
+        :param df: ``pandas`` table; input data.
+        :return: ``list`` of ``IRFNode``; tree forest representing current state of the transform.
+        """
+
+        self_transformed = []
+
+        if self.terminal():
+            if type(self.impulse).__name__ == 'InteractionImpulse':
+                expanded_atomic_impulses = []
+                for x in self.impulse.impulses():
+                    if x.categorical(df):
+                        expanded_atomic_impulses.append([Impulse('_'.join([x.id, pythonize_string(str(val))]), ops=x.ops) for val in df[x.id].unique()[1:]])
+                    else:
+                        expanded_atomic_impulses.append([x])
+
+                new_impulses = [InteractionImpulse(x, ops=self.impulse.ops) for x in itertools.product(*expanded_atomic_impulses)]
+
+            elif self.impulse.categorical(df):
+                new_impulses = [Impulse('_'.join([self.impulse.id, pythonize_string(str(val))]), ops=self.ops) for val in df[self.impulse.id].unique()[1:]]
+            else:
+                new_impulses = [self.impulse]
+
+            for x in new_impulses:
+                new_irf = IRFNode(
+                    family='Terminal',
+                    impulse=x,
+                    coefID=self.coefID,
+                    cont=self.cont,
+                    fixed=self.fixed,
+                    rangf=self.rangf[:],
+                    param_init=self.param_init,
+                    trainable=self.trainable
+                )
+                self_transformed.append(new_irf)
+
+        elif self.family is None:
+            ## ROOT node
+            children = []
+            for c in self.children:
+                c_children = [x for x in c.categorical_transform(df)]
+                children += c_children
+            new_irf = IRFNode()
+            for c in children:
+                new_irf.add_child(c)
+            self_transformed.append(new_irf)
+
+        else:
+            children = []
+            for c in self.children:
+                c_children = [x for x in c.categorical_transform(df)]
+                children += c_children
+            for c in children:
+                new_irf = IRFNode(
+                    family=self.family,
+                    irfID=self.irfID,
+                    fixed=self.fixed,
+                    rangf=self.rangf,
+                    param_init=self.param_init,
+                    trainable=self.trainable
+                )
+                new_irf.add_child(c)
+                self_transformed.append(new_irf)
+
         return self_transformed
 
     @staticmethod
