@@ -5,7 +5,7 @@ Introduction
 
 .. image:: rtdbanner.png
 
-Deconvolutional time series regression (DTSR) is a regression technique for time series that directly models temporal diffusion of effects.
+Deconvolutional time series regression (DTSR) is a regression technique for time series that directly models temporal diffusion of effects (Shain & Schuler, to appear).
 DTSR recasts the streams of independent and dependent variables as `signals` and learns impulse response functions (IRF) that mediate the relationship between them.
 Given data and a model template specifying the functional form(s) of the IRF kernel(s), DTSR finds IRF parameters that optimize some objective function.
 
@@ -23,3 +23,8 @@ This package provides (1) an API for programming with DTSR and (2) executables t
 This package was built and tested using Python 3.6.4, Tensorflow 1.6.0, and Edward 1.3.5.
 Python 2.7.* support is not guaranteed, although certain DTSR features may still work.
 If you run into issues using DTSR with other versions of these tools, you may report them in the issue tracker on `Github <https://github.com/coryshain/dtsr>`_.
+
+
+References
+----------
+Shain, Cory and Schuler, William (to appear). Deconvolutional time series regression: A technique for modeling temporally diffuse effects. *EMNLP18*.
