@@ -362,7 +362,7 @@ class DTSR(object):
 
     def _unpack_metadata(self, md):
         self.form_str = md.pop('form_str')
-        self.form = md.pop('form', Formula(self.form))
+        self.form = md.pop('form', Formula(self.form_str))
         self.n_train = md.pop('n_train')
         self.y_train_mean = md.pop('y_train_mean')
         self.y_train_sd = md.pop('y_train_sd')

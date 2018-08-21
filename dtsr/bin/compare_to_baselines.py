@@ -70,7 +70,6 @@ if __name__ == '__main__':
 
     systems = sorted(list(systems))
     dtsr_models = [x for x in systems if x.startswith('DTSR')]
-    print(losses.keys())
     for m1 in dtsr_models:
         competitors = [x for x in systems if not x == m1]
         for m2 in competitors:
@@ -84,7 +83,7 @@ if __name__ == '__main__':
                     m2_scaled_losses.append(b)
             m1_scaled_losses = np.concatenate(m1_scaled_losses, axis=0)
             m2_scaled_losses = np.concatenate(m2_scaled_losses, axis=0)
-            p_value, base_diff = permutation_test(m1_scaled_losses, m2_scaled_losses, n_iter=10000)
+            p_value, base_diff, _ = permutation_test(m1_scaled_losses, m2_scaled_losses, n_iter=10000)
 
             print('='*50)
             print('Model comparison: %s vs %s' %(m1, m2))

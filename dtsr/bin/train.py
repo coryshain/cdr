@@ -63,7 +63,7 @@ if __name__ == '__main__':
 
     for i in range(len(dtsr_formula_list)):
         x = dtsr_formula_list[i]
-        if run_baseline and x.dv not in X_baseline.columns:
+        if run_baseline and x.dv not in X_baseline.columns and x.dv in y.columns:
             X_baseline[x.dv] = y[x.dv]
 
     if run_baseline:

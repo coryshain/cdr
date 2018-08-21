@@ -147,17 +147,6 @@ The currently supported parametric IRF families are:
 
   - Definition: :math:`\frac{\beta^{\alpha}x^{\alpha-1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha)}`
 
-- ``HRFDoubleGamma``: Double-gamma hemodynamic response function (fMRI, peak response with undershoot) with constraints against implausible undershoot models. Specifically, the shape parameter :math:`\alpha` of the undershoot is constrained to be at least as large as the shape parameter of the peak response, the rate parameter :math:`\beta` is tied between the peak response and the undershoot, and the constant coefficient :math:`c` is constrained to be between 0 and 1, ensuring that the undershoot will be both negative and smaller in magnitude than the peak response. In some applications it can also be useful to simply leave the shape of the undershoot and the coefficient of the undershoot untrained, resulting in a two-parameter model with a global shape and rate. This can be accomplished using the keyword specification ``trainable=[alpha, beta]`` in the IRF call in the model formula.
-
-  - Parameters:
-
-    - :math:`\alpha_1 > 0`: ``alpha_main`` (peak response shape)
-    - :math:`\beta > 0`: ``beta`` (rate)
-    - :math:`\alpha_2 > 0`: ``alpha_undershoot_offset`` (offset for undershoot shape)
-    - :math:`0 < c < 1`: ``c`` (undershoot coefficient)
-
-  - Definition: :math:`\frac{\beta^{\alpha_1}x^{\alpha_1-1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha_1)} - c\frac{\beta^{\alpha_1 + \alpha_2}x^{\alpha_1 + \alpha_2 -1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha_1 + \alpha_2)}`
-
 - ``HRFDoubleGamma1``: 1-parameter double-gamma hemodynamic response function (fMRI). Shape parameters are fixed at SPM's defaults for both the first and second gammas (6 and 16, respectively). Parameter :math:`\beta` is tied between both gammas. The coefficient on the second gamma is fixed at SPM's default (:math:`\frac{1}{6}`). This is a "stretchable" canonical HRF.
 
   - Parameters:

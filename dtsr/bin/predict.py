@@ -14,6 +14,8 @@ from dtsr.data import filter_invalid_responses, preprocess_data, compute_splitID
 from dtsr.util import mse, mae, percent_variance_explained
 from dtsr.util import load_dtsr, filter_models
 
+
+# This code block is factored out because it is used by both LME objects and DTSR objects under 2-step analysis
 def predict_LME(model_path, outdir, X, y, dv, model_name=''):
     sys.stderr.write('Retrieving saved model %s...\n' % m)
     with open(model_path, 'rb') as m_file:
@@ -46,14 +48,14 @@ def predict_LME(model_path, outdir, X, y, dv, model_name=''):
         summary += '  MSE: %.4f\n' % lme_mse
         summary += '  MAE: %.4f\n' % lme_mae
 
-    if args.mode in [None, 'loglik']:
-        lme_loglik = lme.log_lik(newdata=X, summed=False)
-        with open(outdir + '/%sloglik_%s.txt' % ('' if model_name=='' else model_name + '_', args.partition), 'w') as p_file:
-            for i in range(len(lme_loglik)):
-                p_file.write(str(lme_loglik[i]) + '\n')
-        lme_loglik = np.sum(lme_loglik)
-
-        summary += '  Log Lik: %.4f\n' % lme_loglik
+    # if args.mode in [None, 'loglik']:
+    #     lme_loglik = lme.log_lik(newdata=X, summed=False)
+    #     with open(outdir + '/%sloglik_%s.txt' % ('' if model_name=='' else model_name + '_', args.partition), 'w') as p_file:
+    #         for i in range(len(lme_loglik)):
+    #             p_file.write(str(lme_loglik[i]) + '\n')
+    #     lme_loglik = np.sum(lme_loglik)
+    #
+    #     summary += '  Log Lik: %.4f\n' % lme_loglik
 
     summary += '=' * 50 + '\n'
     with open(outdir + '/%seval_%s.txt' % ('' if model_name=='' else model_name + '_', args.partition), 'w') as f_out:
@@ -121,7 +123,7 @@ if __name__ == '__main__':
 
     for i in range(len(dtsr_formula_list)):
         x = dtsr_formula_list[i]
-        if run_baseline and x.dv not in X_baseline.columns:
+        if run_baseline and x.dv not in X_baseline.columns and x.dv in y.columns:
             X_baseline[x.dv] = y[x.dv]
 
     if run_baseline:
@@ -142,7 +144,7 @@ if __name__ == '__main__':
             predict_LME(
                 p.outdir + '/' + m + '/m.obj',
                 p.outdir + '/' + m,
-                X,
+                X_baseline,
                 y,
                 dv
             )
