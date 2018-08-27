@@ -153,18 +153,18 @@ The currently supported parametric IRF families are:
 
     - :math:`\beta > 0`: ``beta`` (peak and undershoot rate)
 
-- ``HRFDoubleGamma2``: 2-parameter double-gamma hemodynamic response function (fMRI). Parameter :math:`\alpha` of the second gamma is fixed to the :math:`alpha` of the first gamma at SPM
-s default ratio (:math:`\frac{16}{6}`). Parameter :math:`\beta` is tied between both gammas. The coefficient on the second gamma is fixed at SPM's default (:math:`\frac{1}{6}`).
+- ``HRFDoubleGamma2``: 2-parameter double-gamma hemodynamic response function (fMRI). Parameter :math:`\alpha` of the second gamma is fixed to the :math:`alpha` of the first gamma using SPM
+s default offset (10). Parameter :math:`\beta` is tied between both gammas. The coefficient on the second gamma is fixed at SPM's default (:math:`\frac{1}{6}`).
 
   - Parameters:
 
     - :math:`\alpha > 1`: ``alpha`` (peak shape)
     - :math:`\beta > 0`: ``beta`` (peak and undershoot rate)
 
-  - Definition: :math:`\frac{\beta^{\alpha}x^{\alpha-1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha)} - \frac{1}{6}\frac{\beta^{\frac{16}{6}\alpha}x^{\frac{16}{6}\alpha - 1}e^{-\frac{x}{\beta}}}{\Gamma(\frac{16}{6}\alpha)}`
+  - Definition: :math:`\frac{\beta^{\alpha}x^{\alpha-1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha)} - \frac{1}{6}\frac{\beta^{\alpha + 10}x^{\alpha + 9}e^{-\frac{x}{\beta}}}{\Gamma(\alpha + 10)}`
 
-- ``HRFDoubleGamma3``: 3-parameter double-gamma hemodynamic response function (fMRI). Parameter :math:`\alpha` of the second gamma is fixed to the :math:`alpha` of the first gamma at SPM
-s default ratio (:math:`\frac{16}{6}`). Parameter :math:`\beta` is tied between both gammas.
+- ``HRFDoubleGamma3``: 3-parameter double-gamma hemodynamic response function (fMRI). Parameter :math:`\alpha` of the second gamma is fixed to the :math:`alpha` of the first gamma using SPM
+s default offset (10). Parameter :math:`\beta` is tied between both gammas.
 
   - Parameters:
 
@@ -172,7 +172,7 @@ s default ratio (:math:`\frac{16}{6}`). Parameter :math:`\beta` is tied between 
     - :math:`\beta > 0`: ``beta`` (peak and undershoot rate)
     - :math:`c`: ``c`` (undershoot coefficient)
 
-  - Definition: :math:`\frac{\beta^{\alpha}x^{\alpha-1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha)} - c\frac{\beta^{\frac{16}{6}\alpha}x^{\frac{16}{6}\alpha - 1}e^{-\frac{x}{\beta}}}{\Gamma(\frac{16}{6}\alpha)}`
+  - Definition: :math:`\frac{\beta^{\alpha}x^{\alpha-1}e^{-\frac{x}{\beta}}}{\Gamma(\alpha)} - c\frac{\beta^{\alpha + 10}x^{\alpha + 9}e^{-\frac{x}{\beta}}}{\Gamma(\alpha + 10)}`
 
 - ``HRFDoubleGamma4``: 4-parameter double-gamma hemodynamic response function (fMRI). Parameter :math:`\beta` is tied between both gammas.
 

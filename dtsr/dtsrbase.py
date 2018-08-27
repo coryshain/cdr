@@ -930,7 +930,7 @@ class DTSR(object):
                         validate_args=self.validate_irf_args
                     ).prob
                     pdf_undershoot = tf.contrib.distributions.Gamma(
-                        concentration=alpha * 16. / 6.,
+                        concentration=alpha + 10,
                         rate=beta,
                         validate_args=self.validate_irf_args
                     ).prob
@@ -950,7 +950,7 @@ class DTSR(object):
                         validate_args=self.validate_irf_args
                     ).prob
                     pdf_undershoot = tf.contrib.distributions.Gamma(
-                        concentration=alpha * 16. / 6.,
+                        concentration=alpha + 10,
                         rate=beta,
                         validate_args=self.validate_irf_args
                     ).prob
@@ -2381,15 +2381,13 @@ class DTSR(object):
                     irf_names = [x for x in self.src_node_table if x in self.src_irf_plot and not (len(self.src_node_table[x].children) == 1 and self.src_node_table[x].children[0].terminal())]
                     irf_names_terminal = [x for x in self.src_node_table if x in self.src_irf_plot and self.src_node_table[x].terminal()]
 
-                    print(irf_names)
-
                     for a in switches[0]:
                         if a not in self.src_plot_tensors:
                             self.src_plot_tensors[a] = {}
                         for b in switches[1]:
                             plot_y = []
                             names = irf_names if b == 'unscaled' else irf_names_terminal
-                            print(names)
+
                             for x in names:
                                 plot_y.append(self.src_irf_plot[x][a][b])
 
@@ -3473,7 +3471,7 @@ class DTSR(object):
         out += self.report_parameter_values(
             random=random,
             level=level,
-            n_samples=level,
+            n_samples=n_samples,
             indent=indent+2
         )
 

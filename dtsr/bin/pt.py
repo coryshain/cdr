@@ -32,6 +32,8 @@ if __name__ == '__main__':
     argparser.add_argument('-t', '--tails', type=int, default=2, help='Number of tails (1 or 2)')
     args, unknown = argparser.parse_known_args()
 
+    assert args.metric in ['loss', 'loglik'], 'Metric must be one of ["loss", "loglik"].'
+
     if args.pool:
         args.ablation = True
         ablations = None
@@ -116,7 +118,8 @@ if __name__ == '__main__':
                                     if diff > 0:
                                         summary += '%d NaN rows filtered out (out of %d)\n' %(diff, len(a))
                                     summary += 'Partition: %s\n' %args.partition
-                                    summary += 'Loss difference: %.4f\n' %base_diff
+                                    summary += 'Metric: %s\n' %args.metric
+                                    summary += 'Difference: %.4f\n' %base_diff
                                     summary += 'p: %.4e%s\n' %(p_value, '' if p_value > 0.05 else '*' if p_value > 0.01 else '**' if p_value > 0.001 else '***')
                                     summary += '='*50 + '\n'
 
@@ -170,6 +173,7 @@ if __name__ == '__main__':
                         summary += 'Model comparison: %s vs %s\n' % (
                         'FULL' if m1 == '' else '!' + m1, 'FULL' if m2 == '' else '!' + m2)
                         summary += 'Partition: %s\n' % args.partition
+                        summary += 'Metric: %s\n' % args.metric
                         summary += 'Experiments pooled:\n'
                         for exp in exps_outdirs:
                             summary += '  %s\n' %exp
@@ -177,7 +181,7 @@ if __name__ == '__main__':
                         for basename in basenames_to_pool:
                             summary += '  %s\n' %basename
                         summary += 'n: %s\n' %df1.shape[0]
-                        summary += 'Loss difference: %.4f\n' % diff
+                        summary += 'Difference: %.4f\n' % diff
                         summary += 'p: %.4e%s\n' % (
                             p_value,
                             '' if p_value > 0.05 else '*' if p_value > 0.01 else '**' if p_value > 0.001 else '***')
