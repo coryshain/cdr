@@ -252,7 +252,7 @@ DTSR_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'learning_rate',
-        0.01,
+        0.001,
         float,
         "Initial value for the learning rate."
     ),
