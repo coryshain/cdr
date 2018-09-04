@@ -178,9 +178,9 @@ class Config(object):
         if 'plot_n_time_points' in settings or add_defaults:
             out['plot_n_time_points'] = settings.getfloat('plot_n_time_points', 1000)
         if 'plot_x_inches' in settings or add_defaults:
-            out['plot_x_inches'] = settings.getfloat('plot_x_inches', 7)
+            out['plot_x_inches'] = settings.getfloat('plot_x_inches', 6)
         if 'plot_y_inches' in settings or add_defaults:
-            out['plot_y_inches'] = settings.getfloat('plot_y_inches', 5)
+            out['plot_y_inches'] = settings.getfloat('plot_y_inches', 4)
         if 'cmap' in settings or add_defaults:
             out['cmap'] = settings.get('cmap', 'gist_rainbow')
 

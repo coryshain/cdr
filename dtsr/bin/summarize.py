@@ -42,6 +42,8 @@ if __name__ == '__main__':
                 outname = p.outdir + '/' + m + '/' + args.prefix + '_summary.txt'
             else:
                 outname = p.outdir + '/' + m + '/summary.txt'
+
+            sys.stderr.write('Saving summary to %s' %outname)
             with open(outname, 'w') as f:
                 f.write(summary)
             sys.stderr.write(summary)
