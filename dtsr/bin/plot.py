@@ -25,6 +25,7 @@ if __name__ == '__main__':
     argparser.add_argument('-Y', '--ylab', type=str, default=None, help='y-axis label (if default -- None -- no label)')
     argparser.add_argument('-c', '--cmap', type=str, default=None, help='Name of matplotlib colormap library to use for curves')
     argparser.add_argument('-l', '--nolegend', action='store_true', help='Omit legend from figure')
+    argparser.add_argument('-M', '--markers', action='store_true', help='Add markers to IRF lines')
     argparser.add_argument('-t', '--transparent_background', action='store_true', help='Use transparent background (otherwise white background)')
     args, unknown = argparser.parse_known_args()
 
@@ -73,6 +74,7 @@ if __name__ == '__main__':
                 legend=legend,
                 xlab=args.xlab,
                 ylab=args.ylab,
+                use_line_markers=args.markers,
                 transparent_background=args.transparent_background
             )
 
@@ -97,6 +99,7 @@ if __name__ == '__main__':
                 legend=legend,
                 xlab=args.xlab,
                 ylab=args.ylab,
+                use_line_markers=args.markers,
                 transparent_background=args.transparent_background,
                 **kwargs
             )
@@ -109,6 +112,7 @@ if __name__ == '__main__':
                     legend=legend,
                     xlab=args.xlab,
                     ylab=args.ylab,
+                    use_line_markers=args.markers,
                     transparent_background=args.transparent_background,
                     **kwargs
                 )

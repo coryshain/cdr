@@ -4,7 +4,7 @@ import pickle
 import string
 import numpy as np
 import pandas as pd
-from scipy.stats import gamma
+import scipy.stats
 import argparse
 
 from dtsr.plot import plot_irf
@@ -14,6 +14,53 @@ def convolve(x, k, theta, delta, coefficient = 1):
 
 def read_params(path):
     return pd.read_csv(path, sep=' ', index_col=0)
+
+class SyntheticDataset(object):
+    def __init__(
+            self,
+            nobs_X,
+            n_pred,
+            irf,
+            step_distribution=None,
+            error_sd=20.,
+            rho=0,
+            nobs_y=None,
+            align_X_y=True
+    ):
+        self.nobs_X = nobs_X
+        if nobs_y is None:
+            self.nobs_y = nobs_X
+        else:
+            self.nobs_y = nobs_y
+        self.n_pred = n_pred
+        if not isinstance(irf, list):
+            irf = [irf]
+        self.irf = irf
+        self.step_distribution = step_distribution
+        self.error_sd = error_sd
+        self.rho = rho
+        self.align_X_y = align_X_y
+        if align_X_y:
+            if self.nobs_X != self.nobs_y:
+                self.align_X_y = False
+                sys.stderr.write('If align_X_y, nobs_X and nobs_y must be equal (or nobs_y must be None). Forcing align_X_y to False.')
+
+    def build(self):
+        time_X = np.cumsum(getattr(scipy.stats, self.step_distribution['name'])(size=self.nobs_X, **self.step_distribution['args']))
+        if self.align_X_y:
+            time_y = time_X
+        else:
+            time_y = np.cumsum(getattr(scipy.stats, self.step_distribution['name'])(size=self.nobs_y, **self.step_distribution['args']))
+
+    IRF_LAMBDAS = {
+        'Dirac': lambda x, coefficient: x * coefficient,
+        'Normal': lambda x, mu, sigma, coefficient: np.sum(scipy.stats.norm.pdf(x, loc=mu, scale=sigma) * coefficient),
+        'Exp': lambda x, theta, coefficient: np.sum(scipy.stats.expon.pdf(x, scale=theta) * coefficient),
+        'Gamma': lambda x, k, theta, coefficient: np.sum(scipy.stats.gamma.pdf(x, k, scale=theta) * coefficient),
+        'ShiftedGamma': lambda x, k, theta, delta, coefficient: np.sum(scipy.stats.gamma.pdf(x, k, scale=theta, loc=delta) * coefficient)
+    }
+
+
 
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser('''

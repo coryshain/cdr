@@ -2459,7 +2459,7 @@ class DTSR(object):
                 return out
 
     # Thanks to Ralph Mao (https://github.com/RalphMao) for this workaround
-    def _restore_allow_missing(self, path, predict=False):
+    def _restore_inner(self, path, predict=False, allow_missing=False):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 try:
@@ -2474,46 +2474,49 @@ class DTSR(object):
                     else:
                         self.saver.restore(self.sess, path[:-5] + '_backup.ckpt')
                 except tf.errors.NotFoundError as err:  # Model contains variables that are missing in checkpoint, special handling needed
-                    reader = tf.train.NewCheckpointReader(path)
-                    saved_shapes = reader.get_variable_to_shape_map()
-                    model_var_names = sorted([(var.name, var.name.split(':')[0]) for var in tf.global_variables()])
-                    ckpt_var_names = sorted([(var.name, var.name.split(':')[0]) for var in tf.global_variables()
-                                             if var.name.split(':')[0] in saved_shapes])
+                    if allow_missing:
+                        reader = tf.train.NewCheckpointReader(path)
+                        saved_shapes = reader.get_variable_to_shape_map()
+                        model_var_names = sorted([(var.name, var.name.split(':')[0]) for var in tf.global_variables()])
+                        ckpt_var_names = sorted([(var.name, var.name.split(':')[0]) for var in tf.global_variables()
+                                                 if var.name.split(':')[0] in saved_shapes])
 
-                    model_var_names_set = set([x[1] for x in model_var_names])
-                    ckpt_var_names_set = set([x[1] for x in ckpt_var_names])
+                        model_var_names_set = set([x[1] for x in model_var_names])
+                        ckpt_var_names_set = set([x[1] for x in ckpt_var_names])
 
-                    missing_in_ckpt = model_var_names_set - ckpt_var_names_set
-                    if len(missing_in_ckpt) > 0:
-                        sys.stderr.write(
-                            'Checkpoint file lacked the variables below. They will be left at their initializations.\n%s.\n\n' % (
-                            sorted(list(missing_in_ckpt))))
-                    missing_in_model = ckpt_var_names_set - model_var_names_set
-                    if len(missing_in_model) > 0:
-                        sys.stderr.write(
-                            'Checkpoint file contained the variables below which do not exist in the current model. They will be ignored.\n%s.\n\n' % (
-                            sorted(list(missing_in_ckpt))))
+                        missing_in_ckpt = model_var_names_set - ckpt_var_names_set
+                        if len(missing_in_ckpt) > 0:
+                            sys.stderr.write(
+                                'Checkpoint file lacked the variables below. They will be left at their initializations.\n%s.\n\n' % (
+                                sorted(list(missing_in_ckpt))))
+                        missing_in_model = ckpt_var_names_set - model_var_names_set
+                        if len(missing_in_model) > 0:
+                            sys.stderr.write(
+                                'Checkpoint file contained the variables below which do not exist in the current model. They will be ignored.\n%s.\n\n' % (
+                                sorted(list(missing_in_ckpt))))
 
-                    restore_vars = []
-                    name2var = dict(
-                        zip(map(lambda x: x.name.split(':')[0], tf.global_variables()), tf.global_variables()))
+                        restore_vars = []
+                        name2var = dict(
+                            zip(map(lambda x: x.name.split(':')[0], tf.global_variables()), tf.global_variables()))
 
-                    with tf.variable_scope('', reuse=True):
-                        for var_name, saved_var_name in ckpt_var_names:
-                            curr_var = name2var[saved_var_name]
-                            var_shape = curr_var.get_shape().as_list()
-                            if var_shape == saved_shapes[saved_var_name]:
-                                restore_vars.append(curr_var)
+                        with tf.variable_scope('', reuse=True):
+                            for var_name, saved_var_name in ckpt_var_names:
+                                curr_var = name2var[saved_var_name]
+                                var_shape = curr_var.get_shape().as_list()
+                                if var_shape == saved_shapes[saved_var_name]:
+                                    restore_vars.append(curr_var)
 
-                    if predict:
-                        self.ema_map = {}
-                        for v in restore_vars:
-                            self.ema_map[self.ema.average_name(v)] = v
-                        saver_tmp = tf.train.Saver(self.ema_map)
+                        if predict:
+                            self.ema_map = {}
+                            for v in restore_vars:
+                                self.ema_map[self.ema.average_name(v)] = v
+                            saver_tmp = tf.train.Saver(self.ema_map)
+                        else:
+                            saver_tmp = tf.train.Saver(restore_vars)
+
+                        saver_tmp.restore(self.sess, path)
                     else:
-                        saver_tmp = tf.train.Saver(restore_vars)
-
-                    saver_tmp.restore(self.sess, path)
+                        raise err
 
 
 
@@ -2988,7 +2991,7 @@ class DTSR(object):
                     with open(dir + '/m.obj', 'wb') as f:
                         pickle.dump(self, f)
     
-    def load(self, outdir=None, predict=False, restore=True):
+    def load(self, outdir=None, predict=False, restore=True, allow_missing=False):
         """
         Load weights from a DTSR checkpoint and/or initialize the DTSR model.
         Missing weights in the checkpoint will be kept at their initializations, and unneeded weights in the checkpoint will be ignored.
@@ -3005,7 +3008,7 @@ class DTSR(object):
                 if not self.initialized():
                     self.sess.run(tf.global_variables_initializer())
                 if restore and os.path.exists(outdir + '/checkpoint'):
-                    self._restore_allow_missing(outdir + '/model.ckpt', predict=predict)
+                    self._restore_inner(outdir + '/model.ckpt', predict=predict, allow_missing=allow_missing)
                 else:
                     if predict:
                         sys.stderr.write('No EMA checkpoint available. Leaving internal variables unchanged.\n')
@@ -4220,6 +4223,7 @@ class DTSR(object):
             legend=True,
             xlab=None,
             ylab=None,
+            use_line_markers=False,
             transparent_background=False,
             keep_plot_history=False
     ):
@@ -4333,6 +4337,7 @@ class DTSR(object):
                                     legend=legend,
                                     xlab=xlab,
                                     ylab=ylab,
+                                    use_line_markers=use_line_markers,
                                     transparent_background=transparent_background
                                 )
 
@@ -4392,6 +4397,7 @@ class DTSR(object):
                                             legend=legend,
                                             xlab=xlab,
                                             ylab=ylab,
+                                            use_line_markers=use_line_markers,
                                             transparent_background=transparent_background
                                         )
 
@@ -4423,6 +4429,8 @@ class DTSR(object):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                self.set_predict_mode(True)
+
                 if fixed:
                     keys = self.parameter_table_fixed_keys
                     values = self._extract_parameter_values(
@@ -4447,6 +4455,8 @@ class DTSR(object):
 
                 columns = self.parameter_table_columns
                 out = pd.concat([out, pd.DataFrame(values, columns=columns)], axis=1)
+
+                self.set_predict_mode(False)
 
                 return out
 

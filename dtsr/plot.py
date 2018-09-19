@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from matplotlib import markers
 
 def plot_irf(
         plot_x,
@@ -19,6 +20,7 @@ def plot_irf(
         legend=True,
         xlab=None,
         ylab=None,
+        use_line_markers=False,
         transparent_background=False
 ):
     """
@@ -38,13 +40,17 @@ def plot_irf(
     :param legend: ``bool``; include a legend.
     :param xlab: ``str`` or ``None``; x-axis label. If ``None``, no label.
     :param ylab: ``str`` or ``None``; y-axis label. If ``None``, no label.
+    :param use_line_markers: ``bool``; add markers to IRF lines.
     :param transparent_background: ``bool``; use a transparent background. If ``False``, uses a white background.
     :return: ``None``
     """
 
     cm = plt.get_cmap(cmap)
     plt.rcParams["font.family"] = "sans-serif"
-    plt.gca().set_prop_cycle(color=[cm(1. * i / len(irf_names)) for i in range(len(irf_names))])
+    prop_cycle_kwargs = {'color': [cm(1. * i / len(irf_names)) for i in range(len(irf_names))]}
+    if use_line_markers:
+        prop_cycle_kwargs['marker'] = list(markers.MarkerStyle.markers.keys())[:-3][:len(irf_names)]
+    plt.gca().set_prop_cycle(**prop_cycle_kwargs)
     plt.gca().spines['top'].set_visible(False)
     plt.gca().spines['right'].set_visible(False)
     plt.gca().spines['bottom'].set_visible(False)
@@ -61,9 +67,10 @@ def plot_irf(
     sort_ix = [i[0] for i in sorted(enumerate(irf_names_processed), key=lambda x:x[1])]
     for i in range(len(sort_ix)):
         if plot_y[1:,sort_ix[i]].sum() == 0:
-            plt.plot(plot_x[:2], plot_y[:2,sort_ix[i]], label=irf_names_processed[sort_ix[i]], lw=2, alpha=0.8, solid_capstyle='butt')
+            plt.plot(plot_x[:2], plot_y[:2,sort_ix[i]], label=irf_names_processed[sort_ix[i]], lw=2, alpha=0.8, linestyle='-', solid_capstyle='butt')
         else:
-            plt.plot(plot_x, plot_y[:,sort_ix[i]], label=irf_names_processed[sort_ix[i]], lw=2, alpha=0.8, solid_capstyle='butt')
+            markevery = int(len(plot_y) / 10)
+            plt.plot(plot_x, plot_y[:,sort_ix[i]], label=irf_names_processed[sort_ix[i]], lw=2, alpha=0.8, linestyle='-', markevery=markevery, solid_capstyle='butt')
         if uq is not None and lq is not None:
             plt.fill_between(plot_x[:,0], lq[:,sort_ix[i]], uq[:,sort_ix[i]], alpha=0.25)
 
