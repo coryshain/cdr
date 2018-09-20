@@ -3131,8 +3131,6 @@ class DTSR(object):
 
             self.predict_mode = mode
 
-        print('Predict mode: %s' %self.predict_mode)
-
     def set_training_complete(self, status):
         """
         Change internal record of whether training is complete.
