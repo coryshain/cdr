@@ -15,6 +15,7 @@ spline = re.compile('S((o([0-9]+))?(b([0-9]+))?(l([0-9]+))?(p([0-9]+))?(i([0-1])
 starts_numeric = re.compile('^[0-9]')
 non_alphanumeric = re.compile('[^0-9a-zA-Z_]')
 
+
 def pythonize_string(s):
     """
     Convert string to valid python variable name
@@ -29,6 +30,17 @@ def pythonize_string(s):
     return s
 
 
+def standardize_formula_string(s):
+    """
+    Standardize a formula string, removing notational variation.
+    IRF specifications ``C(...)`` are sorted alphabetically by the IRF call name e.g. ``Gamma()``.
+    The order of impulses within an IRF specification is preserved.
+
+    :param s: ``str``; the formula string to be standardized
+    :return: ``str``; standardization of **s**
+    """
+
+    return str(Formula(s, standardize=False))
 
 class Formula(object):
     """
@@ -210,16 +222,19 @@ class Formula(object):
                 out = None
         return out
 
-    def __init__(self, bform_str):
-        self.build(bform_str)
+    def __init__(self, bform_str, standardize=True):
+        self.build(bform_str, standardize=standardize)
 
-    def build(self, bform_str):
+    def build(self, bform_str, standardize=True):
         """
         Construct internal data from formula string
 
         :param bform_str: ``str``; source string.
         :return: ``None``
         """
+
+        if standardize:
+            bform_str = standardize_formula_string(bform_str)
 
         self.bform_str = bform_str
 
