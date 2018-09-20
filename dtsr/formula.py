@@ -815,6 +815,8 @@ class Formula(object):
         elif not isinstance(rangf, list):
             rangf = [rangf]
 
+        rangf = sorted(rangf)
+
         bform = str(self)
         bform += ' + C(' + ' + '.join(impulses) + ', ' + irf_str + ')'
         for gf in rangf:
@@ -855,10 +857,10 @@ class Formula(object):
             out += '0 + '
 
         out += ' + '.join([x for x in fixed])
-        for gf in random:
+        for gf in sorted(list(random.keys()), key=lambda x: (x is None, x)):
             out += ' + (' + ('1 + ' if self.has_intercept[gf] else '0 + ') + ' + '.join([x for x in random[gf]]) + ' | ' + gf + ')'
 
-        for gf in self.has_intercept:
+        for gf in sorted(list(self.has_intercept.keys())):
             if gf is not None and gf not in random and self.has_intercept[gf]:
                 out += ' + (1 | ' + gf + ')'
 
@@ -883,10 +885,10 @@ class Formula(object):
                     new_terms[term['irf']]['impulses'] += term['impulses']
                 else:
                     new_terms[term['irf']] = term
-            new_terms = [new_terms[x] for x in new_terms]
+            new_terms = [new_terms[x] for x in sorted(list(new_terms.keys()))]
             term_strings.append(' + '.join(['C(%s, %s)' %(' + '.join([x.name() for x in y['impulses']]), y['irf']) for y in new_terms]))
 
-        for rangf in terms:
+        for rangf in sorted(list(terms.keys()), key=lambda x: (x is None, x)):
             ran = terms[rangf]
             new_terms = {}
             for term in ran:
@@ -894,7 +896,7 @@ class Formula(object):
                     new_terms[term['irf']]['impulses'] += term['impulses']
                 else:
                     new_terms[term['irf']] = term
-            new_terms = [new_terms[x] for x in new_terms]
+            new_terms = [new_terms[x] for x in sorted(list(new_terms.keys()))]
             new_terms_str = '('
             if not self.has_intercept[rangf]:
                 new_terms_str += '0 + '
@@ -903,7 +905,7 @@ class Formula(object):
 
         out += ' + '.join(term_strings)
 
-        for key in self.has_intercept:
+        for key in sorted(list(self.has_intercept.keys()), key=lambda x: (x is None, x)):
             if key is not None and not key in terms and self.has_intercept[key]:
                 out += ' + (1 | %s)' %key
 
@@ -1007,8 +1009,10 @@ class Impulse(object):
         impulses = [self]
 
         if self.id in df.columns and self.categorical(df):
-            impulses = [Impulse('_'.join([self.id, pythonize_string(str(val))]), ops=self.ops) for val in df[self.id].unique()[1:]]
-            expanded_value_names = [str(val) for val in df[self.id].unique()[1:]]
+            vals = sorted(df[self.id].unique())[1:]
+
+            impulses = [Impulse('_'.join([self.id, pythonize_string(str(val))]), ops=self.ops) for val in vals]
+            expanded_value_names = [str(val) for val in vals]
             for i in range(len(impulses)):
                 x = impulses[i]
                 val = expanded_value_names[i]
@@ -1133,7 +1137,7 @@ class IRFNode(object):
             self.irfID = irfID
             self.coefID = coefID
             self.fixed = fixed
-            self.rangf = [] if rangf is None else rangf if isinstance(rangf, list) else [rangf]
+            self.rangf = [] if rangf is None else sorted(rangf) if isinstance(rangf, list) else [rangf]
 
             self.param_init = {}
             if param_init is not None:
@@ -1188,9 +1192,13 @@ class IRFNode(object):
 
         if not isinstance(rangf, list):
             rangf = [rangf]
+        if len(rangf) == 0 and self.terminal():
+            self.fixed = True
         for gf in rangf:
             if gf not in self.rangf:
                 self.rangf.append(gf)
+
+        self.rangf = sorted(self.rangf)
 
     def local_name(self):
         """
@@ -1367,6 +1375,7 @@ class IRFNode(object):
         out = {}
         for x in self.impulses():
             out[x.name()] = x
+
         return out
 
     def terminals(self):
@@ -1792,15 +1801,17 @@ class IRFNode(object):
             if type(self.impulse).__name__ == 'InteractionImpulse':
                 expanded_atomic_impulses = []
                 for x in self.impulse.impulses():
+                    vals = sorted(df[x.id].unique()[1:])
                     if x.categorical(df):
-                        expanded_atomic_impulses.append([Impulse('_'.join([x.id, pythonize_string(str(val))]), ops=x.ops) for val in df[x.id].unique()[1:]])
+                        expanded_atomic_impulses.append([Impulse('_'.join([x.id, pythonize_string(str(val))]), ops=x.ops) for val in vals])
                     else:
                         expanded_atomic_impulses.append([x])
 
                 new_impulses = [InteractionImpulse(x, ops=self.impulse.ops) for x in itertools.product(*expanded_atomic_impulses)]
 
             elif self.impulse.categorical(df):
-                new_impulses = [Impulse('_'.join([self.impulse.id, pythonize_string(str(val))]), ops=self.ops) for val in df[self.impulse.id].unique()[1:]]
+                vals = sorted(df[self.impulse.id].unique()[1:])
+                new_impulses = [Impulse('_'.join([self.impulse.id, pythonize_string(str(val))]), ops=self.ops) for val in vals]
             else:
                 new_impulses = [self.impulse]
 

@@ -93,18 +93,20 @@ class Config(object):
         self.models = {}
         self.model_list = []
         for model_field in [m for m in config.keys() if m.startswith('model_')]:
-            self.models[model_field[6:]] = self.build_dtsr_settings(config[model_field], add_defaults=False)
-            self.model_list.append(model_field[6:])
+            model_name = model_field[6:]
+            is_dtsr = model_name.startswith('DTSR')
+            self.models[model_name] = self.build_dtsr_settings(config[model_field], add_defaults=False, is_dtsr=is_dtsr)
+            self.model_list.append(model_name)
             if 'ablate' in config[model_field]:
                 for ablated in powerset(config[model_field]['ablate'].strip().split()):
                     ablated = list(ablated)
-                    name = model_field[6:] + '!' + '!'.join(ablated)
+                    new_name = model_name + '!' + '!'.join(ablated)
                     formula = Formula(config[model_field]['formula'])
                     formula.ablate_impulses(ablated)
-                    new_model = self.models[model_field[6:]].copy()
+                    new_model = self.models[model_name].copy()
                     new_model['formula'] = str(formula)
-                    self.models[name] = new_model
-                    self.model_list.append(name)
+                    self.models[new_name] = new_model
+                    self.model_list.append(new_name)
 
         if 'irf_name_map' in config:
             self.irf_name_map = {}
@@ -141,12 +143,13 @@ class Config(object):
         else:
             raise ValueError('There is no model named "%s" defined in the config file.' %model_name)
 
-    def build_dtsr_settings(self, settings, add_defaults=True):
+    def build_dtsr_settings(self, settings, add_defaults=True, is_dtsr=True):
         """
         Given a settings object parsed from a config file, compute DTSR parameter dictionary.
 
         :param settings: settings from a ``ConfigParser`` object.
         :param add_defaults: ``bool``; whether to supply defaults for parameters missing from **settings**.
+        :param is_dtsr: ``bool``; whether this is a DTSR model.
         :return: ``dict``; dictionary of settings key-value pairs.
         """
 
@@ -154,6 +157,9 @@ class Config(object):
 
         # Core fields
         out['formula'] = settings.get('formula', None)
+        if is_dtsr and out['formula']:
+            # Standardize the model string
+            out['formula'] = str(Formula(out['formula']))
         if 'network_type' in settings or add_defaults:
             out['network_type'] = settings.get('network_type', 'bayes')
 

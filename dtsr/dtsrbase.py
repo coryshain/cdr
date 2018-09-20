@@ -330,6 +330,7 @@ class DTSR(object):
                 self.epsilon = tf.constant(2 * np.finfo(self.FLOAT_NP).eps, dtype=self.FLOAT_TF)
 
         self.parameter_table_columns = ['Estimate']
+        self.predict_mode = False
 
     def __getstate__(self):
         md = self._pack_metadata()
@@ -1446,7 +1447,7 @@ class DTSR(object):
                     joint_fixed_ix['coefficient'] = (i, i + len(coef_ids))
                     i += len(coef_ids)
 
-                    for family in self.atomic_irf_names_by_family:
+                    for family in sorted(list(self.atomic_irf_names_by_family.keys())):
                         if family not in joint_fixed_ix:
                             joint_fixed_ix[family] = {}
                         for param_name in Formula.irf_params(family):
@@ -1512,7 +1513,7 @@ class DTSR(object):
                             joint_random_ix[gf]['coefficient'] = (i, i + n_levels * len(coef_ids))
                             i += n_levels * len(coef_ids)
 
-                        for family in self.atomic_irf_names_by_family:
+                        for family in sorted(list(self.atomic_irf_names_by_family.keys())):
                             for param_name in Formula.irf_params(family):
                                 irf_ids_src = self.atomic_irf_names_by_family[family]
 
@@ -1570,7 +1571,7 @@ class DTSR(object):
                     self.coefficient_fixed_base = self.joint_fixed[s:e]
                     self.coefficient_fixed_base_summary = self.joint_fixed_summary[s:e]
 
-                    for family in self.atomic_irf_names_by_family:
+                    for family in sorted(list(self.atomic_irf_names_by_family.keys())):
                         if family not in self.irf_params_fixed_base:
                             self.irf_params_fixed_base[family] = {}
                         if family not in self.irf_params_fixed_base_summary:
@@ -1616,7 +1617,7 @@ class DTSR(object):
                         if gf not in self.irf_params_random_base_summary:
                             self.irf_params_random_base_summary[gf] = {}
 
-                        for family in self.atomic_irf_names_by_family:
+                        for family in sorted(list(self.atomic_irf_names_by_family.keys())):
                             irf_ids_src = self.atomic_irf_names_by_family[family]
 
                             irf_ids = []
@@ -1764,13 +1765,13 @@ class DTSR(object):
             with self.sess.graph.as_default():
                 if len(self.rangf) > 0:
                     means = []
-                    for gf in self.intercept_random_means:
+                    for gf in sorted(list(self.intercept_random_means.keys())):
                         means.append(tf.expand_dims(self.intercept_random_means[gf], 0))
-                    for gf in self.coefficient_random_means:
+                    for gf in sorted(list(self.coefficient_random_means.keys())):
                         means.append(self.coefficient_random_means[gf])
-                    for gf in self.irf_params_random_means:
-                        for family in self.irf_params_random_means[gf]:
-                            for param_name in self.irf_params_random_means[gf][family]:
+                    for gf in sorted(list(self.irf_params_random_means.keys())):
+                        for family in sorted(list(self.irf_params_random_means[gf].keys())):
+                            for param_name in sorted(list(self.irf_params_random_means[gf][family].keys())):
                                 means.append(self.irf_params_random_means[gf][family][param_name])
 
                     self.random_means = tf.concat(means, axis=0)
@@ -2146,13 +2147,26 @@ class DTSR(object):
     def _initialize_ema(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                vars = tf.get_collection('trainable_variables')
+                self.ema_vars = tf.get_collection('trainable_variables')
                 self.ema = tf.train.ExponentialMovingAverage(decay=self.ema_decay)
-                self.ema_op = self.ema.apply(vars)
+                self.ema_op = self.ema.apply(self.ema_vars)
                 self.ema_map = {}
-                for v in vars:
+                for v in self.ema_vars:
                     self.ema_map[self.ema.average_name(v)] = v
                 self.ema_saver = tf.train.Saver(self.ema_map)
+
+                self.ema_max_delta_placeholder = tf.placeholder(self.FLOAT_TF, shape=[], name='ema_max_delta_placeholder')
+                self.ema_max_delta = tf.Variable(0., dtype=self.FLOAT_TF, trainable=False, name='ema_max_delta')
+                self.assign_ema_max_delta = tf.assign(self.ema_max_delta, self.ema_max_delta_placeholder)
+
+                self.ema_averages = [self.ema.average(v) for v in self.ema_vars]
+                self.ema_old = [tf.Variable(tf.ones_like(v), trainable=False) for v in self.ema_vars]
+                self.ema_old_placeholder = [tf.placeholder(self.FLOAT_TF, shape=v.shape) for v in self.ema_vars]
+                self.assign_ema_averages = [tf.assign(self.ema_old[i], self.ema_old_placeholder[i]) for i in range(len(self.ema_vars))]
+
+                tf.summary.scalar('max_delta', self.ema_max_delta_placeholder, collections=['convergence'])
+                self.summary_convergence = tf.summary.merge_all(key='convergence')
+
 
 
 
@@ -2967,6 +2981,9 @@ class DTSR(object):
         :param dir: ``str``; output directory. If ``None``, use model default.
         :return: ``None``
         """
+
+        assert not self.predict_mode, 'Cannot save while in predict mode, since this would overwrite the parameters with their moving averages.'
+
         if dir is None:
             dir = self.outdir
         with self.sess.as_default():
@@ -3012,6 +3029,29 @@ class DTSR(object):
                 else:
                     if predict:
                         sys.stderr.write('No EMA checkpoint available. Leaving internal variables unchanged.\n')
+
+    def check_convergence(self, verbose=True):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                ema_old = self.sess.run(self.ema_old)
+                ema_new = self.sess.run(self.ema_averages)
+                ema_max_delta = max(*[np.abs(ema_new[i] - ema_old[i]).max() for i in range(len(ema_new))])
+
+                if verbose:
+                    sys.stderr.write('Max delta: %s.\n\n' %ema_max_delta)
+
+                _, summary_convergence = self.sess.run(
+                    [self.assign_ema_max_delta, self.summary_convergence],
+                    feed_dict={self.ema_max_delta_placeholder: ema_max_delta}
+                )
+                self.writer.add_summary(summary_convergence, self.global_step.eval(session=self.sess))
+
+                fd = {}
+                for i, v in enumerate(self.ema_old_placeholder):
+                    fd[v] = ema_new[i]
+                self.sess.run([x for x in self.assign_ema_averages], feed_dict=fd)
+
+                return False
 
     def finalize(self):
         """
@@ -3083,9 +3123,15 @@ class DTSR(object):
         :param mode: ``bool``; if ``True``, enter predict mode. If ``False``, exit predict mode.
         :return: ``None``
         """
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                self.load(predict=mode)
+
+        if mode != self.predict_mode:
+            with self.sess.as_default():
+                with self.sess.graph.as_default():
+                    self.load(predict=mode)
+
+            self.predict_mode = mode
+
+        print('Predict mode: %s' %self.predict_mode)
 
     def set_training_complete(self, status):
         """
@@ -3675,6 +3721,8 @@ class DTSR(object):
                         self.sess.run(self.incr_global_step)
 
                         self.verify_random_centering()
+
+                        self.check_convergence()
 
                         if self.log_freq > 0 and self.global_step.eval(session=self.sess) % self.log_freq == 0:
                             loss_total /= n_minibatch
