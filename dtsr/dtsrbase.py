@@ -329,6 +329,14 @@ class DTSR(object):
                 self.intercept_init_tf = tf.constant(self.intercept_init, dtype=self.FLOAT_TF)
                 self.epsilon = tf.constant(2 * np.finfo(self.FLOAT_NP).eps, dtype=self.FLOAT_TF)
 
+                self.params_old = []
+                self.params_old_placeholder = []
+                self.params_old_getter = []
+                self.params_old_updater = []
+                self.params_max_delta = tf.Variable(0., dtype=self.FLOAT_TF, trainable=False, name='params_max_delta')
+                self.params_max_delta_placeholder = tf.placeholder(self.FLOAT_TF, shape=[], name='params_max_delta_placeholder')
+                self.assign_params_max_delta = tf.assign(self.params_max_delta, self.params_max_delta_placeholder)
+
         self.parameter_table_columns = ['Estimate']
         self.predict_mode = False
 
@@ -606,7 +614,6 @@ class DTSR(object):
                         self._initialize_base_irf_param('alpha_main', family, lb=1., default=6.)
                         self._initialize_base_irf_param('beta', family, lb=0., default=1.)
                         self._initialize_base_irf_param('alpha_undershoot_offset', family, lb=0., default=10.)
-                        # self._initialize_base_irf_param('c', family, lb=0., ub=1., default=1./6.)
                         self._initialize_base_irf_param('c', family, default=1./6.)
 
                     elif family == 'HRFDoubleGamma1':
@@ -670,6 +677,8 @@ class DTSR(object):
                         collections=['params']
                     )
                     self._regularize(self.intercept_fixed, type='intercept', var_name='intercept')
+                    self._add_convergence_tracker(self.intercept_fixed_summary, 'intercept_fixed_old')
+
                 else:
                     self.intercept_fixed = self.intercept_fixed_base
 
@@ -686,8 +695,8 @@ class DTSR(object):
                     self.coefficient_fixed_base_summary,
                     [len(coef_ids)]
                 )
-
                 self._regularize(self.coefficient_fixed, type='coefficient', var_name='coefficient')
+                self._add_convergence_tracker(self.coefficient_fixed_summary, 'coefficient_fixed_old')
 
                 for i in range(len(self.coef_names)):
                     tf.summary.scalar(
@@ -741,6 +750,9 @@ class DTSR(object):
                         self.intercept_random_summary[gf] = intercept_random_summary
                         self.intercept_random_means[gf] = tf.reduce_mean(intercept_random_summary, axis=0)
 
+                        # Create record for convergence tracking
+                        self._add_convergence_tracker(self.intercept_random_summary[gf], 'intercept_random_%s_old' %gf)
+
                         self.intercept += tf.gather(intercept_random, self.gf_y[:, i])
 
                         if self.log_random:
@@ -788,6 +800,8 @@ class DTSR(object):
                         self.coefficient_random[gf] = coefficient_random
                         self.coefficient_random_summary[gf] = coefficient_random_summary
                         self.coefficient_random_means[gf] = tf.reduce_mean(coefficient_random_summary, axis=0)
+
+                        self._add_convergence_tracker(self.coefficient_random_summary[gf], 'coefficient_random_%s_old' %gf)
 
                         self.coefficient += tf.gather(coefficient_random, self.gf_y[:, i], axis=0)
 
@@ -1139,6 +1153,7 @@ class DTSR(object):
                             params_fixed.append(param_vals[2])
                         if param_vals[3] is not None:
                             params_fixed_summary.append(param_vals[3])
+                            self._add_convergence_tracker(param_vals[3], 'irf_%s_old' % family)
 
                         if param_vals[4] is not None and param_vals[5] is not None:
                             assert(set(param_vals[4].keys()) == set(param_vals[5].keys()))
@@ -1151,6 +1166,7 @@ class DTSR(object):
                                 if gf not in params_random_summary:
                                     params_random_summary[gf] = []
                                 params_random_summary[gf].append(param_vals[5][gf])
+                                self._add_convergence_tracker(param_vals[5][gf], 'irf_%s_random_%s_old' % (family, gf))
 
                     has_random_irf = False
                     for param in params:
@@ -2138,6 +2154,8 @@ class DTSR(object):
                 self.summary_losses = tf.summary.merge_all(key='loss')
                 if self.log_random and len(self.rangf) > 0:
                     self.summary_random = tf.summary.merge_all(key='random')
+                tf.summary.scalar('max_delta', self.params_max_delta_placeholder, collections=['convergence'])
+                self.summary_convergence = tf.summary.merge_all(key='convergence')
 
     def _initialize_saver(self):
         with self.sess.as_default():
@@ -2155,17 +2173,6 @@ class DTSR(object):
                     self.ema_map[self.ema.average_name(v)] = v
                 self.ema_saver = tf.train.Saver(self.ema_map)
 
-                self.ema_max_delta_placeholder = tf.placeholder(self.FLOAT_TF, shape=[], name='ema_max_delta_placeholder')
-                self.ema_max_delta = tf.Variable(0., dtype=self.FLOAT_TF, trainable=False, name='ema_max_delta')
-                self.assign_ema_max_delta = tf.assign(self.ema_max_delta, self.ema_max_delta_placeholder)
-
-                self.ema_averages = [self.ema.average(v) for v in self.ema_vars]
-                self.ema_old = [tf.Variable(tf.ones_like(v), trainable=False) for v in self.ema_vars]
-                self.ema_old_placeholder = [tf.placeholder(self.FLOAT_TF, shape=v.shape) for v in self.ema_vars]
-                self.assign_ema_averages = [tf.assign(self.ema_old[i], self.ema_old_placeholder[i]) for i in range(len(self.ema_vars))]
-
-                tf.summary.scalar('max_delta', self.ema_max_delta_placeholder, collections=['convergence'])
-                self.summary_convergence = tf.summary.merge_all(key='convergence')
 
 
 
@@ -2366,6 +2373,37 @@ class DTSR(object):
             untrainable_ix = np.array(untrainable_ix, dtype=self.INT_NP)
 
         return trainable_ix, untrainable_ix
+
+    def _add_convergence_tracker(self, var, name):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                self.params_old_getter.append(var)
+                self.params_old.append(
+                    tf.Variable(
+                        tf.zeros_like(var),
+                        name=name,
+                        trainable=False
+                    )
+                )
+                self.params_old_placeholder.append(
+                    tf.placeholder(
+                        self.FLOAT_TF,
+                        shape=self.params_old[-1].shape
+                    )
+                )
+
+                # Use EMA to smooth parameter training dynamics
+                alpha = 0.9
+                old = self.params_old[-1]
+                new = self.params_old_placeholder[-1]
+                updated = alpha * old + (1 - alpha) * new
+
+                self.params_old_updater.append(
+                    tf.assign(
+                        old,
+                        updated
+                    )
+                )
 
     def _collect_plots(self):
         switches = [['atomic', 'composite'], ['scaled', 'unscaled']]
@@ -3008,7 +3046,7 @@ class DTSR(object):
                     with open(dir + '/m.obj', 'wb') as f:
                         pickle.dump(self, f)
     
-    def load(self, outdir=None, predict=False, restore=True, allow_missing=False):
+    def load(self, outdir=None, predict=False, restore=True, allow_missing=True):
         """
         Load weights from a DTSR checkpoint and/or initialize the DTSR model.
         Missing weights in the checkpoint will be kept at their initializations, and unneeded weights in the checkpoint will be ignored.
@@ -3016,6 +3054,7 @@ class DTSR(object):
         :param outdir: ``str``; directory in which to search for weights. If ``None``, use model defaults.
         :param predict: ``bool``; load EMA weights because the model is being used for prediction. If ``False`` load training weights.
         :param restore: ``bool``; restore weights from a checkpoint file if available, otherwise initialize the model. If ``False``, no weights will be loaded even if a checkpoint is found.
+        :param allow_missing: ``bool``; load all weights found in the checkpoint file, allowing those that are missing to remain at their initializations. If ``False``, weights in checkpoint must exactly match those in the model graph, or else an error will be raised. Leaving set to ``True`` is helpful for backward compatibility, setting to ``False`` can be helpful for debugging.
         :return:
         """
         if outdir is None:
@@ -3033,23 +3072,24 @@ class DTSR(object):
     def check_convergence(self, verbose=True):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                ema_old = self.sess.run(self.ema_old)
-                ema_new = self.sess.run(self.ema_averages)
-                ema_max_delta = max(*[np.abs(ema_new[i] - ema_old[i]).max() for i in range(len(ema_new))])
+
+                params_old = self.sess.run(self.params_old)
+                params_new = self.sess.run(self.params_old_getter)
+                params_max_delta = max(*[np.abs(params_new[i] - params_old[i]).max() for i in range(len(params_new))])
 
                 if verbose:
-                    sys.stderr.write('Max delta: %s.\n\n' %ema_max_delta)
+                    sys.stderr.write('Max delta: %s.\n\n' %params_max_delta)
 
                 _, summary_convergence = self.sess.run(
-                    [self.assign_ema_max_delta, self.summary_convergence],
-                    feed_dict={self.ema_max_delta_placeholder: ema_max_delta}
+                    [self.assign_params_max_delta, self.summary_convergence],
+                    feed_dict={self.params_max_delta_placeholder: params_max_delta}
                 )
                 self.writer.add_summary(summary_convergence, self.global_step.eval(session=self.sess))
 
                 fd = {}
-                for i, v in enumerate(self.ema_old_placeholder):
-                    fd[v] = ema_new[i]
-                self.sess.run([x for x in self.assign_ema_averages], feed_dict=fd)
+                for i, v in enumerate(self.params_old_placeholder):
+                    fd[v] = params_new[i]
+                self.sess.run(self.params_old_updater, feed_dict=fd)
 
                 return False
 
