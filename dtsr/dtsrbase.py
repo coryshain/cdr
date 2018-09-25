@@ -751,7 +751,7 @@ class DTSR(object):
                         self.intercept_random_means[gf] = tf.reduce_mean(intercept_random_summary, axis=0)
 
                         # Create record for convergence tracking
-                        self._add_convergence_tracker(self.intercept_random_summary[gf], 'intercept_random_%s_old' %gf)
+                        self._add_convergence_tracker(self.intercept_random_summary[gf], 'intercept_by_%s_old' %gf)
 
                         self.intercept += tf.gather(intercept_random, self.gf_y[:, i])
 
@@ -801,7 +801,7 @@ class DTSR(object):
                         self.coefficient_random_summary[gf] = coefficient_random_summary
                         self.coefficient_random_means[gf] = tf.reduce_mean(coefficient_random_summary, axis=0)
 
-                        self._add_convergence_tracker(self.coefficient_random_summary[gf], 'coefficient_random_%s_old' %gf)
+                        self._add_convergence_tracker(self.coefficient_random_summary[gf], 'coefficient_by_%s_old' %gf)
 
                         self.coefficient += tf.gather(coefficient_random, self.gf_y[:, i], axis=0)
 
@@ -1153,7 +1153,7 @@ class DTSR(object):
                             params_fixed.append(param_vals[2])
                         if param_vals[3] is not None:
                             params_fixed_summary.append(param_vals[3])
-                            self._add_convergence_tracker(param_vals[3], 'irf_%s_old' % family)
+                            self._add_convergence_tracker(param_vals[3], 'irf_%s_%s_old' % (family, param_name))
 
                         if param_vals[4] is not None and param_vals[5] is not None:
                             assert(set(param_vals[4].keys()) == set(param_vals[5].keys()))
@@ -1166,7 +1166,7 @@ class DTSR(object):
                                 if gf not in params_random_summary:
                                     params_random_summary[gf] = []
                                 params_random_summary[gf].append(param_vals[5][gf])
-                                self._add_convergence_tracker(param_vals[5][gf], 'irf_%s_random_%s_old' % (family, gf))
+                                self._add_convergence_tracker(param_vals[5][gf], 'irf_%s_%s_by_%s_old' % (family, param_name, gf))
 
                     has_random_irf = False
                     for param in params:
