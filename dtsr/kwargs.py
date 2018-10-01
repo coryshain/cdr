@@ -353,6 +353,12 @@ DTSR_INITIALIZATION_KWARGS = [
         "Decay factor to use for exponential moving average for parameters (used in prediction)."
     ),
     Kwarg(
+        'convergence_n_iterates',
+        100,
+        [int, None],
+        "Number of timesteps over which to average parameter movements for convergence diagnostics. If ``None`` or ``0``, convergence diagnostics will not be used (speeds training and reduces memory overhead, but convergence must then be visually diagnosed)."
+    ),
+    Kwarg(
         'minibatch_size',
         1024,
         [int, None],

@@ -1057,7 +1057,7 @@ class DTSRBayes(DTSR):
 
                 self.out_prior = self.out
                 self.out_post = ed.copy(self.out, self.inference_map)
-                self.MAP_map[self.out] = self.out.mean()
+                self.MAP_map[self.out] = self.out_mean
                 self.out_MAP = tf.identity(self.MAP_map[self.out])
                 self.out_MAP = ed.copy(self.out_MAP, self.MAP_map, scope='MAP')
 
@@ -1192,7 +1192,7 @@ class DTSRBayes(DTSR):
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw. If ``None``, use model defaults.
         :param n_time_units: ``float``; number of time units over which to plot the curve.
         :param n_time_points: ``float``; number of points to use in the plot.
-        :return: ``tuple`` of 3 ``numpy`` vectors; mean, lower bound, and upper bound at the desired level for each plot point.
+        :return: ``tuple`` of 4 ``numpy`` arrays; mean, lower bound, and upper bound at the desired level for each plot point, plus the full array of samples.
         """
         if n_samples is None:
             n_samples = self.n_samples_eval
@@ -1218,7 +1218,7 @@ class DTSRBayes(DTSR):
                 lower = np.percentile(samples, alpha/2, axis=1)
                 upper = np.percentile(samples, 100-(alpha/2), axis=1)
 
-                return (mean, lower, upper)
+                return (mean, lower, upper, samples)
 
     def report_settings(self, indent=0):
         out = super(DTSRBayes, self).report_settings(indent=indent)

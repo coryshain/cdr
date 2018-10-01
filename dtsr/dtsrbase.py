@@ -329,13 +329,19 @@ class DTSR(object):
                 self.intercept_init_tf = tf.constant(self.intercept_init, dtype=self.FLOAT_TF)
                 self.epsilon = tf.constant(2 * np.finfo(self.FLOAT_NP).eps, dtype=self.FLOAT_TF)
 
-                self.params_old = []
-                self.params_old_placeholder = []
-                self.params_old_getter = []
-                self.params_old_updater = []
-                self.params_max_delta = tf.Variable(0., dtype=self.FLOAT_TF, trainable=False, name='params_max_delta')
-                self.params_max_delta_placeholder = tf.placeholder(self.FLOAT_TF, shape=[], name='params_max_delta_placeholder')
-                self.assign_params_max_delta = tf.assign(self.params_max_delta, self.params_max_delta_placeholder)
+                self.d0_names = []
+
+                self.d0 = []
+                self.d0_saved = []
+                self.d1 = []
+                self.d1_saved = []
+                self.d2 = []
+
+                self.max_delta_all = []
+                self.double_delta_at_max_delta_all = []
+
+                self.update_iterates = []
+                self.assign_d0_init = []
 
         self.parameter_table_columns = ['Estimate']
         self.predict_mode = False
@@ -677,7 +683,7 @@ class DTSR(object):
                         collections=['params']
                     )
                     self._regularize(self.intercept_fixed, type='intercept', var_name='intercept')
-                    self._add_convergence_tracker(self.intercept_fixed_summary, 'intercept_fixed_old')
+                    self._add_convergence_tracker(self.intercept_fixed_summary, 'intercept_fixed')
 
                 else:
                     self.intercept_fixed = self.intercept_fixed_base
@@ -696,7 +702,7 @@ class DTSR(object):
                     [len(coef_ids)]
                 )
                 self._regularize(self.coefficient_fixed, type='coefficient', var_name='coefficient')
-                self._add_convergence_tracker(self.coefficient_fixed_summary, 'coefficient_fixed_old')
+                self._add_convergence_tracker(self.coefficient_fixed_summary, 'coefficient_fixed')
 
                 for i in range(len(self.coef_names)):
                     tf.summary.scalar(
@@ -751,7 +757,7 @@ class DTSR(object):
                         self.intercept_random_means[gf] = tf.reduce_mean(intercept_random_summary, axis=0)
 
                         # Create record for convergence tracking
-                        self._add_convergence_tracker(self.intercept_random_summary[gf], 'intercept_by_%s_old' %gf)
+                        self._add_convergence_tracker(self.intercept_random_summary[gf], 'intercept_by_%s' %gf)
 
                         self.intercept += tf.gather(intercept_random, self.gf_y[:, i])
 
@@ -801,7 +807,7 @@ class DTSR(object):
                         self.coefficient_random_summary[gf] = coefficient_random_summary
                         self.coefficient_random_means[gf] = tf.reduce_mean(coefficient_random_summary, axis=0)
 
-                        self._add_convergence_tracker(self.coefficient_random_summary[gf], 'coefficient_by_%s_old' %gf)
+                        self._add_convergence_tracker(self.coefficient_random_summary[gf], 'coefficient_by_%s' %gf)
 
                         self.coefficient += tf.gather(coefficient_random, self.gf_y[:, i], axis=0)
 
@@ -1153,7 +1159,7 @@ class DTSR(object):
                             params_fixed.append(param_vals[2])
                         if param_vals[3] is not None:
                             params_fixed_summary.append(param_vals[3])
-                            self._add_convergence_tracker(param_vals[3], 'irf_%s_%s_old' % (family, param_name))
+                            self._add_convergence_tracker(param_vals[3], 'irf_%s_%s' % (family, param_name))
 
                         if param_vals[4] is not None and param_vals[5] is not None:
                             assert(set(param_vals[4].keys()) == set(param_vals[5].keys()))
@@ -1166,7 +1172,7 @@ class DTSR(object):
                                 if gf not in params_random_summary:
                                     params_random_summary[gf] = []
                                 params_random_summary[gf].append(param_vals[5][gf])
-                                self._add_convergence_tracker(param_vals[5][gf], 'irf_%s_%s_by_%s_old' % (family, param_name, gf))
+                                self._add_convergence_tracker(param_vals[5][gf], 'irf_%s_%s_by_%s' % (family, param_name, gf))
 
                     has_random_irf = False
                     for param in params:
@@ -2096,6 +2102,7 @@ class DTSR(object):
                 self.X_conv_scaled = self.X_conv*coef
 
                 self.out = self.intercept + tf.reduce_sum(self.X_conv_scaled, axis=1)
+                self.out_mean = self.out
 
     def _initialize_optimizer(self, name):
         with self.sess.as_default():
@@ -2154,8 +2161,6 @@ class DTSR(object):
                 self.summary_losses = tf.summary.merge_all(key='loss')
                 if self.log_random and len(self.rangf) > 0:
                     self.summary_random = tf.summary.merge_all(key='random')
-                tf.summary.scalar('max_delta', self.params_max_delta_placeholder, collections=['convergence'])
-                self.summary_convergence = tf.summary.merge_all(key='convergence')
 
     def _initialize_saver(self):
         with self.sess.as_default():
@@ -2172,6 +2177,22 @@ class DTSR(object):
                 for v in self.ema_vars:
                     self.ema_map[self.ema.average_name(v)] = v
                 self.ema_saver = tf.train.Saver(self.ema_map)
+
+    def _initialize_convergence_checking(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                max_deltas = tf.stack(self.max_delta_all, axis=0)
+                double_deltas_at_max_deltas = tf.stack(self.double_delta_at_max_delta_all, axis=0)
+                self.max_delta_ix = tf.argmax(max_deltas)
+                self.max_delta = max_deltas[self.max_delta_ix]
+                self.double_delta_at_max_delta = double_deltas_at_max_deltas[self.max_delta_ix]
+
+                tf.summary.scalar('max_delta', self.max_delta, collections=['convergence'])
+                tf.summary.scalar('double_delta_at_max_delta', self.double_delta_at_max_delta, collections=['convergence'])
+                self.summary_convergence = tf.summary.merge_all(key='convergence')
+
+                if self.global_step.eval(session=self.sess) == 0:
+                    self.sess.run(self.assign_d0_init)
 
 
 
@@ -2374,36 +2395,101 @@ class DTSR(object):
 
         return trainable_ix, untrainable_ix
 
-    def _add_convergence_tracker(self, var, name):
+    def _add_convergence_tracker(self, var, name, alpha=0.9):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                self.params_old_getter.append(var)
-                self.params_old.append(
-                    tf.Variable(
-                        tf.zeros_like(var),
-                        name=name,
-                        trainable=False
-                    )
-                )
-                self.params_old_placeholder.append(
-                    tf.placeholder(
-                        self.FLOAT_TF,
-                        shape=self.params_old[-1].shape
-                    )
-                )
+                if self.convergence_n_iterates:
+                    # Flatten the variable for easy argmax
+                    var = tf.reshape(var, [-1])
+                    self.d0.append(var)
 
-                # Use EMA to smooth parameter training dynamics
-                alpha = 0.9
-                old = self.params_old[-1]
-                new = self.params_old_placeholder[-1]
-                updated = alpha * old + (1 - alpha) * new
+                    self.d0_names.append(name)
 
-                self.params_old_updater.append(
-                    tf.assign(
-                        old,
-                        updated
-                    )
-                )
+                    # Initialize a list of parameter iterates
+                    var_d0_iterates = [var]
+
+                    # Add placeholders for iterates from front to back
+                    for i in range(self.convergence_n_iterates - 1):
+                        var_d0_iterate = tf.Variable(
+                            tf.zeros_like(var),
+                            name=name + '_d0_tm%d' %(i+1),
+                            trainable=False
+                        )
+                        var_d0_iterates.insert(0, var_d0_iterate)
+                    self.d0_saved.append(var_d0_iterates)
+
+                    # Compute regression coefficient (slope) over time for each element of var.
+                    # This uses the first normal equation for univariate linear regression:
+                    #
+                    #     beta = sum[(x_i - mu_x)(y_i - mu_y)] / sum[(x_i - mu_x)^2]
+                    #
+                    y = tf.stack(var_d0_iterates, axis=0)
+                    x = tf.range(0, self.convergence_n_iterates, dtype=self.FLOAT_TF)[..., None]
+                    mu_x = tf.reduce_mean(x, axis=0, keepdims=True)
+                    mu_y = tf.reduce_mean(y, axis=0, keepdims=True)
+                    num = tf.reduce_sum((x-mu_x) * (y-mu_y),axis=0)
+                    denom = tf.reduce_sum((x - mu_x) ** 2)
+
+                    # Take the absolute value of the slope(s) as the estimate for the magnitude
+                    # of the derivative of the parameter(s) with respect to time.
+                    var_d1 = tf.abs(num / denom)
+                    self.d1.append(var_d1)
+
+                    # Create assigners that copy iterates back one step,
+                    # with control flow dependencies from back to front
+                    # to ensure that copies are executed before the source is overwritten
+                    deps = None
+                    assign_var_d0 = None
+                    assign_d0_init = []
+                    for i in range(self.convergence_n_iterates - 1):
+                        with tf.control_dependencies(deps):
+                            assign_var_d0 = tf.assign(var_d0_iterates[i], var_d0_iterates[i + 1])
+                        assign_d0_init.append(tf.assign(var_d0_iterates[i], var))
+                        deps = [assign_var_d0]
+                    self.assign_d0_init += assign_d0_init
+
+                    # Find the largest-magnitude derivative and its index
+                    max_delta_ix = tf.argmax(var_d1)
+                    max_delta = var_d1[max_delta_ix]
+                    self.max_delta_all.append(max_delta)
+
+                    # Initialize a list of derivative iterates
+                    var_d1_iterates = [var_d1]
+                    
+                    # Add placeholders for derivative iterates from front to back
+                    for i in range(self.convergence_n_iterates - 1):
+                        var_d1_iterate = tf.Variable(
+                            tf.zeros_like(var_d1),
+                            name=name + '_d1_tm%d' % (i + 1),
+                            trainable=False
+                        )
+                        var_d1_iterates.insert(0, var_d1_iterate)
+                    self.d1_saved.append(var_d1_iterates)
+
+                    # Compute regression coefficient (slope) over time for the derivative of each element of var.
+                    y = tf.stack(var_d1_iterates, axis=0)
+                    mu_y = tf.reduce_mean(y, axis=0, keepdims=True)
+                    num = tf.reduce_sum((x - mu_x) * (y - mu_y), axis=0)
+
+                    # Take the absolute value of the slope(s) as the estimate for the magnitude
+                    # of the second derivative of the parameter(s) with respect to time.
+                    var_d2 = tf.abs(num / denom)
+                    self.d2.append(var_d2)
+
+                    # Create assigners that copy iterates back one step,
+                    # with control flow dependencies from back to front
+                    # to ensure that copies are executed before the source is overwritten
+                    deps = [assign_var_d0]
+                    assign_var_d1 = None
+                    for i in range(self.convergence_n_iterates - 1):
+                        with tf.control_dependencies(deps):
+                            assign_var_d1 = tf.assign(var_d1_iterates[i], var_d1_iterates[i + 1])
+                        deps = [assign_var_d0, assign_var_d1]
+
+                    self.update_iterates.append(assign_var_d1)
+
+                    double_delta_at_max_delta = var_d2[max_delta_ix]
+                    self.double_delta_at_max_delta_all.append(double_delta_at_max_delta)
 
     def _collect_plots(self):
         switches = [['atomic', 'composite'], ['scaled', 'unscaled']]
@@ -3010,6 +3096,7 @@ class DTSR(object):
                 self._initialize_saver()
                 self.load(restore=restore)
 
+                self._initialize_convergence_checking()
                 self._collect_plots()
 
     def save(self, dir=None):
@@ -3072,24 +3159,41 @@ class DTSR(object):
     def check_convergence(self, verbose=True):
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                max_delta_ix, max_delta, double_delta_at_max_delta = self.sess.run([self.max_delta_ix, self.max_delta, self.double_delta_at_max_delta])
 
-                params_old = self.sess.run(self.params_old)
-                params_new = self.sess.run(self.params_old_getter)
-                params_max_delta = max(*[np.abs(params_new[i] - params_old[i]).max() for i in range(len(params_new))])
+                # from matplotlib import pyplot as plt
+                # for i in range(len(self.d0)):
+                #     print('Variable: %s' %self.d0_names[i])
+                #     to_run = [self.d0[i], self.d0_saved[i], self.d1[i], self.d1_saved[i], self.d2[i]]
+                #     to_run_names = ['d0', 'd0_saved', 'd1', 'd1_saved', 'd2']
+                #     out = self.sess.run(to_run)
+                #
+                #
+                #     for j in range(len(to_run)):
+                #         print(to_run_names[j])
+                #         print(out[j])
+                #         plt.pause(0.001)
+                #         input()
+                #
+                #     y = out[1]
+                #     if len(y[0]) == 1:
+                #         x = np.arange(self.convergence_n_iterates)
+                #         plt.scatter(x, y)
+                #         plt.plot(x, out[2] * x)
+                #         plt.savefig('lr_vis.png')
+                #         plt.close('all')
 
                 if verbose:
-                    sys.stderr.write('Max delta: %s.\n\n' %params_max_delta)
+                    sys.stderr.write('Max delta: %s.\n' %max_delta)
+                    sys.stderr.write('Double delta at max delta: %s.\n' %double_delta_at_max_delta)
+                    sys.stderr.write('Location: %s.\n\n' %self.d0_names[max_delta_ix])
 
-                _, summary_convergence = self.sess.run(
-                    [self.assign_params_max_delta, self.summary_convergence],
-                    feed_dict={self.params_max_delta_placeholder: params_max_delta}
+                summary_convergence = self.sess.run(
+                    self.summary_convergence,
                 )
                 self.writer.add_summary(summary_convergence, self.global_step.eval(session=self.sess))
 
-                fd = {}
-                for i, v in enumerate(self.params_old_placeholder):
-                    fd[v] = params_new[i]
-                self.sess.run(self.params_old_updater, feed_dict=fd)
+                self.sess.run(self.update_iterates)
 
                 return False
 
@@ -4295,6 +4399,7 @@ class DTSR(object):
 
     def make_plots(
             self,
+            summed=False,
             irf_name_map=None,
             irf_ids=None,
             plot_n_time_units=2.5,
@@ -4327,7 +4432,8 @@ class DTSR(object):
 
         :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
             If ``None``, IRF tree node string ID's will be used.
-        :param irf_ids: ``list`` or ``None``; List of irf ID's to plot. If ``None``, all IRF's are plotted.
+        :param summed: ``bool``; whether to plot individual IRFs or their sum.
+        :param irf_ids: ``list`` or ``None``; list of irf ID's to plot. If ``None``, all IRF's are plotted.
         :param plot_n_time_units: ``float``; number if time units to use for plotting.
         :param plot_n_time_points: ``float``; number of points to use for plotting.
         :param plot_x_inches: ``int``; width of plot in inches.
@@ -4354,6 +4460,10 @@ class DTSR(object):
             prefix = ''
         if prefix != '':
             prefix += '_'
+
+        if summed:
+            alpha = 100 - float(level)
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.set_predict_mode(True)
@@ -4373,7 +4483,10 @@ class DTSR(object):
                 for a in switches[0]:
                     if self.t.has_composed_irf() or a == 'atomic':
                         for b in switches[1]:
-                            plot_name = 'irf_%s_%s_%d.png' %(a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'irf_%s_%s.png' %(a, b)
+                            if summed:
+                                plot_name = 'irf_%s_%s_summed_%d.png' %(a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'irf_%s_%s_summed.png' %(a, b)
+                            else:
+                                plot_name = 'irf_%s_%s_%d.png' %(a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'irf_%s_%s.png' %(a, b)
                             names = self.plots[a][b]['names']
                             if irf_ids is not None and len(irf_ids) > 0:
                                 new_names = []
@@ -4384,34 +4497,58 @@ class DTSR(object):
                                 names = new_names
                             if len(names) > 0:
                                 if mc:
-                                    plot_y = []
-                                    lq = []
-                                    uq = []
+                                    if summed:
+                                        samples = []
+                                    else:
+                                        plot_y = []
+                                        lq = []
+                                        uq = []
                                     for name in names:
-                                        mean_cur, lq_cur, uq_cur = self.ci_curve(
+                                        mean_cur, lq_cur, uq_cur, samples_cur = self.ci_curve(
                                             self.irf_mc[name][a][b],
                                             level=level,
                                             n_samples=n_samples,
                                             n_time_units=plot_n_time_units,
                                             n_time_points=plot_n_time_points,
                                         )
-                                        plot_y.append(mean_cur)
-                                        lq.append(lq_cur)
-                                        uq.append(uq_cur)
-                                    lq = np.stack(lq, axis=1)
-                                    uq = np.stack(uq, axis=1)
-                                    plot_y = np.stack(plot_y, axis=1)
+
+                                        if summed:
+                                            samples.append(samples_cur)
+                                        else:
+                                            plot_y.append(mean_cur)
+                                            lq.append(lq_cur)
+                                            uq.append(uq_cur)
+
+                                    if summed:
+                                        samples = np.stack(samples, axis=2)
+                                        samples = samples.sum(axis=2, keepdims=True)
+                                        lq = np.percentile(samples, alpha / 2, axis=1)
+                                        uq = np.percentile(samples, 100 - (alpha / 2), axis=1)
+                                        plot_y = samples.mean(axis=1)
+                                    else:
+                                        lq = np.stack(lq, axis=1)
+                                        uq = np.stack(uq, axis=1)
+                                        plot_y = np.stack(plot_y, axis=1)
+
                                     plot_name = 'mc_' + plot_name
+
                                 else:
                                     plot_y = [self.sess.run(self.plots[a][b]['plot'][i], feed_dict=fd) for i in range(len(self.plots[a][b]['plot'])) if self.plots[a][b]['names'][i] in names]
                                     lq = None
                                     uq = None
                                     plot_y = np.concatenate(plot_y, axis=1)
+                                    if summed:
+                                        plot_y = plot_y.sum(axis=1, keepdims=True)
+
+                                if summed:
+                                    names_cur = ['Sum']
+                                else:
+                                    names_cur = names
 
                                 plot_irf(
                                     plot_x,
                                     plot_y,
-                                    names,
+                                    names_cur,
                                     lq=lq,
                                     uq=uq,
                                     dir=self.outdir,
@@ -4432,7 +4569,10 @@ class DTSR(object):
                         if self.t.has_composed_irf() or a == 'atomic':
                             for b in switches[1]:
                                 if b == 'scaled':
-                                    plot_name = 'src_irf_%s_%s_%d.png' % (a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'src_irf_%s_%s.png' % (a, b)
+                                    if summed:
+                                        plot_name = 'src_irf_%s_%s_summed_%d.png' % (a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'src_irf_%s_%s_summed.png' % (a, b)
+                                    else:
+                                        plot_name = 'src_irf_%s_%s_%d.png' % (a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'src_irf_%s_%s.png' % (a, b)
                                     names = self.src_plot_tensors[a][b]['names']
                                     if irf_ids is not None and len(irf_ids) > 0:
                                         new_names = []
@@ -4444,34 +4584,58 @@ class DTSR(object):
                                         names = new_names
                                     if len(names) > 0:
                                         if mc:
-                                            plot_y = []
-                                            lq = []
-                                            uq = []
+                                            if summed:
+                                                samples = []
+                                            else:
+                                                plot_y = []
+                                                lq = []
+                                                uq = []
                                             for name in names:
-                                                mean_cur, lq_cur, uq_cur = self.ci_curve(
+                                                mean_cur, lq_cur, uq_cur, samples_cur = self.ci_curve(
                                                     self.src_irf_mc[name][a][b],
                                                     level=level,
                                                     n_samples=n_samples,
                                                     n_time_units=plot_n_time_units,
                                                     n_time_points=plot_n_time_points,
                                                 )
-                                                plot_y.append(mean_cur)
-                                                lq.append(lq_cur)
-                                                uq.append(uq_cur)
-                                            lq = np.stack(lq, axis=1)
-                                            uq = np.stack(uq, axis=1)
-                                            plot_y = np.stack(plot_y, axis=1)
+
+                                                if summed:
+                                                    samples.append(samples_cur)
+                                                else:
+                                                    plot_y.append(mean_cur)
+                                                    lq.append(lq_cur)
+                                                    uq.append(uq_cur)
+
+                                            if summed:
+                                                samples = np.stack(samples, axis=2)
+                                                samples = samples.sum(axis=2, keepdims=True)
+                                                lq = np.percentile(samples, alpha / 2, axis=1)
+                                                uq = np.percentile(samples, 100 - (alpha / 2), axis=1)
+                                                plot_y = samples.mean(axis=1)
+                                            else:
+                                                lq = np.stack(lq, axis=1)
+                                                uq = np.stack(uq, axis=1)
+                                                plot_y = np.stack(plot_y, axis=1)
+
                                             plot_name = 'mc_' + plot_name
+
                                         else:
                                             plot_y = [self.sess.run(self.src_plot_tensors[a][b]['plot'][i], feed_dict=fd) for i in range(len(self.src_plot_tensors[a][b]['plot'])) if self.src_plot_tensors[a][b]['names'][i] in names]
                                             lq = None
                                             uq = None
                                             plot_y = np.concatenate(plot_y, axis=1)
+                                            if summed:
+                                                plot_y = plot_y.sum(axis=1, keepdims=True)
+
+                                        if summed:
+                                            names_cur = ['Sum']
+                                        else:
+                                            names_cur = names
 
                                         plot_irf(
                                             plot_x,
                                             plot_y,
-                                            names,
+                                            names_cur,
                                             lq=lq,
                                             uq=uq,
                                             dir=self.outdir,
