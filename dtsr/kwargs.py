@@ -356,7 +356,13 @@ DTSR_INITIALIZATION_KWARGS = [
         'convergence_n_iterates',
         100,
         [int, None],
-        "Number of timesteps over which to average parameter movements for convergence diagnostics. If ``None`` or ``0``, convergence diagnostics will not be used (speeds training and reduces memory overhead, but convergence must then be visually diagnosed)."
+        "Number of timesteps over which to average parameter movements for convergence diagnostics. If ``None`` or ``0``, convergence will not be programmatically checked (reduces memory overhead, but convergence must then be visually diagnosed)."
+    ),
+    Kwarg(
+        'convergence_tolerance',
+        1e-4,
+        [float, None],
+        "Tolerance around 0 for convergence of estimates of first and second order derivatives of parameters with respect to training time. If ``None``, convergence will not be programmatically checked (reduces memory overhead, but convergence must then be visually diagnosed)."
     ),
     Kwarg(
         'minibatch_size',
@@ -395,16 +401,22 @@ DTSR_INITIALIZATION_KWARGS = [
         "Frequency (in iterations) with which to save model checkpoints."
     ),
     Kwarg(
-        'log_random',
-        True,
-        bool,
-        "Log random effects to Tensorboard."
+        'convergence_check_freq',
+        1,
+        int,
+        "Frequency (in iterations) with which to check convergence. Parameter slopes are computed over ``convergence_n_iter * convergence_check_freq`` iterations. Thus larger values increase the receptive field of the slope estimates, making convergence diagnosis less vulnerable to local perturbations but also increasing the number of post-convergence iterations necessary in order to identify convergence."
     ),
     Kwarg(
         'log_freq',
         1,
         int,
         "Frequency (in iterations) with which to log model params to Tensorboard."
+    ),
+    Kwarg(
+        'log_random',
+        True,
+        bool,
+        "Log random effects to Tensorboard."
     ),
     Kwarg(
         'log_graph',

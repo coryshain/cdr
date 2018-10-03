@@ -333,14 +333,6 @@ if __name__ == '__main__':
                         terminal_names = dtsr_model.src_terminal_names
                     else:
                         terminal_names = dtsr_model.terminal_names
-                    posterior_summaries = np.zeros((len(terminal_names), 3))
-                    for i in range(len(terminal_names)):
-                        terminal = terminal_names[i]
-                        row = np.array(dtsr_model.irf_integral(terminal, n_time_units=10))
-                        posterior_summaries[i] += row
-                    posterior_summaries = pd.DataFrame(posterior_summaries, index=terminal_names,
-                                                       columns=['Mean', '2.5%', '97.5%'])
-
 
                 summary += dtsr_model.report_evaluation(
                     mse=dtsr_mse,

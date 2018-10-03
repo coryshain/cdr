@@ -329,19 +329,18 @@ class DTSR(object):
                 self.intercept_init_tf = tf.constant(self.intercept_init, dtype=self.FLOAT_TF)
                 self.epsilon = tf.constant(2 * np.finfo(self.FLOAT_NP).eps, dtype=self.FLOAT_TF)
 
-                self.d0_names = []
-
                 self.d0 = []
+                self.d0_names = []
                 self.d0_saved = []
-                self.d1 = []
+                self.d0_saved_update = []
+                self.d0_assign = []
                 self.d1_saved = []
-                self.d2 = []
-
-                self.max_delta_all = []
-                self.double_delta_at_max_delta_all = []
-
-                self.update_iterates = []
-                self.assign_d0_init = []
+                self.d1_saved_update = []
+                self.d1_assign = []
+                self.last_convergence_check = tf.Variable(0, trainable=False, dtype=self.INT_NP)
+                self.last_convergence_check_update = tf.placeholder(self.INT_NP, shape=[])
+                self.last_convergence_check_assign = tf.assign(self.last_convergence_check, self.last_convergence_check_update)
+                self.check_convergence = self.convergence_n_iterates and (self.convergence_tolerance is not None)
 
         self.parameter_table_columns = ['Estimate']
         self.predict_mode = False
@@ -527,6 +526,10 @@ class DTSR(object):
                 self.training_loglik_in = tf.placeholder(self.FLOAT_TF, shape=[], name='training_loglik_in')
                 self.training_loglik = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_loglik')
                 self.set_training_loglik = tf.assign(self.training_loglik, self.training_loglik_in)
+
+                self.converged_in = tf.placeholder(tf.bool, shape=[], name='converged_in')
+                self.converged = tf.Variable(False, trainable=False, dtype=tf.bool)
+                self.set_converged = tf.assign(self.converged, self.converged_in)
 
     def _initialize_base_params(self):
         with self.sess.as_default():
@@ -2181,18 +2184,21 @@ class DTSR(object):
     def _initialize_convergence_checking(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                max_deltas = tf.stack(self.max_delta_all, axis=0)
-                double_deltas_at_max_deltas = tf.stack(self.double_delta_at_max_delta_all, axis=0)
-                self.max_delta_ix = tf.argmax(max_deltas)
-                self.max_delta = max_deltas[self.max_delta_ix]
-                self.double_delta_at_max_delta = double_deltas_at_max_deltas[self.max_delta_ix]
+                self.max_delta_summary = tf.placeholder(self.FLOAT_TF, name='max_delta')
+                self.double_delta_at_max_delta_summary = tf.placeholder(self.FLOAT_TF, name='double_delta_at_max_delta')
 
-                tf.summary.scalar('max_delta', self.max_delta, collections=['convergence'])
-                tf.summary.scalar('double_delta_at_max_delta', self.double_delta_at_max_delta, collections=['convergence'])
+                tf.summary.scalar('max_delta', self.max_delta_summary, collections=['convergence'])
+                tf.summary.scalar('double_delta_at_max_delta', self.double_delta_at_max_delta_summary, collections=['convergence'])
                 self.summary_convergence = tf.summary.merge_all(key='convergence')
 
                 if self.global_step.eval(session=self.sess) == 0:
-                    self.sess.run(self.assign_d0_init)
+                    d0 = self.sess.run(self.d0)
+                    fd_init = {}
+                    for i in range(len(d0)):
+                        init_cur = np.tile(d0[i], [self.convergence_n_iterates, 1])
+                        fd_init[self.d0_saved_update[i]] = init_cur
+
+                    self.sess.run(self.d0_assign, feed_dict=fd_init)
 
 
 
@@ -2405,91 +2411,121 @@ class DTSR(object):
 
                     self.d0_names.append(name)
 
-                    # Initialize a list of parameter iterates
-                    var_d0_iterates = [var]
+                    # Initialize tracker of parameter iterates
+                    var_d0_iterates = tf.Variable(
+                        tf.zeros([self.convergence_n_iterates] + list(var.shape), dtype=self.FLOAT_TF),
+                        name=name + '_d0',
+                        trainable=False
+                    )
 
-                    # Add placeholders for iterates from front to back
-                    for i in range(self.convergence_n_iterates - 1):
-                        var_d0_iterate = tf.Variable(
-                            tf.zeros_like(var),
-                            name=name + '_d0_tm%d' %(i+1),
-                            trainable=False
-                        )
-                        var_d0_iterates.insert(0, var_d0_iterate)
+                    var_d0_iterates_update = tf.placeholder(self.FLOAT_TF, shape=var_d0_iterates.shape)
                     self.d0_saved.append(var_d0_iterates)
+                    self.d0_saved_update.append(var_d0_iterates_update)
+                    self.d0_assign.append(tf.assign(var_d0_iterates, var_d0_iterates_update))
 
-                    # Compute regression coefficient (slope) over time for each element of var.
-                    # This uses the first normal equation for univariate linear regression:
-                    #
-                    #     beta = sum[(x_i - mu_x)(y_i - mu_y)] / sum[(x_i - mu_x)^2]
-                    #
-                    y = tf.stack(var_d0_iterates, axis=0)
-                    x = tf.range(0, self.convergence_n_iterates, dtype=self.FLOAT_TF)[..., None]
-                    mu_x = tf.reduce_mean(x, axis=0, keepdims=True)
-                    mu_y = tf.reduce_mean(y, axis=0, keepdims=True)
-                    num = tf.reduce_sum((x-mu_x) * (y-mu_y),axis=0)
-                    denom = tf.reduce_sum((x - mu_x) ** 2)
-
-                    # Take the absolute value of the slope(s) as the estimate for the magnitude
-                    # of the derivative of the parameter(s) with respect to time.
-                    var_d1 = tf.abs(num / denom)
-                    self.d1.append(var_d1)
-
-                    # Create assigners that copy iterates back one step,
-                    # with control flow dependencies from back to front
-                    # to ensure that copies are executed before the source is overwritten
-                    deps = None
-                    assign_var_d0 = None
-                    assign_d0_init = []
-                    for i in range(self.convergence_n_iterates - 1):
-                        with tf.control_dependencies(deps):
-                            assign_var_d0 = tf.assign(var_d0_iterates[i], var_d0_iterates[i + 1])
-                        assign_d0_init.append(tf.assign(var_d0_iterates[i], var))
-                        deps = [assign_var_d0]
-                    self.assign_d0_init += assign_d0_init
-
-                    # Find the largest-magnitude derivative and its index
-                    max_delta_ix = tf.argmax(var_d1)
-                    max_delta = var_d1[max_delta_ix]
-                    self.max_delta_all.append(max_delta)
-
-                    # Initialize a list of derivative iterates
-                    var_d1_iterates = [var_d1]
-                    
-                    # Add placeholders for derivative iterates from front to back
-                    for i in range(self.convergence_n_iterates - 1):
-                        var_d1_iterate = tf.Variable(
-                            tf.zeros_like(var_d1),
-                            name=name + '_d1_tm%d' % (i + 1),
-                            trainable=False
-                        )
-                        var_d1_iterates.insert(0, var_d1_iterate)
+                    # Initialize tracker of derivative of parameter iterates with respect to training time
+                    var_d1_iterates = tf.Variable(
+                        tf.zeros([self.convergence_n_iterates] + list(var.shape), dtype=self.FLOAT_TF),
+                        name=name + '_d1',
+                        trainable=False
+                    )
+                    var_d1_iterates_update = tf.placeholder(self.FLOAT_TF, shape=var_d1_iterates.shape)
                     self.d1_saved.append(var_d1_iterates)
+                    self.d1_saved_update.append(var_d1_iterates_update)
+                    self.d1_assign.append(tf.assign(var_d1_iterates, var_d1_iterates_update))
 
-                    # Compute regression coefficient (slope) over time for the derivative of each element of var.
-                    y = tf.stack(var_d1_iterates, axis=0)
-                    mu_y = tf.reduce_mean(y, axis=0, keepdims=True)
-                    num = tf.reduce_sum((x - mu_x) * (y - mu_y), axis=0)
+    def _compute_delta(self, iterates):
+        # Compute regression coefficient (slope) over time for each element of var.
+        # This uses the first normal equation for univariate linear regression:
+        #
+        #     beta = sum[(x_i - mu_x)(y_i - mu_y)] / sum[(x_i - mu_x)^2]
+        #
+        y = iterates
+        x = np.arange(0, len(iterates), self.convergence_check_freq).astype('float')[..., None]
+        mu_x = x.mean(axis=0, keepdims=True)
+        mu_y = y.mean(axis=0, keepdims=True)
+        num = ((x - mu_x) * (y - mu_y)).sum(axis=0)
+        denom = ((x - mu_x) ** 2).sum()
 
-                    # Take the absolute value of the slope(s) as the estimate for the magnitude
-                    # of the second derivative of the parameter(s) with respect to time.
-                    var_d2 = tf.abs(num / denom)
-                    self.d2.append(var_d2)
+        delta = num / denom
 
-                    # Create assigners that copy iterates back one step,
-                    # with control flow dependencies from back to front
-                    # to ensure that copies are executed before the source is overwritten
-                    deps = [assign_var_d0]
-                    assign_var_d1 = None
-                    for i in range(self.convergence_n_iterates - 1):
-                        with tf.control_dependencies(deps):
-                            assign_var_d1 = tf.assign(var_d1_iterates[i], var_d1_iterates[i + 1])
-                        deps = [assign_var_d0, assign_var_d1]
+        return delta
 
-                    self.update_iterates.append(assign_var_d1)
+    def run_convergence_check(self, verbose=True):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                max_delta_ix, max_delta, double_delta_at_max_delta = self._convergence_check_inner()
 
-                    double_delta_at_max_delta = var_d2[max_delta_ix]
-                    self.double_delta_at_max_delta_all.append(double_delta_at_max_delta)
+                if self.check_convergence:
+                    if verbose:
+                        sys.stderr.write('Max delta: %s.\n' % max_delta)
+                        sys.stderr.write('Double delta at max delta: %s.\n' % double_delta_at_max_delta)
+                        sys.stderr.write('Location: %s.\n\n' % self.d0_names[max_delta_ix])
+
+                    converged = self.global_step.eval(session=self.sess) > self.convergence_n_iterates and \
+                              (max_delta < self.convergence_tolerance) and \
+                              (double_delta_at_max_delta < self.convergence_tolerance)
+                else:
+                    converged = False
+                    if verbose:
+                        sys.stderr.write('Automatic convergence checking off.\n')
+
+                self.sess.run(self.set_converged, feed_dict={self.converged_in: converged})
+
+    def _convergence_check_inner(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                max_delta = 0
+                max_delta_ix = 0
+                double_delta_at_max_delta = 0
+                fd_assign = {}
+
+                update = self.last_convergence_check.eval(session=self.sess) < self.global_step.eval(session=self.sess) and \
+                         self.convergence_check_freq > 0 and \
+                         self.global_step.eval(session=self.sess) % self.convergence_check_freq == 0
+
+                if self.check_convergence:
+                    var_d0, var_d0_iterates, var_d1_iterates = self.sess.run(
+                        [self.d0, self.d0_saved, self.d1_saved])
+
+                    for i in range(len(var_d0)):
+                        if update:
+                            new_d0 = var_d0[i]
+                            iterates_d0 = var_d0_iterates[i]
+                            iterates_d0[:-1] = iterates_d0[1:]
+                            iterates_d0[-1] = new_d0
+                            fd_assign[self.d0_saved_update[i]] = iterates_d0
+
+                            new_d1 = np.fabs(self._compute_delta(iterates_d0))
+                            iterates_d1 = var_d1_iterates[i]
+                            iterates_d1[:-1] = iterates_d1[1:]
+                            iterates_d1[-1] = new_d1
+                            fd_assign[self.d1_saved_update[i]] = iterates_d1
+
+                        else:
+                            new_d1 = np.fabs(self._compute_delta(var_d0_iterates[i]))
+                            iterates_d1 = var_d1_iterates[i]
+
+                        new_d1_max_ix = new_d1.argmax()
+                        new_d1_max = new_d1[new_d1_max_ix]
+                        if new_d1_max > max_delta:
+                            max_delta = new_d1_max
+                            max_delta_ix = i
+                            double_delta_at_max_delta = np.fabs(self._compute_delta(iterates_d1))[new_d1_max_ix]
+
+                    if update:
+                        fd_assign[self.last_convergence_check_update] = self.global_step.eval(session=self.sess)
+                        self.sess.run([self.d0_assign, self.d1_assign, self.last_convergence_check_assign],
+                                      feed_dict=fd_assign)
+
+                        summary_convergence = self.sess.run(
+                            self.summary_convergence,
+                            feed_dict={self.max_delta_summary: max_delta,
+                                       self.double_delta_at_max_delta_summary: double_delta_at_max_delta}
+                        )
+                        self.writer.add_summary(summary_convergence, self.global_step.eval(session=self.sess))
+
+                return max_delta_ix, max_delta, double_delta_at_max_delta
 
     def _collect_plots(self):
         switches = [['atomic', 'composite'], ['scaled', 'unscaled']]
@@ -3156,47 +3192,6 @@ class DTSR(object):
                     if predict:
                         sys.stderr.write('No EMA checkpoint available. Leaving internal variables unchanged.\n')
 
-    def check_convergence(self, verbose=True):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                max_delta_ix, max_delta, double_delta_at_max_delta = self.sess.run([self.max_delta_ix, self.max_delta, self.double_delta_at_max_delta])
-
-                # from matplotlib import pyplot as plt
-                # for i in range(len(self.d0)):
-                #     print('Variable: %s' %self.d0_names[i])
-                #     to_run = [self.d0[i], self.d0_saved[i], self.d1[i], self.d1_saved[i], self.d2[i]]
-                #     to_run_names = ['d0', 'd0_saved', 'd1', 'd1_saved', 'd2']
-                #     out = self.sess.run(to_run)
-                #
-                #
-                #     for j in range(len(to_run)):
-                #         print(to_run_names[j])
-                #         print(out[j])
-                #         plt.pause(0.001)
-                #         input()
-                #
-                #     y = out[1]
-                #     if len(y[0]) == 1:
-                #         x = np.arange(self.convergence_n_iterates)
-                #         plt.scatter(x, y)
-                #         plt.plot(x, out[2] * x)
-                #         plt.savefig('lr_vis.png')
-                #         plt.close('all')
-
-                if verbose:
-                    sys.stderr.write('Max delta: %s.\n' %max_delta)
-                    sys.stderr.write('Double delta at max delta: %s.\n' %double_delta_at_max_delta)
-                    sys.stderr.write('Location: %s.\n\n' %self.d0_names[max_delta_ix])
-
-                summary_convergence = self.sess.run(
-                    self.summary_convergence,
-                )
-                self.writer.add_summary(summary_convergence, self.global_step.eval(session=self.sess))
-
-                self.sess.run(self.update_iterates)
-
-                return False
-
     def finalize(self):
         """
         Close the DTSR instance to prevent memory leaks.
@@ -3274,6 +3269,11 @@ class DTSR(object):
                     self.load(predict=mode)
 
             self.predict_mode = mode
+
+    def has_converged(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                return self.sess.run(self.converged)
 
     def set_training_complete(self, status):
         """
@@ -3636,6 +3636,49 @@ class DTSR(object):
 
         return out
 
+    def convergence_summary(self, indent=0):
+        """
+        Generate a string representation of model's convergence status.
+
+        :param indent: ``int``; indentation level
+        :return: ``str``; the convergence report
+        """
+
+        out = ' ' * indent + '-------------------\n'
+        out += ' ' * indent + 'CONVERGENCE SUMMARY\n'
+        out += ' ' * indent + '-------------------\n\n'
+
+        converged = self.has_converged()
+        n_iter = self.global_step.eval(session=self.sess)
+
+        out += ' ' * (indent * 2) + 'Converged: %s\n\n' % converged
+
+        if converged:
+            out += ' ' * (indent + 2) + 'NOTE:\n'
+            out += ' ' * (indent + 4) + 'Programmatic diagnosis of convergence in DTSR is error-prone because of stochastic optimization.\n'
+            out += ' ' * (indent + 4) + 'It is possible that the convergence diagnostics used are too permissive given the stochastic dynamics of the model.\n'
+            out += ' ' * (indent + 4) + 'Consider visually checking the learning curves in Tensorboard to see whether the parameter estimates have flatlined:\n'
+            out += ' ' * (indent + 6) + 'python -m tensorboard.main --logdir=<path_to_model_directory>\n'
+            out += ' ' * (indent + 4) + 'If not, consider lowering the **convergence_tolerance** parameter and resuming training.\n'
+
+        else:
+            max_delta_ix, max_delta, double_delta_at_max_delta = self._convergence_check_inner()
+            location = self.d0_names[max_delta_ix]
+
+            out += ' ' * (indent + 2) + 'Model did not reach convergence criteria in %s epochs.\n' % n_iter
+            out += ' ' * (indent + 2) + 'Largest first derivative with respect to training time must be <= %s, with second derivative at that parameter <= %s.\n\n' % (self.convergence_tolerance, self.convergence_tolerance)
+            out += ' ' * (indent + 4) + 'Max first derivative: %s\n' % max_delta
+            out += ' ' * (indent + 4) + 'Second derivative at max first derivative: %s\n' % double_delta_at_max_delta
+            out += ' ' * (indent + 4) + 'Location: %s\n\n' % location
+            out += ' ' * (indent + 2) + 'NOTE:\n'
+            out += ' ' * (indent + 4) + 'Programmatic diagnosis of convergence in DTSR is error-prone because of stochastic optimization.\n'
+            out += ' ' * (indent + 4) + 'It is possible that the convergence diagnostics used are too conservative given the stochastic dynamics of the model.\n'
+            out += ' ' * (indent + 4) + 'Consider visually checking the learning curves in Tensorboard to see whether the parameter estimates have flatlined:\n'
+            out += ' ' * (indent + 6) + 'python -m tensorboard.main --logdir=<path_to_model_directory>\n'
+            out += ' ' * (indent + 4) + 'If so, consider the model converged.\n'
+
+        return out
+
     def parameter_summary(self, random=False, level=95, n_samples=None, integral_n_time_units=None, indent=0):
         """
         Generate a string representation of the model's effect sizes and parameter values.
@@ -3686,9 +3729,11 @@ class DTSR(object):
         out += ' ' * indent + '#                          #\n'
         out += ' ' * indent + '############################\n\n\n'
 
-        out += self.initialization_summary(indent =indent + 2)
+        out += self.initialization_summary(indent=indent + 2)
         out += '\n'
-        out += self.training_evaluation_summary(indent =indent + 2)
+        out += self.training_evaluation_summary(indent=indent + 2)
+        out += '\n'
+        out += self.convergence_summary(indent=indent + 2)
         out += '\n'
         out += self.parameter_summary(
             random=random,
@@ -3812,7 +3857,7 @@ class DTSR(object):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if self.global_step.eval(session=self.sess) < n_iter:
+                if (self.global_step.eval(session=self.sess) < n_iter) and not self.has_converged():
                     self.set_training_complete(False)
 
                 if self.training_complete.eval(session=self.sess):
@@ -3827,7 +3872,8 @@ class DTSR(object):
                     else:
                         sys.stderr.write('Resuming training from most recent checkpoint...\n\n')
 
-                    while self.global_step.eval(session=self.sess) < n_iter:
+                    while not self.has_converged() and self.global_step.eval(session=self.sess) < n_iter:
+
                         p, p_inv = get_random_permutation(len(y))
                         t0_iter = pytime.time()
                         sys.stderr.write('-' * 50 + '\n')
@@ -3864,7 +3910,8 @@ class DTSR(object):
 
                         self.verify_random_centering()
 
-                        self.check_convergence()
+                        if self.convergence_check_freq > 0 and self.global_step.eval(session=self.sess) % self.convergence_check_freq == 0:
+                            self.run_convergence_check(verbose=True)
 
                         if self.log_freq > 0 and self.global_step.eval(session=self.sess) % self.log_freq == 0:
                             loss_total /= n_minibatch
@@ -3913,9 +3960,6 @@ class DTSR(object):
                         sys.stderr.write('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
 
                     self.save()
-
-
-
 
                     # End of training plotting and evaluation.
                     # For DTSRMLE, this is a crucial step in the model definition because it provides the
@@ -4007,6 +4051,8 @@ class DTSR(object):
                         }
                     )
 
+                    self.save()
+
                     with open(self.outdir + '/eval_train.txt', 'w') as e_file:
                         eval_train = '------------------------\n'
                         eval_train += 'DTSR TRAINING EVALUATION\n'
@@ -4025,6 +4071,7 @@ class DTSR(object):
                     self.save_parameter_table()
 
                     self.set_training_complete(True)
+
                     self.save()
 
     def predict(
