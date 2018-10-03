@@ -12,7 +12,7 @@ To do so, run the following from the command line::
 
     python -m tensorboard.main --logdir=<path_to_model_directory>
 
-The open the displayed URL in your web browser to visual learning curves over the whole parameter space.
+Then open the displayed URL in your web browser to visualize the learning curves over the whole parameter space.
 Fixed effects estimates are displayed under the "Scalars" tab, and random effects estimates are displayed under the "Distributions" tab.
 If the model threw a convergence warning but all estimates visually appear to have flatlined, the diagnostics may have been too conservative and you can consider the model converged.
 Conversely, if the model did not throw a convergence warning but one or more estimates still appear to be moving in a particular direction, the diagnostics may have been too permissive and you should not consider the model converged.
@@ -33,7 +33,7 @@ To estimate the first derivative, the system incrementally saves iterates of the
 To estimate the second derivative, the system incrementally saves its first derivative estimates as computed above, then finds the slope of the regression line to the first derivatives as a function of training epoch.
 The number of iterates retained and the frequency with which they are recorded are governed by the **convergence_n_iterates** and **convergence_check_freq** parameters, respectively.
 The receptive field of the derivative estimates is ``convergence_n_iterates * convergence_check_freq`` training epochs.
-Increasing this receptive field effectively increases smoothing on the derivative estimates, with attendant advantages and drawbacks.
+Increasing this receptive field increases smoothing on the derivative estimates, which has advantages and drawbacks.
 The larger the receptive field, the less sensitive the derivative estimates are to local fluctuations, but the more post-convergence iterations necessary to detect convergence, increasing training time.
 Training stops automatically when the derivatives estimated above both fall below **convergence_tolerance** (or when **n_iter** is reached, whichever happens first).
 
