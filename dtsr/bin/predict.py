@@ -334,6 +334,8 @@ if __name__ == '__main__':
                     else:
                         terminal_names = dtsr_model.terminal_names
 
+                summary += 'Training iterations completed: %d\n\n' % dtsr_model.global_step.eval(session=dtsr_model.sess)
+
                 summary += dtsr_model.report_evaluation(
                     mse=dtsr_mse,
                     mae=dtsr_mae,

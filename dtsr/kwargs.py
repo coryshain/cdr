@@ -258,7 +258,7 @@ DTSR_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'learning_rate_min',
-        1e-4,
+        0.,
         float,
         "Minimum value for the learning rate."
     ),
@@ -279,6 +279,12 @@ DTSR_INITIALIZATION_KWARGS = [
         25,
         int,
         "Span of iterations over which to decay the learning rate by ``lr_decay_rate`` (ignored if ``lr_decay_family==None``)."
+    ),
+    Kwarg(
+        'lr_decay_iteration_power',
+        1,
+        float,
+        "Power to which the iteration number ``t`` should be raised when computing the learning rate decay."
     ),
     Kwarg(
         'lr_decay_staircase',

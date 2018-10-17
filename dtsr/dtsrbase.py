@@ -2118,17 +2118,22 @@ class DTSR(object):
                     lr_decay_steps = tf.constant(self.lr_decay_steps, dtype=self.INT_TF)
                     lr_decay_rate = tf.constant(self.lr_decay_rate, dtype=self.FLOAT_TF)
                     lr_decay_staircase = self.lr_decay_staircase
+                    if self.lr_decay_iteration_power != 1:
+                        t = tf.cast(self.global_step, dtype=self.FLOAT_TF) ** self.lr_decay_iteration_power
+                    else:
+                        t = self.global_step
+
                     if 'cosine' in self.lr_decay_family:
                         self.lr = getattr(tf.train, self.lr_decay_family)(
                             lr,
-                            self.global_step,
+                            t,
                             lr_decay_steps,
                             name='learning_rate'
                         )
                     else:
                         self.lr = getattr(tf.train, self.lr_decay_family)(
                             lr,
-                            self.global_step,
+                            t,
                             lr_decay_steps,
                             lr_decay_rate,
                             staircase=lr_decay_staircase,
@@ -2496,18 +2501,18 @@ class DTSR(object):
                             iterates_d0[-1] = new_d0
                             fd_assign[self.d0_saved_update[i]] = iterates_d0
 
-                            new_d1 = np.fabs(self._compute_delta(iterates_d0))
+                            new_d1 = self._compute_delta(iterates_d0)
                             iterates_d1 = var_d1_iterates[i]
                             iterates_d1[:-1] = iterates_d1[1:]
                             iterates_d1[-1] = new_d1
                             fd_assign[self.d1_saved_update[i]] = iterates_d1
 
                         else:
-                            new_d1 = np.fabs(self._compute_delta(var_d0_iterates[i]))
+                            new_d1 = self._compute_delta(var_d0_iterates[i])
                             iterates_d1 = var_d1_iterates[i]
 
-                        new_d1_max_ix = new_d1.argmax()
-                        new_d1_max = new_d1[new_d1_max_ix]
+                        new_d1_max_ix = np.fabs(new_d1).argmax()
+                        new_d1_max = np.fabs(new_d1[new_d1_max_ix])
                         if new_d1_max > max_delta:
                             max_delta = new_d1_max
                             max_delta_ix = i
