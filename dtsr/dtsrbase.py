@@ -327,7 +327,7 @@ class DTSR(object):
                 if self.intercept_init is None:
                     self.intercept_init = self.y_train_mean
                 self.intercept_init_tf = tf.constant(self.intercept_init, dtype=self.FLOAT_TF)
-                self.epsilon = tf.constant(2 * np.finfo(self.FLOAT_NP).eps, dtype=self.FLOAT_TF)
+                self.epsilon = tf.constant(4 * np.finfo(self.FLOAT_NP).eps, dtype=self.FLOAT_TF)
 
                 self.d0 = []
                 self.d0_names = []
