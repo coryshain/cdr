@@ -12,10 +12,10 @@ if __name__ == '__main__':
         Compute root mean squared deviation of fitted IRFs from gold synthetic IRFs.
     ''')
     argparser.add_argument('paths', nargs='+', help='Path(s) to config file(s) defining experiments')
-    argparser.add_argument('-m', '--models', nargs='*', default = [], help='Model names to plot. Regex permitted. If unspecified, plots all DTSR models.')
-    argparser.add_argument('-S', '--summed', action='store_true', help='Plot summed rather than individual IRFs.')
-    argparser.add_argument('-u', '--ntimeunits', type=float, default=None, help='Number of time units on x-axis')
-    argparser.add_argument('-r', '--resolution', type=float, default=1000, help='Number of points on x-axis')
+    argparser.add_argument('-m', '--models', nargs='*', default = [], help='Model names for which to compute RMSD. Regex permitted. If unspecified, uses all DTSR models.')
+    argparser.add_argument('-S', '--summed', action='store_true', help='Use summed rather than individual IRFs.')
+    argparser.add_argument('-u', '--ntimeunits', type=float, default=None, help='Number of time units over which to compute RMSD.')
+    argparser.add_argument('-r', '--resolution', type=float, default=1000, help='Number of points to use for computing RMSD.')
     args, unknown = argparser.parse_known_args()
 
     for path in args.paths:
