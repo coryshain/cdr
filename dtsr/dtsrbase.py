@@ -337,7 +337,7 @@ class DTSR(object):
                 self.d1_saved = []
                 self.d1_saved_update = []
                 self.d1_assign = []
-                self.last_convergence_check = tf.Variable(0, trainable=False, dtype=self.INT_NP)
+                self.last_convergence_check = tf.Variable(0, trainable=False, dtype=self.INT_NP, name='last_convergence_check')
                 self.last_convergence_check_update = tf.placeholder(self.INT_NP, shape=[])
                 self.last_convergence_check_assign = tf.assign(self.last_convergence_check, self.last_convergence_check_update)
                 self.check_convergence = self.convergence_n_iterates and (self.convergence_tolerance is not None)
@@ -528,7 +528,7 @@ class DTSR(object):
                 self.set_training_loglik = tf.assign(self.training_loglik, self.training_loglik_in)
 
                 self.converged_in = tf.placeholder(tf.bool, shape=[], name='converged_in')
-                self.converged = tf.Variable(False, trainable=False, dtype=tf.bool)
+                self.converged = tf.Variable(False, trainable=False, dtype=tf.bool, name='converged')
                 self.set_converged = tf.assign(self.converged, self.converged_in)
 
     def _initialize_base_params(self):
@@ -4704,6 +4704,78 @@ class DTSR(object):
                                         )
 
                 self.set_predict_mode(False)
+
+    def irf_rmsd(
+            self,
+            gold_irf_lambda,
+            summed=False,
+            n_time_units=None,
+            n_time_points=1000,
+            n_samples=None
+    ):
+        """
+        Compute root mean squared deviation (RMSD) of fitted IRFs from gold.
+
+        :param gold_irf_lambdas: callable; vectorized numpy callable representing continuous IRFs. Generates response values for an array of inputs. Input has shape ``[n_time_points, 1]`` and output has shape ``[n_time_points, len(self.terminals)]``.
+        :param summed: ``bool``; whether to compare individual IRFs or their sum.
+        :param n_time_units: ``float``; number if time units to use. If ``None``, maximum temporal offset seen in training will be used.
+        :param n_time_points: ``float``; number of points to use.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :return: ``float``; RMSD of fitted IRFs from gold
+        """
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if not n_time_units:
+                    n_time_units = self.max_tdelta
+
+                support = np.linspace(0., n_time_units, n_time_points+1)[..., None]
+                gold = gold_irf_lambda(support)
+                if summed:
+                    gold = gold.sum(axis=1)
+
+                plots = self.plots['atomic']['scaled']
+
+                names = plots['names']
+
+                fd = {
+                    self.support_start: 0.,
+                    self.n_time_units: n_time_units,
+                    self.n_time_points: n_time_points,
+                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1,
+                    self.max_tdelta_batch: n_time_units
+                }
+
+                if type(self).__name__ == 'DTSRBayes':
+                    if n_samples is None:
+                        n_samples = self.n_samples_eval
+
+                    fd[self.time_y] = np.ones((1,)) * n_time_units
+                    fd[self.time_X] = np.zeros((1, self.history_length))
+
+                    preds = []
+
+                    for name in names:
+                        posterior = self.irf_mc[name]['atomic']['scaled']
+
+                        samples = [self.sess.run(posterior, feed_dict=fd) for _ in range(n_samples)]
+                        samples = np.concatenate(samples, axis=1)
+                        preds.append(samples)
+
+                    preds = np.stack(preds, axis=2)
+                    if summed:
+                        preds = preds.sum(axis=2)
+                    gold = np.expand_dims(gold, 1)
+
+                else:
+                    preds = [self.sess.run(plots['plot'][i], feed_dict=fd) for i in range(len(plots['plot'])) if plots['names'][i] in names]
+                    preds = np.concatenate(preds, axis=1)
+                    if summed:
+                        preds = preds.sum(axis=1)
+
+                rmsd = np.sqrt(((gold - preds) ** 2).mean())
+
+                return rmsd
 
     def plot_eigenvectors(self):
         """
