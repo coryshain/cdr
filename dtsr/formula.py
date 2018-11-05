@@ -594,7 +594,7 @@ class Formula(object):
                 new_2d_predictor_name = 'eucldist2D'
 
             for i in range(0, len(first_obs), minibatch_size):
-                sys.stderr.write('\rProcessing batch %d/%d' %(i/minibatch_size + 1, math.ceil(len(first_obs)/minibatch_size)))
+                sys.stderr.write('\rProcessing batch %d/%d' %(i/minibatch_size + 1, math.ceil(float(len(first_obs))/minibatch_size)))
                 sys.stderr.flush()
                 X_embeddings, _, _ = expand_history(
                     np.array(X[embedding_colnames]),
