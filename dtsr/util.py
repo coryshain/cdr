@@ -174,7 +174,42 @@ def filter_models(names, filters, dtsr_only=False):
         out = names
     return out
 
+def get_partition_list(partition):
+    if not isinstance(partition, list):
+        partition = partition.strip().split()
+    if len(partition) == 1:
+        partition = partition[0].split('-')
+    if len(partition) == 1:
+        partition = partition[0].split('+')
+    return partition
 
+def paths_from_partition_cliarg(partition, config):
+    partition = get_partition_list(partition)
+    X_paths = []
+    y_paths = []
+
+    X_map = {
+        'train': config.X_train,
+        'dev': config.X_dev,
+        'test': config.X_test
+    }
+
+    y_map = {
+        'train': config.y_train,
+        'dev': config.y_dev,
+        'test': config.y_test
+    }
+
+    for p in partition:
+        X_path = X_map[p]
+        y_path = y_map[p]
+
+        if X_path not in X_paths:
+            X_paths.append(X_path)
+        if y_path not in y_paths:
+            y_paths.append(y_path)
+
+    return X_paths, y_paths
 
 
 def load_dtsr(dir_path):

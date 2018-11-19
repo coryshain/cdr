@@ -6,7 +6,7 @@ from dtsr.config import Config
 from dtsr.io import read_data
 from dtsr.formula import Formula
 from dtsr.data import preprocess_data, filter_invalid_responses
-from dtsr.util import load_dtsr, filter_models
+from dtsr.util import load_dtsr, filter_models, get_partition_list, paths_from_partition_cliarg
 
 pd.options.mode.chained_assignment = None
 
@@ -17,7 +17,7 @@ if __name__ == '__main__':
     ''')
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='Path to configuration (*.ini) file')
-    argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
+    argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use ("train", "dev", "test", or space- or hyphen-delimited subset of these)')
     argparser.add_argument('-n', '--nsamples', type=int, default=None, help='Number of posterior samples to average (only used for DTSRBayes)')
     argparser.add_argument('-u', '--unscaled', action='store_true', help='Do not multiply outputs by DTSR-fitted coefficients')
     argparser.add_argument('-a', '--algorithm', type=str, default='MAP', help='Algorithm ("sampling" or "MAP") to use for extracting predictions.')
@@ -41,14 +41,10 @@ if __name__ == '__main__':
                 dtsr_models_new.append(model_name)
         dtsr_models = dtsr_models_new
 
-    if args.partition == 'train':
-        X, y = read_data(p.X_train, p.y_train, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in dtsr_formula_list for v in x.rangf])))
-    elif args.partition == 'dev':
-        X, y = read_data(p.X_dev, p.y_dev, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in dtsr_formula_list for v in x.rangf])))
-    elif args.partition == 'test':
-        X, y = read_data(p.X_test, p.y_test, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in dtsr_formula_list for v in x.rangf])))
-    else:
-        raise ValueError('Unrecognized value for "partition" argument: %s' %args.partition)
+    partitions = get_partition_list(args.partition)
+    partition_str = '-'.join(partitions)
+    X_paths, y_paths = paths_from_partition_cliarg(partitions, p)
+    X, y = read_data(X_paths, y_paths, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in dtsr_formula_list for v in x.rangf])))
     X, y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors = preprocess_data(
         X,
         y,
@@ -83,10 +79,10 @@ if __name__ == '__main__':
             algorithm=args.algorithm
         )
 
-        X_conv.to_csv(p.outdir + '/' + m + '/X_conv_%s.csv' %args.partition, sep=' ', index=False, na_rep='nan')
+        X_conv.to_csv(p.outdir + '/' + m + '/X_conv_%s.csv' %partition_str, sep=' ', index=False, na_rep='nan')
 
         sys.stderr.write(X_conv_summary)
-        with open(p.outdir + '/' + m + '/X_conv_%s_summary.txt' %args.partition, 'w') as f:
+        with open(p.outdir + '/' + m + '/X_conv_%s_summary.txt' %partition_str, 'w') as f:
             f.write(X_conv_summary)
 
         dtsr_model.finalize()

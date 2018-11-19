@@ -4175,7 +4175,7 @@ class DTSR(object):
                     n_eval_minibatch = math.ceil(len(y_time) / self.eval_minibatch_size)
                     for i in range(0, len(y_time), self.eval_minibatch_size):
                         if verbose:
-                            sys.stderr.write('\rMinibatch %d/%d\n' %((i/self.eval_minibatch_size)+1, n_eval_minibatch))
+                            sys.stderr.write('\rMinibatch %d/%d' %((i/self.eval_minibatch_size)+1, n_eval_minibatch))
                             sys.stderr.flush()
                         fd_minibatch = {
                             self.X: X_2d[i:i + self.eval_minibatch_size],
@@ -4287,7 +4287,7 @@ class DTSR(object):
                     n_eval_minibatch = math.ceil(len(y) / self.eval_minibatch_size)
                     for i in range(0, len(time_y), self.eval_minibatch_size):
                         if verbose:
-                            sys.stderr.write('\rMinibatch %d/%d\n' %((i/self.eval_minibatch_size)+1, n_eval_minibatch))
+                            sys.stderr.write('\rMinibatch %d/%d' %((i/self.eval_minibatch_size)+1, n_eval_minibatch))
                             sys.stderr.flush()
                         fd_minibatch = {
                             self.X: X_2d[i:i + self.eval_minibatch_size],
@@ -4398,7 +4398,7 @@ class DTSR(object):
                 n_eval_minibatch = math.ceil(len(y) / self.eval_minibatch_size)
                 for i in range(0, len(y), self.eval_minibatch_size):
                     if verbose:
-                        sys.stderr.write('\rMinibatch %d/%d\n' % ((i / self.eval_minibatch_size) + 1, n_eval_minibatch))
+                        sys.stderr.write('\rMinibatch %d/%d' % ((i / self.eval_minibatch_size) + 1, n_eval_minibatch))
                         sys.stderr.flush()
                     fd_minibatch[self.time_y] = time_y[i:i + self.eval_minibatch_size]
                     fd_minibatch[self.gf_y] = gf_y[i:i + self.eval_minibatch_size]
