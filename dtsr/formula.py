@@ -875,7 +875,7 @@ class Formula(object):
         for gf in sorted(list(random.keys()), key=lambda x: (x is None, x)):
             out += ' + (' + ('1 + ' if self.has_intercept[gf] else '0 + ') + ' + '.join([x for x in random[gf]]) + ' | ' + gf + ')'
 
-        for gf in sorted(list(self.has_intercept.keys())):
+        for gf in sorted(list(self.has_intercept.keys()), key=lambda x: (x is None, x)):
             if gf is not None and gf not in random and self.has_intercept[gf]:
                 out += ' + (1 | ' + gf + ')'
 
