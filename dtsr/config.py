@@ -31,6 +31,8 @@ class Config(object):
 
         data = config['data']
         global_settings = config['global_settings']
+        if 'dtsr_settings' not in config:
+            config['dtsr_settings'] = {}
         dtsr_settings = config['dtsr_settings']
 
         ########
@@ -161,7 +163,7 @@ class Config(object):
             # Standardize the model string
             out['formula'] = str(Formula(out['formula']))
         if 'network_type' in settings or add_defaults:
-            out['network_type'] = settings.get('network_type', 'bayes')
+            out['network_type'] = settings.get('network_type', 'mle')
 
         # DTSR initialization keyword arguments
         for kwarg in DTSR_INITIALIZATION_KWARGS:

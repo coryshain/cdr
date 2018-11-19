@@ -6,7 +6,7 @@ import pandas as pd
 from dtsr.config import Config
 from dtsr.baselines import py2ri, LME
 from dtsr.formula import Formula
-from dtsr.util import mse, mae, filter_models
+from dtsr.util import mse, mae, filter_models, get_partition_list
 
 pd.options.mode.chained_assignment = None
 
@@ -17,7 +17,7 @@ if __name__ == '__main__':
     ''')
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of model names to use for LMER fitting. Regex permitted. If unspecified, fits LMER to all DTSR models.')
-    argparser.add_argument('-p', '--partition', type=str, default='train', help='Name of partition to use (one of "train", "dev", "test")')
+    argparser.add_argument('-p', '--partition', type=str, default='train', help='Name of partition to use ("train", "dev", "test", or space- or hyphen-delimited subset of these)')
     argparser.add_argument('-z', '--zscore', action='store_true', help='Z-transform (center and scale) the convolved predictors prior to fitting')
     argparser.add_argument('-A', '--ablated_models', action='store_true', help='Fit ablated models to data convolved using the ablated model. Otherwise fits ablated models to data convolved using the full model.')
     argparser.add_argument('-f', '--force', action='store_true', help='Refit and overwrite any previously trained models. Otherwise, previously trained models are skipped.')
@@ -29,12 +29,15 @@ if __name__ == '__main__':
 
     models = [x for x in models if x.startswith('DTSR_')]
 
+    partitions = get_partition_list(args.partition)
+    partition_str = '-'.join(partitions)
+
     for m in models:
         dir_path = p.outdir + '/' + m
         if args.ablated_models:
-            data_path = dir_path + '/X_conv_' + args.partition + '.csv'
+            data_path = dir_path + '/X_conv_' + partition_str + '.csv'
         else:
-            data_path = p.outdir + '/' + m.split('!')[0] + '/X_conv_' + args.partition + '.csv'
+            data_path = p.outdir + '/' + m.split('!')[0] + '/X_conv_' + partition_str + '.csv'
 
         sys.stderr.write('Two-step analysis using data file %s\n' %data_path)
 
@@ -58,8 +61,8 @@ if __name__ == '__main__':
 
             dv = f.dv
 
-            model_path = dir_path + '/lmer_%s.obj' %args.partition
-            model_summary_path = dir_path + '/lmer_%s_summary.txt' %args.partition
+            model_path = dir_path + '/lmer_%s.obj' % partition_str
+            model_summary_path = dir_path + '/lmer_%s_summary.txt' % partition_str
 
             if not args.force and os.path.exists(model_path):
                 sys.stderr.write('Retrieving saved LMER regression of DTSR model %s...\n' % m)

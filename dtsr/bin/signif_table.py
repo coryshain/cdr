@@ -5,6 +5,7 @@ import numpy as np
 import argparse
 
 from dtsr.config import Config
+from dtsr.util import get_partition_list
 
 def extract_signif_2step(path):
     signif = np.nan
@@ -98,12 +99,17 @@ if __name__ == '__main__':
     args, unknown = argparser.parse_known_args()
 
     p = Config(args.config_path)
-    suffix = '_2stepLRT_%s.txt' %args.partition if args.mode == '2step' else '_PT_%s.txt' %args.partition
+
+    partitions = get_partition_list(args.partition)
+    partition_str = '-'.join(partitions)
+
+    suffix = '_2stepLRT_%s.txt' % partition_str if args.mode == '2step' else '_PT_%s.txt' % partition_str
     paths = [p.outdir + '/' + x for x in os.listdir(p.outdir) if x.endswith(suffix)]
 
     models, comparisons, comparisons_converged = extract_comparisons(paths)
     comparison_keys = sorted(list(comparisons.keys()), key= lambda x: len(x[0]))
     models = sorted(models)
+
 
     cols = ['model']
     for c in comparison_keys:

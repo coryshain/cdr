@@ -4,7 +4,7 @@ import pickle
 
 from dtsr.baselines import anova
 from dtsr.config import Config
-from dtsr.util import nested, filter_models
+from dtsr.util import nested, filter_models, get_partition_list
 
 if __name__ == '__main__':
 
@@ -22,6 +22,9 @@ if __name__ == '__main__':
     p = Config(args.config_path)
 
     models = filter_models(p.model_list, args.models, dtsr_only=True)
+
+    partitions = get_partition_list(args.partition)
+    partition_str = '-'.join(partitions)
 
     sys.stderr.write('\n')
 
@@ -48,24 +51,24 @@ if __name__ == '__main__':
                 sys.stderr.write('Comparing models within ablation set "%s"...\n' %s)
             for i in range(len(model_set)):
                 model_name_1 = model_set[i]
-                lme_path_1 = p.outdir + '/' + model_name_1 + '/lmer_%s.obj' % args.partition
+                lme_path_1 = p.outdir + '/' + model_name_1 + '/lmer_%s.obj' % partition_str
                 with open(lme_path_1, 'rb') as m_file:
                     lme1 = pickle.load(m_file)
 
                 for j in range(i+1, len(model_set)):
                     model_name_2 = model_set[j]
                     if nested(model_name_1, model_name_2) or not args.ablation:
-                        lme_path_2 = p.outdir + '/' + model_name_2 + '/lmer_%s.obj' % args.partition
+                        lme_path_2 = p.outdir + '/' + model_name_2 + '/lmer_%s.obj' % partition_str
                         with open(lme_path_2, 'rb') as m_file:
                             lme2 = pickle.load(m_file)
                         anova_summary = str(anova(lme1.m, lme2.m))
                         name = '%s_v_%s' %(model_name_1, model_name_2)
-                        out_path = p.outdir + '/' + name + '_2stepLRT_' + args.partition + '.txt'
+                        out_path = p.outdir + '/' + name + '_2stepLRT_' + partition_str + '.txt'
                         with open(out_path, 'w') as f:
                             sys.stderr.write('Saving output to %s...\n' %out_path)
                             summary = '='*50 + '\n'
                             summary += 'Model comparison: %s vs %s\n' % (model_name_1, model_name_2)
-                            summary += 'Partition: %s\n\n' %args.partition
+                            summary += 'Partition: %s\n\n' % partition_str
                             if not lme1.converged():
                                 summary += 'Model %s had the following convergence warnings:\n' %model_name_1
                                 summary += '%s\n\n' %lme1.convergence_warnings()

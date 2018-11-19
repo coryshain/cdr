@@ -461,21 +461,21 @@ DTSRMLE_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'irf_param_joint_sd',
-        1,
+        1.,
         float,
         "Square root of variance of intercept in initial variance-covariance matrix of joint distributions. Used only if either **covarying_fixef** or **covarying_ranef** is ``True``, otherwise ignored.",
         aliases=['irf_param_prior_sd, conv_param_joint_sd, conv_prior_sd']
     ),
     Kwarg(
         'joint_sd_scaling_coefficient',
-        1,
+        1.,
         float,
         "Factor by which to multiply square roots of variances on intercepts and coefficients if inferred from the empirical variance of the data (i.e. if **intercept_joint_sd** or **coef_joint_sd** is ``None``). Ignored for any prior widths that are explicitly specified.",
         aliases=['prior_sd_scaling_coefficient']
     ),
     Kwarg(
         'ranef_to_fixef_joint_sd_ratio',
-        1,
+        1.,
         float,
         "Ratio of widths of random to fixed effects root-variances in joint distributions. I.e. if less than 1, random effects have tighter distributions. Used only if either **covarying_fixef** or **covarying_ranef** is ``True``, otherwise ignored.",
         aliases=['ranef_to_fixef_prior_sd_ratio']
@@ -531,7 +531,7 @@ DTSRBAYES_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'irf_param_prior_sd',
-        1,
+        1.,
         float,
         "Standard deviation of prior on convolutional IRF parameters",
         aliases=['conv_prior_sd']

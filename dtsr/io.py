@@ -5,17 +5,31 @@ def read_data(path_X, path_y, series_ids, categorical_columns=None, sep=' '):
     """
     Read impulse and response data into pandas dataframes and perform basic pre-processing.
 
-    :param path_X: ``str``; path to impulse (predictor) data.
-    :param path_y: ``str``; path to response data.
+    :param path_X: ``str`` or ``list`` of ``str``; path(s) to impulse (predictor) data (multiple tables are concatenated).
+    :param path_y: ``str`` or ``list`` of ``str``; path(s) to response data (multiple tables are concatenated).
     :param series_ids: ``list`` of ``str``; column names whose jointly unique values define unique time series.
     :param categorical_columns: ``list`` of ``str``; column names that should be treated as categorical.
     :param sep: ``str``; string representation of field delimiter in input data.
     :return: 2-tuple of ``pandas`` ``DataFrame``; (impulse data, response data)
     """
 
+    if not isinstance(path_X, list):
+        path_X = [path_X]
+    if not isinstance(path_y, list):
+        path_y = [path_y]
+
     sys.stderr.write('Loading data...\n')
-    X = pd.read_csv(path_X, sep=sep, skipinitialspace=True)
-    y = pd.read_csv(path_y, sep=sep, skipinitialspace=True)
+    X = []
+    y = []
+
+    for path in path_X:
+        X.append(pd.read_csv(path, sep=sep, skipinitialspace=True))
+
+    for path in path_y:
+        y.append(pd.read_csv(path, sep=sep, skipinitialspace=True))
+
+    X = pd.concat(X, axis=0)
+    y = pd.concat(y, axis=0)
 
     sys.stderr.write('Ensuring sort order...\n')
     X.sort_values(series_ids + ['time'], inplace=True)

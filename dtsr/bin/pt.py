@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from dtsr.config import Config
 from dtsr.signif import permutation_test
-from dtsr.util import filter_models
+from dtsr.util import filter_models, get_partition_list
 import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
@@ -44,13 +44,15 @@ if __name__ == '__main__':
         p = Config(path)
 
         models = filter_models(p.model_list, args.models)
+        dtsr_models = [x for x in models if x.startswith('DTSR')]
+
+        partitions = get_partition_list(args.partition)
+        partition_str = '-'.join(partitions)
 
         if args.metric == 'loss':
-            file_name = '%s_losses_%s.txt' % (p['loss_name'], args.partition)
+            file_name = '%s_losses_%s.txt' % (p['loss_name'], partition_str)
         else:
-            file_name = 'loglik_%s.txt' % args.partition
-
-        dtsr_models = [x for x in models if x.startswith('DTSR')]
+            file_name = 'loglik_%s.txt' % partition_str
 
         if args.ablation:
             comparison_sets = {}
@@ -109,25 +111,25 @@ if __name__ == '__main__':
                                 diff = float(len(a) - select.sum())
                                 p_value, base_diff, diffs = permutation_test(a[select], b[select], n_iter=10000, n_tails=args.tails, mode=args.metric)
                                 sys.stderr.write('\n')
-                                out_path = p.outdir + '/' + name + '_PT_' + args.partition + '.txt'
+                                out_path = p.outdir + '/' + name + '_PT_' + partition_str + '.txt'
                                 with open(out_path, 'w') as f:
                                     sys.stderr.write('Saving output to %s...\n' %out_path)
 
                                     summary = '='*50 + '\n'
                                     summary += 'Model comparison: %s vs %s\n' %(m1, m2)
                                     if diff > 0:
-                                        summary += '%d NaN rows filtered out (out of %d)\n' %(diff, len(a))
-                                    summary += 'Partition: %s\n' %args.partition
-                                    summary += 'Metric: %s\n' %args.metric
-                                    summary += 'Difference: %.4f\n' %base_diff
-                                    summary += 'p: %.4e%s\n' %(p_value, '' if p_value > 0.05 else '*' if p_value > 0.01 else '**' if p_value > 0.001 else '***')
+                                        summary += '%d NaN rows filtered out (out of %d)\n' % (diff, len(a))
+                                    summary += 'Partition: %s\n' % partition_str
+                                    summary += 'Metric: %s\n' % args.metric
+                                    summary += 'Difference: %.4f\n' % base_diff
+                                    summary += 'p: %.4e%s\n' % (p_value, '' if p_value > 0.05 else '*' if p_value > 0.01 else '**' if p_value > 0.001 else '***')
                                     summary += '='*50 + '\n'
 
                                     f.write(summary)
                                     sys.stdout.write(summary)
 
                                 plt.hist(diffs, bins=1000)
-                                plt.savefig(p.outdir + '/' + name + '_PT_' + args.partition + '.png')
+                                plt.savefig(p.outdir + '/' + name + '_PT_' + partition_str + '.png')
                                 plt.close('all')
 
     if args.pool:
@@ -165,14 +167,14 @@ if __name__ == '__main__':
                     p_value, diff, diffs = permutation_test(df1, df2, n_iter=10000, n_tails=args.tails, mode=args.metric)
                     sys.stderr.write('\n')
                     name = '%s_v_%s' % ('FULL' if m1 == '' else '!' + m1, 'FULL' if m2 == '' else '!' + m2)
-                    out_path = p.outdir + '/' + name + '_PT_pooled_' + args.partition + '.txt'
+                    out_path = p.outdir + '/' + name + '_PT_pooled_' + partition_str + '.txt'
                     with open(out_path, 'w') as f:
                         sys.stderr.write('Saving output to %s...\n' % out_path)
 
                         summary = '=' * 50 + '\n'
                         summary += 'Model comparison: %s vs %s\n' % (
                         'FULL' if m1 == '' else '!' + m1, 'FULL' if m2 == '' else '!' + m2)
-                        summary += 'Partition: %s\n' % args.partition
+                        summary += 'Partition: %s\n' % partition_str
                         summary += 'Metric: %s\n' % args.metric
                         summary += 'Experiments pooled:\n'
                         for exp in exps_outdirs:
@@ -191,5 +193,5 @@ if __name__ == '__main__':
                         sys.stdout.write(summary)
 
                     plt.hist(diffs, bins=1000)
-                    plt.savefig(p.outdir + '/' + name + '_PT_pooled_' + args.partition + '.png')
+                    plt.savefig(p.outdir + '/' + name + '_PT_pooled_' + partition_str + '.png')
                     plt.close('all')
