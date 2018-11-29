@@ -3278,7 +3278,10 @@ class DTSR(object):
     def has_converged(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                return self.sess.run(self.converged)
+                if self.check_convergence:
+                    return self.sess.run(self.converged)
+                else:
+                    return False
 
     def set_training_complete(self, status):
         """
