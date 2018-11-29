@@ -3656,34 +3656,38 @@ class DTSR(object):
         out += ' ' * indent + 'CONVERGENCE SUMMARY\n'
         out += ' ' * indent + '-------------------\n\n'
 
-        converged = self.has_converged()
-        n_iter = self.global_step.eval(session=self.sess)
+        if self.check_convergence:
+            converged = self.has_converged()
+            n_iter = self.global_step.eval(session=self.sess)
 
-        out += ' ' * (indent * 2) + 'Converged: %s\n\n' % converged
+            out += ' ' * (indent * 2) + 'Converged: %s\n\n' % converged
 
-        if converged:
-            out += ' ' * (indent + 2) + 'NOTE:\n'
-            out += ' ' * (indent + 4) + 'Programmatic diagnosis of convergence in DTSR is error-prone because of stochastic optimization.\n'
-            out += ' ' * (indent + 4) + 'It is possible that the convergence diagnostics used are too permissive given the stochastic dynamics of the model.\n'
-            out += ' ' * (indent + 4) + 'Consider visually checking the learning curves in Tensorboard to see whether the parameter estimates have flatlined:\n'
-            out += ' ' * (indent + 6) + 'python -m tensorboard.main --logdir=<path_to_model_directory>\n'
-            out += ' ' * (indent + 4) + 'If not, consider lowering the **convergence_tolerance** parameter and resuming training.\n'
+            if converged:
+                out += ' ' * (indent + 2) + 'NOTE:\n'
+                out += ' ' * (indent + 4) + 'Programmatic diagnosis of convergence in DTSR is error-prone because of stochastic optimization.\n'
+                out += ' ' * (indent + 4) + 'It is possible that the convergence diagnostics used are too permissive given the stochastic dynamics of the model.\n'
+                out += ' ' * (indent + 4) + 'Consider visually checking the learning curves in Tensorboard to see whether the parameter estimates have flatlined:\n'
+                out += ' ' * (indent + 6) + 'python -m tensorboard.main --logdir=<path_to_model_directory>\n'
+                out += ' ' * (indent + 4) + 'If not, consider lowering the **convergence_tolerance** parameter and resuming training.\n'
+
+            else:
+                max_delta_ix, max_delta, double_delta_at_max_delta = self._convergence_check_inner()
+                location = self.d0_names[max_delta_ix]
+
+                out += ' ' * (indent + 2) + 'Model did not reach convergence criteria in %s epochs.\n' % n_iter
+                out += ' ' * (indent + 2) + 'Largest first derivative with respect to training time must be <= %s, with second derivative at that parameter <= %s.\n\n' % (self.convergence_tolerance, self.convergence_tolerance)
+                out += ' ' * (indent + 4) + 'Max first derivative: %s\n' % max_delta
+                out += ' ' * (indent + 4) + 'Second derivative at max first derivative: %s\n' % double_delta_at_max_delta
+                out += ' ' * (indent + 4) + 'Location: %s\n\n' % location
+                out += ' ' * (indent + 2) + 'NOTE:\n'
+                out += ' ' * (indent + 4) + 'Programmatic diagnosis of convergence in DTSR is error-prone because of stochastic optimization.\n'
+                out += ' ' * (indent + 4) + 'It is possible that the convergence diagnostics used are too conservative given the stochastic dynamics of the model.\n'
+                out += ' ' * (indent + 4) + 'Consider visually checking the learning curves in Tensorboard to see whether the parameter estimates have flatlined:\n'
+                out += ' ' * (indent + 6) + 'python -m tensorboard.main --logdir=<path_to_model_directory>\n'
+                out += ' ' * (indent + 4) + 'If so, consider the model converged.\n'
 
         else:
-            max_delta_ix, max_delta, double_delta_at_max_delta = self._convergence_check_inner()
-            location = self.d0_names[max_delta_ix]
-
-            out += ' ' * (indent + 2) + 'Model did not reach convergence criteria in %s epochs.\n' % n_iter
-            out += ' ' * (indent + 2) + 'Largest first derivative with respect to training time must be <= %s, with second derivative at that parameter <= %s.\n\n' % (self.convergence_tolerance, self.convergence_tolerance)
-            out += ' ' * (indent + 4) + 'Max first derivative: %s\n' % max_delta
-            out += ' ' * (indent + 4) + 'Second derivative at max first derivative: %s\n' % double_delta_at_max_delta
-            out += ' ' * (indent + 4) + 'Location: %s\n\n' % location
-            out += ' ' * (indent + 2) + 'NOTE:\n'
-            out += ' ' * (indent + 4) + 'Programmatic diagnosis of convergence in DTSR is error-prone because of stochastic optimization.\n'
-            out += ' ' * (indent + 4) + 'It is possible that the convergence diagnostics used are too conservative given the stochastic dynamics of the model.\n'
-            out += ' ' * (indent + 4) + 'Consider visually checking the learning curves in Tensorboard to see whether the parameter estimates have flatlined:\n'
-            out += ' ' * (indent + 6) + 'python -m tensorboard.main --logdir=<path_to_model_directory>\n'
-            out += ' ' * (indent + 4) + 'If so, consider the model converged.\n'
+            out += ' ' * (indent + 2) + 'Convergence checking is turned off.\n'
 
         return out
 
