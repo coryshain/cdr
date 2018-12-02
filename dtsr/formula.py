@@ -1040,7 +1040,7 @@ class InteractionImpulse(object):
     """
     Data structure representing an interaction of multiple impulses in a DTSR model.
 
-    :param terms: ``list`` of ``Impulse``; impulses to interact.
+    :param impulses: ``list`` of ``Impulse``; impulses to interact.
     :param ops: ``list`` of ``str``, or ``None``; ops to apply to interaction. If ``None``, no ops.
     """
 
@@ -1057,7 +1057,7 @@ class InteractionImpulse(object):
         self.name_str = ':'.join([x.name() for x in impulses])
         for op in self.ops:
             self.name_str = op + '(' + self.name_str + ')'
-        self.id = ':'.join([x.name() for x in self.atomic_impulses])
+        self.id = ':'.join([x.id for x in self.atomic_impulses])
 
     def __str__(self):
         return self.name_str
@@ -1093,6 +1093,60 @@ class InteractionImpulse(object):
             df, expanded_atomic_impulses_cur = x.expand_categorical(df)
             expanded_atomic_impulses.append(expanded_atomic_impulses_cur)
         expanded_interaction_impulses = [InteractionImpulse(x, ops=self.ops) for x in itertools.product(*expanded_atomic_impulses)]
+
+        return df, expanded_interaction_impulses, expanded_atomic_impulses
+
+class InteractionIRFNode(object):
+    """
+    Data structure representing an interaction of multiple IRF nodes in a DTSR model.
+
+    :param irfs: ``list`` of ``IRFNode``; IRF nodes to interact.
+    """
+
+    def __init__(self, irfs):
+        self.atomic_irfs = []
+        names = set()
+        for x in irfs:
+            if x.name() not in names:
+                names.add(x.name())
+                self.atomic_irfs.append(x)
+        self.name_str = ':'.join([x.name() for x in irfs])
+        self.id = ':'.join([x.id for x in self.atomic_irfs])
+
+    def __str__(self):
+        return self.name_str
+
+    def name(self):
+        """
+        Get name of interation impulse.
+
+        :return: ``str``; name.
+        """
+
+        return self.name_str
+
+    def irfs(self):
+        """
+        Get list of IRFs dominated by interaction.
+
+        :return: ``list`` of ``Impulse``; impulses dominated by interaction.
+        """
+
+        return self.atomic_irfs
+
+    def expand_categorical(self, df):
+        """
+        Expand any categorical predictors in **df** into 1-hot columns.
+
+        :param df: ``pandas`` table; input data.
+        :return: 3-tuple of ``pandas`` table, ``list`` of ``InteractionImpulse``, ``list`` of ``list`` of ``Impulse``; expanded data, list of expanded ``InteractionImpulse`` objects, list of lists of expanded ``Impulse`` objects, one list for each interaction.
+        """
+
+        expanded_atomic_impulses = []
+        for x in self.irfs():
+            df, expanded_atomic_impulses_cur = x.expand_categorical(df)
+            expanded_atomic_impulses.append(expanded_atomic_impulses_cur)
+        expanded_interaction_impulses = [InteractionIRFNode(x) for x in itertools.product(*expanded_atomic_impulses)]
 
         return df, expanded_interaction_impulses, expanded_atomic_impulses
 
