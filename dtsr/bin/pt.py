@@ -140,7 +140,7 @@ if __name__ == '__main__':
                 pooled_data[a][exp_outdir] = {}
                 for m in basenames_to_pool:
                     m_name = '!'.join([m] + list(a))
-                    pooled_data[a][exp_outdir][m] = pd.read_csv(p.outdir + '/' + m_name + '/' + file_name, sep=' ', header=None, skipinitialspace=True)
+                    pooled_data[a][exp_outdir][m] = pd.read_csv(exp_outdir + '/' + m_name + '/' + file_name, sep=' ', header=None, skipinitialspace=True)
 
         for i in range(len(ablations)):
             a1 = ablations[i]
