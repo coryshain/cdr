@@ -2446,7 +2446,7 @@ class DTSR(object):
         #     beta = sum[(x_i - mu_x)(y_i - mu_y)] / sum[(x_i - mu_x)^2]
         #
         y = iterates
-        x = np.arange(0, len(iterates), self.convergence_check_freq).astype('float')[..., None]
+        x = np.arange(0, len(iterates)*self.convergence_check_freq, self.convergence_check_freq).astype('float')[..., None]
         mu_x = x.mean(axis=0, keepdims=True)
         mu_y = y.mean(axis=0, keepdims=True)
         num = ((x - mu_x) * (y - mu_y)).sum(axis=0)
