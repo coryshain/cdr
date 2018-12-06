@@ -103,20 +103,31 @@ if __name__ == '__main__':
 
                         for j in range(i+1, len(model_set)):
                             m2 = model_set[j]
-                            if nested(m1, m2) or not args.ablation:
-                                name = '%s_v_%s' %(m1, m2)
-                                a = pd.read_csv(p.outdir + '/' + m1 + '/' + file_name, sep=' ', header=None, skipinitialspace=True)
-                                b = pd.read_csv(p.outdir + '/' + m2 + '/' + file_name, sep=' ', header=None, skipinitialspace=True)
+                            is_nested = nested(m1, m2)
+                            if is_nested or not args.ablation:
+                                if is_nested:
+                                    if len(m1) > len(m2):
+                                        a_model = m2
+                                        b_model = m1
+                                    else:
+                                        a_model = m1
+                                        b_model = m2
+                                else:
+                                    a_model = m1
+                                    b_model = m2
+                                name = '%s_v_%s' %(a_model, b_model)
+                                a = pd.read_csv(p.outdir + '/' + a_model + '/' + file_name, sep=' ', header=None, skipinitialspace=True)
+                                b = pd.read_csv(p.outdir + '/' + b_model + '/' + file_name, sep=' ', header=None, skipinitialspace=True)
                                 select = np.logical_and(np.isfinite(np.array(a)), np.isfinite(np.array(b)))
                                 diff = float(len(a) - select.sum())
-                                p_value, base_diff, diffs = permutation_test(a[select], b[select], n_iter=10000, n_tails=args.tails, mode=args.metric)
+                                p_value, base_diff, diffs = permutation_test(a[select], b[select], n_iter=10000, n_tails=args.tails, mode=args.metric, nested=is_nested)
                                 sys.stderr.write('\n')
                                 out_path = p.outdir + '/' + name + '_PT_' + partition_str + '.txt'
                                 with open(out_path, 'w') as f:
                                     sys.stderr.write('Saving output to %s...\n' %out_path)
 
                                     summary = '='*50 + '\n'
-                                    summary += 'Model comparison: %s vs %s\n' %(m1, m2)
+                                    summary += 'Model comparison: %s vs %s\n' %(a_model, b_model)
                                     if diff > 0:
                                         summary += '%d NaN rows filtered out (out of %d)\n' % (diff, len(a))
                                     summary += 'Partition: %s\n' % partition_str
