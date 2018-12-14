@@ -422,7 +422,15 @@ class DTSR(object):
 
                 self.y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('y'))
                 self.time_y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('time_y'))
-                self.t_delta = tf.expand_dims(tf.expand_dims(self.time_y, -1) - self.time_X, -1)  # Tensor of temporal offsets with shape (?, history_length, 1)
+                # Tensor of temporal offsets with shape (?, history_length, 1)
+                self.t_delta = tf.expand_dims(tf.expand_dims(self.time_y, -1) - self.time_X, -1)
+                # Mask on variables that are not response-aligned, used for implementation of DiracDelta IRF
+                self.is_response_aligned = tf.cast(
+                    tf.logical_not(
+                        tf.cast(self.t_delta[:, -1, :], dtype=tf.bool)
+                    ),
+                    self.FLOAT_TF
+                )
                 self.gf_y = tf.placeholder(shape=[None, len(self.rangf)], dtype=self.INT_TF)
 
                 # Tensors used for interpolated IRF composition
@@ -2027,6 +2035,9 @@ class DTSR(object):
                                 impulse = self._apply_pc(X, src_ix=src_impulse_ix, pc_ix=impulse_ix)
                         else:
                             impulse = tf.gather(self.X, impulse_ix, axis=2)[:, -1, :]
+
+                        # Zero-out impulses to DiracDelta that are not response-aligned
+                        impulse *= self.is_response_aligned
                     else:
                         if self.pc:
                             if impulse_name == 'rate':
@@ -2523,12 +2534,13 @@ class DTSR(object):
                         self.sess.run([self.d0_assign, self.d1_assign, self.last_convergence_check_assign],
                                       feed_dict=fd_assign)
 
-                        summary_convergence = self.sess.run(
-                            self.summary_convergence,
-                            feed_dict={self.max_delta_summary: max_delta,
-                                       self.double_delta_at_max_delta_summary: double_delta_at_max_delta}
-                        )
-                        self.writer.add_summary(summary_convergence, self.global_step.eval(session=self.sess))
+                        if self.log_freq > 0 and self.global_step.eval(session=self.sess) % self.log_freq == 0:
+                            summary_convergence = self.sess.run(
+                                self.summary_convergence,
+                                feed_dict={self.max_delta_summary: max_delta,
+                                           self.double_delta_at_max_delta_summary: double_delta_at_max_delta}
+                            )
+                            self.writer.add_summary(summary_convergence, self.global_step.eval(session=self.sess))
 
                 return max_delta_ix, max_delta, double_delta_at_max_delta
 

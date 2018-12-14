@@ -222,6 +222,32 @@ class Formula(object):
                 out = None
         return out
 
+    @staticmethod
+    def prep_formula_string(s):
+        return s.strip().replace('.(', '(').replace(':', '%').replace('^', '**')
+
+    @ staticmethod
+    def expand_terms(terms):
+        new_terms = []
+        for t in terms:
+            if isinstance(t, list):
+                new_terms.append(t)
+            else:
+                new_terms.append([t])
+
+        return new_terms
+
+    @staticmethod
+    def collapse_terms(terms):
+        new_terms = []
+        for t in terms:
+            if isinstance(t, list):
+                new_terms += t
+            else:
+                new_terms.append(t)
+
+        return new_terms
+
     def __init__(self, bform_str, standardize=True):
         self.build(bform_str, standardize=standardize)
 
@@ -240,20 +266,25 @@ class Formula(object):
 
         lhs, rhs = bform_str.strip().split('~')
 
-        dv = ast.parse(lhs.strip().replace('.(', '(').replace(':', '%'))
+        dv = ast.parse(Formula.prep_formula_string(lhs))
         dv_term = []
-        self.process_ast(dv.body[0].value, terms=dv_term)
-        self.dv_term = dv_term[0]
+        self.process_ast(dv.body[0].value, terms=dv_term, under_irf=True) # Hack: use under_irf=True to prevent function from transforming DV into Dirac Delta IRF
+        self.dv_term = dv_term[0][0]
         self.dv = self.dv_term.name()
 
-        rhs = ast.parse(rhs.strip().replace('.(', '(').replace(':', '%'))
+        rhs = ast.parse(Formula.prep_formula_string(rhs))
 
         self.t = IRFNode()
-        terms = []
         self.has_intercept = {None: True}
-        self.process_ast(rhs.body[0].value, terms=terms, has_intercept=self.has_intercept)
+        self.process_ast(
+            rhs.body[0].value,
+            has_intercept=self.has_intercept
+        )
 
         self.rangf = sorted([x for x in list(self.has_intercept.keys()) if x is not None])
+
+        print(str(self))
+        print('built!')
 
     def process_ast(
             self,
@@ -261,11 +292,15 @@ class Formula(object):
             terms=None,
             has_intercept=None,
             ops=None,
-            rangf=None
+            rangf=None,
+            impulses_by_name=None,
+            interactions_by_name=None,
+            under_irf=False,
+            under_interaction=False,
+            under_expansion=False,
     ):
         """
-        Process a node of the Python abstract syntax tree (AST) representation of the formula string and insert data into internal representation of model formula.
-        Recursive.
+        Recursively process a node of the Python abstract syntax tree (AST) representation of the formula string and insert data into internal representation of model formula.
 
         :param t: AST node.
         :param terms: ``list`` or ``None``; DTSR terms computed so far, or ``None`` if no DTSR terms computed.
@@ -283,81 +318,464 @@ class Formula(object):
             has_intercept[rangf] = True
         if ops is None:
             ops = []
+        if impulses_by_name is None:
+            impulses_by_name = {}
+        if interactions_by_name is None:
+            interactions_by_name = {}
         if type(t).__name__ == 'BinOp':
             if type(t.op).__name__ == 'Add':
+                # Delimited terms (impulses and/or IRF calls)
+
                 assert len(ops) == 0, 'Transformation of multiple terms is not supported in DTSR formula strings'
-                self.process_ast(t.left, terms=terms, has_intercept=has_intercept, ops=ops, rangf=rangf)
-                self.process_ast(t.right, terms=terms, has_intercept=has_intercept, ops=ops, rangf=rangf)
+                self.process_ast(
+                    t.left,
+                    terms=terms,
+                    has_intercept=has_intercept,
+                    ops=ops,
+                    rangf=rangf,
+                    impulses_by_name=impulses_by_name,
+                    interactions_by_name=interactions_by_name,
+                    under_irf=under_irf,
+                    under_interaction=under_interaction
+                )
+                self.process_ast(
+                    t.right,
+                    terms=terms,
+                    has_intercept=has_intercept,
+                    ops=ops,
+                    rangf=rangf,
+                    impulses_by_name=impulses_by_name,
+                    interactions_by_name=interactions_by_name,
+                    under_irf=under_irf,
+                    under_interaction=under_interaction
+                )
+
             elif type(t.op).__name__ == 'BitOr':
+                # Random effects term
+                # LHS: inputs
+                # RHS: grouping factor
+
                 assert len(ops) == 0, 'Transformation of random terms is not supported in DTSR formula strings'
                 assert rangf is None, 'Random terms may not be embedded under other random terms in DTSR formula strings'
-                self.process_ast(t.left, has_intercept=has_intercept, rangf=t.right.id)
+                self.process_ast(
+                    t.left,
+                    has_intercept=has_intercept,
+                    rangf=t.right.id,
+                    impulses_by_name=impulses_by_name,
+                    interactions_by_name=interactions_by_name,
+                    under_irf=under_irf,
+                    under_interaction=under_interaction
+                )
+
             elif type(t.op).__name__ == 'Mod':
+                # Interaction term
+
                 subterms = []
-                self.process_ast(t.left, terms=subterms, has_intercept=has_intercept, rangf=rangf)
-                self.process_ast(t.right, terms=subterms, has_intercept=has_intercept, rangf=rangf)
-                for x in subterms:
-                    if type(x).__name__ == 'IRFNode':
-                        raise ValueError('Interaction terms may not dominate IRF terms in DTSR formula strings')
-                new = InteractionImpulse(impulses=subterms, ops=ops)
-                terms.append(new)
+                self.process_ast(
+                    t.left,
+                    terms=subterms,
+                    has_intercept=has_intercept,
+                    rangf=rangf,
+                    impulses_by_name=impulses_by_name,
+                    interactions_by_name=interactions_by_name,
+                    under_irf=under_irf,
+                    under_interaction=True
+                )
+                self.process_ast(
+                    t.right,
+                    terms=subterms,
+                    has_intercept=has_intercept,
+                    rangf=rangf,
+                    impulses_by_name=impulses_by_name,
+                    interactions_by_name=interactions_by_name,
+                    under_irf=under_irf,
+                    under_interaction=True
+                )
+
+                subterms_list = itertools.product(*subterms)
+
+                new_subterms = []
+
+                for subterms in subterms_list:
+                    subterm_irf = [x for x in subterms if (isinstance(x, IRFNode) or isinstance(x, ResponseInteraction))]
+                    subterm_nonirf = [x for x in subterms if not (isinstance(x, IRFNode) or isinstance(x, ResponseInteraction))]
+                    has_irf_subterm = len(subterm_irf) > 0
+
+                    if has_irf_subterm:
+                        assert not under_irf, 'IRF calls cannot be nested in the inputs to another IRF call. To compose IRFs, apply nesting in the impulse response function definition (second argument of IFR call).'
+
+                        if len(subterm_nonirf) > 0:
+                            new = ImpulseInteraction(impulses=subterm_nonirf, ops=ops)
+
+                            if new.name() in impulses_by_name:
+                                new = impulses_by_name[new.name()]
+                            else:
+                                impulses_by_name[new.name()] = new
+
+                            if new.name() in interactions_by_name:
+                                new = interactions_by_name[new.name()]
+                            else:
+                                interactions_by_name[new.name()] = new
+
+                            interaction_in = subterm_irf + [new]
+                        else:
+                            interaction_in = subterm_irf
+
+                        new = ResponseInteraction(
+                            interaction_in,
+                            rangf=rangf
+                        )
+
+                        if new.name() in interactions_by_name:
+                            new = interactions_by_name[new.name()]
+                        else:
+                            interactions_by_name[new.name()] = new
+
+                        if not under_interaction:
+                            new.add_rangf(rangf)
+                            for irf in [response for response in new.responses() if isinstance(response, IRFNode)]:
+                                irf.add_interactions(new)
+
+                        new_subterms.append(new)
+
+                    else:
+                        if under_irf or under_interaction:
+                            new = ImpulseInteraction(impulses=subterms, ops=ops)
+
+                            if new.name() in impulses_by_name:
+                                new = impulses_by_name[new.name()]
+                            else:
+                                impulses_by_name[new.name()] = new
+
+                            if new.name() in interactions_by_name:
+                                new = interactions_by_name[new.name()]
+                            else:
+                                interactions_by_name[new.name()] = new
+
+                            new_subterms.append(new)
+                        else:
+                            subterms_name = '%'.join([x.name() for x in subterms])
+                            new_str = 'C(%s, DiracDelta())' % subterms_name
+
+                            new_ast = ast.parse(Formula.prep_formula_string(new_str)).body[0].value
+                            subterms = []
+
+                            self.process_ast(
+                                new_ast,
+                                terms=subterms,
+                                has_intercept=has_intercept,
+                                ops=None,
+                                rangf=rangf,
+                                impulses_by_name=impulses_by_name,
+                                interactions_by_name=interactions_by_name,
+                                under_irf=under_irf,
+                                under_interaction=under_interaction
+                            )
+                            for term in subterms:
+                                terms.append(term)
+                if len(new_subterms) > 0:
+                    terms.append(new_subterms)
+
             elif type(t.op).__name__ == 'Mult':
+                # Binary interaction expansion
+                # LSH: A
+                # RHS: B
+                # Output: A + B + A:B
+
                 assert len(ops) == 0, 'Transformation of term expansions is not supported in DTSR formula strings'
-                subterms = []
-                self.process_ast(t.left, terms=subterms, has_intercept=has_intercept, rangf=rangf)
-                self.process_ast(t.right, terms=subterms, has_intercept=has_intercept, rangf=rangf)
-                for x in subterms:
-                    if type(x).__name__ == 'IRFNode':
-                        raise ValueError('Term expansions may not dominate IRF terms in DTSR formula strings')
-                new = InteractionImpulse(impulses=subterms, ops=ops)
-                terms += subterms
-                terms.append(new)
+                subterms_left = []
+                self.process_ast(
+                    t.left,
+                    terms=subterms_left,
+                    has_intercept=has_intercept,
+                    rangf=rangf,
+                    impulses_by_name=impulses_by_name,
+                    interactions_by_name=interactions_by_name,
+                    under_irf=under_irf,
+                    under_interaction=True
+                )
+                assert len(subterms_left) == 1, 'Incorrect number of elements given to left side of multiplication operator. Expected 1, saw %s.' % len(subterms_left)
+
+                subterms_right = []
+                self.process_ast(
+                    t.right,
+                    terms=subterms_right,
+                    has_intercept=has_intercept,
+                    rangf=rangf,
+                    impulses_by_name=impulses_by_name,
+                    interactions_by_name=interactions_by_name,
+                    under_irf=under_irf,
+                    under_interaction=True
+                )
+                assert len(subterms_right) == 1, 'Incorrect number of elements given to right side of multiplication operator. Expected 1, saw %s.' % len(subterms_right)
+
+                if under_irf or under_interaction:
+                    new_terms = subterms_left[0] + subterms_right[0]
+                    for l in subterms_left[0]:
+                        for r in subterms_right[0]:
+                            new = ImpulseInteraction(impulses=[l,r], ops=ops)
+
+                            if new.name() in impulses_by_name:
+                                new = impulses_by_name[new.name()]
+                            else:
+                                impulses_by_name[new.name()] = new
+
+                            if new.name() in interactions_by_name:
+                                new = interactions_by_name[new.name()]
+                            else:
+                                interactions_by_name[new.name()] = new
+
+                            new_terms.append(new)
+
+                    terms.append(new_terms)
+
+                else:
+                    has_irf_subterm = False
+                    for x in subterms_left[0] + subterms_right[0]:
+                        if type(x).__name__ in ['IRFNode', 'ResponseInteraction']:
+                            has_irf_subterm = True
+                            break
+
+                    if has_irf_subterm:
+                        new_subterms_left = []
+                        for s in subterms_left[0]:
+                            if isinstance(s, IRFNode):
+                                irf = s.irf_to_formula(rangf)
+                                new_str = 'C(%s' % s.impulse.name() + ', ' + irf + ')'
+                            else:
+                                print(s)
+                                new_str = s.name()
+                            new_subterms_left.append(new_str)
+                        new_subterms_right = []
+                        for s in subterms_right[0]:
+                            if isinstance(s, IRFNode):
+                                irf = s.irf_to_formula(rangf)
+                                new_str = 'C(%s' % s.impulse.name() + ', ' + irf + ')'
+                            else:
+                                new_str = s.name()
+                            new_subterms_right.append(new_str)
+
+                        subterm_strs = []
+                        for l in new_subterms_left:
+                            for r in new_subterms_right:
+                                subterm_strs.append('%s + %s + %s%%%s' % (l, r, l, r))
+                        subterm_str = ' + '.join(subterm_strs)
+                    else:
+                        new_subterms_left = [x.name() for x in subterms_left[0]]
+                        new_subterms_right = [x.name() for x in subterms_right[0]]
+
+                        subterm_strs = []
+                        for l in new_subterms_left:
+                            for r in new_subterms_right:
+                                subterm_strs.append('C(%s + %s + %s%%%s, DiracDelta())' % (l, r, l, r))
+                        subterm_str = ' + '.join(subterm_strs)
+
+                    subterm_str = Formula.prep_formula_string(subterm_str)
+
+                    new_ast = ast.parse(subterm_str).body[0].value
+                    subterms = []
+
+                    self.process_ast(
+                        new_ast,
+                        terms=subterms,
+                        has_intercept=has_intercept,
+                        ops=None,
+                        rangf=rangf,
+                        impulses_by_name=impulses_by_name,
+                        interactions_by_name=interactions_by_name,
+                        under_irf=under_irf,
+                        under_interaction=under_interaction
+                    )
+                    terms += subterms
+
             elif type(t.op).__name__ == 'Pow':
+                # N-ary interaction expansion
+                # LHS: inputs
+                # RHS: n (integer), degree of interaction
+                # Output: All interactions of inputs of order up to n
+
                 assert len(ops) == 0, 'Transformation of term expansions is not supported in DTSR formula strings'
                 subterms = []
-                self.process_ast(t.left, terms=subterms, has_intercept=has_intercept, rangf=rangf)
-                for x in subterms:
-                    if type(x).__name__ == 'IRFNode':
-                        raise ValueError('Term expansions may not dominate IRF terms in DTSR formula strings')
-                order = min(int(t.right.n), len(subterms))
+                self.process_ast(
+                    t.left,
+                    terms=subterms,
+                    has_intercept=has_intercept,
+                    rangf=rangf,
+                    impulses_by_name=impulses_by_name,
+                    interactions_by_name=interactions_by_name,
+                    under_irf=under_irf,
+                    under_interaction=under_interaction
+                )
+                assert len(subterms) == 1, 'Incorrect number of elements given to power expansion. Expected 1, saw %s.' % len(subterms)
+
+                order = min(int(t.right.n), len(subterms[0]))
+                new_terms = []
                 for i in range(1, order + 1):
-                    collections = itertools.combinations(subterms, i)
+                    collections = itertools.combinations(subterms[0], i)
                     for tup in collections:
                         if i > 1:
-                            new = InteractionImpulse(list(tup), ops=ops)
-                            terms.append(new)
+                            new_terms_cur = []
+                            for x in tup:
+                                print(x.name())
+                                if isinstance(x, IRFNode):
+                                    irf = x.irf_to_formula(rangf)
+                                    name = 'C(%s' % x.impulse.name() + ', ' + irf + ')'
+                                    new_terms_cur.append(name)
+                                elif isinstance(x, ResponseInteraction):
+                                    for response in x.responses():
+                                        if isinstance(response, IRFNode):
+                                            irf = response.irf_to_formula(rangf)
+                                            name = 'C(%s' % response.impulse.name() + ', ' + irf + ')'
+                                        else:
+                                            name = response.name()
+                                        new_terms_cur.append(name)
+                                else:
+                                    new_terms_cur.append(x.name())
+                            new_terms.append('%'.join(new_terms_cur))
                         else:
-                            terms.append(tup[0])
+                            x = tup[0]
+                            print(x.name())
+                            if isinstance(x, IRFNode):
+                                irf = x.irf_to_formula(rangf)
+                                name = 'C(%s' % x.impulse.name() + ', ' + irf + ')'
+                            elif isinstance(x, ResponseInteraction):
+                                print('Responses:')
+                                print([y.name() for y in x.responses()])
+                                for response in x.responses():
+                                    if isinstance(response, IRFNode):
+                                        irf = response.irf_to_formula(rangf)
+                                        name = 'C(%s' % response.impulse.name() + ', ' + irf + ')'
+                                    else:
+                                        name = response.name()
+                            else:
+                                name = x.name()
+                            new_terms.append(name)
+
+                        print(new_terms)
+                        print()
+
+                new_terms_str = ' + '.join(new_terms)
+                print(new_terms_str)
+
+                new_terms_str = Formula.prep_formula_string(new_terms_str)
+                subterms = []
+
+                self.process_ast(
+                    ast.parse(new_terms_str).body[0].value,
+                    terms=subterms,
+                    has_intercept=has_intercept,
+                    rangf=rangf,
+                    impulses_by_name=impulses_by_name,
+                    interactions_by_name=interactions_by_name,
+                    under_irf=under_irf,
+                    under_interaction=under_interaction
+                )
+                new_subterms = []
+                for S in subterms:
+                    for s in S:
+                        new_subterms.append(s)
+
+                print('New pow subterms!')
+                print(new_subterms)
+
+                terms.append(new_subterms)
+
         elif type(t).__name__ == 'Call':
             if t.func.id == 'C':
+                # IRF Call
+                # Arg 1: Inputs
+                # Arg 2: IRF kernel definition
+
+                assert not under_irf, 'IRF calls cannot be nested in the inputs to another IRF call. To compose IRFs, apply nesting in the impulse response function definition (second argument of IFR call).'
                 assert len(t.args) == 2, 'C() takes exactly two arguments in DTSR formula strings'
                 subterms = []
-                self.process_ast(t.args[0], terms=subterms, has_intercept=has_intercept, rangf=rangf)
-                for x in subterms:
-                    new = self.process_irf(t.args[1], input=x, ops=None, rangf=rangf)
-                    terms.append(new)
+                self.process_ast(
+                    t.args[0],
+                    terms=subterms,
+                    has_intercept=has_intercept,
+                    rangf=rangf,
+                    impulses_by_name=impulses_by_name,
+                    interactions_by_name=interactions_by_name,
+                    under_irf=True,
+                    under_interaction=under_interaction
+                )
+                new_subterms = []
+                for S in subterms:
+                    for s in S:
+                        new = self.process_irf(t.args[1], input=s, ops=None, rangf=rangf)
+                        new_subterms.append(new)
+                terms.append(new_subterms)
             elif t.func.id in Formula.IRF_PARAMS.keys() or spline.match(t.func.id) is not None:
                 raise ValueError('IRF calls can only occur as inputs to C() in DTSR formula strings')
             else:
+                # Unary transform
+
                 assert len(t.args) <= 1, 'Only unary ops on variables supported in DTSR formula strings'
                 subterms = []
-                self.process_ast(t.args[0], terms=subterms, has_intercept=has_intercept, ops=[t.func.id] + ops, rangf=rangf)
+                self.process_ast(
+                    t.args[0],
+                    terms=subterms,
+                    has_intercept=has_intercept,
+                    ops=[t.func.id] + ops,
+                    rangf=rangf,
+                    impulses_by_name=impulses_by_name,
+                    interactions_by_name=interactions_by_name,
+                    under_irf=under_irf,
+                    under_interaction=under_interaction
+                )
                 terms += subterms
-        elif type(t).__name__ == 'Name':
-            new = Impulse(t.id, ops=ops)
-            terms.append(new)
-        elif type(t).__name__ == 'NameConstant':
-            new = Impulse(t.value, ops=ops)
-            terms.append(new)
-        elif type(t).__name__ == 'Num':
-            new = Impulse(str(t.n), ops=ops)
-            terms.append(new)
+
+        elif type(t).__name__ in ['Name', 'NameConstant', 'Num']:
+            # Basic impulse term
+
+            if type(t).__name__ == 'Name':
+                t_id = t.id
+            elif type(t).__name__ == 'NameConstant':
+                t_id = t.value
+            else: # type(t).__name__ == 'Num'
+                t_id = str(t.n)
+                if t_id in ['0', '1'] and len(ops) == 0:
+                    return [[t_id]]
+
+            if under_irf or under_interaction:
+                new = Impulse(t_id, ops=ops)
+
+                if new.name() in impulses_by_name:
+                    new = impulses_by_name[new.name()]
+                else:
+                    impulses_by_name[new.name()] = new
+
+                terms.append([new])
+            else:
+                term_name = t_id
+                for op in ops:
+                    term_name = '%s(%s)' %(op, term_name)
+
+                new_term_str = 'C(%s, DiracDelta())' % term_name
+
+                new_ast = ast.parse(Formula.prep_formula_string(new_term_str)).body[0].value
+                subterms = []
+
+                self.process_ast(
+                    new_ast,
+                    terms=subterms,
+                    has_intercept=has_intercept,
+                    ops=None,
+                    rangf=rangf,
+                    impulses_by_name=impulses_by_name,
+                    interactions_by_name=interactions_by_name,
+                    under_irf=under_irf,
+                    under_interaction=under_interaction
+                )
+                terms += subterms
+
         else:
             raise ValueError('Operation "%s" is not supported in DTSR formula strings' %type(t).__name___)
 
-        for t in terms:
-            if t.name() == '0':
-                has_intercept[rangf] = False
+        for T in terms:
+            for t in T:
+                if t.name() == '0':
+                    has_intercept[rangf] = False
 
     def process_irf(
             self,
@@ -385,7 +803,6 @@ class Formula(object):
         ranirf = False
         trainable = None
         param_init={}
-        order = None
         if len(t.keywords) > 0:
             for k in t.keywords:
                 if k.arg == 'irf_id':
@@ -486,6 +903,11 @@ class Formula(object):
                 rangf=rangf
             )
 
+        for c in p.children:
+            if c.local_name() == new.local_name():
+                new = c
+                break
+
         return new
 
     def apply_op(self, op, arr):
@@ -527,7 +949,7 @@ class Formula(object):
         ops = impulse.ops
 
         if impulse.id not in df.columns:
-            if type(impulse).__name__ == 'InteractionImpulse':
+            if type(impulse).__name__ == 'ImpulseInteraction':
                 df, expanded_impulses, expanded_atomic_impulses = impulse.expand_categorical(df)
                 for x in expanded_atomic_impulses:
                     for a in x:
@@ -716,6 +1138,8 @@ class Formula(object):
         if self.dv not in y.columns:
             y = self.apply_ops(self.dv_term, y)
         impulses = self.t.impulses()
+        impulses += self.t.impulses_from_response_interaction()
+        impulses = sorted(list(set(impulses)), key=lambda x: x.name())
 
         if X_2d_predictor_names is None:
             X_2d_predictor_names = []
@@ -725,7 +1149,7 @@ class Formula(object):
         time_mask = None
 
         for impulse in impulses:
-            if type(impulse).__name__ == 'InteractionImpulse':
+            if type(impulse).__name__ == 'ImpulseInteraction':
                 to_process = impulse.impulses()
             else:
                 to_process = [impulse]
@@ -771,7 +1195,7 @@ class Formula(object):
                 else:
                     X = self.apply_ops(x, X)
 
-            if type(impulse).__name__ == 'InteractionImpulse':
+            if type(impulse).__name__ == 'ImpulseInteraction':
                 X = self.apply_ops(impulse, X)
 
         for col in [x for x in X.columns if spillover.match(x)]:
@@ -872,7 +1296,7 @@ class Formula(object):
             out += '0 + '
 
         out += ' + '.join([x for x in fixed])
-        for gf in sorted(list(random.keys()), key=lambda x: (x is None, x)):
+        for gf in sorted(list(random.keys())):
             out += ' + (' + ('1 + ' if self.has_intercept[gf] else '0 + ') + ' + '.join([x for x in random[gf]]) + ' | ' + gf + ')'
 
         for gf in sorted(list(self.has_intercept.keys()), key=lambda x: (x is None, x)):
@@ -903,7 +1327,19 @@ class Formula(object):
             new_terms = [new_terms[x] for x in sorted(list(new_terms.keys()))]
             term_strings.append(' + '.join(['C(%s, %s)' %(' + '.join([x.name() for x in y['impulses']]), y['irf']) for y in new_terms]))
 
-        for rangf in sorted(list(terms.keys()), key=lambda x: (x is None, x)):
+            for x in t.interactions():
+                if None in x.rangf:
+                    subterm_strings = []
+                    for y in x.atomic_responses:
+                        if isinstance(y, IRFNode):
+                            irf = y.irf_to_formula(None)
+                            new_term_string = 'C(%s' % y.impulse.name() + ', ' + irf + ')'
+                        else:
+                            new_term_string = y.name()
+                        subterm_strings.append(new_term_string)
+                    term_strings.append(':'.join(subterm_strings))
+
+        for rangf in sorted(list(terms.keys())):
             ran = terms[rangf]
             new_terms = {}
             for term in ran:
@@ -915,7 +1351,21 @@ class Formula(object):
             new_terms_str = '('
             if not self.has_intercept[rangf]:
                 new_terms_str += '0 + '
-            new_terms_str += ' + '.join(['C(%s, %s)' % (' + '.join([x.name() for x in y['impulses']]), y['irf']) for y in new_terms]) + ' | %s)' %rangf
+
+            interactions_str = ''
+            for x in t.interactions():
+                if rangf in x.rangf:
+                    subterm_strings = []
+                    for y in x.atomic_responses:
+                        if isinstance(y, IRFNode):
+                            irf = y.irf_to_formula(rangf)
+                            new_term_string = 'C(%s' % y.impulse.name() + ', ' + irf + ')'
+                        else:
+                            new_term_string = y.name()
+                        subterm_strings.append(new_term_string)
+                    interactions_str += ' + ' + ':'.join(subterm_strings)
+
+            new_terms_str += ' + '.join(['C(%s, %s)' % (' + '.join([x.name() for x in y['impulses']]), y['irf']) for y in new_terms]) + interactions_str + ' | %s)' %rangf
             term_strings.append(new_terms_str)
 
         out += ' + '.join(term_strings)
@@ -963,6 +1413,7 @@ class Formula(object):
         """
 
         new_t = self.t.categorical_transform(df)[0]
+        print(str(new_t))
         new_formstring = self.to_string(t=new_t)
         new_form = Formula(new_formstring)
         return new_form
@@ -1036,9 +1487,9 @@ class Impulse(object):
 
         return df, impulses
 
-class InteractionImpulse(object):
+class ImpulseInteraction(object):
     """
-    Data structure representing an interaction of multiple impulses in a DTSR model.
+    Data structure representing an interaction of impulse-aligned variables (impulses) in a DTSR model.
 
     :param impulses: ``list`` of ``Impulse``; impulses to interact.
     :param ops: ``list`` of ``str``, or ``None``; ops to apply to interaction. If ``None``, no ops.
@@ -1051,10 +1502,16 @@ class InteractionImpulse(object):
         self.atomic_impulses = []
         names = set()
         for x in impulses:
-            if x.name() not in names:
-                names.add(x.name())
-                self.atomic_impulses.append(x)
-        self.name_str = ':'.join([x.name() for x in impulses])
+            if isinstance(x, ImpulseInteraction):
+                for impulse in x.impulses():
+                    if impulse.name() not in names:
+                        names.add(impulse.name())
+                        self.atomic_impulses.append(impulse)
+            else:
+                if x.name() not in names:
+                    names.add(x.name())
+                    self.atomic_impulses.append(x)
+        self.name_str = ':'.join([x.name() for x in sorted(impulses, key=lambda x: x.name())])
         for op in self.ops:
             self.name_str = op + '(' + self.name_str + ')'
         self.id = ':'.join([x.id for x in self.atomic_impulses])
@@ -1085,33 +1542,43 @@ class InteractionImpulse(object):
         Expand any categorical predictors in **df** into 1-hot columns.
 
         :param df: ``pandas`` table; input data.
-        :return: 3-tuple of ``pandas`` table, ``list`` of ``InteractionImpulse``, ``list`` of ``list`` of ``Impulse``; expanded data, list of expanded ``InteractionImpulse`` objects, list of lists of expanded ``Impulse`` objects, one list for each interaction.
+        :return: 3-tuple of ``pandas`` table, ``list`` of ``ImpulseInteraction``, ``list`` of ``list`` of ``Impulse``; expanded data, list of expanded ``ImpulseInteraction`` objects, list of lists of expanded ``Impulse`` objects, one list for each interaction.
         """
 
         expanded_atomic_impulses = []
         for x in self.impulses():
             df, expanded_atomic_impulses_cur = x.expand_categorical(df)
             expanded_atomic_impulses.append(expanded_atomic_impulses_cur)
-        expanded_interaction_impulses = [InteractionImpulse(x, ops=self.ops) for x in itertools.product(*expanded_atomic_impulses)]
+        expanded_interaction_impulses = [ImpulseInteraction(x, ops=self.ops) for x in itertools.product(*expanded_atomic_impulses)]
 
         return df, expanded_interaction_impulses, expanded_atomic_impulses
 
-class InteractionIRFNode(object):
+class ResponseInteraction(object):
     """
-    Data structure representing an interaction of multiple IRF nodes in a DTSR model.
+    Data structure representing an interaction of response-aligned variables (containing at least one IRF-convolved impulse) in a DTSR model.
 
-    :param irfs: ``list`` of ``IRFNode``; IRF nodes to interact.
+    :param responses: ``list`` of terminal ``IRFNode``, ``Impulse``, and/or ``ImpulseInteraction`` objects; responses to interact.
+    :param rangf: ``str`` or list of ``str``; random grouping factors for which to build random effects for this interaction.
     """
 
-    def __init__(self, irfs):
-        self.atomic_irfs = []
+    def __init__(self, responses, rangf=None):
+        self.atomic_responses = []
         names = set()
-        for x in irfs:
-            if x.name() not in names:
-                names.add(x.name())
-                self.atomic_irfs.append(x)
-        self.name_str = ':'.join([x.name() for x in irfs])
-        self.id = ':'.join([x.id for x in self.atomic_irfs])
+        for x in responses:
+            assert (type(x).__name__ == 'IRFNode' and x.terminal()) or type(x).__name__ in ['Impulse', 'ImpulseInteraction', 'ResponseInteraction'], 'All inputs to ResponseInteraction must be either terminal IRFNode, Impulse, ImpulseInteraction, or ResponseInteraction objects. Got %s.' % type(x).__name__
+            if isinstance(x, ResponseInteraction):
+                for y in x.responses():
+                    if y.name() not in names:
+                        names.add(y.name())
+                        self.atomic_responses.append(y)
+            else:
+                if x.name() not in names:
+                    names.add(x.name())
+                    self.atomic_responses.append(x)
+        self.name_str = '|'.join([x.name() for x in sorted(responses, key=lambda x: x.name())])
+        if not isinstance(rangf, list):
+            rangf = [rangf]
+        self.rangf = rangf
 
     def __str__(self):
         return self.name_str
@@ -1125,30 +1592,48 @@ class InteractionIRFNode(object):
 
         return self.name_str
 
-    def irfs(self):
+    def responses(self):
+        """
+        Get list of variables dominated by interaction.
+
+        :return: ``list`` of ``IRFNode``, ``Impulse``, and/or ``ImpulseInteraction`` objects; impulses dominated by interaction.
+        """
+
+        return self.atomic_responses[:]
+
+    def irf_responses(self):
         """
         Get list of IRFs dominated by interaction.
 
-        :return: ``list`` of ``Impulse``; impulses dominated by interaction.
+        :return: ``list`` of ``IRFNode`` objects; terminal IRFs dominated by interaction.
         """
 
-        return self.atomic_irfs
+        return [x for x in self.atomic_responses if type(x).__name__ == 'IRFNode']
 
-    def expand_categorical(self, df):
+    def non_irf_responses(self):
         """
-        Expand any categorical predictors in **df** into 1-hot columns.
+        Get list of non-IRF response-aligned variables dominated by interaction.
 
-        :param df: ``pandas`` table; input data.
-        :return: 3-tuple of ``pandas`` table, ``list`` of ``InteractionImpulse``, ``list`` of ``list`` of ``Impulse``; expanded data, list of expanded ``InteractionImpulse`` objects, list of lists of expanded ``Impulse`` objects, one list for each interaction.
+        :return: ``list`` of ``Impulse`` and/or ``ImpulseInteraction`` objects; non-IRF variables dominated by interaction.
         """
 
-        expanded_atomic_impulses = []
-        for x in self.irfs():
-            df, expanded_atomic_impulses_cur = x.expand_categorical(df)
-            expanded_atomic_impulses.append(expanded_atomic_impulses_cur)
-        expanded_interaction_impulses = [InteractionIRFNode(x) for x in itertools.product(*expanded_atomic_impulses)]
+        return [x for x in self.atomic_responses if type(x).__name__ != 'IRFNode']
 
-        return df, expanded_interaction_impulses, expanded_atomic_impulses
+    def add_rangf(self, rangf):
+        """
+        Add random grouping factor name to this interaction.
+
+        :param rangf: ``str``; random grouping factor name
+        :return: ``None``
+        """
+
+        if not isinstance(rangf, list):
+            rangf = [rangf]
+        for gf in rangf:
+            if gf not in self.rangf:
+                self.rangf.append(gf)
+
+        self.rangf = sorted(self.rangf, key=lambda x: (x is None, x))
 
 class IRFNode(object):
     """
@@ -1228,6 +1713,8 @@ class IRFNode(object):
         if self.p is not None:
             self.p.add_child(self)
 
+        self.interaction_list = []
+
     def add_child(self, t):
         """
         Add child to this node in the IRF tree
@@ -1269,6 +1756,42 @@ class IRFNode(object):
 
         self.rangf = sorted(self.rangf)
 
+    def add_interactions(self, response_interactions):
+        """
+        Add a ResponseInteraction object (or list of them) to this node.
+
+        :param response_interaction: ``ResponseInteraction`` or ``list`` of ``ResponseInteraction``; response interaction(s) to add
+        :return: ``None``
+        """
+
+        assert self.terminal() or response_interactions is None or len(response_interactions) == 0, 'Interactions cannot be added to non-terminal IRF nodes.'
+
+        if not isinstance(response_interactions, list):
+            response_interactions = [response_interactions]
+
+        for r in response_interactions:
+            assert type(r).__name__ == 'ResponseInteraction', 'All inputs to add_interactions() must be of type ResponseInteraction. Got type %s.' % type(r).__name__
+
+        interaction_list = self.interaction_list + response_interactions
+        self.interaction_list = sorted(list(set(interaction_list)), key = lambda x: x.name())
+
+    def interactions(self):
+        """
+        Return list of all response interactions used in this subtree, sorted by name.
+
+        :return: ``list`` of ``ResponseInteraction``
+        """
+
+        interaction_list = []
+
+        if self.terminal():
+            interaction_list += self.interaction_list
+        else:
+            for c in self.children:
+                interaction_list += c.interactions()
+
+        return sorted(list(set(interaction_list)), key = lambda x: x.name())
+
     def local_name(self):
         """
         Get descriptive name for this node, ignoring its position in the IRF tree.
@@ -1296,6 +1819,48 @@ class IRFNode(object):
         else:
             p_name = self.p.name() + '-'
         return p_name + self.local_name()
+
+    def irf_to_formula(self, rangf=None):
+        """
+        Generates a representation of this node's impulse response kernel in formula string syntax
+
+        :param rangf: random grouping factor for which to generate the stringification (fixed effects if rangf==None).
+
+        :return: ``str``; formula string representation of node
+        """
+
+        if self.family is None:
+            out = ''
+        else:
+            params = []
+            if self.irfID is not None:
+                params.append('irf_id=%s' % self.irfID)
+            if self.coefID is not None:
+                params.append('coef_id=%s' % self.coefID)
+            if rangf in self.rangf:
+                params.append('ran=T')
+            if self.cont:
+                params.append('cont=T')
+            if len(self.param_init) > 0:
+                params.append(', '.join(['%s=%s' % (x, self.param_init[x]) for x in self.param_init]))
+            if set(self.trainable) != set(Formula.irf_params(self.family)):
+                params.append('trainable=%s' % self.trainable)
+
+            if self.p is not None:
+                inner = self.p.irf_to_formula(rangf)
+            else:
+                inner = ''
+
+            if self.family != 'Terminal':
+                if inner != '' and len(params) > 0:
+                    inner = inner + ', ' + ', '.join(params)
+                elif len(params) > 0:
+                    inner = ', '.join(params)
+                out = self.family + '(' + inner + ')'
+            else:
+                out = inner
+
+        return out
 
     def irf_id(self):
         """
@@ -1423,6 +1988,29 @@ class IRFNode(object):
                 for imp in c.impulses():
                     if imp.name() not in [x.name() for x in out]:
                         out.append(imp)
+        return out
+
+    def impulses_from_response_interaction(self):
+        """
+        Get list of any impulses from response interactions associated with this node.
+
+        :return: ``list`` of ``Impulse``; impulses dominated by node.
+        """
+
+        out = []
+        if self.terminal():
+            out.append(self.impulse)
+            for interaction in self.interactions():
+                for response in interaction.responses():
+                    if not isinstance(response, IRFNode):
+                        if response.name() not in [x.name() for x in out]:
+                            out.append(response)
+        else:
+            for c in self.children:
+                for imp in c.impulses_from_response_interaction():
+                    if imp.name() not in [x.name() for x in out]:
+                        out.append(imp)
+
         return out
 
     def impulse_names(self):
@@ -1867,7 +2455,41 @@ class IRFNode(object):
         self_transformed = []
 
         if self.terminal():
-            if type(self.impulse).__name__ == 'InteractionImpulse':
+            interactions_by_name = {}
+            for interaction in self.interactions():
+                interactions = []
+                for response in interaction.responses():
+                    if isinstance(response, IRFNode):
+                        continue
+                    elif isinstance(response, ImpulseInteraction):
+                        expanded_atomic_responses = []
+                        for x in response.impulses():
+                            vals = sorted(df[x.id].unique()[1:])
+                            if x.categorical(df):
+                                expanded_atomic_responses.append([Impulse('_'.join([x.id, pythonize_string(str(val))]), ops=x.ops) for val in vals])
+                            else:
+                                expanded_atomic_responses.append([x])
+                        interactions += expanded_atomic_responses
+                    elif isinstance(response, Impulse):
+                        vals = sorted(df[response.id].unique()[1:])
+                        if response.categorical(df):
+                            interactions.append(
+                                [Impulse('_'.join([response.id, pythonize_string(str(val))]), ops=response.ops) for val in vals])
+                        else:
+                            interactions.append([x])
+                    else:
+                        raise ValueError('Unsupported type %s found in ResponseInteraction.' %type(response).__name__)
+
+                interactions = [ResponseInteraction(x) for x in itertools.product(*interactions)]
+
+                for interaction in interactions:
+                    if interaction.name() not in interactions_by_name:
+                        interactions_by_name[interaction.name()] = interaction
+
+            interactions = [interactions_by_name[x] for x in sorted(list(interactions_by_name.keys()))]
+            # interactions = []
+
+            if type(self.impulse).__name__ == 'ImpulseInteraction':
                 expanded_atomic_impulses = []
                 for x in self.impulse.impulses():
                     vals = sorted(df[x.id].unique()[1:])
@@ -1876,7 +2498,7 @@ class IRFNode(object):
                     else:
                         expanded_atomic_impulses.append([x])
 
-                new_impulses = [InteractionImpulse(x, ops=self.impulse.ops) for x in itertools.product(*expanded_atomic_impulses)]
+                new_impulses = [ImpulseInteraction(x, ops=self.impulse.ops) for x in itertools.product(*expanded_atomic_impulses)]
 
             elif self.impulse.categorical(df):
                 vals = sorted(df[self.impulse.id].unique()[1:])
@@ -1895,6 +2517,7 @@ class IRFNode(object):
                     param_init=self.param_init,
                     trainable=self.trainable
                 )
+                new_irf.add_interactions(interactions)
                 self_transformed.append(new_irf)
 
         elif self.family is None:
@@ -2006,7 +2629,7 @@ class IRFNode(object):
     def formula_terms(self):
         """
         Return data structure representing formula terms dominated by node, grouped by random grouping factor.
-        Key ``None`` represents this fixed portion of the model (no random grouping factor).
+        Key ``None`` represents the fixed portion of the model (no random grouping factor).
 
         :return: ``dict``; map from random grouping factors data structure representing formula terms.
             Data structure contains 2 fields, ``'impulses'`` containing impulses and ``'irf'`` containing IRF Nodes.
