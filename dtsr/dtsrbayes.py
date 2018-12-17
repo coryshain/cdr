@@ -479,6 +479,162 @@ class DTSRBayes(DTSR):
 
                 return coefficient, coefficient_summary
 
+    def initialize_interaction(self, interaction_ids=None, ran_gf=None):
+        if interaction_ids is None:
+            interaction_ids = self.interaction_names
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if ran_gf is None:
+                    if self.variational():
+                        # Posterior distribution
+                        interaction_q_loc = tf.Variable(
+                            tf.random_normal(
+                                [len(interaction_ids)],
+                                stddev=self.init_sd,
+                                dtype=self.FLOAT_TF
+                            ),
+                            name='interaction_q_loc'
+                        )
+
+                        interaction_q_scale = tf.Variable(
+                            tf.random_normal(
+                                [len(interaction_ids)],
+                                mean=self.coef_posterior_sd_init_unconstrained,
+                                stddev=self.init_sd,
+                                dtype=self.FLOAT_TF
+                            ),
+                            name='interaction_q_scale'
+                        )
+
+                        interaction_q = Normal(
+                            loc=interaction_q_loc,
+                            scale=tf.nn.softplus(interaction_q_scale),
+                            name='interaction_q'
+                        )
+                        interaction_summary = interaction_q.mean()
+
+                        if self.declare_priors_fixef:
+                            # Prior distribution
+                            interaction = Normal(
+                                sample_shape=[len(interaction_ids)],
+                                loc=0.,
+                                scale=self.coef_prior_sd_tf,
+                                name='interaction'
+                            )
+                            self.inference_map[interaction] = interaction_q
+                        else:
+                            interaction = interaction_q
+                    else:
+                        # Prior distribution
+                        interaction = Normal(
+                            sample_shape=[len(interaction_ids)],
+                            loc=0.,
+                            scale=self.coef_prior_sd_tf,
+                            name='interaction'
+                        )
+
+                        # Posterior distribution
+                        interaction_q_samples = tf.Variable(
+                            tf.zeros((self.n_samples, len(interaction_ids)), dtype=self.FLOAT_TF),
+                            name='interaction_q_samples'
+                        )
+                        interaction_q = Empirical(
+                            params=interaction_q_samples,
+                            name='interaction_q'
+                        )
+
+                        if self.inference_name == 'MetropolisHastings':
+                            # Proposal distribution
+                            interaction_proposal = Normal(
+                                loc=interaction,
+                                scale=self.mh_proposal_sd,
+                                name='interaction_proposal'
+                            )
+                            self.proposal_map[interaction] = interaction_proposal
+
+                        interaction_summary = interaction_q.params[self.global_batch_step - 1]
+
+                        self.inference_map[interaction] = interaction_q
+                else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+                    if self.variational():
+                        # Posterior distribution
+                        interaction_q_loc = tf.Variable(
+                            tf.random_normal(
+                                [rangf_n_levels, len(interaction_ids)],
+                                stddev=self.init_sd,
+                                dtype=self.FLOAT_TF
+                            ),
+                            name='interaction_q_loc_by_%s' % ran_gf
+                        )
+
+                        interaction_q_scale = tf.Variable(
+                            tf.random_normal(
+                                [rangf_n_levels, len(interaction_ids)],
+                                mean=self.coef_posterior_sd_init_unconstrained,
+                                stddev=self.init_sd,
+                                dtype=self.FLOAT_TF
+                            ),
+                            name='interaction_q_scale_by_%s' % ran_gf
+                        )
+
+                        interaction_q = Normal(
+                            loc=interaction_q_loc,
+                            scale=tf.nn.softplus(interaction_q_scale) * self.ranef_to_fixef_prior_sd_ratio,
+                            name='interaction_q_by_%s' % ran_gf
+                        )
+                        interaction_summary = interaction_q.mean()
+
+                        if self.declare_priors_ranef:
+                            # Prior distribution
+                            interaction = Normal(
+                                sample_shape=[rangf_n_levels, len(interaction_ids)],
+                                loc=0.,
+                                scale=self.coef_prior_sd_tf * self.ranef_to_fixef_prior_sd_ratio,
+                                name='interaction_by_%s' % ran_gf
+                            )
+                            self.inference_map[interaction] = interaction_q
+                        else:
+                            interaction = interaction_q
+
+                    else:
+                        # Prior distribution
+                        interaction = Normal(
+                            sample_shape=[rangf_n_levels, len(interaction_ids)],
+                            loc=0.,
+                            scale=self.coef_prior_sd_tf * self.ranef_to_fixef_prior_sd_ratio,
+                            name='interaction_by_%s' % ran_gf
+                        )
+
+                        # Posterior distribution
+                        interaction_q = Empirical(
+                            params=tf.Variable(
+                                tf.zeros(
+                                    (self.n_samples, rangf_n_levels, len(interaction_ids)),
+                                    dtype=self.FLOAT_TF
+                                ),
+                                name='interaction_q_by_%s_samples' % ran_gf
+                            ),
+                            name='interaction_q_by_%s' % ran_gf
+                        )
+
+                        if self.inference_name == 'MetropolisHastings':
+                            # Proposal distribution
+                            interaction_proposal = Normal(
+                                loc=interaction,
+                                scale=self.mh_proposal_sd,
+                                name='interaction_proposal_by_%s' % ran_gf
+                            )
+                            self.proposal_map[interaction] = interaction_proposal
+
+                        interaction_summary = interaction_q.params[self.global_batch_step - 1]
+
+                        self.inference_map[interaction] = interaction_q
+
+                self.MAP_map[interaction] = interaction_summary
+
+                return interaction, interaction_summary
+
     def initialize_irf_param_unconstrained(self, param_name, ids, mean=0., ran_gf=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():

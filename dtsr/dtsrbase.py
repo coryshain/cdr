@@ -187,6 +187,9 @@ class DTSR(object):
             self.src_node_table = t_src.node_table()
             self.src_coef_names = t_src.coef_names()
             self.src_fixed_coef_names = t_src.fixed_coef_names()
+            self.src_interaction_list = t_src.interactions()
+            self.src_interaction_names = t_src.interaction_names()
+            self.src_fixed_interaction_names = t_src.fixed_interaction_names()
             self.src_impulse_names = t_src.impulse_names()
             self.src_terminal_names = t_src.terminal_names()
             self.src_atomic_irf_names_by_family = t_src.atomic_irf_by_family()
@@ -203,8 +206,11 @@ class DTSR(object):
             self.src_terminal2coef = t_src.terminal2coef()
             self.src_impulse2terminal = t_src.impulse2terminal()
             self.src_terminal2impulse = t_src.terminal2impulse()
+            self.src_interaction2inputs = t_src.interactions2inputs()
             self.src_coef_by_rangf = t_src.coef_by_rangf()
+            self.src_interaction_by_rangf = t_src.interaction_by_rangf()
             self.src_irf_by_rangf = t_src.irf_by_rangf()
+            self.src_interactions_list = t_src.interactions()
 
             # Initialize PC tree metadata
             self.n_pc = len(self.src_impulse_names)
@@ -219,6 +225,9 @@ class DTSR(object):
             self.node_table = t.node_table()
             self.coef_names = t.coef_names()
             self.fixed_coef_names = t.fixed_coef_names()
+            self.interaction_list = t.interactions()
+            self.interaction_names = t.interaction_names()
+            self.fixed_interaction_names = t.fixed_interaction_names()
             self.impulse_names = t.impulse_names()
             self.terminal_names = t.terminal_names()
             self.atomic_irf_names_by_family = t.atomic_irf_by_family()
@@ -235,8 +244,11 @@ class DTSR(object):
             self.terminal2coef = t.terminal2coef()
             self.impulse2terminal = t.impulse2terminal()
             self.terminal2impulse = t.terminal2impulse()
+            self.interaction2inputs = t.interactions2inputs()
             self.coef_by_rangf = t.coef_by_rangf()
+            self.interaction_by_rangf = t.interaction_by_rangf()
             self.irf_by_rangf = t.irf_by_rangf()
+            self.interactions_list = t.interactions()
 
             # Compute names and indices of source impulses excluding rate term
             self.src_terminal_ix_norate = names2ix(self.src_impulse_names_norate, self.src_impulse_names)
@@ -281,6 +293,9 @@ class DTSR(object):
             self.node_table = t.node_table()
             self.coef_names = t.coef_names()
             self.fixed_coef_names = t.fixed_coef_names()
+            self.interaction_list = t.interactions()
+            self.interaction_names = t.interaction_names()
+            self.fixed_interaction_names = t.fixed_interaction_names()
             self.impulse_names = t.impulse_names()
             self.terminal_names = t.terminal_names()
             self.atomic_irf_names_by_family = t.atomic_irf_by_family()
@@ -297,8 +312,11 @@ class DTSR(object):
             self.terminal2coef = t.terminal2coef()
             self.impulse2terminal = t.impulse2terminal()
             self.terminal2impulse = t.terminal2impulse()
+            self.interaction2inputs = t.interactions2inputs()
             self.coef_by_rangf = t.coef_by_rangf()
+            self.interaction_by_rangf = t.interaction_by_rangf()
             self.irf_by_rangf = t.irf_by_rangf()
+            self.interactions_list = t.interactions()
 
         if self.log_random:
             self.summary_random_writers = {}
@@ -542,29 +560,44 @@ class DTSR(object):
     def _initialize_base_params(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
+
+                # FIXED EFFECTS
+
+                # Intercept
                 if self.has_intercept[None]:
                     if not self.covarying_fixef:
                         self.intercept_fixed_base, self.intercept_fixed_base_summary = self.initialize_intercept()
                 else:
                     self.intercept_fixed_base = tf.constant(0., dtype=self.FLOAT_TF, name='intercept')
-
-                coef_ids = self.fixed_coef_names
-                if len(coef_ids) > 0 and not self.covarying_fixef:
-                    self.coefficient_fixed_base, self.coefficient_fixed_base_summary = self.initialize_coefficient(coef_ids=coef_ids)
-
                 self.intercept_random_base = {}
                 self.intercept_random_base_summary = {}
 
-                self.coefficient_random_base = {}
-                self.coefficient_random_base_summary = {}
+                # Coefficients
+                coef_ids = self.fixed_coef_names
+                if len(coef_ids) > 0 and not self.covarying_fixef:
+                    self.coefficient_fixed_base, self.coefficient_fixed_base_summary = self.initialize_coefficient(coef_ids=coef_ids)
+                    self.coefficient_random_base = {}
+                    self.coefficient_random_base_summary = {}
+
+                # Interactions
+                if len(self.interaction_names) > 0:
+                    interaction_ids = self.fixed_interaction_names
+                    if len(interaction_ids) > 0 and not self.covarying_fixef:
+                        self.interaction_fixed_base, self.interaction_fixed_base_summary = self.initialize_interaction(interaction_ids=interaction_ids)
+                        self.interaction_random_base = {}
+                        self.interaction_random_base_summary = {}
+
+                # RANDOM EFFECTS
 
                 for i in range(len(self.rangf)):
                     gf = self.rangf[i]
 
+                    # Intercept
                     if self.has_intercept[gf]:
                         if not self.covarying_ranef:
                             self.intercept_random_base[gf], self.intercept_random_base_summary[gf] = self.initialize_intercept(ran_gf=gf)
 
+                    # Coefficients
                     coef_ids = self.coef_by_rangf.get(gf, [])
                     if len(coef_ids) > 0 and not self.covarying_ranef:
                         self.coefficient_random_base[gf], self.coefficient_random_base_summary[gf] = self.initialize_coefficient(
@@ -572,6 +605,16 @@ class DTSR(object):
                             ran_gf=gf,
                         )
 
+                    # Interactions
+                    interaction_ids = self.interaction_by_rangf.get(gf, [])
+                    if len(interaction_ids) > 0 and not self.covarying_ranef:
+                        self.interaction_random_base[gf], self.interaction_random_base_summary[
+                            gf] = self.initialize_interaction(
+                            interaction_ids=interaction_ids,
+                            ran_gf=gf,
+                        )
+
+                # All IRF parameters
                 for family in self.atomic_irf_names_by_family:
                     if family == 'DiracDelta':
                         continue
@@ -681,10 +724,13 @@ class DTSR(object):
                                 default = 0
                             self._initialize_base_irf_param(param_name, family, default=default)
 
-    def _initialize_intercepts_coefficients(self):
+    def _initialize_intercepts_coefficients_interactions(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
 
+                # FIXED EFFECTS
+
+                # Intercept
                 if self.has_intercept[None]:
                     self.intercept_fixed = self.intercept_fixed_base
                     self.intercept_fixed_summary = self.intercept_fixed_base_summary
@@ -699,6 +745,14 @@ class DTSR(object):
                 else:
                     self.intercept_fixed = self.intercept_fixed_base
 
+                self.intercept = self.intercept_fixed
+                self.intercept_summary = self.intercept_fixed_summary
+                self.intercept_random = {}
+                self.intercept_random_summary = {}
+                self.intercept_random_means = {}
+
+
+                # Coefficients
                 fixef_ix = names2ix(self.fixed_coef_names, self.coef_names)
 
                 coef_ids = self.coef_names
@@ -722,24 +776,48 @@ class DTSR(object):
                         collections=['params']
                     )
 
-                self.intercept = self.intercept_fixed
-                self.intercept_summary = self.intercept_fixed_summary
                 self.coefficient = self.coefficient_fixed
-                self.coefficient_summary = self.coefficient_fixed_summary
-
-                self.intercept_random = {}
-                self.intercept_random_summary = {}
-                self.intercept_random_means = {}
                 self.coefficient_random = {}
                 self.coefficient_random_summary = {}
                 self.coefficient_random_means = {}
-
                 self.coefficient = tf.expand_dims(self.coefficient, 0)
+
+                # Interactions
+                fixef_ix = names2ix(self.fixed_interaction_names, self.interaction_names)
+                if len(self.interaction_names) > 0:
+                    interaction_ids = self.interaction_names
+                    self.interaction_fixed = self._scatter_along_axis(
+                        fixef_ix,
+                        self.interaction_fixed_base,
+                        [len(interaction_ids)]
+                    )
+                    self.interaction_fixed_summary = self._scatter_along_axis(
+                        fixef_ix,
+                        self.interaction_fixed_base_summary,
+                        [len(interaction_ids)]
+                    )
+                    self._regularize(self.interaction_fixed, type='coefficient', var_name='interaction')
+                    self._add_convergence_tracker(self.interaction_fixed_summary, 'interaction_fixed')
+
+                    for i in range(len(self.interaction_names)):
+                        tf.summary.scalar(
+                            sn('interaction' + '/%s' % self.interaction_names[i]),
+                            self.interaction_fixed_summary[i],
+                            collections=['params']
+                        )
+                    self.interaction = self.interaction_fixed
+                    self.interaction_random = {}
+                    self.interaction_random_summary = {}
+                    self.interaction_random_means = {}
+                    self.interaction = tf.expand_dims(self.interaction, 0)
+
+                # RANDOM EFFECTS
 
                 for i in range(len(self.rangf)):
                     gf = self.rangf[i]
                     levels_ix = np.arange(self.rangf_n_levels[i] - 1)
 
+                    # Random intercepts
                     if self.has_intercept[gf]:
                         intercept_random = self.intercept_random_base[gf]
                         intercept_random_summary = self.intercept_random_base_summary[gf]
@@ -779,6 +857,7 @@ class DTSR(object):
                                 collections=['random']
                             )
 
+                    # Random coefficients
                     coefs = self.coef_by_rangf.get(gf, [])
                     if len(coefs) > 0:
                         coef_ix = names2ix(coefs, self.coef_names)
@@ -831,6 +910,61 @@ class DTSR(object):
                                     coefficient_random_summary[:, ix],
                                     collections=['random']
                                 )
+                                
+                    # Random interactions
+                    if len(self.interaction_names) > 0:
+                        interactions = self.interaction_by_rangf.get(gf, [])
+                        if len(interactions) > 0:
+                            interaction_ix = names2ix(interactions, self.interaction_names)
+
+                            interaction_random = self.interaction_random_base[gf]
+                            interaction_random_summary = self.interaction_random_base_summary[gf]
+
+                            interaction_random_means = tf.reduce_mean(interaction_random, axis=0, keepdims=True)
+                            interaction_random_summary_means = tf.reduce_mean(interaction_random_summary, axis=0, keepdims=True)
+
+                            interaction_random -= interaction_random_means
+                            interaction_random_summary -= interaction_random_summary_means
+                            self._regularize(interaction_random, type='ranef', var_name='interaction_by_%s' % gf)
+
+                            interaction_random = self._scatter_along_axis(
+                                interaction_ix,
+                                self._scatter_along_axis(
+                                    levels_ix,
+                                    interaction_random,
+                                    [self.rangf_n_levels[i], len(interactions)]
+                                ),
+                                [self.rangf_n_levels[i], len(self.interaction_names)],
+                                axis=1
+                            )
+                            interaction_random_summary = self._scatter_along_axis(
+                                interaction_ix,
+                                self._scatter_along_axis(
+                                    levels_ix,
+                                    interaction_random_summary,
+                                    [self.rangf_n_levels[i], len(interactions)]
+                                ),
+                                [self.rangf_n_levels[i], len(self.interaction_names)],
+                                axis=1
+                            )
+
+                            self.interaction_random[gf] = interaction_random
+                            self.interaction_random_summary[gf] = interaction_random_summary
+                            self.interaction_random_means[gf] = tf.reduce_mean(interaction_random_summary, axis=0)
+
+                            self._add_convergence_tracker(self.interaction_random_summary[gf], 'interaction_by_%s' % gf)
+
+                            self.interaction += tf.gather(interaction_random, self.gf_y[:, i], axis=0)
+
+                            if self.log_random:
+                                for j in range(len(interactions)):
+                                    interaction_name = interactions[j]
+                                    ix = interaction_ix[j]
+                                    tf.summary.histogram(
+                                        sn('by_%s/interaction/%s' % (gf, interaction_name)),
+                                        interaction_random_summary[:, ix],
+                                        collections=['random']
+                                    )
 
     def _initialize_irf_lambdas(self):
 
@@ -1461,6 +1595,8 @@ class DTSR(object):
         with self.sess.as_default():
             with self.sess.graph.as_default():
 
+                # FIXED EFFECTS
+
                 if self.covarying_fixef:
                     joint_fixed_means = []
                     joint_fixed_sds = []
@@ -1468,18 +1604,30 @@ class DTSR(object):
 
                     i = 0
 
+                    # Intercept
                     if self.has_intercept[None]:
                         joint_fixed_means.append(tf.expand_dims(self.intercept_init_tf, axis=0))
                         joint_fixed_sds.append(tf.expand_dims(self.intercept_joint_sd, axis=0))
                         joint_fixed_ix['intercept'] = (i, i + 1)
                         i += 1
 
+                    # Coefficients
                     coef_ids = self.fixed_coef_names
-                    joint_fixed_means.append(tf.zeros((len(coef_ids), ), dtype=self.FLOAT_TF))
-                    joint_fixed_sds.append(tf.ones((len(coef_ids), ), dtype=self.FLOAT_TF) * self.coef_joint_sd)
-                    joint_fixed_ix['coefficient'] = (i, i + len(coef_ids))
-                    i += len(coef_ids)
+                    if len(coef_ids) > 0:
+                        joint_fixed_means.append(tf.zeros((len(coef_ids), ), dtype=self.FLOAT_TF))
+                        joint_fixed_sds.append(tf.ones((len(coef_ids), ), dtype=self.FLOAT_TF) * self.coef_joint_sd)
+                        joint_fixed_ix['coefficient'] = (i, i + len(coef_ids))
+                        i += len(coef_ids)
 
+                    # Interactions
+                    interaction_ids = self.fixed_interaction_names
+                    if len(interaction_ids) > 0:
+                        joint_fixed_means.append(tf.zeros((len(interaction_ids),), dtype=self.FLOAT_TF))
+                        joint_fixed_sds.append(tf.ones((len(interaction_ids),), dtype=self.FLOAT_TF) * self.coef_joint_sd)
+                        joint_fixed_ix['interaction'] = (i, i + len(interaction_ids))
+                        i += len(interaction_ids)
+
+                    # IRF Parameters
                     for family in sorted(list(self.atomic_irf_names_by_family.keys())):
                         if family not in joint_fixed_ix:
                             joint_fixed_ix[family] = {}
@@ -1518,6 +1666,8 @@ class DTSR(object):
 
                     self.joint_fixed_ix = joint_fixed_ix
 
+                # RANDOM EFFECTS
+
                 if self.covarying_ranef:
                     joint_random = {}
                     joint_random_summary = {}
@@ -1533,18 +1683,29 @@ class DTSR(object):
 
                         i = 0
 
+                        # Intercepts
                         if self.has_intercept[gf]:
                             joint_random_means[gf].append(tf.zeros([n_levels,], dtype=self.FLOAT_TF))
                             joint_random_sds[gf].append(tf.ones([n_levels,], dtype=self.FLOAT_TF) * self.intercept_joint_sd)
                             joint_random_ix[gf]['intercept'] = (i, i + n_levels)
                             i += n_levels
 
+                        # Coefficients
                         coef_ids = self.coef_by_rangf.get(gf, [])
                         if len(coef_ids) > 0:
                             joint_random_means[gf].append(tf.zeros([n_levels * len(coef_ids)], dtype=self.FLOAT_TF))
                             joint_random_sds[gf].append(tf.ones([n_levels * len(coef_ids)], dtype=self.FLOAT_TF) * self.coef_joint_sd)
                             joint_random_ix[gf]['coefficient'] = (i, i + n_levels * len(coef_ids))
                             i += n_levels * len(coef_ids)
+
+                        # Interactions
+                        interaction_ids = self.interaction_by_rangf.get(gf, [])
+                        if len(interaction_ids) > 0:
+                            joint_random_means[gf].append(tf.zeros([n_levels * len(interaction_ids)], dtype=self.FLOAT_TF))
+                            joint_random_sds[gf].append(
+                                tf.ones([n_levels * len(interaction_ids)], dtype=self.FLOAT_TF) * self.coef_joint_sd)
+                            joint_random_ix[gf]['interaction'] = (i, i + n_levels * len(interaction_ids))
+                            i += n_levels * len(interaction_ids)
 
                         for family in sorted(list(self.atomic_irf_names_by_family.keys())):
                             for param_name in Formula.irf_params(family):
@@ -1604,6 +1765,10 @@ class DTSR(object):
                     self.coefficient_fixed_base = self.joint_fixed[s:e]
                     self.coefficient_fixed_base_summary = self.joint_fixed_summary[s:e]
 
+                    s, e = self.joint_fixed_ix['interaction']
+                    self.interaction_fixed_base = self.joint_fixed[s:e]
+                    self.interaction_fixed_base_summary = self.joint_fixed_summary[s:e]
+
                     for family in sorted(list(self.atomic_irf_names_by_family.keys())):
                         if family not in self.irf_params_fixed_base:
                             self.irf_params_fixed_base[family] = {}
@@ -1643,6 +1808,22 @@ class DTSR(object):
                             self.coefficient_random_base_summary[gf] = tf.reshape(
                                 self.joint_random_summary[gf][s:e],
                                 [rangf_n_levels, len(coef_ids)]
+                            )
+
+                        interaction_ids = self.interaction_by_rangf.get(gf, [])
+                        if len(interaction_ids) > 0:
+                            if gf not in self.interaction_random_base:
+                                self.interaction_random_base[gf] = {}
+                            if gf not in self.interaction_random_base_summary:
+                                self.interaction_random_base_summary[gf] = {}
+                            s, e = self.joint_random_ix[gf]['interaction']
+                            self.interaction_random_base[gf] = tf.reshape(
+                                self.joint_random[gf][s:e],
+                                [rangf_n_levels, len(interaction_ids)]
+                            )
+                            self.interaction_random_base_summary[gf] = tf.reshape(
+                                self.joint_random_summary[gf][s:e],
+                                [rangf_n_levels, len(interaction_ids)]
                             )
 
                         if gf not in self.irf_params_random_base:
@@ -1703,6 +1884,18 @@ class DTSR(object):
                 parameter_table_fixed_values.append(
                     tf.gather(self.coefficient_fixed, names2ix(self.fixed_coef_names, self.coef_names))
                 )
+                if len(self.fixed_interaction_names) > 0:
+                    for interaction_name in self.fixed_interaction_names:
+                        interaction_name_str = interaction_name.split('-')
+                        if len(interaction_name_str) > 1:
+                            interaction_name_str = ' '.join(interaction_name_str[:-1])
+                        else:
+                            interaction_name_str = interaction_name_str[0]
+                        interaction_name_str = sn('interaction_' + interaction_name_str)
+                        parameter_table_fixed_keys.append(interaction_name_str)
+                    parameter_table_fixed_values.append(
+                        tf.gather(self.interaction_fixed, names2ix(self.fixed_interaction_names, self.interaction_names))
+                    )
                 for irf_id in self.irf_params_fixed:
                     family = self.atomic_irf_family_by_name[irf_id]
                     for param in self.atomic_irf_param_trainable_by_family[family][irf_id]:
@@ -1764,6 +1957,29 @@ class DTSR(object):
                                         )
                                     )
                                 )
+                        if len(self.interaction_names) > 0:
+                            if gf in self.interaction_random:
+                                interaction_names = self.interaction_by_rangf.get(gf, [])
+                                for interaction_name in interaction_names:
+                                    interaction_ix = names2ix(interaction_name, self.interaction_names)
+                                    interaction_name_str = interaction_name.split('-')
+                                    if len(interaction_name_str) > 1:
+                                        interaction_name_str = ' '.join(interaction_name_str[:-1])
+                                    else:
+                                        interaction_name_str = interaction_name_str[0]
+                                    interaction_name_str = sn('interaction_' + interaction_name_str)
+                                    for level in levels:
+                                        parameter_table_random_keys.append(interaction_name_str)
+                                        parameter_table_random_rangf.append(gf)
+                                        parameter_table_random_rangf_levels.append(level)
+                                    parameter_table_random_values.append(
+                                        tf.squeeze(
+                                            tf.gather(
+                                                tf.gather(self.interaction_random[gf], interaction_ix, axis=1),
+                                                levels_ix
+                                            )
+                                        )
+                                    )
                         if gf in self.irf_params_random:
                             for irf_id in self.irf_params_random[gf]:
                                 family = self.atomic_irf_family_by_name[irf_id]
@@ -1802,6 +2018,9 @@ class DTSR(object):
                         means.append(tf.expand_dims(self.intercept_random_means[gf], 0))
                     for gf in sorted(list(self.coefficient_random_means.keys())):
                         means.append(self.coefficient_random_means[gf])
+                    if len(self.interaction_names) > 0:
+                        for gf in sorted(list(self.interaction_random_means.keys())):
+                            means.append(self.interaction_random_means[gf])
                     for gf in sorted(list(self.irf_params_random_means.keys())):
                         for family in sorted(list(self.irf_params_random_means[gf].keys())):
                             for param_name in sorted(list(self.irf_params_random_means[gf][family].keys())):
@@ -1836,11 +2055,11 @@ class DTSR(object):
                     assert not t.name() in self.irf_plot, 'Duplicate IRF node name already in self.irf_plot'
                     self.irf_plot[t.name()] = {
                         'atomic': {
-                            'scaled': self.irf_plot[t.p.name()]['atomic']['unscaled'] * tf.gather(self.coefficient_summary, coef_ix),
+                            'scaled': self.irf_plot[t.p.name()]['atomic']['unscaled'] * tf.gather(self.coefficient_fixed_summary, coef_ix),
                             'unscaled': self.irf_plot[t.p.name()]['atomic']['unscaled']
                         },
                         'composite': {
-                            'scaled': self.irf_plot[t.p.name()]['composite']['unscaled'] * tf.gather(self.coefficient_summary, coef_ix),
+                            'scaled': self.irf_plot[t.p.name()]['composite']['unscaled'] * tf.gather(self.coefficient_fixed_summary, coef_ix),
                             'unscaled': self.irf_plot[t.p.name()]['composite']['unscaled']
                         }
                     }
@@ -2096,6 +2315,66 @@ class DTSR(object):
 
                             self.convolutions[name] = tf.reduce_sum(impulse * irf_seq, axis=1)
 
+    def _initialize_interactions(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if len(self.interaction_names) > 0:
+                    interaction_ix = np.arange(len(self.interaction_names))
+                    interaction_coefs = tf.gather(self.interaction, interaction_ix, axis=1)
+                    interaction_inputs = []
+                    for interaction in self.interaction_list:
+                        irf_input_names = [x.name() for x in interaction.irf_responses()]
+                        if len(irf_input_names) > 0:
+                            irf_input_ix = names2ix(irf_input_names, self.terminal_names)
+                            irf_inputs = tf.gather(self.X_conv, irf_input_ix, axis=1)
+                            irf_inputs = tf.reduce_prod(irf_inputs, axis=1)
+                        else:
+                            irf_inputs = 1
+
+                        non_irf_input_names = [x.name() for x in interaction.non_irf_responses()]
+                        if len(non_irf_input_names):
+                            non_irf_input_ix = names2ix(non_irf_input_names, self.impulse_names)
+                            non_irf_inputs = tf.gather(self.X, non_irf_input_ix, axis=1)
+                            non_irf_inputs = tf.reduce_prod(non_irf_inputs, axis=1)
+                        else:
+                            non_irf_inputs = 1
+
+                        inputs = irf_inputs * non_irf_inputs
+
+                        interaction_inputs.append(inputs)
+                    interaction_inputs = tf.stack(interaction_inputs, axis=1)
+                    print(interaction_inputs.shape)
+                    self.summed_interactions = tf.reduce_sum(interaction_coefs * interaction_inputs, axis=1)
+
+    def _initialize_interaction_plots(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                for i, interaction in enumerate(self.interaction_names):
+                    interaction_ix = [i]
+                    estimate = self.dd_support * tf.gather(self.interaction_fixed, interaction_ix)
+                    self.irf_mc[interaction] = {
+                        'atomic': {
+                            'scaled': estimate,
+                            'unscaled': estimate
+                        },
+                        'composite': {
+                            'scaled': estimate,
+                            'unscaled': estimate
+                        }
+                    }
+
+                    estimate = self.dd_support * tf.gather(self.interaction_fixed_summary, interaction_ix)
+                    self.irf_plot[interaction] = {
+                        'atomic': {
+                            'scaled': estimate,
+                            'unscaled': estimate
+                        },
+                        'composite': {
+                            'scaled': estimate,
+                            'unscaled': estimate
+                        }
+                    }
+
     def _construct_network(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -2115,7 +2394,15 @@ class DTSR(object):
                 coef = tf.gather(self.coefficient, coef_ix, axis=1)
                 self.X_conv_scaled = self.X_conv*coef
 
-                self.out = self.intercept + tf.reduce_sum(self.X_conv_scaled, axis=1)
+                out = self.intercept + tf.reduce_sum(self.X_conv_scaled, axis=1)
+
+                if len(self.interaction_names) > 0:
+                    self._initialize_interactions()
+                    self._initialize_interaction_plots()
+                    out += self.summed_interactions
+
+                self.out = out
+                # Hack needed for MAP evaluation of DTSRBayes
                 self.out_mean = self.out
 
     def _initialize_optimizer(self, name):
@@ -2250,6 +2537,19 @@ class DTSR(object):
         :param coef_ids: ``list`` of ``str``: List of coefficient IDs
         :param ran_gf: ``str`` or ``None``: Name of random grouping factor for random coefficient (if ``None``, constructs a fixed coefficient)
         :return: 2-tuple of ``Tensor`` ``(coefficient, coefficient_summary)``; ``coefficient`` is the coefficient for use by the model. ``coefficient_summary`` is an identically-shaped representation of the current coefficient values for logging and plotting (can be identical to ``coefficient``). For fixed coefficients, should return a vector of ``len(coef_ids)`` trainable weights. For random coefficients, should return batch-length matrix of trainable weights with ``len(coef_ids)`` columns for each input in the batch. Weights should be initialized around 0.
+        """
+
+        raise NotImplementedError
+
+    def initialize_interaction(self, interaction_ids=None, ran_gf=None):
+        """
+        Add (response-level) interactions.
+        This method must be implemented by subclasses of ``DTSR`` and should only be called at model initialization.
+        Correct model behavior is not guaranteed if called at any other time.
+
+        :param coef_ids: ``list`` of ``str``: List of interaction IDs
+        :param ran_gf: ``str`` or ``None``: Name of random grouping factor for random interaction (if ``None``, constructs a fixed interaction)
+        :return: 2-tuple of ``Tensor`` ``(interaction, interaction_summary)``; ``interaction`` is the interaction for use by the model. ``interaction_summary`` is an identically-shaped representation of the current interaction values for logging and plotting (can be identical to ``interaction``). For fixed interactions, should return a vector of ``len(interaction_ids)`` trainable weights. For random interactions, should return batch-length matrix of trainable weights with ``len(interaction_ids)`` columns for each input in the batch. Weights should be initialized around 0.
         """
 
         raise NotImplementedError
@@ -2550,8 +2850,8 @@ class DTSR(object):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.plots = {}
-                irf_names = [x for x in self.node_table if x in self.irf_plot and not (len(self.node_table[x].children) == 1 and self.node_table[x].children[0].terminal())]
-                irf_names_terminal = [x for x in self.node_table if x in self.irf_plot and self.node_table[x].terminal()]
+                irf_names = [x for x in self.node_table if x in self.irf_plot and not (len(self.node_table[x].children) == 1 and self.node_table[x].children[0].terminal())] + self.interaction_names
+                irf_names_terminal = [x for x in self.node_table if x in self.irf_plot and self.node_table[x].terminal()] + self.interaction_names
 
                 for a in switches[0]:
                     if a not in self.plots:
@@ -3133,7 +3433,7 @@ class DTSR(object):
                 self._initialize_base_params()
                 self._initialize_joint_distributions()
                 self._initialize_joint_distribution_slices()
-                self._initialize_intercepts_coefficients()
+                self._initialize_intercepts_coefficients_interactions()
                 self._initialize_irf_lambdas()
                 self._initialize_irf_params()
                 self._initialize_parameter_tables()
