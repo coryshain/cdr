@@ -2737,6 +2737,21 @@ class IRFNode(object):
         if self.terminal():
             if self.impulse.id in impulse_ids:
                 self.fixed = False
+            else:
+                for interaction in self.interactions():
+                    if None in interaction.rangf:
+                        ids = []
+                        for response in interaction.responses():
+                            if isinstance(response, IRFNode):
+                                ids.append(response.impulse.id)
+                            elif isinstance(response, ImpulseInteraction):
+                                for subresponse in response.impulses():
+                                    ids.append(subresponse.impulse.id)
+                            else:
+                                ids.append(response.id)
+                        ids = ':'.join(ids)
+                        if ids in impulse_ids:
+                            interaction.atomic_responses = [x for x in interaction.atomic_responses if x is not None]
         else:
             for c in self.children:
                 c.ablate_impulses(impulse_ids)

@@ -2322,7 +2322,8 @@ class DTSR(object):
                     interaction_ix = np.arange(len(self.interaction_names))
                     interaction_coefs = tf.gather(self.interaction, interaction_ix, axis=1)
                     interaction_inputs = []
-                    for interaction in self.interaction_list:
+                    for i, interaction in enumerate(self.interaction_list):
+                        assert interaction.name() == self.interaction_names[i], 'Mismatched sort order between self.interaction_names and self.interaction_list. This should not have happened, so please report it in issue tracker on Github.'
                         irf_input_names = [x.name() for x in interaction.irf_responses()]
                         if len(irf_input_names) > 0:
                             irf_input_ix = names2ix(irf_input_names, self.terminal_names)
@@ -2343,7 +2344,6 @@ class DTSR(object):
 
                         interaction_inputs.append(inputs)
                     interaction_inputs = tf.stack(interaction_inputs, axis=1)
-                    print(interaction_inputs.shape)
                     self.summed_interactions = tf.reduce_sum(interaction_coefs * interaction_inputs, axis=1)
 
     def _initialize_interaction_plots(self):
