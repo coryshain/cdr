@@ -2325,24 +2325,25 @@ class DTSR(object):
                     for i, interaction in enumerate(self.interaction_list):
                         assert interaction.name() == self.interaction_names[i], 'Mismatched sort order between self.interaction_names and self.interaction_list. This should not have happened, so please report it in issue tracker on Github.'
                         irf_input_names = [x.name() for x in interaction.irf_responses()]
+
+                        inputs_cur = None
+
                         if len(irf_input_names) > 0:
                             irf_input_ix = names2ix(irf_input_names, self.terminal_names)
                             irf_inputs = tf.gather(self.X_conv, irf_input_ix, axis=1)
-                            irf_inputs = tf.reduce_prod(irf_inputs, axis=1)
-                        else:
-                            irf_inputs = 1
+                            inputs_cur = tf.reduce_prod(irf_inputs, axis=1)
 
                         non_irf_input_names = [x.name() for x in interaction.non_irf_responses()]
                         if len(non_irf_input_names):
                             non_irf_input_ix = names2ix(non_irf_input_names, self.impulse_names)
-                            non_irf_inputs = tf.gather(self.X, non_irf_input_ix, axis=1)
+                            non_irf_inputs = tf.gather(self.X[:,-1,:], non_irf_input_ix, axis=1)
                             non_irf_inputs = tf.reduce_prod(non_irf_inputs, axis=1)
-                        else:
-                            non_irf_inputs = 1
+                            if inputs_cur is not None:
+                                inputs_cur *= non_irf_inputs
+                            else:
+                                inputs_cur = non_irf_inputs
 
-                        inputs = irf_inputs * non_irf_inputs
-
-                        interaction_inputs.append(inputs)
+                        interaction_inputs.append(inputs_cur)
                     interaction_inputs = tf.stack(interaction_inputs, axis=1)
                     self.summed_interactions = tf.reduce_sum(interaction_coefs * interaction_inputs, axis=1)
 
