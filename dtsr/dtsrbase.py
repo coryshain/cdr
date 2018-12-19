@@ -5155,13 +5155,14 @@ class DTSR(object):
 
                 return out
 
-    def save_parameter_table(self, random=True, level=95, n_samples=None):
+    def save_parameter_table(self, random=True, level=95, n_samples=None, outfile=None):
         """
         Save space-delimited parameter table to the model's output directory.
 
         :param random: Include random parameters.
         :param level: ``float``; significance level for credible intervals if model is Bayesian, ignored otherwise.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param outfile: ``str``; Path to output file. If ``None``, use model defaults.
         :return: ``None``
         """
 
@@ -5183,5 +5184,10 @@ class DTSR(object):
             axis=0
             )
 
-        parameter_table.to_csv(self.outdir + '/dtsr_parameters.csv', index=False)
+        if args.outfile:
+            outfile = self.outdir + '/dtsr_parameters.csv'
+        else:
+            outfile = args.outfile
+
+        parameter_table.to_csv(outfile, index=False)
 
