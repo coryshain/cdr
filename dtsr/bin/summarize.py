@@ -55,7 +55,7 @@ if __name__ == '__main__':
                 else:
                     outname = p.outdir + '/' + m + '/dtsr_parameters.csv'
 
-                dtsr_model.save_parameter_table(level=args.level, nsamples=args.nsamples, outfile=outname)
+                dtsr_model.save_parameter_table(level=args.level, n_samples=args.nsamples, outfile=outname)
 
             dtsr_model.finalize()
 

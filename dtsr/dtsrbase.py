@@ -297,7 +297,6 @@ class DTSR(object):
             self.interaction_names = t.interaction_names()
             self.fixed_interaction_names = t.fixed_interaction_names()
             self.impulse_names = t.impulse_names(include_interactions=True)
-            print(self.impulse_names)
             self.terminal_names = t.terminal_names()
             self.atomic_irf_names_by_family = t.atomic_irf_by_family()
             self.atomic_irf_family_by_name = {}
@@ -1875,24 +1874,14 @@ class DTSR(object):
                         tf.expand_dims(self.intercept_fixed, axis=0)
                     )
                 for coef_name in self.fixed_coef_names:
-                    coef_name_str = coef_name.split('-')
-                    if len(coef_name_str) > 1:
-                        coef_name_str = ' '.join(coef_name_str[:-1])
-                    else:
-                        coef_name_str = coef_name_str[0]
-                    coef_name_str = sn('coefficient_' + coef_name_str)
+                    coef_name_str = 'coefficient_' + coef_name
                     parameter_table_fixed_keys.append(coef_name_str)
                 parameter_table_fixed_values.append(
                     tf.gather(self.coefficient_fixed, names2ix(self.fixed_coef_names, self.coef_names))
                 )
                 if len(self.fixed_interaction_names) > 0:
                     for interaction_name in self.fixed_interaction_names:
-                        interaction_name_str = interaction_name.split('-')
-                        if len(interaction_name_str) > 1:
-                            interaction_name_str = ' '.join(interaction_name_str[:-1])
-                        else:
-                            interaction_name_str = interaction_name_str[0]
-                        interaction_name_str = sn('interaction_' + interaction_name_str)
+                        interaction_name_str = 'interaction_' + interaction_name
                         parameter_table_fixed_keys.append(interaction_name_str)
                     parameter_table_fixed_values.append(
                         tf.gather(self.interaction_fixed, names2ix(self.fixed_interaction_names, self.interaction_names))
@@ -1901,13 +1890,7 @@ class DTSR(object):
                     family = self.atomic_irf_family_by_name[irf_id]
                     for param in self.atomic_irf_param_trainable_by_family[family][irf_id]:
                         param_ix = names2ix(param, Formula.irf_params(family))
-                        irf_id_str = irf_id.split('-')
-                        if len(irf_id_str) > 1:
-                            irf_id_str = ' '.join(irf_id_str[:-1])
-                        else:
-                            irf_id_str = irf_id_str[0]
-                        irf_id_str = sn(irf_id_str)
-                        parameter_table_fixed_keys.append(param + '_' + irf_id_str)
+                        parameter_table_fixed_keys.append(param + '_' + irf_id)
                         parameter_table_fixed_values.append(
                             tf.squeeze(
                                 tf.gather(self.irf_params_fixed[irf_id], param_ix, axis=1),
@@ -1940,12 +1923,7 @@ class DTSR(object):
                             coef_names = self.coef_by_rangf.get(gf, [])
                             for coef_name in coef_names:
                                 coef_ix = names2ix(coef_name, self.coef_names)
-                                coef_name_str = coef_name.split('-')
-                                if len(coef_name_str) > 1:
-                                    coef_name_str = ' '.join(coef_name_str[:-1])
-                                else:
-                                    coef_name_str = coef_name_str[0]
-                                coef_name_str = sn('coefficient_' + coef_name_str)
+                                coef_name_str = 'coefficient_' + coef_name
                                 for level in levels:
                                     parameter_table_random_keys.append(coef_name_str)
                                     parameter_table_random_rangf.append(gf)
@@ -1963,12 +1941,7 @@ class DTSR(object):
                                 interaction_names = self.interaction_by_rangf.get(gf, [])
                                 for interaction_name in interaction_names:
                                     interaction_ix = names2ix(interaction_name, self.interaction_names)
-                                    interaction_name_str = interaction_name.split('-')
-                                    if len(interaction_name_str) > 1:
-                                        interaction_name_str = ' '.join(interaction_name_str[:-1])
-                                    else:
-                                        interaction_name_str = interaction_name_str[0]
-                                    interaction_name_str = sn('interaction_' + interaction_name_str)
+                                    interaction_name_str = 'interaction_' + interaction_name
                                     for level in levels:
                                         parameter_table_random_keys.append(interaction_name_str)
                                         parameter_table_random_rangf.append(gf)
@@ -1986,14 +1959,8 @@ class DTSR(object):
                                 family = self.atomic_irf_family_by_name[irf_id]
                                 for param in self.atomic_irf_param_trainable_by_family[family][irf_id]:
                                     param_ix = names2ix(param, Formula.irf_params(family))
-                                    irf_id_str = irf_id.split('-')
-                                    if len(irf_id_str) > 1:
-                                        irf_id_str = ' '.join(irf_id_str[:-1])
-                                    else:
-                                        irf_id_str = irf_id_str[0]
-                                    irf_id_str = sn(irf_id_str)
                                     for level in levels:
-                                        parameter_table_random_keys.append(param + '_' + irf_id_str)
+                                        parameter_table_random_keys.append(param + '_' + irf_id)
                                         parameter_table_random_rangf.append(gf)
                                         parameter_table_random_rangf_levels.append(level)
                                     parameter_table_random_values.append(
@@ -5184,10 +5151,10 @@ class DTSR(object):
             axis=0
             )
 
-        if args.outfile:
-            outfile = self.outdir + '/dtsr_parameters.csv'
+        if outfile:
+            outname = self.outdir + '/dtsr_parameters.csv'
         else:
-            outfile = args.outfile
+            outname = outfile
 
-        parameter_table.to_csv(outfile, index=False)
+        parameter_table.to_csv(outname, index=False)
 
