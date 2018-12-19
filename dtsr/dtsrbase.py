@@ -781,6 +781,7 @@ class DTSR(object):
                 self.coefficient_random_summary = {}
                 self.coefficient_random_means = {}
                 self.coefficient = tf.expand_dims(self.coefficient, 0)
+                coefficient_fixed = self.coefficient
 
                 # Interactions
                 fixef_ix = names2ix(self.fixed_interaction_names, self.interaction_names)
@@ -810,6 +811,7 @@ class DTSR(object):
                     self.interaction_random_summary = {}
                     self.interaction_random_means = {}
                     self.interaction = tf.expand_dims(self.interaction, 0)
+                    interaction_fixed = self.interaction
 
                 # RANDOM EFFECTS
 
@@ -1426,7 +1428,7 @@ class DTSR(object):
                 param_random_summary_by_rangf = {}
 
                 if len(irf_by_rangf) > 0:
-                    for i, gf in enumerate(irf_by_rangf):
+                   for i, gf in enumerate(self.rangf):
                         irf_ids_ran = [x for x in irf_by_rangf[gf] if param_name in trainable[x]]
                         if len(irf_ids_ran):
                             irfs_ix = names2ix(irf_by_rangf[gf], irf_ids)
@@ -1434,7 +1436,7 @@ class DTSR(object):
 
                             param_random = self._center_and_constrain(
                                 self.irf_params_random_base[gf][family][param_name],
-                                tf.gather(param, irfs_ix, axis=1),
+                                tf.gather(param_fixed, irfs_ix, axis=1),
                                 lb=param_lb,
                                 ub=param_ub
                             )
