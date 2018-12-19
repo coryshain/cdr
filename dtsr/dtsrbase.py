@@ -105,7 +105,7 @@ class DTSR(object):
         self.max_tdelta = (t_delta).max()
 
         if self.pc:
-            self.src_impulse_names_norate = list(filter(lambda x: x != 'rate', self.form.t.impulse_names()))
+            self.src_impulse_names_norate = list(filter(lambda x: x != 'rate', self.form.t.impulse_names(include_interactions=True)))
             _, self.eigenvec, self.eigenval, self.impulse_means, self.impulse_sds = pca(X[self.src_impulse_names_norate])
         else:
             self.eigenvec = self.eigenval = self.impulse_means = self.impulse_sds = None
@@ -190,7 +190,7 @@ class DTSR(object):
             self.src_interaction_list = t_src.interactions()
             self.src_interaction_names = t_src.interaction_names()
             self.src_fixed_interaction_names = t_src.fixed_interaction_names()
-            self.src_impulse_names = t_src.impulse_names()
+            self.src_impulse_names = t_src.impulse_names(include_interactions=True)
             self.src_terminal_names = t_src.terminal_names()
             self.src_atomic_irf_names_by_family = t_src.atomic_irf_by_family()
             self.src_atomic_irf_family_by_name = {}
@@ -228,7 +228,7 @@ class DTSR(object):
             self.interaction_list = t.interactions()
             self.interaction_names = t.interaction_names()
             self.fixed_interaction_names = t.fixed_interaction_names()
-            self.impulse_names = t.impulse_names()
+            self.impulse_names = t.impulse_names(include_interactions=True)
             self.terminal_names = t.terminal_names()
             self.atomic_irf_names_by_family = t.atomic_irf_by_family()
             self.atomic_irf_family_by_name = {}
@@ -296,7 +296,8 @@ class DTSR(object):
             self.interaction_list = t.interactions()
             self.interaction_names = t.interaction_names()
             self.fixed_interaction_names = t.fixed_interaction_names()
-            self.impulse_names = t.impulse_names()
+            self.impulse_names = t.impulse_names(include_interactions=True)
+            print(self.impulse_names)
             self.terminal_names = t.terminal_names()
             self.atomic_irf_names_by_family = t.atomic_irf_by_family()
             self.atomic_irf_family_by_name = {}

@@ -969,7 +969,10 @@ class Formula(object):
             else:
                 raise ValueError('Unrecognized term "%s" in model formula' %impulse.id)
         else:
-            df, expanded_impulses = impulse.expand_categorical(df)
+            if type(impulse).__name__ == 'ImpulseInteraction':
+                df, expanded_impulses, _ = impulse.expand_categorical(df)
+            else:
+                df, expanded_impulses = impulse.expand_categorical(df)
 
         for x in expanded_impulses:
             if x.name() not in df.columns:
@@ -1146,8 +1149,7 @@ class Formula(object):
 
         if self.dv not in y.columns:
             y = self.apply_ops(self.dv_term, y)
-        impulses = self.t.impulses()
-        impulses += self.t.impulses_from_response_interaction()
+        impulses = self.t.impulses(include_interactions=True)
         impulses = sorted(list(set(impulses)), key=lambda x: x.name())
 
         if X_2d_predictor_names is None:
@@ -1205,10 +1207,21 @@ class Formula(object):
                     X = self.apply_ops(x, X)
 
             if type(impulse).__name__ == 'ImpulseInteraction':
-                X = self.apply_ops(impulse, X)
+                response_aligned = False
+                for x in impulse.impulses():
+                    if x.id not in X.columns:
+                        response_aligned = True
+                        break
+                if response_aligned:
+                    if impulse.name() not in X_response_aligned_predictor_names:
+                        X_response_aligned_predictor_names.append(impulse.name())
+                        X_response_aligned_predictors = self.apply_ops(impulse, X_response_aligned_predictors)
+                else:
+                    X = self.apply_ops(impulse, X)
 
         for col in [x for x in X.columns if spillover.match(x)]:
             X[col] = X[col].fillna(0)
+
         return X, y, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors
 
     def ablate_impulses(self, impulse_ids):
@@ -2060,9 +2073,11 @@ class IRFNode(object):
         """
         return Formula.instantaneous(self.family)
 
-    def impulses(self):
+    def impulses(self, include_interactions=False):
         """
         Get list of impulses dominated by node.
+    
+        :param include_interactions: ``bool``; whether to return impulses defined by interaction terms.
 
         :return: ``list`` of ``Impulse``; impulses dominated by node.
         """
@@ -2070,9 +2085,24 @@ class IRFNode(object):
         out = []
         if self.terminal():
             out.append(self.impulse)
+            if include_interactions:
+                for interaction in self.interactions():
+                    for response in interaction.responses():
+                        if isinstance(response, IRFNode):
+                            if response.impulse.name() not in [x.name() for x in out]:
+                                out.append(response)
+                        elif isinstance(response, ImpulseInteraction):
+                            for subresponse in response.atomic_impulses():
+                                if subresponse.name() not in [x.name() for x in out]:
+                                    out.append(subresponse)
+                        elif isinstance(response, Impulse):
+                            if response.name() not in [x.name() for x in out]:
+                                out.append(response)
+                        else:
+                            raise ValueError('Unsupported type "%s" for input to interaction' % type(response).__name__)
         else:
             for c in self.children:
-                for imp in c.impulses():
+                for imp in c.impulses(include_interactions=include_interactions):
                     if imp.name() not in [x.name() for x in out]:
                         out.append(imp)
         return out
@@ -2100,14 +2130,16 @@ class IRFNode(object):
 
         return out
 
-    def impulse_names(self):
+    def impulse_names(self, include_interactions=False):
         """
         Get list of names of impulses dominated by node.
 
+        :param include_interactions: ``bool``; whether to return impulses defined by interaction terms.
+       
         :return: ``list`` of ``str``; names of impulses dominated by node.
         """
 
-        return [x.name() for x in self.impulses()]
+        return [x.name() for x in self.impulses(include_interactions=include_interactions)]
 
     def impulses_by_name(self):
         """
@@ -2582,8 +2614,8 @@ class IRFNode(object):
                 for response in interaction.responses():
                     if isinstance(response, Impulse):
                         if not response.name() in expansion_map:
-                            vals = sorted(df[response.id].unique()[1:])
                             if response.categorical(df):
+                                vals = sorted(df[response.id].unique()[1:])
                                 expansion = [Impulse('_'.join([response.id, pythonize_string(str(val))]), ops=response.ops) for val in vals]
                             else:
                                 expansion = [response]
@@ -2591,8 +2623,8 @@ class IRFNode(object):
                     elif isinstance(response, ImpulseInteraction):
                         for subresponse in response.impulses():
                             if not subresponse.name() in expansion_map:
-                                vals = sorted(df[subresponse.id].unique()[1:])
                                 if subresponse.categorical(df):
+                                    vals = sorted(df[subresponse.id].unique()[1:])
                                     expansion = [
                                         Impulse('_'.join([subresponse.id, pythonize_string(str(val))]), ops=subresponse.ops)
                                         for val in vals]
@@ -2604,8 +2636,8 @@ class IRFNode(object):
                 expanded_atomic_impulses = []
                 for x in self.impulse.impulses():
                     if x.name() not in expansion_map:
-                        vals = sorted(df[x.id].unique()[1:])
                         if x.categorical(df):
+                            vals = sorted(df[x.id].unique()[1:])
                             expansion = [Impulse('_'.join([x.id, pythonize_string(str(val))]), ops=x.ops) for val in vals]
                         else:
                             expansion = [x]
@@ -2618,8 +2650,8 @@ class IRFNode(object):
             else:
                 if not self.impulse.name() in expansion_map:
                     if self.impulse.categorical(df):
-                        vals = sorted(df[self.impulse.id].unique()[1:])
                         if self.impulse.categorical(df):
+                            vals = sorted(df[self.impulse.id].unique()[1:])
                             expansion = [Impulse('_'.join([self.impulse.id, pythonize_string(str(val))]), ops=self.impulse.ops) for val in vals]
                         else:
                             expansion = [self.impulse]
