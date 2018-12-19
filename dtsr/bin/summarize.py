@@ -15,6 +15,7 @@ if __name__ == '__main__':
     argparser.add_argument('-l', '--level', type=float, default = 95., help='Level (in percent) for any credible intervals (DTSRBayes only).')
     argparser.add_argument('-n', '--nsamples', type=int, default = None, help='Number of MC samples to use for computing statistics (DTSRBayes only). If unspecified, uses model default (**n_samples_eval** parameter).')
     argparser.add_argument('-t', '--timeunits', type=float, default = None, help='Number of time units over which to compute effect size integrals. If unspecified, uses longest timespan attested in training.')
+    argparser.add_argument('-T', '--save_table', action='store_true', help='Save CSV table of model parameters.')
     argparser.add_argument('-p', '--prefix', type=str, default = None, help='String to prepend to output file.')
     args, unknown = argparser.parse_known_args()
 
@@ -47,6 +48,9 @@ if __name__ == '__main__':
             with open(outname, 'w') as f:
                 f.write(summary)
             sys.stderr.write(summary)
+
+            if args.save_table:
+                dtsr_model.save_parameter_table(level=args.level, nsamples=args.nsamples)
 
             dtsr_model.finalize()
 
