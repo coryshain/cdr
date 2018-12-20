@@ -2929,27 +2929,43 @@ class DTSR(object):
                 return max_delta_ix, max_delta, double_delta_at_max_delta
 
     def _collect_plots(self):
-        switches = [['atomic', 'composite'], ['scaled', 'unscaled']]
+        switches = [['atomic', 'composite'], ['scaled', 'unscaled'], ['dirac', 'nodirac']]
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.plots = {}
-                irf_names = [x for x in self.node_table if x in self.irf_plot and not (len(self.node_table[x].children) == 1 and self.node_table[x].children[0].terminal())] # + self.interaction_names
-                irf_names_terminal = [x for x in self.node_table if x in self.irf_plot and self.node_table[x].terminal()] # + self.interaction_names
+                irf_names = [x for x in self.node_table if x in self.irf_plot and not (len(self.node_table[x].children) == 1 and self.node_table[x].children[0].terminal())]
+                irf_names_nodirac = [x for x in irf_names if not x.startswith('DiracDelta')]
+                irf_names_terminal = [x for x in self.node_table if x in self.irf_plot and self.node_table[x].terminal()]
+                irf_names_terminal_nodirac = [x for x in irf_names_terminal if not x.startswith('DiracDelta')]
+
 
                 for a in switches[0]:
                     if a not in self.plots:
                         self.plots[a] = {}
                     for b in switches[1]:
-                        plot_y = []
-                        names = irf_names if b == 'unscaled' else irf_names_terminal
-                        for x in names:
-                            plot_y.append(self.irf_plot[x][a][b])
+                        self.plots[a][b] = {}
+                        for c in switches[2]:
+                            plot_y = []
 
-                        self.plots[a][b] = {
-                            'names': names,
-                            'plot': plot_y
-                        }
+                            if b == 'unscaled':
+                                if c == 'dirac':
+                                    names = irf_names
+                                else:
+                                    names = irf_names_nodirac
+                            else:
+                                if c == 'dirac':
+                                    names = irf_names_terminal
+                                else:
+                                    names = irf_names_terminal_nodirac
+
+                            for x in names:
+                                plot_y.append(self.irf_plot[x][a][b])
+
+                            self.plots[a][b][c] = {
+                                'names': names,
+                                'plot': plot_y
+                            }
 
                 if self.pc:
                     self.src_plot_tensors = {}
@@ -2960,16 +2976,28 @@ class DTSR(object):
                         if a not in self.src_plot_tensors:
                             self.src_plot_tensors[a] = {}
                         for b in switches[1]:
-                            plot_y = []
-                            names = irf_names if b == 'unscaled' else irf_names_terminal
+                            self.plots[a][b] = {}
+                            for c in switches[2]:
+                                plot_y = []
 
-                            for x in names:
-                                plot_y.append(self.src_irf_plot[x][a][b])
+                                if b == 'unscaled':
+                                    if c == 'dirac':
+                                        names = irf_names
+                                    else:
+                                        names = irf_names_nodirac
+                                else:
+                                    if c == 'dirac':
+                                        names = irf_names_terminal
+                                    else:
+                                        names = irf_names_terminal_nodirac
 
-                            self.src_plot_tensors[a][b] = {
-                                'names': names,
-                                'plot': plot_y
-                            }
+                                for x in names:
+                                    plot_y.append(self.src_irf_plot[x][a][b])
+
+                                self.src_plot_tensors[a][b][c] = {
+                                    'names': names,
+                                    'plot': plot_y
+                                }
 
     def _regularize(self, var, center=None, type=None, var_name=None):
         assert type in [None, 'intercept', 'coefficient', 'irf', 'ranef']
@@ -4857,6 +4885,7 @@ class DTSR(object):
             summed=False,
             irf_name_map=None,
             irf_ids=None,
+            plot_dirac=False,
             plot_n_time_units=2.5,
             plot_n_time_points=1000,
             plot_x_inches=6.,
@@ -4889,6 +4918,7 @@ class DTSR(object):
             If ``None``, IRF tree node string ID's will be used.
         :param summed: ``bool``; whether to plot individual IRFs or their sum.
         :param irf_ids: ``list`` or ``None``; list of irf ID's to plot. If ``None``, all IRF's are plotted.
+        :param plot_dirac: ``bool``; include any linear Dirac delta IRF's (stick functions at t=0) in plot.
         :param plot_n_time_units: ``float``; number if time units to use for plotting.
         :param plot_n_time_points: ``float``; number of points to use for plotting.
         :param plot_x_inches: ``int``; width of plot in inches.
@@ -4910,6 +4940,11 @@ class DTSR(object):
 
         if len(self.terminal_names) == 0:
             return
+
+        if plot_dirac:
+            dirac = 'dirac'
+        else:
+            dirac = 'nodirac'
 
         if prefix is None:
             prefix = ''
@@ -4942,7 +4977,7 @@ class DTSR(object):
                                 plot_name = 'irf_%s_%s_summed_%d.png' %(a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'irf_%s_%s_summed.png' %(a, b)
                             else:
                                 plot_name = 'irf_%s_%s_%d.png' %(a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'irf_%s_%s.png' %(a, b)
-                            names = self.plots[a][b]['names']
+                            names = self.plots[a][b][dirac]['names']
                             if irf_ids is not None and len(irf_ids) > 0:
                                 new_names = []
                                 for i, name in enumerate(names):
@@ -4988,7 +5023,7 @@ class DTSR(object):
                                     plot_name = 'mc_' + plot_name
 
                                 else:
-                                    plot_y = [self.sess.run(self.plots[a][b]['plot'][i], feed_dict=fd) for i in range(len(self.plots[a][b]['plot'])) if self.plots[a][b]['names'][i] in names]
+                                    plot_y = [self.sess.run(self.plots[a][b][dirac]['plot'][i], feed_dict=fd) for i in range(len(self.plots[a][b][dirac]['plot'])) if self.plots[a][b][dirac]['names'][i] in names]
                                     lq = None
                                     uq = None
                                     plot_y = np.concatenate(plot_y, axis=1)
@@ -5028,7 +5063,7 @@ class DTSR(object):
                                         plot_name = 'src_irf_%s_%s_summed_%d.png' % (a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'src_irf_%s_%s_summed.png' % (a, b)
                                     else:
                                         plot_name = 'src_irf_%s_%s_%d.png' % (a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'src_irf_%s_%s.png' % (a, b)
-                                    names = self.src_plot_tensors[a][b]['names']
+                                    names = self.src_plot_tensors[a][b][dirac]['names']
                                     if irf_ids is not None and len(irf_ids) > 0:
                                         new_names = []
                                         for i, name in enumerate(names):
@@ -5075,7 +5110,7 @@ class DTSR(object):
                                             plot_name = 'mc_' + plot_name
 
                                         else:
-                                            plot_y = [self.sess.run(self.src_plot_tensors[a][b]['plot'][i], feed_dict=fd) for i in range(len(self.src_plot_tensors[a][b]['plot'])) if self.src_plot_tensors[a][b]['names'][i] in names]
+                                            plot_y = [self.sess.run(self.src_plot_tensors[a][b][dirac]['plot'][i], feed_dict=fd) for i in range(len(self.src_plot_tensors[a][b][dirac]['plot'])) if self.src_plot_tensors[a][b][dirac]['names'][i] in names]
                                             lq = None
                                             uq = None
                                             plot_y = np.concatenate(plot_y, axis=1)
