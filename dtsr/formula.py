@@ -2793,8 +2793,10 @@ class IRFNode(object):
                             else:
                                 ids.append(response.id)
                         ids = ':'.join(ids)
+                        print(ids)
                         if ids in impulse_ids:
-                            interaction.atomic_responses = [x for x in interaction.atomic_responses if x is not None]
+                            interaction.rangf.remove(None)
+                            print(interaction.rangf)
         else:
             for c in self.children:
                 c.ablate_impulses(impulse_ids)
