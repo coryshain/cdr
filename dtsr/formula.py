@@ -1165,6 +1165,7 @@ class Formula(object):
                 to_process = impulse.impulses()
             else:
                 to_process = [impulse]
+
             for x in to_process:
                 if x.is_2d:
                     if time_mask is None:
@@ -2091,9 +2092,9 @@ class IRFNode(object):
                     for response in interaction.responses():
                         if isinstance(response, IRFNode):
                             if response.impulse.name() not in [x.name() for x in out]:
-                                out.append(response)
+                                out.append(response.impulse)
                         elif isinstance(response, ImpulseInteraction):
-                            for subresponse in response.atomic_impulses():
+                            for subresponse in response.impulses():
                                 if subresponse.name() not in [x.name() for x in out]:
                                     out.append(subresponse)
                         elif isinstance(response, Impulse):
