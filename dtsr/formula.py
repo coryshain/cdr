@@ -1815,11 +1815,19 @@ class IRFNode(object):
         if not isinstance(response_interactions, list):
             response_interactions = [response_interactions]
 
+        new_interactions = []
+        cur_interaction_names = [x.name() for x in self.interaction_list]
         for r in response_interactions:
             assert type(r).__name__ == 'ResponseInteraction', 'All inputs to add_interactions() must be of type ResponseInteraction. Got type %s.' % type(r).__name__
-            # assert r.contains_member(self), 'Attempted to add a response interaction %s of which IRF is not a member to IRF %s' %(r.name(), self.name())
+            if r.name() in cur_interaction_names:
+                ix = cur_interaction_names.index(r.name())
+                old_interaction = self.interaction_list[ix]
+                for gf in r.rangf:
+                    old_interaction.add_rangf(gf)
+            else:
+                new_interactions.append(r)
 
-        interaction_list = self.interaction_list + response_interactions
+        interaction_list = self.interaction_list + new_interactions
         self.interaction_list = sorted(list(set(interaction_list)), key = lambda x: x.name())
 
     def interactions(self):
@@ -2715,6 +2723,7 @@ class IRFNode(object):
             new_interactions = []
 
             for old_interaction in old_interactions:
+                old_rangf = old_interaction.rangf[:]
                 expanded_interaction = []
                 for response in old_interaction.responses():
                     if isinstance(response, ImpulseInteraction):
@@ -2727,7 +2736,7 @@ class IRFNode(object):
                     else:
                         expansion = expansion_map[response.name()]
                         expanded_interaction.append(expansion)
-                expanded_interaction = [ResponseInteraction(x) for x in itertools.product(*expanded_interaction)]
+                expanded_interaction = [ResponseInteraction(x, rangf=old_rangf) for x in itertools.product(*expanded_interaction)]
                 new_interactions += expanded_interaction
             for interaction in new_interactions:
                 for irf in interaction.irf_responses():
