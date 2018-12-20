@@ -26,6 +26,211 @@ pd.options.mode.chained_assignment = None
 #
 ######################################################
 
+def get_session(session):
+    if session is None:
+        sess = tf.get_default_session()
+    else:
+        sess = session
+
+    return sess
+
+def exponential_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            pdf = tf.contrib.distributions.Exponential(rate=params[:, 0:1]).prob
+            return lambda x: pdf(x + epsilon)
+
+
+def gamma_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            pdf = tf.contrib.distributions.Gamma(
+                concentration=params[:, 0:1],
+                rate=params[:, 1:2],
+                validate_args=validate_irf_args
+            ).prob
+            return lambda x: pdf(x + epsilon)
+
+
+def shifted_gamma_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            pdf = tf.contrib.distributions.Gamma(
+                concentration=params[:, 0:1],
+                rate=params[:, 1:2],
+                validate_args=validate_irf_args
+            ).prob
+            return lambda x: pdf(x - params[:, 2:3] + epsilon)
+
+
+def normal_irf(params, session=None):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            pdf = tf.contrib.distributions.Normal(loc=params[:, 0:1], scale=params[:, 1:2]).prob
+            return lambda x: pdf(x)
+
+
+def skew_normal_irf(params, session=None):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            mu = params[:, 0:1]
+            sigma = params[:, 1:2]
+            alpha = params[:, 2:3]
+            stdnorm = tf.contrib.distributions.Normal(loc=0., scale=1.)
+            stdnorm_pdf = stdnorm.prob
+            stdnorm_cdf = stdnorm.cdf
+            return lambda x: 2 / sigma * stdnorm_pdf((x - mu) / sigma) * stdnorm_cdf(alpha * (x - mu) / sigma)
+
+
+def emg_irf(params, session=None):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            mu = params[:, 0:1]
+            sigma = params[:, 1:2]
+            L = params[:, 2:3]
+            return lambda x: L / 2 * tf.exp(0.5 * L * (2. * mu + L * sigma ** 2. - 2. * x)) * tf.erfc(
+                (mu + L * sigma ** 2 - x) / (tf.sqrt(2.) * sigma))
+
+
+def beta_prime_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            alpha = params[:, 1:2]
+            beta = params[:, 2:3]
+            return lambda x: (x + epsilon) ** (alpha - 1.) * (1. + (x + epsilon)) ** (
+                        -alpha - beta) / tf.exp(
+                tf.lbeta(tf.transpose(tf.stack([alpha, beta], axis=0))))
+
+
+def shifted_beta_prime_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            alpha = params[:, 0:1]
+            beta = params[:, 1:2]
+            delta = params[:, 2:3]
+            return lambda x: (x - delta + epsilon) ** (alpha - 1) * (1 + (x - delta + epsilon)) ** (
+                    -alpha - beta) / tf.exp(
+                tf.lbeta(tf.transpose(tf.stack([alpha, beta], axis=0))))
+
+
+def double_gamma_1_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            beta = params[:, 1:2]
+
+            pdf_main = tf.contrib.distributions.Gamma(
+                concentration=6.,
+                rate=beta,
+                validate_args=validate_irf_args
+            ).prob
+            pdf_undershoot = tf.contrib.distributions.Gamma(
+                concentration=16.,
+                rate=beta,
+                validate_args=validate_irf_args
+            ).prob
+
+            return lambda x: pdf_main(x + epsilon) - 1. / 6. * pdf_undershoot(x + epsilon)
+
+
+def double_gamma_2_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            alpha = params[:, 0:1]
+            beta = params[:, 1:2]
+
+            pdf_main = tf.contrib.distributions.Gamma(
+                concentration=alpha,
+                rate=beta,
+                validate_args=validate_irf_args
+            ).prob
+            pdf_undershoot = tf.contrib.distributions.Gamma(
+                concentration=alpha + 10,
+                rate=beta,
+                validate_args=validate_irf_args
+            ).prob
+
+            return lambda x: pdf_main(x + epsilon) - 1. / 6. * pdf_undershoot(x + epsilon)
+
+
+def double_gamma_3_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            alpha = params[:, 0:1]
+            beta = params[:, 1:2]
+            c = params[:, 2:3]
+
+            pdf_main = tf.contrib.distributions.Gamma(
+                concentration=alpha,
+                rate=beta,
+                validate_args=validate_irf_args
+            ).prob
+            pdf_undershoot = tf.contrib.distributions.Gamma(
+                concentration=alpha + 10,
+                rate=beta,
+                validate_args=validate_irf_args
+            ).prob
+
+            return lambda x: pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)
+
+
+def double_gamma_4_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            alpha_main = params[:, 0:1]
+            alpha_undershoot = params[:, 1:2]
+            beta = params[:, 2:3]
+            c = params[:, 3:4]
+
+            pdf_main = tf.contrib.distributions.Gamma(
+                concentration=alpha_main,
+                rate=beta,
+                validate_args=validate_irf_args
+            ).prob
+            pdf_undershoot = tf.contrib.distributions.Gamma(
+                concentration=alpha_undershoot,
+                rate=beta,
+                validate_args=validate_irf_args
+            ).prob
+
+            return lambda x: pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)
+
+
+def double_gamma_5_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            alpha_main = params[:, 0:1]
+            alpha_undershoot = params[:, 1:2]
+            beta_main = params[:, 2:3]
+            beta_undershoot = params[:, 3:4]
+            c = params[:, 4:5]
+
+            pdf_main = tf.contrib.distributions.Gamma(
+                concentration=alpha_main,
+                rate=beta_main,
+                validate_args=validate_irf_args
+            ).prob
+            pdf_undershoot = tf.contrib.distributions.Gamma(
+                concentration=alpha_undershoot,
+                rate=beta_undershoot,
+                validate_args=validate_irf_args
+            ).prob
+
+            return lambda x: pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)
+
+
 class DTSR(object):
 
     _INITIALIZATION_KWARGS = DTSR_INITIALIZATION_KWARGS
@@ -971,19 +1176,22 @@ class DTSR(object):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 def exponential(params):
-                    pdf = tf.contrib.distributions.Exponential(rate=params[:,0:1]).prob
-                    return lambda x: pdf(x + self.epsilon)
+                    return lambda x: exponential_irf(
+                        params,
+                        session=self.sess,
+                        epsilon=self.epsilon
+                    )(x)
 
                 self.irf_lambdas['Exp'] = exponential
                 self.irf_lambdas['ExpRateGT1'] = exponential
 
                 def gamma(params):
-                    pdf = tf.contrib.distributions.Gamma(
-                        concentration=params[:,0:1],
-                        rate=params[:,1:2],
-                        validate_args=self.validate_irf_args
-                    ).prob
-                    return lambda x: pdf(x + self.epsilon)
+                    return lambda x: gamma_irf(
+                        params,
+                        session=self.sess,
+                        epsilon=self.epsilon,
+                        validate_irf_args=self.validate_irf_args
+                    )(x)
 
                 self.irf_lambdas['Gamma'] = gamma
                 self.irf_lambdas['SteepGamma'] = gamma
@@ -992,203 +1200,108 @@ class DTSR(object):
                 self.irf_lambdas['HRFSingleGamma'] = gamma
 
                 def shifted_gamma(params):
-                    pdf = tf.contrib.distributions.Gamma(
-                        concentration=params[:,0:1],
-                        rate=params[:,1:2],
-                        validate_args=self.validate_irf_args
-                    ).prob
-                    return lambda x: pdf(x - params[:,2:3] + self.epsilon)
+                    return lambda x: shifted_gamma_irf(
+                        params,
+                        session=self.sess,
+                        epsilon=self.epsilon,
+                        validate_irf_args=self.validate_irf_args
+                    )(x)
 
                 self.irf_lambdas['ShiftedGamma'] = shifted_gamma
                 self.irf_lambdas['ShiftedGammaShapeGT1'] = shifted_gamma
                 self.irf_lambdas['ShiftedGammaKgt1'] = shifted_gamma
 
                 def normal(params):
-                    pdf = tf.contrib.distributions.Normal(loc=params[:,0:1], scale=params[:,1:2]).prob
-                    return lambda x: pdf(x)
+                    return lambda x: normal_irf(
+                        params,
+                        session=self.sess
+                    )(x)
 
                 self.irf_lambdas['Normal'] = normal
 
                 def skew_normal(params):
-                    mu = params[:,0:1]
-                    sigma = params[:,1:2]
-                    alpha = params[:,2:3]
-                    stdnorm = tf.contrib.distributions.Normal(loc=0., scale=1.)
-                    stdnorm_pdf = stdnorm.prob
-                    stdnorm_cdf = stdnorm.cdf
-                    return lambda x: 2 / sigma * stdnorm_pdf((x - mu) / sigma) * stdnorm_cdf(alpha * (x - mu) / sigma)
+                    return lambda x: skew_normal_irf(
+                        params,
+                        session=self.sess
+                    )(x)
 
                 self.irf_lambdas['SkewNormal'] = skew_normal
 
                 def emg(params):
-                    mu = params[:,0:1]
-                    sigma = params[:,1:2]
-                    L = params[:,2:3]
-                    return lambda x: L / 2 * tf.exp(0.5 * L * (2. * mu + L * sigma ** 2. - 2. * x)) * tf.erfc(
-                        (mu + L * sigma ** 2 - x) / (tf.sqrt(2.) * sigma))
+                    return lambda x: emg_irf(
+                        params,
+                        session=self.sess
+                    )(x)
 
                 self.irf_lambdas['EMG'] = emg
 
                 def beta_prime(params):
-                    alpha = params[:,1:2]
-                    beta = params[:,2:3]
-                    return lambda x: (x + self.epsilon) ** (alpha - 1.) * (1. + (x + self.epsilon)) ** (-alpha - beta) / tf.exp(
-                        tf.lbeta(tf.transpose(tf.stack([alpha, beta], axis=0))))
+                    return lambda x: beta_prime_irf(
+                        params,
+                        session=self.sess,
+                        epsilon=self.epsilon
+                    )(x)
 
                 self.irf_lambdas['BetaPrime'] = beta_prime
 
                 def shifted_beta_prime(params):
-                    alpha = params[:,0:1]
-                    beta = params[:,1:2]
-                    delta = params[:,2:3]
-                    return lambda x: (x - delta + self.epsilon) ** (alpha - 1) * (1 + (x - delta + self.epsilon)) ** (
-                    -alpha - beta) / tf.exp(
-                        tf.lbeta(tf.transpose(tf.stack([alpha, beta], axis=0))))
+                    return lambda x: shifted_beta_prime_irf(
+                        params,
+                        session=self.sess,
+                        epsilon=self.epsilon
+                    )(x)
 
                 self.irf_lambdas['ShiftedBetaPrime'] = shifted_beta_prime
 
-                def double_gamma(params):
-                    alpha_main = params[:, 0:1]
-                    beta = params[:, 1:2]
-                    alpha_undershoot_offset = params[:, 2:3]
-                    c = params[:, 3:4]
-
-                    pdf_main = tf.contrib.distributions.Gamma(
-                        concentration=alpha_main,
-                        rate=beta,
-                        validate_args=self.validate_irf_args
-                    ).prob
-                    pdf_undershoot = tf.contrib.distributions.Gamma(
-                        concentration=alpha_main + alpha_undershoot_offset,
-                        rate=beta,
-                        validate_args=self.validate_irf_args
-                    ).prob
-
-                    return lambda x: pdf_main(x + self.epsilon) - c * pdf_undershoot(x + self.epsilon)
-
-                self.irf_lambdas['HRFDoubleGamma'] = double_gamma
-
                 def double_gamma_1(params):
-                    beta = params[:, 1:2]
-
-                    pdf_main = tf.contrib.distributions.Gamma(
-                        concentration=6.,
-                        rate=beta,
-                        validate_args=self.validate_irf_args
-                    ).prob
-                    pdf_undershoot = tf.contrib.distributions.Gamma(
-                        concentration=16.,
-                        rate=beta,
-                        validate_args=self.validate_irf_args
-                    ).prob
-
-                    return lambda x: pdf_main(x + self.epsilon) - 1. / 6. * pdf_undershoot(x + self.epsilon)
+                    return lambda x: double_gamma_1_irf(
+                        params,
+                        session=self.sess,
+                        epsilon=self.epsilon,
+                        validate_irf_args=self.validate_irf_args
+                    )(x)
 
                 self.irf_lambdas['HRFDoubleGamma1'] = double_gamma_1
 
                 def double_gamma_2(params):
-                    alpha = params[:, 0:1]
-                    beta = params[:, 1:2]
-
-                    pdf_main = tf.contrib.distributions.Gamma(
-                        concentration=alpha,
-                        rate=beta,
-                        validate_args=self.validate_irf_args
-                    ).prob
-                    pdf_undershoot = tf.contrib.distributions.Gamma(
-                        concentration=alpha + 10,
-                        rate=beta,
-                        validate_args=self.validate_irf_args
-                    ).prob
-
-                    return lambda x: pdf_main(x + self.epsilon) - 1. / 6. * pdf_undershoot(x + self.epsilon)
+                    return lambda x: double_gamma_2_irf(
+                        params,
+                        session=self.sess,
+                        epsilon=self.epsilon,
+                        validate_irf_args=self.validate_irf_args
+                    )(x)
 
                 self.irf_lambdas['HRFDoubleGamma2'] = double_gamma_2
 
                 def double_gamma_3(params):
-                    alpha = params[:, 0:1]
-                    beta = params[:, 1:2]
-                    c = params[:, 2:3]
-
-                    pdf_main = tf.contrib.distributions.Gamma(
-                        concentration=alpha,
-                        rate=beta,
-                        validate_args=self.validate_irf_args
-                    ).prob
-                    pdf_undershoot = tf.contrib.distributions.Gamma(
-                        concentration=alpha + 10,
-                        rate=beta,
-                        validate_args=self.validate_irf_args
-                    ).prob
-
-                    return lambda x: pdf_main(x + self.epsilon) - c * pdf_undershoot(x + self.epsilon)
+                    return lambda x: double_gamma_3_irf(
+                        params,
+                        session=self.sess,
+                        epsilon=self.epsilon,
+                        validate_irf_args=self.validate_irf_args
+                    )(x)
 
                 self.irf_lambdas['HRFDoubleGamma3'] = double_gamma_3
 
                 def double_gamma_4(params):
-                    alpha_main = params[:, 0:1]
-                    alpha_undershoot = params[:, 1:2]
-                    beta = params[:, 2:3]
-                    c = params[:, 3:4]
-
-                    pdf_main = tf.contrib.distributions.Gamma(
-                        concentration=alpha_main,
-                        rate=beta,
-                        validate_args=self.validate_irf_args
-                    ).prob
-                    pdf_undershoot = tf.contrib.distributions.Gamma(
-                        concentration=alpha_undershoot,
-                        rate=beta,
-                        validate_args=self.validate_irf_args
-                    ).prob
-
-                    return lambda x: pdf_main(x + self.epsilon) - c * pdf_undershoot(x + self.epsilon)
+                    return lambda x: double_gamma_4_irf(
+                        params,
+                        session=self.sess,
+                        epsilon=self.epsilon,
+                        validate_irf_args=self.validate_irf_args
+                    )(x)
 
                 self.irf_lambdas['HRFDoubleGamma4'] = double_gamma_4
 
                 def double_gamma_5(params):
-                    alpha_main = params[:, 0:1]
-                    alpha_undershoot = params[:, 1:2]
-                    beta_main = params[:, 2:3]
-                    beta_undershoot = params[:, 3:4]
-                    c = params[:, 4:5]
-
-                    pdf_main = tf.contrib.distributions.Gamma(
-                        concentration=alpha_main,
-                        rate=beta_main,
-                        validate_args=self.validate_irf_args
-                    ).prob
-                    pdf_undershoot = tf.contrib.distributions.Gamma(
-                        concentration=alpha_undershoot,
-                        rate=beta_undershoot,
-                        validate_args=self.validate_irf_args
-                    ).prob
-
-                    return lambda x: pdf_main(x + self.epsilon) - c * pdf_undershoot(x + self.epsilon)
+                    return lambda x: double_gamma_5_irf(
+                        params,
+                        session=self.sess,
+                        epsilon=self.epsilon,
+                        validate_irf_args=self.validate_irf_args
+                    )(x)
 
                 self.irf_lambdas['HRFDoubleGamma5'] = double_gamma_5
-
-                def double_gamma_unconstrained(params):
-                    alpha_main = params[:, 0:1]
-                    beta_main = params[:, 1:2]
-                    alpha_undershoot = params[:, 2:3]
-                    beta_undershoot = params[:, 3:4]
-                    c = params[:, 4:5]
-
-                    pdf_main = tf.contrib.distributions.Gamma(
-                        concentration=alpha_main,
-                        rate=beta_main,
-                        validate_args=self.validate_irf_args
-                    ).prob
-                    pdf_undershoot = tf.contrib.distributions.Gamma(
-                        concentration=alpha_undershoot,
-                        rate=beta_undershoot,
-                        validate_args=self.validate_irf_args
-                    ).prob
-
-                    return lambda x: pdf_main(x + self.epsilon) - c * pdf_undershoot(x + self.epsilon)
-
-                self.irf_lambdas['HRFDoubleGammaUnconstrained'] = double_gamma_unconstrained
 
     def _initialize_spline(self, order, bases, instantaneous=True, roughness_penalty=0.):
         def spline(params):

@@ -65,13 +65,11 @@ class Formula(object):
         'BetaPrime': ['alpha', 'beta'],
         'ShiftedBetaPrime': ['alpha', 'beta', 'delta'],
         'HRFSingleGamma': ['alpha', 'beta'],
-        'HRFDoubleGamma': ['alpha_main', 'beta', 'alpha_undershoot_offset', 'c'],
         'HRFDoubleGamma1': ['beta'],
         'HRFDoubleGamma2': ['alpha', 'beta'],
         'HRFDoubleGamma3': ['alpha', 'beta', 'c'],
         'HRFDoubleGamma4': ['alpha_main', 'alpha_undershoot', 'beta', 'c'],
         'HRFDoubleGamma5': ['alpha_main', 'alpha_undershoot', 'beta_main', 'beta_undershoot', 'c'],
-        'HRFDoubleGammaUnconstrained': ['alpha_main', 'beta_main', 'beta_undershoot', 'c']
     }
 
     SPLINE_DEFAULT_ORDER = 2
@@ -491,7 +489,11 @@ class Formula(object):
                     under_irf=under_irf,
                     under_interaction=True
                 )
-                assert len(subterms_left) == 1, 'Incorrect number of elements given to left side of multiplication operator. Expected 1, saw %s.' % len(subterms_left)
+                new_subterms_left = []
+                for s1 in subterms_left:
+                    for s2 in s1:
+                        new_subterms_left.append(s2)
+                subterms_left = new_subterms_left
 
                 subterms_right = []
                 self.process_ast(
@@ -504,12 +506,16 @@ class Formula(object):
                     under_irf=under_irf,
                     under_interaction=True
                 )
-                assert len(subterms_right) == 1, 'Incorrect number of elements given to right side of multiplication operator. Expected 1, saw %s.' % len(subterms_right)
+                new_subterms_right = []
+                for s1 in subterms_right:
+                    for s2 in s1:
+                        new_subterms_right.append(s2)
+                subterms_right = new_subterms_right
 
                 if under_irf or under_interaction:
-                    new_terms = subterms_left[0] + subterms_right[0]
-                    for l in subterms_left[0]:
-                        for r in subterms_right[0]:
+                    new_terms = subterms_left + subterms_right
+                    for l in subterms_left:
+                        for r in subterms_right:
                             new = ImpulseInteraction(impulses=[l,r], ops=ops)
 
                             if new.name() in impulses_by_name:
@@ -528,14 +534,14 @@ class Formula(object):
 
                 else:
                     has_irf_subterm = False
-                    for x in subterms_left[0] + subterms_right[0]:
+                    for x in subterms_left + subterms_right:
                         if type(x).__name__ in ['IRFNode', 'ResponseInteraction']:
                             has_irf_subterm = True
                             break
 
                     if has_irf_subterm:
                         new_subterms_left = []
-                        for s in subterms_left[0]:
+                        for s in subterms_left:
                             if isinstance(s, IRFNode):
                                 irf = s.irf_to_formula(rangf)
                                 new_str = 'C(%s' % s.impulse.name() + ', ' + irf + ')'
@@ -551,7 +557,7 @@ class Formula(object):
                                 new_str = s.name()
                             new_subterms_left.append(new_str)
                         new_subterms_right = []
-                        for s in subterms_right[0]:
+                        for s in subterms_right:
                             if isinstance(s, IRFNode):
                                 irf = s.irf_to_formula(rangf)
                                 new_str = 'C(%s' % s.impulse.name() + ', ' + irf + ')'
@@ -573,8 +579,8 @@ class Formula(object):
                                 subterm_strs.append('%s + %s + %s%%%s' % (l, r, l, r))
                         subterm_str = ' + '.join(subterm_strs)
                     else:
-                        new_subterms_left = [x.name() for x in subterms_left[0]]
-                        new_subterms_right = [x.name() for x in subterms_right[0]]
+                        new_subterms_left = [x.name() for x in subterms_left]
+                        new_subterms_right = [x.name() for x in subterms_right]
 
                         subterm_strs = []
                         for l in new_subterms_left:
@@ -622,11 +628,6 @@ class Formula(object):
                 for s1 in subterms:
                     for s2 in s1:
                         new_subterms.append(s2)
-                # if len(subterms) > 1:
-                #     new_subterms = [[]]
-                #     for x in subterms:
-                #         assert len(x) == 1, 'Incorrect number of elements given in inputs to power expansion. Expected 1, saw %s.' % len(subterms)
-                #         new_subterms[0].append(x[0])
                 subterms = new_subterms
 
                 order = min(int(t.right.n), len(subterms))
