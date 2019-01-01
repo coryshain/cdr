@@ -3896,13 +3896,14 @@ class DTSR(object):
 
                 return out
 
-    def report_evaluation(self, mse=None, mae=None, loglik=None, percent_variance_explained=None, indent=0):
+    def report_evaluation(self, mse=None, mae=None, loglik=None, percent_variance_explained=None, true_variance=None, indent=0):
         """
         Generate a string representation of pre-comupted evaluation metrics.
 
         :param mse: ``float`` or ``None``; mean squared error, skipped if ``None``.
         :param mae: ``float`` or ``None``; mean absolute error, skipped if ``None``.
         :param loglik: ``float`` or ``None``; log likelihood, skipped if ``None``.
+        :param true_variance: ``float`` or ``None``; variance of targets, skipped if ``None``.
         :param percent_variance_explained: ``float`` or ``None``; percent variance explained, skipped if ``None``.
         :param indent: ``int``; indentation level
         :return: ``str``; the evaluation report
@@ -3914,6 +3915,8 @@ class DTSR(object):
             out += ' ' * (indent+2) + 'MAE: %s\n' %mae
         if loglik is not None:
             out += ' ' * (indent+2) + 'Log likelihood: %s\n' %loglik
+        if true_variance is not None:
+            out += ' ' * (indent+2) + 'True variance: %s\n' %true_variance
         if percent_variance_explained is not None:
             out += ' ' * (indent+2) + 'Percent variance explained: %.2f%%\n' %percent_variance_explained
 
@@ -4293,6 +4296,7 @@ class DTSR(object):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                self.run_convergence_check(verbose=False)
                 if (self.global_step.eval(session=self.sess) < n_iter) and not self.has_converged():
                     self.set_training_complete(False)
 

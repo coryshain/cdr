@@ -106,12 +106,12 @@ if __name__ == '__main__':
                             is_nested = nested(m1, m2)
                             if is_nested or not args.ablation:
                                 if is_nested:
-                                    if len(m1) > len(m2):
-                                        a_model = m2
-                                        b_model = m1
-                                    else:
+                                    if m1.count('!') > m2.count('!'):
                                         a_model = m1
                                         b_model = m2
+                                    else:
+                                        a_model = m2
+                                        b_model = m1
                                 else:
                                     a_model = m1
                                     b_model = m2
@@ -156,35 +156,47 @@ if __name__ == '__main__':
         for i in range(len(ablations)):
             a1 = ablations[i]
             m1 = '!'.join(a1)
+            m1_dummy = 'DUMMY' + (('!' + m1) if m1 != '' else m1)
             for j in range(i + 1, len(ablations)):
                 a2 = ablations[j]
                 m2 = '!'.join(a2)
-                if nested('DUMMY' + (('!' + m1) if m1 != '' else m1), 'DUMMY' + (('!' + m2) if m2 != '' else m2)):
+                m2_dummy = 'DUMMY' + (('!' + m2) if m2 != '' else m2)
+                is_nested = nested(m1_dummy, m2_dummy)
+                if is_nested:
+                    if m1.count('!') > m2.count('!'):
+                        a_model = a1
+                        b_model = a2
+                        a_name = 'FULL' if m2 == '' else '!' + m2
+                        b_name = 'FULL' if m1 == '' else '!' + m1
+                    else:
+                        a_model = a2
+                        b_model = a1
+                        a_name = 'FULL' if m1 == '' else '!' + m1
+                        b_name = 'FULL' if m2 == '' else '!' + m2
                     df1 = []
                     df2 = []
                     for exp in exps_outdirs:
                         for m in basenames_to_pool:
-                            a, b = scale(pooled_data[a1][exp][m], pooled_data[a2][exp][m])
+                            a, b = scale(pooled_data[a_model][exp][m], pooled_data[b_model][exp][m])
                             df1.append(a)
                             df2.append(b)
                     df1 = np.concatenate(df1, axis=0)
                     df2 = np.concatenate(df2, axis=0)
                     assert len(df1) == len(df2), 'Shape mismatch between datasets %s and %s: %s vs. %s' %(
-                        'FULL' if m1 == '' else '!' + m1,
-                        'FULL' if m2 == '' else '!' + m2,
+                        a_name,
+                        b_name,
                         df1.shape,
                         df2.shape
                     )
                     p_value, diff, diffs = permutation_test(df1, df2, n_iter=10000, n_tails=args.tails, mode=args.metric)
                     sys.stderr.write('\n')
-                    name = '%s_v_%s' % ('FULL' if m1 == '' else '!' + m1, 'FULL' if m2 == '' else '!' + m2)
+                    name = '%s_v_%s' % (a_name, b_name)
                     out_path = p.outdir + '/' + name + '_PT_pooled_' + partition_str + '.txt'
                     with open(out_path, 'w') as f:
                         sys.stderr.write('Saving output to %s...\n' % out_path)
 
                         summary = '=' * 50 + '\n'
-                        summary += 'Model comparison: %s vs %s\n' % (
-                        'FULL' if m1 == '' else '!' + m1, 'FULL' if m2 == '' else '!' + m2)
+                        summary += 'Model comparison: %s vs %s\n' % (a_name, b_name)
                         summary += 'Partition: %s\n' % partition_str
                         summary += 'Metric: %s\n' % args.metric
                         summary += 'Experiments pooled:\n'

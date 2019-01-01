@@ -279,7 +279,7 @@ if __name__ == '__main__':
                 summary += '  ' + formula + '\n\n'
                 summary += 'Partition: %s\n\n' % partition_str
 
-                dtsr_mse = dtsr_mae = dtsr_loglik = dtsr_percent_variance_explained = None
+                dtsr_mse = dtsr_mae = dtsr_loglik = dtsr_percent_variance_explained = dtsr_true_variance = None
 
                 if args.mode in [None, 'response']:
                     dtsr_preds = dtsr_model.predict(
@@ -311,6 +311,7 @@ if __name__ == '__main__':
                     dtsr_mse = mse(y_valid[dv], dtsr_preds)
                     dtsr_mae = mae(y_valid[dv], dtsr_preds)
                     dtsr_percent_variance_explained = percent_variance_explained(y_valid[dv], dtsr_preds)
+                    dtsr_true_variance = np.std(y_valid[dv]) ** 2
                     y_dv_mean = y_valid[dv].mean()
 
                 if args.mode in [None, 'loglik']:
@@ -341,7 +342,8 @@ if __name__ == '__main__':
                     mse=dtsr_mse,
                     mae=dtsr_mae,
                     loglik=dtsr_loglik,
-                    percent_variance_explained=dtsr_percent_variance_explained
+                    percent_variance_explained=dtsr_percent_variance_explained,
+                    true_variance=dtsr_true_variance
                 )
 
                 summary += '=' * 50 + '\n'
