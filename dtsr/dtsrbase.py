@@ -4297,6 +4297,7 @@ class DTSR(object):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.run_convergence_check(verbose=False)
+                
                 if (self.global_step.eval(session=self.sess) < n_iter) and not self.has_converged():
                     self.set_training_complete(False)
 
