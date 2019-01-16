@@ -152,6 +152,35 @@ class DTSRMLE(DTSR):
                     coefficient_summary = coefficient
                 return coefficient, coefficient_summary
 
+    def initialize_interaction(self, interaction_ids=None, ran_gf=None):
+        if interaction_ids is None:
+            interaction_ids = self.interaction_names
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if ran_gf is None:
+                    interaction = tf.Variable(
+                        tf.random_normal(
+                            shape=[len(interaction_ids)],
+                            stddev=self.init_sd,
+                            dtype=self.FLOAT_TF
+                        ),
+                        name='interaction'
+                    )
+                    interaction_summary = interaction
+                else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+                    interaction = tf.Variable(
+                        tf.random_normal(
+                            shape=[rangf_n_levels, len(interaction_ids)],
+                            stddev=self.init_sd,
+                            dtype=self.FLOAT_TF
+                        ),
+                        name='coefficient_by_%s' % ran_gf
+                    )
+                    interaction_summary = interaction
+                return interaction, interaction_summary
+
     def initialize_irf_param_unconstrained(self, param_name, ids, mean=0., ran_gf=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():

@@ -2,6 +2,7 @@ import argparse
 import os
 import sys
 import pickle
+import numpy as np
 import pandas as pd
 
 pd.options.mode.chained_assignment = None
@@ -11,7 +12,7 @@ from dtsr.config import Config
 from dtsr.io import read_data
 from dtsr.formula import Formula
 from dtsr.data import filter_invalid_responses, preprocess_data, compute_splitID, compute_partition
-from dtsr.util import mse, mae, filter_models
+from dtsr.util import mse, mae, filter_models, get_partition_list, paths_from_partition_cliarg
 
 if __name__ == '__main__':
 
@@ -20,6 +21,7 @@ if __name__ == '__main__':
     ''')
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default = [], help='Path to configuration (*.ini) file')
+    argparser.add_argument('-p', '--partition', type=str, default='train', help='Name of partition to train on ("train", "dev", "test", or space- or hyphen-delimited subset of these)')
     argparser.add_argument('-e', '--force_training_evaluation', action='store_true', help='Recompute training evaluation even for models that are already finished.')
     args, unknown = argparser.parse_known_args()
 
@@ -41,7 +43,9 @@ if __name__ == '__main__':
     dtsr_formula_list = [Formula(p.models[m]['formula']) for m in p.model_list if m.startswith('DTSR')]
     dtsr_formula_name_list = [m for m in p.model_list if m.startswith('DTSR')]
     all_rangf = [v for x in dtsr_formula_list for v in x.rangf]
-    X, y = read_data(p.X_train, p.y_train, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in dtsr_formula_list for v in x.rangf])))
+    partitions = get_partition_list(args.partition)
+    X_paths, y_paths = paths_from_partition_cliarg(partitions, p)
+    X, y = read_data(X_paths, y_paths, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in dtsr_formula_list for v in x.rangf])))
     X, y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors = preprocess_data(
         X,
         y,
@@ -55,7 +59,14 @@ if __name__ == '__main__':
     if run_baseline:
         X['splitID'] = compute_splitID(X, p.split_ids)
         part = compute_partition(X, p.modulus, 3)
-        part_select = part[0]
+        part_select = None
+        partition_name_to_ix = {'train': 0, 'dev': 1, 'test': 2}
+        for partition in partitions:
+            if part_select is None:
+                part_select = part[partition_name_to_ix[partition]]
+            else:
+                part_select &= part[partition_name_to_ix[partition]]
+
         X_baseline = X[part_select]
         X_baseline = X_baseline.reset_index(drop=True)[select]
 

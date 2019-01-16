@@ -58,4 +58,4 @@ Bug reports can be logged in the issue tracker on [Github](https://github.com/co
 
 
 ## References
-Shain, Cory and Schuler, William (to appear). Deconvolutional time series regression: A technique for modeling temporally diffuse effects. _EMNLP18_.
+Shain, Cory and Schuler, William (2018). Deconvolutional time series regression: A technique for modeling temporally diffuse effects. _EMNLP18_.

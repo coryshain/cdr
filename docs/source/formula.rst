@@ -17,7 +17,39 @@ The left-hand side (LHS) of the formula contains the name a single (possibly tra
 Intercept terms can be added by including ``1`` in the RHS and removed by including ``0`` in the RHS.
 If neither of these appears in the RHS, an intercept is added by default.
 
+**WARNING:** The compiler for DTSR formulae is still early in development and may fail to correctly process certain formula strings, especially ones that contain hierarchical term expansions, categorical variable expansions, and/or interactions.
+Please double-check the correctness of the model formula reported at the start of training and report problems in the issue tracker on `Github <https://github.com/coryshain/dtsr>`_.
 
+**WARNING:** If you are using interaction terms, it is easy to accidentally mis-specify your formula because interactions are trickier in DTSR than in linear models.
+Make sure to read :ref:`interactions` before fitting models with interactions.
+
+
+
+.. _linear:
+Linear (DiracDelta) Predictors:
+-------------------------------
+
+A trivial way of "deconvolving" a predictor ``A`` is to assume a Dirac delta response to ``A``: :math:`A` at :math:`t=0`, :math:`0` otherwise.
+DiracDelta IRF are thus equivalent to predictors in linear models; only the value of the predictor that coincides with the response measurement is used for prediction.
+Linear (mixed) models of time series are therefore a special subtype of DTSR, namely DTSR models that exclusively use Dirac delta response kernels.
+While you therefore `can` use this package to fit LME models, that doesn't mean you should!
+The stochastic optimization used here is likely much less efficient in this simple case than that of specialized LME regression tools.
+
+However, the availability of Dirac delta responses in this package means that DTSR can combine linear and convolved substructures into a single model, which is important for many use cases.
+For example, imagine a bi-variate model with predictors ``stimulus`` and ``condition``, where ``stimulus`` varies within each time series can might engender a temporally diffise response while ``condition`` is held fixed within each time series.
+In this case, a convolution of ``condition`` would be meaningless (or at least perfectly confounded with ``rate``, the deconvolutional intercept); instead, we're interested in a `linear` effect of ``condition`` and a `convolved` effect of ``stimulus`` on the response.
+Dirac delta responses can specified manually using the syntax described in the following sections.
+However, for convenience, bare predictor names in model formulae (outside of convolution calls ``C()``) are automatically interpreted as Dirac delta.
+This allows you to retain stock formula syntax that might already be familiar from linear (mixed) models in **R** in order to define linear substructures of your DTSR model.
+For example, the following is interpreted as specifying linear effects for each of ``A``, ``B``, and the interaction ``A:B``::
+
+    y ~ A + B + C:B
+
+An important caveat in using Dirac delta responses is that the predictors they apply to should be `response-aligned`, that is, measured at the same moments in time that the responses themselves are.
+If the stimuli and responses are measured at different points in time, you cannot fit a Dirac delta response to a stimulus-aligned variable unless that variable happens at least sometimes to accidentally be measured concurrently with the response.
+DTSR does not internally distinguish stimulus-aligned and response-aligned predictors, so it's up to users to make sure that models are sensible in this regard.
+However, the model does internally mask all elements in a Dirac delta predictor that are not simultaneous with the response.
+Therefore, fitting a Dirac delta response to a stimulus-aligned predictor will not produce an erroneous model; in the worst case, the entire predictor will be masked and therefore ignored by the model.
 
 Defining an Impulse Response Function (IRF)
 -------------------------------------------
@@ -28,13 +60,12 @@ Separate terms are delimited by ``+``.
 For example, to add a Gaussian convolution of predictor ``B``, the RHS above becomes ``C(A, Gamma()) + C(B, Normal())``.
 
 
-
 Supported Parametric IRF
 ------------------------
 
 The currently supported parametric IRF families are:
 
-- ``DiracDelta``: Stick function (equivalent to a predictor in linear regression)
+- ``DiracDelta``: Stick function (equivalent to a predictor in linear regression, see :ref:`linear`)
 
   - Parameters:
 
@@ -198,65 +229,58 @@ s default offset (10). Parameter :math:`\beta` is tied between both gammas.
   - Definition: :math:`\frac{\beta^{\alpha_1}x^{\alpha_1-1}e^{-\frac{x}{\beta_1}}}{\Gamma(\alpha_1)} - c\frac{\beta^{\alpha_2}x^{\alpha_2 - 1}e^{-\frac{x}{\beta_2}}}{\Gamma(\alpha_2)}`
 
 
+.. _interactions:
 
-Spline IRF
-----------
+Interactions in DTSR
+--------------------
 
-DTSR also supports non-parametric IRF in the form of spline functions.
-Instead of a parametric IRF kernel, the model is supplied with control points (knots) that define a smooth function which can be moved around the x/y plane.
-The advantage of spline IRF is that they do not require precommitment to a particular functional form for the IRF.
-The disadvantage is that fitting them is much more computationally expensive because computing the spline function between the control points requires matrix inversion.
+In comparison to interactions in linear models, deconvolution introduces the additional complexity of needing to decide and specify whether interactions precede (impulse-level interactions) or follow (response-level interactions) the convolution step.
+Impulse-level interactions consider interactions as `events` which may trigger a temporally diffuse response (i.e. a response to both A and B happening together at a particular point in time).
+Response-level interactions capture non-additive effects of multiple (possibly convolved) variables; they do not get their own impulse responses.
+Response-level interactions correspond to interactions in linear models and are almost always what you want except in the special case of linear (DiracDelta IRF) predictors, where impulse-level interactions should be used (just like in linear models).
 
-The splines themselves have a number of free parameters which are specified by the name of the spline in the IRF call of the model formula.
-The syntax for a spline IRF kernel is as follows::
+DTSR formulae use a simple syntax to distinguish these two types of interactions: impulse-level interactions are specified `inside` the first argument of convolution calls `C()`, while response-level interactions are specified outside them.
+As in **R**, interaction terms are designated with ``:``, as in ``A:B``.
+And as in **R**, for convenience, two-way cross-product interactions can be designated with ``*`` (e.g. ``A*B`` is shorthand for ``A + B + A:B``) and multi-way cross-product interactions can be designated with power notation ``^<INT>`` or ``**<INT>`` (e.g. ``(A+B+C)^3`` equals ``A + B + C + A:B + B:C + A:C + A:B:C``).
+The following defines an impulse-level interaction between ``A`` and ``B`` underneath a ``Normal`` IRF kernel::
 
-    S(o([0-9]+))?(b([0-9]+))?(l([0-9]+))?(p([0-9]+))?(i([0-1]))?
+    C(A:B, Normal()
 
-This is a string representation of a function call ``S`` with optional keyword arguments ``o``, ``b``, ``l``, ``p``, and ``i``, in that order.
+The following defines a response-level interaction between Normal convolutions of ``A`` and ``B``::
 
-The keyword arguments are defined as follows:
+    C(A, Normal()):C(B, Normal())
 
-  - **o** (order): ``int``, the order of the spline. Order 1 is linear interpolation, order 2 is a thin-plate spline, order 3 is a cubic spline, etc. **Default**: 2.
-  - **b** (bases): ``int``, number of bases (control points). **Default**: 10.
-  - **l** (roughness penalty): ``int``, digits following the decimal representing the roughness penalty (regularization against wiggliness). For example, ``l01`` specifies a roughness penalty of 0.01. **Default**: 001.
-  - **p** (spacing power): ``int``, power to use for initial spacing of control points in time between 0 and the maximum time offset attested in the training data. If 1, control points will be initialized as evenly spaced. If 2, control points will be quadratically spaced, etc. Initially concentrating more control points toward smaller time offsets is motivated in many cases by the fact that (1) many real-world IRF have more complex dynamics closer to the time of the impulse and (2) most datasets will contain more training data for smaller time offsets than longer ones, possibly resulting in decreasing precision of the IRF estimate at long latencies. **Default**: 1.
-  - **i** (instantaneous response): ``int`` (0 or 1), whether to allow an instantaneous response. If 0, the response at time 0 is forced to be 0. **Default**: 1.
+In order to fit interactions between convolved variables, the convolutions themselves must exist.
+Therefore, unlike linear interactions, which can be fit even if their subcomponents are not included in the model, ``C(A, Normal()):C(B, Normal())`` requires the existence of model estimates for both ``C(A, Normal())`` and ``C(B, Normal())``, and these terms are therefore automatically inserted when used by any response-level interactions.
 
+Response-level interactions do not need to be convolved variables.
+They can also be predictors supplied by the data `as long as the predictors are response-aligned` (i.e. measured concurrently with the responses, rather than the impulses).
+For example, suppose we have a response-aligned variable ``C`` provided by our data.
+We can interact responses with it, like so::
 
+    C(A, Normal()):C
 
-IRF Composition
----------------
+This will fit a normal response to A, along with an estimate for the modulation of that response by C.
+Unlike convolved inputs to response-level interactions, estimates for regular variables are not automatically added to the model.
+In order to fit a separate (linear) effect for C, we could use the multiplication operator instead::
 
-In some cases it may be desirable to decompose the response into multiple convolutions of an impulse.
-For example, it is possible that the BOLD response in fMRI consists underlyingly of 2 convolutional responses: a **neural response** that convolves the impulse into a timecourse of neural activation, which is then convolved with a **hemodynamic response** into a BOLD signal.
-In this case, it would be desirable to be able to model the BOLD response as a composition of neural and hemodynamic responses.
+    C(A, Normal())*C = C(A, Normal() + C + C(A, Normal()):C
 
-Exact parametric composition of IRF is not possible in the general case because many pairs of IRF do not have a tractable analytical convolution.
-Instead, the DTSR package uses a discrete approximation to the continuous integral of composed IRF by (1) computing the value of each IRF for some number of interpolation points, (2) computing their convolution via FFT, and (3) rescaling by the temporal distance between interpolation points.
-The number of interpolation points is defined by the model's **n_interp** initialization parameter.
+For convenience, response-level interactions distribute across the inputs to a convolution call ``C()``.
+Thus, interacting a variable with a convolution of multiple inputs is equivalent to interacting the variable with a convolution of each of the inputs::
 
-To compose IRF in a model, simply insert one IRF call into the first argument position of another IRF call.
-For example, the following first convolves impulse ``A`` with a normal IRF and then convolves this convolved response with an exponential IRF::
+    C(A + B, Gamma()):C = C(A + B, Gamma()) + C(A, Gamma()):C + C(B, Gamma()):C
 
-    C(A, Exp(Normal()))
+Similarly, interacting multiple convolution calls each containing multiple inputs is equivalent to defining interactions over the Cartesian-product of the responses to the two sets of inputs::
 
-Because convolution has the associative property, the order of composition does not matter, and the above is equivalent to::
+    C(A + B, Gamma()):C(C + D, EMG()) = C(A + B, Gamma()) + C(C + D, EMG()) + \
+                                        C(A, Gamma()):C(C, EMG()) + C(B, Gamma()):C(C, EMG()) + \
+                                        C(A, Gamma()):C(D, EMG()) + C(B, Gamma()):C(D, EMG())
 
-    C(A, Normal(Exp()))
+Order of operations between term expansions can be enforced through parentheses::
 
-The advantage of IRF composition is that it affords the possibility of discovering the structure of latent responses that are not directly observable in the measured response, as in the example described above.
-The disadvantage is that it is much more computationally expensive due to the interpolation and FFT steps required.
-
-Care must also be taken when using IRF composition to avoid constructing unidentifiable models.
-For example, the convolution of two Gaussians :math:`N(\mu_1, \sigma_1^2)` and :math:`N(\mu_2, \sigma_2^2)` is known to be :math:`N(\mu_1 + \mu_2, \sigma_1^2 + \sigma_2^2)`.
-As a result, the following composed IRF has infinitely many solutions, and the resulting model is unidentifiable::
-
-    C(A, Normal(Normal()))
-
-DTSR is not able to recognize and flag identifiability problems and it will happily find a solution to such a model, disguising the fact that there are infinitely many other optimal solutions.
-It is up to the user to think carefully about whether the model structure could introduce such problems.
-For example, in the BOLD example discussed above, the neural response is predictor-specific while the hemodynamic response is predictor-independent given the neural response.
-The two responses can thus be separated via parameter tying of the hemodynamic response portion (see below), requiring all predictors to share a single hemodynamic response and forcing predictor-level variation into the neural response alone.
+    (A*B):E = A:E + B:E + A:B:E
+    A*(B:E) = A + B:E + A:B:E
 
 
 
@@ -269,12 +293,10 @@ Therefore, the following two expressions are equivalent::
     C(A + B, Gamma())
     C(A, Gamma()) + C(B, Gamma())
 
-As in **R**, interaction terms are designated with ``:``, as in ``C(A:B, Gamma())``, and cross-product interactions can be expressed using Python's power notation ``**<INT>``.
-For example, ``(A + B + C)**3`` adds all first, second, and third order interactions, expanding out as::
 
-    A + B + C + A:B + B:C + A:C + A:B:C
 
-As above, IRF distribute across the expansion of interaction terms, such that the following expressions are equivalent::
+**R**-style expansions for interactions are also available, as discussed above.
+IRF distribute across the expansion of interaction terms, such that the following expressions are equivalent::
 
     C((A + B + C)**3, Gamma())
     C(A, Gamma()) + C(B, Gamma()) + C(C, Gamma()) + C(A:B, Gamma()) + C(B:C, Gamma()) + C(A:C, Gamma()) + C(A:B:C, Gamma())
@@ -434,4 +456,63 @@ To flag a predictor as continuous, use the ``cont`` keyword argument in the IRF 
 Be warned that, due to the need for interpolation, continuous predictors tend to impose a heavy computational burden that can dramatically slow training and prediction.
 Speedups can be obtained at the expense of accuracy by choose a small value for the **n_interp** initialization parameter, decreasing the resolution of the interpolation.
 
+
+Spline IRF
+----------
+
+DTSR also supports non-parametric IRF in the form of spline functions.
+Instead of a parametric IRF kernel, the model is supplied with control points (knots) that define a smooth function which can be moved around the x/y plane.
+The advantage of spline IRF is that they do not require precommitment to a particular functional form for the IRF.
+The disadvantage is that fitting them is much more computationally expensive because computing the spline function between the control points requires matrix inversion.
+
+The splines themselves have a number of free parameters which are specified by the name of the spline in the IRF call of the model formula.
+The syntax for a spline IRF kernel is as follows::
+
+    S(o([0-9]+))?(b([0-9]+))?(l([0-9]+))?(p([0-9]+))?(i([0-1]))?
+
+This is a string representation of a function call ``S`` with optional keyword arguments ``o``, ``b``, ``l``, ``p``, and ``i``, in that order.
+
+The keyword arguments are defined as follows:
+
+  - **o** (order): ``int``, the order of the spline. Order 1 is linear interpolation, order 2 is a thin-plate spline, order 3 is a cubic spline, etc. **Default**: 2.
+  - **b** (bases): ``int``, number of bases (control points). **Default**: 10.
+  - **l** (roughness penalty): ``int``, digits following the decimal representing the roughness penalty (regularization against wiggliness). For example, ``l01`` specifies a roughness penalty of 0.01. **Default**: 001.
+  - **p** (spacing power): ``int``, power to use for initial spacing of control points in time between 0 and the maximum time offset attested in the training data. If 1, control points will be initialized as evenly spaced. If 2, control points will be quadratically spaced, etc. Initially concentrating more control points toward smaller time offsets is motivated in many cases by the fact that (1) many real-world IRF have more complex dynamics closer to the time of the impulse and (2) most datasets will contain more training data for smaller time offsets than longer ones, possibly resulting in decreasing precision of the IRF estimate at long latencies. **Default**: 1.
+  - **i** (instantaneous response): ``int`` (0 or 1), whether to allow an instantaneous response. If 0, the response at time 0 is forced to be 0. **Default**: 1.
+
+
+
+IRF Composition
+---------------
+
+In some cases it may be desirable to decompose the response into multiple convolutions of an impulse.
+For example, it is possible that the BOLD response in fMRI consists underlyingly of 2 convolutional responses: a **neural response** that convolves the impulse into a timecourse of neural activation, which is then convolved with a **hemodynamic response** into a BOLD signal.
+In this case, it would be desirable to be able to model the BOLD response as a composition of neural and hemodynamic responses.
+
+Exact parametric composition of IRF is not possible in the general case because many pairs of IRF do not have a tractable analytical convolution.
+Instead, the DTSR package uses a discrete approximation to the continuous integral of composed IRF by (1) computing the value of each IRF for some number of interpolation points, (2) computing their convolution via FFT, and (3) rescaling by the temporal distance between interpolation points.
+The number of interpolation points is defined by the model's **n_interp** initialization parameter.
+
+To compose IRF in a model, simply insert one IRF call into the first argument position of another IRF call.
+For example, the following first convolves impulse ``A`` with a normal IRF and then convolves this convolved response with an exponential IRF::
+
+    C(A, Exp(Normal()))
+
+Because convolution has the associative property, the order of composition does not matter, and the above is equivalent to::
+
+    C(A, Normal(Exp()))
+
+The advantage of IRF composition is that it affords the possibility of discovering the structure of latent responses that are not directly observable in the measured response, as in the example described above.
+The disadvantage is that it is much more computationally expensive due to the interpolation and FFT steps required.
+
+Care must also be taken when using IRF composition to avoid constructing unidentifiable models.
+For example, the convolution of two Gaussians :math:`N(\mu_1, \sigma_1^2)` and :math:`N(\mu_2, \sigma_2^2)` is known to be :math:`N(\mu_1 + \mu_2, \sigma_1^2 + \sigma_2^2)`.
+As a result, the following composed IRF has infinitely many solutions, and the resulting model is unidentifiable::
+
+    C(A, Normal(Normal()))
+
+DTSR is not able to recognize and flag identifiability problems and it will happily find a solution to such a model, disguising the fact that there are infinitely many other optimal solutions.
+It is up to the user to think carefully about whether the model structure could introduce such problems.
+For example, in the BOLD example discussed above, the neural response is predictor-specific while the hemodynamic response is predictor-independent given the neural response.
+The two responses can thus be separated via parameter tying of the hemodynamic response portion (see below), requiring all predictors to share a single hemodynamic response and forcing predictor-level variation into the neural response alone.
 

@@ -26,6 +26,211 @@ pd.options.mode.chained_assignment = None
 #
 ######################################################
 
+def get_session(session):
+    if session is None:
+        sess = tf.get_default_session()
+    else:
+        sess = session
+
+    return sess
+
+def exponential_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            pdf = tf.contrib.distributions.Exponential(rate=params[:, 0:1]).prob
+            return lambda x: pdf(x + epsilon)
+
+
+def gamma_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            pdf = tf.contrib.distributions.Gamma(
+                concentration=params[:, 0:1],
+                rate=params[:, 1:2],
+                validate_args=validate_irf_args
+            ).prob
+            return lambda x: pdf(x + epsilon)
+
+
+def shifted_gamma_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            pdf = tf.contrib.distributions.Gamma(
+                concentration=params[:, 0:1],
+                rate=params[:, 1:2],
+                validate_args=validate_irf_args
+            ).prob
+            return lambda x: pdf(x - params[:, 2:3] + epsilon)
+
+
+def normal_irf(params, session=None):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            pdf = tf.contrib.distributions.Normal(loc=params[:, 0:1], scale=params[:, 1:2]).prob
+            return lambda x: pdf(x)
+
+
+def skew_normal_irf(params, session=None):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            mu = params[:, 0:1]
+            sigma = params[:, 1:2]
+            alpha = params[:, 2:3]
+            stdnorm = tf.contrib.distributions.Normal(loc=0., scale=1.)
+            stdnorm_pdf = stdnorm.prob
+            stdnorm_cdf = stdnorm.cdf
+            return lambda x: 2 / sigma * stdnorm_pdf((x - mu) / sigma) * stdnorm_cdf(alpha * (x - mu) / sigma)
+
+
+def emg_irf(params, session=None):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            mu = params[:, 0:1]
+            sigma = params[:, 1:2]
+            L = params[:, 2:3]
+            return lambda x: L / 2 * tf.exp(0.5 * L * (2. * mu + L * sigma ** 2. - 2. * x)) * tf.erfc(
+                (mu + L * sigma ** 2 - x) / (tf.sqrt(2.) * sigma))
+
+
+def beta_prime_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            alpha = params[:, 1:2]
+            beta = params[:, 2:3]
+            return lambda x: (x + epsilon) ** (alpha - 1.) * (1. + (x + epsilon)) ** (
+                        -alpha - beta) / tf.exp(
+                tf.lbeta(tf.transpose(tf.stack([alpha, beta], axis=0))))
+
+
+def shifted_beta_prime_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            alpha = params[:, 0:1]
+            beta = params[:, 1:2]
+            delta = params[:, 2:3]
+            return lambda x: (x - delta + epsilon) ** (alpha - 1) * (1 + (x - delta + epsilon)) ** (
+                    -alpha - beta) / tf.exp(
+                tf.lbeta(tf.transpose(tf.stack([alpha, beta], axis=0))))
+
+
+def double_gamma_1_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            beta = params[:, 1:2]
+
+            pdf_main = tf.contrib.distributions.Gamma(
+                concentration=6.,
+                rate=beta,
+                validate_args=validate_irf_args
+            ).prob
+            pdf_undershoot = tf.contrib.distributions.Gamma(
+                concentration=16.,
+                rate=beta,
+                validate_args=validate_irf_args
+            ).prob
+
+            return lambda x: pdf_main(x + epsilon) - 1. / 6. * pdf_undershoot(x + epsilon)
+
+
+def double_gamma_2_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            alpha = params[:, 0:1]
+            beta = params[:, 1:2]
+
+            pdf_main = tf.contrib.distributions.Gamma(
+                concentration=alpha,
+                rate=beta,
+                validate_args=validate_irf_args
+            ).prob
+            pdf_undershoot = tf.contrib.distributions.Gamma(
+                concentration=alpha + 10,
+                rate=beta,
+                validate_args=validate_irf_args
+            ).prob
+
+            return lambda x: pdf_main(x + epsilon) - 1. / 6. * pdf_undershoot(x + epsilon)
+
+
+def double_gamma_3_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            alpha = params[:, 0:1]
+            beta = params[:, 1:2]
+            c = params[:, 2:3]
+
+            pdf_main = tf.contrib.distributions.Gamma(
+                concentration=alpha,
+                rate=beta,
+                validate_args=validate_irf_args
+            ).prob
+            pdf_undershoot = tf.contrib.distributions.Gamma(
+                concentration=alpha + 10,
+                rate=beta,
+                validate_args=validate_irf_args
+            ).prob
+
+            return lambda x: pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)
+
+
+def double_gamma_4_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            alpha_main = params[:, 0:1]
+            alpha_undershoot = params[:, 1:2]
+            beta = params[:, 2:3]
+            c = params[:, 3:4]
+
+            pdf_main = tf.contrib.distributions.Gamma(
+                concentration=alpha_main,
+                rate=beta,
+                validate_args=validate_irf_args
+            ).prob
+            pdf_undershoot = tf.contrib.distributions.Gamma(
+                concentration=alpha_undershoot,
+                rate=beta,
+                validate_args=validate_irf_args
+            ).prob
+
+            return lambda x: pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)
+
+
+def double_gamma_5_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            alpha_main = params[:, 0:1]
+            alpha_undershoot = params[:, 1:2]
+            beta_main = params[:, 2:3]
+            beta_undershoot = params[:, 3:4]
+            c = params[:, 4:5]
+
+            pdf_main = tf.contrib.distributions.Gamma(
+                concentration=alpha_main,
+                rate=beta_main,
+                validate_args=validate_irf_args
+            ).prob
+            pdf_undershoot = tf.contrib.distributions.Gamma(
+                concentration=alpha_undershoot,
+                rate=beta_undershoot,
+                validate_args=validate_irf_args
+            ).prob
+
+            return lambda x: pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)
+
+
 class DTSR(object):
 
     _INITIALIZATION_KWARGS = DTSR_INITIALIZATION_KWARGS
@@ -105,7 +310,7 @@ class DTSR(object):
         self.max_tdelta = (t_delta).max()
 
         if self.pc:
-            self.src_impulse_names_norate = list(filter(lambda x: x != 'rate', self.form.t.impulse_names()))
+            self.src_impulse_names_norate = list(filter(lambda x: x != 'rate', self.form.t.impulse_names(include_interactions=True)))
             _, self.eigenvec, self.eigenval, self.impulse_means, self.impulse_sds = pca(X[self.src_impulse_names_norate])
         else:
             self.eigenvec = self.eigenval = self.impulse_means = self.impulse_sds = None
@@ -187,7 +392,10 @@ class DTSR(object):
             self.src_node_table = t_src.node_table()
             self.src_coef_names = t_src.coef_names()
             self.src_fixed_coef_names = t_src.fixed_coef_names()
-            self.src_impulse_names = t_src.impulse_names()
+            self.src_interaction_list = t_src.interactions()
+            self.src_interaction_names = t_src.interaction_names()
+            self.src_fixed_interaction_names = t_src.fixed_interaction_names()
+            self.src_impulse_names = t_src.impulse_names(include_interactions=True)
             self.src_terminal_names = t_src.terminal_names()
             self.src_atomic_irf_names_by_family = t_src.atomic_irf_by_family()
             self.src_atomic_irf_family_by_name = {}
@@ -203,8 +411,11 @@ class DTSR(object):
             self.src_terminal2coef = t_src.terminal2coef()
             self.src_impulse2terminal = t_src.impulse2terminal()
             self.src_terminal2impulse = t_src.terminal2impulse()
+            self.src_interaction2inputs = t_src.interactions2inputs()
             self.src_coef_by_rangf = t_src.coef_by_rangf()
+            self.src_interaction_by_rangf = t_src.interaction_by_rangf()
             self.src_irf_by_rangf = t_src.irf_by_rangf()
+            self.src_interactions_list = t_src.interactions()
 
             # Initialize PC tree metadata
             self.n_pc = len(self.src_impulse_names)
@@ -219,7 +430,10 @@ class DTSR(object):
             self.node_table = t.node_table()
             self.coef_names = t.coef_names()
             self.fixed_coef_names = t.fixed_coef_names()
-            self.impulse_names = t.impulse_names()
+            self.interaction_list = t.interactions()
+            self.interaction_names = t.interaction_names()
+            self.fixed_interaction_names = t.fixed_interaction_names()
+            self.impulse_names = t.impulse_names(include_interactions=True)
             self.terminal_names = t.terminal_names()
             self.atomic_irf_names_by_family = t.atomic_irf_by_family()
             self.atomic_irf_family_by_name = {}
@@ -235,8 +449,11 @@ class DTSR(object):
             self.terminal2coef = t.terminal2coef()
             self.impulse2terminal = t.impulse2terminal()
             self.terminal2impulse = t.terminal2impulse()
+            self.interaction2inputs = t.interactions2inputs()
             self.coef_by_rangf = t.coef_by_rangf()
+            self.interaction_by_rangf = t.interaction_by_rangf()
             self.irf_by_rangf = t.irf_by_rangf()
+            self.interactions_list = t.interactions()
 
             # Compute names and indices of source impulses excluding rate term
             self.src_terminal_ix_norate = names2ix(self.src_impulse_names_norate, self.src_impulse_names)
@@ -281,7 +498,10 @@ class DTSR(object):
             self.node_table = t.node_table()
             self.coef_names = t.coef_names()
             self.fixed_coef_names = t.fixed_coef_names()
-            self.impulse_names = t.impulse_names()
+            self.interaction_list = t.interactions()
+            self.interaction_names = t.interaction_names()
+            self.fixed_interaction_names = t.fixed_interaction_names()
+            self.impulse_names = t.impulse_names(include_interactions=True)
             self.terminal_names = t.terminal_names()
             self.atomic_irf_names_by_family = t.atomic_irf_by_family()
             self.atomic_irf_family_by_name = {}
@@ -297,8 +517,11 @@ class DTSR(object):
             self.terminal2coef = t.terminal2coef()
             self.impulse2terminal = t.impulse2terminal()
             self.terminal2impulse = t.terminal2impulse()
+            self.interaction2inputs = t.interactions2inputs()
             self.coef_by_rangf = t.coef_by_rangf()
+            self.interaction_by_rangf = t.interaction_by_rangf()
             self.irf_by_rangf = t.irf_by_rangf()
+            self.interactions_list = t.interactions()
 
         if self.log_random:
             self.summary_random_writers = {}
@@ -327,15 +550,20 @@ class DTSR(object):
                 if self.intercept_init is None:
                     self.intercept_init = self.y_train_mean
                 self.intercept_init_tf = tf.constant(self.intercept_init, dtype=self.FLOAT_TF)
-                self.epsilon = tf.constant(2 * np.finfo(self.FLOAT_NP).eps, dtype=self.FLOAT_TF)
+                self.epsilon = tf.constant(4 * np.finfo(self.FLOAT_NP).eps, dtype=self.FLOAT_TF)
 
-                self.params_old = []
-                self.params_old_placeholder = []
-                self.params_old_getter = []
-                self.params_old_updater = []
-                self.params_max_delta = tf.Variable(0., dtype=self.FLOAT_TF, trainable=False, name='params_max_delta')
-                self.params_max_delta_placeholder = tf.placeholder(self.FLOAT_TF, shape=[], name='params_max_delta_placeholder')
-                self.assign_params_max_delta = tf.assign(self.params_max_delta, self.params_max_delta_placeholder)
+                self.d0 = []
+                self.d0_names = []
+                self.d0_saved = []
+                self.d0_saved_update = []
+                self.d0_assign = []
+                self.d1_saved = []
+                self.d1_saved_update = []
+                self.d1_assign = []
+                self.last_convergence_check = tf.Variable(0, trainable=False, dtype=self.INT_NP, name='last_convergence_check')
+                self.last_convergence_check_update = tf.placeholder(self.INT_NP, shape=[])
+                self.last_convergence_check_assign = tf.assign(self.last_convergence_check, self.last_convergence_check_update)
+                self.check_convergence = self.convergence_n_iterates and (self.convergence_tolerance is not None)
 
         self.parameter_table_columns = ['Estimate']
         self.predict_mode = False
@@ -417,7 +645,15 @@ class DTSR(object):
 
                 self.y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('y'))
                 self.time_y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('time_y'))
-                self.t_delta = tf.expand_dims(tf.expand_dims(self.time_y, -1) - self.time_X, -1)  # Tensor of temporal offsets with shape (?, history_length, 1)
+                # Tensor of temporal offsets with shape (?, history_length, 1)
+                self.t_delta = tf.expand_dims(tf.expand_dims(self.time_y, -1) - self.time_X, -1)
+                # Mask on variables that are not response-aligned, used for implementation of DiracDelta IRF
+                self.is_response_aligned = tf.cast(
+                    tf.logical_not(
+                        tf.cast(self.t_delta[:, -1, :], dtype=tf.bool)
+                    ),
+                    self.FLOAT_TF
+                )
                 self.gf_y = tf.placeholder(shape=[None, len(self.rangf)], dtype=self.INT_TF)
 
                 # Tensors used for interpolated IRF composition
@@ -522,32 +758,51 @@ class DTSR(object):
                 self.training_loglik = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_loglik')
                 self.set_training_loglik = tf.assign(self.training_loglik, self.training_loglik_in)
 
+                self.converged_in = tf.placeholder(tf.bool, shape=[], name='converged_in')
+                self.converged = tf.Variable(False, trainable=False, dtype=tf.bool, name='converged')
+                self.set_converged = tf.assign(self.converged, self.converged_in)
+
     def _initialize_base_params(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
+
+                # FIXED EFFECTS
+
+                # Intercept
                 if self.has_intercept[None]:
                     if not self.covarying_fixef:
                         self.intercept_fixed_base, self.intercept_fixed_base_summary = self.initialize_intercept()
                 else:
                     self.intercept_fixed_base = tf.constant(0., dtype=self.FLOAT_TF, name='intercept')
-
-                coef_ids = self.fixed_coef_names
-                if len(coef_ids) > 0 and not self.covarying_fixef:
-                    self.coefficient_fixed_base, self.coefficient_fixed_base_summary = self.initialize_coefficient(coef_ids=coef_ids)
-
                 self.intercept_random_base = {}
                 self.intercept_random_base_summary = {}
 
-                self.coefficient_random_base = {}
-                self.coefficient_random_base_summary = {}
+                # Coefficients
+                coef_ids = self.fixed_coef_names
+                if len(coef_ids) > 0 and not self.covarying_fixef:
+                    self.coefficient_fixed_base, self.coefficient_fixed_base_summary = self.initialize_coefficient(coef_ids=coef_ids)
+                    self.coefficient_random_base = {}
+                    self.coefficient_random_base_summary = {}
+
+                # Interactions
+                if len(self.interaction_names) > 0:
+                    interaction_ids = self.fixed_interaction_names
+                    if len(interaction_ids) > 0 and not self.covarying_fixef:
+                        self.interaction_fixed_base, self.interaction_fixed_base_summary = self.initialize_interaction(interaction_ids=interaction_ids)
+                        self.interaction_random_base = {}
+                        self.interaction_random_base_summary = {}
+
+                # RANDOM EFFECTS
 
                 for i in range(len(self.rangf)):
                     gf = self.rangf[i]
 
+                    # Intercept
                     if self.has_intercept[gf]:
                         if not self.covarying_ranef:
                             self.intercept_random_base[gf], self.intercept_random_base_summary[gf] = self.initialize_intercept(ran_gf=gf)
 
+                    # Coefficients
                     coef_ids = self.coef_by_rangf.get(gf, [])
                     if len(coef_ids) > 0 and not self.covarying_ranef:
                         self.coefficient_random_base[gf], self.coefficient_random_base_summary[gf] = self.initialize_coefficient(
@@ -555,6 +810,16 @@ class DTSR(object):
                             ran_gf=gf,
                         )
 
+                    # Interactions
+                    interaction_ids = self.interaction_by_rangf.get(gf, [])
+                    if len(interaction_ids) > 0 and not self.covarying_ranef:
+                        self.interaction_random_base[gf], self.interaction_random_base_summary[
+                            gf] = self.initialize_interaction(
+                            interaction_ids=interaction_ids,
+                            ran_gf=gf,
+                        )
+
+                # All IRF parameters
                 for family in self.atomic_irf_names_by_family:
                     if family == 'DiracDelta':
                         continue
@@ -664,10 +929,13 @@ class DTSR(object):
                                 default = 0
                             self._initialize_base_irf_param(param_name, family, default=default)
 
-    def _initialize_intercepts_coefficients(self):
+    def _initialize_intercepts_coefficients_interactions(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
 
+                # FIXED EFFECTS
+
+                # Intercept
                 if self.has_intercept[None]:
                     self.intercept_fixed = self.intercept_fixed_base
                     self.intercept_fixed_summary = self.intercept_fixed_base_summary
@@ -677,11 +945,19 @@ class DTSR(object):
                         collections=['params']
                     )
                     self._regularize(self.intercept_fixed, type='intercept', var_name='intercept')
-                    self._add_convergence_tracker(self.intercept_fixed_summary, 'intercept_fixed_old')
+                    self._add_convergence_tracker(self.intercept_fixed_summary, 'intercept_fixed')
 
                 else:
                     self.intercept_fixed = self.intercept_fixed_base
 
+                self.intercept = self.intercept_fixed
+                self.intercept_summary = self.intercept_fixed_summary
+                self.intercept_random = {}
+                self.intercept_random_summary = {}
+                self.intercept_random_means = {}
+
+
+                # Coefficients
                 fixef_ix = names2ix(self.fixed_coef_names, self.coef_names)
 
                 coef_ids = self.coef_names
@@ -696,7 +972,7 @@ class DTSR(object):
                     [len(coef_ids)]
                 )
                 self._regularize(self.coefficient_fixed, type='coefficient', var_name='coefficient')
-                self._add_convergence_tracker(self.coefficient_fixed_summary, 'coefficient_fixed_old')
+                self._add_convergence_tracker(self.coefficient_fixed_summary, 'coefficient_fixed')
 
                 for i in range(len(self.coef_names)):
                     tf.summary.scalar(
@@ -705,24 +981,50 @@ class DTSR(object):
                         collections=['params']
                     )
 
-                self.intercept = self.intercept_fixed
-                self.intercept_summary = self.intercept_fixed_summary
                 self.coefficient = self.coefficient_fixed
-                self.coefficient_summary = self.coefficient_fixed_summary
-
-                self.intercept_random = {}
-                self.intercept_random_summary = {}
-                self.intercept_random_means = {}
                 self.coefficient_random = {}
                 self.coefficient_random_summary = {}
                 self.coefficient_random_means = {}
-
                 self.coefficient = tf.expand_dims(self.coefficient, 0)
+                coefficient_fixed = self.coefficient
+
+                # Interactions
+                fixef_ix = names2ix(self.fixed_interaction_names, self.interaction_names)
+                if len(self.interaction_names) > 0:
+                    interaction_ids = self.interaction_names
+                    self.interaction_fixed = self._scatter_along_axis(
+                        fixef_ix,
+                        self.interaction_fixed_base,
+                        [len(interaction_ids)]
+                    )
+                    self.interaction_fixed_summary = self._scatter_along_axis(
+                        fixef_ix,
+                        self.interaction_fixed_base_summary,
+                        [len(interaction_ids)]
+                    )
+                    self._regularize(self.interaction_fixed, type='coefficient', var_name='interaction')
+                    self._add_convergence_tracker(self.interaction_fixed_summary, 'interaction_fixed')
+
+                    for i in range(len(self.interaction_names)):
+                        tf.summary.scalar(
+                            sn('interaction' + '/%s' % self.interaction_names[i]),
+                            self.interaction_fixed_summary[i],
+                            collections=['params']
+                        )
+                    self.interaction = self.interaction_fixed
+                    self.interaction_random = {}
+                    self.interaction_random_summary = {}
+                    self.interaction_random_means = {}
+                    self.interaction = tf.expand_dims(self.interaction, 0)
+                    interaction_fixed = self.interaction
+
+                # RANDOM EFFECTS
 
                 for i in range(len(self.rangf)):
                     gf = self.rangf[i]
                     levels_ix = np.arange(self.rangf_n_levels[i] - 1)
 
+                    # Random intercepts
                     if self.has_intercept[gf]:
                         intercept_random = self.intercept_random_base[gf]
                         intercept_random_summary = self.intercept_random_base_summary[gf]
@@ -751,7 +1053,7 @@ class DTSR(object):
                         self.intercept_random_means[gf] = tf.reduce_mean(intercept_random_summary, axis=0)
 
                         # Create record for convergence tracking
-                        self._add_convergence_tracker(self.intercept_random_summary[gf], 'intercept_by_%s_old' %gf)
+                        self._add_convergence_tracker(self.intercept_random_summary[gf], 'intercept_by_%s' %gf)
 
                         self.intercept += tf.gather(intercept_random, self.gf_y[:, i])
 
@@ -762,6 +1064,7 @@ class DTSR(object):
                                 collections=['random']
                             )
 
+                    # Random coefficients
                     coefs = self.coef_by_rangf.get(gf, [])
                     if len(coefs) > 0:
                         coef_ix = names2ix(coefs, self.coef_names)
@@ -801,7 +1104,7 @@ class DTSR(object):
                         self.coefficient_random_summary[gf] = coefficient_random_summary
                         self.coefficient_random_means[gf] = tf.reduce_mean(coefficient_random_summary, axis=0)
 
-                        self._add_convergence_tracker(self.coefficient_random_summary[gf], 'coefficient_by_%s_old' %gf)
+                        self._add_convergence_tracker(self.coefficient_random_summary[gf], 'coefficient_by_%s' %gf)
 
                         self.coefficient += tf.gather(coefficient_random, self.gf_y[:, i], axis=0)
 
@@ -814,25 +1117,83 @@ class DTSR(object):
                                     coefficient_random_summary[:, ix],
                                     collections=['random']
                                 )
+                                
+                    # Random interactions
+                    if len(self.interaction_names) > 0:
+                        interactions = self.interaction_by_rangf.get(gf, [])
+                        if len(interactions) > 0:
+                            interaction_ix = names2ix(interactions, self.interaction_names)
+
+                            interaction_random = self.interaction_random_base[gf]
+                            interaction_random_summary = self.interaction_random_base_summary[gf]
+
+                            interaction_random_means = tf.reduce_mean(interaction_random, axis=0, keepdims=True)
+                            interaction_random_summary_means = tf.reduce_mean(interaction_random_summary, axis=0, keepdims=True)
+
+                            interaction_random -= interaction_random_means
+                            interaction_random_summary -= interaction_random_summary_means
+                            self._regularize(interaction_random, type='ranef', var_name='interaction_by_%s' % gf)
+
+                            interaction_random = self._scatter_along_axis(
+                                interaction_ix,
+                                self._scatter_along_axis(
+                                    levels_ix,
+                                    interaction_random,
+                                    [self.rangf_n_levels[i], len(interactions)]
+                                ),
+                                [self.rangf_n_levels[i], len(self.interaction_names)],
+                                axis=1
+                            )
+                            interaction_random_summary = self._scatter_along_axis(
+                                interaction_ix,
+                                self._scatter_along_axis(
+                                    levels_ix,
+                                    interaction_random_summary,
+                                    [self.rangf_n_levels[i], len(interactions)]
+                                ),
+                                [self.rangf_n_levels[i], len(self.interaction_names)],
+                                axis=1
+                            )
+
+                            self.interaction_random[gf] = interaction_random
+                            self.interaction_random_summary[gf] = interaction_random_summary
+                            self.interaction_random_means[gf] = tf.reduce_mean(interaction_random_summary, axis=0)
+
+                            self._add_convergence_tracker(self.interaction_random_summary[gf], 'interaction_by_%s' % gf)
+
+                            self.interaction += tf.gather(interaction_random, self.gf_y[:, i], axis=0)
+
+                            if self.log_random:
+                                for j in range(len(interactions)):
+                                    interaction_name = interactions[j]
+                                    ix = interaction_ix[j]
+                                    tf.summary.histogram(
+                                        sn('by_%s/interaction/%s' % (gf, interaction_name)),
+                                        interaction_random_summary[:, ix],
+                                        collections=['random']
+                                    )
 
     def _initialize_irf_lambdas(self):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 def exponential(params):
-                    pdf = tf.contrib.distributions.Exponential(rate=params[:,0:1]).prob
-                    return lambda x: pdf(x + self.epsilon)
+                    return lambda x: exponential_irf(
+                        params,
+                        session=self.sess,
+                        epsilon=self.epsilon
+                    )(x)
 
                 self.irf_lambdas['Exp'] = exponential
                 self.irf_lambdas['ExpRateGT1'] = exponential
 
                 def gamma(params):
-                    pdf = tf.contrib.distributions.Gamma(
-                        concentration=params[:,0:1],
-                        rate=params[:,1:2],
-                        validate_args=self.validate_irf_args
-                    ).prob
-                    return lambda x: pdf(x + self.epsilon)
+                    return lambda x: gamma_irf(
+                        params,
+                        session=self.sess,
+                        epsilon=self.epsilon,
+                        validate_irf_args=self.validate_irf_args
+                    )(x)
 
                 self.irf_lambdas['Gamma'] = gamma
                 self.irf_lambdas['SteepGamma'] = gamma
@@ -841,203 +1202,108 @@ class DTSR(object):
                 self.irf_lambdas['HRFSingleGamma'] = gamma
 
                 def shifted_gamma(params):
-                    pdf = tf.contrib.distributions.Gamma(
-                        concentration=params[:,0:1],
-                        rate=params[:,1:2],
-                        validate_args=self.validate_irf_args
-                    ).prob
-                    return lambda x: pdf(x - params[:,2:3] + self.epsilon)
+                    return lambda x: shifted_gamma_irf(
+                        params,
+                        session=self.sess,
+                        epsilon=self.epsilon,
+                        validate_irf_args=self.validate_irf_args
+                    )(x)
 
                 self.irf_lambdas['ShiftedGamma'] = shifted_gamma
                 self.irf_lambdas['ShiftedGammaShapeGT1'] = shifted_gamma
                 self.irf_lambdas['ShiftedGammaKgt1'] = shifted_gamma
 
                 def normal(params):
-                    pdf = tf.contrib.distributions.Normal(loc=params[:,0:1], scale=params[:,1:2]).prob
-                    return lambda x: pdf(x)
+                    return lambda x: normal_irf(
+                        params,
+                        session=self.sess
+                    )(x)
 
                 self.irf_lambdas['Normal'] = normal
 
                 def skew_normal(params):
-                    mu = params[:,0:1]
-                    sigma = params[:,1:2]
-                    alpha = params[:,2:3]
-                    stdnorm = tf.contrib.distributions.Normal(loc=0., scale=1.)
-                    stdnorm_pdf = stdnorm.prob
-                    stdnorm_cdf = stdnorm.cdf
-                    return lambda x: 2 / sigma * stdnorm_pdf((x - mu) / sigma) * stdnorm_cdf(alpha * (x - mu) / sigma)
+                    return lambda x: skew_normal_irf(
+                        params,
+                        session=self.sess
+                    )(x)
 
                 self.irf_lambdas['SkewNormal'] = skew_normal
 
                 def emg(params):
-                    mu = params[:,0:1]
-                    sigma = params[:,1:2]
-                    L = params[:,2:3]
-                    return lambda x: L / 2 * tf.exp(0.5 * L * (2. * mu + L * sigma ** 2. - 2. * x)) * tf.erfc(
-                        (mu + L * sigma ** 2 - x) / (tf.sqrt(2.) * sigma))
+                    return lambda x: emg_irf(
+                        params,
+                        session=self.sess
+                    )(x)
 
                 self.irf_lambdas['EMG'] = emg
 
                 def beta_prime(params):
-                    alpha = params[:,1:2]
-                    beta = params[:,2:3]
-                    return lambda x: (x + self.epsilon) ** (alpha - 1.) * (1. + (x + self.epsilon)) ** (-alpha - beta) / tf.exp(
-                        tf.lbeta(tf.transpose(tf.stack([alpha, beta], axis=0))))
+                    return lambda x: beta_prime_irf(
+                        params,
+                        session=self.sess,
+                        epsilon=self.epsilon
+                    )(x)
 
                 self.irf_lambdas['BetaPrime'] = beta_prime
 
                 def shifted_beta_prime(params):
-                    alpha = params[:,0:1]
-                    beta = params[:,1:2]
-                    delta = params[:,2:3]
-                    return lambda x: (x - delta + self.epsilon) ** (alpha - 1) * (1 + (x - delta + self.epsilon)) ** (
-                    -alpha - beta) / tf.exp(
-                        tf.lbeta(tf.transpose(tf.stack([alpha, beta], axis=0))))
+                    return lambda x: shifted_beta_prime_irf(
+                        params,
+                        session=self.sess,
+                        epsilon=self.epsilon
+                    )(x)
 
                 self.irf_lambdas['ShiftedBetaPrime'] = shifted_beta_prime
 
-                def double_gamma(params):
-                    alpha_main = params[:, 0:1]
-                    beta = params[:, 1:2]
-                    alpha_undershoot_offset = params[:, 2:3]
-                    c = params[:, 3:4]
-
-                    pdf_main = tf.contrib.distributions.Gamma(
-                        concentration=alpha_main,
-                        rate=beta,
-                        validate_args=self.validate_irf_args
-                    ).prob
-                    pdf_undershoot = tf.contrib.distributions.Gamma(
-                        concentration=alpha_main + alpha_undershoot_offset,
-                        rate=beta,
-                        validate_args=self.validate_irf_args
-                    ).prob
-
-                    return lambda x: pdf_main(x + self.epsilon) - c * pdf_undershoot(x + self.epsilon)
-
-                self.irf_lambdas['HRFDoubleGamma'] = double_gamma
-
                 def double_gamma_1(params):
-                    beta = params[:, 1:2]
-
-                    pdf_main = tf.contrib.distributions.Gamma(
-                        concentration=6.,
-                        rate=beta,
-                        validate_args=self.validate_irf_args
-                    ).prob
-                    pdf_undershoot = tf.contrib.distributions.Gamma(
-                        concentration=16.,
-                        rate=beta,
-                        validate_args=self.validate_irf_args
-                    ).prob
-
-                    return lambda x: pdf_main(x + self.epsilon) - 1. / 6. * pdf_undershoot(x + self.epsilon)
+                    return lambda x: double_gamma_1_irf(
+                        params,
+                        session=self.sess,
+                        epsilon=self.epsilon,
+                        validate_irf_args=self.validate_irf_args
+                    )(x)
 
                 self.irf_lambdas['HRFDoubleGamma1'] = double_gamma_1
 
                 def double_gamma_2(params):
-                    alpha = params[:, 0:1]
-                    beta = params[:, 1:2]
-
-                    pdf_main = tf.contrib.distributions.Gamma(
-                        concentration=alpha,
-                        rate=beta,
-                        validate_args=self.validate_irf_args
-                    ).prob
-                    pdf_undershoot = tf.contrib.distributions.Gamma(
-                        concentration=alpha + 10,
-                        rate=beta,
-                        validate_args=self.validate_irf_args
-                    ).prob
-
-                    return lambda x: pdf_main(x + self.epsilon) - 1. / 6. * pdf_undershoot(x + self.epsilon)
+                    return lambda x: double_gamma_2_irf(
+                        params,
+                        session=self.sess,
+                        epsilon=self.epsilon,
+                        validate_irf_args=self.validate_irf_args
+                    )(x)
 
                 self.irf_lambdas['HRFDoubleGamma2'] = double_gamma_2
 
                 def double_gamma_3(params):
-                    alpha = params[:, 0:1]
-                    beta = params[:, 1:2]
-                    c = params[:, 2:3]
-
-                    pdf_main = tf.contrib.distributions.Gamma(
-                        concentration=alpha,
-                        rate=beta,
-                        validate_args=self.validate_irf_args
-                    ).prob
-                    pdf_undershoot = tf.contrib.distributions.Gamma(
-                        concentration=alpha + 10,
-                        rate=beta,
-                        validate_args=self.validate_irf_args
-                    ).prob
-
-                    return lambda x: pdf_main(x + self.epsilon) - c * pdf_undershoot(x + self.epsilon)
+                    return lambda x: double_gamma_3_irf(
+                        params,
+                        session=self.sess,
+                        epsilon=self.epsilon,
+                        validate_irf_args=self.validate_irf_args
+                    )(x)
 
                 self.irf_lambdas['HRFDoubleGamma3'] = double_gamma_3
 
                 def double_gamma_4(params):
-                    alpha_main = params[:, 0:1]
-                    alpha_undershoot = params[:, 1:2]
-                    beta = params[:, 2:3]
-                    c = params[:, 3:4]
-
-                    pdf_main = tf.contrib.distributions.Gamma(
-                        concentration=alpha_main,
-                        rate=beta,
-                        validate_args=self.validate_irf_args
-                    ).prob
-                    pdf_undershoot = tf.contrib.distributions.Gamma(
-                        concentration=alpha_undershoot,
-                        rate=beta,
-                        validate_args=self.validate_irf_args
-                    ).prob
-
-                    return lambda x: pdf_main(x + self.epsilon) - c * pdf_undershoot(x + self.epsilon)
+                    return lambda x: double_gamma_4_irf(
+                        params,
+                        session=self.sess,
+                        epsilon=self.epsilon,
+                        validate_irf_args=self.validate_irf_args
+                    )(x)
 
                 self.irf_lambdas['HRFDoubleGamma4'] = double_gamma_4
 
                 def double_gamma_5(params):
-                    alpha_main = params[:, 0:1]
-                    alpha_undershoot = params[:, 1:2]
-                    beta_main = params[:, 2:3]
-                    beta_undershoot = params[:, 3:4]
-                    c = params[:, 4:5]
-
-                    pdf_main = tf.contrib.distributions.Gamma(
-                        concentration=alpha_main,
-                        rate=beta_main,
-                        validate_args=self.validate_irf_args
-                    ).prob
-                    pdf_undershoot = tf.contrib.distributions.Gamma(
-                        concentration=alpha_undershoot,
-                        rate=beta_undershoot,
-                        validate_args=self.validate_irf_args
-                    ).prob
-
-                    return lambda x: pdf_main(x + self.epsilon) - c * pdf_undershoot(x + self.epsilon)
+                    return lambda x: double_gamma_5_irf(
+                        params,
+                        session=self.sess,
+                        epsilon=self.epsilon,
+                        validate_irf_args=self.validate_irf_args
+                    )(x)
 
                 self.irf_lambdas['HRFDoubleGamma5'] = double_gamma_5
-
-                def double_gamma_unconstrained(params):
-                    alpha_main = params[:, 0:1]
-                    beta_main = params[:, 1:2]
-                    alpha_undershoot = params[:, 2:3]
-                    beta_undershoot = params[:, 3:4]
-                    c = params[:, 4:5]
-
-                    pdf_main = tf.contrib.distributions.Gamma(
-                        concentration=alpha_main,
-                        rate=beta_main,
-                        validate_args=self.validate_irf_args
-                    ).prob
-                    pdf_undershoot = tf.contrib.distributions.Gamma(
-                        concentration=alpha_undershoot,
-                        rate=beta_undershoot,
-                        validate_args=self.validate_irf_args
-                    ).prob
-
-                    return lambda x: pdf_main(x + self.epsilon) - c * pdf_undershoot(x + self.epsilon)
-
-                self.irf_lambdas['HRFDoubleGammaUnconstrained'] = double_gamma_unconstrained
 
     def _initialize_spline(self, order, bases, instantaneous=True, roughness_penalty=0.):
         def spline(params):
@@ -1153,7 +1419,7 @@ class DTSR(object):
                             params_fixed.append(param_vals[2])
                         if param_vals[3] is not None:
                             params_fixed_summary.append(param_vals[3])
-                            self._add_convergence_tracker(param_vals[3], 'irf_%s_%s_old' % (family, param_name))
+                            self._add_convergence_tracker(param_vals[3], 'irf_%s_%s' % (family, param_name))
 
                         if param_vals[4] is not None and param_vals[5] is not None:
                             assert(set(param_vals[4].keys()) == set(param_vals[5].keys()))
@@ -1166,7 +1432,7 @@ class DTSR(object):
                                 if gf not in params_random_summary:
                                     params_random_summary[gf] = []
                                 params_random_summary[gf].append(param_vals[5][gf])
-                                self._add_convergence_tracker(param_vals[5][gf], 'irf_%s_%s_by_%s_old' % (family, param_name, gf))
+                                self._add_convergence_tracker(param_vals[5][gf], 'irf_%s_%s_by_%s' % (family, param_name, gf))
 
                     has_random_irf = False
                     for param in params:
@@ -1275,7 +1541,7 @@ class DTSR(object):
                 param_random_summary_by_rangf = {}
 
                 if len(irf_by_rangf) > 0:
-                    for i, gf in enumerate(irf_by_rangf):
+                   for i, gf in enumerate([x for x in self.rangf if x in irf_by_rangf]):
                         irf_ids_ran = [x for x in irf_by_rangf[gf] if param_name in trainable[x]]
                         if len(irf_ids_ran):
                             irfs_ix = names2ix(irf_by_rangf[gf], irf_ids)
@@ -1283,7 +1549,7 @@ class DTSR(object):
 
                             param_random = self._center_and_constrain(
                                 self.irf_params_random_base[gf][family][param_name],
-                                tf.gather(param, irfs_ix, axis=1),
+                                tf.gather(param_fixed, irfs_ix, axis=1),
                                 lb=param_lb,
                                 ub=param_ub
                             )
@@ -1444,6 +1710,8 @@ class DTSR(object):
         with self.sess.as_default():
             with self.sess.graph.as_default():
 
+                # FIXED EFFECTS
+
                 if self.covarying_fixef:
                     joint_fixed_means = []
                     joint_fixed_sds = []
@@ -1451,18 +1719,30 @@ class DTSR(object):
 
                     i = 0
 
+                    # Intercept
                     if self.has_intercept[None]:
                         joint_fixed_means.append(tf.expand_dims(self.intercept_init_tf, axis=0))
                         joint_fixed_sds.append(tf.expand_dims(self.intercept_joint_sd, axis=0))
                         joint_fixed_ix['intercept'] = (i, i + 1)
                         i += 1
 
+                    # Coefficients
                     coef_ids = self.fixed_coef_names
-                    joint_fixed_means.append(tf.zeros((len(coef_ids), ), dtype=self.FLOAT_TF))
-                    joint_fixed_sds.append(tf.ones((len(coef_ids), ), dtype=self.FLOAT_TF) * self.coef_joint_sd)
-                    joint_fixed_ix['coefficient'] = (i, i + len(coef_ids))
-                    i += len(coef_ids)
+                    if len(coef_ids) > 0:
+                        joint_fixed_means.append(tf.zeros((len(coef_ids), ), dtype=self.FLOAT_TF))
+                        joint_fixed_sds.append(tf.ones((len(coef_ids), ), dtype=self.FLOAT_TF) * self.coef_joint_sd)
+                        joint_fixed_ix['coefficient'] = (i, i + len(coef_ids))
+                        i += len(coef_ids)
 
+                    # Interactions
+                    interaction_ids = self.fixed_interaction_names
+                    if len(interaction_ids) > 0:
+                        joint_fixed_means.append(tf.zeros((len(interaction_ids),), dtype=self.FLOAT_TF))
+                        joint_fixed_sds.append(tf.ones((len(interaction_ids),), dtype=self.FLOAT_TF) * self.coef_joint_sd)
+                        joint_fixed_ix['interaction'] = (i, i + len(interaction_ids))
+                        i += len(interaction_ids)
+
+                    # IRF Parameters
                     for family in sorted(list(self.atomic_irf_names_by_family.keys())):
                         if family not in joint_fixed_ix:
                             joint_fixed_ix[family] = {}
@@ -1501,6 +1781,8 @@ class DTSR(object):
 
                     self.joint_fixed_ix = joint_fixed_ix
 
+                # RANDOM EFFECTS
+
                 if self.covarying_ranef:
                     joint_random = {}
                     joint_random_summary = {}
@@ -1516,18 +1798,29 @@ class DTSR(object):
 
                         i = 0
 
+                        # Intercepts
                         if self.has_intercept[gf]:
                             joint_random_means[gf].append(tf.zeros([n_levels,], dtype=self.FLOAT_TF))
                             joint_random_sds[gf].append(tf.ones([n_levels,], dtype=self.FLOAT_TF) * self.intercept_joint_sd)
                             joint_random_ix[gf]['intercept'] = (i, i + n_levels)
                             i += n_levels
 
+                        # Coefficients
                         coef_ids = self.coef_by_rangf.get(gf, [])
                         if len(coef_ids) > 0:
                             joint_random_means[gf].append(tf.zeros([n_levels * len(coef_ids)], dtype=self.FLOAT_TF))
                             joint_random_sds[gf].append(tf.ones([n_levels * len(coef_ids)], dtype=self.FLOAT_TF) * self.coef_joint_sd)
                             joint_random_ix[gf]['coefficient'] = (i, i + n_levels * len(coef_ids))
                             i += n_levels * len(coef_ids)
+
+                        # Interactions
+                        interaction_ids = self.interaction_by_rangf.get(gf, [])
+                        if len(interaction_ids) > 0:
+                            joint_random_means[gf].append(tf.zeros([n_levels * len(interaction_ids)], dtype=self.FLOAT_TF))
+                            joint_random_sds[gf].append(
+                                tf.ones([n_levels * len(interaction_ids)], dtype=self.FLOAT_TF) * self.coef_joint_sd)
+                            joint_random_ix[gf]['interaction'] = (i, i + n_levels * len(interaction_ids))
+                            i += n_levels * len(interaction_ids)
 
                         for family in sorted(list(self.atomic_irf_names_by_family.keys())):
                             for param_name in Formula.irf_params(family):
@@ -1587,6 +1880,10 @@ class DTSR(object):
                     self.coefficient_fixed_base = self.joint_fixed[s:e]
                     self.coefficient_fixed_base_summary = self.joint_fixed_summary[s:e]
 
+                    s, e = self.joint_fixed_ix['interaction']
+                    self.interaction_fixed_base = self.joint_fixed[s:e]
+                    self.interaction_fixed_base_summary = self.joint_fixed_summary[s:e]
+
                     for family in sorted(list(self.atomic_irf_names_by_family.keys())):
                         if family not in self.irf_params_fixed_base:
                             self.irf_params_fixed_base[family] = {}
@@ -1626,6 +1923,22 @@ class DTSR(object):
                             self.coefficient_random_base_summary[gf] = tf.reshape(
                                 self.joint_random_summary[gf][s:e],
                                 [rangf_n_levels, len(coef_ids)]
+                            )
+
+                        interaction_ids = self.interaction_by_rangf.get(gf, [])
+                        if len(interaction_ids) > 0:
+                            if gf not in self.interaction_random_base:
+                                self.interaction_random_base[gf] = {}
+                            if gf not in self.interaction_random_base_summary:
+                                self.interaction_random_base_summary[gf] = {}
+                            s, e = self.joint_random_ix[gf]['interaction']
+                            self.interaction_random_base[gf] = tf.reshape(
+                                self.joint_random[gf][s:e],
+                                [rangf_n_levels, len(interaction_ids)]
+                            )
+                            self.interaction_random_base_summary[gf] = tf.reshape(
+                                self.joint_random_summary[gf][s:e],
+                                [rangf_n_levels, len(interaction_ids)]
                             )
 
                         if gf not in self.irf_params_random_base:
@@ -1676,27 +1989,23 @@ class DTSR(object):
                         tf.expand_dims(self.intercept_fixed, axis=0)
                     )
                 for coef_name in self.fixed_coef_names:
-                    coef_name_str = coef_name.split('-')
-                    if len(coef_name_str) > 1:
-                        coef_name_str = ' '.join(coef_name_str[:-1])
-                    else:
-                        coef_name_str = coef_name_str[0]
-                    coef_name_str = sn('coefficient_' + coef_name_str)
+                    coef_name_str = 'coefficient_' + coef_name
                     parameter_table_fixed_keys.append(coef_name_str)
                 parameter_table_fixed_values.append(
                     tf.gather(self.coefficient_fixed, names2ix(self.fixed_coef_names, self.coef_names))
                 )
+                if len(self.fixed_interaction_names) > 0:
+                    for interaction_name in self.fixed_interaction_names:
+                        interaction_name_str = 'interaction_' + interaction_name
+                        parameter_table_fixed_keys.append(interaction_name_str)
+                    parameter_table_fixed_values.append(
+                        tf.gather(self.interaction_fixed, names2ix(self.fixed_interaction_names, self.interaction_names))
+                    )
                 for irf_id in self.irf_params_fixed:
                     family = self.atomic_irf_family_by_name[irf_id]
                     for param in self.atomic_irf_param_trainable_by_family[family][irf_id]:
                         param_ix = names2ix(param, Formula.irf_params(family))
-                        irf_id_str = irf_id.split('-')
-                        if len(irf_id_str) > 1:
-                            irf_id_str = ' '.join(irf_id_str[:-1])
-                        else:
-                            irf_id_str = irf_id_str[0]
-                        irf_id_str = sn(irf_id_str)
-                        parameter_table_fixed_keys.append(param + '_' + irf_id_str)
+                        parameter_table_fixed_keys.append(param + '_' + irf_id)
                         parameter_table_fixed_values.append(
                             tf.squeeze(
                                 tf.gather(self.irf_params_fixed[irf_id], param_ix, axis=1),
@@ -1729,12 +2038,7 @@ class DTSR(object):
                             coef_names = self.coef_by_rangf.get(gf, [])
                             for coef_name in coef_names:
                                 coef_ix = names2ix(coef_name, self.coef_names)
-                                coef_name_str = coef_name.split('-')
-                                if len(coef_name_str) > 1:
-                                    coef_name_str = ' '.join(coef_name_str[:-1])
-                                else:
-                                    coef_name_str = coef_name_str[0]
-                                coef_name_str = sn('coefficient_' + coef_name_str)
+                                coef_name_str = 'coefficient_' + coef_name
                                 for level in levels:
                                     parameter_table_random_keys.append(coef_name_str)
                                     parameter_table_random_rangf.append(gf)
@@ -1747,19 +2051,31 @@ class DTSR(object):
                                         )
                                     )
                                 )
+                        if len(self.interaction_names) > 0:
+                            if gf in self.interaction_random:
+                                interaction_names = self.interaction_by_rangf.get(gf, [])
+                                for interaction_name in interaction_names:
+                                    interaction_ix = names2ix(interaction_name, self.interaction_names)
+                                    interaction_name_str = 'interaction_' + interaction_name
+                                    for level in levels:
+                                        parameter_table_random_keys.append(interaction_name_str)
+                                        parameter_table_random_rangf.append(gf)
+                                        parameter_table_random_rangf_levels.append(level)
+                                    parameter_table_random_values.append(
+                                        tf.squeeze(
+                                            tf.gather(
+                                                tf.gather(self.interaction_random[gf], interaction_ix, axis=1),
+                                                levels_ix
+                                            )
+                                        )
+                                    )
                         if gf in self.irf_params_random:
                             for irf_id in self.irf_params_random[gf]:
                                 family = self.atomic_irf_family_by_name[irf_id]
                                 for param in self.atomic_irf_param_trainable_by_family[family][irf_id]:
                                     param_ix = names2ix(param, Formula.irf_params(family))
-                                    irf_id_str = irf_id.split('-')
-                                    if len(irf_id_str) > 1:
-                                        irf_id_str = ' '.join(irf_id_str[:-1])
-                                    else:
-                                        irf_id_str = irf_id_str[0]
-                                    irf_id_str = sn(irf_id_str)
                                     for level in levels:
-                                        parameter_table_random_keys.append(param + '_' + irf_id_str)
+                                        parameter_table_random_keys.append(param + '_' + irf_id)
                                         parameter_table_random_rangf.append(gf)
                                         parameter_table_random_rangf_levels.append(level)
                                     parameter_table_random_values.append(
@@ -1785,6 +2101,9 @@ class DTSR(object):
                         means.append(tf.expand_dims(self.intercept_random_means[gf], 0))
                     for gf in sorted(list(self.coefficient_random_means.keys())):
                         means.append(self.coefficient_random_means[gf])
+                    if len(self.interaction_names) > 0:
+                        for gf in sorted(list(self.interaction_random_means.keys())):
+                            means.append(self.interaction_random_means[gf])
                     for gf in sorted(list(self.irf_params_random_means.keys())):
                         for family in sorted(list(self.irf_params_random_means[gf].keys())):
                             for param_name in sorted(list(self.irf_params_random_means[gf][family].keys())):
@@ -1819,11 +2138,11 @@ class DTSR(object):
                     assert not t.name() in self.irf_plot, 'Duplicate IRF node name already in self.irf_plot'
                     self.irf_plot[t.name()] = {
                         'atomic': {
-                            'scaled': self.irf_plot[t.p.name()]['atomic']['unscaled'] * tf.gather(self.coefficient_summary, coef_ix),
+                            'scaled': self.irf_plot[t.p.name()]['atomic']['unscaled'] * tf.gather(self.coefficient_fixed_summary, coef_ix),
                             'unscaled': self.irf_plot[t.p.name()]['atomic']['unscaled']
                         },
                         'composite': {
-                            'scaled': self.irf_plot[t.p.name()]['composite']['unscaled'] * tf.gather(self.coefficient_summary, coef_ix),
+                            'scaled': self.irf_plot[t.p.name()]['composite']['unscaled'] * tf.gather(self.coefficient_fixed_summary, coef_ix),
                             'unscaled': self.irf_plot[t.p.name()]['composite']['unscaled']
                         }
                     }
@@ -2018,6 +2337,9 @@ class DTSR(object):
                                 impulse = self._apply_pc(X, src_ix=src_impulse_ix, pc_ix=impulse_ix)
                         else:
                             impulse = tf.gather(self.X, impulse_ix, axis=2)[:, -1, :]
+
+                        # Zero-out impulses to DiracDelta that are not response-aligned
+                        impulse *= self.is_response_aligned
                     else:
                         if self.pc:
                             if impulse_name == 'rate':
@@ -2076,6 +2398,67 @@ class DTSR(object):
 
                             self.convolutions[name] = tf.reduce_sum(impulse * irf_seq, axis=1)
 
+    def _initialize_interactions(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if len(self.interaction_names) > 0:
+                    interaction_ix = np.arange(len(self.interaction_names))
+                    interaction_coefs = tf.gather(self.interaction, interaction_ix, axis=1)
+                    interaction_inputs = []
+                    for i, interaction in enumerate(self.interaction_list):
+                        assert interaction.name() == self.interaction_names[i], 'Mismatched sort order between self.interaction_names and self.interaction_list. This should not have happened, so please report it in issue tracker on Github.'
+                        irf_input_names = [x.name() for x in interaction.irf_responses()]
+
+                        inputs_cur = None
+
+                        if len(irf_input_names) > 0:
+                            irf_input_ix = names2ix(irf_input_names, self.terminal_names)
+                            irf_inputs = tf.gather(self.X_conv, irf_input_ix, axis=1)
+                            inputs_cur = tf.reduce_prod(irf_inputs, axis=1)
+
+                        non_irf_input_names = [x.name() for x in interaction.non_irf_responses()]
+                        if len(non_irf_input_names):
+                            non_irf_input_ix = names2ix(non_irf_input_names, self.impulse_names)
+                            non_irf_inputs = tf.gather(self.X[:,-1,:], non_irf_input_ix, axis=1)
+                            non_irf_inputs = tf.reduce_prod(non_irf_inputs, axis=1)
+                            if inputs_cur is not None:
+                                inputs_cur *= non_irf_inputs
+                            else:
+                                inputs_cur = non_irf_inputs
+
+                        interaction_inputs.append(inputs_cur)
+                    interaction_inputs = tf.stack(interaction_inputs, axis=1)
+                    self.summed_interactions = tf.reduce_sum(interaction_coefs * interaction_inputs, axis=1)
+
+    def _initialize_interaction_plots(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                for i, interaction in enumerate(self.interaction_names):
+                    interaction_ix = [i]
+                    estimate = self.dd_support * tf.gather(self.interaction_fixed, interaction_ix)
+                    self.irf_mc[interaction] = {
+                        'atomic': {
+                            'scaled': estimate,
+                            'unscaled': estimate
+                        },
+                        'composite': {
+                            'scaled': estimate,
+                            'unscaled': estimate
+                        }
+                    }
+
+                    estimate = self.dd_support * tf.gather(self.interaction_fixed_summary, interaction_ix)
+                    self.irf_plot[interaction] = {
+                        'atomic': {
+                            'scaled': estimate,
+                            'unscaled': estimate
+                        },
+                        'composite': {
+                            'scaled': estimate,
+                            'unscaled': estimate
+                        }
+                    }
+
     def _construct_network(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -2095,7 +2478,16 @@ class DTSR(object):
                 coef = tf.gather(self.coefficient, coef_ix, axis=1)
                 self.X_conv_scaled = self.X_conv*coef
 
-                self.out = self.intercept + tf.reduce_sum(self.X_conv_scaled, axis=1)
+                out = self.intercept + tf.reduce_sum(self.X_conv_scaled, axis=1)
+
+                if len(self.interaction_names) > 0:
+                    self._initialize_interactions()
+                    #self._initialize_interaction_plots()
+                    out += self.summed_interactions
+
+                self.out = out
+                # Hack needed for MAP evaluation of DTSRBayes
+                self.out_mean = self.out
 
     def _initialize_optimizer(self, name):
         with self.sess.as_default():
@@ -2108,17 +2500,22 @@ class DTSR(object):
                     lr_decay_steps = tf.constant(self.lr_decay_steps, dtype=self.INT_TF)
                     lr_decay_rate = tf.constant(self.lr_decay_rate, dtype=self.FLOAT_TF)
                     lr_decay_staircase = self.lr_decay_staircase
+                    if self.lr_decay_iteration_power != 1:
+                        t = tf.cast(self.global_step, dtype=self.FLOAT_TF) ** self.lr_decay_iteration_power
+                    else:
+                        t = self.global_step
+
                     if 'cosine' in self.lr_decay_family:
                         self.lr = getattr(tf.train, self.lr_decay_family)(
                             lr,
-                            self.global_step,
+                            t,
                             lr_decay_steps,
                             name='learning_rate'
                         )
                     else:
                         self.lr = getattr(tf.train, self.lr_decay_family)(
                             lr,
-                            self.global_step,
+                            t,
                             lr_decay_steps,
                             lr_decay_rate,
                             staircase=lr_decay_staircase,
@@ -2154,8 +2551,6 @@ class DTSR(object):
                 self.summary_losses = tf.summary.merge_all(key='loss')
                 if self.log_random and len(self.rangf) > 0:
                     self.summary_random = tf.summary.merge_all(key='random')
-                tf.summary.scalar('max_delta', self.params_max_delta_placeholder, collections=['convergence'])
-                self.summary_convergence = tf.summary.merge_all(key='convergence')
 
     def _initialize_saver(self):
         with self.sess.as_default():
@@ -2172,6 +2567,25 @@ class DTSR(object):
                 for v in self.ema_vars:
                     self.ema_map[self.ema.average_name(v)] = v
                 self.ema_saver = tf.train.Saver(self.ema_map)
+
+    def _initialize_convergence_checking(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                self.max_delta_summary = tf.placeholder(self.FLOAT_TF, name='max_delta')
+                self.double_delta_at_max_delta_summary = tf.placeholder(self.FLOAT_TF, name='double_delta_at_max_delta')
+
+                tf.summary.scalar('max_delta', self.max_delta_summary, collections=['convergence'])
+                tf.summary.scalar('double_delta_at_max_delta', self.double_delta_at_max_delta_summary, collections=['convergence'])
+                self.summary_convergence = tf.summary.merge_all(key='convergence')
+
+                if self.global_step.eval(session=self.sess) == 0:
+                    d0 = self.sess.run(self.d0)
+                    fd_init = {}
+                    for i in range(len(d0)):
+                        init_cur = np.tile(d0[i], [self.convergence_n_iterates, 1])
+                        fd_init[self.d0_saved_update[i]] = init_cur
+
+                    self.sess.run(self.d0_assign, feed_dict=fd_init)
 
 
 
@@ -2207,6 +2621,19 @@ class DTSR(object):
         :param coef_ids: ``list`` of ``str``: List of coefficient IDs
         :param ran_gf: ``str`` or ``None``: Name of random grouping factor for random coefficient (if ``None``, constructs a fixed coefficient)
         :return: 2-tuple of ``Tensor`` ``(coefficient, coefficient_summary)``; ``coefficient`` is the coefficient for use by the model. ``coefficient_summary`` is an identically-shaped representation of the current coefficient values for logging and plotting (can be identical to ``coefficient``). For fixed coefficients, should return a vector of ``len(coef_ids)`` trainable weights. For random coefficients, should return batch-length matrix of trainable weights with ``len(coef_ids)`` columns for each input in the batch. Weights should be initialized around 0.
+        """
+
+        raise NotImplementedError
+
+    def initialize_interaction(self, interaction_ids=None, ran_gf=None):
+        """
+        Add (response-level) interactions.
+        This method must be implemented by subclasses of ``DTSR`` and should only be called at model initialization.
+        Correct model behavior is not guaranteed if called at any other time.
+
+        :param coef_ids: ``list`` of ``str``: List of interaction IDs
+        :param ran_gf: ``str`` or ``None``: Name of random grouping factor for random interaction (if ``None``, constructs a fixed interaction)
+        :return: 2-tuple of ``Tensor`` ``(interaction, interaction_summary)``; ``interaction`` is the interaction for use by the model. ``interaction_summary`` is an identically-shaped representation of the current interaction values for logging and plotting (can be identical to ``interaction``). For fixed interactions, should return a vector of ``len(interaction_ids)`` trainable weights. For random interactions, should return batch-length matrix of trainable weights with ``len(interaction_ids)`` columns for each input in the batch. Weights should be initialized around 0.
         """
 
         raise NotImplementedError
@@ -2374,59 +2801,171 @@ class DTSR(object):
 
         return trainable_ix, untrainable_ix
 
-    def _add_convergence_tracker(self, var, name):
+    def _add_convergence_tracker(self, var, name, alpha=0.9):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                self.params_old_getter.append(var)
-                self.params_old.append(
-                    tf.Variable(
-                        tf.zeros_like(var),
-                        name=name,
+                if self.convergence_n_iterates:
+                    # Flatten the variable for easy argmax
+                    var = tf.reshape(var, [-1])
+                    self.d0.append(var)
+
+                    self.d0_names.append(name)
+
+                    # Initialize tracker of parameter iterates
+                    var_d0_iterates = tf.Variable(
+                        tf.zeros([self.convergence_n_iterates] + list(var.shape), dtype=self.FLOAT_TF),
+                        name=name + '_d0',
                         trainable=False
                     )
-                )
-                self.params_old_placeholder.append(
-                    tf.placeholder(
-                        self.FLOAT_TF,
-                        shape=self.params_old[-1].shape
-                    )
-                )
 
-                # Use EMA to smooth parameter training dynamics
-                alpha = 0.9
-                old = self.params_old[-1]
-                new = self.params_old_placeholder[-1]
-                updated = alpha * old + (1 - alpha) * new
+                    var_d0_iterates_update = tf.placeholder(self.FLOAT_TF, shape=var_d0_iterates.shape)
+                    self.d0_saved.append(var_d0_iterates)
+                    self.d0_saved_update.append(var_d0_iterates_update)
+                    self.d0_assign.append(tf.assign(var_d0_iterates, var_d0_iterates_update))
 
-                self.params_old_updater.append(
-                    tf.assign(
-                        old,
-                        updated
+                    # Initialize tracker of derivative of parameter iterates with respect to training time
+                    var_d1_iterates = tf.Variable(
+                        tf.zeros([self.convergence_n_iterates] + list(var.shape), dtype=self.FLOAT_TF),
+                        name=name + '_d1',
+                        trainable=False
                     )
-                )
+                    var_d1_iterates_update = tf.placeholder(self.FLOAT_TF, shape=var_d1_iterates.shape)
+                    self.d1_saved.append(var_d1_iterates)
+                    self.d1_saved_update.append(var_d1_iterates_update)
+                    self.d1_assign.append(tf.assign(var_d1_iterates, var_d1_iterates_update))
+
+    def _compute_delta(self, iterates):
+        # Compute regression coefficient (slope) over time for each element of var.
+        # This uses the first normal equation for univariate linear regression:
+        #
+        #     beta = sum[(x_i - mu_x)(y_i - mu_y)] / sum[(x_i - mu_x)^2]
+        #
+        y = iterates
+        x = np.arange(0, len(iterates)*self.convergence_check_freq, self.convergence_check_freq).astype('float')[..., None]
+        mu_x = x.mean(axis=0, keepdims=True)
+        mu_y = y.mean(axis=0, keepdims=True)
+        num = ((x - mu_x) * (y - mu_y)).sum(axis=0)
+        denom = ((x - mu_x) ** 2).sum()
+
+        delta = num / denom
+
+        return delta
+
+    def run_convergence_check(self, verbose=True):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                max_delta_ix, max_delta, double_delta_at_max_delta = self._convergence_check_inner()
+
+                if self.check_convergence:
+                    if verbose:
+                        sys.stderr.write('Max delta: %s.\n' % max_delta)
+                        sys.stderr.write('Double delta at max delta: %s.\n' % double_delta_at_max_delta)
+                        sys.stderr.write('Location: %s.\n\n' % self.d0_names[max_delta_ix])
+
+                    converged = self.global_step.eval(session=self.sess) > self.convergence_n_iterates and \
+                              (max_delta < self.convergence_tolerance) and \
+                              (double_delta_at_max_delta < self.convergence_tolerance)
+                else:
+                    converged = False
+                    if verbose:
+                        sys.stderr.write('Automatic convergence checking off.\n')
+
+                self.sess.run(self.set_converged, feed_dict={self.converged_in: converged})
+
+    def _convergence_check_inner(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                max_delta = 0
+                max_delta_ix = 0
+                double_delta_at_max_delta = 0
+                fd_assign = {}
+
+                update = self.last_convergence_check.eval(session=self.sess) < self.global_step.eval(session=self.sess) and \
+                         self.convergence_check_freq > 0 and \
+                         self.global_step.eval(session=self.sess) % self.convergence_check_freq == 0
+
+                if self.check_convergence:
+                    var_d0, var_d0_iterates, var_d1_iterates = self.sess.run(
+                        [self.d0, self.d0_saved, self.d1_saved])
+
+                    for i in range(len(var_d0)):
+                        if update:
+                            new_d0 = var_d0[i]
+                            iterates_d0 = var_d0_iterates[i]
+                            iterates_d0[:-1] = iterates_d0[1:]
+                            iterates_d0[-1] = new_d0
+                            fd_assign[self.d0_saved_update[i]] = iterates_d0
+
+                            new_d1 = self._compute_delta(iterates_d0)
+                            iterates_d1 = var_d1_iterates[i]
+                            iterates_d1[:-1] = iterates_d1[1:]
+                            iterates_d1[-1] = new_d1
+                            fd_assign[self.d1_saved_update[i]] = iterates_d1
+
+                        else:
+                            new_d1 = self._compute_delta(var_d0_iterates[i])
+                            iterates_d1 = var_d1_iterates[i]
+
+                        new_d1_max_ix = np.fabs(new_d1).argmax()
+                        new_d1_max = np.fabs(new_d1[new_d1_max_ix])
+                        if new_d1_max > max_delta:
+                            max_delta = new_d1_max
+                            max_delta_ix = i
+                            double_delta_at_max_delta = np.fabs(self._compute_delta(iterates_d1))[new_d1_max_ix]
+
+                    if update:
+                        fd_assign[self.last_convergence_check_update] = self.global_step.eval(session=self.sess)
+                        self.sess.run([self.d0_assign, self.d1_assign, self.last_convergence_check_assign],
+                                      feed_dict=fd_assign)
+
+                        if self.log_freq > 0 and self.global_step.eval(session=self.sess) % self.log_freq == 0:
+                            summary_convergence = self.sess.run(
+                                self.summary_convergence,
+                                feed_dict={self.max_delta_summary: max_delta,
+                                           self.double_delta_at_max_delta_summary: double_delta_at_max_delta}
+                            )
+                            self.writer.add_summary(summary_convergence, self.global_step.eval(session=self.sess))
+
+                return max_delta_ix, max_delta, double_delta_at_max_delta
 
     def _collect_plots(self):
-        switches = [['atomic', 'composite'], ['scaled', 'unscaled']]
+        switches = [['atomic', 'composite'], ['scaled', 'unscaled'], ['dirac', 'nodirac']]
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.plots = {}
                 irf_names = [x for x in self.node_table if x in self.irf_plot and not (len(self.node_table[x].children) == 1 and self.node_table[x].children[0].terminal())]
+                irf_names_nodirac = [x for x in irf_names if not x.startswith('DiracDelta')]
                 irf_names_terminal = [x for x in self.node_table if x in self.irf_plot and self.node_table[x].terminal()]
+                irf_names_terminal_nodirac = [x for x in irf_names_terminal if not x.startswith('DiracDelta')]
+
 
                 for a in switches[0]:
                     if a not in self.plots:
                         self.plots[a] = {}
                     for b in switches[1]:
-                        plot_y = []
-                        names = irf_names if b == 'unscaled' else irf_names_terminal
-                        for x in names:
-                            plot_y.append(self.irf_plot[x][a][b])
+                        self.plots[a][b] = {}
+                        for c in switches[2]:
+                            plot_y = []
 
-                        self.plots[a][b] = {
-                            'names': names,
-                            'plot': plot_y
-                        }
+                            if b == 'unscaled':
+                                if c == 'dirac':
+                                    names = irf_names
+                                else:
+                                    names = irf_names_nodirac
+                            else:
+                                if c == 'dirac':
+                                    names = irf_names_terminal
+                                else:
+                                    names = irf_names_terminal_nodirac
+
+                            for x in names:
+                                plot_y.append(self.irf_plot[x][a][b])
+
+                            self.plots[a][b][c] = {
+                                'names': names,
+                                'plot': plot_y
+                            }
 
                 if self.pc:
                     self.src_plot_tensors = {}
@@ -2437,16 +2976,28 @@ class DTSR(object):
                         if a not in self.src_plot_tensors:
                             self.src_plot_tensors[a] = {}
                         for b in switches[1]:
-                            plot_y = []
-                            names = irf_names if b == 'unscaled' else irf_names_terminal
+                            self.plots[a][b] = {}
+                            for c in switches[2]:
+                                plot_y = []
 
-                            for x in names:
-                                plot_y.append(self.src_irf_plot[x][a][b])
+                                if b == 'unscaled':
+                                    if c == 'dirac':
+                                        names = irf_names
+                                    else:
+                                        names = irf_names_nodirac
+                                else:
+                                    if c == 'dirac':
+                                        names = irf_names_terminal
+                                    else:
+                                        names = irf_names_terminal_nodirac
 
-                            self.src_plot_tensors[a][b] = {
-                                'names': names,
-                                'plot': plot_y
-                            }
+                                for x in names:
+                                    plot_y.append(self.src_irf_plot[x][a][b])
+
+                                self.src_plot_tensors[a][b][c] = {
+                                    'names': names,
+                                    'plot': plot_y
+                                }
 
     def _regularize(self, var, center=None, type=None, var_name=None):
         assert type in [None, 'intercept', 'coefficient', 'irf', 'ranef']
@@ -2994,7 +3545,7 @@ class DTSR(object):
                 self._initialize_base_params()
                 self._initialize_joint_distributions()
                 self._initialize_joint_distribution_slices()
-                self._initialize_intercepts_coefficients()
+                self._initialize_intercepts_coefficients_interactions()
                 self._initialize_irf_lambdas()
                 self._initialize_irf_params()
                 self._initialize_parameter_tables()
@@ -3010,6 +3561,7 @@ class DTSR(object):
                 self._initialize_saver()
                 self.load(restore=restore)
 
+                self._initialize_convergence_checking()
                 self._collect_plots()
 
     def save(self, dir=None):
@@ -3068,30 +3620,6 @@ class DTSR(object):
                 else:
                     if predict:
                         sys.stderr.write('No EMA checkpoint available. Leaving internal variables unchanged.\n')
-
-    def check_convergence(self, verbose=True):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-
-                params_old = self.sess.run(self.params_old)
-                params_new = self.sess.run(self.params_old_getter)
-                params_max_delta = max(*[np.abs(params_new[i] - params_old[i]).max() for i in range(len(params_new))])
-
-                if verbose:
-                    sys.stderr.write('Max delta: %s.\n\n' %params_max_delta)
-
-                _, summary_convergence = self.sess.run(
-                    [self.assign_params_max_delta, self.summary_convergence],
-                    feed_dict={self.params_max_delta_placeholder: params_max_delta}
-                )
-                self.writer.add_summary(summary_convergence, self.global_step.eval(session=self.sess))
-
-                fd = {}
-                for i, v in enumerate(self.params_old_placeholder):
-                    fd[v] = params_new[i]
-                self.sess.run(self.params_old_updater, feed_dict=fd)
-
-                return False
 
     def finalize(self):
         """
@@ -3170,6 +3698,14 @@ class DTSR(object):
                     self.load(predict=mode)
 
             self.predict_mode = mode
+
+    def has_converged(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if self.check_convergence:
+                    return self.sess.run(self.converged)
+                else:
+                    return False
 
     def set_training_complete(self, status):
         """
@@ -3360,13 +3896,14 @@ class DTSR(object):
 
                 return out
 
-    def report_evaluation(self, mse=None, mae=None, loglik=None, percent_variance_explained=None, indent=0):
+    def report_evaluation(self, mse=None, mae=None, loglik=None, percent_variance_explained=None, true_variance=None, indent=0):
         """
         Generate a string representation of pre-comupted evaluation metrics.
 
         :param mse: ``float`` or ``None``; mean squared error, skipped if ``None``.
         :param mae: ``float`` or ``None``; mean absolute error, skipped if ``None``.
         :param loglik: ``float`` or ``None``; log likelihood, skipped if ``None``.
+        :param true_variance: ``float`` or ``None``; variance of targets, skipped if ``None``.
         :param percent_variance_explained: ``float`` or ``None``; percent variance explained, skipped if ``None``.
         :param indent: ``int``; indentation level
         :return: ``str``; the evaluation report
@@ -3378,6 +3915,8 @@ class DTSR(object):
             out += ' ' * (indent+2) + 'MAE: %s\n' %mae
         if loglik is not None:
             out += ' ' * (indent+2) + 'Log likelihood: %s\n' %loglik
+        if true_variance is not None:
+            out += ' ' * (indent+2) + 'True variance: %s\n' %true_variance
         if percent_variance_explained is not None:
             out += ' ' * (indent+2) + 'Percent variance explained: %.2f%%\n' %percent_variance_explained
 
@@ -3532,6 +4071,53 @@ class DTSR(object):
 
         return out
 
+    def convergence_summary(self, indent=0):
+        """
+        Generate a string representation of model's convergence status.
+
+        :param indent: ``int``; indentation level
+        :return: ``str``; the convergence report
+        """
+
+        out = ' ' * indent + '-------------------\n'
+        out += ' ' * indent + 'CONVERGENCE SUMMARY\n'
+        out += ' ' * indent + '-------------------\n\n'
+
+        if self.check_convergence:
+            converged = self.has_converged()
+            n_iter = self.global_step.eval(session=self.sess)
+
+            out += ' ' * (indent * 2) + 'Converged: %s\n\n' % converged
+
+            if converged:
+                out += ' ' * (indent + 2) + 'NOTE:\n'
+                out += ' ' * (indent + 4) + 'Programmatic diagnosis of convergence in DTSR is error-prone because of stochastic optimization.\n'
+                out += ' ' * (indent + 4) + 'It is possible that the convergence diagnostics used are too permissive given the stochastic dynamics of the model.\n'
+                out += ' ' * (indent + 4) + 'Consider visually checking the learning curves in Tensorboard to see whether the parameter estimates have flatlined:\n'
+                out += ' ' * (indent + 6) + 'python -m tensorboard.main --logdir=<path_to_model_directory>\n'
+                out += ' ' * (indent + 4) + 'If not, consider lowering the **convergence_tolerance** parameter and resuming training.\n'
+
+            else:
+                max_delta_ix, max_delta, double_delta_at_max_delta = self._convergence_check_inner()
+                location = self.d0_names[max_delta_ix]
+
+                out += ' ' * (indent + 2) + 'Model did not reach convergence criteria in %s epochs.\n' % n_iter
+                out += ' ' * (indent + 2) + 'Largest first derivative with respect to training time must be <= %s, with second derivative at that parameter <= %s.\n\n' % (self.convergence_tolerance, self.convergence_tolerance)
+                out += ' ' * (indent + 4) + 'Max first derivative: %s\n' % max_delta
+                out += ' ' * (indent + 4) + 'Second derivative at max first derivative: %s\n' % double_delta_at_max_delta
+                out += ' ' * (indent + 4) + 'Location: %s\n\n' % location
+                out += ' ' * (indent + 2) + 'NOTE:\n'
+                out += ' ' * (indent + 4) + 'Programmatic diagnosis of convergence in DTSR is error-prone because of stochastic optimization.\n'
+                out += ' ' * (indent + 4) + 'It is possible that the convergence diagnostics used are too conservative given the stochastic dynamics of the model.\n'
+                out += ' ' * (indent + 4) + 'Consider visually checking the learning curves in Tensorboard to see whether the parameter estimates have flatlined:\n'
+                out += ' ' * (indent + 6) + 'python -m tensorboard.main --logdir=<path_to_model_directory>\n'
+                out += ' ' * (indent + 4) + 'If so, consider the model converged.\n'
+
+        else:
+            out += ' ' * (indent + 2) + 'Convergence checking is turned off.\n'
+
+        return out
+
     def parameter_summary(self, random=False, level=95, n_samples=None, integral_n_time_units=None, indent=0):
         """
         Generate a string representation of the model's effect sizes and parameter values.
@@ -3582,9 +4168,11 @@ class DTSR(object):
         out += ' ' * indent + '#                          #\n'
         out += ' ' * indent + '############################\n\n\n'
 
-        out += self.initialization_summary(indent =indent + 2)
+        out += self.initialization_summary(indent=indent + 2)
         out += '\n'
-        out += self.training_evaluation_summary(indent =indent + 2)
+        out += self.training_evaluation_summary(indent=indent + 2)
+        out += '\n'
+        out += self.convergence_summary(indent=indent + 2)
         out += '\n'
         out += self.parameter_summary(
             random=random,
@@ -3708,7 +4296,9 @@ class DTSR(object):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if self.global_step.eval(session=self.sess) < n_iter:
+                self.run_convergence_check(verbose=False)
+                
+                if (self.global_step.eval(session=self.sess) < n_iter) and not self.has_converged():
                     self.set_training_complete(False)
 
                 if self.training_complete.eval(session=self.sess):
@@ -3723,7 +4313,8 @@ class DTSR(object):
                     else:
                         sys.stderr.write('Resuming training from most recent checkpoint...\n\n')
 
-                    while self.global_step.eval(session=self.sess) < n_iter:
+                    while not self.has_converged() and self.global_step.eval(session=self.sess) < n_iter:
+
                         p, p_inv = get_random_permutation(len(y))
                         t0_iter = pytime.time()
                         sys.stderr.write('-' * 50 + '\n')
@@ -3760,7 +4351,8 @@ class DTSR(object):
 
                         self.verify_random_centering()
 
-                        self.check_convergence()
+                        if self.convergence_check_freq > 0 and self.global_step.eval(session=self.sess) % self.convergence_check_freq == 0:
+                            self.run_convergence_check(verbose=True)
 
                         if self.log_freq > 0 and self.global_step.eval(session=self.sess) % self.log_freq == 0:
                             loss_total /= n_minibatch
@@ -3809,9 +4401,6 @@ class DTSR(object):
                         sys.stderr.write('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
 
                     self.save()
-
-
-
 
                     # End of training plotting and evaluation.
                     # For DTSRMLE, this is a crucial step in the model definition because it provides the
@@ -3903,6 +4492,8 @@ class DTSR(object):
                         }
                     )
 
+                    self.save()
+
                     with open(self.outdir + '/eval_train.txt', 'w') as e_file:
                         eval_train = '------------------------\n'
                         eval_train += 'DTSR TRAINING EVALUATION\n'
@@ -3921,6 +4512,7 @@ class DTSR(object):
                     self.save_parameter_table()
 
                     self.set_training_complete(True)
+
                     self.save()
 
     def predict(
@@ -4019,7 +4611,7 @@ class DTSR(object):
                     n_eval_minibatch = math.ceil(len(y_time) / self.eval_minibatch_size)
                     for i in range(0, len(y_time), self.eval_minibatch_size):
                         if verbose:
-                            sys.stderr.write('\rMinibatch %d/%d\n' %((i/self.eval_minibatch_size)+1, n_eval_minibatch))
+                            sys.stderr.write('\rMinibatch %d/%d' %((i/self.eval_minibatch_size)+1, n_eval_minibatch))
                             sys.stderr.flush()
                         fd_minibatch = {
                             self.X: X_2d[i:i + self.eval_minibatch_size],
@@ -4131,7 +4723,7 @@ class DTSR(object):
                     n_eval_minibatch = math.ceil(len(y) / self.eval_minibatch_size)
                     for i in range(0, len(time_y), self.eval_minibatch_size):
                         if verbose:
-                            sys.stderr.write('\rMinibatch %d/%d\n' %((i/self.eval_minibatch_size)+1, n_eval_minibatch))
+                            sys.stderr.write('\rMinibatch %d/%d' %((i/self.eval_minibatch_size)+1, n_eval_minibatch))
                             sys.stderr.flush()
                         fd_minibatch = {
                             self.X: X_2d[i:i + self.eval_minibatch_size],
@@ -4242,7 +4834,7 @@ class DTSR(object):
                 n_eval_minibatch = math.ceil(len(y) / self.eval_minibatch_size)
                 for i in range(0, len(y), self.eval_minibatch_size):
                     if verbose:
-                        sys.stderr.write('\rMinibatch %d/%d\n' % ((i / self.eval_minibatch_size) + 1, n_eval_minibatch))
+                        sys.stderr.write('\rMinibatch %d/%d' % ((i / self.eval_minibatch_size) + 1, n_eval_minibatch))
                         sys.stderr.flush()
                     fd_minibatch[self.time_y] = time_y[i:i + self.eval_minibatch_size]
                     fd_minibatch[self.gf_y] = gf_y[i:i + self.eval_minibatch_size]
@@ -4295,8 +4887,10 @@ class DTSR(object):
 
     def make_plots(
             self,
+            summed=False,
             irf_name_map=None,
             irf_ids=None,
+            plot_dirac=False,
             plot_n_time_units=2.5,
             plot_n_time_points=1000,
             plot_x_inches=6.,
@@ -4327,7 +4921,9 @@ class DTSR(object):
 
         :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
             If ``None``, IRF tree node string ID's will be used.
-        :param irf_ids: ``list`` or ``None``; List of irf ID's to plot. If ``None``, all IRF's are plotted.
+        :param summed: ``bool``; whether to plot individual IRFs or their sum.
+        :param irf_ids: ``list`` or ``None``; list of irf ID's to plot. If ``None``, all IRF's are plotted.
+        :param plot_dirac: ``bool``; include any linear Dirac delta IRF's (stick functions at t=0) in plot.
         :param plot_n_time_units: ``float``; number if time units to use for plotting.
         :param plot_n_time_points: ``float``; number of points to use for plotting.
         :param plot_x_inches: ``int``; width of plot in inches.
@@ -4350,10 +4946,19 @@ class DTSR(object):
         if len(self.terminal_names) == 0:
             return
 
+        if plot_dirac:
+            dirac = 'dirac'
+        else:
+            dirac = 'nodirac'
+
         if prefix is None:
             prefix = ''
         if prefix != '':
             prefix += '_'
+
+        if summed:
+            alpha = 100 - float(level)
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.set_predict_mode(True)
@@ -4373,8 +4978,11 @@ class DTSR(object):
                 for a in switches[0]:
                     if self.t.has_composed_irf() or a == 'atomic':
                         for b in switches[1]:
-                            plot_name = 'irf_%s_%s_%d.png' %(a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'irf_%s_%s.png' %(a, b)
-                            names = self.plots[a][b]['names']
+                            if summed:
+                                plot_name = 'irf_%s_%s_summed_%d.png' %(a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'irf_%s_%s_summed.png' %(a, b)
+                            else:
+                                plot_name = 'irf_%s_%s_%d.png' %(a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'irf_%s_%s.png' %(a, b)
+                            names = self.plots[a][b][dirac]['names']
                             if irf_ids is not None and len(irf_ids) > 0:
                                 new_names = []
                                 for i, name in enumerate(names):
@@ -4384,34 +4992,58 @@ class DTSR(object):
                                 names = new_names
                             if len(names) > 0:
                                 if mc:
-                                    plot_y = []
-                                    lq = []
-                                    uq = []
+                                    if summed:
+                                        samples = []
+                                    else:
+                                        plot_y = []
+                                        lq = []
+                                        uq = []
                                     for name in names:
-                                        mean_cur, lq_cur, uq_cur = self.ci_curve(
+                                        mean_cur, lq_cur, uq_cur, samples_cur = self.ci_curve(
                                             self.irf_mc[name][a][b],
                                             level=level,
                                             n_samples=n_samples,
                                             n_time_units=plot_n_time_units,
                                             n_time_points=plot_n_time_points,
                                         )
-                                        plot_y.append(mean_cur)
-                                        lq.append(lq_cur)
-                                        uq.append(uq_cur)
-                                    lq = np.stack(lq, axis=1)
-                                    uq = np.stack(uq, axis=1)
-                                    plot_y = np.stack(plot_y, axis=1)
+
+                                        if summed:
+                                            samples.append(samples_cur)
+                                        else:
+                                            plot_y.append(mean_cur)
+                                            lq.append(lq_cur)
+                                            uq.append(uq_cur)
+
+                                    if summed:
+                                        samples = np.stack(samples, axis=2)
+                                        samples = samples.sum(axis=2, keepdims=True)
+                                        lq = np.percentile(samples, alpha / 2, axis=1)
+                                        uq = np.percentile(samples, 100 - (alpha / 2), axis=1)
+                                        plot_y = samples.mean(axis=1)
+                                    else:
+                                        lq = np.stack(lq, axis=1)
+                                        uq = np.stack(uq, axis=1)
+                                        plot_y = np.stack(plot_y, axis=1)
+
                                     plot_name = 'mc_' + plot_name
+
                                 else:
-                                    plot_y = [self.sess.run(self.plots[a][b]['plot'][i], feed_dict=fd) for i in range(len(self.plots[a][b]['plot'])) if self.plots[a][b]['names'][i] in names]
+                                    plot_y = [self.sess.run(self.plots[a][b][dirac]['plot'][i], feed_dict=fd) for i in range(len(self.plots[a][b][dirac]['plot'])) if self.plots[a][b][dirac]['names'][i] in names]
                                     lq = None
                                     uq = None
                                     plot_y = np.concatenate(plot_y, axis=1)
+                                    if summed:
+                                        plot_y = plot_y.sum(axis=1, keepdims=True)
+
+                                if summed:
+                                    names_cur = ['Sum']
+                                else:
+                                    names_cur = names
 
                                 plot_irf(
                                     plot_x,
                                     plot_y,
-                                    names,
+                                    names_cur,
                                     lq=lq,
                                     uq=uq,
                                     dir=self.outdir,
@@ -4432,8 +5064,11 @@ class DTSR(object):
                         if self.t.has_composed_irf() or a == 'atomic':
                             for b in switches[1]:
                                 if b == 'scaled':
-                                    plot_name = 'src_irf_%s_%s_%d.png' % (a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'src_irf_%s_%s.png' % (a, b)
-                                    names = self.src_plot_tensors[a][b]['names']
+                                    if summed:
+                                        plot_name = 'src_irf_%s_%s_summed_%d.png' % (a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'src_irf_%s_%s_summed.png' % (a, b)
+                                    else:
+                                        plot_name = 'src_irf_%s_%s_%d.png' % (a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'src_irf_%s_%s.png' % (a, b)
+                                    names = self.src_plot_tensors[a][b][dirac]['names']
                                     if irf_ids is not None and len(irf_ids) > 0:
                                         new_names = []
                                         for i, name in enumerate(names):
@@ -4444,34 +5079,58 @@ class DTSR(object):
                                         names = new_names
                                     if len(names) > 0:
                                         if mc:
-                                            plot_y = []
-                                            lq = []
-                                            uq = []
+                                            if summed:
+                                                samples = []
+                                            else:
+                                                plot_y = []
+                                                lq = []
+                                                uq = []
                                             for name in names:
-                                                mean_cur, lq_cur, uq_cur = self.ci_curve(
+                                                mean_cur, lq_cur, uq_cur, samples_cur = self.ci_curve(
                                                     self.src_irf_mc[name][a][b],
                                                     level=level,
                                                     n_samples=n_samples,
                                                     n_time_units=plot_n_time_units,
                                                     n_time_points=plot_n_time_points,
                                                 )
-                                                plot_y.append(mean_cur)
-                                                lq.append(lq_cur)
-                                                uq.append(uq_cur)
-                                            lq = np.stack(lq, axis=1)
-                                            uq = np.stack(uq, axis=1)
-                                            plot_y = np.stack(plot_y, axis=1)
+
+                                                if summed:
+                                                    samples.append(samples_cur)
+                                                else:
+                                                    plot_y.append(mean_cur)
+                                                    lq.append(lq_cur)
+                                                    uq.append(uq_cur)
+
+                                            if summed:
+                                                samples = np.stack(samples, axis=2)
+                                                samples = samples.sum(axis=2, keepdims=True)
+                                                lq = np.percentile(samples, alpha / 2, axis=1)
+                                                uq = np.percentile(samples, 100 - (alpha / 2), axis=1)
+                                                plot_y = samples.mean(axis=1)
+                                            else:
+                                                lq = np.stack(lq, axis=1)
+                                                uq = np.stack(uq, axis=1)
+                                                plot_y = np.stack(plot_y, axis=1)
+
                                             plot_name = 'mc_' + plot_name
+
                                         else:
-                                            plot_y = [self.sess.run(self.src_plot_tensors[a][b]['plot'][i], feed_dict=fd) for i in range(len(self.src_plot_tensors[a][b]['plot'])) if self.src_plot_tensors[a][b]['names'][i] in names]
+                                            plot_y = [self.sess.run(self.src_plot_tensors[a][b][dirac]['plot'][i], feed_dict=fd) for i in range(len(self.src_plot_tensors[a][b][dirac]['plot'])) if self.src_plot_tensors[a][b][dirac]['names'][i] in names]
                                             lq = None
                                             uq = None
                                             plot_y = np.concatenate(plot_y, axis=1)
+                                            if summed:
+                                                plot_y = plot_y.sum(axis=1, keepdims=True)
+
+                                        if summed:
+                                            names_cur = ['Sum']
+                                        else:
+                                            names_cur = names
 
                                         plot_irf(
                                             plot_x,
                                             plot_y,
-                                            names,
+                                            names_cur,
                                             lq=lq,
                                             uq=uq,
                                             dir=self.outdir,
@@ -4488,6 +5147,78 @@ class DTSR(object):
                                         )
 
                 self.set_predict_mode(False)
+
+    def irf_rmsd(
+            self,
+            gold_irf_lambda,
+            summed=False,
+            n_time_units=None,
+            n_time_points=1000,
+            n_samples=None
+    ):
+        """
+        Compute root mean squared deviation (RMSD) of fitted IRFs from gold.
+
+        :param gold_irf_lambdas: callable; vectorized numpy callable representing continuous IRFs. Generates response values for an array of inputs. Input has shape ``[n_time_points, 1]`` and output has shape ``[n_time_points, len(self.terminals)]``.
+        :param summed: ``bool``; whether to compare individual IRFs or their sum.
+        :param n_time_units: ``float``; number if time units to use. If ``None``, maximum temporal offset seen in training will be used.
+        :param n_time_points: ``float``; number of points to use.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :return: ``float``; RMSD of fitted IRFs from gold
+        """
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if not n_time_units:
+                    n_time_units = self.max_tdelta
+
+                support = np.linspace(0., n_time_units, n_time_points+1)[..., None]
+                gold = gold_irf_lambda(support)
+                if summed:
+                    gold = gold.sum(axis=1)
+
+                plots = self.plots['atomic']['scaled']
+
+                names = plots['names']
+
+                fd = {
+                    self.support_start: 0.,
+                    self.n_time_units: n_time_units,
+                    self.n_time_points: n_time_points,
+                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1,
+                    self.max_tdelta_batch: n_time_units
+                }
+
+                if type(self).__name__ == 'DTSRBayes':
+                    if n_samples is None:
+                        n_samples = self.n_samples_eval
+
+                    fd[self.time_y] = np.ones((1,)) * n_time_units
+                    fd[self.time_X] = np.zeros((1, self.history_length))
+
+                    preds = []
+
+                    for name in names:
+                        posterior = self.irf_mc[name]['atomic']['scaled']
+
+                        samples = [self.sess.run(posterior, feed_dict=fd) for _ in range(n_samples)]
+                        samples = np.concatenate(samples, axis=1)
+                        preds.append(samples)
+
+                    preds = np.stack(preds, axis=2)
+                    if summed:
+                        preds = preds.sum(axis=2)
+                    gold = np.expand_dims(gold, 1)
+
+                else:
+                    preds = [self.sess.run(plots['plot'][i], feed_dict=fd) for i in range(len(plots['plot'])) if plots['names'][i] in names]
+                    preds = np.concatenate(preds, axis=1)
+                    if summed:
+                        preds = preds.sum(axis=1)
+
+                rmsd = np.sqrt(((gold - preds) ** 2).mean())
+
+                return rmsd
 
     def plot_eigenvectors(self):
         """
@@ -4546,13 +5277,14 @@ class DTSR(object):
 
                 return out
 
-    def save_parameter_table(self, random=True, level=95, n_samples=None):
+    def save_parameter_table(self, random=True, level=95, n_samples=None, outfile=None):
         """
         Save space-delimited parameter table to the model's output directory.
 
         :param random: Include random parameters.
         :param level: ``float``; significance level for credible intervals if model is Bayesian, ignored otherwise.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param outfile: ``str``; Path to output file. If ``None``, use model defaults.
         :return: ``None``
         """
 
@@ -4574,5 +5306,10 @@ class DTSR(object):
             axis=0
             )
 
-        parameter_table.to_csv(self.outdir + '/dtsr_parameters.csv', index=False)
+        if outfile:
+            outname = self.outdir + '/dtsr_parameters.csv'
+        else:
+            outname = outfile
+
+        parameter_table.to_csv(outname, index=False)
 

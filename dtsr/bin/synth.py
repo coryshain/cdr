@@ -10,7 +10,7 @@ import argparse
 from dtsr.plot import plot_irf
 
 def convolve(x, k, theta, delta, coefficient = 1):
-    return gamma.pdf(x, k, scale=theta, loc=delta) * coefficient
+    return scipy.stats.gamma.pdf(x, k, scale=theta, loc=delta) * coefficient
 
 def read_params(path):
     return pd.read_csv(path, sep=' ', index_col=0)
@@ -66,37 +66,58 @@ if __name__ == '__main__':
     argparser = argparse.ArgumentParser('''
         Generates synthetic temporally convolved data using randomly sampled ShiftedGammaKgt1 IRF.
     ''')
-    argparser.add_argument('-n', '--n', type=int, default=1, help='Number of covariates')
+    argparser.add_argument('-n', '--n', type=int, default=20, help='Number of covariates')
     argparser.add_argument('-x', '--x', type=int, default=10000, help='Length of obs table')
     argparser.add_argument('-y', '--y', type=int, default=10000, help='Length of dv table')
     argparser.add_argument('-s', '--s', type=float, default = 0.1, help='Temporal step length')
     argparser.add_argument('-k', '--k', type=float, default = None, help='Value for shape parameter k (randomly sampled by default)')
+    argparser.add_argument('-r', '--rho', type=float, default = None, help='Fixed correlation level for covariates. If ``None`` or ``0``, uncorrelated covariates.')
     argparser.add_argument('-t', '--theta', type=float, default = None, help='Value for scale parameter theta (randomly sampled by default)')
     argparser.add_argument('-d', '--delta', type=float, default = None, help='Value for location parameter delta (randomly sampled by default)')
     argparser.add_argument('-b', '--beta', type=float, default = None, help='Value for linear coefficient beta (randomly sampled by default)')
-    argparser.add_argument('-e', '--error', type=float, default = None, help='SD of error distribution')
+    argparser.add_argument('-e', '--error', type=float, default = 20., help='SD of error distribution')
     argparser.add_argument('-o', '--outdir', type=str, default='.', help='Output directory in which to save synthetic data tables (randomly sampled by default)')
+    argparser.add_argument('-p', '--paramsfile', type=str, default=None, help='Path to file containing IRF parameters and coefficients. If provided, will override any parameter arguments specified.')
     argparser.add_argument('-N', '--name', type=str, default=None, help='Name for synthetic dataset')
 
     args, unknown = argparser.parse_known_args()
 
-    if args.k is None:
-        k = np.random.random(args.n)*5 + 1
+    if args.paramsfile:
+        params = read_params(args.paramsfile)
+        k = params.k.as_matrix()
+        theta = params.theta.as_matrix()
+        delta = params.delta.as_matrix()
+        beta = params.beta.as_matrix()
+
+
     else:
-        k = np.ones(args.n)*args.k
-    if args.theta is None:
-        theta = np.random.random(args.n)*5
+        if args.k is None:
+            k = np.random.random(args.n)*5 + 1
+        else:
+            k = np.ones(args.n)*args.k
+        if args.theta is None:
+            theta = np.random.random(args.n)*5
+        else:
+            theta = np.ones(args.n)*args.theta
+        if args.delta is None:
+            delta = -np.random.random(args.n)
+        else:
+            delta = np.ones(args.n)*args.delta
+        if args.beta is None:
+            beta = np.random.random(args.n)*100-50
+        else:
+            beta = np.ones(args.n)*args.beta
+
+    if args.rho:
+        if args.rho < 1:
+            sigma = np.ones((args.n, args.n)) * args.rho
+            np.fill_diagonal(sigma, 1.)
+            X = np.random.multivariate_normal(np.zeros(args.n), sigma, (args.x,))
+        else:
+            X = np.random.normal(0, 1, (args.x,))[..., None]
+            X = np.tile(X, [1, 20])
     else:
-        theta = np.ones(args.n)*args.theta
-    if args.delta is None:
-        delta = -np.random.random(args.n)
-    else:
-        delta = np.ones(args.n)*args.delta
-    if args.beta is None:
-        beta = np.random.random(args.n)*100-50
-    else:
-        beta = np.ones(args.n)*args.beta
-    X = np.random.normal(0, 1, (args.x, args.n))
+        X = np.random.normal(0, 1, (args.x, args.n))
 
     time_X = np.linspace(0., args.s*args.x, args.x)
     time_y = np.linspace(0., args.s*args.y, args.y)
@@ -155,7 +176,7 @@ if __name__ == '__main__':
         plot_x,
         plot_y,
         string.ascii_lowercase[:args.n],
-        dir = args.outdir,
+        dir = args.outdir + '/' + exp_name,
         filename = exp_name + '.png',
         legend=False
     )

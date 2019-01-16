@@ -2,7 +2,7 @@ import sys
 import numpy as np
 import math
 
-def permutation_test(err_1, err_2, n_iter=10000, n_tails=2, mode='loss', verbose=False):
+def permutation_test(err_1, err_2, n_iter=10000, n_tails=2, mode='loss', nested=False, verbose=False):
     """
     Perform a paired permutation test for significance.
 
@@ -11,6 +11,7 @@ def permutation_test(err_1, err_2, n_iter=10000, n_tails=2, mode='loss', verbose
     :param n_iter: ``int``; number of resampling iterations.
     :param n_tails: ``int``; number of tails.
     :param mode: ``str``; one of ``["loss", "loglik"]``, the type of error used (losses are averaged while loglik's are summed).
+    :param nested: ``bool``; assume that the second model is nested within the first.
     :param verbose: ``bool``; report progress logs to standard error.
     :return:
     """
@@ -18,8 +19,12 @@ def permutation_test(err_1, err_2, n_iter=10000, n_tails=2, mode='loss', verbose
     err_table = np.stack([err_1, err_2], 1)
     if mode == 'loss':
         base_diff = err_table[:,0].mean() - err_table[:,1].mean()
+        if nested and base_diff <= 0:
+            return (1.0, base_diff, np.zeros((n_iter,)))
     elif mode == 'loglik':
         base_diff = err_table[:,0].sum() - err_table[:,1].sum()
+        if nested and base_diff >= 0:
+            return (1.0, base_diff, np.zeros((n_iter,)))
     else:
         raise ValueError('Unrecognized aggregation function "%s" in permutation test' %mode)
 
@@ -55,7 +60,7 @@ def permutation_test(err_1, err_2, n_iter=10000, n_tails=2, mode='loss', verbose
                     sys.stderr.write('Hit on iteration %d: %s\n' %(i, cur_diff))
                 hits += 1
         else:
-            raise ValueError('Invalid bootstrap parameter n_tails: %s. Must be in {0, 1}.' %n_tails)
+            raise ValueError('Invalid bootstrap parameter n_tails: %s. Must be in {1, 2}.' %n_tails)
 
     p = float(hits+1)/(n_iter+1)
 

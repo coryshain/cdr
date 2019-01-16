@@ -3,13 +3,13 @@ import matplotlib
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 import argparse
 from dtsr.config import Config
-from dtsr.util import filter_models
+from dtsr.util import filter_models, filter_names
 
 def stitch(dir_paths, image_names, output_path):
     fontpath = matplotlib.rcParams['datapath'] + '/fonts/ttf/DejaVuSans.ttf'
     imgs = []
     for dir_path in dir_paths:
-        matches = [x for x in os.listdir(dir_path) if x in image_names]
+        matches = filter_names(os.listdir(dir_path), image_names)
         for match in matches:
             im = Image.open(dir_path + '/' + match)
             if im.mode == 'RGBA':
@@ -35,7 +35,7 @@ if __name__ == '__main__':
     ''')
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of models for which to stitch plots. Regex permitted. If unspecified, stitches all DTSR models.')
-    argparser.add_argument('-i', '--image_names', nargs='+', default=['irf_atomic_scaled.png'], help='Name(s) of image file(s) to search for in each output directory.')
+    argparser.add_argument('-i', '--image_names', nargs='+', default=['irf_atomic_scaled.png'], help='Name(s) of image file(s) to search for in each output directory. Regex matching supported.')
     argparser.add_argument('-o', '--output_name', type=str, default='DTSR_plots_stitched.pdf', help='Name of output file.')
     args, unknown = argparser.parse_known_args()
 

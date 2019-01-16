@@ -14,6 +14,7 @@ if __name__ == '__main__':
     ''')
     argparser.add_argument('paths', nargs='+', help='Path(s) to config file(s) defining experiments')
     argparser.add_argument('-m', '--models', nargs='*', default = [], help='Model names to plot. Regex permitted. If unspecified, plots all DTSR models.')
+    argparser.add_argument('-S', '--summed', action='store_true', help='Plot summed rather than individual IRFs.')
     argparser.add_argument('-i', '--irf_ids', nargs='*', default = [], help='List of IDs for IRF to include in the plot. Regex supported.')
     argparser.add_argument('-s', '--plot_true_synthetic', action='store_true', help='If the models are fit to synthetic data, also generate plots of the true IRF')
     argparser.add_argument('-p', '--prefix', type=str, default='', help='Filename prefix to use for outputs')
@@ -62,21 +63,39 @@ if __name__ == '__main__':
 
             names = list(params.index)
 
-            plot_irf(
-                x,
-                y,
-                names,
-                dir=p.outdir,
-                filename=prefix + 'synthetic_true.png',
-                plot_x_inches=p['plot_x_inches'] if x_inches is None else x_inches,
-                plot_y_inches=p['plot_y_inches'] if y_inches is None else y_inches,
-                cmap=p['cmap'] if cmap is None else cmap,
-                legend=legend,
-                xlab=args.xlab,
-                ylab=args.ylab,
-                use_line_markers=args.markers,
-                transparent_background=args.transparent_background
-            )
+            if args.summed:
+                plot_irf(
+                    x,
+                    y.sum(axis=1, keepdims=True),
+                    ['Sum'],
+                    dir=p.outdir,
+                    filename=prefix + 'synthetic_true_summed.png',
+                    plot_x_inches=p['plot_x_inches'] if x_inches is None else x_inches,
+                    plot_y_inches=p['plot_y_inches'] if y_inches is None else y_inches,
+                    cmap=p['cmap'] if cmap is None else cmap,
+                    legend=legend,
+                    xlab=args.xlab,
+                    ylab=args.ylab,
+                    use_line_markers=args.markers,
+                    transparent_background=args.transparent_background
+                )
+
+            else:
+                plot_irf(
+                    x,
+                    y,
+                    names,
+                    dir=p.outdir,
+                    filename=prefix + 'synthetic_true.png',
+                    plot_x_inches=p['plot_x_inches'] if x_inches is None else x_inches,
+                    plot_y_inches=p['plot_y_inches'] if y_inches is None else y_inches,
+                    cmap=p['cmap'] if cmap is None else cmap,
+                    legend=legend,
+                    xlab=args.xlab,
+                    ylab=args.ylab,
+                    use_line_markers=args.markers,
+                    transparent_background=args.transparent_background
+                )
 
         for m in models:
             p.set_model(m)
@@ -93,6 +112,7 @@ if __name__ == '__main__':
             }
 
             dtsr_model.make_plots(
+                summed=args.summed,
                 irf_name_map=name_map,
                 irf_ids=args.irf_ids,
                 prefix=prefix + m,
@@ -105,6 +125,7 @@ if __name__ == '__main__':
             )
             if hasattr(dtsr_model, 'inference_name'):
                 dtsr_model.make_plots(
+                    summed=args.summed,
                     irf_name_map=name_map,
                     irf_ids=args.irf_ids,
                     mc=True,

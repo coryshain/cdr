@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from dtsr.config import Config
 from dtsr.signif import permutation_test
-from dtsr.util import filter_models
+from dtsr.util import filter_models, get_partition_list
 import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
@@ -44,13 +44,15 @@ if __name__ == '__main__':
         p = Config(path)
 
         models = filter_models(p.model_list, args.models)
+        dtsr_models = [x for x in models if x.startswith('DTSR')]
+
+        partitions = get_partition_list(args.partition)
+        partition_str = '-'.join(partitions)
 
         if args.metric == 'loss':
-            file_name = '%s_losses_%s.txt' % (p['loss_name'], args.partition)
+            file_name = '%s_losses_%s.txt' % (p['loss_name'], partition_str)
         else:
-            file_name = 'loglik_%s.txt' % args.partition
-
-        dtsr_models = [x for x in models if x.startswith('DTSR')]
+            file_name = 'loglik_%s.txt' % partition_str
 
         if args.ablation:
             comparison_sets = {}
@@ -101,33 +103,44 @@ if __name__ == '__main__':
 
                         for j in range(i+1, len(model_set)):
                             m2 = model_set[j]
-                            if nested(m1, m2) or not args.ablation:
-                                name = '%s_v_%s' %(m1, m2)
-                                a = pd.read_csv(p.outdir + '/' + m1 + '/' + file_name, sep=' ', header=None, skipinitialspace=True)
-                                b = pd.read_csv(p.outdir + '/' + m2 + '/' + file_name, sep=' ', header=None, skipinitialspace=True)
+                            is_nested = nested(m1, m2)
+                            if is_nested or not args.ablation:
+                                if is_nested:
+                                    if m1.count('!') > m2.count('!'):
+                                        a_model = m1
+                                        b_model = m2
+                                    else:
+                                        a_model = m2
+                                        b_model = m1
+                                else:
+                                    a_model = m1
+                                    b_model = m2
+                                name = '%s_v_%s' %(a_model, b_model)
+                                a = pd.read_csv(p.outdir + '/' + a_model + '/' + file_name, sep=' ', header=None, skipinitialspace=True)
+                                b = pd.read_csv(p.outdir + '/' + b_model + '/' + file_name, sep=' ', header=None, skipinitialspace=True)
                                 select = np.logical_and(np.isfinite(np.array(a)), np.isfinite(np.array(b)))
                                 diff = float(len(a) - select.sum())
-                                p_value, base_diff, diffs = permutation_test(a[select], b[select], n_iter=10000, n_tails=args.tails, mode=args.metric)
+                                p_value, base_diff, diffs = permutation_test(a[select], b[select], n_iter=10000, n_tails=args.tails, mode=args.metric, nested=is_nested)
                                 sys.stderr.write('\n')
-                                out_path = p.outdir + '/' + name + '_PT_' + args.partition + '.txt'
+                                out_path = p.outdir + '/' + name + '_PT_' + partition_str + '.txt'
                                 with open(out_path, 'w') as f:
                                     sys.stderr.write('Saving output to %s...\n' %out_path)
 
                                     summary = '='*50 + '\n'
-                                    summary += 'Model comparison: %s vs %s\n' %(m1, m2)
+                                    summary += 'Model comparison: %s vs %s\n' %(a_model, b_model)
                                     if diff > 0:
-                                        summary += '%d NaN rows filtered out (out of %d)\n' %(diff, len(a))
-                                    summary += 'Partition: %s\n' %args.partition
-                                    summary += 'Metric: %s\n' %args.metric
-                                    summary += 'Difference: %.4f\n' %base_diff
-                                    summary += 'p: %.4e%s\n' %(p_value, '' if p_value > 0.05 else '*' if p_value > 0.01 else '**' if p_value > 0.001 else '***')
+                                        summary += '%d NaN rows filtered out (out of %d)\n' % (diff, len(a))
+                                    summary += 'Partition: %s\n' % partition_str
+                                    summary += 'Metric: %s\n' % args.metric
+                                    summary += 'Difference: %.4f\n' % base_diff
+                                    summary += 'p: %.4e%s\n' % (p_value, '' if p_value > 0.05 else '*' if p_value > 0.01 else '**' if p_value > 0.001 else '***')
                                     summary += '='*50 + '\n'
 
                                     f.write(summary)
                                     sys.stdout.write(summary)
 
                                 plt.hist(diffs, bins=1000)
-                                plt.savefig(p.outdir + '/' + name + '_PT_' + args.partition + '.png')
+                                plt.savefig(p.outdir + '/' + name + '_PT_' + partition_str + '.png')
                                 plt.close('all')
 
     if args.pool:
@@ -138,41 +151,53 @@ if __name__ == '__main__':
                 pooled_data[a][exp_outdir] = {}
                 for m in basenames_to_pool:
                     m_name = '!'.join([m] + list(a))
-                    pooled_data[a][exp_outdir][m] = pd.read_csv(p.outdir + '/' + m_name + '/' + file_name, sep=' ', header=None, skipinitialspace=True)
+                    pooled_data[a][exp_outdir][m] = pd.read_csv(exp_outdir + '/' + m_name + '/' + file_name, sep=' ', header=None, skipinitialspace=True)
 
         for i in range(len(ablations)):
             a1 = ablations[i]
             m1 = '!'.join(a1)
+            m1_dummy = 'DUMMY' + (('!' + m1) if m1 != '' else m1)
             for j in range(i + 1, len(ablations)):
                 a2 = ablations[j]
                 m2 = '!'.join(a2)
-                if nested('DUMMY' + (('!' + m1) if m1 != '' else m1), 'DUMMY' + (('!' + m2) if m2 != '' else m2)):
+                m2_dummy = 'DUMMY' + (('!' + m2) if m2 != '' else m2)
+                is_nested = nested(m1_dummy, m2_dummy)
+                if is_nested:
+                    if m1.count('!') > m2.count('!'):
+                        a_model = a1
+                        b_model = a2
+                        a_name = 'FULL' if m2 == '' else '!' + m2
+                        b_name = 'FULL' if m1 == '' else '!' + m1
+                    else:
+                        a_model = a2
+                        b_model = a1
+                        a_name = 'FULL' if m1 == '' else '!' + m1
+                        b_name = 'FULL' if m2 == '' else '!' + m2
                     df1 = []
                     df2 = []
                     for exp in exps_outdirs:
                         for m in basenames_to_pool:
-                            a, b = scale(pooled_data[a1][exp][m], pooled_data[a2][exp][m])
+                            a, b = scale(pooled_data[a_model][exp][m], pooled_data[b_model][exp][m])
                             df1.append(a)
                             df2.append(b)
                     df1 = np.concatenate(df1, axis=0)
                     df2 = np.concatenate(df2, axis=0)
                     assert len(df1) == len(df2), 'Shape mismatch between datasets %s and %s: %s vs. %s' %(
-                        'FULL' if m1 == '' else '!' + m1,
-                        'FULL' if m2 == '' else '!' + m2,
+                        a_name,
+                        b_name,
                         df1.shape,
                         df2.shape
                     )
                     p_value, diff, diffs = permutation_test(df1, df2, n_iter=10000, n_tails=args.tails, mode=args.metric)
                     sys.stderr.write('\n')
-                    name = '%s_v_%s' % ('FULL' if m1 == '' else '!' + m1, 'FULL' if m2 == '' else '!' + m2)
-                    out_path = p.outdir + '/' + name + '_PT_pooled_' + args.partition + '.txt'
+                    name = '%s_v_%s' % (a_name, b_name)
+                    out_path = p.outdir + '/' + name + '_PT_pooled_' + partition_str + '.txt'
                     with open(out_path, 'w') as f:
                         sys.stderr.write('Saving output to %s...\n' % out_path)
 
                         summary = '=' * 50 + '\n'
-                        summary += 'Model comparison: %s vs %s\n' % (
-                        'FULL' if m1 == '' else '!' + m1, 'FULL' if m2 == '' else '!' + m2)
-                        summary += 'Partition: %s\n' % args.partition
+                        summary += 'Model comparison: %s vs %s\n' % (a_name, b_name)
+                        summary += 'Partition: %s\n' % partition_str
                         summary += 'Metric: %s\n' % args.metric
                         summary += 'Experiments pooled:\n'
                         for exp in exps_outdirs:
@@ -191,5 +216,5 @@ if __name__ == '__main__':
                         sys.stdout.write(summary)
 
                     plt.hist(diffs, bins=1000)
-                    plt.savefig(p.outdir + '/' + name + '_PT_pooled_' + args.partition + '.png')
+                    plt.savefig(p.outdir + '/' + name + '_PT_pooled_' + partition_str + '.png')
                     plt.close('all')

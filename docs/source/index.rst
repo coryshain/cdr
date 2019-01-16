@@ -12,6 +12,7 @@ Documentation for the ``dtsr`` Python package.
    getting_started
    formula
    config
+   convergence
    api
    irftree
    dtsr

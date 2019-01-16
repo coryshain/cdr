@@ -252,13 +252,13 @@ DTSR_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'learning_rate',
-        0.001,
+        0.01,
         float,
         "Initial value for the learning rate."
     ),
     Kwarg(
         'learning_rate_min',
-        1e-4,
+        0.,
         float,
         "Minimum value for the learning rate."
     ),
@@ -279,6 +279,12 @@ DTSR_INITIALIZATION_KWARGS = [
         25,
         int,
         "Span of iterations over which to decay the learning rate by ``lr_decay_rate`` (ignored if ``lr_decay_family==None``)."
+    ),
+    Kwarg(
+        'lr_decay_iteration_power',
+        1,
+        float,
+        "Power to which the iteration number ``t`` should be raised when computing the learning rate decay."
     ),
     Kwarg(
         'lr_decay_staircase',
@@ -353,6 +359,18 @@ DTSR_INITIALIZATION_KWARGS = [
         "Decay factor to use for exponential moving average for parameters (used in prediction)."
     ),
     Kwarg(
+        'convergence_n_iterates',
+        100,
+        [int, None],
+        "Number of timesteps over which to average parameter movements for convergence diagnostics. If ``None`` or ``0``, convergence will not be programmatically checked (reduces memory overhead, but convergence must then be visually diagnosed)."
+    ),
+    Kwarg(
+        'convergence_tolerance',
+        1e-4,
+        [float, None],
+        "Tolerance around 0 for convergence of estimates of first and second order derivatives of parameters with respect to training time. If ``None``, convergence will not be programmatically checked (reduces memory overhead, but convergence must then be visually diagnosed)."
+    ),
+    Kwarg(
         'minibatch_size',
         1024,
         [int, None],
@@ -389,16 +407,22 @@ DTSR_INITIALIZATION_KWARGS = [
         "Frequency (in iterations) with which to save model checkpoints."
     ),
     Kwarg(
-        'log_random',
-        True,
-        bool,
-        "Log random effects to Tensorboard."
+        'convergence_check_freq',
+        1,
+        int,
+        "Frequency (in iterations) with which to check convergence. Parameter slopes are computed over ``convergence_n_iter * convergence_check_freq`` iterations. Thus larger values increase the receptive field of the slope estimates, making convergence diagnosis less vulnerable to local perturbations but also increasing the number of post-convergence iterations necessary in order to identify convergence."
     ),
     Kwarg(
         'log_freq',
         1,
         int,
         "Frequency (in iterations) with which to log model params to Tensorboard."
+    ),
+    Kwarg(
+        'log_random',
+        True,
+        bool,
+        "Log random effects to Tensorboard."
     ),
     Kwarg(
         'log_graph',
@@ -410,7 +434,7 @@ DTSR_INITIALIZATION_KWARGS = [
         'keep_plot_history',
         False,
         bool,
-        "Keep IRF plots from each checkpoint of a run, which can help evaluate learning but can also consume a lot of disk space. If ``False``, only the most recent plot of each type is kept."
+        "Keep IRF plots from each checkpoint of a run, which can help visualize learning trajectories but can also consume a lot of disk space. If ``False``, only the most recent plot of each type is kept."
     )
 ]
 
@@ -437,21 +461,21 @@ DTSRMLE_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'irf_param_joint_sd',
-        1,
+        1.,
         float,
         "Square root of variance of intercept in initial variance-covariance matrix of joint distributions. Used only if either **covarying_fixef** or **covarying_ranef** is ``True``, otherwise ignored.",
         aliases=['irf_param_prior_sd, conv_param_joint_sd, conv_prior_sd']
     ),
     Kwarg(
         'joint_sd_scaling_coefficient',
-        1,
+        1.,
         float,
         "Factor by which to multiply square roots of variances on intercepts and coefficients if inferred from the empirical variance of the data (i.e. if **intercept_joint_sd** or **coef_joint_sd** is ``None``). Ignored for any prior widths that are explicitly specified.",
         aliases=['prior_sd_scaling_coefficient']
     ),
     Kwarg(
         'ranef_to_fixef_joint_sd_ratio',
-        1,
+        1.,
         float,
         "Ratio of widths of random to fixed effects root-variances in joint distributions. I.e. if less than 1, random effects have tighter distributions. Used only if either **covarying_fixef** or **covarying_ranef** is ``True``, otherwise ignored.",
         aliases=['ranef_to_fixef_prior_sd_ratio']
@@ -507,7 +531,7 @@ DTSRBAYES_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'irf_param_prior_sd',
-        1,
+        1.,
         float,
         "Standard deviation of prior on convolutional IRF parameters",
         aliases=['conv_prior_sd']

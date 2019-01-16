@@ -11,10 +11,11 @@ if __name__ == '__main__':
     ''')
     argparser.add_argument('paths', nargs='+', help='Path(s) to config file(s) defining experiments')
     argparser.add_argument('-m', '--models', nargs='*', default = [], help='List of models for which to generate summaries. Regex permitted. If not, generates summaries for all DTSR models.')
-    argparser.add_argument('-r', '--random', action='store_true', help='Report random effects (default True)')
+    argparser.add_argument('-r', '--random', action='store_true', help='Report random effects.')
     argparser.add_argument('-l', '--level', type=float, default = 95., help='Level (in percent) for any credible intervals (DTSRBayes only).')
     argparser.add_argument('-n', '--nsamples', type=int, default = None, help='Number of MC samples to use for computing statistics (DTSRBayes only). If unspecified, uses model default (**n_samples_eval** parameter).')
     argparser.add_argument('-t', '--timeunits', type=float, default = None, help='Number of time units over which to compute effect size integrals. If unspecified, uses longest timespan attested in training.')
+    argparser.add_argument('-T', '--save_table', action='store_true', help='Save CSV table of model parameters.')
     argparser.add_argument('-p', '--prefix', type=str, default = None, help='String to prepend to output file.')
     args, unknown = argparser.parse_known_args()
 
@@ -47,6 +48,14 @@ if __name__ == '__main__':
             with open(outname, 'w') as f:
                 f.write(summary)
             sys.stderr.write(summary)
+
+            if args.save_table:
+                if args.prefix:
+                    outname = p.outdir + '/' + m + '/' + args.prefix + '_dtsr_parameters.csv'
+                else:
+                    outname = p.outdir + '/' + m + '/dtsr_parameters.csv'
+
+                dtsr_model.save_parameter_table(level=args.level, n_samples=args.nsamples, outfile=outname)
 
             dtsr_model.finalize()
 
