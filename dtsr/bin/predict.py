@@ -75,6 +75,7 @@ if __name__ == '__main__':
     argparser.add_argument('-a', '--algorithm', type=str, default='MAP', help='Algorithm ("sampling" or "MAP") to use for extracting predictions.')
     argparser.add_argument('-t', '--twostep', action='store_true', help='For DTSR models, predict from fitted LME model from two-step hypothesis test.')
     argparser.add_argument('-A', '--ablated_models', action='store_true', help='For two-step prediction from DTSR models, predict from data convolved using the ablated model. Otherwise predict from data convolved using the full model.')
+    argparser.add_argument('-e', '--extra_cols', action='store_true', help='For prediction from DTSR models, dump prediction outputs and response metadata to a single csv.')
     args, unknown = argparser.parse_known_args()
 
     p = Config(args.config_path)
@@ -295,19 +296,29 @@ if __name__ == '__main__':
                         n_samples=args.nsamples,
                         algorithm=args.algorithm
                     )
-                    with open(p.outdir + '/' + m + '/preds_%s.txt' % partition_str, 'w') as p_file:
-                        for i in range(len(dtsr_preds)):
-                            p_file.write(str(dtsr_preds[i]) + '\n')
                     if p['loss_name'].lower() == 'mae':
                         losses = np.array(y_valid[dv] - dtsr_preds).abs()
                     else:
                         losses = np.array(y_valid[dv] - dtsr_preds) ** 2
-                    with open(p.outdir + '/' + m + '/%s_losses_%s.txt' % (p['loss_name'], partition_str), 'w') as l_file:
-                        for i in range(len(losses)):
-                            l_file.write(str(losses[i]) + '\n')
-                    with open(p.outdir + '/' + m + '/obs_%s.txt' % partition_str, 'w') as p_file:
-                        for i in range(len(y_valid[dv])):
-                            p_file.write(str(y_valid[dv].iloc[i]) + '\n')
+
+                    if args.extra_cols:
+                        df_out = pd.DataFrame({'DTSRloss%s' % p['loss_name'].upper(): losses, 'DTSRpreds': dtsr_preds})
+                        df_out = pd.concat([y_valid.reset_index(drop=True), df_out], axis=1)
+                    else:
+                        preds_outfile = p.outdir + '/' + m + '/preds_%s.txt' % partition_str
+                        loss_outfile = p.outdir + '/' + m + '/%s_losses_%s.txt' % (p['loss_name'], partition_str)
+                        obs_outfile = p.outdir + '/' + m + '/obs_%s.txt' % partition_str
+
+                        with open(preds_outfile, 'w') as p_file:
+                            for i in range(len(dtsr_preds)):
+                                p_file.write(str(dtsr_preds[i]) + '\n')
+                        with open(loss_outfile, 'w') as l_file:
+                            for i in range(len(losses)):
+                                l_file.write(str(losses[i]) + '\n')
+                        with open(obs_outfile, 'w') as p_file:
+                            for i in range(len(y_valid[dv])):
+                                p_file.write(str(y_valid[dv].iloc[i]) + '\n')
+
                     dtsr_mse = mse(y_valid[dv], dtsr_preds)
                     dtsr_mae = mae(y_valid[dv], dtsr_preds)
                     dtsr_percent_variance_explained = percent_variance_explained(y_valid[dv], dtsr_preds)
@@ -325,9 +336,15 @@ if __name__ == '__main__':
                         n_samples=args.nsamples,
                         algorithm=args.algorithm
                     )
-                    with open(p.outdir + '/' + m + '/loglik_%s.txt' % partition_str, 'w') as l_file:
-                        for i in range(len(dtsr_loglik_vector)):
-                            l_file.write(str(dtsr_loglik_vector[i]) + '\n')
+
+                    if args.extra_cols:
+                        df_ll = pd.DataFrame({'DTSRloglik': dtsr_loglik_vector})
+                        df_out= pd.concat([df_out, df_ll], axis=1)
+                    else:
+                        ll_outfile = p.outdir + '/' + m + '/loglik_%s.txt' % partition_str
+                        with open(ll_outfile, 'w') as l_file:
+                            for i in range(len(dtsr_loglik_vector)):
+                                l_file.write(str(dtsr_loglik_vector[i]) + '\n')
                     dtsr_loglik = dtsr_loglik_vector.sum()
 
                 if bayes:
@@ -335,6 +352,10 @@ if __name__ == '__main__':
                         terminal_names = dtsr_model.src_terminal_names
                     else:
                         terminal_names = dtsr_model.terminal_names
+
+                if args.extra_cols:
+                    preds_outfile = p.outdir + '/' + m + '/dtsr_preds_%s.csv' % partition_str
+                    df_out.to_csv(preds_outfile, sep=' ', na_rep='NaN', index=False)
 
                 summary += 'Training iterations completed: %d\n\n' % dtsr_model.global_step.eval(session=dtsr_model.sess)
 
