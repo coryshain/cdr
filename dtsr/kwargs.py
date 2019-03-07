@@ -365,6 +365,12 @@ DTSR_INITIALIZATION_KWARGS = [
         "Number of timesteps over which to average parameter movements for convergence diagnostics. If ``None`` or ``0``, convergence will not be programmatically checked (reduces memory overhead, but convergence must then be visually diagnosed)."
     ),
     Kwarg(
+        'convergence_basis',
+        'loss',
+        str,
+        "Basis of convergence diagnostic, one of ``['parameters', 'loss']``. If ``parameters``, slopes of all parameters with respect to time must be within the tolerance of 0. If ``loss``, slope of loss with respect to time must be within the tolerance of 0 (even if parameters are still moving). The loss-based criterion is less stringent."
+    ),
+    Kwarg(
         'convergence_tolerance',
         1e-4,
         [float, None],

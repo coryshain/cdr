@@ -748,6 +748,8 @@ class DTSR(object):
                     self.ranef_regularizer = getattr(tf.contrib.layers, self.ranef_regularizer_name)(self.ranef_regularizer_scale)
 
                 self.loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='loss_total')
+                if self.convergence_basis.lower() == 'loss':
+                    self._add_convergence_tracker(self.loss_total, 'loss_total')
 
                 self.training_mse_in = tf.placeholder(self.FLOAT_TF, shape=[], name='training_mse_in')
                 self.training_mse = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_mse')
@@ -949,7 +951,8 @@ class DTSR(object):
                         collections=['params']
                     )
                     self._regularize(self.intercept_fixed, type='intercept', var_name='intercept')
-                    self._add_convergence_tracker(self.intercept_fixed_summary, 'intercept_fixed')
+                    if self.convergence_basis.lower() == 'parameters':
+                        self._add_convergence_tracker(self.intercept_fixed_summary, 'intercept_fixed')
 
                 else:
                     self.intercept_fixed = self.intercept_fixed_base
@@ -976,7 +979,8 @@ class DTSR(object):
                     [len(coef_ids)]
                 )
                 self._regularize(self.coefficient_fixed, type='coefficient', var_name='coefficient')
-                self._add_convergence_tracker(self.coefficient_fixed_summary, 'coefficient_fixed')
+                if self.convergence_basis.lower() == 'parameters':
+                    self._add_convergence_tracker(self.coefficient_fixed_summary, 'coefficient_fixed')
 
                 for i in range(len(self.coef_names)):
                     tf.summary.scalar(
@@ -1007,7 +1011,8 @@ class DTSR(object):
                         [len(interaction_ids)]
                     )
                     self._regularize(self.interaction_fixed, type='coefficient', var_name='interaction')
-                    self._add_convergence_tracker(self.interaction_fixed_summary, 'interaction_fixed')
+                    if self.convergence_basis.lower() == 'parameters':
+                        self._add_convergence_tracker(self.interaction_fixed_summary, 'interaction_fixed')
 
                     for i in range(len(self.interaction_names)):
                         tf.summary.scalar(
@@ -1057,7 +1062,8 @@ class DTSR(object):
                         self.intercept_random_means[gf] = tf.reduce_mean(intercept_random_summary, axis=0)
 
                         # Create record for convergence tracking
-                        self._add_convergence_tracker(self.intercept_random_summary[gf], 'intercept_by_%s' %gf)
+                        if self.convergence_basis.lower() == 'parameters':
+                            self._add_convergence_tracker(self.intercept_random_summary[gf], 'intercept_by_%s' %gf)
 
                         self.intercept += tf.gather(intercept_random, self.gf_y[:, i])
 
@@ -1108,7 +1114,8 @@ class DTSR(object):
                         self.coefficient_random_summary[gf] = coefficient_random_summary
                         self.coefficient_random_means[gf] = tf.reduce_mean(coefficient_random_summary, axis=0)
 
-                        self._add_convergence_tracker(self.coefficient_random_summary[gf], 'coefficient_by_%s' %gf)
+                        if self.convergence_basis.lower() == 'parameters':
+                            self._add_convergence_tracker(self.coefficient_random_summary[gf], 'coefficient_by_%s' %gf)
 
                         self.coefficient += tf.gather(coefficient_random, self.gf_y[:, i], axis=0)
 
@@ -1163,7 +1170,8 @@ class DTSR(object):
                             self.interaction_random_summary[gf] = interaction_random_summary
                             self.interaction_random_means[gf] = tf.reduce_mean(interaction_random_summary, axis=0)
 
-                            self._add_convergence_tracker(self.interaction_random_summary[gf], 'interaction_by_%s' % gf)
+                            if self.convergence_basis.lower() == 'parameters':
+                                self._add_convergence_tracker(self.interaction_random_summary[gf], 'interaction_by_%s' % gf)
 
                             self.interaction += tf.gather(interaction_random, self.gf_y[:, i], axis=0)
 
@@ -1423,7 +1431,8 @@ class DTSR(object):
                             params_fixed.append(param_vals[2])
                         if param_vals[3] is not None:
                             params_fixed_summary.append(param_vals[3])
-                            self._add_convergence_tracker(param_vals[3], 'irf_%s_%s' % (family, param_name))
+                            if self.convergence_basis.lower() == 'parameters':
+                                self._add_convergence_tracker(param_vals[3], 'irf_%s_%s' % (family, param_name))
 
                         if param_vals[4] is not None and param_vals[5] is not None:
                             assert(set(param_vals[4].keys()) == set(param_vals[5].keys()))
@@ -1436,7 +1445,8 @@ class DTSR(object):
                                 if gf not in params_random_summary:
                                     params_random_summary[gf] = []
                                 params_random_summary[gf].append(param_vals[5][gf])
-                                self._add_convergence_tracker(param_vals[5][gf], 'irf_%s_%s_by_%s' % (family, param_name, gf))
+                                if self.convergence_basis.lower() == 'parameters':
+                                    self._add_convergence_tracker(param_vals[5][gf], 'irf_%s_%s_by_%s' % (family, param_name, gf))
 
                     has_random_irf = False
                     for param in params:
@@ -2594,7 +2604,7 @@ class DTSR(object):
                 tf.summary.scalar('double_delta_at_max_delta', self.double_delta_at_max_delta_summary, collections=['convergence'])
                 self.summary_convergence = tf.summary.merge_all(key='convergence')
 
-                if self.global_step.eval(session=self.sess) == 0:
+                if self.global_step.eval(session=self.sess) == 0 and self.convergence_basis.lower() == 'parameters':
                     d0 = self.sess.run(self.d0)
                     fd_init = {}
                     for i in range(len(d0)):
@@ -2877,10 +2887,10 @@ class DTSR(object):
 
         return delta
 
-    def run_convergence_check(self, verbose=True):
+    def run_convergence_check(self, verbose=True, feed_dict=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                max_delta_ix, max_delta, double_delta_at_max_delta = self._convergence_check_inner()
+                max_delta_ix, max_delta, double_delta_at_max_delta = self._convergence_check_inner(feed_dict=feed_dict)
 
                 if self.check_convergence:
                     if verbose:
@@ -2896,7 +2906,7 @@ class DTSR(object):
 
                 self.sess.run(self.set_converged, feed_dict={self.converged_in: converged})
 
-    def _convergence_check_inner(self):
+    def _convergence_check_inner(self, feed_dict=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 max_delta = 0
@@ -2909,10 +2919,17 @@ class DTSR(object):
                          self.global_step.eval(session=self.sess) % self.convergence_check_freq == 0
 
                 if self.check_convergence:
-                    var_d0, var_d0_iterates, var_d1_iterates = self.sess.run(
-                        [self.d0, self.d0_saved, self.d1_saved])
+                    if update:
+                        var_d0, var_d0_iterates, var_d1_iterates = self.sess.run(
+                            [self.d0, self.d0_saved, self.d1_saved],
+                            feed_dict=feed_dict
+                        )
+                    else:
+                        var_d0_iterates, var_d1_iterates = self.sess.run(
+                            [self.d0_saved, self.d1_saved]
+                        )
 
-                    for i in range(len(var_d0)):
+                    for i in range(len(var_d0_iterates)):
                         if update:
                             new_d0 = var_d0[i]
                             iterates_d0 = var_d0_iterates[i]
@@ -4395,7 +4412,7 @@ class DTSR(object):
                         self.verify_random_centering()
 
                         if self.convergence_check_freq > 0 and self.global_step.eval(session=self.sess) % self.convergence_check_freq == 0:
-                            self.run_convergence_check(verbose=True)
+                            self.run_convergence_check(verbose=True, feed_dict={self.loss_total: loss_total/n_minibatch})
 
                         if self.log_freq > 0 and self.global_step.eval(session=self.sess) % self.log_freq == 0:
                             loss_total /= n_minibatch

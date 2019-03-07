@@ -55,14 +55,17 @@ if __name__ == '__main__':
         ])
         if not os.path.exists(args.outdir + '/' + model_name):
             os.makedirs(args.outdir + '/' + model_name)
-        data_name = '_'.join([
+        data_name = [
             'm%d' % m,
             'n%d' % n,
             'x%s' % X_interval,
             'y%s' % y_interval,
             'r%0.4f' % rho,
             'e%s' % ('None' if e is None else '%.4f' % e)
-        ])
+        ]
+        if a:
+            data_name.append('a')
+        data_name = '_'.join(data_name)
         if not os.path.exists(args.outdir + '/' + model_name + '/' + data_name):
             os.makedirs(args.outdir + '/' + model_name + '/' + data_name)
 
