@@ -2,8 +2,10 @@ import sys
 import os
 import shutil
 from itertools import chain, combinations
-import configparser
-from numpy import inf
+if sys.version_info[0] == 2:
+    import ConfigParser as configparser
+else:
+    import configparser
 
 from .formula import Formula
 from .kwargs import DTSR_INITIALIZATION_KWARGS, DTSRMLE_INITIALIZATION_KWARGS, DTSRBAYES_INITIALIZATION_KWARGS
