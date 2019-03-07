@@ -304,6 +304,18 @@ class DTSRMLE(DTSR):
                 y_dist = tf.distributions.Normal(loc=self.out, scale=tf.sqrt(self.training_mse))
                 self.ll = y_dist.log_prob(self.y)
 
+    def get_base_loss(
+            self,
+            X,
+            y,
+            X_response_aligned_predictor_names=None,
+            X_response_aligned_predictors=None,
+            X_2d_predictor_names=None,
+            X_2d_predictors=None
+    ):
+        # Data are not used but must be in method signature for DTSRBayes
+        return self.y_train_sd
+
     ######################################################
     #
     #  Public methods

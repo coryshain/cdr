@@ -748,8 +748,6 @@ class DTSR(object):
                     self.ranef_regularizer = getattr(tf.contrib.layers, self.ranef_regularizer_name)(self.ranef_regularizer_scale)
 
                 self.loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='loss_total')
-                if self.convergence_basis.lower() == 'loss':
-                    self._add_convergence_tracker(self.loss_total, 'loss_total')
 
                 self.training_mse_in = tf.placeholder(self.FLOAT_TF, shape=[], name='training_mse_in')
                 self.training_mse = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_mse')
@@ -764,6 +762,16 @@ class DTSR(object):
                 self.training_loglik = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_loglik')
                 self.set_training_loglik = tf.assign(self.training_loglik, self.training_loglik_in)
 
+                if self.convergence_basis.lower() == 'loss':
+                    self._add_convergence_tracker(self.loss_total, 'loss_total')
+                    self.base_loss = tf.Variable(
+                        np.inf,
+                        dtype=self.FLOAT_TF,
+                        trainable=False,
+                        name='base_loss'
+                    )
+                    self.base_loss_in = tf.placeholder(self.FLOAT_TF, shape=[], name='base_loss_in')
+                    self.set_base_loss = tf.assign(self.base_loss, self.base_loss_in)
                 self.converged_in = tf.placeholder(tf.bool, shape=[], name='converged_in')
                 self.converged = tf.Variable(False, trainable=False, dtype=tf.bool, name='converged')
                 self.set_converged = tf.assign(self.converged, self.converged_in)
@@ -2704,6 +2712,44 @@ class DTSR(object):
 
         raise NotImplementedError
 
+    def get_base_loss(
+            self,
+            X,
+            y,
+            X_response_aligned_predictor_names=None,
+            X_response_aligned_predictors=None,
+            X_2d_predictor_names=None,
+            X_2d_predictors=None
+    ):
+        """
+        Compute a base loss to use for loss-based convergence checking
+
+        :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
+            **X** must contain the following columns (additional columns are ignored):
+
+            * ``time``: Timestamp associated with each observation in **X**
+            * A column for each independent variable in the DTSR ``form_str`` provided at iniialization
+
+        :param y: ``pandas`` table; the dependent variable. Must contain the following columns:
+
+            * ``time``: Timestamp associated with each observation in **y**
+            * ``first_obs``:  Index in the design matrix **X** of the first observation in the time series associated with each entry in **y**
+            * ``last_obs``:  Index in the design matrix **X** of the immediately preceding observation in the time series associated with each entry in **y**
+            * A column with the same name as the dependent variable specified in the model formula
+            * A column for each random grouping factor in the model formula
+
+            In general, **y** will be identical to the parameter **y** provided at model initialization.
+            This must hold for MCMC inference, since the number of minibatches is built into the model architecture.
+            However, it is not necessary for variational inference.
+        :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
+        :param X_response_aligned_predictors: ``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
+        :param X_2d_predictor_names: ``list`` or ``None``; List of column names 2D predictors (predictors whose value depends on properties of the most recent impulse) if applicable, ``None`` otherwise.
+        :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
+        :return: ``float``; a scalar base loss
+        """
+
+        raise NotImplementedError
+
 
 
 
@@ -2898,9 +2944,14 @@ class DTSR(object):
                         sys.stderr.write('Double delta at max delta: %s.\n' % double_delta_at_max_delta)
                         sys.stderr.write('Location: %s.\n\n' % self.d0_names[max_delta_ix])
 
+                    if self.convergence_basis.lower() == 'loss':
+                        tol = self.base_loss.eval(session=self.sess) * self.convergence_tolerance
+                    else:
+                        tol = self.convergence_tolerance
+
                     converged = self.global_step.eval(session=self.sess) > self.convergence_n_iterates and \
-                              (max_delta < self.convergence_tolerance) and \
-                              (double_delta_at_max_delta < self.convergence_tolerance)
+                              (max_delta < tol) and \
+                              (double_delta_at_max_delta < tol)
                 else:
                     converged = False
 
@@ -4147,7 +4198,16 @@ class DTSR(object):
             converged = self.has_converged()
             n_iter = self.global_step.eval(session=self.sess)
 
-            out += ' ' * (indent * 2) + 'Converged: %s\n\n' % converged
+            out += ' ' * (indent * 2) + 'Converged: %s\n' % converged
+            out += ' ' * (indent * 2) + 'Convergence basis: %s\n\n' % self.convergence_basis.lower()
+            if self.convergence_basis.lower() == 'loss':
+                out += ' ' * (indent * 2) + 'Convergence tolerance ratio: %s\n\n' % self.convergence_tolerance
+                out += ' ' * (indent * 2) + 'Convergence base loss: %s\n\n' % self.base_loss.eval(session=self.sess)
+                out += ' ' * (indent * 2) + 'Convergence tolerance (tolerance ratio * base loss): %s\n\n' % self.base_loss.eval(session=self.sess) * self.convergence_tolerance
+            else:
+                out += ' ' * (indent * 2) + 'Convergence tolerance: %s\n\n' % self.convergence_tolerance
+
+            out += '\n'
 
             if converged:
                 out += ' ' * (indent + 2) + 'NOTE:\n'
@@ -4162,14 +4222,14 @@ class DTSR(object):
                 location = self.d0_names[max_delta_ix]
 
                 out += ' ' * (indent + 2) + 'Model did not reach convergence criteria in %s epochs.\n' % n_iter
-                out += ' ' * (indent + 2) + 'Largest first derivative with respect to training time must be <= %s, with second derivative at that parameter <= %s.\n\n' % (self.convergence_tolerance, self.convergence_tolerance)
+                out += ' ' * (indent + 2) + 'Largest first derivative with respect to training time must be <= %s, with second derivative at that variable <= %s.\n\n' % (self.convergence_tolerance, self.convergence_tolerance)
                 out += ' ' * (indent + 4) + 'Max first derivative: %s\n' % max_delta
                 out += ' ' * (indent + 4) + 'Second derivative at max first derivative: %s\n' % double_delta_at_max_delta
                 out += ' ' * (indent + 4) + 'Location: %s\n\n' % location
                 out += ' ' * (indent + 2) + 'NOTE:\n'
                 out += ' ' * (indent + 4) + 'Programmatic diagnosis of convergence in DTSR is error-prone because of stochastic optimization.\n'
                 out += ' ' * (indent + 4) + 'It is possible that the convergence diagnostics used are too conservative given the stochastic dynamics of the model.\n'
-                out += ' ' * (indent + 4) + 'Consider visually checking the learning curves in Tensorboard to see whether the parameter estimates have flatlined:\n'
+                out += ' ' * (indent + 4) + 'Consider visually checking the learning curves in Tensorboard to see whether the parameter estimates and/or losses have flatlined:\n'
                 out += ' ' * (indent + 6) + 'python -m tensorboard.main --logdir=<path_to_model_directory>\n'
                 out += ' ' * (indent + 4) + 'If so, consider the model converged.\n'
 
@@ -4356,6 +4416,20 @@ class DTSR(object):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                if self.convergence_basis.lower() == 'loss' and not np.isfinite(self.base_loss.eval(session=self.sess)):
+                    base_loss = self.get_base_loss(
+                        X,
+                        y,
+                        X_response_aligned_predictor_names=X_response_aligned_predictor_names,
+                        X_response_aligned_predictors=X_response_aligned_predictors,
+                        X_2d_predictor_names=X_2d_predictor_names,
+                        X_2d_predictors=X_2d_predictors,
+                    )
+                    self.sess.run(self.set_base_loss, feed_dict={self.base_loss_in: base_loss})
+                    if self.global_step.eval(session=self.sess) == 0:
+                        base_loss_init = np.ones((self.convergence_n_iterates, 1)) * base_loss
+                        self.sess.run(self.d0_assign, feed_dict={self.d0_saved_update[0]: base_loss_init})
+
                 self.run_convergence_check(verbose=False)
                 
                 if (self.global_step.eval(session=self.sess) < n_iter) and not self.has_converged():
