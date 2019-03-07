@@ -14,10 +14,8 @@ def read_params(path):
 def irf(x, irf_name, irf_params, coefs=None):
     if irf_name == 'Exp':
         out = np.exp(-x[..., None] * irf_params['beta'][None, ...])
-        # out = scipy.stats.expon.pdf(x[..., None], scale=1./irf_params['beta'])
     elif irf_name == 'Normal':
         out = np.exp(-(x[..., None] - irf_params['mu'][None, ...]) ** 2 / irf_params['sigma2'][None, ...])
-        # out = scipy.stats.norm.pdf(x[..., None], loc=irf_params['mu'], scale=irf_params['sigma'])
     elif irf_name in ['Gamma', 'HRF']:
         out = scipy.stats.gamma.pdf(x[..., None], irf_params['alpha'], scale=1./irf_params['beta'])
     elif irf_name == 'ShiftedGamma':
@@ -78,7 +76,7 @@ class SyntheticModel(object):
         self.irf_name = irf_name
 
         if coefs is None:
-            coefs = np.random.uniform(-50, 50, (self.n_pred,))
+            coefs = np.random.uniform(-10, 10, (self.n_pred,))
         self.coefs = coefs
 
     def irf(self, x, coefs=False):
@@ -173,7 +171,7 @@ class SyntheticModel(object):
                 if j % 1000 == 0:
                     sys.stderr.write('\r%d/%d' % (j, len(t_y)))
                     sys.stderr.flush()
-            while cond(t_X[i], t_y[j]):
+            while i < len(t_X) and cond(t_X[i], t_y[j]):
                 i += 1
             t_delta = t_y[j] - t_X[:i]
             X_conv[j] = np.sum(self.irf(t_delta) * X[0:i], axis=0, keepdims=True) * self.coefs[None, ...]
@@ -187,15 +185,11 @@ class SyntheticModel(object):
         if verbose:
             sys.stderr.write('\n')
 
-        print('Non-noised SD:')
-        print(np.std(y))
         if err_sd != 0:
             if err_sd is None:
                 err_sd = np.std(y)
             y += np.random.normal(loc=0., scale=err_sd, size=y.shape)
-            print('Noised SD:')
-            print(np.std(y))
-        print()
+
         return X_conv, y
 
     def convolve_v2(self, X, t_X, t_y, err_sd=None, allow_instantaneous=True, verbose=True):
