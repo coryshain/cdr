@@ -17,7 +17,7 @@ if __name__ == '__main__':
     argparser.add_argument('-m', '--m', nargs='+', type=int, default=[10000], help='Number of impulses')
     argparser.add_argument('-n', '--n', nargs='+', type=int, default=[10000], help='Number of responses')
     argparser.add_argument('-k', '--k', nargs='+', type=int, default=[20], help='Number of predictors')
-    argparser.add_argument('-a', '--async', nargs='+', type=bool, default=[False], help='Use asynchronous impulses/responses.')
+    argparser.add_argument('-a', '--async', nargs='+', type=int, default=[0], help='Use asynchronous impulses/responses.')
     argparser.add_argument('-g', '--irf', nargs='+', type=str, default=['Normal'], help='Default IRF type (one of ["Exp", "Normal", "Gamma", "ShiftedGamma"])')
     argparser.add_argument('-x', '--X_interval', nargs='+', type=str, default=[None], help='Interval definition for the impulse stream. Either a float (fixed-length step) or "-"-delimited tuple of <distribution>_(<param>)+')
     argparser.add_argument('-y', '--y_interval', nargs='+', type=str, default=[None], help='Interval definition for the response stream. Either a float (fixed-length step) or "-"-delimited tuple of <distribution>_(<param>)+')
@@ -36,7 +36,7 @@ if __name__ == '__main__':
 
     args, unknown = argparser.parse_known_args()
 
-    for m, n, k, a, g, X_interval, y_interval, rho, e in itertools.product(*[
+    for m, n, k, a, g, X_interval, y_interval, rho in itertools.product(*[
         args.m,
         args.n,
         args.k,
@@ -44,8 +44,7 @@ if __name__ == '__main__':
         args.irf,
         args.X_interval,
         args.y_interval,
-        args.rho,
-        args.error
+        args.rho
     ]):
         if not os.path.exists(args.outdir):
             os.makedirs(args.outdir)
@@ -55,19 +54,6 @@ if __name__ == '__main__':
         ])
         if not os.path.exists(args.outdir + '/' + model_name):
             os.makedirs(args.outdir + '/' + model_name)
-        data_name = [
-            'm%d' % m,
-            'n%d' % n,
-            'x%s' % X_interval,
-            'y%s' % y_interval,
-            'r%0.4f' % rho,
-            'e%s' % ('None' if e is None else '%.4f' % e)
-        ]
-        if a:
-            data_name.append('a')
-        data_name = '_'.join(data_name)
-        if not os.path.exists(args.outdir + '/' + model_name + '/' + data_name):
-            os.makedirs(args.outdir + '/' + model_name + '/' + data_name)
 
         if os.path.exists(args.outdir + '/' + model_name + '/d.obj'):
             with open(args.outdir + '/' + model_name + '/d.obj', 'rb') as f:
@@ -117,25 +103,51 @@ if __name__ == '__main__':
         else:
             y_interval = X_interval
 
-        if not (os.path.exists(args.outdir + '/' + model_name + '/' + data_name + '/X.evmeasures') and
-                os.path.exists(args.outdir + '/' + model_name + '/' + data_name + '/y.evmeasures')):
-            sys.stderr.write('Generating data %s for model %s...\n' % (data_name, model_name))
-            X, t_X, t_y = d.sample_data(
-                m,
-                n,
-                X_interval=X_interval,
-                y_interval=y_interval,
-                rho=rho,
-                align_X_y=not a
-            )
+        X, t_X, t_y = d.sample_data(
+            m,
+            n,
+            X_interval=X_interval,
+            y_interval=y_interval,
+            rho=rho,
+            align_X_y=not a
+        )
 
-            X_conv, y = d.convolve(X, t_X, t_y, err_sd=e, allow_instantaneous=not g == 'Gamma')
-            sys.stderr.write('\n')
+        X_conv, y = d.convolve(X, t_X, t_y, allow_instantaneous=not g == 'Gamma')
 
-            names = ['time', 'subject', 'sentid', 'docid'] + list(string.ascii_lowercase[:k])
-            df_x = pd.DataFrame(np.concatenate([t_X[:,None], np.zeros((m, 3)), X], axis=1), columns=names)
-            df_x.to_csv(args.outdir + '/' + model_name + '/' + data_name + '/X.evmeasures', ' ', index=False, na_rep='nan')
+        for e in args.error:
+            if e is None:
+                err_sd = np.std(y)
+            else:
+                err_sd = e
+            if err_sd:
+                y_cur = y + np.random.normal(loc=0., scale=err_sd, size=y.shape)
+            else:
+                y_cur = y
 
-            names = ['time', 'subject', 'sentid', 'docid', 'y']
-            df_y = pd.DataFrame(np.concatenate([t_y[:,None], np.zeros((n, 3)), y[:, None]], axis=1), columns=names)
-            df_y.to_csv(args.outdir + '/' + model_name + '/' + data_name + '/y.evmeasures', ' ', index=False, na_rep='nan')
+            data_name = [
+                'm%d' % m,
+                'n%d' % n,
+                'x%s' % X_interval,
+                'y%s' % y_interval,
+                'r%0.4f' % rho,
+                'e%s' % ('None' if e is None else '%.4f' % e)
+            ]
+            if a:
+                data_name.append('a')
+            data_name = '_'.join(data_name)
+            if not os.path.exists(args.outdir + '/' + model_name + '/' + data_name):
+                os.makedirs(args.outdir + '/' + model_name + '/' + data_name)
+
+            if not (os.path.exists(args.outdir + '/' + model_name + '/' + data_name + '/X.evmeasures') and
+                    os.path.exists(args.outdir + '/' + model_name + '/' + data_name + '/y.evmeasures')):
+                sys.stderr.write('Generating data %s for model %s...\n' % (data_name, model_name))
+
+                sys.stderr.write('\n')
+
+                names = ['time', 'subject', 'sentid', 'docid'] + list(string.ascii_lowercase[:k])
+                df_x = pd.DataFrame(np.concatenate([t_X[:,None], np.zeros((m, 3)), X], axis=1), columns=names)
+                df_x.to_csv(args.outdir + '/' + model_name + '/' + data_name + '/X.evmeasures', ' ', index=False, na_rep='nan')
+
+                names = ['time', 'subject', 'sentid', 'docid', 'y']
+                df_y = pd.DataFrame(np.concatenate([t_y[:,None], np.zeros((n, 3)), y_cur[:, None]], axis=1), columns=names)
+                df_y.to_csv(args.outdir + '/' + model_name + '/' + data_name + '/y.evmeasures', ' ', index=False, na_rep='nan')
