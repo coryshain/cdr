@@ -132,7 +132,7 @@ class Kwarg(object):
                             val = x(from_settings)
                             parsed = True
                             break
-                        except:
+                        except TypeError:
                             pass
 
                 assert parsed, 'Invalid value "%s" received for %s' %(from_settings, self.key)
@@ -217,10 +217,10 @@ DTSR_INITIALIZATION_KWARGS = [
         "Initial value to use for the intercept (if ``None``, use mean response in training data)"
     ),
     Kwarg(
-        'init_sd',
-        .001,
-        float,
-        "Standard deviation of Gaussian initialization distribution for trainable variables."
+        'constraint',
+        'abs',
+        str,
+        "Constraint function to use for bounded variables. One of ``['abs', 'softplus']``."
     ),
     Kwarg(
         'interp_hz',
@@ -252,7 +252,7 @@ DTSR_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'learning_rate',
-        0.01,
+        0.001,
         float,
         "Initial value for the learning rate."
     ),
@@ -598,7 +598,7 @@ DTSRBAYES_INITIALIZATION_KWARGS = [
         'posterior_to_prior_sd_ratio',
         0.01,
         float,
-        "Ratio of widths of priors to posterior initializations. Low values are often beneficial to stability, convergence speed, and optimality of the final model by avoiding erratic sampling and divergent behavior early in training."
+        "Ratio of posterior initialization SD to prior SD. Low values are often beneficial to stability, convergence speed, and quality of final fit by avoiding erratic sampling and divergent behavior early in training."
     ),
     Kwarg(
         'asymmetric_error',

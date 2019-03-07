@@ -62,17 +62,18 @@ def predict_LME(model_path, outdir, X, y, dv, partition_name, model_name=''):
         f_out.write(summary)
     sys.stderr.write(summary)
 
-if __name__ == '__main__':
 
+if __name__ == '__main__':
     argparser = argparse.ArgumentParser('''
         Generates predictions from data given saved model(s)
     ''')
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of model names from which to predict. Regex permitted. If unspecified, predicts from all models.')
-    argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use ("train", "dev", "test", or space- or hyphen-delimited subset of these)')
+    argparser.add_argument('-d', '--data', nargs=2, default=None, help='Pair of paths or buffers <predictors, responses>, allowing prediction on arbitrary evaluation data. If specified, overrides the **partition** argument.')
+    argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use ("train", "dev", "test", or space- or hyphen-delimited subset of these). Ignored if **data** is provided.')
     argparser.add_argument('-n', '--nsamples', type=int, default=1024, help='Number of posterior samples to average (only used for DTSRBayes)')
     argparser.add_argument('-M', '--mode', type=str, default=None, help='Predict mode ("response" or "loglik") or default None, which does both')
-    argparser.add_argument('-a', '--algorithm', type=str, default='MAP', help='Algorithm ("sampling" or "MAP") to use for extracting predictions.')
+    argparser.add_argument('-a', '--algorithm', type=str, default='MAP', help='Algorithm ("sampling" or "MAP") to use for extracting predictions from DTSRBayes. Ignored for DTSRMLE.')
     argparser.add_argument('-t', '--twostep', action='store_true', help='For DTSR models, predict from fitted LME model from two-step hypothesis test.')
     argparser.add_argument('-A', '--ablated_models', action='store_true', help='For two-step prediction from DTSR models, predict from data convolved using the ablated model. Otherwise predict from data convolved using the full model.')
     argparser.add_argument('-e', '--extra_cols', action='store_true', help='For prediction from DTSR models, dump prediction outputs and response metadata to a single csv.')

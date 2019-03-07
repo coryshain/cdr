@@ -5,6 +5,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib import markers
 
+
 def plot_irf(
         plot_x,
         plot_y,
@@ -24,7 +25,7 @@ def plot_irf(
         transparent_background=False
 ):
     """
-    Plot N impulse response functions at T time points.
+    Plot impulse response functions.
 
     :param plot_x: ``numpy`` array with shape (T,); time points for which to plot the response. For example, if the plots contain 1000 points from 0s to 10s, **plot_x** could be generated as ``np.linspace(0, 10, 1000)``.
     :param plot_y: ``numpy`` array with shape (T, N); response of each IRF at each time point.
@@ -89,6 +90,7 @@ def plot_irf(
         sys.stderr.write('Error saving plot to file %s. Skipping...' %(dir+'/'+filename))
     plt.close('all')
 
+
 def plot_heatmap(
         m,
         row_names,
@@ -100,7 +102,7 @@ def plot_heatmap(
         cmap='Blues'
 ):
     """
-    Plot a heatmap. Generally used in DTSR for visualizing eigenvector matrices in principal components models.
+    Plot a heatmap. Used in DTSR for visualizing eigenvector matrices in principal components models.
 
     :param m: 2D ``numpy`` array; source data for plot.
     :param row_names: ``list`` of ``str``; row names.

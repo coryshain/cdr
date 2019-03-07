@@ -59,7 +59,7 @@ class Formula(object):
         'GammaShapeGT1': ['alpha', 'beta'],
         'ShiftedGammaKgt1': ['alpha', 'beta', 'delta'],
         'ShiftedGammaShapeGT1': ['alpha', 'beta', 'delta'],
-        'Normal': ['mu', 'sigma'],
+        'Normal': ['mu', 'sigma2'],
         'SkewNormal': ['mu', 'sigma', 'alpha'],
         'EMG': ['mu', 'sigma', 'beta'],
         'BetaPrime': ['alpha', 'beta'],

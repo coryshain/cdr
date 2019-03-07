@@ -2,183 +2,137 @@ import sys
 import os
 import pickle
 import string
+import itertools
 import numpy as np
 import pandas as pd
-import scipy.stats
 import argparse
 
-from dtsr.plot import plot_irf
-
-def convolve(x, k, theta, delta, coefficient = 1):
-    return scipy.stats.gamma.pdf(x, k, scale=theta, loc=delta) * coefficient
-
-def read_params(path):
-    return pd.read_csv(path, sep=' ', index_col=0)
-
-class SyntheticDataset(object):
-    def __init__(
-            self,
-            nobs_X,
-            n_pred,
-            irf,
-            step_distribution=None,
-            error_sd=20.,
-            rho=0,
-            nobs_y=None,
-            align_X_y=True
-    ):
-        self.nobs_X = nobs_X
-        if nobs_y is None:
-            self.nobs_y = nobs_X
-        else:
-            self.nobs_y = nobs_y
-        self.n_pred = n_pred
-        if not isinstance(irf, list):
-            irf = [irf]
-        self.irf = irf
-        self.step_distribution = step_distribution
-        self.error_sd = error_sd
-        self.rho = rho
-        self.align_X_y = align_X_y
-        if align_X_y:
-            if self.nobs_X != self.nobs_y:
-                self.align_X_y = False
-                sys.stderr.write('If align_X_y, nobs_X and nobs_y must be equal (or nobs_y must be None). Forcing align_X_y to False.')
-
-    def build(self):
-        time_X = np.cumsum(getattr(scipy.stats, self.step_distribution['name'])(size=self.nobs_X, **self.step_distribution['args']))
-        if self.align_X_y:
-            time_y = time_X
-        else:
-            time_y = np.cumsum(getattr(scipy.stats, self.step_distribution['name'])(size=self.nobs_y, **self.step_distribution['args']))
-
-    IRF_LAMBDAS = {
-        'Dirac': lambda x, coefficient: x * coefficient,
-        'Normal': lambda x, mu, sigma, coefficient: np.sum(scipy.stats.norm.pdf(x, loc=mu, scale=sigma) * coefficient),
-        'Exp': lambda x, theta, coefficient: np.sum(scipy.stats.expon.pdf(x, scale=theta) * coefficient),
-        'Gamma': lambda x, k, theta, coefficient: np.sum(scipy.stats.gamma.pdf(x, k, scale=theta) * coefficient),
-        'ShiftedGamma': lambda x, k, theta, delta, coefficient: np.sum(scipy.stats.gamma.pdf(x, k, scale=theta, loc=delta) * coefficient)
-    }
-
+from dtsr.synth import SyntheticModel
 
 
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser('''
-        Generates synthetic temporally convolved data using randomly sampled ShiftedGammaKgt1 IRF.
+        Create synthetic data using randomly generated IRFs.
     ''')
-    argparser.add_argument('-n', '--n', type=int, default=20, help='Number of covariates')
-    argparser.add_argument('-x', '--x', type=int, default=10000, help='Length of obs table')
-    argparser.add_argument('-y', '--y', type=int, default=10000, help='Length of dv table')
-    argparser.add_argument('-s', '--s', type=float, default = 0.1, help='Temporal step length')
-    argparser.add_argument('-k', '--k', type=float, default = None, help='Value for shape parameter k (randomly sampled by default)')
-    argparser.add_argument('-r', '--rho', type=float, default = None, help='Fixed correlation level for covariates. If ``None`` or ``0``, uncorrelated covariates.')
-    argparser.add_argument('-t', '--theta', type=float, default = None, help='Value for scale parameter theta (randomly sampled by default)')
-    argparser.add_argument('-d', '--delta', type=float, default = None, help='Value for location parameter delta (randomly sampled by default)')
-    argparser.add_argument('-b', '--beta', type=float, default = None, help='Value for linear coefficient beta (randomly sampled by default)')
-    argparser.add_argument('-e', '--error', type=float, default = 20., help='SD of error distribution')
+    argparser.add_argument('-m', '--m', nargs='+', type=int, default=[10000], help='Number of impulses')
+    argparser.add_argument('-n', '--n', nargs='+', type=int, default=[10000], help='Number of responses')
+    argparser.add_argument('-k', '--k', nargs='+', type=int, default=[20], help='Number of predictors')
+    argparser.add_argument('-a', '--async', nargs='+', type=bool, default=[False], help='Use asynchronous impulses/responses.')
+    argparser.add_argument('-g', '--irf', nargs='+', type=str, default=['Normal'], help='Default IRF type (one of ["Exp", "Normal", "Gamma", "ShiftedGamma"])')
+    argparser.add_argument('-x', '--X_interval', nargs='+', type=str, default=[None], help='Interval definition for the impulse stream. Either a float (fixed-length step) or "-"-delimited tuple of <distribution>_(<param>)+')
+    argparser.add_argument('-y', '--y_interval', nargs='+', type=str, default=[None], help='Interval definition for the response stream. Either a float (fixed-length step) or "-"-delimited tuple of <distribution>_(<param>)+')
+    argparser.add_argument('-r', '--rho', nargs='+', type=float, default=[0.], help='Fixed correlation level for covariates. If ``None`` or ``0``, uncorrelated covariates.')
+    argparser.add_argument('-e', '--error', nargs='+', type=float, default=[None], help='SD of error distribution')
+    argparser.add_argument('-u', '--ntimeunits', type=float, default=None, help='Number of time units on x-axis of plots')
+    argparser.add_argument('-R', '--resolution', type=float, default=None, help='Number of points on x-axis of plots')
+    argparser.add_argument('-w', '--width', type=float, default=None, help='Width of plot in inches')
+    argparser.add_argument('-X', '--xlab', type=str, default=None, help='x-axis label (if default -- None -- no label)')
+    argparser.add_argument('-H', '--height', type=float, default=None, help='Height of plot in inches')
+    argparser.add_argument('-Y', '--ylab', type=str, default=None, help='y-axis label (if default -- None -- no label)')
+    argparser.add_argument('-c', '--cmap', type=str, default='gist_rainbow', help='Name of matplotlib colormap library to use for curves')
+    argparser.add_argument('-M', '--markers', action='store_true', help='Add markers to IRF lines')
+    argparser.add_argument('-t', '--transparent_background', action='store_true', help='Use transparent background (otherwise white background)')
     argparser.add_argument('-o', '--outdir', type=str, default='.', help='Output directory in which to save synthetic data tables (randomly sampled by default)')
-    argparser.add_argument('-p', '--paramsfile', type=str, default=None, help='Path to file containing IRF parameters and coefficients. If provided, will override any parameter arguments specified.')
-    argparser.add_argument('-N', '--name', type=str, default=None, help='Name for synthetic dataset')
 
     args, unknown = argparser.parse_known_args()
 
-    if args.paramsfile:
-        params = read_params(args.paramsfile)
-        k = params.k.as_matrix()
-        theta = params.theta.as_matrix()
-        delta = params.delta.as_matrix()
-        beta = params.beta.as_matrix()
+    for m, n, k, a, g, X_interval, y_interval, rho, e in itertools.product(*[
+        args.m,
+        args.n,
+        args.k,
+        args.async,
+        args.irf,
+        args.X_interval,
+        args.y_interval,
+        args.rho,
+        args.error
+    ]):
+        if not os.path.exists(args.outdir):
+            os.makedirs(args.outdir)
+        model_name = '_'.join([
+            'k%d' % k,
+            'g%s' % g,
+        ])
+        if not os.path.exists(args.outdir + '/' + model_name):
+            os.makedirs(args.outdir + '/' + model_name)
+        data_name = '_'.join([
+            'm%d' % m,
+            'n%d' % n,
+            'x%s' % X_interval,
+            'y%s' % y_interval,
+            'r%0.4f' % rho,
+            'e%s' % ('None' if e is None else '%.4f' % e)
+        ])
+        if not os.path.exists(args.outdir + '/' + model_name + '/' + data_name):
+            os.makedirs(args.outdir + '/' + model_name + '/' + data_name)
 
-
-    else:
-        if args.k is None:
-            k = np.random.random(args.n)*5 + 1
+        if os.path.exists(args.outdir + '/' + model_name + '/d.obj'):
+            with open(args.outdir + '/' + model_name + '/d.obj', 'rb') as f:
+                d = pickle.load(f)
         else:
-            k = np.ones(args.n)*args.k
-        if args.theta is None:
-            theta = np.random.random(args.n)*5
+            d = SyntheticModel(
+                k,
+                g
+            )
+            d.plot_irf(
+                dir=args.outdir + '/' + model_name,
+                n_time_units=args.ntimeunits,
+                n_time_points=args.resolution,
+                plot_x_inches=args.width,
+                plot_y_inches=args.height,
+                cmap=args.cmap,
+                legend=False,
+                xlab=args.xlab,
+                ylab=args.ylab,
+                use_line_markers=args.markers,
+                transparent_background=args.transparent_background
+            )
+            with open(args.outdir + '/' + model_name + '/d.obj', 'wb') as f:
+                pickle.dump(d, f)
+
+        if X_interval is None:
+            X_interval = 0.1
         else:
-            theta = np.ones(args.n)*args.theta
-        if args.delta is None:
-            delta = -np.random.random(args.n)
+            try:
+                X_interval = float(X_interval)
+            except ValueError:
+                X_interval_tmp = X_interval.split('-')
+                name = X_interval_tmp[0]
+                params = [float(x) for x in X_interval_tmp[1:]]
+                X_interval = [name] + params
+        if a:
+            if y_interval is None:
+                y_interval = 0.1
+            else:
+                try:
+                    y_interval = float(y_interval)
+                except ValueError:
+                    y_interval_tmp = y_interval.split('-')
+                    name = y_interval_tmp[0]
+                    params = [float(x) for x in y_interval_tmp[1:]]
+                    y_interval = [name] + params
         else:
-            delta = np.ones(args.n)*args.delta
-        if args.beta is None:
-            beta = np.random.random(args.n)*100-50
-        else:
-            beta = np.ones(args.n)*args.beta
+            y_interval = X_interval
 
-    if args.rho:
-        if args.rho < 1:
-            sigma = np.ones((args.n, args.n)) * args.rho
-            np.fill_diagonal(sigma, 1.)
-            X = np.random.multivariate_normal(np.zeros(args.n), sigma, (args.x,))
-        else:
-            X = np.random.normal(0, 1, (args.x,))[..., None]
-            X = np.tile(X, [1, 20])
-    else:
-        X = np.random.normal(0, 1, (args.x, args.n))
+        if not (os.path.exists(args.outdir + '/' + model_name + '/' + data_name + '/X.evmeasures') and
+                os.path.exists(args.outdir + '/' + model_name + '/' + data_name + '/y.evmeasures')):
+            sys.stderr.write('Generating data %s for model %s...\n' % (data_name, model_name))
+            X, t_X, t_y = d.sample_data(
+                m,
+                n,
+                X_interval=X_interval,
+                y_interval=y_interval,
+                rho=rho,
+                align_X_y=not a
+            )
 
-    time_X = np.linspace(0., args.s*args.x, args.x)
-    time_y = np.linspace(0., args.s*args.y, args.y)
+            X_conv, y = d.convolve(X, t_X, t_y, err_sd=e, allow_instantaneous=not g == 'Gamma')
+            sys.stderr.write('\n')
 
-    y_pred = np.zeros(args.y)
+            names = ['time', 'subject', 'sentid', 'docid'] + list(string.ascii_lowercase[:k])
+            df_x = pd.DataFrame(np.concatenate([t_X[:,None], np.zeros((m, 3)), X], axis=1), columns=names)
+            df_x.to_csv(args.outdir + '/' + model_name + '/' + data_name + '/X.evmeasures', ' ', index=False, na_rep='nan')
 
-    for i in range(args.y):
-        delta_t = np.expand_dims(time_y[i] - time_X[0:i+1], -1)
-        X_conv = np.sum(convolve(delta_t, k, theta, delta) * X[0:i + 1], axis=0, keepdims=True)
-        y_pred[i] = np.dot(X_conv, np.expand_dims(beta, 1))
-        sys.stderr.write('\r%d/%d' %(i+1, args.y))
-    sys.stderr.write('\n')
-
-    if args.error is not None:
-        y = y_pred + np.random.normal(0, args.error, args.y)
-    else:
-        y = y_pred
-
-    if not os.path.exists(args.outdir):
-        os.makedirs(args.outdir)
-    if args.name is None:
-        exp_name = str(np.random.randint(0, 100000))
-    else:
-        exp_name = args.name
-    os.mkdir(args.outdir + '/' + exp_name)
-
-    names = ['time', 'subject', 'sentid', 'docid'] + list(string.ascii_lowercase[:args.n])
-    df_x = pd.DataFrame(np.concatenate([time_X[:,None], np.zeros((args.x, 3)), X], axis=1), columns=names)
-    df_x.to_csv(args.outdir + '/' + exp_name + '/X.evmeasures', ' ', index=False, na_rep='nan')
-
-    names = ['time', 'subject', 'sentid', 'docid', 'y']
-    df_y = pd.DataFrame(np.concatenate([time_y[:,None], np.zeros((args.y, 3)), y[:, None]], axis=1), columns=names)
-    df_y.to_csv(args.outdir + '/' + exp_name + '/y.evmeasures', ' ', index=False, na_rep='nan')
-
-    names = ['k', 'theta', 'delta', 'beta']
-    row_names = list(string.ascii_lowercase[:args.n])
-    df_params = pd.DataFrame(np.stack([k, theta, delta, beta], axis=1), columns=names, index=row_names)
-    df_params.to_csv(args.outdir + '/' + exp_name + '/params.evmeasures', ' ', index=True, na_rep='nan')
-
-    names = ['true', 'preds']
-    df_preds = pd.Series(y_pred)
-    df_preds.to_csv(args.outdir + '/' + exp_name + '/preds_full.txt', index=False, na_rep='nan')
-
-    names = ['mse']
-    df_err = pd.Series((y-y_pred)**2)
-    df_err.to_csv(args.outdir + '/' + exp_name + '/MSE_losses_full.txt', index=False, na_rep='nan')
-
-    plot_x = np.expand_dims(np.linspace(0., 2.5, 1000), -1)
-    plot_y = convolve(plot_x, k, theta, delta) * beta
-
-    with open(args.outdir + '/' + exp_name + '/conv_true.obj', 'wb') as f:
-        pickle.dump(plot_x, f)
-
-
-    plot_irf(
-        plot_x,
-        plot_y,
-        string.ascii_lowercase[:args.n],
-        dir = args.outdir + '/' + exp_name,
-        filename = exp_name + '.png',
-        legend=False
-    )
-
-
+            names = ['time', 'subject', 'sentid', 'docid', 'y']
+            df_y = pd.DataFrame(np.concatenate([t_y[:,None], np.zeros((n, 3)), y[:, None]], axis=1), columns=names)
+            df_y.to_csv(args.outdir + '/' + model_name + '/' + data_name + '/y.evmeasures', ' ', index=False, na_rep='nan')

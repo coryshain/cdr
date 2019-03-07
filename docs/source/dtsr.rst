@@ -76,6 +76,13 @@ dtsr\.signif module
     :members:
     :show-inheritance:
 
+dtsr\.synth module
+-------------------
+
+.. automodule:: dtsr.synth
+    :members:
+    :show-inheritance:
+
 dtsr\.util module
 -----------------
 

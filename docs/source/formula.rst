@@ -73,13 +73,14 @@ The currently supported parametric IRF families are:
 
   - Definition: :math:`1` at :math:`x=0`, :math:`0` otherwise
 
-- ``Exp``: PDF of exponential distribution
+- ``Exp``: Unnormalized PDF of exponential distribution
 
   - Parameters:
 
     - :math:`\beta > 0`: ``beta`` (rate)
 
-  - Definition: :math:`\beta e^{-\beta x}`
+  - Definition: :math:`e^{-\beta x}`
+  - Note: Dropping the normalization constant from the PDF helps deconfound IRF shape and magnitude. Normalization is unnecessary since this kernel defines an IRF, not a probability distribution.
 
 - ``Gamma``: PDF of gamma distribution
 
@@ -119,14 +120,15 @@ The currently supported parametric IRF families are:
 
   - Definition: :math:`\frac{\beta^{\alpha}(x - \delta)^{\alpha-1}e^{-\frac{x - \delta}{\beta}}}{\Gamma(\alpha)}`
 
-- ``Normal``: PDF of Gaussian (normal) distribution
+- ``Normal``: Unnormalized PDF of Gaussian (normal) distribution
 
   - Parameters:
 
     - :math:`\mu`: ``mu`` (mean)
-    - :math:`\sigma > 0`: ``sigma`` (standard deviation)
+    - :math:`\sigma^2 > 0`: ``sigma2`` (variance)
 
-  - Definition: :math:`\frac{1}{\sqrt{2\pi\sigma^2}}e^{-\frac{(x - \mu) ^ 2}{2 \sigma ^ 2}}`
+  - Definition: :math:`e^{-\frac{(x - \mu) ^ 2}{2 \sigma ^ 2}}`
+  - Note: Dropping the normalization constant from the PDF helps deconfound IRF shape and magnitude. Normalization is unnecessary since this kernel defines an IRF, not a probability distribution.
 
 - ``SkewNormal``: PDF of SkewNormal distribution (normal distribution augmented with left/right skew parameter)
 
@@ -183,6 +185,8 @@ The currently supported parametric IRF families are:
   - Parameters:
 
     - :math:`\beta > 0`: ``beta`` (peak and undershoot rate)
+
+  - Definition: :math:`\frac{\beta^{6}x^{6-1}e^{-\frac{x}{\beta}}}{\Gamma(6)} - \frac{1}{6}\frac{\beta^{16}x^{15}e^{-\frac{x}{\beta}}}{\Gamma(16)}`
 
 - ``HRFDoubleGamma2``: 2-parameter double-gamma hemodynamic response function (fMRI). Parameter :math:`\alpha` of the second gamma is fixed to the :math:`alpha` of the first gamma using SPM
 s default offset (10). Parameter :math:`\beta` is tied between both gammas. The coefficient on the second gamma is fixed at SPM's default (:math:`\frac{1}{6}`).

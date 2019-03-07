@@ -1,10 +1,10 @@
 import argparse
 import sys
 import os
-import numpy as np
+import string
+import pickle
 from dtsr.config import Config
 from dtsr.util import load_dtsr, filter_models
-from dtsr.bin.synth import read_params, convolve
 from dtsr.plot import plot_irf
 
 if __name__ == '__main__':
@@ -49,19 +49,15 @@ if __name__ == '__main__':
         name_map = p.irf_name_map
         legend = not args.nolegend
 
-        synth_path = os.path.dirname(p.X_train) + '/params.evmeasures'
+        synth_path = os.path.dirname(os.path.dirname(p.X_train)) + '/d.obj'
         if args.plot_true_synthetic and os.path.exists(synth_path):
-            params = read_params(synth_path)
-
-            a = p['plot_n_time_units'] if n_time_units is None else n_time_units
-            b = p['plot_n_time_points'] if resolution is None else resolution
-
-            x = np.linspace(0, a, b)
-
-            y = convolve(x, np.expand_dims(params.k, -1), np.expand_dims(params.theta, -1), np.expand_dims(params.delta, -1), coefficient=np.expand_dims(params.beta, -1))
-            y = y.transpose([1, 0])
-
-            names = list(params.index)
+            with open(synth_path, 'rb') as f:
+                d = pickle.load(f)
+            x, y = d.get_curves(
+                n_time_units=p['plot_n_time_units'] if n_time_units is None else n_time_units,
+                n_time_points=p['plot_n_time_points'] if resolution is None else resolution
+            )
+            names = string.ascii_lowercase[:d.n_pred]
 
             if args.summed:
                 plot_irf(

@@ -34,25 +34,35 @@ def get_session(session):
 
     return sess
 
-def exponential_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
+
+def unnormalized_gamma(alpha, beta):
+    return lambda x: x ** (alpha - 1) * tf.exp(-beta * x)
+
+
+def unnormalized_gaussian(mu, sigma):
+    return lambda x: tf.exp(-(x - mu) ** 2 / sigma)
+
+
+def exponential_irf(params, session=None):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
-            pdf = tf.contrib.distributions.Exponential(rate=params[:, 0:1]).prob
-            return lambda x: pdf(x + epsilon)
+            beta = params[:, 0:1]
+            return lambda x: tf.exp(- beta * x)
 
 
 def gamma_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
+            alpha = params[:, 0:1]
+            beta = params[:, 1:2]
             pdf = tf.contrib.distributions.Gamma(
-                concentration=params[:, 0:1],
-                rate=params[:, 1:2],
+                concentration=alpha,
+                rate=beta,
                 validate_args=validate_irf_args
             ).prob
             return lambda x: pdf(x + epsilon)
-
 
 def shifted_gamma_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
     session = get_session(session)
@@ -65,13 +75,11 @@ def shifted_gamma_irf(params, session=None, epsilon=4*np.finfo('float32').eps, v
             ).prob
             return lambda x: pdf(x - params[:, 2:3] + epsilon)
 
-
 def normal_irf(params, session=None):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
-            pdf = tf.contrib.distributions.Normal(loc=params[:, 0:1], scale=params[:, 1:2]).prob
-            return lambda x: pdf(x)
+            return lambda x: unnormalized_gaussian(params[:, 0:1], params[:, 1:2])(x)
 
 
 def skew_normal_irf(params, session=None):
@@ -84,7 +92,7 @@ def skew_normal_irf(params, session=None):
             stdnorm = tf.contrib.distributions.Normal(loc=0., scale=1.)
             stdnorm_pdf = stdnorm.prob
             stdnorm_cdf = stdnorm.cdf
-            return lambda x: 2 / sigma * stdnorm_pdf((x - mu) / sigma) * stdnorm_cdf(alpha * (x - mu) / sigma)
+            return lambda x: stdnorm_pdf((x - mu) / sigma) * stdnorm_cdf(alpha * (x - mu) / sigma)
 
 
 def emg_irf(params, session=None):
@@ -104,9 +112,7 @@ def beta_prime_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
         with session.graph.as_default():
             alpha = params[:, 1:2]
             beta = params[:, 2:3]
-            return lambda x: (x + epsilon) ** (alpha - 1.) * (1. + (x + epsilon)) ** (
-                        -alpha - beta) / tf.exp(
-                tf.lbeta(tf.transpose(tf.stack([alpha, beta], axis=0))))
+            return lambda x: (x + epsilon) ** (alpha - 1.) * (1. + (x + epsilon)) ** (-alpha - beta)
 
 
 def shifted_beta_prime_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
@@ -116,9 +122,7 @@ def shifted_beta_prime_irf(params, session=None, epsilon=4*np.finfo('float32').e
             alpha = params[:, 0:1]
             beta = params[:, 1:2]
             delta = params[:, 2:3]
-            return lambda x: (x - delta + epsilon) ** (alpha - 1) * (1 + (x - delta + epsilon)) ** (
-                    -alpha - beta) / tf.exp(
-                tf.lbeta(tf.transpose(tf.stack([alpha, beta], axis=0))))
+            return lambda x: (x - delta + epsilon) ** (alpha - 1) * (1 + (x - delta + epsilon)) ** (-alpha - beta)
 
 
 def double_gamma_1_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
@@ -850,7 +854,7 @@ class DTSR(object):
 
                     elif family == 'Normal':
                         self._initialize_base_irf_param('mu', family, default=0.)
-                        self._initialize_base_irf_param('sigma', family, lb=0., default=1.)
+                        self._initialize_base_irf_param('sigma2', family, lb=0., default=1.)
 
                     elif family == 'SkewNormal':
                         self._initialize_base_irf_param('mu', family, default=0.)
@@ -1314,7 +1318,7 @@ class DTSR(object):
             c = params[:, 0:bases-1]
             c_endpoint_shape = [tf.shape(params)[0], 1, tf.shape(params)[2]]
             zero = tf.zeros(c_endpoint_shape, dtype=self.FLOAT_TF)
-            c = tf.cumsum(tf.abs(tf.concat([zero, c], axis=1)), axis=1)
+            c = tf.cumsum(self._safe_abs(tf.concat([zero, c], axis=1)), axis=1)
             c = tf.unstack(c, axis=2)
 
             # Build values at knots
@@ -1496,11 +1500,23 @@ class DTSR(object):
                     param_fixed_summary = self.irf_params_fixed_base_summary[family][param_name]
 
                     if param_lb is not None and param_ub is None:
-                        param_fixed = param_lb + self.epsilon + tf.nn.softplus(param_fixed)
-                        param_fixed_summary = param_lb + self.epsilon + tf.nn.softplus(param_fixed_summary)
+                        if self.constraint.lower() == 'softplus':
+                            param_fixed = param_lb + self.epsilon + tf.nn.softplus(param_fixed)
+                            param_fixed_summary = param_lb + self.epsilon + tf.nn.softplus(param_fixed_summary)
+                        elif self.constraint.lower() == 'abs':
+                            param_fixed = param_lb + self.epsilon + self._safe_abs(param_fixed)
+                            param_fixed_summary = param_lb + self.epsilon + self._safe_abs(param_fixed_summary)
+                        else:
+                            raise ValueError('Unrecognized constraint function "%s"' % self.constraint)
                     elif param_lb is None and param_ub is not None:
-                        param_fixed = param_ub - self.epsilon - tf.nn.softplus(param_fixed)
-                        param_fixed_summary = param_ub - self.epsilon - tf.nn.softplus(param_fixed_summary)
+                        if self.constraint.lower() == 'softplus':
+                            param_fixed = param_ub - self.epsilon - tf.nn.softplus(param_fixed)
+                            param_fixed_summary = param_ub - self.epsilon - tf.nn.softplus(param_fixed_summary)
+                        elif self.constraint.lower() == 'abs':
+                            param_fixed = param_ub - self.epsilon - self._safe_abs(param_fixed)
+                            param_fixed_summary = param_ub - self.epsilon - self._safe_abs(param_fixed_summary)
+                        else:
+                            raise ValueError('Unrecognized constraint function "%s"' % self.constraint)
                     elif param_lb is not None and param_ub is not None:
                         param_fixed = self._softplus_sigmoid(param_fixed, a=param_lb, b=param_ub)
                         param_fixed_summary = self._softplus_sigmoid(param_fixed_summary, a=param_lb, b=param_ub)
@@ -2773,10 +2789,20 @@ class DTSR(object):
 
                 if lb is not None and ub is None:
                     # Lower-bounded support only
-                    mean = tf.contrib.distributions.softplus_inverse(mean - lb - self.epsilon)
+                    if self.constraint.lower() == 'softplus':
+                        mean = tf.contrib.distributions.softplus_inverse(mean - lb - self.epsilon)
+                    elif self.constraint.lower() == 'abs':
+                        mean = mean - lb - self.epsilon
+                    else:
+                        raise ValueError('Unrecognized constraint function "%s"' % self.constraint)
                 elif lb is None and ub is not None:
                     # Upper-bounded support only
-                    mean = tf.contrib.distributions.softplus_inverse(-(mean - ub + self.epsilon))
+                    if self.constraint.lower() == 'softplus':
+                        mean = tf.contrib.distributions.softplus_inverse(-(mean - ub + self.epsilon))
+                    elif self.constraint.lower() == 'abs':
+                        mean = -(mean - ub + self.epsilon)
+                    else:
+                        raise ValueError('Unrecognized constraint function "%s"' % self.constraint)
                 elif lb is not None and ub is not None:
                     # Finite-interval bounded support
                     mean = self._softplus_sigmoid_inverse(mean, lb, ub)
@@ -2867,8 +2893,6 @@ class DTSR(object):
                               (double_delta_at_max_delta < self.convergence_tolerance)
                 else:
                     converged = False
-                    if verbose:
-                        sys.stderr.write('Automatic convergence checking off.\n')
 
                 self.sess.run(self.set_converged, feed_dict={self.converged_in: converged})
 
@@ -3248,7 +3272,12 @@ class DTSR(object):
                     max_lower_offset = param_fixed - (lb + self.epsilon)
 
                     # Enforce constraint
-                    param_random = tf.nn.softplus(param_random)
+                    if self.constraint.lower() == 'softplus':
+                        param_random = tf.nn.softplus(param_random)
+                    elif self.constraint.lower() == 'abs':
+                        param_random = self._safe_abs(param_random)
+                    else:
+                        raise ValueError('Unrecognized constraint function "%s"' % self.constraint)
 
                     # Center
                     param_random_mean = tf.reduce_mean(param_random, axis=0, keepdims=True)
@@ -3264,7 +3293,12 @@ class DTSR(object):
                     max_upper_offset = ub - param_fixed - self.epsilon
 
                     # Enforce constraint
-                    param_random = -tf.nn.softplus(param_random)
+                    if self.constraint.lower() == 'softplus':
+                        param_random = -tf.nn.softplus(param_random)
+                    elif self.constraint.lower() == 'abs':
+                        param_random = -self._safe_abs(param_random)
+                    else:
+                        raise ValueError('Unrecognized constraint function "%s"' % self.constraint)
 
                     # Center
                     param_random_mean = tf.reduce_mean(param_random, axis=0, keepdims=True)
@@ -3419,6 +3453,15 @@ class DTSR(object):
                 ) * tf.reverse(time_mask_interp, axis=[1]) / hz
 
                 return x_interp, time_interp
+
+    def _safe_abs(self, x):
+        out = tf.where(
+            tf.equal(x, 0.),
+            x + 1e-8,
+            tf.abs(x)
+        )
+
+        return out
 
 
 
@@ -4925,7 +4968,7 @@ class DTSR(object):
         :param irf_ids: ``list`` or ``None``; list of irf ID's to plot. If ``None``, all IRF's are plotted.
         :param plot_dirac: ``bool``; include any linear Dirac delta IRF's (stick functions at t=0) in plot.
         :param plot_n_time_units: ``float``; number if time units to use for plotting.
-        :param plot_n_time_points: ``float``; number of points to use for plotting.
+        :param plot_n_time_points: ``int``; number of points to use for plotting.
         :param plot_x_inches: ``int``; width of plot in inches.
         :param plot_y_inches: ``int``; height of plot in inches.
         :param cmap: ``str``; name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot).
@@ -5154,7 +5197,8 @@ class DTSR(object):
             summed=False,
             n_time_units=None,
             n_time_points=1000,
-            n_samples=None
+            n_samples=None,
+            algorithm='MAP'
     ):
         """
         Compute root mean squared deviation (RMSD) of fitted IRFs from gold.
@@ -5164,8 +5208,11 @@ class DTSR(object):
         :param n_time_units: ``float``; number if time units to use. If ``None``, maximum temporal offset seen in training will be used.
         :param n_time_points: ``float``; number of points to use.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param algorithm: ``str``; algorithm to use for extracting IRFs from DTSRBayes, one of [``MAP``, ``sampling``]. Ignored for MLE models.
         :return: ``float``; RMSD of fitted IRFs from gold
         """
+
+        assert algorithm.lower() in ['map', 'sampling'], 'Unrecognized algorithm for computing IRFs in RMSD comparison: "%s"' % algorithm
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -5177,7 +5224,7 @@ class DTSR(object):
                 if summed:
                     gold = gold.sum(axis=1)
 
-                plots = self.plots['atomic']['scaled']
+                plots = self.plots['atomic']['scaled']['nodirac']
 
                 names = plots['names']
 
@@ -5189,7 +5236,7 @@ class DTSR(object):
                     self.max_tdelta_batch: n_time_units
                 }
 
-                if type(self).__name__ == 'DTSRBayes':
+                if type(self).__name__ == 'DTSRBayes' and algorithm.lower() == 'sampling':
                     if n_samples is None:
                         n_samples = self.n_samples_eval
 
