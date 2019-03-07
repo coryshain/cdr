@@ -4203,7 +4203,7 @@ class DTSR(object):
             if self.convergence_basis.lower() == 'loss':
                 out += ' ' * (indent * 2) + 'Convergence tolerance ratio: %s\n\n' % self.convergence_tolerance
                 out += ' ' * (indent * 2) + 'Convergence base loss: %s\n\n' % self.base_loss.eval(session=self.sess)
-                out += ' ' * (indent * 2) + 'Convergence tolerance (tolerance ratio * base loss): %s\n\n' % self.base_loss.eval(session=self.sess) * self.convergence_tolerance
+                out += ' ' * (indent * 2) + 'Convergence tolerance (tolerance ratio * base loss): %s\n\n' % (self.base_loss.eval(session=self.sess) * self.convergence_tolerance)
             else:
                 out += ' ' * (indent * 2) + 'Convergence tolerance: %s\n\n' % self.convergence_tolerance
 
@@ -5310,7 +5310,7 @@ class DTSR(object):
                 if not n_time_units:
                     n_time_units = self.max_tdelta
 
-                support = np.linspace(0., n_time_units, n_time_points+1)[..., None]
+                support = np.linspace(0., n_time_units, n_time_points+1)
                 gold = gold_irf_lambda(support)
                 if summed:
                     gold = gold.sum(axis=1)
