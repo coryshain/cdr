@@ -4197,17 +4197,20 @@ class DTSR(object):
         if self.check_convergence:
             converged = self.has_converged()
             n_iter = self.global_step.eval(session=self.sess)
+            max_delta_ix, max_delta, double_delta_at_max_delta = self._convergence_check_inner()
+            location = self.d0_names[max_delta_ix]
 
             out += ' ' * (indent * 2) + 'Converged: %s\n' % converged
-            out += ' ' * (indent * 2) + 'Convergence basis: %s\n\n' % self.convergence_basis.lower()
+            out += ' ' * (indent * 2) + 'Convergence basis: %s\n' % self.convergence_basis.lower()
             if self.convergence_basis.lower() == 'loss':
-                out += ' ' * (indent * 2) + 'Convergence tolerance ratio: %s\n\n' % self.convergence_tolerance
-                out += ' ' * (indent * 2) + 'Convergence base loss: %s\n\n' % self.base_loss.eval(session=self.sess)
-                out += ' ' * (indent * 2) + 'Convergence tolerance (tolerance ratio * base loss): %s\n\n' % (self.base_loss.eval(session=self.sess) * self.convergence_tolerance)
+                out += ' ' * (indent * 2) + 'Convergence tolerance ratio: %s\n' % self.convergence_tolerance
+                out += ' ' * (indent * 2) + 'Convergence base loss: %s\n' % self.base_loss.eval(session=self.sess)
+                out += ' ' * (indent * 2) + 'Convergence tolerance (tolerance ratio * base loss): %s\n' % (self.base_loss.eval(session=self.sess) * self.convergence_tolerance)
             else:
-                out += ' ' * (indent * 2) + 'Convergence tolerance: %s\n\n' % self.convergence_tolerance
-
-            out += '\n'
+                out += ' ' * (indent * 2) + 'Convergence tolerance: %s\n' % self.convergence_tolerance
+            out += ' ' * (indent + 2) + 'Max first derivative: %s\n' % max_delta
+            out += ' ' * (indent + 2) + 'Second derivative at max first derivative: %s\n' % double_delta_at_max_delta
+            out += ' ' * (indent + 2) + 'Location: %s\n\n' % location
 
             if converged:
                 out += ' ' * (indent + 2) + 'NOTE:\n'
@@ -4218,14 +4221,8 @@ class DTSR(object):
                 out += ' ' * (indent + 4) + 'If not, consider lowering the **convergence_tolerance** parameter and resuming training.\n'
 
             else:
-                max_delta_ix, max_delta, double_delta_at_max_delta = self._convergence_check_inner()
-                location = self.d0_names[max_delta_ix]
-
                 out += ' ' * (indent + 2) + 'Model did not reach convergence criteria in %s epochs.\n' % n_iter
                 out += ' ' * (indent + 2) + 'Largest first derivative with respect to training time must be <= %s, with second derivative at that variable <= %s.\n\n' % (self.convergence_tolerance, self.convergence_tolerance)
-                out += ' ' * (indent + 4) + 'Max first derivative: %s\n' % max_delta
-                out += ' ' * (indent + 4) + 'Second derivative at max first derivative: %s\n' % double_delta_at_max_delta
-                out += ' ' * (indent + 4) + 'Location: %s\n\n' % location
                 out += ' ' * (indent + 2) + 'NOTE:\n'
                 out += ' ' * (indent + 4) + 'Programmatic diagnosis of convergence in DTSR is error-prone because of stochastic optimization.\n'
                 out += ' ' * (indent + 4) + 'It is possible that the convergence diagnostics used are too conservative given the stochastic dynamics of the model.\n'
