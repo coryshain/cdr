@@ -383,6 +383,12 @@ DTSR_INITIALIZATION_KWARGS = [
         "Type of slope with respect to training iteration to use for convergence checking. One of ``[None, 'z', 'corr']``. If ``None``, use raw slope of variable. If ``z``, use slope of variable rescaled by its standard deviation over the past **convergence_n_iterates** iterations. If ``corr``, use correlation between variable and training iteration over the past **convergence_n_iterates** iterations."
     ),
     Kwarg(
+        'convergence_use_ema',
+        True,
+        bool,
+        "Whether to compute slopes for convergence checking on an exponential moving average of the iterates. If ``True``, uses decay rate ``2 / (convergence_n_iterates + 1)`` If ``False``, uses raw iterate values."
+    ),
+    Kwarg(
         'minibatch_size',
         1024,
         [int, None],

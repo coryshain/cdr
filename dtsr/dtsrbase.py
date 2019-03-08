@@ -2876,6 +2876,7 @@ class DTSR(object):
     def _compute_slope(self, iterates, slope_type=None):
         x = np.arange(0, len(iterates)*self.convergence_check_freq, self.convergence_check_freq).astype('float')[..., None]
         y = iterates
+
         if slope_type and slope_type.lower() == 'corr':
             b = corr(x, y)[0]
         elif not slope_type or slope_type.lower() == 'z':
@@ -2901,9 +2902,8 @@ class DTSR(object):
     def run_convergence_check(self, verbose=True, feed_dict=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                max_slope_ix, max_slope, slope_of_max_slope = self._convergence_check_inner(feed_dict=feed_dict)
-
                 if self.check_convergence:
+                    max_slope_ix, max_slope, slope_of_max_slope = self._convergence_check_inner(feed_dict=feed_dict)
                     if verbose:
                         if self.convergence_slope_type:
                             if self.convergence_slope_type.lower() == 'z':
@@ -2950,12 +2950,16 @@ class DTSR(object):
                             [self.d0_saved, self.d1_saved]
                         )
 
+                    start_ix = self.convergence_n_iterates - int(self.global_step.eval(session=self.sess) / self.convergence_check_freq)
+                    start_ix = max(0, start_ix)
+
                     for i in range(len(var_d0_iterates)):
-                        start_ix = self.convergence_n_iterates - int(self.global_step.eval(session=self.sess) / self.convergence_check_freq)
-                        start_ix = max(0, min(self.convergence_n_iterates - 1, start_ix))
                         if update:
                             new_d0 = var_d0[i]
                             iterates_d0 = var_d0_iterates[i]
+                            if self.convergence_use_ema and start_ix < self.convergence_n_iterates - 1:
+                                rate = 1 - 2. / (self.convergence_n_iterates + 1)
+                                new_d0 = iterates_d0[-1] * rate + new_d0 * (1 - rate)
                             iterates_d0[:-1] = iterates_d0[1:]
                             iterates_d0[-1] = new_d0
                             fd_assign[self.d0_saved_update[i]] = iterates_d0
@@ -2975,12 +2979,12 @@ class DTSR(object):
                         if new_d1_max > max_slope:
                             max_slope = new_d1_max
                             max_slope_ix = i
-                            slope_of_max_slope = np.fabs(self._compute_slope(iterates_d1[start_ix:]))[new_d1_max_ix]
+                            slope_of_max_slope = np.fabs(self._compute_slope(iterates_d1[start_ix+1:], slope_type=self.convergence_slope_type))[new_d1_max_ix]
 
                     if update:
                         fd_assign[self.last_convergence_check_update] = self.global_step.eval(session=self.sess)
-                        self.sess.run([self.d0_assign, self.d1_assign, self.last_convergence_check_assign],
-                                      feed_dict=fd_assign)
+                        to_run = [self.d0_assign, self.d1_assign, self.last_convergence_check_assign]
+                        self.sess.run(to_run, feed_dict=fd_assign)
 
                         if self.log_freq > 0 and self.global_step.eval(session=self.sess) % self.log_freq == 0:
                             summary_convergence = self.sess.run(
@@ -4407,7 +4411,6 @@ class DTSR(object):
                         sys.stderr.write('Resuming training from most recent checkpoint...\n\n')
 
                     while not self.has_converged() and self.global_step.eval(session=self.sess) < n_iter:
-
                         p, p_inv = get_random_permutation(len(y))
                         t0_iter = pytime.time()
                         sys.stderr.write('-' * 50 + '\n')
