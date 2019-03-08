@@ -360,7 +360,7 @@ DTSR_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'convergence_n_iterates',
-        100,
+        500,
         [int, None],
         "Number of timesteps over which to average parameter movements for convergence diagnostics. If ``None`` or ``0``, convergence will not be programmatically checked (reduces memory overhead, but convergence must then be visually diagnosed)."
     ),
@@ -377,10 +377,10 @@ DTSR_INITIALIZATION_KWARGS = [
         "Tolerance around 0 for convergence of estimates of first and second order derivatives of parameters with respect to training time. If ``None``, convergence will not be programmatically checked (reduces memory overhead, but convergence must then be visually diagnosed)."
     ),
     Kwarg(
-        'adaptive_convergence_tolerance',
-        True,
-        bool,
-        "Whether to use an adaptive tolerance. If ``True``, **convergence_tolerance** defines a proportion of the mean parameter/loss values from the past **convergence_n_iterates** iterations. If ``False``, **convergence_tolerance** defines an absolute threshold."
+        'convergence_slope_type',
+        'corr',
+        [str, None],
+        "Type of slope with respect to training iteration to use for convergence checking. One of ``[None, 'z', 'corr']``. If ``None``, use raw slope of variable. If ``z``, use slope of variable rescaled by its standard deviation over the past **convergence_n_iterates** iterations. If ``corr``, use correlation between variable and training iteration over the past **convergence_n_iterates** iterations."
     ),
     Kwarg(
         'minibatch_size',

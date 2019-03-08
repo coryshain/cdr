@@ -235,6 +235,18 @@ def double_gamma_5_irf(params, session=None, epsilon=4*np.finfo('float32').eps, 
             return lambda x: pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)
 
 
+def corr(A, B):
+    # Assumes A and B are n x a and n x b matrices and computes a x b pairwise correlations
+    A_centered = A - A.mean(axis=0, keepdims=True)
+    B_centered = B - B.mean(axis=0, keepdims=True)
+
+    A_ss = (A_centered ** 2).sum(axis=0)
+    B_ss = (B_centered ** 2).sum(axis=0)
+
+    rho = np.dot(A_centered.T, B_centered) / (np.sqrt(np.dot(A_ss[..., None], B_ss[None, ...])) + 1e-8)
+    return rho
+
+
 class DTSR(object):
 
     _INITIALIZATION_KWARGS = DTSR_INITIALIZATION_KWARGS
@@ -764,14 +776,6 @@ class DTSR(object):
 
                 if self.convergence_basis.lower() == 'loss':
                     self._add_convergence_tracker(self.loss_total, 'loss_total')
-                    self.base_loss = tf.Variable(
-                        np.inf,
-                        dtype=self.FLOAT_TF,
-                        trainable=False,
-                        name='base_loss'
-                    )
-                    self.base_loss_in = tf.placeholder(self.FLOAT_TF, shape=[], name='base_loss_in')
-                    self.set_base_loss = tf.assign(self.base_loss, self.base_loss_in)
                 self.converged_in = tf.placeholder(tf.bool, shape=[], name='converged_in')
                 self.converged = tf.Variable(False, trainable=False, dtype=tf.bool, name='converged')
                 self.set_converged = tf.assign(self.converged, self.converged_in)
@@ -2605,21 +2609,12 @@ class DTSR(object):
     def _initialize_convergence_checking(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                self.max_delta_summary = tf.placeholder(self.FLOAT_TF, name='max_delta')
-                self.double_delta_at_max_delta_summary = tf.placeholder(self.FLOAT_TF, name='double_delta_at_max_delta')
+                self.max_slope_summary = tf.placeholder(self.FLOAT_TF, name='max_slope_placeholder')
+                self.slope_of_max_slope_summary = tf.placeholder(self.FLOAT_TF, name='slope_of_max_slope_summary_placeholder')
 
-                tf.summary.scalar('max_delta', self.max_delta_summary, collections=['convergence'])
-                tf.summary.scalar('double_delta_at_max_delta', self.double_delta_at_max_delta_summary, collections=['convergence'])
+                tf.summary.scalar('max_slope', self.max_slope_summary, collections=['convergence'])
+                tf.summary.scalar('slope_of_max_slope', self.slope_of_max_slope_summary, collections=['convergence'])
                 self.summary_convergence = tf.summary.merge_all(key='convergence')
-
-                if self.global_step.eval(session=self.sess) == 0 and self.convergence_basis.lower() == 'parameters':
-                    d0 = self.sess.run(self.d0)
-                    fd_init = {}
-                    for i in range(len(d0)):
-                        init_cur = np.tile(d0[i], [self.convergence_n_iterates, 1])
-                        fd_init[self.d0_saved_update[i]] = init_cur
-
-                    self.sess.run(self.d0_assign, feed_dict=fd_init)
 
 
 
@@ -2708,44 +2703,6 @@ class DTSR(object):
         Add an objective function to the DTSR model.
 
         :return: ``None``
-        """
-
-        raise NotImplementedError
-
-    def get_base_loss(
-            self,
-            X,
-            y,
-            X_response_aligned_predictor_names=None,
-            X_response_aligned_predictors=None,
-            X_2d_predictor_names=None,
-            X_2d_predictors=None
-    ):
-        """
-        Compute a base loss to use for loss-based convergence checking
-
-        :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
-            **X** must contain the following columns (additional columns are ignored):
-
-            * ``time``: Timestamp associated with each observation in **X**
-            * A column for each independent variable in the DTSR ``form_str`` provided at iniialization
-
-        :param y: ``pandas`` table; the dependent variable. Must contain the following columns:
-
-            * ``time``: Timestamp associated with each observation in **y**
-            * ``first_obs``:  Index in the design matrix **X** of the first observation in the time series associated with each entry in **y**
-            * ``last_obs``:  Index in the design matrix **X** of the immediately preceding observation in the time series associated with each entry in **y**
-            * A column with the same name as the dependent variable specified in the model formula
-            * A column for each random grouping factor in the model formula
-
-            In general, **y** will be identical to the parameter **y** provided at model initialization.
-            This must hold for MCMC inference, since the number of minibatches is built into the model architecture.
-            However, it is not necessary for variational inference.
-        :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
-        :param X_response_aligned_predictors: ``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
-        :param X_2d_predictor_names: ``list`` or ``None``; List of column names 2D predictors (predictors whose value depends on properties of the most recent impulse) if applicable, ``None`` otherwise.
-        :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
-        :return: ``float``; a scalar base loss
         """
 
         raise NotImplementedError
@@ -2916,39 +2873,55 @@ class DTSR(object):
                     self.d1_saved_update.append(var_d1_iterates_update)
                     self.d1_assign.append(tf.assign(var_d1_iterates, var_d1_iterates_update))
 
-    def _compute_delta(self, iterates):
-        # Compute regression coefficient (slope) over time for each element of var.
-        # This uses the first normal equation for univariate linear regression:
-        #
-        #     beta = sum[(x_i - mu_x)(y_i - mu_y)] / sum[(x_i - mu_x)^2]
-        #
-        y = iterates
+    def _compute_slope(self, iterates, slope_type=None):
         x = np.arange(0, len(iterates)*self.convergence_check_freq, self.convergence_check_freq).astype('float')[..., None]
-        mu_x = x.mean(axis=0, keepdims=True)
-        mu_y = y.mean(axis=0, keepdims=True)
-        num = ((x - mu_x) * (y - mu_y)).sum(axis=0)
-        denom = ((x - mu_x) ** 2).sum()
+        y = iterates
+        if slope_type and slope_type.lower() == 'corr':
+            b = corr(x, y)[0]
+        elif not slope_type or slope_type.lower() == 'z':
+            # Compute regression coefficient (slope) over time for each element of var.
+            # This uses the first normal equation for univariate linear regression:
+            #
+            #     beta = sum[(x_i - mu_x)(y_i - mu_y)] / sum[(x_i - mu_x)^2]
+            #
+            mu_x = x.mean(axis=0, keepdims=True)
+            mu_y = y.mean(axis=0, keepdims=True)
+            num = ((x - mu_x) * (y - mu_y)).sum(axis=0)
+            denom = ((x - mu_x) ** 2).sum() + 1e-8
 
-        delta = num / denom
+            b = num / denom
 
-        return delta
+            if slope_type and slope_type.lower() == 'z':
+                b /= y.std(axis=0, keepdims=True) + 1e-8
+        else:
+            raise ValueError('Unrecognized slope type "%s"\n' % slope_type)
+
+        return b
 
     def run_convergence_check(self, verbose=True, feed_dict=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                max_delta_ix, max_delta, double_delta_at_max_delta, tol = self._convergence_check_inner(feed_dict=feed_dict)
+                max_slope_ix, max_slope, slope_of_max_slope = self._convergence_check_inner(feed_dict=feed_dict)
 
                 if self.check_convergence:
                     if verbose:
-                        if self.adaptive_convergence_tolerance:
-                            sys.stderr.write('Tolerance: %s.\n' % tol)
-                        sys.stderr.write('Max delta: %s.\n' % max_delta)
-                        sys.stderr.write('Double delta at max delta: %s.\n' % double_delta_at_max_delta)
-                        sys.stderr.write('Location: %s.\n\n' % self.d0_names[max_delta_ix])
+                        if self.convergence_slope_type:
+                            if self.convergence_slope_type.lower() == 'z':
+                                sys.stderr.write('Max standardized slope: %s.\n' % max_slope)
+                                sys.stderr.write('Slope of max standardized slope: %s.\n' % slope_of_max_slope)
+                            elif self.convergence_slope_type.lower() == 'corr':
+                                sys.stderr.write('Max corr: %s.\n' % max_slope)
+                                sys.stderr.write('Slope of max corr: %s.\n' % slope_of_max_slope)
+                            else:
+                                raise ValueError('Unrecognized slope type "%s"\n' % self.convergence_slope_type)
+                        else:
+                            sys.stderr.write('Max slope: %s.\n' % max_slope)
+                            sys.stderr.write('Slope of max slope: %s.\n' % slope_of_max_slope)
+                        sys.stderr.write('Location: %s.\n\n' % self.d0_names[max_slope_ix])
 
                     converged = self.global_step.eval(session=self.sess) > self.convergence_n_iterates and \
-                              (max_delta < tol) and \
-                              (double_delta_at_max_delta < tol)
+                              (max_slope < self.convergence_tolerance) and \
+                              (slope_of_max_slope < self.convergence_tolerance)
                 else:
                     converged = False
 
@@ -2957,10 +2930,9 @@ class DTSR(object):
     def _convergence_check_inner(self, feed_dict=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                max_delta = 0
-                max_delta_base = 0
-                max_delta_ix = 0
-                double_delta_at_max_delta = 0
+                max_slope = 0
+                max_slope_ix = 0
+                slope_of_max_slope = 0
                 fd_assign = {}
 
                 update = self.last_convergence_check.eval(session=self.sess) < self.global_step.eval(session=self.sess) and \
@@ -2979,6 +2951,8 @@ class DTSR(object):
                         )
 
                     for i in range(len(var_d0_iterates)):
+                        start_ix = self.convergence_n_iterates - int(self.global_step.eval(session=self.sess) / self.convergence_check_freq)
+                        start_ix = max(0, min(self.convergence_n_iterates - 1, start_ix))
                         if update:
                             new_d0 = var_d0[i]
                             iterates_d0 = var_d0_iterates[i]
@@ -2986,28 +2960,22 @@ class DTSR(object):
                             iterates_d0[-1] = new_d0
                             fd_assign[self.d0_saved_update[i]] = iterates_d0
 
-                            new_d1 = self._compute_delta(iterates_d0)
+                            new_d1 = self._compute_slope(iterates_d0[start_ix:], slope_type=self.convergence_slope_type)
                             iterates_d1 = var_d1_iterates[i]
                             iterates_d1[:-1] = iterates_d1[1:]
                             iterates_d1[-1] = new_d1
                             fd_assign[self.d1_saved_update[i]] = iterates_d1
 
                         else:
-                            new_d1 = self._compute_delta(var_d0_iterates[i])
+                            new_d1 = self._compute_slope(var_d0_iterates[i][start_ix:])
                             iterates_d1 = var_d1_iterates[i]
 
                         new_d1_max_ix = np.fabs(new_d1).argmax()
                         new_d1_max = np.fabs(new_d1[new_d1_max_ix])
-                        if new_d1_max > max_delta:
-                            max_delta = new_d1_max
-                            max_delta_base = var_d0_iterates[i][:, new_d1_max_ix].mean()
-                            max_delta_ix = i
-                            double_delta_at_max_delta = np.fabs(self._compute_delta(iterates_d1))[new_d1_max_ix]
-
-                    if self.adaptive_convergence_tolerance:
-                        tol = max_delta_base * self.convergence_tolerance
-                    else:
-                        tol = self.convergence_tolerance
+                        if new_d1_max > max_slope:
+                            max_slope = new_d1_max
+                            max_slope_ix = i
+                            slope_of_max_slope = np.fabs(self._compute_slope(iterates_d1[start_ix:]))[new_d1_max_ix]
 
                     if update:
                         fd_assign[self.last_convergence_check_update] = self.global_step.eval(session=self.sess)
@@ -3017,12 +2985,12 @@ class DTSR(object):
                         if self.log_freq > 0 and self.global_step.eval(session=self.sess) % self.log_freq == 0:
                             summary_convergence = self.sess.run(
                                 self.summary_convergence,
-                                feed_dict={self.max_delta_summary: max_delta,
-                                           self.double_delta_at_max_delta_summary: double_delta_at_max_delta}
+                                feed_dict={self.max_slope_summary: max_slope,
+                                           self.slope_of_max_slope_summary: slope_of_max_slope}
                             )
                             self.writer.add_summary(summary_convergence, self.global_step.eval(session=self.sess))
 
-                return max_delta_ix, max_delta, double_delta_at_max_delta, tol
+                return max_slope_ix, max_slope, slope_of_max_slope
 
     def _collect_plots(self):
         switches = [['atomic', 'composite'], ['scaled', 'unscaled'], ['dirac', 'nodirac']]
@@ -4201,19 +4169,24 @@ class DTSR(object):
         if self.check_convergence:
             converged = self.has_converged()
             n_iter = self.global_step.eval(session=self.sess)
-            max_delta_ix, max_delta, double_delta_at_max_delta, tol = self._convergence_check_inner()
-            location = self.d0_names[max_delta_ix]
+            max_slope_ix, max_slope, slope_of_max_slope = self._convergence_check_inner()
+            location = self.d0_names[max_slope_ix]
 
             out += ' ' * (indent * 2) + 'Converged: %s\n' % converged
             out += ' ' * (indent * 2) + 'Convergence basis: %s\n' % self.convergence_basis.lower()
-            if self.adaptive_convergence_tolerance:
-                out += ' ' * (indent * 2) + 'Convergence tolerance ratio: %s\n' % self.convergence_tolerance
-                out += ' ' * (indent * 2) + 'Final adaptive convergence tolerance: %s\n' % tol
+            out += ' ' * (indent * 2) + 'Convergence tolerance: %s\n' % self.convergence_tolerance
+            if self.convergence_slope_type:
+                if self.convergence_slope_type.lower() == 'z':
+                    out += ' ' * (indent + 2) + 'Max standardized slope: %s.\n' % max_slope
+                    out += ' ' * (indent + 2) + 'Slope of max standardized slope: %s.\n' % slope_of_max_slope
+                elif self.convergence_slope_type.lower() == 'corr':
+                    out += ' ' * (indent + 2) + 'Max corr: %s.\n' % max_slope
+                    out += ' ' * (indent + 2) + 'Slope of max corr: %s.\n' % slope_of_max_slope
+                else:
+                    raise ValueError('Unrecognized slope type "%s"\n' % self.convergence_slope_type)
             else:
-                out += ' ' * (indent * 2) + 'Convergence tolerance: %s\n' % self.convergence_tolerance
-            out += ' ' * (indent + 2) + 'Max first derivative: %s\n' % max_delta
-            out += ' ' * (indent + 2) + 'Second derivative at max first derivative: %s\n' % double_delta_at_max_delta
-            out += ' ' * (indent + 2) + 'Location: %s\n\n' % location
+                out += ' ' * (indent + 2) + 'Max slope: %s.\n' % max_slope
+                out += ' ' * (indent + 2) + 'Slope of max slope: %s.\n' % slope_of_max_slope
 
             if converged:
                 out += ' ' * (indent + 2) + 'NOTE:\n'
@@ -4416,22 +4389,8 @@ class DTSR(object):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if self.convergence_basis.lower() == 'loss' and not np.isfinite(self.base_loss.eval(session=self.sess)):
-                    base_loss = self.get_base_loss(
-                        X,
-                        y,
-                        X_response_aligned_predictor_names=X_response_aligned_predictor_names,
-                        X_response_aligned_predictors=X_response_aligned_predictors,
-                        X_2d_predictor_names=X_2d_predictor_names,
-                        X_2d_predictors=X_2d_predictors,
-                    )
-                    self.sess.run(self.set_base_loss, feed_dict={self.base_loss_in: base_loss})
-                    if self.global_step.eval(session=self.sess) == 0:
-                        base_loss_init = np.ones((self.convergence_n_iterates, 1)) * base_loss
-                        self.sess.run(self.d0_assign, feed_dict={self.d0_saved_update[0]: base_loss_init})
-
                 self.run_convergence_check(verbose=False)
-                
+
                 if (self.global_step.eval(session=self.sess) < n_iter) and not self.has_converged():
                     self.set_training_complete(False)
 
