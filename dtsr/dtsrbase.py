@@ -2936,18 +2936,15 @@ class DTSR(object):
     def run_convergence_check(self, verbose=True, feed_dict=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                max_delta_ix, max_delta, double_delta_at_max_delta = self._convergence_check_inner(feed_dict=feed_dict)
+                max_delta_ix, max_delta, double_delta_at_max_delta, tol = self._convergence_check_inner(feed_dict=feed_dict)
 
                 if self.check_convergence:
                     if verbose:
+                        if self.adaptive_convergence_tolerance:
+                            sys.stderr.write('Tolerance: %s.\n' % tol)
                         sys.stderr.write('Max delta: %s.\n' % max_delta)
                         sys.stderr.write('Double delta at max delta: %s.\n' % double_delta_at_max_delta)
                         sys.stderr.write('Location: %s.\n\n' % self.d0_names[max_delta_ix])
-
-                    if self.convergence_basis.lower() == 'loss':
-                        tol = self.base_loss.eval(session=self.sess) * self.convergence_tolerance
-                    else:
-                        tol = self.convergence_tolerance
 
                     converged = self.global_step.eval(session=self.sess) > self.convergence_n_iterates and \
                               (max_delta < tol) and \
@@ -2961,6 +2958,7 @@ class DTSR(object):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 max_delta = 0
+                max_delta_base = 0
                 max_delta_ix = 0
                 double_delta_at_max_delta = 0
                 fd_assign = {}
@@ -3002,8 +3000,14 @@ class DTSR(object):
                         new_d1_max = np.fabs(new_d1[new_d1_max_ix])
                         if new_d1_max > max_delta:
                             max_delta = new_d1_max
+                            max_delta_base = var_d0_iterates[i][:, new_d1_max_ix].mean()
                             max_delta_ix = i
                             double_delta_at_max_delta = np.fabs(self._compute_delta(iterates_d1))[new_d1_max_ix]
+
+                    if self.adaptive_convergence_tolerance:
+                        tol = max_delta_base * self.convergence_tolerance
+                    else:
+                        tol = self.convergence_tolerance
 
                     if update:
                         fd_assign[self.last_convergence_check_update] = self.global_step.eval(session=self.sess)
@@ -3018,7 +3022,7 @@ class DTSR(object):
                             )
                             self.writer.add_summary(summary_convergence, self.global_step.eval(session=self.sess))
 
-                return max_delta_ix, max_delta, double_delta_at_max_delta
+                return max_delta_ix, max_delta, double_delta_at_max_delta, tol
 
     def _collect_plots(self):
         switches = [['atomic', 'composite'], ['scaled', 'unscaled'], ['dirac', 'nodirac']]
@@ -4197,15 +4201,14 @@ class DTSR(object):
         if self.check_convergence:
             converged = self.has_converged()
             n_iter = self.global_step.eval(session=self.sess)
-            max_delta_ix, max_delta, double_delta_at_max_delta = self._convergence_check_inner()
+            max_delta_ix, max_delta, double_delta_at_max_delta, tol = self._convergence_check_inner()
             location = self.d0_names[max_delta_ix]
 
             out += ' ' * (indent * 2) + 'Converged: %s\n' % converged
             out += ' ' * (indent * 2) + 'Convergence basis: %s\n' % self.convergence_basis.lower()
-            if self.convergence_basis.lower() == 'loss':
+            if self.adaptive_convergence_tolerance:
                 out += ' ' * (indent * 2) + 'Convergence tolerance ratio: %s\n' % self.convergence_tolerance
-                out += ' ' * (indent * 2) + 'Convergence base loss: %s\n' % self.base_loss.eval(session=self.sess)
-                out += ' ' * (indent * 2) + 'Convergence tolerance (tolerance ratio * base loss): %s\n' % (self.base_loss.eval(session=self.sess) * self.convergence_tolerance)
+                out += ' ' * (indent * 2) + 'Final adaptive convergence tolerance: %s\n' % tol
             else:
                 out += ' ' * (indent * 2) + 'Convergence tolerance: %s\n' % self.convergence_tolerance
             out += ' ' * (indent + 2) + 'Max first derivative: %s\n' % max_delta

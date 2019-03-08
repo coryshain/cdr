@@ -372,9 +372,15 @@ DTSR_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'convergence_tolerance',
-        1e-8,
+        1e-4,
         [float, None],
         "Tolerance around 0 for convergence of estimates of first and second order derivatives of parameters with respect to training time. If ``None``, convergence will not be programmatically checked (reduces memory overhead, but convergence must then be visually diagnosed)."
+    ),
+    Kwarg(
+        'adaptive_convergence_tolerance',
+        True,
+        bool,
+        "Whether to use an adaptive tolerance. If ``True``, **convergence_tolerance** defines a proportion of the mean parameter/loss values from the past **convergence_n_iterates** iterations. If ``False``, **convergence_tolerance** defines an absolute threshold."
     ),
     Kwarg(
         'minibatch_size',
