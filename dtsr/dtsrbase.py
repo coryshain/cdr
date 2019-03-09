@@ -243,7 +243,7 @@ def corr(A, B):
     A_ss = (A_centered ** 2).sum(axis=0)
     B_ss = (B_centered ** 2).sum(axis=0)
 
-    rho = np.dot(A_centered.T, B_centered) / (np.sqrt(np.dot(A_ss[..., None], B_ss[None, ...])) + 1e-8)
+    rho = np.dot(A_centered.T, B_centered) / np.sqrt(np.dot(A_ss[..., None], B_ss[None, ...]))
     return rho
 
 
@@ -2888,12 +2888,13 @@ class DTSR(object):
             mu_x = x.mean(axis=0, keepdims=True)
             mu_y = y.mean(axis=0, keepdims=True)
             num = ((x - mu_x) * (y - mu_y)).sum(axis=0)
-            denom = ((x - mu_x) ** 2).sum() + 1e-8
+            denom = ((x - mu_x) ** 2).sum()
 
             b = num / denom
 
             if slope_type and slope_type.lower() == 'z':
-                b /= y.std(axis=0, keepdims=True) + 1e-8
+                b /= y.std(axis=0)
+            b = b
         else:
             raise ValueError('Unrecognized slope type "%s"\n' % slope_type)
 

@@ -360,7 +360,7 @@ DTSR_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'convergence_n_iterates',
-        500,
+        100,
         [int, None],
         "Number of timesteps over which to average parameter movements for convergence diagnostics. If ``None`` or ``0``, convergence will not be programmatically checked (reduces memory overhead, but convergence must then be visually diagnosed)."
     ),
