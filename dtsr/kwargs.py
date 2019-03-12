@@ -360,9 +360,15 @@ DTSR_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'convergence_n_iterates',
-        100,
+        500,
         [int, None],
         "Number of timesteps over which to average parameter movements for convergence diagnostics. If ``None`` or ``0``, convergence will not be programmatically checked (reduces memory overhead, but convergence must then be visually diagnosed)."
+    ),
+    Kwarg(
+        'convergence_stride',
+        1,
+        int,
+        "Stride (in iterations) over which to compute convergence. If larger than 1, iterations within a stride are averaged with the most recently saved value. Larger values increase the receptive field of the slope estimates, making convergence diagnosis less vulnerable to local perturbations but also increasing the number of post-convergence iterations necessary in order to identify convergence."
     ),
     Kwarg(
         'convergence_basis',
@@ -371,22 +377,10 @@ DTSR_INITIALIZATION_KWARGS = [
         "Basis of convergence diagnostic, one of ``['parameters', 'loss']``. If ``parameters``, slopes of all parameters with respect to time must be within the tolerance of 0. If ``loss``, slope of loss with respect to time must be within the tolerance of 0 (even if parameters are still moving). The loss-based criterion is less stringent."
     ),
     Kwarg(
-        'convergence_tolerance',
-        1e-4,
+        'convergence_alpha',
+        0.75,
         [float, None],
-        "Tolerance around 0 for convergence of estimates of first and second order derivatives of parameters with respect to training time. If ``None``, convergence will not be programmatically checked (reduces memory overhead, but convergence must then be visually diagnosed)."
-    ),
-    Kwarg(
-        'convergence_slope_type',
-        'corr',
-        [str, None],
-        "Type of slope with respect to training iteration to use for convergence checking. One of ``[None, 'z', 'corr']``. If ``None``, use raw slope of variable. If ``z``, use slope of variable rescaled by its standard deviation over the past **convergence_n_iterates** iterations. If ``corr``, use correlation between variable and training iteration over the past **convergence_n_iterates** iterations."
-    ),
-    Kwarg(
-        'convergence_use_ema',
-        True,
-        bool,
-        "Whether to compute slopes for convergence checking on an exponential moving average of the iterates. If ``True``, uses decay rate ``2 / (convergence_n_iterates + 1)`` If ``False``, uses raw iterate values."
+        "Significance threshold above which to fail to reject the null of no correlation between convergence basis and training time. Larger values are more stringent."
     ),
     Kwarg(
         'minibatch_size',
@@ -423,12 +417,6 @@ DTSR_INITIALIZATION_KWARGS = [
         1,
         int,
         "Frequency (in iterations) with which to save model checkpoints."
-    ),
-    Kwarg(
-        'convergence_check_freq',
-        1,
-        int,
-        "Frequency (in iterations) with which to check convergence. Parameter slopes are computed over ``convergence_n_iter * convergence_check_freq`` iterations. Thus larger values increase the receptive field of the slope estimates, making convergence diagnosis less vulnerable to local perturbations but also increasing the number of post-convergence iterations necessary in order to identify convergence."
     ),
     Kwarg(
         'log_freq',

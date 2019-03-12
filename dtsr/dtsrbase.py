@@ -3,6 +3,7 @@ from collections import defaultdict
 import textwrap
 from numpy import inf
 import pandas as pd
+import scipy.stats
 import time as pytime
 
 from .formula import *
@@ -244,6 +245,7 @@ def corr(A, B):
     B_ss = (B_centered ** 2).sum(axis=0)
 
     rho = np.dot(A_centered.T, B_centered) / np.sqrt(np.dot(A_ss[..., None], B_ss[None, ...]))
+    rho = np.clip(rho, -1, 1)
     return rho
 
 
@@ -568,18 +570,22 @@ class DTSR(object):
                 self.intercept_init_tf = tf.constant(self.intercept_init, dtype=self.FLOAT_TF)
                 self.epsilon = tf.constant(4 * np.finfo(self.FLOAT_NP).eps, dtype=self.FLOAT_TF)
 
-                self.d0 = []
-                self.d0_names = []
-                self.d0_saved = []
-                self.d0_saved_update = []
-                self.d0_assign = []
-                self.d1_saved = []
-                self.d1_saved_update = []
-                self.d1_assign = []
-                self.last_convergence_check = tf.Variable(0, trainable=False, dtype=self.INT_NP, name='last_convergence_check')
-                self.last_convergence_check_update = tf.placeholder(self.INT_NP, shape=[])
-                self.last_convergence_check_assign = tf.assign(self.last_convergence_check, self.last_convergence_check_update)
-                self.check_convergence = self.convergence_n_iterates and (self.convergence_tolerance is not None)
+                if self.convergence_n_iterates and self.convergence_alpha is not None:
+                    self.d0 = []
+                    self.d0_names = []
+                    self.d0_saved = []
+                    self.d0_saved_update = []
+                    self.d0_assign = []
+
+                    self.convergence_history = tf.Variable(tf.zeros([self.convergence_n_iterates, 1]), trainable=False, dtype=self.FLOAT_NP, name='convergence_history')
+                    self.convergence_history_update = tf.placeholder(self.FLOAT_TF, shape=[self.convergence_n_iterates, 1], name='convergence_history_update')
+                    self.convergence_history_assign = tf.assign(self.convergence_history, self.convergence_history_update)
+                    self.proportion_converged = tf.reduce_mean(self.convergence_history)
+
+                    self.last_convergence_check = tf.Variable(0, trainable=False, dtype=self.INT_NP, name='last_convergence_check')
+                    self.last_convergence_check_update = tf.placeholder(self.INT_NP, shape=[], name='last_convergence_check_update')
+                    self.last_convergence_check_assign = tf.assign(self.last_convergence_check, self.last_convergence_check_update)
+                    self.check_convergence = True
 
         self.parameter_table_columns = ['Estimate']
         self.predict_mode = False
@@ -2609,11 +2615,16 @@ class DTSR(object):
     def _initialize_convergence_checking(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                self.max_slope_summary = tf.placeholder(self.FLOAT_TF, name='max_slope_placeholder')
-                self.slope_of_max_slope_summary = tf.placeholder(self.FLOAT_TF, name='slope_of_max_slope_summary_placeholder')
+                self.rho_t = tf.placeholder(self.FLOAT_TF, name='rho_t_in')
+                self.p_rho_t = tf.placeholder(self.FLOAT_TF, name='p_rho_t_in')
+                self.rho_a = tf.placeholder(self.FLOAT_TF, name='rho_a_in')
+                self.p_rho_a = tf.placeholder(self.FLOAT_TF, name='p_rho_a_in')
 
-                tf.summary.scalar('max_slope', self.max_slope_summary, collections=['convergence'])
-                tf.summary.scalar('slope_of_max_slope', self.slope_of_max_slope_summary, collections=['convergence'])
+                tf.summary.scalar('convergence/rho_t', self.rho_t, collections=['convergence'])
+                tf.summary.scalar('convergence/p_rho_t', self.p_rho_t, collections=['convergence'])
+                tf.summary.scalar('convergence/rho_a', self.rho_a, collections=['convergence'])
+                tf.summary.scalar('convergence/p_rho_a', self.p_rho_a, collections=['convergence'])
+                tf.summary.scalar('convergence/proportion_converged', self.proportion_converged, collections=['convergence'])
                 self.summary_convergence = tf.summary.merge_all(key='convergence')
 
 
@@ -2862,140 +2873,123 @@ class DTSR(object):
                     self.d0_saved_update.append(var_d0_iterates_update)
                     self.d0_assign.append(tf.assign(var_d0_iterates, var_d0_iterates_update))
 
-                    # Initialize tracker of derivative of parameter iterates with respect to training time
-                    var_d1_iterates = tf.Variable(
-                        tf.zeros([self.convergence_n_iterates] + list(var.shape), dtype=self.FLOAT_TF),
-                        name=name + '_d1',
-                        trainable=False
-                    )
-                    var_d1_iterates_update = tf.placeholder(self.FLOAT_TF, shape=var_d1_iterates.shape)
-                    self.d1_saved.append(var_d1_iterates)
-                    self.d1_saved_update.append(var_d1_iterates_update)
-                    self.d1_assign.append(tf.assign(var_d1_iterates, var_d1_iterates_update))
-
-    def _compute_slope(self, iterates, slope_type=None):
-        x = np.arange(0, len(iterates)*self.convergence_check_freq, self.convergence_check_freq).astype('float')[..., None]
+    def _compute_and_test_corr(self, iterates):
+        x = np.arange(0, len(iterates)*self.convergence_stride, self.convergence_stride).astype('float')[..., None]
         y = iterates
 
-        if slope_type and slope_type.lower() == 'corr':
-            b = corr(x, y)[0]
-        elif not slope_type or slope_type.lower() == 'z':
-            # Compute regression coefficient (slope) over time for each element of var.
-            # This uses the first normal equation for univariate linear regression:
-            #
-            #     beta = sum[(x_i - mu_x)(y_i - mu_y)] / sum[(x_i - mu_x)^2]
-            #
-            mu_x = x.mean(axis=0, keepdims=True)
-            mu_y = y.mean(axis=0, keepdims=True)
-            num = ((x - mu_x) * (y - mu_y)).sum(axis=0)
-            denom = ((x - mu_x) ** 2).sum()
+        rt = corr(x, y)[0]
+        tt = rt * np.sqrt((self.convergence_n_iterates - 2) / (1 - rt ** 2))
+        p_tt = 1 - (scipy.stats.t.cdf(np.fabs(tt), self.convergence_n_iterates - 2) - scipy.stats.t.cdf(-np.fabs(tt), self.convergence_n_iterates - 2))
+        p_tt = np.where(np.isfinite(p_tt), p_tt, np.zeros_like(p_tt))
 
-            b = num / denom
+        ra = corr(y[1:], y[:-1])[0]
+        ta = ra * np.sqrt((self.convergence_n_iterates - 2) / (1 - ra ** 2))
+        p_ta = 1 - (scipy.stats.t.cdf(np.fabs(ta), self.convergence_n_iterates - 2) - scipy.stats.t.cdf(-np.fabs(ta), self.convergence_n_iterates - 2))
+        p_ta = np.where(np.isfinite(p_ta), p_ta, np.zeros_like(p_ta))
 
-            if slope_type and slope_type.lower() == 'z':
-                b /= y.std(axis=0)
-            b = b
-        else:
-            raise ValueError('Unrecognized slope type "%s"\n' % slope_type)
-
-        return b
+        return rt, p_tt, ra, p_ta
 
     def run_convergence_check(self, verbose=True, feed_dict=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if self.check_convergence:
-                    max_slope_ix, max_slope, slope_of_max_slope = self._convergence_check_inner(feed_dict=feed_dict)
-                    if verbose:
-                        if self.convergence_slope_type:
-                            if self.convergence_slope_type.lower() == 'z':
-                                sys.stderr.write('Max standardized slope: %s.\n' % max_slope)
-                                sys.stderr.write('Slope of max standardized slope: %s.\n' % slope_of_max_slope)
-                            elif self.convergence_slope_type.lower() == 'corr':
-                                sys.stderr.write('Max corr: %s.\n' % max_slope)
-                                sys.stderr.write('Slope of max corr: %s.\n' % slope_of_max_slope)
-                            else:
-                                raise ValueError('Unrecognized slope type "%s"\n' % self.convergence_slope_type)
-                        else:
-                            sys.stderr.write('Max slope: %s.\n' % max_slope)
-                            sys.stderr.write('Slope of max slope: %s.\n' % slope_of_max_slope)
-                        sys.stderr.write('Location: %s.\n\n' % self.d0_names[max_slope_ix])
+                    min_p = 1.
+                    min_p_ix = 0
+                    rt_at_min_p = 0
+                    ra_at_min_p = 0
+                    p_ta_at_min_p = 0
+                    fd_assign = {}
 
+                    offset = self.global_step.eval(session=self.sess) % self.convergence_stride
+                    update = self.last_convergence_check.eval(session=self.sess) < self.global_step.eval(session=self.sess) and \
+                             self.convergence_stride > 0
+                    push = update and offset == 0
+
+                    if self.check_convergence:
+                        if update:
+                            var_d0, var_d0_iterates = self.sess.run([self.d0, self.d0_saved], feed_dict=feed_dict)
+                        else:
+                            var_d0_iterates = self.sess.run(self.d0_saved)
+
+                        start_ix = self.convergence_n_iterates - int(self.global_step.eval(session=self.sess) / self.convergence_stride)
+                        start_ix = max(0, start_ix)
+
+                        for i in range(len(var_d0_iterates)):
+                            if update:
+                                new_d0 = var_d0[i]
+                                iterates_d0 = var_d0_iterates[i]
+                                if push:
+                                    iterates_d0[:-1] = iterates_d0[1:]
+                                    iterates_d0[-1] = new_d0
+                                else:
+                                    new_d0 = (new_d0 + offset * iterates_d0[-1]) / (offset + 1)
+                                    iterates_d0[-1] = new_d0
+                                fd_assign[self.d0_saved_update[i]] = iterates_d0
+
+                                rt, p_tt, ra, p_ta = self._compute_and_test_corr(iterates_d0[start_ix:])
+                            else:
+                                rt, p_tt, ra, p_ta = self._compute_and_test_corr(var_d0_iterates[i][start_ix:])
+
+                            new_min_p_ix = p_tt.argmin()
+                            new_min_p = p_tt[new_min_p_ix]
+                            if new_min_p < min_p:
+                                min_p = new_min_p
+                                min_p_ix = i
+                                rt_at_min_p = rt[new_min_p_ix]
+                                ra_at_min_p = ra[new_min_p_ix]
+                                p_ta_at_min_p = p_ta[new_min_p_ix]
+
+                        if update:
+                            fd_assign[self.last_convergence_check_update] = self.global_step.eval(session=self.sess)
+                            to_run = [self.d0_assign, self.last_convergence_check_assign]
+                            self.sess.run(to_run, feed_dict=fd_assign)
+
+                    if push:
+                        locally_converged = self.global_step.eval(session=self.sess) > self.convergence_n_iterates and \
+                                    (min_p > self.convergence_alpha) and \
+                                    (p_ta_at_min_p > self.convergence_alpha)
+                        convergence_history = self.convergence_history.eval(session=self.sess)
+                        convergence_history[:-1] = convergence_history[1:]
+                        convergence_history[-1] = locally_converged
+                        self.sess.run(self.convergence_history_assign, {self.convergence_history_update: convergence_history})
+
+                    if self.log_freq > 0 and self.global_step.eval(session=self.sess) % self.log_freq == 0:
+                        summary_convergence = self.sess.run(
+                            self.summary_convergence,
+                            feed_dict={
+                                self.rho_t: rt_at_min_p,
+                                self.p_rho_t: min_p,
+                                self.rho_a: ra_at_min_p,
+                                self.p_rho_a: p_ta_at_min_p,
+                            }
+                        )
+                        self.writer.add_summary(summary_convergence, self.global_step.eval(session=self.sess))
+
+                    proportion_converged = self.proportion_converged.eval(session=self.sess)
                     converged = self.global_step.eval(session=self.sess) > self.convergence_n_iterates and \
-                              (max_slope < self.convergence_tolerance) and \
-                              (slope_of_max_slope < self.convergence_tolerance)
+                                (min_p > self.convergence_alpha) and \
+                                (p_ta_at_min_p > self.convergence_alpha) and \
+                                (proportion_converged > self.convergence_alpha)
+
+                    if verbose:
+                        sys.stderr.write('rho_t: %s.\n' % rt_at_min_p)
+                        sys.stderr.write('p of rho_t: %s.\n' % min_p)
+                        sys.stderr.write('rho_a: %s.\n' % ra_at_min_p)
+                        sys.stderr.write('p of rho_a: %s.\n' % p_ta_at_min_p)
+                        sys.stderr.write('Location: %s.\n\n' % self.d0_names[min_p_ix])
+                        sys.stderr.write('Iterate meets convergence criteria: %s.\n\n' % converged)
+                        sys.stderr.write('Proportion of recent iterates converged: %s.\n' % proportion_converged)
+
                 else:
+                    min_p_ix = min_p = rt_at_min_p = ra_at_min_p = p_ta_at_min_p = None
+                    proportion_converged = 0
                     converged = False
+                    if verbose:
+                        sys.stderr.write('Convergence checking off.\n')
 
                 self.sess.run(self.set_converged, feed_dict={self.converged_in: converged})
 
-    def _convergence_check_inner(self, feed_dict=None):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                max_slope = 0
-                max_slope_ix = 0
-                slope_of_max_slope = 0
-                fd_assign = {}
-
-                update = self.last_convergence_check.eval(session=self.sess) < self.global_step.eval(session=self.sess) and \
-                         self.convergence_check_freq > 0 and \
-                         self.global_step.eval(session=self.sess) % self.convergence_check_freq == 0
-
-                if self.check_convergence:
-                    if update:
-                        var_d0, var_d0_iterates, var_d1_iterates = self.sess.run(
-                            [self.d0, self.d0_saved, self.d1_saved],
-                            feed_dict=feed_dict
-                        )
-                    else:
-                        var_d0_iterates, var_d1_iterates = self.sess.run(
-                            [self.d0_saved, self.d1_saved]
-                        )
-
-                    start_ix = self.convergence_n_iterates - int(self.global_step.eval(session=self.sess) / self.convergence_check_freq)
-                    start_ix = max(0, start_ix)
-
-                    for i in range(len(var_d0_iterates)):
-                        if update:
-                            new_d0 = var_d0[i]
-                            iterates_d0 = var_d0_iterates[i]
-                            if self.convergence_use_ema and start_ix < self.convergence_n_iterates - 1:
-                                rate = 1 - 2. / (self.convergence_n_iterates + 1)
-                                new_d0 = iterates_d0[-1] * rate + new_d0 * (1 - rate)
-                            iterates_d0[:-1] = iterates_d0[1:]
-                            iterates_d0[-1] = new_d0
-                            fd_assign[self.d0_saved_update[i]] = iterates_d0
-
-                            new_d1 = self._compute_slope(iterates_d0[start_ix:], slope_type=self.convergence_slope_type)
-                            iterates_d1 = var_d1_iterates[i]
-                            iterates_d1[:-1] = iterates_d1[1:]
-                            iterates_d1[-1] = new_d1
-                            fd_assign[self.d1_saved_update[i]] = iterates_d1
-
-                        else:
-                            new_d1 = self._compute_slope(var_d0_iterates[i][start_ix:])
-                            iterates_d1 = var_d1_iterates[i]
-
-                        new_d1_max_ix = np.fabs(new_d1).argmax()
-                        new_d1_max = np.fabs(new_d1[new_d1_max_ix])
-                        if new_d1_max > max_slope:
-                            max_slope = new_d1_max
-                            max_slope_ix = i
-                            slope_of_max_slope = np.fabs(self._compute_slope(iterates_d1[start_ix+1:], slope_type=self.convergence_slope_type))[new_d1_max_ix]
-
-                    if update:
-                        fd_assign[self.last_convergence_check_update] = self.global_step.eval(session=self.sess)
-                        to_run = [self.d0_assign, self.d1_assign, self.last_convergence_check_assign]
-                        self.sess.run(to_run, feed_dict=fd_assign)
-
-                        if self.log_freq > 0 and self.global_step.eval(session=self.sess) % self.log_freq == 0:
-                            summary_convergence = self.sess.run(
-                                self.summary_convergence,
-                                feed_dict={self.max_slope_summary: max_slope,
-                                           self.slope_of_max_slope_summary: slope_of_max_slope}
-                            )
-                            self.writer.add_summary(summary_convergence, self.global_step.eval(session=self.sess))
-
-                return max_slope_ix, max_slope, slope_of_max_slope
+                return min_p_ix, min_p, rt_at_min_p, ra_at_min_p, p_ta_at_min_p, proportion_converged, converged
 
     def _collect_plots(self):
         switches = [['atomic', 'composite'], ['scaled', 'unscaled'], ['dirac', 'nodirac']]
@@ -4172,38 +4166,31 @@ class DTSR(object):
         out += ' ' * indent + '-------------------\n\n'
 
         if self.check_convergence:
-            converged = self.has_converged()
             n_iter = self.global_step.eval(session=self.sess)
-            max_slope_ix, max_slope, slope_of_max_slope = self._convergence_check_inner()
-            location = self.d0_names[max_slope_ix]
+            min_p_ix, min_p, rt_at_min_p, ra_at_min_p, p_ta_at_min_p, proportion_converged, converged = self.run_convergence_check(verbose=False)
+            location = self.d0_names[min_p_ix]
 
             out += ' ' * (indent * 2) + 'Converged: %s\n' % converged
             out += ' ' * (indent * 2) + 'Convergence basis: %s\n' % self.convergence_basis.lower()
-            out += ' ' * (indent * 2) + 'Convergence tolerance: %s\n' % self.convergence_tolerance
-            if self.convergence_slope_type:
-                if self.convergence_slope_type.lower() == 'z':
-                    out += ' ' * (indent + 2) + 'Max standardized slope: %s.\n' % max_slope
-                    out += ' ' * (indent + 2) + 'Slope of max standardized slope: %s.\n' % slope_of_max_slope
-                elif self.convergence_slope_type.lower() == 'corr':
-                    out += ' ' * (indent + 2) + 'Max corr: %s.\n' % max_slope
-                    out += ' ' * (indent + 2) + 'Slope of max corr: %s.\n' % slope_of_max_slope
-                else:
-                    raise ValueError('Unrecognized slope type "%s"\n' % self.convergence_slope_type)
-            else:
-                out += ' ' * (indent + 2) + 'Max slope: %s.\n' % max_slope
-                out += ' ' * (indent + 2) + 'Slope of max slope: %s.\n' % slope_of_max_slope
+            out += ' ' * (indent * 2) + 'Convergence n iterates: %s\n' % self.convergence_n_iterates
+            out += ' ' * (indent * 2) + 'Convergence stride: %s\n' % self.convergence_stride
+            out += ' ' * (indent * 2) + 'Convergence alpha: %s\n' % self.convergence_alpha
+            out += ' ' * (indent * 2) + 'Convergence min p of rho_t: %s\n' % min_p
+            out += ' ' * (indent * 2) + 'Convergence rho_t at min p: %s\n' % rt_at_min_p
+            out += ' ' * (indent * 2) + 'Convergence rho_a at min p: %s\n' % ra_at_min_p
+            out += ' ' * (indent * 2) + 'Convergence p of rho_a at min p: %s\n' % p_ta_at_min_p
+            out += ' ' * (indent * 2) + 'Proportion converged: %s\n' % proportion_converged
 
             if converged:
                 out += ' ' * (indent + 2) + 'NOTE:\n'
                 out += ' ' * (indent + 4) + 'Programmatic diagnosis of convergence in DTSR is error-prone because of stochastic optimization.\n'
                 out += ' ' * (indent + 4) + 'It is possible that the convergence diagnostics used are too permissive given the stochastic dynamics of the model.\n'
-                out += ' ' * (indent + 4) + 'Consider visually checking the learning curves in Tensorboard to see whether the parameter estimates have flatlined:\n'
+                out += ' ' * (indent + 4) + 'Consider visually checking the learning curves in Tensorboard to see whether the parameter estimates and/or losses have flatlined:\n'
                 out += ' ' * (indent + 6) + 'python -m tensorboard.main --logdir=<path_to_model_directory>\n'
-                out += ' ' * (indent + 4) + 'If not, consider lowering the **convergence_tolerance** parameter and resuming training.\n'
+                out += ' ' * (indent + 4) + 'If not, consider raising **convergence_alpha** and resuming training.\n'
 
             else:
                 out += ' ' * (indent + 2) + 'Model did not reach convergence criteria in %s epochs.\n' % n_iter
-                out += ' ' * (indent + 2) + 'Largest first derivative with respect to training time must be <= %s, with second derivative at that variable <= %s.\n\n' % (self.convergence_tolerance, self.convergence_tolerance)
                 out += ' ' * (indent + 2) + 'NOTE:\n'
                 out += ' ' * (indent + 4) + 'Programmatic diagnosis of convergence in DTSR is error-prone because of stochastic optimization.\n'
                 out += ' ' * (indent + 4) + 'It is possible that the convergence diagnostics used are too conservative given the stochastic dynamics of the model.\n'
@@ -4448,8 +4435,8 @@ class DTSR(object):
 
                         self.verify_random_centering()
 
-                        if self.convergence_check_freq > 0 and self.global_step.eval(session=self.sess) % self.convergence_check_freq == 0:
-                            self.run_convergence_check(verbose=True, feed_dict={self.loss_total: loss_total/n_minibatch})
+                        if self.check_convergence:
+                            self.run_convergence_check(verbose=False, feed_dict={self.loss_total: loss_total/n_minibatch})
 
                         if self.log_freq > 0 and self.global_step.eval(session=self.sess) % self.log_freq == 0:
                             loss_total /= n_minibatch
