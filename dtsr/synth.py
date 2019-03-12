@@ -76,7 +76,7 @@ class SyntheticModel(object):
         self.irf_name = irf_name
 
         if coefs is None:
-            coefs = np.random.uniform(-10, 10, (self.n_pred,))
+            coefs = np.random.uniform(-50, 50, (self.n_pred,))
         self.coefs = coefs
 
     def irf(self, x, coefs=False):
