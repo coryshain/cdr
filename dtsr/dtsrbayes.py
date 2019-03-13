@@ -13,7 +13,6 @@ tf_config.gpu_options.allow_growth = True
 
 from .formula import *
 from .util import *
-from .data import build_DTSR_impulses, corr_dtsr
 from .dtsrbase import DTSR
 from .kwargs import DTSRBAYES_INITIALIZATION_KWARGS
 

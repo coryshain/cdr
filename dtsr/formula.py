@@ -947,43 +947,54 @@ class Formula(object):
             raise ValueError('Unrecognized op: "%s".' % op)
         return out
 
-    def apply_ops(self, impulse, df):
+    def apply_ops(self, impulse, X):
         """
         Apply all ops defined for an impulse
 
         :param impulse: ``Impulse`` object; the impulse.
-        :param df: ``pandas`` table; table containing the impulse data.
+        :param X: list of ``pandas`` tables; table containing the impulse data.
         :return: ``pandas`` table; table augmented with transformed impulse.
         """
 
-        ops = impulse.ops
-
-        if impulse.id not in df.columns:
-            if type(impulse).__name__ == 'ImpulseInteraction':
-                df, expanded_impulses, expanded_atomic_impulses = impulse.expand_categorical(df)
-                for x in expanded_atomic_impulses:
-                    for a in x:
-                        df = self.apply_ops(a, df)
-                for x in expanded_impulses:
-                    if x.name() not in df.columns:
-                        df[x.id] = df[[y.name() for y in x.atomic_impulses]].product(axis=1)
-            else:
-                raise ValueError('Unrecognized term "%s" in model formula' %impulse.id)
+        if not isinstance(X, list):
+            X = [X]
+            delistify = True
         else:
-            if type(impulse).__name__ == 'ImpulseInteraction':
-                df, expanded_impulses, _ = impulse.expand_categorical(df)
+            delistify = False
+
+        for i in range(len(X)):
+            X_cur = X[i]
+            ops = impulse.ops
+
+            if impulse.id not in X_cur.columns:
+                if type(impulse).__name__ == 'ImpulseInteraction':
+                    X_cur, expanded_impulses, expanded_atomic_impulses = impulse.expand_categorical(X_cur)
+                    for x in expanded_atomic_impulses:
+                        for a in x:
+                            X_cur = self.apply_ops(a, X_cur)
+                    for x in expanded_impulses:
+                        if x.name() not in X_cur.columns:
+                            X_cur[x.id] = X_cur[[y.name() for y in x.atomic_impulses]].product(axis=1)
             else:
-                df, expanded_impulses = impulse.expand_categorical(df)
+                if type(impulse).__name__ == 'ImpulseInteraction':
+                    X_cur, expanded_impulses, _ = impulse.expand_categorical(X_cur)
+                else:
+                    X_cur, expanded_impulses = impulse.expand_categorical(X_cur)
 
-        for x in expanded_impulses:
-            if x.name() not in df.columns:
-                new_col = df[x.id]
-                for i in range(len(ops)):
-                    op = ops[i]
-                    new_col = self.apply_op(op, new_col)
-                df[x.name()] = new_col
+            for x in expanded_impulses:
+                if x.name() not in X_cur.columns:
+                    new_col = X_cur[x.id]
+                    for j in range(len(ops)):
+                        op = ops[j]
+                        new_col = self.apply_op(op, new_col)
+                    X_cur[x.name()] = new_col
 
-        return df
+            X[i] = X_cur
+
+        if delistify:
+            X = X[0]
+
+        return X
 
     def compute_2d_predictor(
             self,
@@ -1138,7 +1149,7 @@ class Formula(object):
         """
         Extract all data and compute all transforms required by the model formula.
 
-        :param X: ``pandas`` table; impulse data.
+        :param X: list of ``pandas`` tables; impulse data.
         :param y: ``pandas`` table; response data.
         :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
         :param X_response_aligned_predictors: ``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
@@ -1147,6 +1158,8 @@ class Formula(object):
         :param history_length: ``int``; maximum number of timesteps in the history dimension.
         :return: 6-tuple; transformed **X**, transformed **y**, transformed response-aligned predictor names, transformed response-aligned predictors, transformed 2D predictor names, transformed 2D predictors
         """
+        if not isinstance(X, list):
+            X = [X]
 
         if self.dv not in y.columns:
             y = self.apply_ops(self.dv_term, y)
@@ -1159,6 +1172,11 @@ class Formula(object):
             X_response_aligned_predictor_names = []
 
         time_mask = None
+
+        X_columns = set()
+        for X_cur in X:
+            for c in X_cur.columns:
+                X_columns.add(c)
 
         for impulse in impulses:
             if type(impulse).__name__ == 'ImpulseInteraction':
@@ -1197,7 +1215,7 @@ class Formula(object):
                         time_mask,
                     )
 
-                elif x.id not in X.columns:
+                elif x.id not in X_columns:
                     if x.name() not in X_response_aligned_predictor_names:
                         X_response_aligned_predictor_names.append(x.name())
                         if X_response_aligned_predictors is None:
@@ -1206,12 +1224,17 @@ class Formula(object):
                             X_response_aligned_predictors[[x.id]] = y[[x.id]]
                         X_response_aligned_predictors = self.apply_ops(x, X_response_aligned_predictors)
                 else:
-                    X = self.apply_ops(x, X)
+                    for i in range(len(X)):
+                        X_cur = X[i]
+                        if x.id in X_cur.columns:
+                            X_cur = self.apply_ops(x, X_cur)
+                            X[i] = X_cur
+                            break
 
             if type(impulse).__name__ == 'ImpulseInteraction':
                 response_aligned = False
                 for x in impulse.impulses():
-                    if x.id not in X.columns:
+                    if x.id not in X_columns:
                         response_aligned = True
                         break
                 if response_aligned:
@@ -1219,10 +1242,27 @@ class Formula(object):
                         X_response_aligned_predictor_names.append(impulse.name())
                         X_response_aligned_predictors = self.apply_ops(impulse, X_response_aligned_predictors)
                 else:
-                    X = self.apply_ops(impulse, X)
+                    found = False
+                    for i in range(len(X)):
+                        X_cur = X[i]
+                        in_X = True
+                        for atom in impulse.impulses():
+                            if atom.id not in X_cur.columns:
+                                in_X = False
+                        if in_X:
+                            X_cur = self.apply_ops(impulse, X_cur)
+                            X_cur = self.apply_ops(impulse, X_cur)
+                            X[i] = X_cur
+                            found = True
+                            break
+                    if not found:
+                        raise ValueError('No single predictor file contains all features in ImpulseInteraction, and interaction across files is not possible because of asynchrony. Consider interacting the responses, rather than the impulses.')
 
-        for col in [x for x in X.columns if spillover.match(x)]:
-            X[col] = X[col].fillna(0)
+        for i in range(len(X)):
+            X_cur = X[i]
+            for col in [x for x in X_cur.columns if spillover.match(x)]:
+                X_cur[col] = X_cur[col].fillna(0)
+            X[i] = X_cur
 
         return X, y, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors
 
@@ -1428,15 +1468,15 @@ class Formula(object):
         new_form = Formula(new_formstring)
         return new_form
 
-    def categorical_transform(self, df):
+    def categorical_transform(self, X):
         """
-        Get transformed formula with categorical predictors in **df** expanded.
+        Get transformed formula with categorical predictors in **X** expanded.
 
-        :param df: ``pandas`` table; input data.
+        :param X: list of ``pandas`` tables; input data.
         :return: ``Formula``; transformed ``Formula`` object
         """
 
-        new_t = self.t.categorical_transform(df)[0]
+        new_t = self.t.categorical_transform(X)[0]
         new_formstring = self.to_string(t=new_t)
         new_form = Formula(new_formstring)
         return new_form
@@ -1476,39 +1516,57 @@ class Impulse(object):
 
         return self.name_str
 
-    def categorical(self, df):
+    def categorical(self, X):
         """
         Checks whether impulse is categorical in a dataset
 
-        :param df: ``pandas`` table; data to to check.
+        :param X: list ``pandas`` tables; data to to check.
         :return: ``bool``; ``True`` if impulse is categorical in **X**, ``False`` otherwise.
         """
 
-        if self.id in df and not np.issubdtype(df[self.id].dtype, np.number):
-            return True
+        if not isinstance(X, list):
+            X = [X]
+
+        for X_cur in X:
+            if self.id in X_cur and not np.issubdtype(X_cur[self.id].dtype, np.number):
+                return True
+        
         return False
 
-    def expand_categorical(self, df):
+    def expand_categorical(self, X):
         """
-        Expand any categorical predictors in **df** into 1-hot columns.
+        Expand any categorical predictors in **X** into 1-hot columns.
 
-        :param df: ``pandas`` table; input data
+        :param X: list of ``pandas`` tables; input data
         :return: 2-tuple of ``pandas`` table, ``list`` of ``Impulse``; expanded data, list of expanded ``Impulse`` objects
         """
+
+        if not isinstance(X, list):
+            X = [X]
+            delistify = True
+        else:
+            delistify = False
+
         impulses = [self]
 
-        if self.id in df.columns and self.categorical(df):
-            vals = sorted(df[self.id].unique())[1:]
+        for i in range(len(X)):
+            X_cur = X[i]
+            if self.id in X_cur.columns and self.categorical(X):
+                vals = sorted(X_cur[self.id].unique())[1:]
+                impulses = [Impulse('_'.join([self.id, pythonize_string(str(val))]), ops=self.ops) for val in vals]
+                expanded_value_names = [str(val) for val in vals]
+                for j in range(len(impulses)):
+                    x = impulses[j]
+                    val = expanded_value_names[j]
+                    if x.id not in X_cur.columns:
+                        X_cur[x.id] = (X_cur[self.id] == val).astype('float')
+                X[i] = X_cur
+                break
 
-            impulses = [Impulse('_'.join([self.id, pythonize_string(str(val))]), ops=self.ops) for val in vals]
-            expanded_value_names = [str(val) for val in vals]
-            for i in range(len(impulses)):
-                x = impulses[i]
-                val = expanded_value_names[i]
-                if x.id not in df.columns:
-                    df[x.id] = (df[self.id] == val).astype('float')
+        if delistify:
+            X = X[0]
 
-        return df, impulses
+        return X, impulses
 
 class ImpulseInteraction(object):
     """
@@ -1558,21 +1616,30 @@ class ImpulseInteraction(object):
 
         return self.atomic_impulses
 
-    def expand_categorical(self, df):
+    def expand_categorical(self, X):
         """
-        Expand any categorical predictors in **df** into 1-hot columns.
+        Expand any categorical predictors in **X** into 1-hot columns.
 
-        :param df: ``pandas`` table; input data.
+        :param X: list of ``pandas`` tables; input data.
         :return: 3-tuple of ``pandas`` table, ``list`` of ``ImpulseInteraction``, ``list`` of ``list`` of ``Impulse``; expanded data, list of expanded ``ImpulseInteraction`` objects, list of lists of expanded ``Impulse`` objects, one list for each interaction.
         """
 
+        if not isinstance(X, list):
+            X = [X]
+            delistify = True
+        else:
+            delistify = False
+
         expanded_atomic_impulses = []
         for x in self.impulses():
-            df, expanded_atomic_impulses_cur = x.expand_categorical(df)
+            X, expanded_atomic_impulses_cur = x.expand_categorical(X)
             expanded_atomic_impulses.append(expanded_atomic_impulses_cur)
         expanded_interaction_impulses = [ImpulseInteraction(x, ops=self.ops) for x in itertools.product(*expanded_atomic_impulses)]
 
-        return df, expanded_interaction_impulses, expanded_atomic_impulses
+        if delistify:
+            X = X[0]
+
+        return X, expanded_interaction_impulses, expanded_atomic_impulses
 
 class ResponseInteraction(object):
     """
@@ -2599,14 +2666,14 @@ class IRFNode(object):
                     pointers[self].append(self_pc)
         return self_transformed
 
-    def categorical_transform(self, df, expansion_map=None):
+    def categorical_transform(self, X, expansion_map=None):
         """
-        Generate transformed copy of node with categorical predictors in **df** expanded.
+        Generate transformed copy of node with categorical predictors in **X** expanded.
         Recursive.
         Returns a tree forest representing the current state of the transform.
         When run from ROOT, should always return a length-1 list representing a single-tree forest, in which case the transformed tree is accessible as the 0th element.
 
-        :param df: ``pandas`` table; input data.
+        :param X: list of ``pandas`` tables; input data.
         :param expansion_map: ``dict``; Internal variable. Do not use.
         :return: ``list`` of ``IRFNode``; tree forest representing current state of the transform.
         """
@@ -2624,8 +2691,8 @@ class IRFNode(object):
                 for response in interaction.responses():
                     if isinstance(response, Impulse):
                         if not response.name() in expansion_map:
-                            if response.categorical(df):
-                                vals = sorted(df[response.id].unique()[1:])
+                            if response.categorical(X):
+                                vals = sorted(X[response.id].unique()[1:])
                                 expansion = [Impulse('_'.join([response.id, pythonize_string(str(val))]), ops=response.ops) for val in vals]
                             else:
                                 expansion = [response]
@@ -2633,8 +2700,8 @@ class IRFNode(object):
                     elif isinstance(response, ImpulseInteraction):
                         for subresponse in response.impulses():
                             if not subresponse.name() in expansion_map:
-                                if subresponse.categorical(df):
-                                    vals = sorted(df[subresponse.id].unique()[1:])
+                                if subresponse.categorical(X):
+                                    vals = sorted(X[subresponse.id].unique()[1:])
                                     expansion = [
                                         Impulse('_'.join([subresponse.id, pythonize_string(str(val))]), ops=subresponse.ops)
                                         for val in vals]
@@ -2646,8 +2713,8 @@ class IRFNode(object):
                 expanded_atomic_impulses = []
                 for x in self.impulse.impulses():
                     if x.name() not in expansion_map:
-                        if x.categorical(df):
-                            vals = sorted(df[x.id].unique()[1:])
+                        if x.categorical(X):
+                            vals = sorted(X[x.id].unique()[1:])
                             expansion = [Impulse('_'.join([x.id, pythonize_string(str(val))]), ops=x.ops) for val in vals]
                         else:
                             expansion = [x]
@@ -2659,9 +2726,9 @@ class IRFNode(object):
 
             else:
                 if not self.impulse.name() in expansion_map:
-                    if self.impulse.categorical(df):
-                        if self.impulse.categorical(df):
-                            vals = sorted(df[self.impulse.id].unique()[1:])
+                    if self.impulse.categorical(X):
+                        if self.impulse.categorical(X):
+                            vals = sorted(X[self.impulse.id].unique()[1:])
                             expansion = [Impulse('_'.join([self.impulse.id, pythonize_string(str(val))]), ops=self.impulse.ops) for val in vals]
                         else:
                             expansion = [self.impulse]
@@ -2694,7 +2761,7 @@ class IRFNode(object):
             ## ROOT node
             children = []
             for c in self.children:
-                c_children = [x for x in c.categorical_transform(df, expansion_map=expansion_map)]
+                c_children = [x for x in c.categorical_transform(X, expansion_map=expansion_map)]
                 children += c_children
             new_irf = IRFNode()
             for c in children:
@@ -2704,7 +2771,7 @@ class IRFNode(object):
         else:
             children = []
             for c in self.children:
-                c_children = [x for x in c.categorical_transform(df, expansion_map=expansion_map)]
+                c_children = [x for x in c.categorical_transform(X, expansion_map=expansion_map)]
                 children += c_children
             for c in children:
                 new_irf = IRFNode(

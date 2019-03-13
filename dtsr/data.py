@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 from .util import names2ix
 
+
 def z(df):
     """
     Z-transform pandas series or data frame
@@ -12,6 +13,7 @@ def z(df):
     """
 
     return (df-df.mean(axis=0))/df.std(axis=0)
+
 
 def c(df):
     """
@@ -23,6 +25,7 @@ def c(df):
 
     return df-df.mean(axis=0)
 
+
 def s(df):
     """
     Rescale pandas series or data frame by its standard deviation
@@ -33,6 +36,27 @@ def s(df):
 
     return df/df.std(axis=0)
 
+
+def get_first_last_obs_lists(y):
+    """
+    Convenience utility to extract out all first_obs and last_obs columns in **y** sorted by file index
+
+    :param y: ``pandas`` ``DataFrame``; response data.
+    :return: pair of ``list`` of ``str``; first_obs column names and last_obs column names
+    """
+
+    first_obs = []
+    last_obs = []
+    last_obs_ix = [int(c.split('_')[-1]) for c in y.columns if c.startswith('last_obs')]
+    for i in sorted(last_obs_ix):
+        first_obs_cur = y['first_obs_%d' % i]
+        last_obs_cur = y['last_obs_%d' % i]
+        first_obs.append(first_obs_cur)
+        last_obs.append(last_obs_cur)
+
+    return first_obs, last_obs
+
+
 def filter_invalid_responses(y, dv):
     """
     Filter out rows with non-finite responses.
@@ -42,8 +66,13 @@ def filter_invalid_responses(y, dv):
     :return: 2-tuple of ``pandas`` ``DataFrame`` and ``pandas`` ``Series``; valid data and indicator vector used to filter out invalid data.
     """
 
-    select_y_valid = np.isfinite(y[dv]) & (y.last_obs > y.first_obs)
+    first_obs, last_obs = get_first_last_obs_lists(y)
+
+    select_y_valid = np.isfinite(y[dv])
+    for first_obs_cur, last_obs_cur in zip(first_obs, last_obs):
+        select_y_valid &= (last_obs_cur > first_obs_cur)
     return y[select_y_valid], select_y_valid
+
 
 def build_DTSR_impulses(
         X,
@@ -61,9 +90,9 @@ def build_DTSR_impulses(
     """
     Construct 3D array of shape ``(batch_len, history_length, n_impulses)`` to use as predictor data for DTSR fitting.
 
-    :param X: ``pandas`` ``DataFrame``; impulse (predictor) data.
-    :param first_obs: ``pandas`` ``Series``; vector of row indices in **X** of the first impulse in the time series associated with each response.
-    :param last_obs: ``pandas`` ``Series``; vector of row indices in **X** of the last preceding impulse in the time series associated with each response.
+    :param X: list of ``pandas`` ``DataFrame``; impulse (predictor) data.
+    :param first_obs: list of ``pandas`` ``Series``; vector of row indices in **X** of the first impulse in the time series associated with each response.
+    :param last_obs: list of ``pandas`` ``Series``; vector of row indices in **X** of the last preceding impulse in the time series associated with each response.
     :param impulse_names: ``list`` of ``str``; names of columns in **X** to be used as impulses by the model.
     :param history_length: ``int``; maximum number of history observations.
     :param X_response_aligned_predictor_names: ``list`` of ``str``; names of predictors measured synchronously with the response rather than the impulses. If ``None``, no such impulses.
@@ -75,6 +104,13 @@ def build_DTSR_impulses(
     :return: 3-tuple of ``numpy`` arrays; the expanded impulse array, the expanded timestamp array, and a boolean mask zeroing out locations of non-existent impulses.
     """
 
+    if not isinstance(X, list):
+        X = [X]
+    if not isinstance(first_obs, list):
+        first_obs = [first_obs]
+    if not isinstance(last_obs, list):
+        last_obs = [last_obs]
+
     if X_response_aligned_predictor_names is None:
         X_response_aligned_predictor_names = []
     assert (X_2d_predictors is None and (X_2d_predictor_names is None or len(X_2d_predictor_names) == 0)) or (X_2d_predictors.shape[-1] == len(X_2d_predictor_names)), 'Shape mismatch between X_2d_predictors and X_2d_predictor_names'
@@ -82,18 +118,37 @@ def build_DTSR_impulses(
         X_2d_predictor_names = []
 
     impulse_names_1d = sorted(list(set(impulse_names).difference(set(X_response_aligned_predictor_names)).difference(set(X_2d_predictor_names))))
+    impulse_names_1d_todo = set(impulse_names_1d)
+    impulse_names_1d_complete = set()
+    impulse_names_1d_tmp = []
 
-    X_2d_from_1d, time_X_2d, time_mask = expand_history(
-        X[impulse_names_1d],
-        X.time,
-        first_obs,
-        last_obs,
-        history_length,
-        int_type=int_type,
-        float_type=float_type
-    )
+    X_2d_from_1d = []
+    time_X_2d = []
+    time_mask = []
+    for i, X_cur in enumerate(X):
+        impulse_names_1d_cur = impulse_names_1d_todo.intersection(set(X_cur.columns))
+        if len(impulse_names_1d_cur) > 0:
+            impulse_names_1d_todo = impulse_names_1d_todo - impulse_names_1d_cur
+            impulse_names_1d_complete = impulse_names_1d_complete.union(impulse_names_1d_cur)
+            impulse_names_1d_cur = sorted(list(impulse_names_1d_cur))
+            impulse_names_1d_tmp += impulse_names_1d_cur
+            X_2d_from_1d_cur, time_X_2d_cur, time_mask_cur = expand_history(
+                X_cur[impulse_names_1d_cur],
+                X_cur.time,
+                first_obs[i],
+                last_obs[i],
+                history_length,
+                int_type=int_type,
+                float_type=float_type
+            )
+            X_2d_from_1d.append(X_2d_from_1d_cur)
+            time_X_2d.append(time_X_2d_cur)
+            time_mask.append(time_mask_cur)
 
-    X_2d = X_2d_from_1d
+    X_2d = np.concatenate(X_2d_from_1d, axis=-1)
+    X_2d = X_2d[:,:,names2ix(impulse_names_1d, impulse_names_1d_tmp)]
+    time_X_2d = np.concatenate(time_X_2d, axis=-1)
+    time_mask = np.concatenate(time_mask, axis=-1)
 
     if X_response_aligned_predictors is not None:
         X_response_aligned_predictors_new = np.zeros((X_2d_from_1d.shape[0], X_2d_from_1d.shape[1], len(X_response_aligned_predictor_names)))
@@ -106,6 +161,7 @@ def build_DTSR_impulses(
     X_2d = X_2d[:,:,names2ix(impulse_names, impulse_names_1d + X_response_aligned_predictor_names + X_2d_predictor_names)]
 
     return X_2d, time_X_2d, time_mask
+
 
 def compute_history_intervals(X, y, series_ids):
     """
@@ -176,21 +232,20 @@ def compute_history_intervals(X, y, series_ids):
     
     return first_obs, last_obs
 
-def corr_dtsr(X_2d, impulse_names, impulse_names_2d, time_mask):
+
+def corr_dtsr(X_2d, impulse_names, impulse_names_2d, time, time_mask):
     """
     Compute correlation matrix, including correlations across time where necessitated by 2D predictors.
 
     :param X_2d: ``numpy`` array; the impulse data. Must be of shape ``(batch_len, history_length, n_impulses)``, can be computed from sources by ``build_DTSR_impulses()``.
     :param impulse_names: ``list`` of ``str``; names of columns in **X_2d** to be used as impulses by the model.
     :param impulse_names_2d: ``list`` of ``str``; names of columns in **X_2d** that designate to 2D predictors.
-    :param time_mask: 2D ``numpy`` boolean array; mask of shape ``(batch_len, history_length)`` with zeros in each cell corresponding to a non-existent impulse.
+    :param time: 3D ``numpy`` array; array of timestamps for each event in **X_2d**.
+    :param time_mask: 3D ``numpy`` array; array of masks over padding events in **X_2d**.
     :return: ``pandas`` ``DataFrame``; the correlation matrix.
     """
 
     rho = pd.DataFrame(np.zeros((len(impulse_names), len(impulse_names))), index=impulse_names, columns=impulse_names)
-
-    n_2d = X_2d.shape[0]
-    n_3d = time_mask.sum()
 
     for i in range(len(impulse_names)):
         for j in range(i, len(impulse_names)):
@@ -198,17 +253,18 @@ def corr_dtsr(X_2d, impulse_names, impulse_names_2d, time_mask):
                 x1 = X_2d[..., i]
                 x2 = X_2d[..., j]
 
-                n = n_3d
+                aligned = np.logical_and(np.logical_and(np.isclose(time[:,:,i], time[:,:,j]), time_mask[:,:,i]), time_mask[:,:,j])
+                n = aligned.sum()
                 x1_mean = x1.sum() / n
                 x2_mean = x2.sum() / n
-                cor = ((x1 - x1_mean) * (x2 - x2_mean) * time_mask).sum() / \
-                      np.sqrt(((x1 - x1_mean) ** 2 * time_mask).sum() * (
-                              (x2 - x2_mean) ** 2 * time_mask).sum())
+                cor = ((x1 - x1_mean) * (x2 - x2_mean) * aligned).sum() / \
+                      np.sqrt(((x1 - x1_mean) ** 2 * aligned).sum() * (
+                              (x2 - x2_mean) ** 2 * aligned).sum())
             else:
                 x1 = X_2d[:, -1, i]
                 x2 = X_2d[:, -1, j]
 
-                n = n_2d
+                n = X_2d.shape[0]
                 x1_mean = x1.sum() / n
                 x2_mean = x2.sum() / n
                 cor = ((x1 - x1_mean) * (x2 - x2_mean)).sum() / \
@@ -219,6 +275,7 @@ def corr_dtsr(X_2d, impulse_names, impulse_names_2d, time_mask):
                 rho.loc[impulse_names[j], impulse_names[i]] = cor
 
     return rho
+
 
 def compute_filters(y, filter_map=None):
     """
@@ -237,6 +294,7 @@ def compute_filters(y, filter_map=None):
             for cond in filter_map[field]:
                 select &= compute_filter(y, field, cond)
     return select
+
 
 def compute_filter(y, field, cond):
     """
@@ -269,6 +327,7 @@ def compute_filter(y, field, cond):
             return y[field].astype('str') != cond[2:].strip()
     raise ValueError('Unsupported comparator in filter "%s"' %cond)
 
+
 def compute_splitID(y, split_fields):
     """
     Map tuples in columns designated by **split_fields** into integer ID to use for data partitioning.
@@ -282,6 +341,7 @@ def compute_splitID(y, split_fields):
     for col in split_fields:
         splitID += y[col].cat.codes
     return splitID
+
 
 def compute_partition(y, modulus, n):
     """
@@ -297,6 +357,7 @@ def compute_partition(y, modulus, n):
     for i in range(n-1, 0, -1):
         partition.append(((y.splitID) % modulus) == (modulus - i))
     return partition
+
 
 def expand_history(X, X_time, first_obs, last_obs, history_length, int_type='int32', float_type='float32', fill=0.):
     """
@@ -320,18 +381,19 @@ def expand_history(X, X_time, first_obs, last_obs, history_length, int_type='int
     X_time = np.array(X_time, dtype=FLOAT_NP)
     X = np.array(X)
 
-    X_2d = np.full((first_obs.shape[0], history_length, X.shape[1]), fill)
-    time_X_2d = np.zeros((first_obs.shape[0], history_length), dtype=FLOAT_NP)
-    time_mask = np.zeros((first_obs.shape[0], history_length), dtype=FLOAT_NP)
+    X_2d = np.full((first_obs.shape[0], history_length, X.shape[1]), fill, dtype=FLOAT_NP)
+    time_X_2d = np.zeros_like(X_2d)
+    time_mask = np.zeros_like(X_2d)
 
     for i, first, last in zip(np.arange(first_obs.shape[0]), first_obs, last_obs):
         sX = X[first:last]
         sXt = X_time[first:last]
         X_2d[i, -sX.shape[0]:] = sX
-        time_X_2d[i][-len(sXt):] = sXt
+        time_X_2d[i][-len(sXt):] = sXt[..., None]
         time_mask[i][-len(sXt):] = 1
 
     return X_2d, time_X_2d, time_mask
+
 
 def compute_time_mask(X_time, first_obs, last_obs, history_length, int_type='int32', float_type='float32'):
     """
@@ -360,11 +422,12 @@ def compute_time_mask(X_time, first_obs, last_obs, history_length, int_type='int
 
     return time_mask
 
+
 def preprocess_data(X, y, formula_list, series_ids, filter_map=None, compute_history=True, history_length=128, debug=False):
     """
     Preprocess DTSR data.
 
-    :param X: ``pandas`` ``DataFrame``; impulse (predictor) data.
+    :param X: list of ``pandas`` ``DataFrame``; impulse (predictor) data.
     :param y: ``pandas`` ``DataFrame``; response data.
     :param formula_list: ``list`` of ``Formula``; DTSR formula for which to preprocess data.
     :param series_ids: ``list`` of ``str``; column names whose jointly unique values define unique time series.
@@ -376,6 +439,9 @@ def preprocess_data(X, y, formula_list, series_ids, filter_map=None, compute_his
     """
 
     sys.stderr.write('Pre-processing data...\n')
+
+    if not isinstance(X, list):
+        X = [X]
 
     if filter_map is None:
         select = np.full((len(y),), True, dtype='bool')
@@ -389,27 +455,31 @@ def preprocess_data(X, y, formula_list, series_ids, filter_map=None, compute_his
     X_2d_predictors = None
 
     if compute_history:
-        sys.stderr.write('Computing history intervals for each regression target...\n')
-        first_obs, last_obs = compute_history_intervals(X, y, series_ids)
-        y['first_obs'] = first_obs
-        y['last_obs'] = last_obs
+        X_new = []
+        for i in range(len(X)):
+            X_cur = X[i]
+            sys.stderr.write('Computing history intervals for each regression target in predictor file %d...\n' % (i+1))
+            first_obs, last_obs = compute_history_intervals(X_cur, y, series_ids)
+            y['first_obs_%d' % i] = first_obs
+            y['last_obs_%d' % i] = last_obs
 
-        # Floating point precision issues can allow the response to precede the impulse for simultaneous X/y,
-        # which can break downstream convolution. The correction below to y.time prevents this.
-        y.time = np.where(last_obs > first_obs, np.maximum(np.array(X.time)[last_obs - 1], y.time), y.time)
+            # Floating point precision issues can allow the response to precede the impulse for simultaneous X/y,
+            # which can break downstream convolution. The correction below to y.time prevents this.
+            y.time = np.where(last_obs > first_obs, np.maximum(np.array(X_cur.time)[last_obs - 1], y.time), y.time)
 
-        if debug:
-            sample = np.random.randint(0, len(y), 10)
-            sample = np.concatenate([np.zeros((1,), dtype='int'), sample, np.ones((1,), dtype='int') * (len(y)-1)], axis=0)
-            for i in sample:
-                print(i)
-                row = y.iloc[i]
-                print(row[['subject', 'docid', 'time']])
-                print(X[['subject', 'docid', 'word', 'time']][row.first_obs:row.last_obs])
+            if debug:
+                sample = np.random.randint(0, len(y), 10)
+                sample = np.concatenate([np.zeros((1,), dtype='int'), sample, np.ones((1,), dtype='int') * (len(y)-1)], axis=0)
+                for i in sample:
+                    print(i)
+                    row = y.iloc[i]
+                    print(row[['subject', 'docid', 'time']])
+                    print(X_cur[['subject', 'docid', 'word', 'time']][row.first_obs:row.last_obs])
+            X_new.append(X_cur)
 
         for x in formula_list:
-            X, y, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors = x.apply_formula(
-                X,
+            X_new, y, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors = x.apply_formula(
+                X_new,
                 y,
                 X_2d_predictor_names=X_2d_predictor_names,
                 X_2d_predictors=X_2d_predictors,
@@ -418,5 +488,5 @@ def preprocess_data(X, y, formula_list, series_ids, filter_map=None, compute_his
                 history_length=history_length
             )
 
-    return X, y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors
+    return X_new, y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors
 

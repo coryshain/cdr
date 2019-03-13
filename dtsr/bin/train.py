@@ -57,8 +57,11 @@ if __name__ == '__main__':
     )
 
     if run_baseline:
-        X['splitID'] = compute_splitID(X, p.split_ids)
-        part = compute_partition(X, p.modulus, 3)
+        from dtsr.baselines import py2ri
+        assert len(X) == 1, 'Cannot run baselines on asynchronously sampled predictors'
+        X_cur = X[0]
+        X_cur['splitID'] = compute_splitID(X_cur, p.split_ids)
+        part = compute_partition(X_cur, p.modulus, 3)
         part_select = None
         partition_name_to_ix = {'train': 0, 'dev': 1, 'test': 2}
         for partition in partitions:
@@ -67,22 +70,19 @@ if __name__ == '__main__':
             else:
                 part_select &= part[partition_name_to_ix[partition]]
 
-        X_baseline = X[part_select]
+        X_baseline = X_cur[part_select]
         X_baseline = X_baseline.reset_index(drop=True)[select]
 
-    n_train_sample = len(y)
-
-    for i in range(len(dtsr_formula_list)):
-        x = dtsr_formula_list[i]
-        if run_baseline and x.dv not in X_baseline.columns and x.dv in y.columns:
-            X_baseline[x.dv] = y[x.dv]
-
-    if run_baseline:
-        from dtsr.baselines import py2ri
+        for i in range(len(dtsr_formula_list)):
+            x = dtsr_formula_list[i]
+            if x.dv not in X_baseline.columns and x.dv in y.columns:
+                X_baseline[x.dv] = y[x.dv]
         for c in X_baseline.columns:
             if X_baseline[c].dtype.name == 'category':
                 X_baseline[c] = X_baseline[c].astype(str)
         X_baseline = py2ri(X_baseline)
+
+    n_train_sample = len(y)
 
     for m in models:
         p.set_model(m)

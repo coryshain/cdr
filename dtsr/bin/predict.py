@@ -10,7 +10,7 @@ pd.options.mode.chained_assignment = None
 from dtsr.config import Config
 from dtsr.io import read_data
 from dtsr.formula import Formula
-from dtsr.data import filter_invalid_responses, preprocess_data, compute_splitID, compute_partition
+from dtsr.data import filter_invalid_responses, preprocess_data, compute_splitID, compute_partition, get_first_last_obs_lists
 from dtsr.util import mse, mae, percent_variance_explained
 from dtsr.util import load_dtsr, filter_models, get_partition_list, paths_from_partition_cliarg
 
@@ -69,8 +69,8 @@ if __name__ == '__main__':
     ''')
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of model names from which to predict. Regex permitted. If unspecified, predicts from all models.')
-    argparser.add_argument('-d', '--data', nargs='+', default=[], help='Pairs of paths or buffers <predictors, responses>, allowing prediction on arbitrary evaluation data.')
-    argparser.add_argument('-p', '--partition', nargs='+', default=['dev'], help='Name of partition to use ("train", "dev", "test", or space- or hyphen-delimited subset of these). Ignored if **data** is provided.')
+    argparser.add_argument('-d', '--data', nargs='+', default=[], help='Pairs of paths or buffers <predictors, responses>, allowing prediction on arbitrary evaluation data. Predictors may consist of ``;``-delimited paths designating files containing predictors with different timestamps. Within each file, timestamps are treated as identical across predictors.')
+    argparser.add_argument('-p', '--partition', nargs='+', default=['dev'], help='Name of partition to use ("train", "dev", "test", or hyphen-delimited subset of these). Ignored if **data** is provided.')
     argparser.add_argument('-n', '--nsamples', type=int, default=1024, help='Number of posterior samples to average (only used for DTSRBayes)')
     argparser.add_argument('-M', '--mode', type=str, default=None, help='Predict mode ("response" or "loglik") or default None, which does both')
     argparser.add_argument('-a', '--algorithm', type=str, default='MAP', help='Algorithm ("sampling" or "MAP") to use for extracting predictions from DTSRBayes. Ignored for DTSRMLE.')
@@ -143,11 +143,13 @@ if __name__ == '__main__':
         partition_name_to_ix = {'train': 0, 'dev': 1, 'test': 2}
         for i in range(len(evaluation_sets)):
             X, y, select = evaluation_sets[i][:3]
+            assert len(X) == 1, 'Cannot run baselines on asynchronously sampled predictors'
+            X_cur = X[0]
             partitions = evaluation_set_partitions[i]
-            X['splitID'] = compute_splitID(X, p.split_ids)
-            X_baseline = X
+            X_cur['splitID'] = compute_splitID(X_cur, p.split_ids)
+            X_baseline = X_cur
             if partitions is not None:
-                part = compute_partition(X, p.modulus, 3)
+                part = compute_partition(X_cur, p.modulus, 3)
                 part_select = None
                 for partition in partitions:
                     if part_select is None:
@@ -329,12 +331,13 @@ if __name__ == '__main__':
                     dtsr_mse = dtsr_mae = dtsr_loglik = dtsr_percent_variance_explained = dtsr_true_variance = None
 
                     if args.mode in [None, 'response']:
+                        first_obs, last_obs = get_first_last_obs_lists(y_valid)
                         dtsr_preds = dtsr_model.predict(
                             X,
                             y_valid.time,
                             y_valid[dtsr_model.form.rangf],
-                            y_valid.first_obs,
-                            y_valid.last_obs,
+                            first_obs,
+                            last_obs,
                             X_response_aligned_predictor_names=X_response_aligned_predictor_names,
                             X_response_aligned_predictors=X_response_aligned_predictors_valid,
                             X_2d_predictor_names=X_2d_predictor_names,

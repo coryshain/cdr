@@ -9,7 +9,7 @@ import time as pytime
 from .formula import *
 from .kwargs import DTSR_INITIALIZATION_KWARGS
 from .util import *
-from .data import build_DTSR_impulses, corr_dtsr
+from .data import build_DTSR_impulses, corr_dtsr, get_first_last_obs_lists
 from .plot import *
 from .interpolate_spline import interpolate_spline
 
@@ -321,11 +321,18 @@ class DTSR(object):
         self.n_train = len(y)
         self.y_train_mean = float(y[dv].mean())
         self.y_train_sd = float(y[dv].std())
-        last_obs = np.array(y.last_obs - 1, dtype=getattr(np, self.int_type))
-        first_obs = np.maximum(np.array(y.first_obs, dtype=getattr(np, self.int_type)), last_obs - self.history_length + 1)
-        X_time = np.array(X.time, dtype=getattr(np, self.float_type))
-        t_delta = X_time[last_obs] - X_time[first_obs]
-        self.max_tdelta = (t_delta).max()
+        max_tdelta = 0
+        first_obs, last_obs = get_first_last_obs_lists(y)
+        for i, cols in enumerate(zip(first_obs, last_obs)):
+            first_obs_cur, last_obs_cur = cols
+            X_time = np.array(X[i].time, dtype=getattr(np, self.float_type))
+            last_obs_cur = np.array(last_obs_cur, dtype=getattr(np, self.int_type))
+            first_obs_cur = np.maximum(np.array(first_obs_cur, dtype=getattr(np, self.int_type)), last_obs_cur - self.history_length + 1)
+            t_delta = (y.time - X_time[first_obs_cur])
+            max_tdelta_cur = t_delta.max()
+            if max_tdelta_cur > max_tdelta:
+                max_tdelta = max_tdelta_cur
+        self.max_tdelta = max_tdelta
 
         if self.pc:
             self.src_impulse_names_norate = list(filter(lambda x: x != 'rate', self.form.t.impulse_names(include_interactions=True)))
@@ -654,13 +661,13 @@ class DTSR(object):
                     name='X'
                 )
                 self.time_X = tf.placeholder(
-                    shape=[None, self.history_length],
+                    shape=[None, self.history_length, n_impulse],
                     dtype=self.FLOAT_TF,
                     name='time_X'
                 )
 
                 self.time_X_mask = tf.placeholder(
-                    shape=[None, self.history_length],
+                    shape=[None, self.history_length, n_impulse],
                     dtype=tf.bool,
                     name='time_X_mask'
                 )
@@ -668,7 +675,7 @@ class DTSR(object):
                 self.y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('y'))
                 self.time_y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('time_y'))
                 # Tensor of temporal offsets with shape (?, history_length, 1)
-                self.t_delta = tf.expand_dims(tf.expand_dims(self.time_y, -1) - self.time_X, -1)
+                self.t_delta = self.time_y[..., None, None] - self.time_X
                 # Mask on variables that are not response-aligned, used for implementation of DiracDelta IRF
                 self.is_response_aligned = tf.cast(
                     tf.logical_not(
@@ -2383,7 +2390,7 @@ class DTSR(object):
                             impulse = tf.gather(self.X, impulse_ix, axis=2)[:, -1, :]
 
                         # Zero-out impulses to DiracDelta that are not response-aligned
-                        impulse *= self.is_response_aligned
+                        impulse *= self.is_response_aligned[:, :, impulse_ix]
                     else:
                         if self.pc:
                             if impulse_name == 'rate':
@@ -2407,6 +2414,8 @@ class DTSR(object):
             with self.sess.graph.as_default():
                 for name in self.terminal_names:
                     t = self.node_table[name]
+                    impulse_name = self.terminal2impulse[name]
+                    impulse_ix = names2ix(impulse_name, self.impulse_names)
 
                     if t.p.family == 'DiracDelta':
                         self.convolutions[name] = self.irf_impulses[name]
@@ -2421,8 +2430,8 @@ class DTSR(object):
 
                             impulse_interp, t_interp = self._lininterp_fixed_frequency(
                                 impulse,
-                                self.time_X,
-                                self.time_X_mask,
+                                self.time_X[:,:,impulse_ix],
+                                self.time_X_mask[:,:,impulse_ix],
                                 hz = self.interp_hz
                             )
                             t_delta_interp = tf.expand_dims(tf.expand_dims(self.time_y, -1) - t_interp, -1)
@@ -2438,7 +2447,7 @@ class DTSR(object):
                             else:
                                 irf = irf[0]
 
-                            irf_seq = irf(self.t_delta)
+                            irf_seq = irf(self.t_delta[:,:,impulse_ix:impulse_ix+1])
 
                             self.convolutions[name] = tf.reduce_sum(impulse * irf_seq, axis=1)
 
@@ -3106,13 +3115,19 @@ class DTSR(object):
             with self.sess.graph.as_default():
                 if n_time_units is None:
                     n_time_units = self.max_tdelta
+
+                if self.pc:
+                    n_impulse = len(self.src_impulse_names)
+                else:
+                    n_impulse = len(self.impulse_names)
+
                 fd = {
                     self.support_start: 0.,
                     self.n_time_units: n_time_units,
                     self.n_time_points: n_time_points,
                     self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1,
                     self.time_y: [n_time_units],
-                    self.time_X: np.zeros((1, self.history_length))
+                    self.time_X: np.zeros((1, self.history_length, n_impulse))
                 }
 
                 if terminal_name in self.irf_integral_tensors:
@@ -4298,11 +4313,12 @@ class DTSR(object):
         """
         Fit the DTSR model.
 
-        :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
-            **X** must contain the following columns (additional columns are ignored):
+        :param X: list of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+            Each element of **X** must contain the following columns (additional columns are ignored):
 
             * ``time``: Timestamp associated with each observation in **X**
-            * A column for each independent variable in the DTSR ``form_str`` provided at iniialization
+
+            Across all elements of **X**, there must be a column for each independent variable in the DTSR ``form_str`` provided at initialization.
 
         :param y: ``pandas`` table; the dependent variable. Must contain the following columns:
 
@@ -4356,12 +4372,14 @@ class DTSR(object):
             c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
 
+        first_obs, last_obs = get_first_last_obs_lists(y)
+
         X_2d, time_X_2d, time_X_mask = build_DTSR_impulses(
             X,
-            y.first_obs,
-            y.last_obs,
+            first_obs,
+            last_obs,
             impulse_names,
-            history_length=128,
+            history_length=self.history_length,
             X_response_aligned_predictor_names=X_response_aligned_predictor_names,
             X_response_aligned_predictors=X_response_aligned_predictors,
             X_2d_predictor_names=X_2d_predictor_names,
@@ -4376,7 +4394,7 @@ class DTSR(object):
 
         sys.stderr.write('Correlation matrix for input variables:\n')
         impulse_names_2d = [x for x in impulse_names if x in X_2d_predictor_names]
-        rho = corr_dtsr(X_2d, impulse_names, impulse_names_2d, time_X_mask)
+        rho = corr_dtsr(X_2d, impulse_names, impulse_names_2d, time_X_2d, time_X_mask)
         sys.stderr.write(str(rho) + '\n\n')
 
         with self.sess.as_default():
@@ -4618,19 +4636,20 @@ class DTSR(object):
         Predict from the pre-trained DTSR model.
         Predictions are averaged over ``self.n_samples_eval`` samples from the predictive posterior for each regression target.
 
-        :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
-            ``X`` must contain the following columns (additional columns are ignored):
+        :param X: list of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+            Each element of **X** must contain the following columns (additional columns are ignored):
 
-            * ``time``: Timestamp associated with each observation
-            * A column for each independent variable in the DTSR ``form_str`` provided at iniialization
+            * ``time``: Timestamp associated with each observation in **X**
+
+            Across all elements of **X**, there must be a column for each independent variable in the DTSR ``form_str`` provided at initialization.
 
         :param y_time: ``pandas`` ``Series`` or 1D ``numpy`` array; timestamps for the regression targets, grouped by series.
         :param y_rangf: ``pandas`` ``Series`` or 1D ``numpy`` array; random grouping factor values (if applicable).
             Can be of type ``str`` or ``int``.
             Sort order and number of observations must be identical to that of ``y_time``.
-        :param first_obs: ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the start of the series associated with the current regression target.
+        :param first_obs: list of ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the start of the series associated with the current regression target.
             Sort order and number of observations must be identical to that of ``y_time``.
-        :param last_obs: ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the most recent observation in the series associated with the current regression target.
+        :param last_obs: list of ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the most recent observation in the series associated with the current regression target.
             Sort order and number of observations must be identical to that of ``y_time``.
         :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
         :param X_response_aligned_predictors: ``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
@@ -4641,8 +4660,6 @@ class DTSR(object):
         :param verbose: ``bool``; Report progress and metrics to standard error.
         :return: 1D ``numpy`` array; mean network predictions for regression targets (same length and sort order as ``y_time``).
         """
-
-        assert len(y_time) == len(y_rangf) == len(first_obs) == len(last_obs), 'y_time, y_rangf, first_obs, and last_obs must be of identical length. Got: len(y_time) = %d, len(y_rangf) = %d, len(first_obs) = %d, len(last_obs) = %d' % (len(y_time), len(y_rangf), len(first_obs), len(last_obs))
 
         if verbose:
             usingGPU = tf.test.is_gpu_available()
@@ -4665,7 +4682,7 @@ class DTSR(object):
             first_obs,
             last_obs,
             impulse_names,
-            history_length=128,
+            history_length=self.history_length,
             X_response_aligned_predictor_names=X_response_aligned_predictor_names,
             X_response_aligned_predictors=X_response_aligned_predictors,
             X_2d_predictor_names=X_2d_predictor_names,
@@ -4673,6 +4690,7 @@ class DTSR(object):
             int_type=self.int_type,
             float_type=self.float_type,
         )
+
         time_y = np.array(y_time, dtype=self.FLOAT_NP)
         gf_y = np.array(y_rangf, dtype=self.INT_NP)
 
@@ -4728,11 +4746,12 @@ class DTSR(object):
         """
         Compute log-likelihood of data from predictive posterior.
 
-        :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
-            ``X`` must contain the following columns (additional columns are ignored):
+        :param X: list of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+            Each element of **X** must contain the following columns (additional columns are ignored):
 
-            * ``time``: Timestamp associated with each observation in ``X``
-            * A column for each independent variable in the DTSR ``form_str`` provided at iniialization
+            * ``time``: Timestamp associated with each observation in **X**
+
+            Across all elements of **X**, there must be a column for each independent variable in the DTSR ``form_str`` provided at initialization.
 
         :param y: ``pandas`` table; the dependent variable. Must contain the following columns:
 
@@ -4769,12 +4788,14 @@ class DTSR(object):
             c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
 
+        first_obs, last_obs = get_first_last_obs_lists(y)
+
         X_2d, time_X_2d, time_X_mask = build_DTSR_impulses(
             X,
-            y['first_obs'],
-            y['last_obs'],
+            first_obs,
+            last_obs,
             impulse_names,
-            history_length=128,
+            history_length=self.history_length,
             X_response_aligned_predictor_names=X_response_aligned_predictor_names,
             X_response_aligned_predictors=X_response_aligned_predictors,
             X_2d_predictor_names=X_2d_predictor_names,
@@ -4782,6 +4803,7 @@ class DTSR(object):
             int_type=self.int_type,
             float_type=self.float_type,
         )
+
         time_y = np.array(y.time, dtype=self.FLOAT_NP)
         y_dv = np.array(y[self.dv], dtype=self.FLOAT_NP)
         gf_y = np.array(y_rangf, dtype=self.INT_NP)
@@ -4842,11 +4864,12 @@ class DTSR(object):
         """
         Convolve input data using the fitted DTSR model.
 
-        :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
-            ``X`` must contain the following columns (additional columns are ignored):
+        :param X: list of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+            Each element of **X** must contain the following columns (additional columns are ignored):
 
-            * ``time``: Timestamp associated with each observation in ``X``
-            * A column for each independent variable in the DTSR ``form_str`` provided at iniialization
+            * ``time``: Timestamp associated with each observation in **X**
+
+            Across all elements of **X**, there must be a column for each independent variable in the DTSR ``form_str`` provided at initialization.
 
         :param y: ``pandas`` table; the dependent variable. Must contain the following columns:
 
@@ -4880,12 +4903,14 @@ class DTSR(object):
             c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
 
+        first_obs, last_obs = get_first_last_obs_lists(y)
+
         X_2d, time_X_2d, time_X_mask = build_DTSR_impulses(
             X,
-            y['first_obs'],
-            y['last_obs'],
+            first_obs,
+            last_obs,
             impulse_names,
-            history_length=128,
+            history_length=self.history_length,
             X_response_aligned_predictor_names=X_response_aligned_predictor_names,
             X_response_aligned_predictors=X_response_aligned_predictors,
             X_2d_predictor_names=X_2d_predictor_names,
@@ -4944,7 +4969,7 @@ class DTSR(object):
                 convolution_summary += 'Correlation matrix of convolved predictors:\n\n'
                 convolution_summary += str(corr_conv) + '\n\n'
 
-                select = np.where(np.isclose(time_X_2d[:,-1], time_y))[0]
+                select = np.where(np.all(np.isclose(time_X_2d[:,-1], time_y[..., None]), axis=-1))[0]
 
                 X_input = X_2d[:,-1,:][select]
 
