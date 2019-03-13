@@ -1424,6 +1424,11 @@ class DTSRBayes(DTSR):
             n_samples = self.n_samples_eval
         if n_time_units is None:
             n_time_units = self.max_tdelta
+        if self.pc:
+            n_impulse = len(self.src_impulse_names)
+        else:
+            n_impulse = len(self.impulse_names)
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 fd = {
@@ -1432,7 +1437,7 @@ class DTSRBayes(DTSR):
                     self.n_time_points: n_time_points,
                     self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1,
                     self.time_y: np.ones((1,)) * n_time_units,
-                    self.time_X: np.zeros((1, self.history_length))
+                    self.time_X: np.zeros((1, self.history_length, n_impulse))
                 }
 
                 alpha = 100-float(level)
