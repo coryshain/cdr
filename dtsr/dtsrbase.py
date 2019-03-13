@@ -584,8 +584,8 @@ class DTSR(object):
                     self.d0_saved_update = []
                     self.d0_assign = []
 
-                    self.convergence_history = tf.Variable(tf.zeros([self.convergence_n_iterates, 1]), trainable=False, dtype=self.FLOAT_NP, name='convergence_history')
-                    self.convergence_history_update = tf.placeholder(self.FLOAT_TF, shape=[self.convergence_n_iterates, 1], name='convergence_history_update')
+                    self.convergence_history = tf.Variable(tf.zeros([int(self.convergence_n_iterates / self.convergence_stride), 1]), trainable=False, dtype=self.FLOAT_NP, name='convergence_history')
+                    self.convergence_history_update = tf.placeholder(self.FLOAT_TF, shape=[int(self.convergence_n_iterates / self.convergence_stride), 1], name='convergence_history_update')
                     self.convergence_history_assign = tf.assign(self.convergence_history, self.convergence_history_update)
                     self.proportion_converged = tf.reduce_mean(self.convergence_history)
 
@@ -2872,7 +2872,7 @@ class DTSR(object):
 
                     # Initialize tracker of parameter iterates
                     var_d0_iterates = tf.Variable(
-                        tf.zeros([self.convergence_n_iterates] + list(var.shape), dtype=self.FLOAT_TF),
+                        tf.zeros([int(self.convergence_n_iterates / self.convergence_stride)] + list(var.shape), dtype=self.FLOAT_TF),
                         name=name + '_d0',
                         trainable=False
                     )
@@ -2886,14 +2886,16 @@ class DTSR(object):
         x = np.arange(0, len(iterates)*self.convergence_stride, self.convergence_stride).astype('float')[..., None]
         y = iterates
 
+        n_iterates = int(self.convergence_n_iterates / self.convergence_stride)
+
         rt = corr(x, y)[0]
-        tt = rt * np.sqrt((self.convergence_n_iterates - 2) / (1 - rt ** 2))
-        p_tt = 1 - (scipy.stats.t.cdf(np.fabs(tt), self.convergence_n_iterates - 2) - scipy.stats.t.cdf(-np.fabs(tt), self.convergence_n_iterates - 2))
+        tt = rt * np.sqrt((n_iterates - 2) / (1 - rt ** 2))
+        p_tt = 1 - (scipy.stats.t.cdf(np.fabs(tt), n_iterates - 2) - scipy.stats.t.cdf(-np.fabs(tt), n_iterates - 2))
         p_tt = np.where(np.isfinite(p_tt), p_tt, np.zeros_like(p_tt))
 
         ra = corr(y[1:], y[:-1])[0]
-        ta = ra * np.sqrt((self.convergence_n_iterates - 2) / (1 - ra ** 2))
-        p_ta = 1 - (scipy.stats.t.cdf(np.fabs(ta), self.convergence_n_iterates - 2) - scipy.stats.t.cdf(-np.fabs(ta), self.convergence_n_iterates - 2))
+        ta = ra * np.sqrt((n_iterates - 2) / (1 - ra ** 2))
+        p_ta = 1 - (scipy.stats.t.cdf(np.fabs(ta), n_iterates - 2) - scipy.stats.t.cdf(-np.fabs(ta), n_iterates - 2))
         p_ta = np.where(np.isfinite(p_ta), p_ta, np.zeros_like(p_ta))
 
         return rt, p_tt, ra, p_ta
@@ -2909,10 +2911,13 @@ class DTSR(object):
                     p_ta_at_min_p = 0
                     fd_assign = {}
 
-                    offset = self.global_step.eval(session=self.sess) % self.convergence_stride
-                    update = self.last_convergence_check.eval(session=self.sess) < self.global_step.eval(session=self.sess) and \
-                             self.convergence_stride > 0
+                    cur_step = self.global_step.eval(session=self.sess)
+                    last_check = self.last_convergence_check.eval(session=self.sess)
+                    offset = cur_step % self.convergence_stride
+                    update = last_check < cur_step and self.convergence_stride > 0
                     push = update and offset == 0
+                    # End of stride if next step is a push
+                    end_of_stride = last_check < (cur_step+1) and self.convergence_stride > 0 and ((cur_step+1) % self.convergence_stride == 0)
 
                     if self.check_convergence:
                         if update:
@@ -2920,7 +2925,7 @@ class DTSR(object):
                         else:
                             var_d0_iterates = self.sess.run(self.d0_saved)
 
-                        start_ix = self.convergence_n_iterates - int(self.global_step.eval(session=self.sess) / self.convergence_stride)
+                        start_ix = int(self.convergence_n_iterates / self.convergence_stride) - int(cur_step / self.convergence_stride)
                         start_ix = max(0, start_ix)
 
                         for i in range(len(var_d0_iterates)):
@@ -2953,8 +2958,8 @@ class DTSR(object):
                             to_run = [self.d0_assign, self.last_convergence_check_assign]
                             self.sess.run(to_run, feed_dict=fd_assign)
 
-                    if push:
-                        locally_converged = self.global_step.eval(session=self.sess) > self.convergence_n_iterates and \
+                    if end_of_stride:
+                        locally_converged = cur_step > self.convergence_n_iterates and \
                                     (min_p > self.convergence_alpha) and \
                                     (p_ta_at_min_p > self.convergence_alpha)
                         convergence_history = self.convergence_history.eval(session=self.sess)
@@ -2975,7 +2980,7 @@ class DTSR(object):
                         self.writer.add_summary(summary_convergence, self.global_step.eval(session=self.sess))
 
                     proportion_converged = self.proportion_converged.eval(session=self.sess)
-                    converged = self.global_step.eval(session=self.sess) > self.convergence_n_iterates and \
+                    converged = cur_step > self.convergence_n_iterates and \
                                 (min_p > self.convergence_alpha) and \
                                 (p_ta_at_min_p > self.convergence_alpha) and \
                                 (proportion_converged > self.convergence_alpha)
