@@ -2415,7 +2415,7 @@ class DTSR(object):
                 for name in self.terminal_names:
                     t = self.node_table[name]
                     impulse_name = self.terminal2impulse[name]
-                    impulse_ix = names2ix(impulse_name, self.impulse_names)
+                    impulse_ix = names2ix(impulse_name, self.impulse_names)[0]
 
                     if t.p.family == 'DiracDelta':
                         self.convolutions[name] = self.irf_impulses[name]
