@@ -245,7 +245,7 @@ class LME(object):
 class GAM(object):
     def __init__(self, formula, X, ran_gf=None):
         mgcv = importr('mgcv')
-        process_ran_gf, add_z, fit, summary, predict, unique = self.instance_methods()
+        process_ran_gf, add_z, add_log, fit, summary, predict, unique = self.instance_methods()
         self.formula = formula
         rstring = '''
             function() numeric()
@@ -262,6 +262,7 @@ class GAM(object):
         if ran_gf is not None:
             X = process_ran_gf(X, ran_gf)
         X = add_z(X)
+        X = add_log(X)
         self.m = fit(formula, X)
         self.summary = lambda: summary(self.m)
         self.predict = lambda x: predict(self.m, self.formula, x, self.subject, self.word)
@@ -298,6 +299,18 @@ class GAM(object):
             }
         '''
         add_z = robjects.r(rstring)
+
+        rstring = '''
+            function(X) {
+                for (c in names(X)) {
+                    if (is.numeric(X[[c]])) {
+                        X[[paste0('log_',c)]] <- log(X[[c]])
+                    }
+                }
+                return(X)
+            }
+                '''
+        add_log = robjects.r(rstring)
 
         rstring = '''
             function(bform, df) {
