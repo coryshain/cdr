@@ -366,7 +366,7 @@ DTSR_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'convergence_stride',
-        5,
+        1,
         int,
         "Stride (in iterations) over which to compute convergence. If larger than 1, iterations within a stride are averaged with the most recently saved value. Larger values increase the receptive field of the slope estimates, making convergence diagnosis less vulnerable to local perturbations but also increasing the number of post-convergence iterations necessary in order to identify convergence."
     ),
@@ -378,7 +378,7 @@ DTSR_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'convergence_alpha',
-        0.25,
+        0.5,
         [float, None],
         "Significance threshold above which to fail to reject the null of no correlation between convergence basis and training time. Larger values are more stringent."
     ),
