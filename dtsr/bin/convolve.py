@@ -48,7 +48,7 @@ if __name__ == '__main__':
     evaluation_set_paths = []
 
     for p_name in args.partition:
-        partitions = get_partition_list(args.partition)
+        partitions = get_partition_list(p_name)
         partition_str = '-'.join(partitions)
         X_paths, y_paths = paths_from_partition_cliarg(partitions, p)
         X, y = read_data(X_paths, y_paths, p.series_ids, categorical_columns=list(
