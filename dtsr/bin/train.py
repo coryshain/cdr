@@ -40,6 +40,10 @@ if __name__ == '__main__':
         elif not run_dtsr and m.startswith('DTSR'):
             run_dtsr = True
 
+    if not (run_baseline or run_dtsr):
+        sys.stderr.write('No models to run. Exiting...\n')
+        exit()
+
     dtsr_formula_list = [Formula(p.models[m]['formula']) for m in p.model_list if m.startswith('DTSR')]
     dtsr_formula_name_list = [m for m in p.model_list if m.startswith('DTSR')]
     all_rangf = [v for x in dtsr_formula_list for v in x.rangf]
