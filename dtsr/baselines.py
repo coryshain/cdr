@@ -123,7 +123,7 @@ class LM(object):
 
         rstring = '''
             function(model, df) {
-                return(predict(model, df, allow.new.levels=TRUE, na.action=na.pas))
+                return(predict(model, df, na.action=na.pass))
             }
         '''
 

@@ -1217,8 +1217,7 @@ class DTSR(object):
                 def exponential(params):
                     return lambda x: exponential_irf(
                         params,
-                        session=self.sess,
-                        epsilon=self.epsilon
+                        session=self.sess
                     )(x)
 
                 self.irf_lambdas['Exp'] = exponential
