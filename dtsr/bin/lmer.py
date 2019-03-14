@@ -4,7 +4,7 @@ import os
 import pickle
 import pandas as pd
 from dtsr.config import Config
-from dtsr.baselines import py2ri, LME
+from dtsr.baselines import py2ri, LM, LME
 from dtsr.formula import Formula
 from dtsr.util import mse, mae, filter_models, get_partition_list
 
@@ -44,8 +44,10 @@ if __name__ == '__main__':
         if os.path.exists(data_path):
             p.set_model(m)
             f = Formula(p['formula'])
-            lmeform = f.to_lmer_formula_string(z=args.zscore)
-            lmeform = lmeform.replace('-', '_')
+            model_form = f.to_lmer_formula_string(z=args.zscore)
+            model_form = model_form.replace('-', '_')
+
+            is_lme = '|' in model_form
 
             df = pd.read_csv(data_path, sep=' ', skipinitialspace=True)
             for c in df.columns:
@@ -61,31 +63,34 @@ if __name__ == '__main__':
 
             dv = f.dv
 
-            model_path = dir_path + '/lmer_%s.obj' % partition_str
-            model_summary_path = dir_path + '/lmer_%s_summary.txt' % partition_str
+            model_path = dir_path + '/lm_%s.obj' % partition_str
+            model_summary_path = dir_path + '/lm_%s_summary.txt' % partition_str
 
             if not args.force and os.path.exists(model_path):
-                sys.stderr.write('Retrieving saved LMER regression of DTSR model %s...\n' % m)
+                sys.stderr.write('Retrieving saved L(ME) regression of DTSR model %s...\n' % m)
                 with open(model_path, 'rb') as m_file:
-                    lme = pickle.load(m_file)
+                    lm = pickle.load(m_file)
             else:
-                sys.stderr.write('Fitting LMER regression of DTSR model %s...\n' % m)
-                lme = LME(lmeform, df_r)
+                sys.stderr.write('Fitting L(ME) regression of DTSR model %s...\n' % m)
+                if is_lme:
+                    lm = LME(model_form, df_r)
+                else:
+                    lm = LM(model_form, df_r)
                 with open(model_path, 'wb') as m_file:
-                    pickle.dump(lme, m_file)
+                    pickle.dump(lm, m_file)
 
-            lme_preds = lme.predict(df_r)
-            lme_mse = mse(df[dv], lme_preds)
-            lme_mae = mae(df[dv], lme_preds)
+            lm_preds = lm.predict(df_r)
+            lm_mse = mse(df[dv], lm_preds)
+            lm_mae = mae(df[dv], lm_preds)
             summary = '=' * 50 + '\n'
-            summary += 'LME regression\n\n'
+            summary += '%s regression\n\n' % ('LME' if is_lme else 'Linear')
             summary += 'Model name: %s\n\n' % m
             summary += 'Formula:\n'
-            summary += '  ' + lmeform + '\n'
-            summary += str(lme.summary()) + '\n'
+            summary += '  ' + model_form + '\n'
+            summary += str(lm.summary()) + '\n'
             summary += 'Training set loss:\n'
-            summary += '  MSE: %.4f\n' % lme_mse
-            summary += '  MAE: %.4f\n' % lme_mae
+            summary += '  MSE: %.4f\n' % lm_mse
+            summary += '  MAE: %.4f\n' % lm_mae
             summary += '=' * 50 + '\n'
             with open(model_summary_path, 'w') as f_out:
                 f_out.write(summary)

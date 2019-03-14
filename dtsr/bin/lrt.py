@@ -51,14 +51,14 @@ if __name__ == '__main__':
                 sys.stderr.write('Comparing models within ablation set "%s"...\n' %s)
             for i in range(len(model_set)):
                 model_name_1 = model_set[i]
-                lme_path_1 = p.outdir + '/' + model_name_1 + '/lmer_%s.obj' % partition_str
+                lme_path_1 = p.outdir + '/' + model_name_1 + '/lm_%s.obj' % partition_str
                 with open(lme_path_1, 'rb') as m_file:
                     lme1 = pickle.load(m_file)
 
                 for j in range(i+1, len(model_set)):
                     model_name_2 = model_set[j]
                     if nested(model_name_1, model_name_2) or not args.ablation:
-                        lme_path_2 = p.outdir + '/' + model_name_2 + '/lmer_%s.obj' % partition_str
+                        lme_path_2 = p.outdir + '/' + model_name_2 + '/lm_%s.obj' % partition_str
                         with open(lme_path_2, 'rb') as m_file:
                             lme2 = pickle.load(m_file)
                         anova_summary = str(anova(lme1.m, lme2.m))
