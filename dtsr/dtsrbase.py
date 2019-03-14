@@ -2390,7 +2390,7 @@ class DTSR(object):
                             impulse = tf.gather(self.X, impulse_ix, axis=2)[:, -1, :]
 
                         # Zero-out impulses to DiracDelta that are not response-aligned
-                        impulse *= self.is_response_aligned[:, :, impulse_ix]
+                        impulse *= self.is_response_aligned[:, impulse_ix[0]:impulse_ix[0]+1]
                     else:
                         if self.pc:
                             if impulse_name == 'rate':

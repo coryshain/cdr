@@ -487,6 +487,8 @@ def preprocess_data(X, y, formula_list, series_ids, filter_map=None, compute_his
                 X_response_aligned_predictors=X_response_aligned_predictors,
                 history_length=history_length
             )
+    else:
+        X_new = X
 
     return X_new, y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors
 

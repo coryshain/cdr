@@ -70,7 +70,7 @@ if __name__ == '__main__':
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of model names from which to predict. Regex permitted. If unspecified, predicts from all models.')
     argparser.add_argument('-d', '--data', nargs='+', default=[], help='Pairs of paths or buffers <predictors, responses>, allowing prediction on arbitrary evaluation data. Predictors may consist of ``;``-delimited paths designating files containing predictors with different timestamps. Within each file, timestamps are treated as identical across predictors.')
-    argparser.add_argument('-p', '--partition', nargs='+', default=['dev'], help='Name of partition to use ("train", "dev", "test", or hyphen-delimited subset of these). Ignored if **data** is provided.')
+    argparser.add_argument('-p', '--partition', nargs='+', default=['dev'], help='List of names of partitions to use ("train", "dev", "test", or hyphen-delimited subset of these).')
     argparser.add_argument('-n', '--nsamples', type=int, default=1024, help='Number of posterior samples to average (only used for DTSRBayes)')
     argparser.add_argument('-M', '--mode', type=str, default=None, help='Predict mode ("response" or "loglik") or default None, which does both')
     argparser.add_argument('-a', '--algorithm', type=str, default='MAP', help='Algorithm ("sampling" or "MAP") to use for extracting predictions from DTSRBayes. Ignored for DTSRMLE.')
@@ -100,7 +100,7 @@ if __name__ == '__main__':
     evaluation_set_paths = []
 
     for p_name in args.partition:
-        partitions = get_partition_list(args.partition)
+        partitions = get_partition_list(p_name)
         partition_str = '-'.join(partitions)
         X_paths, y_paths = paths_from_partition_cliarg(partitions, p)
         X, y = read_data(X_paths, y_paths, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in dtsr_formula_list for v in x.rangf])))
