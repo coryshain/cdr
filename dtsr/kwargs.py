@@ -456,21 +456,21 @@ DTSRMLE_INITIALIZATION_KWARGS = [
         None,
         [float, None],
         "Square root of variance of intercept in initial variance-covariance matrix of joint distributions. Used only if either **covarying_fixef** or **covarying_ranef** is ``True``, otherwise ignored. If ``None``, inferred as **joint_sd_scaling_coefficient** times the empirical variance of the response on the training set.",
-        aliases=['intercept_prior_sd']
+        aliases=['intercept_prior_sd', 'prior_sd']
     ),
     Kwarg(
         'coef_joint_sd',
         None,
         [float, None],
         "Square root of variance of coefficients in initial variance-covariance matrix of joint distributions. Used only if either **covarying_fixef** or **covarying_ranef** is ``True``, otherwise ignored. If ``None``, inferred as **joint_sd_scaling_coefficient** times the empirical variance of the response on the training set.",
-        aliases=['coef_prior_sd']
+        aliases=['coef_prior_sd', 'prior_sd']
     ),
     Kwarg(
         'irf_param_joint_sd',
         1.,
         float,
         "Square root of variance of intercept in initial variance-covariance matrix of joint distributions. Used only if either **covarying_fixef** or **covarying_ranef** is ``True``, otherwise ignored.",
-        aliases=['irf_param_prior_sd, conv_param_joint_sd, conv_prior_sd']
+        aliases=['irf_param_prior_sd', 'conv_param_joint_sd', 'conv_prior_sd', 'prior_sd']
     ),
     Kwarg(
         'joint_sd_scaling_coefficient',
@@ -526,21 +526,22 @@ DTSRBAYES_INITIALIZATION_KWARGS = [
         'intercept_prior_sd',
         None,
         [float, None],
-        "Standard deviation of prior on fixed intercept. If ``None``, inferred as **prior_sd_scaling_coefficient** times the empirical variance of the response on the training set."
+        "Standard deviation of prior on fixed intercept. If ``None``, inferred as **prior_sd_scaling_coefficient** times the empirical variance of the response on the training set.",
+        aliases=['prior_sd']
     ),
     Kwarg(
         'coef_prior_sd',
         None,
         [float, None],
         "Standard deviation of prior on fixed coefficients. If ``None``, inferred as **prior_sd_scaling_coefficient** times the empirical variance of the response on the training set.",
-        aliases=['coefficient_prior_sd']
+        aliases=['coefficient_prior_sd', 'prior_sd']
     ),
     Kwarg(
         'irf_param_prior_sd',
         1.,
         float,
         "Standard deviation of prior on convolutional IRF parameters",
-        aliases=['conv_prior_sd']
+        aliases=['conv_prior_sd', 'prior_sd']
     ),
     Kwarg(
         'y_sd_init',
@@ -561,19 +562,21 @@ DTSRBAYES_INITIALIZATION_KWARGS = [
         None,
         [float, None],
         "Standard deviation of prior on standard deviation of output model. If ``None``, inferred as **y_sd_prior_sd_scaling_coefficient** times the empirical variance of the response on the training set.",
-        aliases=['y_scale_prior_sd']
+        aliases=['y_scale_prior_sd', 'prior_sd']
     ),
     Kwarg(
         'y_skewness_prior_sd',
         1,
         float,
-        "Standard deviation of prior on skewness parameter of output model. Only used if ``asymmetric_error == True``, otherwise ignored."
+        "Standard deviation of prior on skewness parameter of output model. Only used if ``asymmetric_error == True``, otherwise ignored.",
+        aliases=['prior_sd']
     ),
     Kwarg(
         'y_tailweight_prior_sd',
         1,
         float,
-        "Standard deviation of prior on tailweight parameter of output model. Only used if ``asymmetric_error == True``, otherwise ignored."
+        "Standard deviation of prior on tailweight parameter of output model. Only used if ``asymmetric_error == True``, otherwise ignored.",
+        aliases=['prior_sd']
     ),
     Kwarg(
         'mh_proposal_sd',
@@ -592,7 +595,7 @@ DTSRBAYES_INITIALIZATION_KWARGS = [
         1,
         float,
         "Factor by which to multiply prior on output model variance if inferred from the empirical variance of the data (i.e. if **y_sd_prior_sd** is ``None``). Ignored if prior width is explicitly specified.",
-        aliases=['y_scale_prior_sd_scaling_coefficient']
+        aliases=['y_scale_prior_sd_scaling_coefficient', 'prior_sd_scaling_coefficient']
     ),
     Kwarg(
         'ranef_to_fixef_prior_sd_ratio',

@@ -417,6 +417,7 @@ class DTSR(object):
             self.src_node_table = t_src.node_table()
             self.src_coef_names = t_src.coef_names()
             self.src_fixed_coef_names = t_src.fixed_coef_names()
+            self.src_spline_coef_names = t_src.spline_coef_names()
             self.src_interaction_list = t_src.interactions()
             self.src_interaction_names = t_src.interaction_names()
             self.src_fixed_interaction_names = t_src.fixed_interaction_names()
@@ -455,6 +456,7 @@ class DTSR(object):
             self.node_table = t.node_table()
             self.coef_names = t.coef_names()
             self.fixed_coef_names = t.fixed_coef_names()
+            self.spline_coef_names = t.spline_coef_names()
             self.interaction_list = t.interactions()
             self.interaction_names = t.interaction_names()
             self.fixed_interaction_names = t.fixed_interaction_names()
@@ -523,6 +525,7 @@ class DTSR(object):
             self.node_table = t.node_table()
             self.coef_names = t.coef_names()
             self.fixed_coef_names = t.fixed_coef_names()
+            self.spline_coef_names = t.spline_coef_names()
             self.interaction_list = t.interactions()
             self.interaction_names = t.interaction_names()
             self.fixed_interaction_names = t.fixed_interaction_names()
@@ -991,26 +994,45 @@ class DTSR(object):
 
                 # Coefficients
                 fixef_ix = names2ix(self.fixed_coef_names, self.coef_names)
-
                 coef_ids = self.coef_names
+                if len(self.spline_coef_names) > 0:
+                    nonzero_coefficients = tf.concat(
+                        [
+                            self.coefficient_fixed_base,
+                            tf.ones([len(self.spline_coef_names)], dtype=self.FLOAT_TF)
+                        ],
+                        axis=0
+                    )
+                    nonzero_coefficients_summary = tf.concat(
+                        [
+                            self.coefficient_fixed_base_summary,
+                            tf.ones([len(self.spline_coef_names)], dtype=self.FLOAT_TF)
+                        ],
+                        axis=0
+                    )
+                    nonzero_coef_ix = names2ix(self.fixed_coef_names + self.spline_coef_names, self.coef_names)
+                else:
+                    nonzero_coefficients = self.coefficient_fixed_base
+                    nonzero_coefficients_summary = self.coefficient_fixed_base_summary
+                    nonzero_coef_ix = fixef_ix
                 self.coefficient_fixed = self._scatter_along_axis(
-                    fixef_ix,
-                    self.coefficient_fixed_base,
+                    nonzero_coef_ix,
+                    nonzero_coefficients,
                     [len(coef_ids)]
                 )
                 self.coefficient_fixed_summary = self._scatter_along_axis(
-                    fixef_ix,
-                    self.coefficient_fixed_base_summary,
+                    nonzero_coef_ix,
+                    nonzero_coefficients_summary,
                     [len(coef_ids)]
                 )
-                self._regularize(self.coefficient_fixed, type='coefficient', var_name='coefficient')
+                self._regularize(self.coefficient_fixed_base, type='coefficient', var_name='coefficient')
                 if self.convergence_basis.lower() == 'parameters':
-                    self._add_convergence_tracker(self.coefficient_fixed_summary, 'coefficient_fixed')
+                    self._add_convergence_tracker(self.coefficient_fixed_base_summary, 'coefficient_fixed')
 
-                for i in range(len(self.coef_names)):
+                for i in range(len(self.fixed_coef_names)):
                     tf.summary.scalar(
-                        'coefficient' + '/%s' % self.coef_names[i],
-                        self.coefficient_fixed_summary[i],
+                        'coefficient' + '/%s' % self.fixed_coef_names[i],
+                        self.coefficient_fixed_base_summary[i],
                         collections=['params']
                     )
 
@@ -1019,7 +1041,6 @@ class DTSR(object):
                 self.coefficient_random_summary = {}
                 self.coefficient_random_means = {}
                 self.coefficient = tf.expand_dims(self.coefficient, 0)
-                coefficient_fixed = self.coefficient
 
                 # Interactions
                 fixef_ix = names2ix(self.fixed_interaction_names, self.interaction_names)
@@ -1102,7 +1123,7 @@ class DTSR(object):
                     # Random coefficients
                     coefs = self.coef_by_rangf.get(gf, [])
                     if len(coefs) > 0:
-                        coef_ix = names2ix(coefs, self.coef_names)
+                        nonzero_coef_ix = names2ix(coefs, self.coef_names)
 
                         coefficient_random = self.coefficient_random_base[gf]
                         coefficient_random_summary = self.coefficient_random_base_summary[gf]
@@ -1115,7 +1136,7 @@ class DTSR(object):
                         self._regularize(coefficient_random, type='ranef', var_name='coefficient_by_%s' % gf)
 
                         coefficient_random = self._scatter_along_axis(
-                            coef_ix,
+                            nonzero_coef_ix,
                             self._scatter_along_axis(
                                 levels_ix,
                                 coefficient_random,
@@ -1125,7 +1146,7 @@ class DTSR(object):
                             axis=1
                         )
                         coefficient_random_summary = self._scatter_along_axis(
-                            coef_ix,
+                            nonzero_coef_ix,
                             self._scatter_along_axis(
                                 levels_ix,
                                 coefficient_random_summary,
@@ -1147,7 +1168,7 @@ class DTSR(object):
                         if self.log_random:
                             for j in range(len(coefs)):
                                 coef_name = coefs[j]
-                                ix = coef_ix[j]
+                                ix = nonzero_coef_ix[j]
                                 tf.summary.histogram(
                                     sn('by_%s/coefficient/%s' % (gf, coef_name)),
                                     coefficient_random_summary[:, ix],
@@ -3897,7 +3918,7 @@ class DTSR(object):
                 for i in range(len(var_names)):
                     v_name = var_names[i]
                     v_val = var_vals[i]
-                    cur_params = np.prod(np.array(v_val).shape)
+                    cur_params = int(np.prod(np.array(v_val).shape))
                     n_params += cur_params
                     out += ' ' * indent + '  ' + v_name.split(':')[0] + ': %s\n' % str(cur_params)
                 out +=  ' ' * indent + '  TOTAL: %d\n\n' % n_params

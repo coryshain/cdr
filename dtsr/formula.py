@@ -2296,11 +2296,30 @@ class IRFNode(object):
 
         out = []
         if self.terminal():
-            if self.fixed:
+            if self.fixed and not Formula.is_spline(self.p.family):
                 out.append(self.coef_id())
         else:
             for c in self.children:
                 names = c.fixed_coef_names()
+                for name in names:
+                    if name not in out:
+                        out.append(name)
+        return out
+
+    def spline_coef_names(self):
+        """
+        Get list of names of spline coefficients dominated by node. Because splines are non-parametric, their coefficients are fixed at 1. Trainable coefficients would be perfectly confounded with the spline parameters.
+
+        :return: ``list`` of ``str``; names of spline coefficients dominated by node.
+        """
+
+        out = []
+        if self.terminal():
+            if Formula.is_spline(self.p.family):
+                out.append(self.coef_id())
+        else:
+            for c in self.children:
+                names = c.spline_coef_names()
                 for name in names:
                     if name not in out:
                         out.append(name)
@@ -2489,9 +2508,10 @@ class IRFNode(object):
         out = {}
         if self.terminal():
             for gf in self.rangf:
-                out[gf] = []
-                if self.coef_id() not in out[gf]:
-                    out[gf].append(self.coef_id())
+                if not (Formula.is_spline(self.p.family) and gf in self.p.rangf):
+                    out[gf] = []
+                    if self.coef_id() not in out[gf]:
+                        out[gf].append(self.coef_id())
         for c in self.children:
             c_out = c.coef_by_rangf()
             for gf in c_out:
