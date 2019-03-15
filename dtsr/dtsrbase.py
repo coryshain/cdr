@@ -739,13 +739,6 @@ class DTSR(object):
                     self.X_rate = tf.gather(self.X, rate_ix, axis=-1)
 
                 # Initialize regularizers
-                if self.regularizer_name is not None or \
-                        self.intercept_regularizer_name is not None or \
-                        self.coefficient_regularizer_name is not None or \
-                        self.irf_regularizer_name is not None or \
-                        self.ranef_regularizer_name is not None:
-                    self.has_regularizer_loss = True
-
                 if self.regularizer_name is None:
                     self.regularizer = None
                 else:

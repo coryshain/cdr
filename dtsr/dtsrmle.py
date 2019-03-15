@@ -281,7 +281,7 @@ class DTSRMLE(DTSR):
                     self.loss_func = self.mae_loss
                 else:
                     self.loss_func = self.mse_loss
-                if self.has_regularizer_loss:
+                if len(self.regularizer_losses_varnames) > 0:
                     self.loss_func += tf.add_n(self.regularizer_losses)
 
                 self.optim = self._initialize_optimizer(self.optim_name)
