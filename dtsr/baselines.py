@@ -273,7 +273,7 @@ class GAM(object):
     def __setstate__(self, state):
         mgcv = importr('mgcv')
         self.m, self.subject, self.word, self.formula = state
-        process_ran_gf, add_z, fit, summary, predict, unique = self.instance_methods()
+        process_ran_gf, add_z, add_log, fit, summary, predict, unique = self.instance_methods()
         self.summary = lambda: summary(self.m)
         self.predict = lambda x: predict(self.m, self.formula, x, self.subject, self.word)
 
@@ -295,6 +295,7 @@ class GAM(object):
                         X[[paste0('z_',c)]] <- scale(X[[c]])
                     }
                 }
+                print(colnames(X))
                 return(X)
             }
         '''
@@ -307,9 +308,10 @@ class GAM(object):
                         X[[paste0('log_',c)]] <- log(X[[c]])
                     }
                 }
+                print(colnames(X))
                 return(X)
             }
-                '''
+        '''
         add_log = robjects.r(rstring)
 
         rstring = '''
@@ -333,6 +335,11 @@ class GAM(object):
                 for (c in names(df)) {
                     if (is.numeric(df[[c]])) {
                         df[[paste0('z_',c)]] <- scale(df[[c]])
+                    }
+                }
+                for (c in names(df)) {
+                    if (is.numeric(df[[c]])) {
+                        df[[paste0('log_',c)]] <- scale(df[[c]])
                     }
                 }
                 select = logical(nrow(df))
@@ -361,7 +368,7 @@ class GAM(object):
 
         unique = robjects.r(rstring)
 
-        return process_ran_gf, add_z, fit, summary, predict, unique
+        return process_ran_gf, add_z, add_log, fit, summary, predict, unique
 
 def py2ri(x):
     return pandas2ri.py2ri(x)
