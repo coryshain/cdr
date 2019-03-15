@@ -321,7 +321,8 @@ class DTSR(object):
         self.n_train = len(y)
         self.y_train_mean = float(y[dv].mean())
         self.y_train_sd = float(y[dv].std())
-        max_tdelta = 0
+
+        t_deltas = []
         first_obs, last_obs = get_first_last_obs_lists(y)
         for i, cols in enumerate(zip(first_obs, last_obs)):
             first_obs_cur, last_obs_cur = cols
@@ -329,10 +330,9 @@ class DTSR(object):
             last_obs_cur = np.array(last_obs_cur, dtype=getattr(np, self.int_type))
             first_obs_cur = np.maximum(np.array(first_obs_cur, dtype=getattr(np, self.int_type)), last_obs_cur - self.history_length + 1)
             t_delta = (y.time - X_time[first_obs_cur])
-            max_tdelta_cur = t_delta.max()
-            if max_tdelta_cur > max_tdelta:
-                max_tdelta = max_tdelta_cur
-        self.max_tdelta = max_tdelta
+            t_deltas.append(t_delta)
+        t_deltas = np.concatenate(t_deltas, axis=0)
+        self.t_delta_limit = np.percentile(t_deltas, 90)
 
         if self.pc:
             self.src_impulse_names_norate = list(filter(lambda x: x != 'rate', self.form.t.impulse_names(include_interactions=True)))
@@ -617,7 +617,7 @@ class DTSR(object):
             'n_train': self.n_train,
             'y_train_mean': self.y_train_mean,
             'y_train_sd': self.y_train_sd,
-            'max_tdelta': self.max_tdelta,
+            't_delta_limit': self.t_delta_limit,
             'rangf_map_base': self.rangf_map_base,
             'rangf_n_levels': self.rangf_n_levels,
             'outdir': self.outdir,
@@ -632,7 +632,7 @@ class DTSR(object):
         self.n_train = md.pop('n_train')
         self.y_train_mean = md.pop('y_train_mean')
         self.y_train_sd = md.pop('y_train_sd')
-        self.max_tdelta = md.pop('max_tdelta', 10.)
+        self.t_delta_limit = md.pop('t_delta_limit', 10.)
         self.rangf_map_base = md.pop('rangf_map_base')
         self.rangf_n_levels = md.pop('rangf_n_levels')
         self.outdir = md.pop('outdir', './dtsr_model/')
@@ -949,7 +949,7 @@ class DTSR(object):
                         spacing_power = Formula.spacing_power(family)
 
                         x_init = np.cumsum(np.ones(bases-1)) ** spacing_power
-                        x_init *= self.max_tdelta / x_init[-1]
+                        x_init *= self.t_delta_limit / x_init[-1]
                         x_init[1:] -= x_init[:-1]
 
                         for param_name in Formula.irf_params(family):
@@ -3118,7 +3118,7 @@ class DTSR(object):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if n_time_units is None:
-                    n_time_units = self.max_tdelta
+                    n_time_units = self.t_delta_limit
 
                 if self.pc:
                     n_impulse = len(self.src_impulse_names)
@@ -4101,7 +4101,7 @@ class DTSR(object):
         """
 
         if integral_n_time_units is None:
-            integral_n_time_units = self.max_tdelta
+            integral_n_time_units = self.t_delta_limit
 
         irf_integrals = self.irf_integrals(
             level=level,
@@ -5287,7 +5287,7 @@ class DTSR(object):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if not n_time_units:
-                    n_time_units = self.max_tdelta
+                    n_time_units = self.t_delta_limit
 
                 support = np.linspace(0., n_time_units, n_time_points+1)
                 gold = gold_irf_lambda(support)

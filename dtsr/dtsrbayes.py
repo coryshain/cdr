@@ -1335,7 +1335,7 @@ class DTSRBayes(DTSR):
         if n_samples is None:
             n_samples = self.n_samples_eval
         if n_time_units is None:
-            n_time_units = self.max_tdelta
+            n_time_units = self.t_delta_limit
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if self.pc:
@@ -1427,7 +1427,7 @@ class DTSRBayes(DTSR):
         if n_samples is None:
             n_samples = self.n_samples_eval
         if n_time_units is None:
-            n_time_units = self.max_tdelta
+            n_time_units = self.t_delta_limit
         if self.pc:
             n_impulse = len(self.src_impulse_names)
         else:
