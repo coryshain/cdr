@@ -333,6 +333,7 @@ class DTSR(object):
             t_deltas.append(t_delta)
         t_deltas = np.concatenate(t_deltas, axis=0)
         self.t_delta_limit = np.percentile(t_deltas, 90)
+        self.max_tdelta = t_deltas.max()
 
         if self.pc:
             self.src_impulse_names_norate = list(filter(lambda x: x != 'rate', self.form.t.impulse_names(include_interactions=True)))
@@ -417,6 +418,7 @@ class DTSR(object):
             self.src_node_table = t_src.node_table()
             self.src_coef_names = t_src.coef_names()
             self.src_fixed_coef_names = t_src.fixed_coef_names()
+            self.src_spline_coef_names = t_src.spline_coef_names()
             self.src_interaction_list = t_src.interactions()
             self.src_interaction_names = t_src.interaction_names()
             self.src_fixed_interaction_names = t_src.fixed_interaction_names()
@@ -455,6 +457,7 @@ class DTSR(object):
             self.node_table = t.node_table()
             self.coef_names = t.coef_names()
             self.fixed_coef_names = t.fixed_coef_names()
+            self.spline_coef_names = t.spline_coef_names()
             self.interaction_list = t.interactions()
             self.interaction_names = t.interaction_names()
             self.fixed_interaction_names = t.fixed_interaction_names()
@@ -523,6 +526,7 @@ class DTSR(object):
             self.node_table = t.node_table()
             self.coef_names = t.coef_names()
             self.fixed_coef_names = t.fixed_coef_names()
+            self.spline_coef_names = t.spline_coef_names()
             self.interaction_list = t.interactions()
             self.interaction_names = t.interaction_names()
             self.fixed_interaction_names = t.fixed_interaction_names()
@@ -617,6 +621,7 @@ class DTSR(object):
             'n_train': self.n_train,
             'y_train_mean': self.y_train_mean,
             'y_train_sd': self.y_train_sd,
+            'max_tdelta': self.max_tdelta,
             't_delta_limit': self.t_delta_limit,
             'rangf_map_base': self.rangf_map_base,
             'rangf_n_levels': self.rangf_n_levels,
@@ -632,7 +637,8 @@ class DTSR(object):
         self.n_train = md.pop('n_train')
         self.y_train_mean = md.pop('y_train_mean')
         self.y_train_sd = md.pop('y_train_sd')
-        self.t_delta_limit = md.pop('t_delta_limit', 10.)
+        self.max_tdelta = md.pop('max_tdelta')
+        self.t_delta_limit = md.pop('t_delta_limit', self.max_tdelta)
         self.rangf_map_base = md.pop('rangf_map_base')
         self.rangf_n_levels = md.pop('rangf_n_levels')
         self.outdir = md.pop('outdir', './dtsr_model/')
@@ -947,18 +953,23 @@ class DTSR(object):
                     elif Formula.is_spline(family):
                         bases = Formula.bases(family)
                         spacing_power = Formula.spacing_power(family)
-
                         x_init = np.cumsum(np.ones(bases-1)) ** spacing_power
-                        x_init *= self.t_delta_limit / x_init[-1]
+
+                        time_limit = Formula.time_limit(family)
+                        if time_limit is None:
+                            time_limit = self.t_delta_limit
+                        x_init *= time_limit / x_init[-1]
                         x_init[1:] -= x_init[:-1]
 
                         for param_name in Formula.irf_params(family):
                             if param_name.startswith('x'):
                                 n = int(param_name[1:])
                                 default = x_init[n-2]
+                                lb = 0
                             else:
                                 default = 0
-                            self._initialize_base_irf_param(param_name, family, default=default)
+                                lb = None
+                            self._initialize_base_irf_param(param_name, family, default=default, lb=lb)
 
     def _initialize_intercepts_coefficients_interactions(self):
         with self.sess.as_default():
@@ -991,26 +1002,45 @@ class DTSR(object):
 
                 # Coefficients
                 fixef_ix = names2ix(self.fixed_coef_names, self.coef_names)
-
                 coef_ids = self.coef_names
+                if len(self.spline_coef_names) > 0:
+                    nonzero_coefficients = tf.concat(
+                        [
+                            self.coefficient_fixed_base,
+                            tf.ones([len(self.spline_coef_names)], dtype=self.FLOAT_TF)
+                        ],
+                        axis=0
+                    )
+                    nonzero_coefficients_summary = tf.concat(
+                        [
+                            self.coefficient_fixed_base_summary,
+                            tf.ones([len(self.spline_coef_names)], dtype=self.FLOAT_TF)
+                        ],
+                        axis=0
+                    )
+                    nonzero_coef_ix = names2ix(self.fixed_coef_names + self.spline_coef_names, self.coef_names)
+                else:
+                    nonzero_coefficients = self.coefficient_fixed_base
+                    nonzero_coefficients_summary = self.coefficient_fixed_base_summary
+                    nonzero_coef_ix = fixef_ix
                 self.coefficient_fixed = self._scatter_along_axis(
-                    fixef_ix,
-                    self.coefficient_fixed_base,
+                    nonzero_coef_ix,
+                    nonzero_coefficients,
                     [len(coef_ids)]
                 )
                 self.coefficient_fixed_summary = self._scatter_along_axis(
-                    fixef_ix,
-                    self.coefficient_fixed_base_summary,
+                    nonzero_coef_ix,
+                    nonzero_coefficients_summary,
                     [len(coef_ids)]
                 )
-                self._regularize(self.coefficient_fixed, type='coefficient', var_name='coefficient')
+                self._regularize(self.coefficient_fixed_base, type='coefficient', var_name='coefficient')
                 if self.convergence_basis.lower() == 'parameters':
-                    self._add_convergence_tracker(self.coefficient_fixed_summary, 'coefficient_fixed')
+                    self._add_convergence_tracker(self.coefficient_fixed_base_summary, 'coefficient_fixed')
 
-                for i in range(len(self.coef_names)):
+                for i in range(len(self.fixed_coef_names)):
                     tf.summary.scalar(
-                        'coefficient' + '/%s' % self.coef_names[i],
-                        self.coefficient_fixed_summary[i],
+                        'coefficient' + '/%s' % self.fixed_coef_names[i],
+                        self.coefficient_fixed_base_summary[i],
                         collections=['params']
                     )
 
@@ -1019,7 +1049,6 @@ class DTSR(object):
                 self.coefficient_random_summary = {}
                 self.coefficient_random_means = {}
                 self.coefficient = tf.expand_dims(self.coefficient, 0)
-                coefficient_fixed = self.coefficient
 
                 # Interactions
                 fixef_ix = names2ix(self.fixed_interaction_names, self.interaction_names)
@@ -1102,7 +1131,7 @@ class DTSR(object):
                     # Random coefficients
                     coefs = self.coef_by_rangf.get(gf, [])
                     if len(coefs) > 0:
-                        coef_ix = names2ix(coefs, self.coef_names)
+                        nonzero_coef_ix = names2ix(coefs, self.coef_names)
 
                         coefficient_random = self.coefficient_random_base[gf]
                         coefficient_random_summary = self.coefficient_random_base_summary[gf]
@@ -1115,7 +1144,7 @@ class DTSR(object):
                         self._regularize(coefficient_random, type='ranef', var_name='coefficient_by_%s' % gf)
 
                         coefficient_random = self._scatter_along_axis(
-                            coef_ix,
+                            nonzero_coef_ix,
                             self._scatter_along_axis(
                                 levels_ix,
                                 coefficient_random,
@@ -1125,7 +1154,7 @@ class DTSR(object):
                             axis=1
                         )
                         coefficient_random_summary = self._scatter_along_axis(
-                            coef_ix,
+                            nonzero_coef_ix,
                             self._scatter_along_axis(
                                 levels_ix,
                                 coefficient_random_summary,
@@ -1147,7 +1176,7 @@ class DTSR(object):
                         if self.log_random:
                             for j in range(len(coefs)):
                                 coef_name = coefs[j]
-                                ix = coef_ix[j]
+                                ix = nonzero_coef_ix[j]
                                 tf.summary.histogram(
                                     sn('by_%s/coefficient/%s' % (gf, coef_name)),
                                     coefficient_random_summary[:, ix],
@@ -1347,10 +1376,10 @@ class DTSR(object):
             assert params.shape[1] == target_shape, 'Incorrect number of parameters for spline with bases "%d". Should be %s, got %s.' %(bases, target_shape)
 
             # Build knot locations
-            c = params[:, 0:bases-1]
             c_endpoint_shape = [tf.shape(params)[0], 1, tf.shape(params)[2]]
             zero = tf.zeros(c_endpoint_shape, dtype=self.FLOAT_TF)
-            c = tf.cumsum(self._safe_abs(tf.concat([zero, c], axis=1)), axis=1)
+            c = params[:, 0:bases-1]
+            c = tf.cumsum(tf.concat([zero, c], axis=1), axis=1)
             c = tf.unstack(c, axis=2)
 
             # Build values at knots
@@ -1374,16 +1403,34 @@ class DTSR(object):
 
                 for i in range(len(c)):
                     if order == 1:
-                        rise = y[i][:,1:] - y[i][:,:-1]
-                        run = c[i][:,1:] - c[i][:,:-1]
-                        a_ = (rise / run)
-                        self.rise_ = rise
-                        self.run_ = run
-                        self.a_ = a_
-                        c_ = c[i][:,:-1]
+                        c_ = c[i]
+                        y_ = y[i]
+                        c_t = c_[:,1:]
+                        c_tm1 = c_[:,:-1]
+                        y_t = y_[:,1:]
+                        y_tm1 = y_[:,:-1]
 
-                        out = lambda x: tf.reduce_sum(tf.cast(x >= c_, dtype=self.FLOAT_TF) * (x - c_) * a_, axis=2, keepdims=True)
+                        # Compute intercepts and slopes of line segments
+                        a = (y_t-y_tm1) / (c_t - c_tm1)
+                        b = y_t - a * c_t
 
+                        # Handle points beyond final knot location
+                        c_ = tf.concat([c_, tf.ones_like(c_[:,-1:]) * np.inf], axis=1)
+                        a = tf.concat([a, tf.zeros_like(a[:,-1:])], axis=1)
+                        b = tf.concat([b, tf.zeros_like(b[:,-1:])], axis=1)
+
+                        def make_piecewise(a, b, c_):
+                            def select_segment(x, c_):
+                                c_t = c_[...,1:]
+                                c_tm1 = c_[...,:-1]
+                                return tf.cast(tf.logical_and(x >= c_tm1, x < c_t), dtype=self.FLOAT_TF)
+                            def piecewise(x):
+                                response = tf.expand_dims(a, -2) * x + tf.expand_dims(b, -2)
+                                select = select_segment(x, tf.expand_dims(c_, -2))
+                                response = tf.reduce_sum(response * select, axis=-1, keepdims=True)
+                                return response
+                            return piecewise
+                        out = make_piecewise(a, b, c_)
                     else:
                         if c[i].shape[0] == 1:
                             c_ = tf.tile(c[i][..., None], [tf.shape(x)[0], 1, 1])
@@ -1394,18 +1441,21 @@ class DTSR(object):
                         else:
                             y_ = y[i][..., None]
 
-                        out = lambda x: interpolate_spline(
-                            c_,
-                            y_,
-                            x,
-                            order,
-                            regularization_weight=roughness_penalty
+                        out = lambda x: tf.where(
+                            x <= c[i][:,-1:][..., None],
+                            interpolate_spline(
+                                c_,
+                                y_,
+                                x,
+                                order,
+                                regularization_weight=roughness_penalty
+                            ),
+                            tf.zeros_like(x)
                         )
 
                     splines.append(out)
 
                 out = tf.concat([s(x) for s in splines], axis=2)
-                # out = tf.where(x <= self.max_tdelta, out, tf.zeros_like(out))
 
                 return out
 
@@ -3897,7 +3947,7 @@ class DTSR(object):
                 for i in range(len(var_names)):
                     v_name = var_names[i]
                     v_val = var_vals[i]
-                    cur_params = np.prod(np.array(v_val).shape)
+                    cur_params = int(np.prod(np.array(v_val).shape))
                     n_params += cur_params
                     out += ' ' * indent + '  ' + v_name.split(':')[0] + ': %s\n' % str(cur_params)
                 out +=  ' ' * indent + '  TOTAL: %d\n\n' % n_params
