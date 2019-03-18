@@ -218,7 +218,7 @@ DTSR_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'constraint',
-        'abs',
+        'softplus',
         str,
         "Constraint function to use for bounded variables. One of ``['abs', 'softplus']``."
     ),
