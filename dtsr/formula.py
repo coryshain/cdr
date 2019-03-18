@@ -1873,6 +1873,7 @@ class IRFNode(object):
             self.children.append(t)
             t.p = self
             out = t
+
         return out
 
     def add_rangf(self, rangf):
@@ -2036,12 +2037,15 @@ class IRFNode(object):
             params = []
             if self.irfID is not None:
                 params.append('irf_id=%s' % self.irfID)
-            if self.coefID is not None:
-                params.append('coef_id=%s' % self.coefID)
+            for c in self.children:
+                if c.terminal() and c.coefID is not None:
+                    params.append('coef_id=%s' % c.coefID)
+                    break
             if rangf in self.rangf:
                 params.append('ran=T')
-            if self.cont:
-                params.append('cont=T')
+            for c in self.children:
+                if c.terminal() and c.cont:
+                    params.append('cont=T')
             if len(self.param_init) > 0:
                 params.append(', '.join(['%s=%s' % (x, self.param_init[x]) for x in self.param_init]))
             if set(self.trainable) != set(Formula.irf_params(self.family)):
@@ -2993,30 +2997,7 @@ class IRFNode(object):
         if self.family is not None:
             for key in out:
                 for term in out[key]:
-                    outer = None
-                    if term['irf'] != '':
-                        outer = split_irf.match(term['irf']).groups()
-                    inner = []
-                    if self.irfID is not None:
-                        inner.append('irf_id=%s' %self.irfID)
-                    if self.coefID is not None:
-                        inner.append('coef_id=%s' %self.coefID)
-                    if key in self.rangf:
-                        inner.append('ran=T')
-                    if self.cont:
-                        inner.append('cont=T')
-                    if len(self.param_init) > 0:
-                        inner.append(', '.join(['%s=%s' %(x, self.param_init[x]) for x in self.param_init]))
-                    if set(self.trainable) != set(Formula.irf_params(self.family)):
-                        inner.append('trainable=%s' %self.trainable)
-                    new_irf = self.family + '(' + ', '.join(inner) + ')'
-                    if outer is not None:
-                        new_irf = outer[0] + '(' + new_irf
-                        if outer[1].startswith(')'):
-                            new_irf += outer[1]
-                        else:
-                            new_irf += ', ' + outer[1]
-                    term['irf'] = new_irf
+                    term['irf'] = self.irf_to_formula(rangf=key)
 
         return out
 

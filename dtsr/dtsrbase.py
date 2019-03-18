@@ -1240,7 +1240,6 @@ class DTSR(object):
                                     )
 
     def _initialize_irf_lambdas(self):
-
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 def exponential(params):
@@ -1370,98 +1369,134 @@ class DTSR(object):
 
                 self.irf_lambdas['HRFDoubleGamma5'] = double_gamma_5
 
-    def _initialize_spline(self, order, bases, instantaneous=True, roughness_penalty=0.):
-        def spline(params):
-            target_shape = bases * 2 - 2 - (1-int(instantaneous))
-            assert params.shape[1] == target_shape, 'Incorrect number of parameters for spline with bases "%d". Should be %s, got %s.' %(bases, target_shape)
+    def _get_piecewise_linear_resampler(self, c, y):
+        # c: knot locations, shape=[B, Q, K], B = batch, Q = query points or 1, K = n knots
+        # y: knot values, shape identical to c
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if len(c.shape) == 1:
+                    # No batch or query dim
+                    c = c[None, None, ...]
+                elif len(c.shape) == 2:
+                    # No query dim
+                    c = tf.expand_dims(c, axis=-2)
+                elif len(c.shape) > 3:
+                    # Too many dims
+                    raise ValueError('Rank of knot location tensor c to piecewise resampler must be >= 1 and <= 3. Saw "%d"' % len(c.shape))
+                if len(y.shape) == 1:
+                    # No batch or query dim
+                    y = y[None, None, ...]
+                elif len(y.shape) == 2:
+                    # No query dim
+                    y = tf.expand_dims(y, axis=-2)
+                elif len(y.shape) > 3:
+                    # Too many dims
+                    raise ValueError('Rank of knot amplitude tensor c to piecewise resampler must be >= 1 and <= 3. Saw "%d"' % len(y.shape))
 
-            # Build knot locations
-            c_endpoint_shape = [tf.shape(params)[0], 1, tf.shape(params)[2]]
-            zero = tf.zeros(c_endpoint_shape, dtype=self.FLOAT_TF)
-            c = params[:, 0:bases-1]
-            c = tf.cumsum(tf.concat([zero, c], axis=1), axis=1)
-            c = tf.unstack(c, axis=2)
+                c_t = c[..., 1:]
+                c_tm1 = c[..., :-1]
+                y_t = y[..., 1:]
+                y_tm1 = y[..., :-1]
 
-            # Build values at knots
-            y = [params[:, bases-1:], zero]
-            if not instantaneous:
-                y = [zero] + y
-            y = tf.concat(y, axis=1)
-            y = tf.unstack(y, axis=2)
+                # Compute intercepts a_ and slopes b_ of line segments
+                a_ = (y_t - y_tm1) / (c_t - c_tm1)
+                valid = c_t > c_tm1
+                a_ = tf.where(valid, a_, tf.zeros_like(a_))
+                b_ = y_t - a_ * c_t
 
-            assert len(c) == len(y), 'c and y coordinates of spline unpacked into lists of different lengths (%s and %s, respectively)' %(len(c), len(y))
+                # Handle points beyond final knot location (0 response)
+                a_ = tf.concat([a_, tf.zeros_like(a_[..., -1:])], axis=-1)
+                b_ = tf.concat([b_, tf.zeros_like(b_[..., -1:])], axis=-1)
+                c_ = tf.concat([c, tf.ones_like(c[..., -1:]) * np.inf], axis=-1)
 
-            def apply_spline(x):
-                splines = []
+                def make_piecewise(a, b, c):
+                    def select_segment(x, c):
+                        c_t = c[..., 1:]
+                        c_tm1 = c[..., :-1]
+                        select = tf.cast(tf.logical_and(x >= c_tm1, x < c_t), dtype=self.FLOAT_TF)
+                        return select
 
-                if len(x.shape) == 1:
-                    x = x[None, :, None]
-                elif len(x.shape) == 2:
-                    x = x[None, ...]
-                if len(x.shape) != 3:
-                    raise ValueError('Query to spline IRF must be exactly rank 3')
+                    def piecewise(x):
+                        select = select_segment(x, c)
+                        # a_select = tf.reduce_sum(a * select, axis=-1, keepdims=True)
+                        # b_select = tf.reduce_sum(b * select, axis=-1, keepdims=True)
+                        # response = a_select * x + b_select
+                        response = tf.reduce_sum((a * x + b) * select, axis=-1, keepdims=True)
+                        return response
 
-                for i in range(len(c)):
-                    if order == 1:
-                        c_ = c[i]
-                        y_ = y[i]
-                        c_t = c_[:,1:]
-                        c_tm1 = c_[:,:-1]
-                        y_t = y_[:,1:]
-                        y_tm1 = y_[:,:-1]
+                    return piecewise
 
-                        # Compute intercepts and slopes of line segments
-                        a = (y_t-y_tm1) / (c_t - c_tm1)
-                        b = y_t - a * c_t
-
-                        # Handle points beyond final knot location
-                        c_ = tf.concat([c_, tf.ones_like(c_[:,-1:]) * np.inf], axis=1)
-                        a = tf.concat([a, tf.zeros_like(a[:,-1:])], axis=1)
-                        b = tf.concat([b, tf.zeros_like(b[:,-1:])], axis=1)
-
-                        def make_piecewise(a, b, c_):
-                            def select_segment(x, c_):
-                                c_t = c_[...,1:]
-                                c_tm1 = c_[...,:-1]
-                                return tf.cast(tf.logical_and(x >= c_tm1, x < c_t), dtype=self.FLOAT_TF)
-                            def piecewise(x):
-                                response = tf.expand_dims(a, -2) * x + tf.expand_dims(b, -2)
-                                select = select_segment(x, tf.expand_dims(c_, -2))
-                                response = tf.reduce_sum(response * select, axis=-1, keepdims=True)
-                                return response
-                            return piecewise
-                        out = make_piecewise(a, b, c_)
-                    else:
-                        if c[i].shape[0] == 1:
-                            c_ = tf.tile(c[i][..., None], [tf.shape(x)[0], 1, 1])
-                        else:
-                            c_ = c[i][..., None]
-                        if y[i].shape[0] == 1:
-                            y_ = tf.tile(y[i][..., None], [tf.shape(x)[0], 1, 1])
-                        else:
-                            y_ = y[i][..., None]
-
-                        out = lambda x: tf.where(
-                            x <= c[i][:,-1:][..., None],
-                            interpolate_spline(
-                                c_,
-                                y_,
-                                x,
-                                order,
-                                regularization_weight=roughness_penalty
-                            ),
-                            tf.zeros_like(x)
-                        )
-
-                    splines.append(out)
-
-                out = tf.concat([s(x) for s in splines], axis=2)
+                out = make_piecewise(a_, b_, c_)
 
                 return out
 
-            return apply_spline
+    def _initialize_spline(self, order, bases, instantaneous=True, roughness_penalty=0.):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                def spline(params):
+                    target_shape = bases * 2 - 2 - (1-int(instantaneous))
+                    assert params.shape[1] == target_shape, 'Incorrect number of parameters for spline with bases "%d". Should be %s, got %s.' %(bases, target_shape)
 
-        return spline
+                    # Build knot locations
+                    c_endpoint_shape = [tf.shape(params)[0], 1, tf.shape(params)[2]]
+                    zero = tf.zeros(c_endpoint_shape, dtype=self.FLOAT_TF)
+                    c = params[:, 0:bases-1]
+                    c = tf.cumsum(tf.concat([zero, c], axis=1), axis=1)
+                    c = tf.unstack(c, axis=2)
+
+                    # Build values at knots
+                    y = [params[:, bases-1:], zero]
+                    if not instantaneous:
+                        y = [zero] + y
+                    y = tf.concat(y, axis=1)
+                    y = tf.unstack(y, axis=2)
+
+                    assert len(c) == len(y), 'c and y coordinates of spline unpacked into lists of different lengths (%s and %s, respectively)' %(len(c), len(y))
+
+                    def apply_spline(x):
+                        splines = []
+
+                        if len(x.shape) == 1:
+                            x = x[None, :, None]
+                        elif len(x.shape) == 2:
+                            x = x[None, ...]
+                        if len(x.shape) != 3:
+                            raise ValueError('Query to spline IRF must be exactly rank 3')
+
+                        for i in range(len(c)):
+                            if order == 1:
+                                out = self._get_piecewise_linear_resampler(c[i], y[i])
+                            else:
+                                if c[i].shape[0] == 1:
+                                    c_ = tf.tile(c[i][..., None], [tf.shape(x)[0], 1, 1])
+                                else:
+                                    c_ = c[i][..., None]
+                                if y[i].shape[0] == 1:
+                                    y_ = tf.tile(y[i][..., None], [tf.shape(x)[0], 1, 1])
+                                else:
+                                    y_ = y[i][..., None]
+
+                                out = lambda x: tf.where(
+                                    x <= c[i][:,-1:][..., None],
+                                    interpolate_spline(
+                                        c_,
+                                        y_,
+                                        x,
+                                        order,
+                                        regularization_weight=roughness_penalty
+                                    ),
+                                    tf.zeros_like(x)
+                                )
+
+                            splines.append(out)
+
+                        out = tf.concat([s(x) for s in splines], axis=2)
+
+                        return out
+
+                    return apply_spline
+
+                return spline
 
     def _get_irf_lambda(self, family):
         if family in self.irf_lambdas:
@@ -2470,35 +2505,35 @@ class DTSR(object):
                         self.convolutions[name] = self.irf_impulses[name]
                     else:
                         if t.cont:
-                            impulse = self.irf_impulses[name]
-                            irf = self.irf[name]
-                            if len(irf) > 1:
-                                irf = self._compose_irf(irf)
-                            else:
-                                irf = irf[0]
-
-                            impulse_interp, t_interp = self._lininterp_fixed_frequency(
-                                impulse,
-                                self.time_X[:,:,impulse_ix],
-                                self.time_X_mask[:,:,impulse_ix],
-                                hz = self.interp_hz
+                            # Create a continuous piecewise linear function
+                            # that interpolates between points in the impulse history.
+                            # Reverse because the history contains time offsets in descending order
+                            knot_location = tf.reverse(
+                                tf.transpose(self.t_delta[:,:,impulse_ix:impulse_ix+1], [0, 2, 1]),
+                                axis=[-1]
                             )
-                            t_delta_interp = tf.expand_dims(tf.expand_dims(self.time_y, -1) - t_interp, -1)
-                            irf_seq = irf(t_delta_interp)
-
-                            self.convolutions[name] = tf.reduce_sum(impulse_interp * irf_seq, axis=1)
+                            knot_amplitude = tf.reverse(
+                                tf.transpose(self.irf_impulses[name], [0, 2, 1]),
+                                axis=[-1]
+                            )
+                            impulse_resampler = self._get_piecewise_linear_resampler(knot_location, knot_amplitude)
+                            t_delta = tf.linspace(self.interp_step * (self.history_length-1), 0, self.history_length)[None, ..., None]
+                            t_delta = tf.tile(t_delta, [tf.shape(self.t_delta)[0], 1, 1])
+                            impulse = impulse_resampler(t_delta)
+                            impulse *= self.interp_step
                         else:
                             impulse = self.irf_impulses[name]
+                            t_delta = self.t_delta[:,:,impulse_ix:impulse_ix+1]
 
-                            irf = self.irf[name]
-                            if len(irf) > 1:
-                                irf = self._compose_irf(irf)
-                            else:
-                                irf = irf[0]
+                        irf = self.irf[name]
+                        if len(irf) > 1:
+                            irf = self._compose_irf(irf)
+                        else:
+                            irf = irf[0]
 
-                            irf_seq = irf(self.t_delta[:,:,impulse_ix:impulse_ix+1])
+                        irf_seq = irf(t_delta)
 
-                            self.convolutions[name] = tf.reduce_sum(impulse * irf_seq, axis=1)
+                        self.convolutions[name] = tf.reduce_sum(impulse * irf_seq, axis=1)
 
     def _initialize_interactions(self):
         with self.sess.as_default():
@@ -3931,6 +3966,28 @@ class DTSR(object):
 
         return out
 
+    def report_impulse_types(self, indent=0):
+        """
+        Generate a string representation of types of impulses (transient or continuous) in the model.
+
+        :param indent: ``int``; indentation level
+        :return: ``str``; the impulse type report
+        """
+
+        out = ''
+        out += ' ' * indent + 'IMPULSE TYPES:\n'
+
+        if self.pc:
+            t = self.t_src
+        else:
+            t = self.t
+        for x in t.terminals():
+            out += ' ' * (indent + 2) + x.name() + ': ' + ('continuous' if x.cont else 'transient') + '\n'
+
+        out += '\n'
+
+        return out
+
     def report_n_params(self, indent=0):
         """
         Generate a string representation of the number of trainable model parameters
@@ -4197,6 +4254,7 @@ class DTSR(object):
         out += self.report_settings(indent=indent+2)
         out += '\n' + ' ' * (indent + 2) + 'Training iterations completed: %d\n\n' %self.global_step.eval(session=self.sess)
         out += self.report_irf_tree(indent=indent+2)
+        out += self.report_impulse_types(indent=indent+2)
         out += self.report_n_params(indent=indent+2)
         out += self.report_regularized_variables(indent=indent+2)
 

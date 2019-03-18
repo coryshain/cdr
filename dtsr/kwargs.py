@@ -229,6 +229,12 @@ DTSR_INITIALIZATION_KWARGS = [
         "Frequency in Hz at which to interpolate continuous impulses for approximating the IRF integral."
     ),
     Kwarg(
+        'interp_step',
+        0.1,
+        float,
+        "Step length for resampling from interpolated continuous predictors."
+    ),
+    Kwarg(
         'optim_name',
         'Nadam',
         [str, None],
