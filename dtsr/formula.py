@@ -11,7 +11,7 @@ from .util import names2ix, sn
 interact = re.compile('([^ ]+):([^ ]+)')
 spillover = re.compile('^.+S[0-9]+$')
 split_irf = re.compile('(.+)\(([^(]+)')
-spline = re.compile('S((o([0-9]+))?(b([0-9]+))?(l([0-9]+))?(p([0-9]+))?(i([0-1]))?)?$')
+spline = re.compile('S((o([0-9]+))?(b([0-9]+))?(l([0-9]*\.?[0-9]+))?(p([0-9]+))?(t([0-9]*\.?[0-9]+))?(i([0-1]))?)?$')
 starts_numeric = re.compile('^[0-9]')
 non_alphanumeric = re.compile('[^0-9a-zA-Z_]')
 
@@ -72,10 +72,11 @@ class Formula(object):
         'HRFDoubleGamma5': ['alpha_main', 'alpha_undershoot', 'beta_main', 'beta_undershoot', 'c'],
     }
 
-    SPLINE_DEFAULT_ORDER = 2
+    SPLINE_DEFAULT_ORDER = 1
     SPLINE_DEFAULT_BASES = 10
-    SPLINE_DEFAULT_ROUGHNESS_PENALTY = 0.001
+    SPLINE_DEFAULT_ROUGHNESS_PENALTY = 0.
     SPLINE_DEFAULT_SPACING_POWER = 1
+    SPLINE_DEFAULT_TIME_LIMIT = None
     SPLINE_DEFAULT_INSTANTANEOUS = True
 
     @staticmethod
@@ -171,7 +172,7 @@ class Formula(object):
                 if roughness_penalty is None:
                     out = Formula.SPLINE_DEFAULT_ROUGHNESS_PENALTY
                 else:
-                    out = float('0.' + roughness_penalty)
+                    out = float(roughness_penalty)
             else:
                 out = None
         return out
@@ -200,6 +201,29 @@ class Formula(object):
         return out
 
     @staticmethod
+    def time_limit(family):
+        """
+        Get the maximum time for the initial positions of the first n-1 knots of a spline kernel.
+        The time limit governs the interval over which knots are initialized.
+
+        :param family: ``str``; name of IRF family
+        :return: ``float`` or ``None``; initial time_limit of spline kernel, or ``None`` if set empirically.
+        """
+
+        if family is None:
+            out = None
+        else:
+            if Formula.is_spline(family):
+                time_limit = spline.match(family).group(11)
+                if time_limit is None:
+                    out = None
+                else:
+                    out = float(time_limit)
+            else:
+                out = None
+        return out
+
+    @staticmethod
     def instantaneous(family):
         """
         Check whether a spline kernel permits a non-zero instantaneous response.
@@ -212,7 +236,7 @@ class Formula(object):
             out = None
         else:
             if Formula.is_spline(family):
-                instantaneous = spline.match(family).group(11)
+                instantaneous = spline.match(family).group(13)
                 if instantaneous is None:
                     instantaneous = Formula.SPLINE_DEFAULT_BASES
                 out = bool(int(instantaneous))
@@ -2132,6 +2156,17 @@ class IRFNode(object):
         """
 
         return Formula.spacing_power(self.family)
+
+    def time_limit(self):
+        """
+        Get the maximum time for the initial positions of the first n-1 knots of a spline kernel.
+        The time limit governs the interval over which knots are initialized.
+
+        :param family: ``str``; name of IRF family
+        :return: ``float`` or ``None``; initial time_limit of spline kernel, or ``None`` if set empirically.
+        """
+
+        return Formula.time_limit(self.family)
 
     def roughness_penalty(self):
         """
