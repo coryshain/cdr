@@ -34,11 +34,8 @@ def predict_LME(model_path, outdir, X, y, dv, partition_name, model_name=''):
         with open(outdir + '/%spreds_%s.txt' % ('' if model_name=='' else model_name + '_', partition_name), 'w') as p_file:
             for i in range(len(lme_preds)):
                 p_file.write(str(lme_preds[i]) + '\n')
-        if p['loss_name'].lower() == 'mae':
-            losses = np.array(y[dv] - lme_preds).abs()
-        else:
-            losses = np.array(y[dv] - lme_preds) ** 2
-        with open(outdir + '/%s%s_losses_%s.txt' % ('' if model_name=='' else model_name + '_', p['loss_name'], partition_name), 'w') as p_file:
+        losses = np.array(y[dv] - lme_preds) ** 2
+        with open(outdir + '/%s%s_losses_mse.txt' % ('' if model_name=='' else model_name + '_', partition_name), 'w') as p_file:
             for i in range(len(losses)):
                 p_file.write(str(losses[i]) + '\n')
         lme_mse = mse(y[dv], lme_preds)
@@ -209,11 +206,8 @@ if __name__ == '__main__':
                 with open(p.outdir + '/' + m + '/preds_%s.txt' % partition_str, 'w') as p_file:
                     for i in range(len(lm_preds)):
                         p_file.write(str(lm_preds[i]) + '\n')
-                if p['loss_name'].lower() == 'mae':
-                    losses = np.array(y[dv] - lm_preds).abs()
-                else:
-                    losses = np.array(y[dv] - lm_preds) ** 2
-                with open(p.outdir + '/' + m + '/%s_losses_%s.txt' % (p['loss_name'], partition_str), 'w') as p_file:
+                losses = np.array(y[dv] - lm_preds) ** 2
+                with open(p.outdir + '/' + m + '/%s_losses_mse.txt' % partition_str, 'w') as p_file:
                     for i in range(len(losses)):
                         p_file.write(str(losses[i]) + '\n')
                 lm_mse = mse(y[dv], lm_preds)
@@ -252,11 +246,8 @@ if __name__ == '__main__':
                 with open(p.outdir + '/' + m + '/preds_%s.txt' % partition_str, 'w') as p_file:
                     for i in range(len(gam_preds)):
                         p_file.write(str(gam_preds[i]) + '\n')
-                if p['loss_name'].lower() == 'mae':
-                    losses = np.array(y[dv] - gam_preds).abs()
-                else:
-                    losses = np.array(y[dv] - gam_preds) ** 2
-                with open(p.outdir + '/' + m + '/%s_losses_%s.txt' % (p['loss_name'], partition_str), 'w') as p_file:
+                losses = np.array(y[dv] - gam_preds) ** 2
+                with open(p.outdir + '/' + m + '/%s_losses_mse.txt' % partition_str, 'w') as p_file:
                     for i in range(len(losses)):
                         p_file.write(str(losses[i]) + '\n')
                 gam_mse = mse(y[dv], gam_preds)
@@ -345,17 +336,14 @@ if __name__ == '__main__':
                             n_samples=args.nsamples,
                             algorithm=args.algorithm
                         )
-                        if p['loss_name'].lower() == 'mae':
-                            losses = np.array(y_valid[dv] - dtsr_preds).abs()
-                        else:
-                            losses = np.array(y_valid[dv] - dtsr_preds) ** 2
+                        losses = np.array(y_valid[dv] - dtsr_preds) ** 2
 
                         if args.extra_cols:
-                            df_out = pd.DataFrame({'DTSRloss%s' % p['loss_name'].upper(): losses, 'DTSRpreds': dtsr_preds})
+                            df_out = pd.DataFrame({'DTSRlossMSE': losses, 'DTSRpreds': dtsr_preds})
                             df_out = pd.concat([y_valid.reset_index(drop=True), df_out], axis=1)
                         else:
                             preds_outfile = p.outdir + '/' + m + '/preds_%s.txt' % partition_str
-                            loss_outfile = p.outdir + '/' + m + '/%s_losses_%s.txt' % (p['loss_name'], partition_str)
+                            loss_outfile = p.outdir + '/' + m + '/%s_losses_mse.txt' % partition_str
                             obs_outfile = p.outdir + '/' + m + '/obs_%s.txt' % partition_str
 
                             with open(preds_outfile, 'w') as p_file:

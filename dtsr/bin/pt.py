@@ -50,7 +50,7 @@ if __name__ == '__main__':
         partition_str = '-'.join(partitions)
 
         if args.metric == 'loss':
-            file_name = '%s_losses_%s.txt' % (p['loss_name'], partition_str)
+            file_name = '%s_losses_mse.txt' % partition_str
         else:
             file_name = 'loglik_%s.txt' % partition_str
 

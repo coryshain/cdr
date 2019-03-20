@@ -90,8 +90,6 @@ class DTSRBayes(DTSR):
             self.intercept_prior_sd = self.y_train_sd * self.prior_sd_scaling_coefficient
         if self.coef_prior_sd is None:
             self.coef_prior_sd = self.y_train_sd * self.prior_sd_scaling_coefficient
-        if self.y_sd_init is None:
-            self.y_sd_init = self.y_train_sd
         if self.y_sd_prior_sd is None:
             self.y_sd_prior_sd = self.y_train_sd * self.y_sd_prior_sd_scaling_coefficient
 
@@ -124,7 +122,6 @@ class DTSRBayes(DTSR):
                 self.irf_param_ranef_prior_sd_tf = self.irf_param_prior_sd_tf * self.ranef_to_fixef_prior_sd_ratio
                 self.irf_param_ranef_posterior_sd_init = self.irf_param_posterior_sd_init * self.ranef_to_fixef_prior_sd_ratio
 
-                self.y_sd_init_tf = tf.constant(float(self.y_sd_init), dtype=self.FLOAT_TF)
                 self.y_sd_prior_sd_tf = tf.constant(float(self.y_sd_prior_sd), dtype=self.FLOAT_TF)
                 self.y_sd_posterior_sd_init = self.y_sd_prior_sd_tf * self.posterior_to_prior_sd_ratio
 
@@ -152,8 +149,6 @@ class DTSRBayes(DTSR):
                     self.irf_param_ranef_prior_sd_unconstrained = tf.contrib.distributions.softplus_inverse(self.irf_param_ranef_prior_sd_tf)
                     self.irf_param_ranef_posterior_sd_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.irf_param_ranef_posterior_sd_init)
 
-                    self.y_sd_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.y_sd_init_tf)
-
                     self.y_sd_prior_sd_unconstrained = tf.contrib.distributions.softplus_inverse(self.y_sd_prior_sd_tf)
                     self.y_sd_posterior_sd_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.y_sd_posterior_sd_init)
 
@@ -164,8 +159,6 @@ class DTSRBayes(DTSR):
                     self.y_tailweight_posterior_loc_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.y_tailweight_posterior_loc_init)
                     self.y_tailweight_prior_sd_unconstrained = tf.contrib.distributions.softplus_inverse(self.y_tailweight_prior_sd_tf)
                     self.y_tailweight_posterior_sd_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.y_tailweight_posterior_sd_init)
-
-                    self.constraint_fn = tf.nn.softplus
 
                 elif self.constraint.lower() == 'abs':
                     self.intercept_prior_sd_unconstrained = self.intercept_prior_sd_tf
@@ -183,8 +176,6 @@ class DTSRBayes(DTSR):
                     self.irf_param_ranef_prior_sd_unconstrained = self.irf_param_ranef_prior_sd_tf
                     self.irf_param_ranef_posterior_sd_init_unconstrained = self.irf_param_ranef_posterior_sd_init
 
-                    self.y_sd_init_unconstrained = self.y_sd_init_tf
-
                     self.y_sd_prior_sd_unconstrained = self.y_sd_prior_sd_tf
                     self.y_sd_posterior_sd_init_unconstrained = self.y_sd_posterior_sd_init
 
@@ -195,8 +186,6 @@ class DTSRBayes(DTSR):
                     self.y_tailweight_posterior_loc_init_unconstrained = self.y_tailweight_posterior_loc_init
                     self.y_tailweight_prior_sd_unconstrained = self.y_tailweight_prior_sd_tf
                     self.y_tailweight_posterior_sd_init_unconstrained = self.y_tailweight_posterior_sd_init
-
-                    self.constraint_fn = self._safe_abs
 
                 else:
                     raise ValueError('Unrecognized constraint function "%s"' % self.constraint)

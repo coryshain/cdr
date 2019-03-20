@@ -275,12 +275,25 @@ class DTSRMLE(DTSR):
     def initialize_objective(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                self.y_sd = self.constraint_fn(
+                    tf.Variable(
+                        self.y_sd_init_unconstrained,
+                        dtype=self.FLOAT_TF,
+                        name='y_sd'
+                    )
+                )
+                self.y_sd_summary = self.y_sd
+                tf.summary.scalar(
+                    'y_sd',
+                    self.y_sd_summary,
+                    collections=['params']
+                )
+                y_dist = tf.distributions.Normal(loc=self.out, scale=self.y_sd)
+                self.ll = y_dist.log_prob(self.y) * self.minibatch_scale
                 self.mae_loss = tf.losses.absolute_difference(self.y, self.out)
                 self.mse_loss = tf.losses.mean_squared_error(self.y, self.out)
-                if self.loss_name.lower() == 'mae':
-                    self.loss_func = self.mae_loss
-                else:
-                    self.loss_func = self.mse_loss
+
+                self.loss_func = -tf.reduce_sum(self.ll)
                 if len(self.regularizer_losses_varnames) > 0:
                     self.loss_func += tf.add_n(self.regularizer_losses)
 
@@ -299,11 +312,6 @@ class DTSRMLE(DTSR):
                     global_step=self.global_batch_step,
                     name=sn('optim')
                 )
-
-                ## Likelihood ops
-                y_dist = tf.distributions.Normal(loc=self.out, scale=tf.sqrt(self.training_mse))
-                self.ll = y_dist.log_prob(self.y)
-
 
 
 

@@ -217,6 +217,13 @@ DTSR_INITIALIZATION_KWARGS = [
         "Initial value to use for the intercept (if ``None``, use mean response in training data)"
     ),
     Kwarg(
+        'y_sd_init',
+        None,
+        [float, None],
+        "Initial value for the standard deviation of the output model. If ``None``, inferred as the empirical standard deviation of the response on the training set.",
+        aliases=['y_scale_init']
+    ),
+    Kwarg(
         'constraint',
         'softplus',
         str,
@@ -452,12 +459,6 @@ DTSR_INITIALIZATION_KWARGS = [
 
 DTSRMLE_INITIALIZATION_KWARGS = [
     Kwarg(
-        'loss_name',
-        'mse',
-        str,
-        "The optimization objective."
-    ),
-    Kwarg(
         'intercept_joint_sd',
         None,
         [float, None],
@@ -548,13 +549,6 @@ DTSRBAYES_INITIALIZATION_KWARGS = [
         float,
         "Standard deviation of prior on convolutional IRF parameters",
         aliases=['conv_prior_sd', 'prior_sd']
-    ),
-    Kwarg(
-        'y_sd_init',
-        None,
-        [float, None],
-        "Initial value for the standard deviation of the output model. If ``None``, inferred as the empirical standard deviation of the response on the training set.",
-        aliases=['y_scale_init']
     ),
     Kwarg(
         'y_sd_trainable',

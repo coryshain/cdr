@@ -574,12 +574,23 @@ class DTSR(object):
             ix_2_levelname[-1] = 'UNK'
             self.rangf_map_ix_2_levelname.append(ix_2_levelname)
 
+        if self.y_sd_init is None:
+            self.y_sd_init = self.y_train_sd
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if self.intercept_init is None:
                     self.intercept_init = self.y_train_mean
                 self.intercept_init_tf = tf.constant(self.intercept_init, dtype=self.FLOAT_TF)
                 self.epsilon = tf.constant(4 * np.finfo(self.FLOAT_NP).eps, dtype=self.FLOAT_TF)
+
+                self.y_sd_init_tf = tf.constant(float(self.y_sd_init), dtype=self.FLOAT_TF)
+                if self.constraint.lower() == 'softplus':
+                    self.y_sd_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.y_sd_init_tf)
+                    self.constraint_fn = tf.nn.softplus
+                else:
+                    self.y_sd_init_unconstrained = self.y_sd_init_tf
+                    self.constraint_fn = self._safe_abs
 
                 if self.convergence_n_iterates and self.convergence_alpha is not None:
                     self.d0 = []
@@ -1619,23 +1630,11 @@ class DTSR(object):
                     param_fixed_summary = self.irf_params_fixed_base_summary[family][param_name]
 
                     if param_lb is not None and param_ub is None:
-                        if self.constraint.lower() == 'softplus':
-                            param_fixed = param_lb + self.epsilon + tf.nn.softplus(param_fixed)
-                            param_fixed_summary = param_lb + self.epsilon + tf.nn.softplus(param_fixed_summary)
-                        elif self.constraint.lower() == 'abs':
-                            param_fixed = param_lb + self.epsilon + self._safe_abs(param_fixed)
-                            param_fixed_summary = param_lb + self.epsilon + self._safe_abs(param_fixed_summary)
-                        else:
-                            raise ValueError('Unrecognized constraint function "%s"' % self.constraint)
+                        param_fixed = param_lb + self.epsilon + self.constraint_fn(param_fixed)
+                        param_fixed_summary = param_lb + self.epsilon + self.constraint_fn(param_fixed_summary)
                     elif param_lb is None and param_ub is not None:
-                        if self.constraint.lower() == 'softplus':
-                            param_fixed = param_ub - self.epsilon - tf.nn.softplus(param_fixed)
-                            param_fixed_summary = param_ub - self.epsilon - tf.nn.softplus(param_fixed_summary)
-                        elif self.constraint.lower() == 'abs':
-                            param_fixed = param_ub - self.epsilon - self._safe_abs(param_fixed)
-                            param_fixed_summary = param_ub - self.epsilon - self._safe_abs(param_fixed_summary)
-                        else:
-                            raise ValueError('Unrecognized constraint function "%s"' % self.constraint)
+                        param_fixed = param_ub - self.epsilon - self.constraint_fn(param_fixed)
+                        param_fixed_summary = param_ub - self.epsilon - self.constraint_fn(param_fixed_summary)
                     elif param_lb is not None and param_ub is not None:
                         param_fixed = self._softplus_sigmoid(param_fixed, a=param_lb, b=param_ub)
                         param_fixed_summary = self._softplus_sigmoid(param_fixed_summary, a=param_lb, b=param_ub)
@@ -2507,7 +2506,7 @@ class DTSR(object):
                         if t.cont:
                             # Create a continuous piecewise linear function
                             # that interpolates between points in the impulse history.
-                            # Reverse because the history contains time offsets in descending order
+                            # Reverse because the history contains time offsets in descen   ding order
                             knot_location = tf.reverse(
                                 tf.transpose(self.t_delta[:,:,impulse_ix:impulse_ix+1], [0, 2, 1]),
                                 axis=[-1]
@@ -3415,12 +3414,7 @@ class DTSR(object):
                     max_lower_offset = param_fixed - (lb + self.epsilon)
 
                     # Enforce constraint
-                    if self.constraint.lower() == 'softplus':
-                        param_random = tf.nn.softplus(param_random)
-                    elif self.constraint.lower() == 'abs':
-                        param_random = self._safe_abs(param_random)
-                    else:
-                        raise ValueError('Unrecognized constraint function "%s"' % self.constraint)
+                    param_random = self.constraint_fn(param_random)
 
                     # Center
                     param_random_mean = tf.reduce_mean(param_random, axis=0, keepdims=True)
@@ -3436,12 +3430,7 @@ class DTSR(object):
                     max_upper_offset = ub - param_fixed - self.epsilon
 
                     # Enforce constraint
-                    if self.constraint.lower() == 'softplus':
-                        param_random = -tf.nn.softplus(param_random)
-                    elif self.constraint.lower() == 'abs':
-                        param_random = -self._safe_abs(param_random)
-                    else:
-                        raise ValueError('Unrecognized constraint function "%s"' % self.constraint)
+                    param_random = -self.constraint_fn(param_random)
 
                     # Center
                     param_random_mean = tf.reduce_mean(param_random, axis=0, keepdims=True)

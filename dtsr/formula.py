@@ -990,6 +990,7 @@ class Formula(object):
             X_cur = X[i]
             ops = impulse.ops
 
+            expanded_impulses = None
             if impulse.id not in X_cur.columns:
                 if type(impulse).__name__ == 'ImpulseInteraction':
                     X_cur, expanded_impulses, expanded_atomic_impulses = impulse.expand_categorical(X_cur)
@@ -1005,13 +1006,14 @@ class Formula(object):
                 else:
                     X_cur, expanded_impulses = impulse.expand_categorical(X_cur)
 
-            for x in expanded_impulses:
-                if x.name() not in X_cur.columns:
-                    new_col = X_cur[x.id]
-                    for j in range(len(ops)):
-                        op = ops[j]
-                        new_col = self.apply_op(op, new_col)
-                    X_cur[x.name()] = new_col
+            if expanded_impulses is not None:
+                for x in expanded_impulses:
+                    if x.name() not in X_cur.columns:
+                        new_col = X_cur[x.id]
+                        for j in range(len(ops)):
+                            op = ops[j]
+                            new_col = self.apply_op(op, new_col)
+                        X_cur[x.name()] = new_col
 
             X[i] = X_cur
 
