@@ -2709,13 +2709,13 @@ class DTSR(object):
             with self.sess.graph.as_default():
                 self.rho_t = tf.placeholder(self.FLOAT_TF, name='rho_t_in')
                 self.p_rho_t = tf.placeholder(self.FLOAT_TF, name='p_rho_t_in')
-                self.rho_a = tf.placeholder(self.FLOAT_TF, name='rho_a_in')
-                self.p_rho_a = tf.placeholder(self.FLOAT_TF, name='p_rho_a_in')
+                # self.rho_a = tf.placeholder(self.FLOAT_TF, name='rho_a_in')
+                # self.p_rho_a = tf.placeholder(self.FLOAT_TF, name='p_rho_a_in')
 
                 tf.summary.scalar('convergence/rho_t', self.rho_t, collections=['convergence'])
                 tf.summary.scalar('convergence/p_rho_t', self.p_rho_t, collections=['convergence'])
-                tf.summary.scalar('convergence/rho_a', self.rho_a, collections=['convergence'])
-                tf.summary.scalar('convergence/p_rho_a', self.p_rho_a, collections=['convergence'])
+                # tf.summary.scalar('convergence/rho_a', self.rho_a, collections=['convergence'])
+                # tf.summary.scalar('convergence/p_rho_a', self.p_rho_a, collections=['convergence'])
                 tf.summary.scalar('convergence/proportion_converged', self.proportion_converged, collections=['convergence'])
                 self.summary_convergence = tf.summary.merge_all(key='convergence')
 
@@ -2998,6 +2998,10 @@ class DTSR(object):
                     last_check = self.last_convergence_check.eval(session=self.sess)
                     offset = cur_step % self.convergence_stride
                     update = last_check < cur_step and self.convergence_stride > 0
+                    if update and self.convergence_basis == 'loss' and feed_dict is None:
+                        update = False
+                        sys.stderr.write('Skipping convergence history update because no feed_dict provided.\n')
+
                     push = update and offset == 0
                     # End of stride if next step is a push
                     end_of_stride = last_check < (cur_step+1) and self.convergence_stride > 0 and ((cur_step+1) % self.convergence_stride == 0)
@@ -3043,8 +3047,9 @@ class DTSR(object):
 
                     if end_of_stride:
                         locally_converged = cur_step > self.convergence_n_iterates and \
-                                    (min_p > self.convergence_alpha) and \
-                                    (p_ta_at_min_p > self.convergence_alpha)
+                                    (min_p > self.convergence_alpha)
+                                    # (min_p > self.convergence_alpha) and \
+                                    # (p_ta_at_min_p > self.convergence_alpha)
                         convergence_history = self.convergence_history.eval(session=self.sess)
                         convergence_history[:-1] = convergence_history[1:]
                         convergence_history[-1] = locally_converged
@@ -3055,9 +3060,9 @@ class DTSR(object):
                             self.summary_convergence,
                             feed_dict={
                                 self.rho_t: rt_at_min_p,
-                                self.p_rho_t: min_p,
-                                self.rho_a: ra_at_min_p,
-                                self.p_rho_a: p_ta_at_min_p,
+                                self.p_rho_t: min_p
+                                # self.rho_a: ra_at_min_p,
+                                # self.p_rho_a: p_ta_at_min_p,
                             }
                         )
                         self.writer.add_summary(summary_convergence, self.global_step.eval(session=self.sess))
@@ -3071,8 +3076,8 @@ class DTSR(object):
                     if verbose:
                         sys.stderr.write('rho_t: %s.\n' % rt_at_min_p)
                         sys.stderr.write('p of rho_t: %s.\n' % min_p)
-                        sys.stderr.write('rho_a: %s.\n' % ra_at_min_p)
-                        sys.stderr.write('p of rho_a: %s.\n' % p_ta_at_min_p)
+                        # sys.stderr.write('rho_a: %s.\n' % ra_at_min_p)
+                        # sys.stderr.write('p of rho_a: %s.\n' % p_ta_at_min_p)
                         sys.stderr.write('Location: %s.\n\n' % self.d0_names[min_p_ix])
                         sys.stderr.write('Iterate meets convergence criteria: %s.\n\n' % converged)
                         sys.stderr.write('Proportion of recent iterates converged: %s.\n' % proportion_converged)
@@ -4293,8 +4298,8 @@ class DTSR(object):
             out += ' ' * (indent * 2) + 'Convergence alpha: %s\n' % self.convergence_alpha
             out += ' ' * (indent * 2) + 'Convergence min p of rho_t: %s\n' % min_p
             out += ' ' * (indent * 2) + 'Convergence rho_t at min p: %s\n' % rt_at_min_p
-            out += ' ' * (indent * 2) + 'Convergence rho_a at min p: %s\n' % ra_at_min_p
-            out += ' ' * (indent * 2) + 'Convergence p of rho_a at min p: %s\n' % p_ta_at_min_p
+            # out += ' ' * (indent * 2) + 'Convergence rho_a at min p: %s\n' % ra_at_min_p
+            # out += ' ' * (indent * 2) + 'Convergence p of rho_a at min p: %s\n' % p_ta_at_min_p
             out += ' ' * (indent * 2) + 'Proportion converged: %s\n' % proportion_converged
 
             if converged:
@@ -5100,6 +5105,9 @@ class DTSR(object):
             summed=False,
             irf_name_map=None,
             irf_ids=None,
+            sort_names=True,
+            prop_cycle_length=None,
+            prop_cycle_ix=None,
             plot_dirac=False,
             plot_n_time_units=2.5,
             plot_n_time_points=1000,
@@ -5133,6 +5141,9 @@ class DTSR(object):
             If ``None``, IRF tree node string ID's will be used.
         :param summed: ``bool``; whether to plot individual IRFs or their sum.
         :param irf_ids: ``list`` or ``None``; list of irf ID's to plot. If ``None``, all IRF's are plotted.
+        :param sort_names: ``sort_names``; alphabetically sort IRF names.
+        :param prop_cycle_length: ``int`` or ``None``; Length of plotting properties cycle (defines step size in the color map). If ``None``, inferred from **irf_names**.
+        :param prop_cycle_ix: ``list`` of ``int``, or ``None``; Integer indices to use in the properties cycle for each entry in **irf_names**. If ``None``, indices are automatically assigned.
         :param plot_dirac: ``bool``; include any linear Dirac delta IRF's (stick functions at t=0) in plot.
         :param plot_n_time_units: ``float``; number if time units to use for plotting.
         :param plot_n_time_points: ``int``; number of points to use for plotting.
@@ -5256,6 +5267,9 @@ class DTSR(object):
                                     names_cur,
                                     lq=lq,
                                     uq=uq,
+                                    sort_names=sort_names,
+                                    prop_cycle_length=prop_cycle_length,
+                                    prop_cycle_ix=prop_cycle_ix,
                                     dir=self.outdir,
                                     filename=prefix + plot_name,
                                     irf_name_map=irf_name_map,
@@ -5343,6 +5357,9 @@ class DTSR(object):
                                             names_cur,
                                             lq=lq,
                                             uq=uq,
+                                            sort_names=sort_names,
+                                            prop_cycle_length=prop_cycle_length,
+                                            prop_cycle_ix=prop_cycle_ix,
                                             dir=self.outdir,
                                             filename=prefix + plot_name,
                                             irf_name_map=irf_name_map,
