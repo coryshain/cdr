@@ -2709,13 +2709,15 @@ class DTSR(object):
             with self.sess.graph.as_default():
                 self.rho_t = tf.placeholder(self.FLOAT_TF, name='rho_t_in')
                 self.p_rho_t = tf.placeholder(self.FLOAT_TF, name='p_rho_t_in')
-                # self.rho_a = tf.placeholder(self.FLOAT_TF, name='rho_a_in')
-                # self.p_rho_a = tf.placeholder(self.FLOAT_TF, name='p_rho_a_in')
+                if self.convergence_basis.lower() == 'parameters':
+                    self.rho_a = tf.placeholder(self.FLOAT_TF, name='rho_a_in')
+                    self.p_rho_a = tf.placeholder(self.FLOAT_TF, name='p_rho_a_in')
 
                 tf.summary.scalar('convergence/rho_t', self.rho_t, collections=['convergence'])
                 tf.summary.scalar('convergence/p_rho_t', self.p_rho_t, collections=['convergence'])
-                # tf.summary.scalar('convergence/rho_a', self.rho_a, collections=['convergence'])
-                # tf.summary.scalar('convergence/p_rho_a', self.p_rho_a, collections=['convergence'])
+                if self.convergence_basis.lower() == 'parameters':
+                    tf.summary.scalar('convergence/rho_a', self.rho_a, collections=['convergence'])
+                    tf.summary.scalar('convergence/p_rho_a', self.p_rho_a, collections=['convergence'])
                 tf.summary.scalar('convergence/proportion_converged', self.proportion_converged, collections=['convergence'])
                 self.summary_convergence = tf.summary.merge_all(key='convergence')
 
@@ -3048,22 +3050,24 @@ class DTSR(object):
                     if end_of_stride:
                         locally_converged = cur_step > self.convergence_n_iterates and \
                                     (min_p > self.convergence_alpha)
-                                    # (min_p > self.convergence_alpha) and \
-                                    # (p_ta_at_min_p > self.convergence_alpha)
+                        if self.convergence_basis.lower() == 'parameters':
+                            locally_converged &= p_ta_at_min_p > self.convergence_alpha
                         convergence_history = self.convergence_history.eval(session=self.sess)
                         convergence_history[:-1] = convergence_history[1:]
                         convergence_history[-1] = locally_converged
                         self.sess.run(self.convergence_history_assign, {self.convergence_history_update: convergence_history})
 
                     if self.log_freq > 0 and self.global_step.eval(session=self.sess) % self.log_freq == 0:
-                        summary_convergence = self.sess.run(
-                            self.summary_convergence,
-                            feed_dict={
+                        fd_convergence = {
                                 self.rho_t: rt_at_min_p,
                                 self.p_rho_t: min_p
-                                # self.rho_a: ra_at_min_p,
-                                # self.p_rho_a: p_ta_at_min_p,
                             }
+                        if self.convergence_basis.lower() == 'parameters':
+                            fd_convergence[self.rho_a] = ra_at_min_p
+                            fd_convergence[self.p_rho_a] =  p_ta_at_min_p
+                        summary_convergence = self.sess.run(
+                            self.summary_convergence,
+                            feed_dict=fd_convergence
                         )
                         self.writer.add_summary(summary_convergence, self.global_step.eval(session=self.sess))
 
@@ -3076,8 +3080,9 @@ class DTSR(object):
                     if verbose:
                         sys.stderr.write('rho_t: %s.\n' % rt_at_min_p)
                         sys.stderr.write('p of rho_t: %s.\n' % min_p)
-                        # sys.stderr.write('rho_a: %s.\n' % ra_at_min_p)
-                        # sys.stderr.write('p of rho_a: %s.\n' % p_ta_at_min_p)
+                        if self.convergence_basis.lower() == 'parameters':
+                            sys.stderr.write('rho_a: %s.\n' % ra_at_min_p)
+                            sys.stderr.write('p of rho_a: %s.\n' % p_ta_at_min_p)
                         sys.stderr.write('Location: %s.\n\n' % self.d0_names[min_p_ix])
                         sys.stderr.write('Iterate meets convergence criteria: %s.\n\n' % converged)
                         sys.stderr.write('Proportion of recent iterates converged: %s.\n' % proportion_converged)
@@ -4298,8 +4303,9 @@ class DTSR(object):
             out += ' ' * (indent * 2) + 'Convergence alpha: %s\n' % self.convergence_alpha
             out += ' ' * (indent * 2) + 'Convergence min p of rho_t: %s\n' % min_p
             out += ' ' * (indent * 2) + 'Convergence rho_t at min p: %s\n' % rt_at_min_p
-            # out += ' ' * (indent * 2) + 'Convergence rho_a at min p: %s\n' % ra_at_min_p
-            # out += ' ' * (indent * 2) + 'Convergence p of rho_a at min p: %s\n' % p_ta_at_min_p
+            if self.convergence_basis.lower() == 'parameters':
+                out += ' ' * (indent * 2) + 'Convergence rho_a at min p: %s\n' % ra_at_min_p
+                out += ' ' * (indent * 2) + 'Convergence p of rho_a at min p: %s\n' % p_ta_at_min_p
             out += ' ' * (indent * 2) + 'Proportion converged: %s\n' % proportion_converged
 
             if converged:
