@@ -85,18 +85,33 @@ class DTSRBayes(DTSR):
         self.inference_map = {}
         self.MAP_map = {}
         if self.intercept_init is None:
-            self.intercept_init = self.y_train_mean
+            if self.standardize_response:
+                self.intercept_init = 0.
+            else:
+                self.intercept_init = self.y_train_mean
         if self.intercept_prior_sd is None:
-            self.intercept_prior_sd = self.y_train_sd * self.prior_sd_scaling_coefficient
+            if self.standardize_response:
+                self.intercept_prior_sd = self.prior_sd_scaling_coefficient
+            else:
+                self.intercept_prior_sd = self.y_train_sd * self.prior_sd_scaling_coefficient
         if self.coef_prior_sd is None:
-            self.coef_prior_sd = self.y_train_sd * self.prior_sd_scaling_coefficient
+            if self.standardize_response:
+                self.coef_prior_sd = self.prior_sd_scaling_coefficient
+            else:
+                self.coef_prior_sd = self.y_train_sd * self.prior_sd_scaling_coefficient
         if self.y_sd_prior_sd is None:
-            self.y_sd_prior_sd = self.y_train_sd * self.y_sd_prior_sd_scaling_coefficient
+            if self.standardize_response:
+                self.y_sd_prior_sd = self.y_sd_prior_sd_scaling_coefficient
+            else:
+                self.y_sd_prior_sd = self.y_train_sd * self.y_sd_prior_sd_scaling_coefficient
 
         if self.inference_name == 'MetropolisHastings':
             self.proposal_map = {}
             if self.mh_proposal_sd is None:
-                self.mh_proposal_sd = self.y_train_sd * self.prior_sd_scaling_coefficient
+                if self.standardize_response:
+                    self.mh_proposal_sd = self.prior_sd_scaling_coefficient
+                else:
+                    self.mh_proposal_sd = self.y_train_sd * self.prior_sd_scaling_coefficient
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -1195,87 +1210,172 @@ class DTSRBayes(DTSR):
                     self.MAP_map[self.y_skewness] = self.y_skewness_summary
                     self.MAP_map[self.y_tailweight] = self.y_tailweight_summary
 
-                    self.out = SinhArcsinh(
-                        loc=self.out,
-                        scale=y_sd,
-                        skewness=self.y_skewness,
-                        tailweight=self.constraint_fn(self.y_tailweight),
-                        name='output'
-                    )
-                    self.err_dist = SinhArcsinh(
-                        loc=0.,
-                        scale=y_sd_summary,
-                        skewness=self.y_skewness_summary,
-                        tailweight=self.constraint_fn(self.y_tailweight_summary),
-                        name='err_dist'
-                    )
+                    if self.standardize_response:
+                        self.out_standardized = SinhArcsinh(
+                            loc=self.out,
+                            scale=y_sd,
+                            skewness=self.y_skewness,
+                            tailweight=self.constraint_fn(self.y_tailweight),
+                            name='output_standardized'
+                        )
+                        self.err_dist_standardized = SinhArcsinh(
+                            loc=0.,
+                            scale=y_sd_summary,
+                            skewness=self.y_skewness_summary,
+                            tailweight=self.constraint_fn(self.y_tailweight_summary),
+                            name='err_dist_standardized'
+                        )
+                        self.MAP_map[self.out_standardized] = self.out_mean
 
-                    self.err_dist_plot = tf.exp(self.err_dist.log_prob(self.support))
+                        self.out = SinhArcsinh(
+                            loc=self.out * self.y_train_sd + self.y_train_mean,
+                            scale=y_sd * self.y_train_sd,
+                            skewness=self.y_skewness,
+                            tailweight=self.constraint_fn(self.y_tailweight),
+                            name='output'
+                        )
+                        self.err_dist = SinhArcsinh(
+                            loc=0.,
+                            scale=y_sd_summary * self.y_train_sd,
+                            skewness=self.y_skewness_summary,
+                            tailweight=self.constraint_fn(self.y_tailweight_summary),
+                            name='err_dist'
+                        )
+                        self.MAP_map[self.out] = self.out_mean * self.y_train_sd + self.y_train_mean
+                    else:
+                        self.out = SinhArcsinh(
+                            loc=self.out,
+                            scale=y_sd,
+                            skewness=self.y_skewness,
+                            tailweight=self.constraint_fn(self.y_tailweight),
+                            name='output'
+                        )
+                        self.err_dist = SinhArcsinh(
+                            loc=0.,
+                            scale=y_sd_summary,
+                            skewness=self.y_skewness_summary,
+                            tailweight=self.constraint_fn(self.y_tailweight_summary),
+                            name='err_dist'
+                        )
+                        self.MAP_map[self.out] = self.out_mean
+
                 else:
-                    self.out = Normal(
-                        loc=self.out,
-                        scale=self.y_sd,
-                        name='output'
-                    )
-                    self.err_dist = Normal(
-                        loc=0.,
-                        scale=self.y_sd_summary,
-                        name='err_dist'
-                    )
-                    self.err_dist_plot = tf.exp(self.err_dist.log_prob(self.support))
+                    if self.standardize_response:
+                        self.out_standardized = Normal(
+                            loc=self.out,
+                            scale=self.y_sd,
+                            name='output_standardized'
+                        )
+                        self.err_dist_standardized = Normal(
+                            loc=0.,
+                            scale=self.y_sd_summary,
+                            name='err_dist_standardized'
+                        )
 
+                        self.MAP_map[self.out_standardized] = self.out_mean
+
+                        self.out = Normal(
+                            loc=self.out * self.y_train_sd + self.y_train_mean,
+                            scale=self.y_sd * self.y_train_sd,
+                            name='output'
+                        )
+                        self.err_dist = Normal(
+                            loc=0.,
+                            scale=self.y_sd_summary * self.y_train_sd,
+                            name='err_dist'
+                        )
+                        self.MAP_map[self.out] = self.out_mean * self.y_train_sd + self.y_train_mean
+                    else:
+                        self.out = Normal(
+                            loc=self.out,
+                            scale=self.y_sd,
+                            name='output'
+                        )
+                        self.err_dist = Normal(
+                            loc=0.,
+                            scale=self.y_sd_summary,
+                            name='err_dist'
+                        )
+                        self.MAP_map[self.out] = self.out_mean
+
+                self.err_dist_plot = tf.exp(self.err_dist.log_prob(self.support))
                 self.err_dist_lb = -3 * y_sd_summary
                 self.err_dist_ub = 3 * y_sd_summary
+
+
 
     def initialize_objective(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self._initialize_output_model()
 
+                if self.standardize_response:
+                    out_model = self.out_standardized
+                    y = (self.y - self.y_train_mean) / self.y_train_sd
+                else:
+                    out_model = self.out
+                    y = self.y
+
                 self.opt = self._initialize_optimizer(self.optim_name)
                 if self.variational():
-                    self.inference = getattr(ed,self.inference_name)(self.inference_map, data={self.out: self.y})
+                    self.inference = getattr(ed,self.inference_name)(self.inference_map, data={out_model: y})
                     self.inference.initialize(
                         n_samples=self.n_samples,
                         n_iter=self.n_iter,
                         n_print=self.n_train_minibatch * self.log_freq,
                         logdir=self.outdir + '/tensorboard/edward',
                         log_timestamp=False,
-                        scale={self.out: self.minibatch_scale},
+                        scale={out_model: self.minibatch_scale},
                         optimizer=self.opt
                     )
                 elif self.inference_name == 'MetropolisHastings':
-                    self.inference = getattr(ed, self.inference_name)(self.inference_map, self.proposal_map, data={self.out: self.y})
+                    self.inference = getattr(ed, self.inference_name)(self.inference_map, self.proposal_map, data={out_model: y})
                     self.inference.initialize(
                         n_print=self.n_train_minibatch * self.log_freq,
                         logdir=self.outdir + '/tensorboard/edward',
                         log_timestamp=False,
-                        scale={self.out: self.minibatch_scale}
+                        scale={out_model: self.minibatch_scale}
                     )
                 else:
-                    self.inference = getattr(ed,self.inference_name)(self.inference_map, data={self.out: self.y})
+                    self.inference = getattr(ed,self.inference_name)(self.inference_map, data={out_model: y})
                     self.inference.initialize(
                         step_size=self.lr,
                         n_print=self.n_train_minibatch * self.log_freq,
                         logdir=self.outdir + '/tensorboard/edward',
                         log_timestamp=False,
-                        scale={self.out: self.minibatch_scale}
+                        scale={out_model: self.minibatch_scale}
                     )
 
-                ## Set up posteriors for MC sampling
+                ## Set up posteriors and MAP estimates
                 self.X_conv_prior = self.X_conv
-                self.X_conv_scaled_prior = self.X_conv
                 self.X_conv_post = ed.copy(self.X_conv, self.inference_map)
-                self.X_conv_scaled_post = ed.copy(self.X_conv_scaled, self.inference_map)
                 self.X_conv_MAP = ed.copy(self.X_conv, self.MAP_map, scope='MAP')
-                self.X_conv_scaled_MAP = ed.copy(self.X_conv_scaled, self.MAP_map, scope='MAP')
+
+                if self.standardize_response:
+                    y_standardized = (self.y - self.y_train_mean) / self.y_train_sd
+                    self.X_conv_standardized_scaled_prior = self.X_conv_scaled
+                    self.X_conv_standardized_scaled_post = ed.copy(self.X_conv_scaled, self.inference_map)
+                    self.X_conv_standardized_scaled_MAP = ed.copy(self.X_conv_scaled, self.MAP_map, scope='MAP')
+                    self.X_conv_scaled_prior = self.X_conv_scaled * self.y_train_sd + self.y_train_mean
+                    self.X_conv_scaled_post = ed.copy(self.X_conv_scaled * self.y_train_sd + self.y_train_mean, self.inference_map)
+                    self.X_conv_scaled_MAP = ed.copy(self.X_conv_scaled * self.y_train_sd + self.y_train_mean, self.MAP_map, scope='MAP')
+
+                    self.out_standardized_prior = self.out_standardized
+                    self.out_standardized_post = ed.copy(self.out_standardized, self.inference_map)
+                    self.out_standardized_MAP = tf.identity(self.MAP_map[self.out_standardized])
+                    self.out_standardized_MAP = ed.copy(self.out_standardized_MAP, self.MAP_map, scope='MAP')
+                    self.ll_standardized_prior = self.out_standardized_prior.log_prob(y_standardized)
+                    self.ll_standardized_post = self.out_standardized_post.log_prob(y_standardized)
+                    self.ll_standardized_MAP = ed.copy(self.out_standardized.log_prob(y_standardized), self.MAP_map, scope='MAP')
+                else:
+                    self.X_conv_scaled_prior = self.X_conv_scaled
+                    self.X_conv_scaled_post = ed.copy(self.X_conv_scaled, self.inference_map)
+                    self.X_conv_scaled_MAP = ed.copy(self.X_conv_scaled, self.MAP_map, scope='MAP')
 
                 self.out_prior = self.out
                 self.out_post = ed.copy(self.out, self.inference_map)
-                self.MAP_map[self.out] = self.out_mean
                 self.out_MAP = tf.identity(self.MAP_map[self.out])
                 self.out_MAP = ed.copy(self.out_MAP, self.MAP_map, scope='MAP')
-
                 self.ll_prior = self.out_prior.log_prob(self.y)
                 self.ll_post = self.out_post.log_prob(self.y)
                 self.ll_MAP = ed.copy(self.out.log_prob(self.y), self.MAP_map, scope='MAP')
@@ -1466,16 +1566,23 @@ class DTSRBayes(DTSR):
 
                 return out_dict
 
-    def run_predict_op(self, feed_dict, n_samples=None, algorithm='MAP', verbose=True):
+    def run_predict_op(self, feed_dict, standardize_response=False, n_samples=None, algorithm='MAP', verbose=True):
         if algorithm in ['map', 'MAP'] and self.variational():
             MAP = True
         else:
             MAP = False
 
+        if standardize_response and self.standardize_response:
+            out_post = self.out_standardized_post
+            out_MAP = self.out_standardized_MAP
+        else:
+            out_post = self.out_post
+            out_MAP = self.out_MAP
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if MAP:
-                    preds = self.sess.run(self.out_MAP, feed_dict=feed_dict)
+                    preds = self.sess.run(out_MAP, feed_dict=feed_dict)
                 else:
                     if n_samples is None:
                         n_samples = self.n_samples_eval
@@ -1486,7 +1593,7 @@ class DTSRBayes(DTSR):
                     preds = np.zeros((len(feed_dict[self.time_y]), n_samples))
 
                     for i in range(n_samples):
-                        preds[:, i] = self.sess.run(self.out_post, feed_dict=feed_dict)
+                        preds[:, i] = self.sess.run(out_post, feed_dict=feed_dict)
                         if verbose:
                             pb.update(i + 1, force=True)
 
@@ -1494,16 +1601,23 @@ class DTSRBayes(DTSR):
 
                 return preds
 
-    def run_loglik_op(self, feed_dict, n_samples=None, algorithm='MAP', verbose=True):
+    def run_loglik_op(self, feed_dict, standardize_response=False, n_samples=None, algorithm='MAP', verbose=True):
         if algorithm in ['map', 'MAP'] and self.variational():
             MAP = True
         else:
             MAP = False
 
+        if standardize_response and self.standardize_response:
+            ll_post = self.ll_standardized_post
+            ll_MAP = self.ll_standardized_MAP
+        else:
+            ll_post = self.ll_post
+            ll_MAP = self.ll_MAP
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if MAP:
-                    log_lik = self.sess.run(self.ll_MAP, feed_dict=feed_dict)
+                    log_lik = self.sess.run(ll_MAP, feed_dict=feed_dict)
                 else:
                     if n_samples is None:
                         n_samples = self.n_samples_eval
@@ -1514,7 +1628,7 @@ class DTSRBayes(DTSR):
                     log_lik = np.zeros((len(feed_dict[self.time_y]), n_samples))
 
                     for i in range(n_samples):
-                        log_lik[:, i] = self.sess.run(self.ll_post, feed_dict=feed_dict)
+                        log_lik[:, i] = self.sess.run(ll_post, feed_dict=feed_dict)
                         if verbose:
                             pb.update(i + 1, force=True)
 
@@ -1550,16 +1664,27 @@ class DTSRBayes(DTSR):
 
                 return loss
 
-    def run_conv_op(self, feed_dict, scaled=False, n_samples=None, algorithm='MAP', verbose=True):
+    def run_conv_op(self, feed_dict, scaled=False, standardize_response=False, n_samples=None, algorithm='MAP', verbose=True):
         if algorithm in ['map', 'MAP'] and self.variational():
             MAP = True
         else:
             MAP = False
 
+        if scaled:
+            if standardize_response and self.standardize_response:
+                X_conv_post = self.X_conv_standardized_scaled_post
+                X_conv_MAP = self.X_conv_standardized_scaled_MAP
+            else:
+                X_conv_post = self.X_conv_scaled_post
+                X_conv_MAP = self.X_conv_scaled_MAP
+        else:
+            X_conv_post = self.X_conv_post
+            X_conv_MAP = self.X_conv_MAP
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if MAP:
-                    X_conv = self.sess.run(self.X_conv_scaled_MAP if scaled else self.X_conv_MAP, feed_dict=feed_dict)
+                    X_conv = self.sess.run(X_conv_MAP, feed_dict=feed_dict)
                 else:
                     if n_samples is None:
                         n_samples = self.n_samples_eval
@@ -1569,7 +1694,7 @@ class DTSRBayes(DTSR):
                     X_conv = np.zeros((len(feed_dict[self.X]), self.X_conv.shape[-1], n_samples))
 
                     for i in range(0, n_samples):
-                        X_conv[..., i] = self.sess.run(self.X_conv_scaled_post if scaled else self.X_conv_post, feed_dict=feed_dict)
+                        X_conv[..., i] = self.sess.run(X_conv_post, feed_dict=feed_dict)
                         if verbose:
                             pb.update(i + 1, force=True)
 

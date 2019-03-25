@@ -288,12 +288,25 @@ class DTSRMLE(DTSR):
                     self.y_sd_summary,
                     collections=['params']
                 )
-                y_dist = tf.distributions.Normal(loc=self.out, scale=self.y_sd)
-                self.ll = y_dist.log_prob(self.y) * self.minibatch_scale
+                if self.standardize_response:
+                    y_standardized = (self.y - self.y_train_mean) / self.y_train_sd
+                    y_dist_standardized = tf.distributions.Normal(loc=self.out, scale=self.y_sd)
+                    self.ll_standardized = y_dist_standardized.log_prob(y_standardized)
+                    y_dist = tf.distributions.Normal(
+                        loc=self.out * self.y_train_sd + self.y_train_mean,
+                        scale=self.y_sd * self.y_train_sd
+                    )
+                    self.ll = y_dist.log_prob(self.y)
+                    ll_objective = self.ll_standardized
+                else:
+                    y_dist = tf.distributions.Normal(loc=self.out, scale=self.y_sd)
+                    self.ll = y_dist.log_prob(self.y)
+                    ll_objective = self.ll
+
                 self.mae_loss = tf.losses.absolute_difference(self.y, self.out)
                 self.mse_loss = tf.losses.mean_squared_error(self.y, self.out)
 
-                self.loss_func = -tf.reduce_sum(self.ll)
+                self.loss_func = -(tf.reduce_sum(ll_objective) * self.minibatch_scale)
                 if len(self.regularizer_losses_varnames) > 0:
                     self.loss_func += tf.add_n(self.regularizer_losses)
 
@@ -345,20 +358,28 @@ class DTSRMLE(DTSR):
 
                 return out_dict
 
-    def run_predict_op(self, feed_dict, n_samples=None, algorithm='MAP', verbose=True):
+    def run_predict_op(self, feed_dict, standardize_response=False, n_samples=None, algorithm='MAP', verbose=True):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 preds = self.sess.run(self.out, feed_dict=feed_dict)
+                if self.standardize_response and not standardize_response:
+                    preds = preds * self.y_train_sd + self.y_train_mean
                 return preds
 
-    def run_loglik_op(self, feed_dict, n_samples=None, algorithm='MAP', verbose=True):
+    def run_loglik_op(self, feed_dict, standardize_response=False, n_samples=None, algorithm='MAP', verbose=True):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                log_lik = self.sess.run(self.ll, feed_dict=feed_dict)
+                if self.standardize_response and standardize_response:
+                    ll = self.ll_standardized
+                else:
+                    ll = self.ll
+                log_lik = self.sess.run(ll, feed_dict=feed_dict)
                 return log_lik
 
-    def run_conv_op(self, feed_dict, scaled=False, n_samples=None, algorithm='MAP', verbose=True):
+    def run_conv_op(self, feed_dict, scaled=False, standardize_response=False, n_samples=None, algorithm='MAP', verbose=True):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 X_conv = self.sess.run(self.X_conv_scaled if scaled else self.X_conv, feed_dict=feed_dict)
+                if scaled and self.standardize_response and not standardize_response:
+                    X_conv = X_conv * self.y_train_sd + self.y_train_mean
                 return X_conv

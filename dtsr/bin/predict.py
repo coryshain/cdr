@@ -68,6 +68,7 @@ if __name__ == '__main__':
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of model names from which to predict. Regex permitted. If unspecified, predicts from all models.')
     argparser.add_argument('-d', '--data', nargs='+', default=[], help='Pairs of paths or buffers <predictors, responses>, allowing prediction on arbitrary evaluation data. Predictors may consist of ``;``-delimited paths designating files containing predictors with different timestamps. Within each file, timestamps are treated as identical across predictors.')
     argparser.add_argument('-p', '--partition', nargs='+', default=['dev'], help='List of names of partitions to use ("train", "dev", "test", or hyphen-delimited subset of these).')
+    argparser.add_argument('-z', '--standardize_response', action='store_true', help='Standardize (Z-transform) response in plots. Ignored for non-DTSR models, and ignored for DTSR models unless fitting used setting ``standardize_respose=True``.')
     argparser.add_argument('-n', '--nsamples', type=int, default=1024, help='Number of posterior samples to average (only used for DTSRBayes)')
     argparser.add_argument('-M', '--mode', type=str, default=None, help='Predict mode ("response" or "loglik") or default None, which does both')
     argparser.add_argument('-a', '--algorithm', type=str, default='MAP', help='Algorithm ("sampling" or "MAP") to use for extracting predictions from DTSRBayes. Ignored for DTSRMLE.')
@@ -88,7 +89,7 @@ if __name__ == '__main__':
         elif not run_dtsr and m.startswith('DTSR'):
             run_dtsr = True
 
-    dtsr_formula_list = [Formula(p.models[m]['formula']) for m in p.model_list if m.startswith('DTSR')]
+    dtsr_formula_list = [Formula(p.models[m]['formula']) for m in models if m.startswith('DTSR')]
     dtsr_formula_name_list = [m for m in p.model_list if m.startswith('DTSR')]
 
     evaluation_sets = []
@@ -321,6 +322,10 @@ if __name__ == '__main__':
 
                     dtsr_mse = dtsr_mae = dtsr_loglik = dtsr_percent_variance_explained = dtsr_true_variance = None
 
+                    if dtsr_model.standardize_response and args.standardize_response:
+                        y_cur = (y_valid[dv] - dtsr_model.y_train_mean) / dtsr_model.y_train_sd
+                    else:
+                        y_cur = y_valid[dv]
                     if args.mode in [None, 'response']:
                         first_obs, last_obs = get_first_last_obs_lists(y_valid)
                         dtsr_preds = dtsr_model.predict(
@@ -334,12 +339,20 @@ if __name__ == '__main__':
                             X_2d_predictor_names=X_2d_predictor_names,
                             X_2d_predictors=X_2d_predictors,
                             n_samples=args.nsamples,
-                            algorithm=args.algorithm
+                            algorithm=args.algorithm,
+                            standardize_response=args.standardize_response
                         )
-                        losses = np.array(y_valid[dv] - dtsr_preds) ** 2
+
+                        losses = np.array(y_cur - dtsr_preds) ** 2
 
                         if args.extra_cols:
-                            df_out = pd.DataFrame({'DTSRlossMSE': losses, 'DTSRpreds': dtsr_preds})
+                            df_out = pd.DataFrame(
+                                {
+                                    'DTSRlossMSE': losses,
+                                    'DTSRpreds': dtsr_preds,
+                                    'yStandardized': y_cur
+                                }
+                            )
                             df_out = pd.concat([y_valid.reset_index(drop=True), df_out], axis=1)
                         else:
                             preds_outfile = p.outdir + '/' + m + '/preds_%s.txt' % partition_str
@@ -353,14 +366,14 @@ if __name__ == '__main__':
                                 for i in range(len(losses)):
                                     l_file.write(str(losses[i]) + '\n')
                             with open(obs_outfile, 'w') as p_file:
-                                for i in range(len(y_valid[dv])):
-                                    p_file.write(str(y_valid[dv].iloc[i]) + '\n')
+                                for i in range(len(y_cur)):
+                                    p_file.write(str(y_cur.iloc[i]) + '\n')
 
-                        dtsr_mse = mse(y_valid[dv], dtsr_preds)
-                        dtsr_mae = mae(y_valid[dv], dtsr_preds)
-                        dtsr_percent_variance_explained = percent_variance_explained(y_valid[dv], dtsr_preds)
-                        dtsr_true_variance = np.std(y_valid[dv]) ** 2
-                        y_dv_mean = y_valid[dv].mean()
+                        dtsr_mse = mse(y_cur, dtsr_preds)
+                        dtsr_mae = mae(y_cur, dtsr_preds)
+                        dtsr_percent_variance_explained = percent_variance_explained(y_cur, dtsr_preds)
+                        dtsr_true_variance = np.std(y_cur) ** 2
+                        y_dv_mean = y_cur.mean()
 
                     if args.mode in [None, 'loglik']:
                         dtsr_loglik_vector = dtsr_model.log_lik(
@@ -371,7 +384,8 @@ if __name__ == '__main__':
                             X_2d_predictor_names=X_2d_predictor_names,
                             X_2d_predictors=X_2d_predictors,
                             n_samples=args.nsamples,
-                            algorithm=args.algorithm
+                            algorithm=args.algorithm,
+                            standardize_response=args.standardize_response
                         )
 
                         if args.extra_cols:

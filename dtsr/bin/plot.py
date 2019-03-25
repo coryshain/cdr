@@ -14,6 +14,7 @@ if __name__ == '__main__':
     ''')
     argparser.add_argument('paths', nargs='+', help='Path(s) to config file(s) defining experiments')
     argparser.add_argument('-m', '--models', nargs='*', default = [], help='Model names to plot. Regex permitted. If unspecified, plots all DTSR models.')
+    argparser.add_argument('-z', '--standardize_response', action='store_true', help='Standardize (Z-transform) response in plots. Ignored unless model was fitted using setting ``standardize_respose=True``.')
     argparser.add_argument('-S', '--summed', action='store_true', help='Plot summed rather than individual IRFs.')
     argparser.add_argument('-i', '--irf_ids', nargs='*', default = [], help='List of IDs for IRF to include in the plot. Regex supported.')
     argparser.add_argument('-U', '--unsorted_irf_ids', action='store_true', help='Leave IRF IDs unsorted (otherwise, they are sorted alphabetically).')
@@ -117,6 +118,7 @@ if __name__ == '__main__':
             }
 
             dtsr_model.make_plots(
+                standardize_response=args.standardize_response,
                 summed=args.summed,
                 irf_name_map=name_map,
                 irf_ids=args.irf_ids,
@@ -134,6 +136,7 @@ if __name__ == '__main__':
             )
             if hasattr(dtsr_model, 'inference_name'):
                 dtsr_model.make_plots(
+                    standardize_response=args.standardize_response,
                     summed=args.summed,
                     irf_name_map=name_map,
                     irf_ids=args.irf_ids,

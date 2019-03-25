@@ -173,6 +173,12 @@ DTSR_INITIALIZATION_KWARGS = [
         "Path to output directory, where logs and model parameters are saved."
     ),
     Kwarg(
+        'standardize_response',
+        True,
+        bool,
+        "Standardize (Z-transform) the response variable. Can improve convergence speed and reduce vulnerability to local optima. Only affects fitting -- the original response scale is still used for prediction, likelihood computation, and plotting."
+    ),
+    Kwarg(
         'history_length',
         None,
         int,

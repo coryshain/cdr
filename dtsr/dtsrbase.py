@@ -574,13 +574,19 @@ class DTSR(object):
             ix_2_levelname[-1] = 'UNK'
             self.rangf_map_ix_2_levelname.append(ix_2_levelname)
 
+        if self.intercept_init is None:
+            if self.standardize_response:
+                self.intercept_init = 0.
+            else:
+                self.intercept_init = self.y_train_mean
         if self.y_sd_init is None:
-            self.y_sd_init = self.y_train_sd
+            if self.standardize_response:
+                self.y_sd_init = 1.
+            else:
+                self.y_sd_init = self.y_train_sd
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if self.intercept_init is None:
-                    self.intercept_init = self.y_train_mean
                 self.intercept_init_tf = tf.constant(self.intercept_init, dtype=self.FLOAT_TF)
                 self.epsilon = tf.constant(4 * np.finfo(self.FLOAT_NP).eps, dtype=self.FLOAT_TF)
 
@@ -794,7 +800,11 @@ class DTSR(object):
                 self.training_mse_in = tf.placeholder(self.FLOAT_TF, shape=[], name='training_mse_in')
                 self.training_mse = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_mse')
                 self.set_training_mse = tf.assign(self.training_mse, self.training_mse_in)
-                self.training_percent_variance_explained = tf.maximum(0., (1. - self.training_mse / (self.y_train_sd ** 2)) * 100.)
+                if self.standardize_response:
+                    max_sd = 1
+                else:
+                    max_sd = self.y_train_sd
+                self.training_percent_variance_explained = tf.maximum(0., (1. - self.training_mse / (max_sd ** 2)) * 100.)
 
                 self.training_mae_in = tf.placeholder(self.FLOAT_TF, shape=[], name='training_mae_in')
                 self.training_mae = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_mae')
@@ -3629,12 +3639,13 @@ class DTSR(object):
 
         raise NotImplementedError
 
-    def run_predict_op(self, feed_dict, n_samples=None, algorithm='MAP', verbose=True):
+    def run_predict_op(self, feed_dict, standardize_response=False, n_samples=None, algorithm='MAP', verbose=True):
         """
         Generate predictions from a batch of data.
         **All DTSR subclasses must implement this method.**
 
         :param feed_dict: ``dict``; A dictionary of predictor values.
+        :param standardize_response: ``bool``; Whether to report response using standard units. Ignored unless model was fitted using ``standardize_response==True``.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
         :param verbose: ``bool``; Send progress reports to standard error.
@@ -3642,12 +3653,13 @@ class DTSR(object):
         """
         raise NotImplementedError
 
-    def run_loglik_op(self, feed_dict, n_samples=None, algorithm='MAP', verbose=True):
+    def run_loglik_op(self, feed_dict, standardize_response=False, n_samples=None, algorithm='MAP', verbose=True):
         """
         Compute the log-likelihoods of a batch of data.
         **All DTSR subclasses must implement this method.**
 
         :param feed_dict: ``dict``; A dictionary of predictor and response values
+        :param standardize_response: ``bool``; Whether to report response using standard units. Ignored unless model was fitted using ``standardize_response==True``.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
         :param verbose: ``bool``; Send progress reports to standard error.
@@ -3656,13 +3668,14 @@ class DTSR(object):
 
         raise NotImplementedError
 
-    def run_conv_op(self, feed_dict, scaled=False, n_samples=None, algorithm='MAP', verbose=True):
+    def run_conv_op(self, feed_dict, scaled=False, standardize_response=False, n_samples=None, algorithm='MAP', verbose=True):
         """
         Convolve a batch of data in feed_dict with the model's latent IRF.
         **All DTSR subclasses must implement this method.**
 
         :param feed_dict: ``dict``; A dictionary of predictor variables
         :param scaled: ``bool``; Whether to scale the outputs using the model's coefficients
+        :param standardize_response: ``bool``; Whether to report response using standard units. Ignored unless ``scaled==True`` and model was fitted using ``standardize_response==True``.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
         :param verbose: ``bool``; Send progress reports to standard error.
@@ -4599,6 +4612,8 @@ class DTSR(object):
                                     self.n_time_points: 1000
                                 }
                                 plot_x = self.sess.run(self.support, feed_dict=fd_plot)
+                                if self.standardize_response:
+                                    plot_x *= self.y_train_sd
                                 plot_y = self.sess.run(self.err_dist_plot, feed_dict=fd_plot)
                                 err_dist_filename = 'error_distribution_%s.png' %self.global_step.eval(sess=self.sess) if self.keep_plot_history else 'error_distribution.png'
                                 plot_irf(
@@ -4742,6 +4757,7 @@ class DTSR(object):
             X_2d_predictors=None,
             n_samples=None,
             algorithm='MAP',
+            standardize_response=False,
             verbose=True
     ):
         """
@@ -4769,6 +4785,7 @@ class DTSR(object):
         :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
+        :param standardize_response: ``bool``; Whether to report response using standard units. Ignored unless model was fitted using ``standardize_response==True``.
         :param verbose: ``bool``; Report progress and metrics to standard error.
         :return: 1D ``numpy`` array; mean network predictions for regression targets (same length and sort order as ``y_time``).
         """
@@ -4819,7 +4836,13 @@ class DTSR(object):
 
 
                 if not np.isfinite(self.eval_minibatch_size):
-                    preds = self.run_predict_op(fd, n_samples=n_samples, algorithm=algorithm, verbose=verbose)
+                    preds = self.run_predict_op(
+                        fd,
+                        standardize_response=standardize_response,
+                        n_samples=n_samples,
+                        algorithm=algorithm,
+                        verbose=verbose
+                    )
                 else:
                     preds = np.zeros((len(y_time),))
                     n_eval_minibatch = math.ceil(len(y_time) / self.eval_minibatch_size)
@@ -4834,7 +4857,13 @@ class DTSR(object):
                             self.time_y: time_y[i:i + self.eval_minibatch_size],
                             self.gf_y: gf_y[i:i + self.eval_minibatch_size] if len(gf_y) > 0 else gf_y
                         }
-                        preds[i:i + self.eval_minibatch_size] = self.run_predict_op(fd_minibatch, n_samples=n_samples, algorithm=algorithm, verbose=verbose)
+                        preds[i:i + self.eval_minibatch_size] = self.run_predict_op(
+                            fd_minibatch,
+                            standardize_response=standardize_response,
+                            n_samples=n_samples,
+                            algorithm=algorithm,
+                            verbose=verbose
+                        )
 
                 if verbose:
                     sys.stderr.write('\n\n')
@@ -4853,6 +4882,7 @@ class DTSR(object):
             X_2d_predictors=None,
             n_samples=None,
             algorithm='MAP',
+            standardize_response=False,
             verbose=True
     ):
         """
@@ -4879,6 +4909,7 @@ class DTSR(object):
         :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
+        :param standardize_response: ``bool``; Whether to report response using standard units. Ignored unless model was fitted using ``standardize_response==True``.
         :param verbose: ``bool``; Report progress and metrics to standard error.
         :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
         """
@@ -4924,18 +4955,22 @@ class DTSR(object):
             with self.sess.graph.as_default():
                 self.set_predict_mode(True)
 
-                fd = {
-                    self.X: X_2d,
-                    self.time_X: time_X_2d,
-                    self.time_X_mask: time_X_mask,
-                    self.time_y: time_y,
-                    self.gf_y: gf_y,
-                    self.y: y_dv
-                }
-
-
                 if not np.isfinite(self.eval_minibatch_size):
-                    log_lik = self.run_loglik_op(fd, n_samples=n_samples, algorithm=algorithm, verbose=verbose)
+                    fd = {
+                        self.X: X_2d,
+                        self.time_X: time_X_2d,
+                        self.time_X_mask: time_X_mask,
+                        self.time_y: time_y,
+                        self.gf_y: gf_y,
+                        self.y: y_dv
+                    }
+                    log_lik = self.run_loglik_op(
+                        fd,
+                        standardize_response=standardize_response,
+                        n_samples=n_samples,
+                        algorithm=algorithm,
+                        verbose=verbose
+                    )
                 else:
                     log_lik = np.zeros((len(time_y),))
                     n_eval_minibatch = math.ceil(len(y) / self.eval_minibatch_size)
@@ -4951,7 +4986,13 @@ class DTSR(object):
                             self.gf_y: gf_y[i:i + self.eval_minibatch_size] if len(gf_y) > 0 else gf_y,
                             self.y: y_dv[i:i+self.eval_minibatch_size]
                         }
-                        log_lik[i:i+self.eval_minibatch_size] = self.run_loglik_op(fd_minibatch, n_samples=n_samples, algorithm=algorithm, verbose=verbose)
+                        log_lik[i:i+self.eval_minibatch_size] = self.run_loglik_op(
+                            fd_minibatch,
+                            standardize_response=standardize_response,
+                            n_samples=n_samples,
+                            algorithm=algorithm,
+                            verbose=verbose
+                        )
 
                 if verbose:
                     sys.stderr.write('\n\n')
@@ -4971,6 +5012,7 @@ class DTSR(object):
             scaled=False,
             n_samples=None,
             algorithm='MAP',
+            standardize_response=False,
             verbose=True
     ):
         """
@@ -4997,6 +5039,7 @@ class DTSR(object):
         :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
+        :param standardize_response: ``bool``; Whether to report response using standard units. Ignored unless ``scaled==True`` and model was fitted using ``standardize_response==True``.
         :param verbose: ``bool``; Report progress and metrics to standard error.
         :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
         """
@@ -5062,7 +5105,14 @@ class DTSR(object):
                     fd_minibatch[self.X] = X_2d[i:i + self.eval_minibatch_size]
                     fd_minibatch[self.time_X] = time_X_2d[i:i + self.eval_minibatch_size]
                     fd_minibatch[self.time_X_mask] = time_X_mask[i:i + self.eval_minibatch_size]
-                    X_conv_cur = self.run_conv_op(fd_minibatch, scaled=scaled, n_samples=n_samples, algorithm=algorithm, verbose=verbose)
+                    X_conv_cur = self.run_conv_op(
+                        fd_minibatch,
+                        scaled=scaled,
+                        standardize_response=standardize_response,
+                        n_samples=n_samples,
+                        algorithm=algorithm,
+                        verbose=verbose
+                    )
                     X_conv.append(X_conv_cur)
                 names = []
                 for x in self.terminal_names:
@@ -5108,6 +5158,7 @@ class DTSR(object):
 
     def make_plots(
             self,
+            standardize_response=False,
             summed=False,
             irf_name_map=None,
             irf_ids=None,
@@ -5145,6 +5196,7 @@ class DTSR(object):
 
         :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
             If ``None``, IRF tree node string ID's will be used.
+        :param standardize_response: ``bool``; Whether to report response using standard units. Ignored unless model was fitted using ``standardize_response==True``.
         :param summed: ``bool``; whether to plot individual IRFs or their sum.
         :param irf_ids: ``list`` or ``None``; list of irf ID's to plot. If ``None``, all IRF's are plotted.
         :param sort_names: ``sort_names``; alphabetically sort IRF names.
@@ -5252,6 +5304,11 @@ class DTSR(object):
                                         uq = np.stack(uq, axis=1)
                                         plot_y = np.stack(plot_y, axis=1)
 
+                                    if self.standardize_response and not standardize_response:
+                                        plot_y = plot_y * self.y_train_sd + self.y_train_mean
+                                        lq = lq * self.y_train_sd
+                                        uq = uq * self.y_train_sd
+
                                     plot_name = 'mc_' + plot_name
 
                                 else:
@@ -5261,6 +5318,8 @@ class DTSR(object):
                                     plot_y = np.concatenate(plot_y, axis=1)
                                     if summed:
                                         plot_y = plot_y.sum(axis=1, keepdims=True)
+                                    if self.standardize_response and not standardize_response:
+                                        plot_y = plot_y * self.y_train_sd
 
                                 if summed:
                                     names_cur = ['Sum']
@@ -5342,6 +5401,11 @@ class DTSR(object):
                                                 uq = np.stack(uq, axis=1)
                                                 plot_y = np.stack(plot_y, axis=1)
 
+                                            if self.standardize_response and not standardize_response:
+                                                plot_y = plot_y * self.y_train_sd
+                                                lq = lq * self.y_train_sd
+                                                uq = uq * self.y_train_sd
+
                                             plot_name = 'mc_' + plot_name
 
                                         else:
@@ -5351,6 +5415,8 @@ class DTSR(object):
                                             plot_y = np.concatenate(plot_y, axis=1)
                                             if summed:
                                                 plot_y = plot_y.sum(axis=1, keepdims=True)
+                                            if self.standardize_response and not standardize_response:
+                                                plot_y = plot_y * self.y_train_sd
 
                                         if summed:
                                             names_cur = ['Sum']

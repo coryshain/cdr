@@ -19,6 +19,7 @@ if __name__ == '__main__':
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='Path to configuration (*.ini) file')
     argparser.add_argument('-d', '--data', nargs='+', default=[], help='Pairs of paths or buffers <predictors, responses>, allowing convolution of arbitrary data. Predictors may consist of ``;``-delimited paths designating files containing predictors with different timestamps. Within each file, timestamps are treated as identical across predictors.')
     argparser.add_argument('-p', '--partition', nargs='+', default=['dev'], help='Name of partition to use ("train", "dev", "test", or hyphen-delimited subset of these). Ignored if **data** is provided.')
+    argparser.add_argument('-z', '--standardize_response', action='store_true', help='Standardize (Z-transform) response in plots. Ignored unless model was fitted using setting ``standardize_respose=True``.')
     argparser.add_argument('-n', '--nsamples', type=int, default=None, help='Number of posterior samples to average (only used for DTSRBayes)')
     argparser.add_argument('-u', '--unscaled', action='store_true', help='Do not multiply outputs by DTSR-fitted coefficients')
     argparser.add_argument('-a', '--algorithm', type=str, default='MAP', help='Algorithm ("sampling" or "MAP") to use for extracting predictions.')
@@ -114,7 +115,8 @@ if __name__ == '__main__':
                 X_2d_predictors=X_2d_predictors,
                 scaled=not args.unscaled,
                 n_samples=args.nsamples,
-                algorithm=args.algorithm
+                algorithm=args.algorithm,
+                standardize_response=args.standardize_response
             )
 
             X_conv.to_csv(p.outdir + '/' + m + '/X_conv_%s.csv' %partition_str, sep=' ', index=False, na_rep='nan')
