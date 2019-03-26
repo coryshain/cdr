@@ -5522,7 +5522,7 @@ class DTSR(object):
                         preds = preds.sum(axis=1)
 
                 if self.standardize_response and not standardize_response:
-                    preds = preds * self.y_train_sd + self.y_train_mean
+                    preds = preds * self.y_train_sd
 
                 rmsd = np.sqrt(((gold - preds) ** 2).mean())
 
