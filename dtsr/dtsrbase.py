@@ -5450,6 +5450,7 @@ class DTSR(object):
     def irf_rmsd(
             self,
             gold_irf_lambda,
+            standardize_response=False,
             summed=False,
             n_time_units=None,
             n_time_points=1000,
@@ -5459,7 +5460,8 @@ class DTSR(object):
         """
         Compute root mean squared deviation (RMSD) of fitted IRFs from gold.
 
-        :param gold_irf_lambdas: callable; vectorized numpy callable representing continuous IRFs. Generates response values for an array of inputs. Input has shape ``[n_time_points, 1]`` and output has shape ``[n_time_points, len(self.terminals)]``.
+        :param gold_irf_lambda: callable; vectorized numpy callable representing continuous IRFs. Generates response values for an array of inputs. Input has shape ``[n_time_points, 1]`` and output has shape ``[n_time_points, len(self.terminals)]``.
+        :param standardize_response: ``bool``; Whether to report response using standard units. Ignored unless model was fitted using ``standardize_response==True``.
         :param summed: ``bool``; whether to compare individual IRFs or their sum.
         :param n_time_units: ``float``; number if time units to use. If ``None``, maximum temporal offset seen in training will be used.
         :param n_time_points: ``float``; number of points to use.
@@ -5518,6 +5520,9 @@ class DTSR(object):
                     preds = np.concatenate(preds, axis=1)
                     if summed:
                         preds = preds.sum(axis=1)
+
+                if self.standardize_response and not standardize_response:
+                    preds = preds * self.y_train_sd + self.y_train_mean
 
                 rmsd = np.sqrt(((gold - preds) ** 2).mean())
 
