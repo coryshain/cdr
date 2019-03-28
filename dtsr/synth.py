@@ -12,13 +12,13 @@ def read_params(path):
 
 
 def irf(x, irf_name, irf_params, coefs=None):
-    if irf_name == 'Exp':
+    if irf_name.lower() == 'exp':
         out = np.exp(-x[..., None] * irf_params['beta'][None, ...])
-    elif irf_name == 'Normal':
+    elif irf_name.lower() == 'normal':
         out = np.exp(-(x[..., None] - irf_params['mu'][None, ...]) ** 2 / irf_params['sigma2'][None, ...])
-    elif irf_name in ['Gamma', 'HRF']:
+    elif irf_name.lower() in ['gamma', 'hrf']:
         out = scipy.stats.gamma.pdf(x[..., None], irf_params['alpha'], scale=1./irf_params['beta'])
-    elif irf_name == 'ShiftedGamma':
+    elif irf_name.lower() == 'shiftedgamma':
         out = scipy.stats.gamma.pdf(x[..., None], irf_params['alpha'], scale=1./irf_params['beta'], loc=irf_params['delta'])
     else:
         raise ValueError('Unrecognized IRF family "%s"' % irf_name)

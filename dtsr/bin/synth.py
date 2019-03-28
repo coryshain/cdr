@@ -126,11 +126,20 @@ if __name__ == '__main__':
             else:
                 y_cur = y
 
+            if isinstance(X_interval, list) or isinstance(X_interval, tuple):
+                X_interval_name = '-'.join([str(x) for x in X_interval])
+            else:
+                X_interval_name = X_interval
+            if isinstance(y_interval, list) or isinstance(y_interval, tuple):
+                y_interval_name = '-'.join([str(x) for x in y_interval])
+            else:
+                y_interval_name = y_interval
+
             data_name = [
                 'm%d' % m,
                 'n%d' % n,
-                'x%s' % X_interval,
-                'y%s' % y_interval,
+                'x%s' % X_interval_name,
+                'y%s' % y_interval_name,
                 'r%0.4f' % rho,
                 'e%s' % ('None' if e is None else '%.4f' % e)
             ]

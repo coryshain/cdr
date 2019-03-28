@@ -611,7 +611,7 @@ DTSRBAYES_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'posterior_to_prior_sd_ratio',
-        0.01,
+        0.1,
         float,
         "Ratio of posterior initialization SD to prior SD. Low values are often beneficial to stability, convergence speed, and quality of final fit by avoiding erratic sampling and divergent behavior early in training."
     ),

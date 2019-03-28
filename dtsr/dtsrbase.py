@@ -5305,7 +5305,7 @@ class DTSR(object):
                                         plot_y = np.stack(plot_y, axis=1)
 
                                     if self.standardize_response and not standardize_response:
-                                        plot_y = plot_y * self.y_train_sd + self.y_train_mean
+                                        plot_y = plot_y * self.y_train_sd
                                         lq = lq * self.y_train_sd
                                         uq = uq * self.y_train_sd
 
