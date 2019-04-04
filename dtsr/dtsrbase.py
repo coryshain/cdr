@@ -839,8 +839,11 @@ class DTSR(object):
                 coef_ids = self.fixed_coef_names
                 if len(coef_ids) > 0 and not self.covarying_fixef:
                     self.coefficient_fixed_base, self.coefficient_fixed_base_summary = self.initialize_coefficient(coef_ids=coef_ids)
-                    self.coefficient_random_base = {}
-                    self.coefficient_random_base_summary = {}
+                else:
+                    self.coefficient_fixed_base = []
+                    self.coefficient_fixed_base_summary = []
+                self.coefficient_random_base = {}
+                self.coefficient_random_base_summary = {}
 
                 # Interactions
                 if len(self.interaction_names) > 0:
