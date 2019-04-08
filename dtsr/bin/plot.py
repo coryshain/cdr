@@ -22,7 +22,7 @@ if __name__ == '__main__':
     argparser.add_argument('-P', '--prop_cycle_length', type=int, default=None, help='Length of plotting properties cycle (defines step size in the color map). If unspecified, inferred from **irf_names**.')
     argparser.add_argument('-I', '--prop_cycle_ix', nargs='*', type=int, default=None, help='Integer indices to use in the properties cycle for each entry in **irf_names**. If unspecified, indices are automatically assigned.')
     argparser.add_argument('-s', '--plot_true_synthetic', action='store_true', help='If the models are fit to synthetic data, also generate plots of the true IRF')
-    argparser.add_argument('-p', '--prefix', type=str, default='', help='Filename prefix to use for outputs')
+    argparser.add_argument('-p', '--prefix', type=str, default=None, help='Filename prefix to use for outputs. If unspecified, creates prefix based on output path.')
     argparser.add_argument('-u', '--ntimeunits', type=float, default=None, help='Number of time units on x-axis')
     argparser.add_argument('-r', '--resolution', type=float, default=None, help='Number of points on x-axis')
     argparser.add_argument('-x', '--x', type=float, default=None, help='Width of plot in inches')
@@ -44,6 +44,8 @@ if __name__ == '__main__':
         models = filter_models(p.model_list, args.models, dtsr_only=True)
 
         prefix = args.prefix
+        if prefix is None:
+            prefix = '_'.join(p.outdir.split('/'))
         if prefix != '':
             prefix += '_'
         n_time_units = args.ntimeunits
