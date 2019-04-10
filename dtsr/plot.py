@@ -25,7 +25,8 @@ def plot_irf(
         xlab=None,
         ylab=None,
         use_line_markers=False,
-        transparent_background=False
+        transparent_background=False,
+        dpi=300
 ):
     """
     Plot impulse response functions.
@@ -49,6 +50,7 @@ def plot_irf(
     :param ylab: ``str`` or ``None``; y-axis label. If ``None``, no label.
     :param use_line_markers: ``bool``; add markers to IRF lines.
     :param transparent_background: ``bool``; use a transparent background. If ``False``, uses a white background.
+    :param dpi: ``int``; dots per inch.
     :return: ``None``
     """
 
@@ -101,7 +103,7 @@ def plot_irf(
     plt.gcf().set_size_inches(plot_x_inches, plot_y_inches)
     plt.tight_layout()
     try:
-        plt.savefig(dir+'/'+filename, dpi=600, transparent=transparent_background)
+        plt.savefig(dir+'/'+filename, dpi=dpi, transparent=transparent_background)
     except:
         sys.stderr.write('Error saving plot to file %s. Skipping...' %(dir+'/'+filename))
     plt.close('all')

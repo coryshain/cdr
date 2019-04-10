@@ -30,6 +30,7 @@ if __name__ == '__main__':
     argparser.add_argument('-y', '--y', type=float, default=None, help='Height of plot in inches')
     argparser.add_argument('-Y', '--ylab', type=str, default=None, help='y-axis label (if default -- None -- no label)')
     argparser.add_argument('-c', '--cmap', type=str, default=None, help='Name of matplotlib colormap library to use for curves')
+    argparser.add_argument('-D', '--dpi', type=int, default=None, help='Dots per inch')
     argparser.add_argument('-l', '--nolegend', action='store_true', help='Omit legend from figure')
     argparser.add_argument('-M', '--markers', action='store_true', help='Add markers to IRF lines')
     argparser.add_argument('-t', '--transparent_background', action='store_true', help='Use transparent background (otherwise white background)')
@@ -78,6 +79,7 @@ if __name__ == '__main__':
                     plot_x_inches=p['plot_x_inches'] if x_inches is None else x_inches,
                     plot_y_inches=p['plot_y_inches'] if y_inches is None else y_inches,
                     cmap=p['cmap'] if cmap is None else cmap,
+                    dpi=args.dpi,
                     legend=legend,
                     xlab=args.xlab,
                     ylab=args.ylab,
@@ -98,6 +100,7 @@ if __name__ == '__main__':
                     plot_x_inches=p['plot_x_inches'] if x_inches is None else x_inches,
                     plot_y_inches=p['plot_y_inches'] if y_inches is None else y_inches,
                     cmap=p['cmap'] if cmap is None else cmap,
+                    dpi=args.dpi,
                     legend=legend,
                     xlab=args.xlab,
                     ylab=args.ylab,
@@ -116,7 +119,8 @@ if __name__ == '__main__':
                 'plot_n_time_points': p['plot_n_time_points'] if resolution is None else resolution,
                 'plot_x_inches': p['plot_x_inches'] if x_inches is None else x_inches,
                 'plot_y_inches': p['plot_y_inches'] if y_inches is None else y_inches,
-                'cmap': p['cmap'] if cmap is None else cmap
+                'cmap': p['cmap'] if cmap is None else cmap,
+                'dpi': p['dpi'] if args.dpi is None else args.dpi
             }
 
             dtsr_model.make_plots(

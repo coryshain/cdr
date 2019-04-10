@@ -40,8 +40,8 @@ def unnormalized_gamma(alpha, beta):
     return lambda x: x ** (alpha - 1) * tf.exp(-beta * x)
 
 
-def unnormalized_gaussian(mu, sigma):
-    return lambda x: tf.exp(-(x - mu) ** 2 / sigma)
+def unnormalized_gaussian(mu, sigma2):
+    return lambda x: tf.exp(-(x - mu) ** 2 / sigma2)
 
 
 def exponential_irf(params, session=None):
@@ -4436,7 +4436,8 @@ class DTSR(object):
             plot_n_time_points=1000,
             plot_x_inches=7,
             plot_y_inches=5,
-            cmap='gist_rainbow'
+            cmap='gist_rainbow',
+            dpi=300
             ):
         """
         Fit the DTSR model.
@@ -4472,6 +4473,7 @@ class DTSR(object):
         :param plot_x_inches: ``int``; width of plot in inches.
         :param plot_y_inches: ``int``; height of plot in inches.
         :param cmap: ``str``; name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot).
+        :param dpi: ``int``; dots per inch.
         :return: ``None``
         """
 
@@ -4603,6 +4605,7 @@ class DTSR(object):
                                 plot_x_inches=plot_x_inches,
                                 plot_y_inches=plot_y_inches,
                                 cmap=cmap,
+                                dpi=dpi,
                                 keep_plot_history=self.keep_plot_history
                             )
                             if type(self).__name__ == 'DTSRBayes' and self.asymmetric_error:
@@ -4645,6 +4648,7 @@ class DTSR(object):
                         plot_x_inches=plot_x_inches,
                         plot_y_inches=plot_y_inches,
                         cmap=cmap,
+                        dpi=dpi,
                         keep_plot_history=self.keep_plot_history
                     )
 
@@ -4657,6 +4661,7 @@ class DTSR(object):
                             plot_x_inches=plot_x_inches,
                             plot_y_inches=plot_y_inches,
                             cmap=cmap,
+                            dpi=dpi,
                             mc=True,
                             keep_plot_history=self.keep_plot_history
                         )
@@ -5174,6 +5179,7 @@ class DTSR(object):
             plot_x_inches=6.,
             plot_y_inches=4.,
             cmap=None,
+            dpi=300,
             mc=False,
             level=95,
             n_samples=None,
@@ -5211,6 +5217,7 @@ class DTSR(object):
         :param plot_x_inches: ``int``; width of plot in inches.
         :param plot_y_inches: ``int``; height of plot in inches.
         :param cmap: ``str``; name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot).
+        :param dpi: ``int``; dots per inch.
         :param mc: ``bool``; compute and plot Monte Carlo credible intervals (only supported for DTSRBayes).
         :param level: ``float``; significance level for credible intervals, ignored unless **mc** is ``True``.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
@@ -5344,6 +5351,7 @@ class DTSR(object):
                                     plot_x_inches=plot_x_inches,
                                     plot_y_inches=plot_y_inches,
                                     cmap=cmap,
+                                    dpi=dpi,
                                     legend=legend,
                                     xlab=xlab,
                                     ylab=ylab,
@@ -5441,6 +5449,7 @@ class DTSR(object):
                                             plot_x_inches=plot_x_inches,
                                             plot_y_inches=plot_y_inches,
                                             cmap=cmap,
+                                            dpi=dpi,
                                             legend=legend,
                                             xlab=xlab,
                                             ylab=ylab,

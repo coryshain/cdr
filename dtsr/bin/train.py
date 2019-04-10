@@ -269,7 +269,8 @@ if __name__ == '__main__':
                 plot_n_time_points=p['plot_n_time_points'],
                 plot_x_inches=p['plot_x_inches'],
                 plot_y_inches=p['plot_y_inches'],
-                cmap=p['cmap']
+                cmap=p['cmap'],
+                dpi=p['dpi']
             )
 
             summary = dtsr_model.summary()

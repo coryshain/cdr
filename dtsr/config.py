@@ -193,6 +193,8 @@ class Config(object):
             out['plot_y_inches'] = settings.getfloat('plot_y_inches', 4)
         if 'cmap' in settings or add_defaults:
             out['cmap'] = settings.get('cmap', 'gist_rainbow')
+        if 'dpi' in settings or add_defaults:
+            out['dpi'] = settings.get('dpi', 300)
 
         return out
 
