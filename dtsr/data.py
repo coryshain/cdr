@@ -1,7 +1,10 @@
 import sys
+import re
 import numpy as np
 import pandas as pd
 from .util import names2ix
+
+op_finder = re.compile('([^()]+)\((.+)\) *')
 
 
 def z(df):
@@ -35,6 +38,42 @@ def s(df):
     """
 
     return df/df.std(axis=0)
+
+
+def add_dv(name, y):
+    """
+
+    :param name: ``str``; name of dependent variable
+    :param y: ``pandas`` ``DataFrame``; response data.
+    :return: ``pandas`` ``DataFrame``; response data with any missing ops applied to DV.
+    """
+
+    if name in y.columns:
+        return y
+
+    op, var = op_finder.match(name).groups()
+
+    y = add_dv(var, y)
+    arr = y[var]
+
+    if op in ['c', 'c.']:
+        new_col = c(arr)
+    elif op in ['z', 'z.']:
+        new_col = z(arr)
+    elif op in ['s', 's.']:
+        new_col = s(arr)
+    elif op == 'log':
+        new_col = np.log(arr)
+    elif op == 'log1p':
+        new_col = np.log(arr + 1)
+    elif op == 'exp':
+        new_col = np.exp(arr)
+    else:
+        raise ValueError('Unrecognized op: "%s".' % op)
+
+    y[name] = new_col
+
+    return y
 
 
 def get_first_last_obs_lists(y):

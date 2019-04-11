@@ -11,7 +11,7 @@ from dtsr.kwargs import DTSR_INITIALIZATION_KWARGS, DTSRMLE_INITIALIZATION_KWARG
 from dtsr.config import Config
 from dtsr.io import read_data
 from dtsr.formula import Formula
-from dtsr.data import filter_invalid_responses, preprocess_data, compute_splitID, compute_partition
+from dtsr.data import add_dv, filter_invalid_responses, preprocess_data, compute_splitID, compute_partition
 from dtsr.util import mse, mae, filter_models, get_partition_list, paths_from_partition_cliarg
 
 if __name__ == '__main__':
@@ -77,13 +77,19 @@ if __name__ == '__main__':
         X_baseline = X_cur[part_select]
         X_baseline = X_baseline.reset_index(drop=True)[select]
 
-        for i in range(len(dtsr_formula_list)):
-            x = dtsr_formula_list[i]
-            if x.dv not in X_baseline.columns and x.dv in y.columns:
-                X_baseline[x.dv] = y[x.dv]
+        for m in models:
+            if not m in dtsr_formula_name_list:
+                p.set_model(m)
+                form = p['formula']
+                dv = form.split('~')[0].strip()
+                y = add_dv(dv, y)
+                if not dv in X_baseline.columns:
+                    X_baseline[dv] = y[dv]
+
         for c in X_baseline.columns:
             if X_baseline[c].dtype.name == 'category':
                 X_baseline[c] = X_baseline[c].astype(str)
+
         X_baseline = py2ri(X_baseline)
 
     n_train_sample = len(y)

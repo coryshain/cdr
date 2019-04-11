@@ -295,7 +295,6 @@ class GAM(object):
                         X[[paste0('z_',c)]] <- scale(X[[c]])
                     }
                 }
-                print(colnames(X))
                 return(X)
             }
         '''
@@ -308,7 +307,6 @@ class GAM(object):
                         X[[paste0('log_',c)]] <- log(X[[c]])
                     }
                 }
-                print(colnames(X))
                 return(X)
             }
         '''
