@@ -179,6 +179,12 @@ DTSR_INITIALIZATION_KWARGS = [
         "Standardize (Z-transform) the response variable. Can improve convergence speed and reduce vulnerability to local optima. Only affects fitting -- the original response scale is still used for prediction, likelihood computation, and plotting."
     ),
     Kwarg(
+        'asymmetric_error',
+        False,
+        bool,
+        "Allow an asymmetric error distribution by fitting a SinArcsinh transform of the normal error, adding trainable skewness and tailweight parameters."
+    ),
+    Kwarg(
         'history_length',
         None,
         int,
@@ -494,7 +500,7 @@ DTSRMLE_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'ranef_to_fixef_joint_sd_ratio',
-        1.,
+        0.1,
         float,
         "Ratio of widths of random to fixed effects root-variances in joint distributions. I.e. if less than 1, random effects have tighter distributions. Used only if either **covarying_fixef** or **covarying_ranef** is ``True``, otherwise ignored.",
         aliases=['ranef_to_fixef_prior_sd_ratio']
@@ -605,7 +611,7 @@ DTSRBAYES_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'ranef_to_fixef_prior_sd_ratio',
-        1,
+        0.1,
         float,
         "Ratio of widths of random to fixed effects priors. I.e. if less than 1, random effects have tighter priors."
     ),
@@ -614,12 +620,6 @@ DTSRBAYES_INITIALIZATION_KWARGS = [
         0.1,
         float,
         "Ratio of posterior initialization SD to prior SD. Low values are often beneficial to stability, convergence speed, and quality of final fit by avoiding erratic sampling and divergent behavior early in training."
-    ),
-    Kwarg(
-        'asymmetric_error',
-        False,
-        bool,
-        "Allow an asymmetric error distribution by fitting a SinArcsinh transform of the normal error, adding trainable skewness and tailweight parameters."
     )
 ]
 

@@ -284,24 +284,116 @@ class DTSRMLE(DTSR):
                 )
                 self.y_sd_summary = self.y_sd
                 tf.summary.scalar(
-                    'y_sd',
+                    'error/y_sd',
                     self.y_sd_summary,
                     collections=['params']
                 )
+
+                if self.asymmetric_error:
+                    self.y_skewness = tf.Variable(
+                        0.,
+                        dtype=self.FLOAT_TF,
+                        name='y_skewness'
+                    )
+                    self.y_skewness_summary = self.y_skewness
+                    tf.summary.scalar(
+                        'error/y_skewness',
+                        self.y_skewness_summary,
+                        collections=['params']
+                    )
+
+                    self.y_tailweight = self.constraint_fn(
+                        tf.Variable(
+                            self.y_tailweight_init_unconstrained,
+                            dtype=self.FLOAT_TF,
+                            name='y_skewness'
+                        )
+                    )
+                    self.y_tailweight_summary = self.y_tailweight
+                    tf.summary.scalar(
+                        'error/y_tailweight',
+                        self.y_tailweight_summary,
+                        collections=['params']
+                    )
+
                 if self.standardize_response:
                     y_standardized = (self.y - self.y_train_mean) / self.y_train_sd
-                    y_dist_standardized = tf.distributions.Normal(loc=self.out, scale=self.y_sd)
+
+                    if self.asymmetric_error:
+                        y_dist_standardized = tf.contrib.distributions.SinhArcsinh(
+                            loc=self.out,
+                            scale=self.y_sd,
+                            skewness=self.y_skewness,
+                            tailweight=self.y_tailweight
+                        )
+                        y_dist = tf.contrib.distributions.SinhArcsinh(
+                            loc=self.out * self.y_train_sd + self.y_train_mean,
+                            scale=self.y_sd * self.y_train_sd,
+                            skewness=self.y_skewness,
+                            tailweight=self.y_tailweight
+                        )
+                        self.err_dist_standardized = tf.contrib.distributions.SinhArcsinh(
+                            loc=0.,
+                            scale=self.y_sd,
+                            skewness=self.y_skewness,
+                            tailweight=self.y_tailweight
+                        )
+                        self.err_dist = tf.contrib.distributions.SinhArcsinh(
+                            loc=0.,
+                            scale=self.y_sd * self.y_train_sd,
+                            skewness=self.y_skewness,
+                            tailweight=self.y_tailweight
+                        )
+                    else:
+                        y_dist_standardized = tf.distributions.Normal(
+                            loc=self.out,
+                            scale=self.y_sd
+                        )
+                        y_dist = tf.distributions.Normal(
+                            loc=self.out * self.y_train_sd + self.y_train_mean,
+                            scale=self.y_sd * self.y_train_sd
+                        )
+                        self.err_dist_standardized = tf.distributions.Normal(
+                            loc=0.,
+                            scale=self.y_sd
+                        )
+                        self.err_dist = tf.distributions.Normal(
+                            loc=0.,
+                            scale=self.y_sd * self.y_train_sd
+                        )
                     self.ll_standardized = y_dist_standardized.log_prob(y_standardized)
-                    y_dist = tf.distributions.Normal(
-                        loc=self.out * self.y_train_sd + self.y_train_mean,
-                        scale=self.y_sd * self.y_train_sd
-                    )
                     self.ll = y_dist.log_prob(self.y)
                     ll_objective = self.ll_standardized
                 else:
-                    y_dist = tf.distributions.Normal(loc=self.out, scale=self.y_sd)
+                    if self.asymmetric_error:
+                        y_dist = tf.contrib.distributions.SinhArcsinh(
+                            loc=self.out,
+                            scale=self.y_sd,
+                            skewness=self.y_skewness,
+                            tailweight=self.y_tailweight
+                        )
+                        self.err_dist = tf.contrib.distributions.SinhArcsinh(
+                            loc=0.,
+                            scale=self.y_sd,
+                            skewness=self.y_skewness,
+                            tailweight=self.y_tailweight
+                        )
+                    else:
+                        y_dist = tf.distributions.Normal(
+                            loc=self.out,
+                            scale=self.y_sd
+                        )
+                        self.err_dist = tf.distributions.Normal(
+                            loc=0.,
+                            scale=self.y_sd
+                        )
                     self.ll = y_dist.log_prob(self.y)
                     ll_objective = self.ll
+
+                self.err_dist_plot = tf.exp(self.err_dist.log_prob(self.support))
+                self.err_dist_plot_summary = self.err_dist_plot
+                self.err_dist_lb = self.err_dist.quantile(.025)
+                self.err_dist_ub = self.err_dist.quantile(.975)
 
                 self.mae_loss = tf.losses.absolute_difference(self.y, self.out)
                 self.mse_loss = tf.losses.mean_squared_error(self.y, self.out)
