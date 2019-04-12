@@ -199,11 +199,11 @@ class LME(object):
         predict = robjects.r(rstring)
 
         rstring = '''   
-            library(mvtnorm)   
             logLik2 <- function(model, newdata=NULL, summed=TRUE) {
                 if (is.null(newdata) && summed) {
                     return(logLik(m))
                 } else {
+                    library(mvtnorm)   
                     if (is.null(newdata)) {
                         newdata = m@frame
                     }
