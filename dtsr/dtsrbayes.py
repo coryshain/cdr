@@ -1044,7 +1044,7 @@ class DTSRBayes(DTSR):
                     y_sd_summary = self.constraint_fn(y_sd_summary)
 
                     tf.summary.scalar(
-                        'y_sd',
+                        'error/y_sd',
                         y_sd_summary,
                         collections=['params']
                     )
@@ -1088,7 +1088,7 @@ class DTSRBayes(DTSR):
                         )
                         self.y_skewness_summary = self.y_skewness_q.mean()
                         tf.summary.scalar(
-                            'y_skewness',
+                            'error/y_skewness_summary',
                             self.y_skewness_summary,
                             collections=['params']
                         )
@@ -1120,7 +1120,7 @@ class DTSRBayes(DTSR):
                         )
                         self.y_tailweight_summary = self.y_tailweight_q.mean()
                         tf.summary.scalar(
-                            'y_tailweight',
+                            'error/y_tailweight',
                             self.constraint_fn(self.y_tailweight_summary),
                             collections=['params']
                         )
@@ -1129,12 +1129,12 @@ class DTSRBayes(DTSR):
                             # Prior distributions
                             self.y_skewness = Normal(
                                 loc=0.,
-                                scale=self.y_skewness_prior_sd,
+                                scale=self.y_skewness_prior_sd_tf,
                                 name='y_skewness'
                             )
                             self.y_tailweight = Normal(
                                 loc=self.y_tailweight_prior_loc_unconstrained,
-                                scale=self.y_tailweight_prior_sd,
+                                scale=self.y_tailweight_prior_sd_tf,
                                 name='y_tailweight'
                             )
 
@@ -1148,12 +1148,12 @@ class DTSRBayes(DTSR):
                         # Prior distributions
                         self.y_skewness = Normal(
                             loc=0.,
-                            scale=self.y_skewness_prior_sd,
+                            scale=self.y_skewness_prior_sd_tf,
                             name='y_skewness'
                         )
                         self.y_tailweight = Normal(
                             loc=self.y_tailweight_prior_loc_unconstrained,
-                            scale=self.y_tailweight_prior_sd,
+                            scale=self.y_tailweight_prior_sd_tf,
                             name='y_tailweight'
                         )
 
@@ -1194,12 +1194,12 @@ class DTSRBayes(DTSR):
                         self.y_tailweight_summary = self.y_tailweight_q.params[self.global_batch_step - 1]
 
                         tf.summary.scalar(
-                            'y_skewness',
+                            'error/y_skewness',
                             self.y_skewness_summary,
                             collections=['params']
                         )
                         tf.summary.scalar(
-                            'y_tailweight',
+                            'error/y_tailweight',
                             self.constraint_fn(self.y_tailweight_summary),
                             collections=['params']
                         )
@@ -1220,10 +1220,17 @@ class DTSRBayes(DTSR):
                         )
                         self.err_dist_standardized = SinhArcsinh(
                             loc=0.,
+                            scale=y_sd,
+                            skewness=self.y_skewness,
+                            tailweight=self.constraint_fn(self.y_tailweight),
+                            name='err_dist_standardized'
+                        )
+                        self.err_dist_standardized_summary = SinhArcsinh(
+                            loc=0.,
                             scale=y_sd_summary,
                             skewness=self.y_skewness_summary,
                             tailweight=self.constraint_fn(self.y_tailweight_summary),
-                            name='err_dist_standardized'
+                            name='err_dist_standardized_summary'
                         )
                         self.MAP_map[self.out_standardized] = self.out_mean
 
@@ -1236,10 +1243,17 @@ class DTSRBayes(DTSR):
                         )
                         self.err_dist = SinhArcsinh(
                             loc=0.,
+                            scale=y_sd * self.y_train_sd,
+                            skewness=self.y_skewness,
+                            tailweight=self.constraint_fn(self.y_tailweight),
+                            name='err_dist'
+                        )
+                        self.err_dist_summary = SinhArcsinh(
+                            loc=0.,
                             scale=y_sd_summary * self.y_train_sd,
                             skewness=self.y_skewness_summary,
                             tailweight=self.constraint_fn(self.y_tailweight_summary),
-                            name='err_dist'
+                            name='err_dist_summary'
                         )
                         self.MAP_map[self.out] = self.out_mean * self.y_train_sd + self.y_train_mean
                     else:
@@ -1252,10 +1266,17 @@ class DTSRBayes(DTSR):
                         )
                         self.err_dist = SinhArcsinh(
                             loc=0.,
+                            scale=y_sd,
+                            skewness=self.y_skewness,
+                            tailweight=self.constraint_fn(self.y_tailweight),
+                            name='err_dist'
+                        )
+                        self.err_dist_summary = SinhArcsinh(
+                            loc=0.,
                             scale=y_sd_summary,
                             skewness=self.y_skewness_summary,
                             tailweight=self.constraint_fn(self.y_tailweight_summary),
-                            name='err_dist'
+                            name='err_dist_summary'
                         )
                         self.MAP_map[self.out] = self.out_mean
 
@@ -1268,8 +1289,13 @@ class DTSRBayes(DTSR):
                         )
                         self.err_dist_standardized = Normal(
                             loc=0.,
-                            scale=self.y_sd_summary,
+                            scale=self.y_sd,
                             name='err_dist_standardized'
+                        )
+                        self.err_dist_standardized_summary = Normal(
+                            loc=0.,
+                            scale=self.y_sd_summary,
+                            name='err_dist_standardized_summary'
                         )
 
                         self.MAP_map[self.out_standardized] = self.out_mean
@@ -1281,8 +1307,13 @@ class DTSRBayes(DTSR):
                         )
                         self.err_dist = Normal(
                             loc=0.,
-                            scale=self.y_sd_summary * self.y_train_sd,
+                            scale=self.y_sd * self.y_train_sd,
                             name='err_dist'
+                        )
+                        self.err_dist_summary = Normal(
+                            loc=0.,
+                            scale=self.y_sd_summary * self.y_train_sd,
+                            name='err_dist_summary'
                         )
                         self.MAP_map[self.out] = self.out_mean * self.y_train_sd + self.y_train_mean
                     else:
@@ -1293,16 +1324,20 @@ class DTSRBayes(DTSR):
                         )
                         self.err_dist = Normal(
                             loc=0.,
-                            scale=self.y_sd_summary,
+                            scale=self.y_sd,
                             name='err_dist'
+                        )
+                        self.err_dist_summary = Normal(
+                            loc=0.,
+                            scale=self.y_sd_summary,
+                            name='err_dist_summary'
                         )
                         self.MAP_map[self.out] = self.out_mean
 
                 self.err_dist_plot = tf.exp(self.err_dist.log_prob(self.support))
-                self.err_dist_lb = -3 * y_sd_summary
-                self.err_dist_ub = 3 * y_sd_summary
-
-
+                self.err_dist_plot_summary = tf.exp(self.err_dist_summary.log_prob(self.support))
+                self.err_dist_lb = self.err_dist_summary.quantile(.025)
+                self.err_dist_ub = self.err_dist_summary.quantile(.975)
 
     def initialize_objective(self):
         with self.sess.as_default():
@@ -1500,6 +1535,7 @@ class DTSRBayes(DTSR):
             posterior,
             level=95,
             n_samples=None,
+            support_start=0.,
             n_time_units=None,
             n_time_points=1000
     ):
@@ -1509,10 +1545,12 @@ class DTSRBayes(DTSR):
         :param posterior: the IRF node in the model's graph
         :param level: ``float``; level of the credible interval.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw. If ``None``, use model defaults.
+        :param support_start: ``float``; starting point for the support vector.
         :param n_time_units: ``float``; number of time units over which to plot the curve.
         :param n_time_points: ``float``; number of points to use in the plot.
         :return: ``tuple`` of 4 ``numpy`` arrays; mean, lower bound, and upper bound at the desired level for each plot point, plus the full array of samples.
         """
+
         if n_samples is None:
             n_samples = self.n_samples_eval
         if n_time_units is None:
@@ -1525,7 +1563,7 @@ class DTSRBayes(DTSR):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 fd = {
-                    self.support_start: 0.,
+                    self.support_start: support_start,
                     self.n_time_units: n_time_units,
                     self.n_time_points: n_time_points,
                     self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1,

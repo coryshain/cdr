@@ -593,9 +593,13 @@ class DTSR(object):
                 self.y_sd_init_tf = tf.constant(float(self.y_sd_init), dtype=self.FLOAT_TF)
                 if self.constraint.lower() == 'softplus':
                     self.y_sd_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.y_sd_init_tf)
+                    if self.asymmetric_error:
+                        self.y_tailweight_init_unconstrained = tf.contrib.distributions.softplus_inverse(1.)
                     self.constraint_fn = tf.nn.softplus
                 else:
                     self.y_sd_init_unconstrained = self.y_sd_init_tf
+                    if self.asymmetric_error:
+                        self.y_tailweight_init_unconstrained = 1.
                     self.constraint_fn = self._safe_abs
 
                 if self.convergence_n_iterates and self.convergence_alpha is not None:
@@ -4608,28 +4612,7 @@ class DTSR(object):
                                 dpi=dpi,
                                 keep_plot_history=self.keep_plot_history
                             )
-                            if type(self).__name__ == 'DTSRBayes' and self.asymmetric_error:
-                                lb = self.sess.run(self.err_dist_lb)
-                                ub = self.sess.run(self.err_dist_ub)
-                                n_time_units = ub-lb
-                                fd_plot = {
-                                    self.support_start: lb,
-                                    self.n_time_units: n_time_units,
-                                    self.n_time_points: 1000
-                                }
-                                plot_x = self.sess.run(self.support, feed_dict=fd_plot)
-                                if self.standardize_response:
-                                    plot_x *= self.y_train_sd
-                                plot_y = self.sess.run(self.err_dist_plot, feed_dict=fd_plot)
-                                err_dist_filename = 'error_distribution_%s.png' %self.global_step.eval(sess=self.sess) if self.keep_plot_history else 'error_distribution.png'
-                                plot_irf(
-                                    plot_x,
-                                    plot_y,
-                                    ['Error Distribution'],
-                                    dir=self.outdir,
-                                    filename=err_dist_filename,
-                                    legend=False,
-                                )
+
                             self.verify_random_centering()
 
                         t1_iter = pytime.time()
@@ -5251,6 +5234,47 @@ class DTSR(object):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.set_predict_mode(True)
+
+                if self.asymmetric_error:
+                    lb = self.sess.run(self.err_dist_lb)
+                    ub = self.sess.run(self.err_dist_ub)
+                    n_time_units = ub - lb
+                    fd = {
+                        self.support_start: lb,
+                        self.n_time_units: n_time_units,
+                        self.n_time_points: plot_n_time_points
+                    }
+                    plot_x = self.sess.run(self.support, feed_dict=fd)
+                    if mc:
+                        plot_y, lq, uq, _ = self.ci_curve(
+                            self.err_dist_plot,
+                            level=level,
+                            n_samples=n_samples,
+                            support_start=lb,
+                            n_time_units=n_time_units,
+                            n_time_points=plot_n_time_points,
+                        )
+                        plot_y = plot_y[..., None]
+                        lq = lq[..., None]
+                        uq = uq[..., None]
+                        plot_name = 'mc_error_distribution_%s.png' % self.global_step.eval(sess=self.sess) \
+                            if self.keep_plot_history else 'mc_error_distribution.png'
+                    else:
+                        plot_y = self.sess.run(self.err_dist_mean_plot, feed_dict=fd)
+                        lq = None
+                        uq = None
+                        plot_name = 'error_distribution_%s.png' % self.global_step.eval(sess=self.sess) \
+                            if self.keep_plot_history else 'error_distribution.png'
+                    plot_irf(
+                        plot_x,
+                        plot_y,
+                        ['Error Distribution'],
+                        lq=lq,
+                        uq=uq,
+                        dir=self.outdir,
+                        filename=prefix + plot_name,
+                        legend=False,
+                    )
 
                 fd = {
                     self.support_start: 0.,
