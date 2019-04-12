@@ -212,7 +212,7 @@ DTSR_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'n_samples',
-        2,
+        1,
         int,
         "For DTSRMLE, number of samples from joint distribution (used only if either **covarying_fixef** or **covarying_ranef** is ``True``, otherwise ignored). For BBVI, number of posterior samples to draw at each training step during variational inference. If using MCMC inferences, the number of samples is set deterministically as ``n_iter * n_minibatch``, so this user-supplied parameter is overridden."
     ),
