@@ -158,7 +158,6 @@ def build_DTSR_impulses(
 
     impulse_names_1d = sorted(list(set(impulse_names).difference(set(X_response_aligned_predictor_names)).difference(set(X_2d_predictor_names))))
     impulse_names_1d_todo = set(impulse_names_1d)
-    impulse_names_1d_complete = set()
     impulse_names_1d_tmp = []
 
     X_2d_from_1d = []
@@ -168,7 +167,6 @@ def build_DTSR_impulses(
         impulse_names_1d_cur = impulse_names_1d_todo.intersection(set(X_cur.columns))
         if len(impulse_names_1d_cur) > 0:
             impulse_names_1d_todo = impulse_names_1d_todo - impulse_names_1d_cur
-            impulse_names_1d_complete = impulse_names_1d_complete.union(impulse_names_1d_cur)
             impulse_names_1d_cur = sorted(list(impulse_names_1d_cur))
             impulse_names_1d_tmp += impulse_names_1d_cur
             X_2d_from_1d_cur, time_X_2d_cur, time_mask_cur = expand_history(
@@ -184,20 +182,33 @@ def build_DTSR_impulses(
             time_X_2d.append(time_X_2d_cur)
             time_mask.append(time_mask_cur)
 
+    assert len(impulse_names_1d_todo) == 0, 'Not all impulses were processed during DTSR data array construction. Remaining impulses: %s' % impulse_names_1d_todo
+
     X_2d = np.concatenate(X_2d_from_1d, axis=-1)
     X_2d = X_2d[:,:,names2ix(impulse_names_1d, impulse_names_1d_tmp)]
     time_X_2d = np.concatenate(time_X_2d, axis=-1)
     time_mask = np.concatenate(time_mask, axis=-1)
 
     if X_response_aligned_predictors is not None:
-        X_response_aligned_predictors_new = np.zeros((X_2d_from_1d.shape[0], X_2d_from_1d.shape[1], len(X_response_aligned_predictor_names)))
+        X_response_aligned_predictors_new = np.zeros((X_2d.shape[0], X_2d.shape[1], len(X_response_aligned_predictor_names)))
         X_response_aligned_predictors_new[:, -1, :] = X_response_aligned_predictors[X_response_aligned_predictor_names]
         X_2d = np.concatenate([X_2d, X_response_aligned_predictors_new], axis=2)
 
+        time_X_2d_new = np.zeros((time_mask.shape[0], time_mask.shape[1], X_response_aligned_predictors_new.shape[2]))
+        time_X_2d = np.concatenate([time_X_2d, time_X_2d_new], axis=2)
+
+        time_mask_new = np.zeros((time_mask.shape[0], time_mask.shape[1], X_response_aligned_predictors_new.shape[2]))
+        time_mask_new[:,-1,:] = 1.
+        time_mask = np.concatenate([time_mask, time_mask_new], axis=2)
+
     if X_2d_predictors is not None:
+        raise ValueError('2D predictors are currently fatally bugged. Do not use them.')
         X_2d = np.concatenate([X_2d, X_2d_predictors], axis=2)
 
+    # Ensure that impulses are properly aligned
     X_2d = X_2d[:,:,names2ix(impulse_names, impulse_names_1d + X_response_aligned_predictor_names + X_2d_predictor_names)]
+    time_X_2d = time_X_2d[:,:,names2ix(impulse_names, impulse_names_1d + X_response_aligned_predictor_names + X_2d_predictor_names)]
+    time_mask = time_mask[:,:,names2ix(impulse_names, impulse_names_1d + X_response_aligned_predictor_names + X_2d_predictor_names)]
 
     return X_2d, time_X_2d, time_mask
 
