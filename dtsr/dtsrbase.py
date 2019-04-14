@@ -5260,7 +5260,7 @@ class DTSR(object):
                         plot_name = 'mc_error_distribution_%s.png' % self.global_step.eval(sess=self.sess) \
                             if self.keep_plot_history else 'mc_error_distribution.png'
                     else:
-                        plot_y = self.sess.run(self.err_dist_mean_plot, feed_dict=fd)
+                        plot_y = self.sess.run(self.err_dist_plot_summary, feed_dict=fd)
                         lq = None
                         uq = None
                         plot_name = 'error_distribution_%s.png' % self.global_step.eval(sess=self.sess) \
