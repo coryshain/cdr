@@ -31,7 +31,7 @@ def plot_irf(
     """
     Plot impulse response functions.
 
-    :param plot_x: ``numpy`` array with shape (T,); time points for which to plot the response. For example, if the plots contain 1000 points from 0s to 10s, **plot_x** could be generated as ``np.linspace(0, 10, 1000)``.
+    :param plot_x: ``numpy`` array with shape (T,1); time points for which to plot the response. For example, if the plots contain 1000 points from 0s to 10s, **plot_x** could be generated as ``np.linspace(0, 10, 1000)``.
     :param plot_y: ``numpy`` array with shape (T, N); response of each IRF at each time point.
     :param irf_names: ``list`` of ``str``; DTSR ID's of IRFs in the same order as they appear in axis 1 of **plot_y**.
     :param uq: ``numpy`` array with shape (T, N), or ``None``; upper bound of credible interval for each time point. If ``None``, no credible interval will be plotted.
@@ -92,6 +92,79 @@ def plot_irf(
             plt.plot(plot_x, plot_y[:,sort_ix[i]], label=irf_names_processed[sort_ix[i]], lw=2, alpha=0.8, linestyle='-', markevery=markevery, solid_capstyle='butt')
         if uq is not None and lq is not None:
             plt.fill_between(plot_x[:,0], lq[:,sort_ix[i]], uq[:,sort_ix[i]], alpha=0.25)
+
+    if xlab:
+        plt.xlabel(xlab, weight='bold')
+    if ylab:
+        plt.ylabel(ylab, weight='bold')
+    if legend:
+        plt.legend(fancybox=True, framealpha=0.75, frameon=True, facecolor='white', edgecolor='gray')
+
+    plt.gcf().set_size_inches(plot_x_inches, plot_y_inches)
+    plt.tight_layout()
+    try:
+        plt.savefig(dir+'/'+filename, dpi=dpi, transparent=transparent_background)
+    except:
+        sys.stderr.write('Error saving plot to file %s. Skipping...' %(dir+'/'+filename))
+    plt.close('all')
+
+
+def plot_qq(
+        theoretical,
+        actual,
+        actual_color='royalblue',
+        expected_color='firebrick',
+        dir='.',
+        filename='qq_plot.png',
+        plot_x_inches=6,
+        plot_y_inches=4,
+        cmap='gist_rainbow',
+        legend=True,
+        xlab='Theoretical',
+        ylab='Empirical',
+        as_lines=False,
+        transparent_background=False,
+        dpi=300
+):
+    """
+    Plot impulse response functions.
+
+    :param theoretical: ``numpy`` array with shape (T,); theoretical error quantiles.
+    :param actual: ``numpy`` array with shape (T,); empirical errors.
+    :param actual_color: ``str``; color for actual values.
+    :param expected_color: ``str``; color for expected values.
+    :param dir: ``str``; output directory.
+    :param filename: ``str``; filename.
+    :param plot_x_inches: ``float``; width of plot in inches.
+    :param plot_y_inches: ``float``; height of plot in inches.
+    :param cmap: ``str``; name of ``matplotlib`` ``cmap`` object (determines colors of plotted IRF).
+    :param legend: ``bool``; include a legend.
+    :param xlab: ``str`` or ``None``; x-axis label. If ``None``, no label.
+    :param ylab: ``str`` or ``None``; y-axis label. If ``None``, no label.
+    :param as_lines: ``bool``; render QQ plot using lines. Otherwise, use points.
+    :param transparent_background: ``bool``; use a transparent background. If ``False``, uses a white background.
+    :param dpi: ``int``; dots per inch.
+    :return: ``None``
+    """
+
+    cm = plt.get_cmap(cmap)
+    plt.rcParams["font.family"] = "sans-serif"
+    plt.gca().spines['top'].set_visible(False)
+    plt.gca().spines['right'].set_visible(False)
+    plt.gca().spines['bottom'].set_visible(False)
+    plt.gca().spines['left'].set_visible(False)
+    plt.gca().tick_params(top='off', bottom='off', left='off', right='off', labelleft='on', labelbottom='on')
+    plt.grid(b=True, which='major', axis='both', ls='--', lw=.5, c='k', alpha=.3)
+    plt.axhline(y=0, lw=1, c='gray', alpha=1)
+    plt.axvline(x=0, lw=1, c='gray', alpha=1)
+
+    plot_y = np.stack([actual, theoretical], axis=-1)
+
+    if as_lines:
+        plt.plot(theoretical, actual, label='Actual', lw=2, alpha=0.8, color=actual_color)
+    else:
+        plt.scatter(theoretical, actual, label='Actual', lw=2, alpha=0.8, facecolors='none', edgecolors=actual_color)
+    plt.plot(theoretical, theoretical, label='Expected', lw=2, alpha=0.8, color=expected_color)
 
     if xlab:
         plt.xlabel(xlab, weight='bold')

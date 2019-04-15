@@ -735,6 +735,9 @@ class DTSR(object):
                     axis=0
                 )
 
+                # Error vector for probability plotting
+                self.n_errors = tf.placeholder(self.INT_TF, shape=[], name='n_errors')
+
                 self.global_step = tf.Variable(
                     0,
                     trainable=False,
@@ -4862,6 +4865,20 @@ class DTSR(object):
                 self.set_predict_mode(False)
 
                 return preds
+
+    def error_theoretical_quantiles(
+            self,
+            n_errors
+    ):
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                fd = {
+                    self.n_errors: n_errors
+                }
+                err_q = self.sess.run(self.err_dist_summary_theoretical_quantiles, feed_dict=fd)
+
+                return err_q
 
     def log_lik(
             self,

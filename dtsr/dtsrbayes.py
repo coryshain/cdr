@@ -1339,6 +1339,13 @@ class DTSRBayes(DTSR):
                 self.err_dist_lb = self.err_dist_summary.quantile(.025)
                 self.err_dist_ub = self.err_dist_summary.quantile(.975)
 
+                empirical_quantiles = tf.linspace(0., 1., self.n_errors)
+                if self.standardize_response:
+                    self.err_dist_standardized_theoretical_quantiles = self.err_dist_standardized.quantile(empirical_quantiles)
+                    self.err_dist_standardized_summary_theoretical_quantiles = self.err_dist_standardized_summary.quantile(empirical_quantiles)
+                self.err_dist_theoretical_quantiles = self.err_dist.quantile(empirical_quantiles)
+                self.err_dist_summary_theoretical_quantiles = self.err_dist_summary.quantile(empirical_quantiles)
+
     def initialize_objective(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -1574,6 +1581,40 @@ class DTSRBayes(DTSR):
                 alpha = 100-float(level)
 
                 samples = [self.sess.run(posterior, feed_dict=fd) for _ in range(n_samples)]
+                samples = np.concatenate(samples, axis=1)
+
+                mean = samples.mean(axis=1)
+                lower = np.percentile(samples, alpha/2, axis=1)
+                upper = np.percentile(samples, 100-(alpha/2), axis=1)
+
+                return (mean, lower, upper, samples)
+
+    def error_quantiles_mc(
+            self,
+            errors,
+            level=95,
+            n_samples=None
+    ):
+        """
+        Extract quantiles of errors with Monte Carlo credible intervals for plotting
+
+        :param errors: ``numpy`` 1D array; vector of errors
+        :param level: ``float``; level of the credible interval.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw. If ``None``, use model defaults.
+        :return: ``tuple`` of 4 ``numpy`` arrays; mean, lower bound, and upper bound at the desired level for each error value, plus the full array of samples.
+        """
+
+        assert False, 'Incomplete method. Do not use.'
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                fd = {
+                    self.errors: errors
+                }
+
+                alpha = 100-float(level)
+
+                samples = [self.sess.run(self.err_dist_cdf, feed_dict=fd) for _ in range(n_samples)]
                 samples = np.concatenate(samples, axis=1)
 
                 mean = samples.mean(axis=1)

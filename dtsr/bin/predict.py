@@ -13,6 +13,7 @@ from dtsr.formula import Formula
 from dtsr.data import filter_invalid_responses, preprocess_data, compute_splitID, compute_partition, get_first_last_obs_lists
 from dtsr.util import mse, mae, percent_variance_explained
 from dtsr.util import load_dtsr, filter_models, get_partition_list, paths_from_partition_cliarg
+from dtsr.plot import plot_qq
 
 
 # This code block is factored out because it is used by both LME objects and DTSR objects under 2-step analysis
@@ -374,6 +375,21 @@ if __name__ == '__main__':
                         dtsr_percent_variance_explained = percent_variance_explained(y_cur, dtsr_preds)
                         dtsr_true_variance = np.std(y_cur) ** 2
                         y_dv_mean = y_cur.mean()
+
+                        err = np.sort(y_cur - dtsr_preds)
+                        err_theoretical_q = dtsr_model.error_theoretical_quantiles(len(err))
+                        valid = np.isfinite(err_theoretical_q)
+                        err = err[valid]
+                        err_theoretical_q = err_theoretical_q[valid]
+
+                        plot_qq(
+                            err_theoretical_q,
+                            err,
+                            dir=dtsr_model.outdir,
+                            filename='error_qq_plot.png',
+                            xlab='Theoretical',
+                            ylab='Empirical'
+                        )
 
                     if args.mode in [None, 'loglik']:
                         dtsr_loglik_vector = dtsr_model.log_lik(
