@@ -1348,7 +1348,7 @@ class DTSRBayes(DTSR):
                 self.err_dist_theoretical_quantiles = self.err_dist.quantile(empirical_quantiles)
                 self.err_dist_theoretical_cdf = self.err_dist.cdf(self.errors)
                 self.err_dist_summary_theoretical_quantiles = self.err_dist_summary.quantile(empirical_quantiles)
-                self.err_dist_summary_theoretical_cdf = self.err_dist_summary.errors(self.errors)
+                self.err_dist_summary_theoretical_cdf = self.err_dist_summary.cdf(self.errors)
 
     def initialize_objective(self):
         with self.sess.as_default():
