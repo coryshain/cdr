@@ -14,6 +14,7 @@ from dtsr.data import filter_invalid_responses, preprocess_data, compute_splitID
 from dtsr.util import mse, mae, percent_variance_explained
 from dtsr.util import load_dtsr, filter_models, get_partition_list, paths_from_partition_cliarg
 from dtsr.plot import plot_qq
+from scipy.stats import kstest
 
 
 # This code block is factored out because it is used by both LME objects and DTSR objects under 2-step analysis
@@ -386,10 +387,12 @@ if __name__ == '__main__':
                             err_theoretical_q,
                             err,
                             dir=dtsr_model.outdir,
-                            filename='error_qq_plot.png',
+                            filename='error_qq_plot_%s.png' % partition_str,
                             xlab='Theoretical',
                             ylab='Empirical'
                         )
+
+                        D, p_value = dtsr_model.error_ks_test(err)
 
                     if args.mode in [None, 'loglik']:
                         dtsr_loglik_vector = dtsr_model.log_lik(
@@ -431,7 +434,8 @@ if __name__ == '__main__':
                         mae=dtsr_mae,
                         loglik=dtsr_loglik,
                         percent_variance_explained=dtsr_percent_variance_explained,
-                        true_variance=dtsr_true_variance
+                        true_variance=dtsr_true_variance,
+                        ks_results=(D, p_value) if args.mode in [None, 'response'] else None
                     )
 
                     summary += '=' * 50 + '\n'

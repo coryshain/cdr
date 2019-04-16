@@ -736,6 +736,7 @@ class DTSR(object):
                 )
 
                 # Error vector for probability plotting
+                self.errors = tf.placeholder(self.FLOAT_TF, shape=[None], name='errors')
                 self.n_errors = tf.placeholder(self.INT_TF, shape=[], name='n_errors')
 
                 self.global_step = tf.Variable(
@@ -4126,7 +4127,16 @@ class DTSR(object):
 
                 return out
 
-    def report_evaluation(self, mse=None, mae=None, loglik=None, percent_variance_explained=None, true_variance=None, indent=0):
+    def report_evaluation(
+            self,
+            mse=None,
+            mae=None,
+            loglik=None,
+            percent_variance_explained=None,
+            true_variance=None,
+            ks_results=None,
+            indent=0
+    ):
         """
         Generate a string representation of pre-comupted evaluation metrics.
 
@@ -4135,6 +4145,8 @@ class DTSR(object):
         :param loglik: ``float`` or ``None``; log likelihood, skipped if ``None``.
         :param true_variance: ``float`` or ``None``; variance of targets, skipped if ``None``.
         :param percent_variance_explained: ``float`` or ``None``; percent variance explained, skipped if ``None``.
+        :param true_variance: ``float`` or ``None``; true variance, skipped if ``None``.
+        :param ks_results: pair of ``float`` or ``None``; if non-null, pair containing ``(D, p_value)`` from Kolmogorov-Smirnov test of errors againts fitted error distribution ; skipped if ``None``.
         :param indent: ``int``; indentation level
         :return: ``str``; the evaluation report
         """
@@ -4149,6 +4161,19 @@ class DTSR(object):
             out += ' ' * (indent+2) + 'True variance: %s\n' %true_variance
         if percent_variance_explained is not None:
             out += ' ' * (indent+2) + 'Percent variance explained: %.2f%%\n' %percent_variance_explained
+        if ks_results is not None:
+            out += ' ' * (indent+2) + 'Kolmogorov-Smirnov test of goodness of fit of modeled to true error:\n'
+            out += ' ' * (indent+4) + 'D value: %s\n' % ks_results[0]
+            out += ' ' * (indent+4) + 'p value: %s\n' % ks_results[1]
+            if ks_results[1] < 0.05:
+                out += '\n'
+                out += ' ' * (indent+4) + 'NOTE: KS tests will likely reject on large datasets.\n'
+                out += ' ' * (indent+4) + 'This does not entail that the model is fatally flawed.\n'
+                out += ' ' * (indent+4) + "Check the Q-Q plot in the model's output directory.\n"
+                if not self.asymmetric_error:
+                    out += ' ' * (indent+4) + 'Poor error fit can usually be improved without transforming\n'
+                    out += ' ' * (indent+4) + 'the response by optimizing using ``asymptotic_error=True``.\n'
+                    out += ' ' * (indent+4) + 'Consult the documentation for details.\n'
 
         out += '\n'
 
@@ -4870,7 +4895,6 @@ class DTSR(object):
             self,
             n_errors
     ):
-
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 fd = {
@@ -4879,6 +4903,31 @@ class DTSR(object):
                 err_q = self.sess.run(self.err_dist_summary_theoretical_quantiles, feed_dict=fd)
 
                 return err_q
+
+    def error_theoretical_cdf(
+            self,
+            errors
+    ):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                fd = {
+                    self.errors: errors
+                }
+                err_cdf = self.sess.run(self.err_dist_summary_theoretical_cdf, feed_dict=fd)
+
+                return err_cdf
+
+    def error_ks_test(
+            self,
+            errors
+    ):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                err_cdf = self.error_theoretical_cdf(errors)
+
+                D, p_value = scipy.stats.kstest(errors, lambda x: err_cdf)
+
+                return D, p_value
 
     def log_lik(
             self,

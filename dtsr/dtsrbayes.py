@@ -1342,9 +1342,13 @@ class DTSRBayes(DTSR):
                 empirical_quantiles = tf.linspace(0., 1., self.n_errors)
                 if self.standardize_response:
                     self.err_dist_standardized_theoretical_quantiles = self.err_dist_standardized.quantile(empirical_quantiles)
+                    self.err_dist_standardized_theoretical_cdf = self.err_dist_standardized.cdf(self.errors)
                     self.err_dist_standardized_summary_theoretical_quantiles = self.err_dist_standardized_summary.quantile(empirical_quantiles)
+                    self.err_dist_standardized_summary_theoretical_cdf = self.err_dist_standardized_summary.cdf(self.errors)
                 self.err_dist_theoretical_quantiles = self.err_dist.quantile(empirical_quantiles)
+                self.err_dist_theoretical_cdf = self.err_dist.cdf(self.errors)
                 self.err_dist_summary_theoretical_quantiles = self.err_dist_summary.quantile(empirical_quantiles)
+                self.err_dist_summary_theoretical_cdf = self.err_dist_summary.errors(self.errors)
 
     def initialize_objective(self):
         with self.sess.as_default():
