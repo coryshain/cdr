@@ -1380,12 +1380,30 @@ class Formula(object):
                     random[gf] = []
                 random[gf].append(name)
 
+        for x in self.t.interactions():
+            subterm_strings = []
+            for y in x.atomic_responses:
+                if y.p.irfID is None:
+                    new_term_string = sn('-'.join(y.name().split('-')[:-1]))
+                else:
+                    new_term_string = sn(y.name())
+                subterm_strings.append(new_term_string)
+            subterm_strings = ':'.join(subterm_strings)
+            if z:
+                subterm_strings = 'z.(' + subterm_strings + ')'
+            if None in x.rangf:
+                fixed.append(subterm_strings)
+            for gf in sorted(list(random.keys())):
+                if gf in x.rangf:
+                    random[gf].append(subterm_strings)
+
         out = str(self.dv_term) + ' ~ '
 
         if not self.has_intercept[None]:
             out += '0 + '
 
         out += ' + '.join([x for x in fixed])
+
         for gf in sorted(list(random.keys())):
             out += ' + (' + ('1 + ' if self.has_intercept[gf] else '0 + ') + ' + '.join([x for x in random[gf]]) + ' | ' + gf + ')'
 
