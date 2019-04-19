@@ -158,8 +158,6 @@ def plot_qq(
     plt.axhline(y=0, lw=1, c='gray', alpha=1)
     plt.axvline(x=0, lw=1, c='gray', alpha=1)
 
-    plot_y = np.stack([actual, theoretical], axis=-1)
-
     if as_lines:
         plt.plot(theoretical, actual, label='Actual', lw=2, alpha=0.8, color=actual_color)
     else:
