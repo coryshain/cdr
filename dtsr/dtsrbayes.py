@@ -1402,9 +1402,9 @@ class DTSRBayes(DTSR):
                     self.X_conv_standardized_scaled_prior = self.X_conv_scaled
                     self.X_conv_standardized_scaled_post = ed.copy(self.X_conv_scaled, self.inference_map)
                     self.X_conv_standardized_scaled_MAP = ed.copy(self.X_conv_scaled, self.MAP_map, scope='MAP')
-                    self.X_conv_scaled_prior = self.X_conv_scaled * self.y_train_sd + self.y_train_mean
-                    self.X_conv_scaled_post = ed.copy(self.X_conv_scaled * self.y_train_sd + self.y_train_mean, self.inference_map)
-                    self.X_conv_scaled_MAP = ed.copy(self.X_conv_scaled * self.y_train_sd + self.y_train_mean, self.MAP_map, scope='MAP')
+                    self.X_conv_scaled_prior = self.X_conv_scaled * self.y_train_sd
+                    self.X_conv_scaled_post = ed.copy(self.X_conv_scaled * self.y_train_sd, self.inference_map)
+                    self.X_conv_scaled_MAP = ed.copy(self.X_conv_scaled * self.y_train_sd, self.MAP_map, scope='MAP')
 
                     self.out_standardized_prior = self.out_standardized
                     self.out_standardized_post = ed.copy(self.out_standardized, self.inference_map)

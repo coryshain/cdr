@@ -484,5 +484,5 @@ class DTSRMLE(DTSR):
             with self.sess.graph.as_default():
                 X_conv = self.sess.run(self.X_conv_scaled if scaled else self.X_conv, feed_dict=feed_dict)
                 if scaled and self.standardize_response and not standardize_response:
-                    X_conv = X_conv * self.y_train_sd + self.y_train_mean
+                    X_conv = X_conv * self.y_train_sd
                 return X_conv
