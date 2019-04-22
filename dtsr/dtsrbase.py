@@ -4360,7 +4360,7 @@ class DTSR(object):
                 out += ' ' * (indent + 2) + 'NOTE:\n'
                 out += ' ' * (indent + 4) + 'Programmatic diagnosis of convergence in DTSR is error-prone because of stochastic optimization.\n'
                 out += ' ' * (indent + 4) + 'It is possible that the convergence diagnostics used are too permissive given the stochastic dynamics of the model.\n'
-                out += ' ' * (indent + 4) + 'Consider visually checking the learning curves in Tensorboard to see whether the parameter estimates and/or losses have flatlined:\n'
+                out += ' ' * (indent + 4) + 'Consider visually checking the learning curves in Tensorboard to see whether the losses have flatlined:\n'
                 out += ' ' * (indent + 6) + 'python -m tensorboard.main --logdir=<path_to_model_directory>\n'
                 out += ' ' * (indent + 4) + 'If not, consider raising **convergence_alpha** and resuming training.\n'
 
@@ -4369,7 +4369,7 @@ class DTSR(object):
                 out += ' ' * (indent + 2) + 'NOTE:\n'
                 out += ' ' * (indent + 4) + 'Programmatic diagnosis of convergence in DTSR is error-prone because of stochastic optimization.\n'
                 out += ' ' * (indent + 4) + 'It is possible that the convergence diagnostics used are too conservative given the stochastic dynamics of the model.\n'
-                out += ' ' * (indent + 4) + 'Consider visually checking the learning curves in Tensorboard to see whether the parameter estimates and/or losses have flatlined:\n'
+                out += ' ' * (indent + 4) + 'Consider visually checking the learning curves in Tensorboard to see whether thelosses have flatlined:\n'
                 out += ' ' * (indent + 6) + 'python -m tensorboard.main --logdir=<path_to_model_directory>\n'
                 out += ' ' * (indent + 4) + 'If so, consider the model converged.\n'
 
@@ -5183,10 +5183,10 @@ class DTSR(object):
                 self.set_predict_mode(False)
 
                 convolution_summary = ''
-                corr_conv = out.corr()
+                corr_conv = out.corr().to_string()
                 convolution_summary += '=' * 50 + '\n'
                 convolution_summary += 'Correlation matrix of convolved predictors:\n\n'
-                convolution_summary += str(corr_conv) + '\n\n'
+                convolution_summary += corr_conv + '\n\n'
 
                 select = np.where(np.all(np.isclose(time_X_2d[:,-1], time_y[..., None]), axis=-1))[0]
 
@@ -5204,11 +5204,11 @@ class DTSR(object):
                         c = self.impulse_names[i]
                         if c not in out_plus:
                             out_plus[c] = X_2d[:,-1,i]
-                    corr_conv = out_plus.iloc[select].corr()
+                    corr_conv = out_plus.iloc[select].corr().to_string()
                     convolution_summary += '-' * 50 + '\n'
                     convolution_summary += 'Full correlation matrix of input and convolved predictors:\n'
                     convolution_summary += 'Based on %d simultaneously sampled impulse/response pairs (out of %d total data points)\n\n' %(select.shape[0], y.shape[0])
-                    convolution_summary += str(corr_conv) + '\n\n'
+                    convolution_summary += corr_conv + '\n\n'
                     convolution_summary += '=' * 50 + '\n'
 
                 return out, convolution_summary
