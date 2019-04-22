@@ -11,9 +11,10 @@ def get_coefs(path):
         line = f.readline()
         n_fixed = 0
         while line:
-            n_fixed += (line.startswith('Fixed effects') or n_fixed > 0)
+            starts_coefs = line.startswith('Fixed effects') or line.startswith('Coefficients')
+            n_fixed += (starts_coefs or n_fixed > 0)
             if n_fixed > 3:
-                if line.strip():
+                if line.strip() and not line.strip() == '---':
                     coefs.append(float(line.strip().split()[1]))
                 else:
                     break 
