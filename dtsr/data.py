@@ -118,6 +118,7 @@ def build_DTSR_impulses(
         first_obs,
         last_obs,
         impulse_names,
+        time_y=None,
         history_length=128,
         X_response_aligned_predictor_names=None,
         X_response_aligned_predictors=None,
@@ -133,6 +134,7 @@ def build_DTSR_impulses(
     :param first_obs: list of ``pandas`` ``Series``; vector of row indices in **X** of the first impulse in the time series associated with each response.
     :param last_obs: list of ``pandas`` ``Series``; vector of row indices in **X** of the last preceding impulse in the time series associated with each response.
     :param impulse_names: ``list`` of ``str``; names of columns in **X** to be used as impulses by the model.
+    :param time_y: ``numpy`` 1D array; vector of response timestamps. Needed to timestamp any response-aligned predictors (ignored if none in model).
     :param history_length: ``int``; maximum number of history observations.
     :param X_response_aligned_predictor_names: ``list`` of ``str``; names of predictors measured synchronously with the response rather than the impulses. If ``None``, no such impulses.
     :param X_response_aligned_predictors: ``pandas`` ``DataFrame`` or ``None``; table of predictors measured synchronously with the response rather than the impulses. If ``None``, no such impulses.
@@ -183,6 +185,7 @@ def build_DTSR_impulses(
             time_mask.append(time_mask_cur)
 
     assert len(impulse_names_1d_todo) == 0, 'Not all impulses were processed during DTSR data array construction. Remaining impulses: %s' % impulse_names_1d_todo
+    impulse_names_1d = impulse_names_1d_tmp
 
     X_2d = np.concatenate(X_2d_from_1d, axis=-1)
     X_2d = X_2d[:,:,names2ix(impulse_names_1d, impulse_names_1d_tmp)]
@@ -190,14 +193,16 @@ def build_DTSR_impulses(
     time_mask = np.concatenate(time_mask, axis=-1)
 
     if X_response_aligned_predictors is not None:
-        X_response_aligned_predictors_new = np.zeros((X_2d.shape[0], X_2d.shape[1], len(X_response_aligned_predictor_names)))
+        response_aligned_shape = (X_2d.shape[0], X_2d.shape[1], len(X_response_aligned_predictor_names))
+        X_response_aligned_predictors_new = np.zeros(response_aligned_shape)
         X_response_aligned_predictors_new[:, -1, :] = X_response_aligned_predictors[X_response_aligned_predictor_names]
         X_2d = np.concatenate([X_2d, X_response_aligned_predictors_new], axis=2)
 
-        time_X_2d_new = np.zeros((time_mask.shape[0], time_mask.shape[1], X_response_aligned_predictors_new.shape[2]))
+        time_X_2d_new = np.zeros(response_aligned_shape)
+        time_X_2d_new[:,-1,:] = time_y[..., None]
         time_X_2d = np.concatenate([time_X_2d, time_X_2d_new], axis=2)
 
-        time_mask_new = np.zeros((time_mask.shape[0], time_mask.shape[1], X_response_aligned_predictors_new.shape[2]))
+        time_mask_new = np.zeros(response_aligned_shape)
         time_mask_new[:,-1,:] = 1.
         time_mask = np.concatenate([time_mask, time_mask_new], axis=2)
 
@@ -206,9 +211,11 @@ def build_DTSR_impulses(
         X_2d = np.concatenate([X_2d, X_2d_predictors], axis=2)
 
     # Ensure that impulses are properly aligned
-    X_2d = X_2d[:,:,names2ix(impulse_names, impulse_names_1d + X_response_aligned_predictor_names + X_2d_predictor_names)]
-    time_X_2d = time_X_2d[:,:,names2ix(impulse_names, impulse_names_1d + X_response_aligned_predictor_names + X_2d_predictor_names)]
-    time_mask = time_mask[:,:,names2ix(impulse_names, impulse_names_1d + X_response_aligned_predictor_names + X_2d_predictor_names)]
+    impulse_names_cur = impulse_names_1d + X_response_aligned_predictor_names + X_2d_predictor_names
+    ix = names2ix(impulse_names, impulse_names_cur)
+    X_2d = X_2d[:,:,ix]
+    time_X_2d = time_X_2d[:,:,ix]
+    time_mask = time_mask[:,:,ix]
 
     return X_2d, time_X_2d, time_mask
 

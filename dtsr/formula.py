@@ -1383,7 +1383,7 @@ class Formula(object):
         for x in self.t.interactions():
             subterm_strings = []
             for y in x.atomic_responses:
-                if y.p.irfID is None:
+                if isinstance(y, IRFNode) and y.p.irfID is None:
                     new_term_string = sn('-'.join(y.name().split('-')[:-1]))
                 else:
                     new_term_string = sn(y.name())

@@ -4535,12 +4535,16 @@ class DTSR(object):
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
 
         first_obs, last_obs = get_first_last_obs_lists(y)
+        time_y = np.array(y.time, dtype=self.FLOAT_NP)
+        y_dv = np.array(y[self.dv], dtype=self.FLOAT_NP)
+        gf_y = np.array(y_rangf, dtype=self.INT_NP)
 
         X_2d, time_X_2d, time_X_mask = build_DTSR_impulses(
             X,
             first_obs,
             last_obs,
             impulse_names,
+            time_y=time_y,
             history_length=self.history_length,
             X_response_aligned_predictor_names=X_response_aligned_predictor_names,
             X_response_aligned_predictors=X_response_aligned_predictors,
@@ -4549,10 +4553,6 @@ class DTSR(object):
             int_type=self.int_type,
             float_type=self.float_type,
         )
-
-        time_y = np.array(y.time, dtype=self.FLOAT_NP)
-        y_dv = np.array(y[self.dv], dtype=self.FLOAT_NP)
-        gf_y = np.array(y_rangf, dtype=self.INT_NP)
 
         sys.stderr.write('Correlation matrix for input variables:\n')
         impulse_names_2d = [x for x in impulse_names if x in X_2d_predictor_names]
@@ -4824,12 +4824,15 @@ class DTSR(object):
         for i in range(len(self.rangf)):
             c = self.rangf[i]
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
+        time_y = np.array(y_time, dtype=self.FLOAT_NP)
+        gf_y = np.array(y_rangf, dtype=self.INT_NP)
 
         X_2d, time_X_2d, time_X_mask = build_DTSR_impulses(
             X,
             first_obs,
             last_obs,
             impulse_names,
+            time_y=time_y,
             history_length=self.history_length,
             X_response_aligned_predictor_names=X_response_aligned_predictor_names,
             X_response_aligned_predictors=X_response_aligned_predictors,
@@ -4838,9 +4841,6 @@ class DTSR(object):
             int_type=self.int_type,
             float_type=self.float_type,
         )
-
-        time_y = np.array(y_time, dtype=self.FLOAT_NP)
-        gf_y = np.array(y_rangf, dtype=self.INT_NP)
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -4989,12 +4989,16 @@ class DTSR(object):
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
 
         first_obs, last_obs = get_first_last_obs_lists(y)
+        time_y = np.array(y.time, dtype=self.FLOAT_NP)
+        y_dv = np.array(y[self.dv], dtype=self.FLOAT_NP)
+        gf_y = np.array(y_rangf, dtype=self.INT_NP)
 
         X_2d, time_X_2d, time_X_mask = build_DTSR_impulses(
             X,
             first_obs,
             last_obs,
             impulse_names,
+            time_y=time_y,
             history_length=self.history_length,
             X_response_aligned_predictor_names=X_response_aligned_predictor_names,
             X_response_aligned_predictors=X_response_aligned_predictors,
@@ -5003,10 +5007,6 @@ class DTSR(object):
             int_type=self.int_type,
             float_type=self.float_type,
         )
-
-        time_y = np.array(y.time, dtype=self.FLOAT_NP)
-        y_dv = np.array(y[self.dv], dtype=self.FLOAT_NP)
-        gf_y = np.array(y_rangf, dtype=self.INT_NP)
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -5116,12 +5116,15 @@ class DTSR(object):
             y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
 
         first_obs, last_obs = get_first_last_obs_lists(y)
+        time_y = np.array(y.time, dtype=self.FLOAT_NP)
+        gf_y = np.array(y_rangf, dtype=self.INT_NP)
 
         X_2d, time_X_2d, time_X_mask = build_DTSR_impulses(
             X,
             first_obs,
             last_obs,
             impulse_names,
+            time_y=time_y,
             history_length=self.history_length,
             X_response_aligned_predictor_names=X_response_aligned_predictor_names,
             X_response_aligned_predictors=X_response_aligned_predictors,
@@ -5130,9 +5133,6 @@ class DTSR(object):
             int_type=self.int_type,
             float_type=self.float_type,
         )
-
-        time_y = np.array(y.time, dtype=self.FLOAT_NP)
-        gf_y = np.array(y_rangf, dtype=self.INT_NP)
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
