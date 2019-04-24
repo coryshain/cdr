@@ -183,8 +183,6 @@ if __name__ == '__main__':
                 else:
                     sys.stderr.write('Model %s missing observation and/or prediction files, skipping Q-Q plot...\n' % m)
 
-            exit()
-
             dtsr_model.make_plots(
                 standardize_response=args.standardize_response,
                 summed=args.summed,
