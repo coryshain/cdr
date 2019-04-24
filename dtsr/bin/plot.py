@@ -3,9 +3,11 @@ import sys
 import os
 import string
 import pickle
+import numpy as np
+import pandas as pd
 from dtsr.config import Config
 from dtsr.util import load_dtsr, filter_models
-from dtsr.plot import plot_irf
+from dtsr.plot import plot_irf, plot_qq
 
 if __name__ == '__main__':
 
@@ -32,6 +34,10 @@ if __name__ == '__main__':
     argparser.add_argument('-c', '--cmap', type=str, default=None, help='Name of matplotlib colormap library to use for curves')
     argparser.add_argument('-D', '--dpi', type=int, default=None, help='Dots per inch')
     argparser.add_argument('-l', '--nolegend', action='store_true', help='Omit legend from figure')
+    argparser.add_argument('-q', '--qq', type=str, default=None, help='Generate Q-Q plot for errors over partition ``qq``. Ignored unless model directory contains saved errors for the requested partition.')
+    argparser.add_argument('-Q', '--qq_axis_labels', action='store_true', help='Add axis labels to Q-Q plots.')
+    argparser.add_argument('-T', '--qq_noticks', action='store_true', help='Remove ticks from Q-Q plots.')
+    argparser.add_argument('-L', '--qq_nolegend', action='store_true', help='Omit legend from Q-Q plots')
     argparser.add_argument('-M', '--markers', action='store_true', help='Add markers to IRF lines')
     argparser.add_argument('-t', '--transparent_background', action='store_true', help='Use transparent background (otherwise white background)')
     args, unknown = argparser.parse_known_args()
@@ -122,6 +128,62 @@ if __name__ == '__main__':
                 'cmap': p['cmap'] if cmap is None else cmap,
                 'dpi': p['dpi'] if args.dpi is None else args.dpi
             }
+
+            if args.qq:
+                obs_path = p.outdir + '/%s/obs_%s.txt' % (m, args.qq)
+                preds_path = p.outdir + '/%s/preds_%s.txt' % (m, args.qq)
+                has_obs = os.path.exists(obs_path)
+                has_preds = os.path.exists(preds_path)
+                if has_obs and has_preds:
+                    y_obs = np.array(pd.read_csv(obs_path, header=None))[:,0]
+                    y_preds = np.array(pd.read_csv(preds_path, header=None))[:,0]
+                    err = np.sort(y_obs - y_preds)
+                    err_theoretical_q = dtsr_model.error_theoretical_quantiles(len(err))
+                    valid = np.isfinite(err_theoretical_q)
+                    err = err[valid]
+                    err_theoretical_q = err_theoretical_q[valid]
+
+                    if args.qq_axis_labels:
+                        xlab = 'Theoretical'
+                        ylab = 'Empirical'
+                    else:
+                        xlab = None
+                        ylab = None
+
+                    if y_inches:
+                        if args.qq_noticks:
+                            qq_x_inches = y_inches
+                        else:
+                            qq_x_inches = y_inches + 0.5
+                        qq_y_inches = y_inches
+                    else:
+                        if args.qq_noticks:
+                            qq_x_inches = p['plot_y_inches']
+                        else:
+                            qq_x_inches = p['plot_y_inches'] + 0.5
+                        qq_y_inches = p['plot_y_inches']
+
+                    qq_kwargs = {
+                        'plot_x_inches': qq_x_inches,
+                        'plot_y_inches': qq_y_inches,
+                        'dpi': p['dpi'] if args.dpi is None else args.dpi
+                    }
+
+                    plot_qq(
+                        err_theoretical_q,
+                        err,
+                        dir=dtsr_model.outdir,
+                        filename=prefix + '%s_error_qq_plot_%s.png' % (m, args.qq),
+                        xlab=xlab,
+                        ylab=ylab,
+                        legend=not args.qq_nolegend,
+                        ticks=not args.qq_noticks,
+                        **qq_kwargs
+                    )
+                else:
+                    sys.stderr.write('Model %s missing observation and/or prediction files, skipping Q-Q plot...\n' % m)
+
+            exit()
 
             dtsr_model.make_plots(
                 standardize_response=args.standardize_response,

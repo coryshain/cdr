@@ -118,16 +118,16 @@ def plot_qq(
         filename='qq_plot.png',
         plot_x_inches=6,
         plot_y_inches=4,
-        cmap='gist_rainbow',
         legend=True,
         xlab='Theoretical',
         ylab='Empirical',
+        ticks=True,
         as_lines=False,
         transparent_background=False,
         dpi=300
 ):
     """
-    Plot impulse response functions.
+    Generate quantile-quantile plot.
 
     :param theoretical: ``numpy`` array with shape (T,); theoretical error quantiles.
     :param actual: ``numpy`` array with shape (T,); empirical errors.
@@ -137,7 +137,6 @@ def plot_qq(
     :param filename: ``str``; filename.
     :param plot_x_inches: ``float``; width of plot in inches.
     :param plot_y_inches: ``float``; height of plot in inches.
-    :param cmap: ``str``; name of ``matplotlib`` ``cmap`` object (determines colors of plotted IRF).
     :param legend: ``bool``; include a legend.
     :param xlab: ``str`` or ``None``; x-axis label. If ``None``, no label.
     :param ylab: ``str`` or ``None``; y-axis label. If ``None``, no label.
@@ -147,13 +146,12 @@ def plot_qq(
     :return: ``None``
     """
 
-    cm = plt.get_cmap(cmap)
     plt.rcParams["font.family"] = "sans-serif"
     plt.gca().spines['top'].set_visible(False)
     plt.gca().spines['right'].set_visible(False)
     plt.gca().spines['bottom'].set_visible(False)
     plt.gca().spines['left'].set_visible(False)
-    plt.gca().tick_params(top='off', bottom='off', left='off', right='off', labelleft='on', labelbottom='on')
+    plt.gca().tick_params(top='off', bottom='off', left='off', right='off', labelleft='on' if ticks else 'off', labelbottom='on' if ticks else 'off')
     plt.grid(b=True, which='major', axis='both', ls='--', lw=.5, c='k', alpha=.3)
     plt.axhline(y=0, lw=1, c='gray', alpha=1)
     plt.axvline(x=0, lw=1, c='gray', alpha=1)
