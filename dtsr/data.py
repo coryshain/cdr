@@ -259,8 +259,9 @@ def compute_history_intervals(X, y, series_ids):
     end = 0
     epsilon = np.finfo(np.float32).eps
     while i < n:
-        sys.stderr.write('\r%d/%d' %(i+1, n))
-        sys.stderr.flush()
+        if i == 0 or i % 1000 == 999 or i == n-1:
+            sys.stderr.write('\r%d/%d' %(i+1, n))
+            sys.stderr.flush()
 
         # Check if we've entered a new series in y
         if (id_vectors_y[i] != y_cur_ids).any():

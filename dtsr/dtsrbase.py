@@ -1696,67 +1696,70 @@ class DTSR(object):
                 param_random_summary_by_rangf = {}
 
                 if len(irf_by_rangf) > 0:
-                   for i, gf in enumerate([x for x in self.rangf if x in irf_by_rangf]):
-                        irf_ids_ran = [x for x in irf_by_rangf[gf] if param_name in trainable[x]]
-                        if len(irf_ids_ran):
-                            irfs_ix = names2ix(irf_by_rangf[gf], irf_ids)
-                            levels_ix = np.arange(self.rangf_n_levels[i] - 1)
+                   for i, gf in enumerate(self.rangf):
+                        if gf in irf_by_rangf:
+                            irf_ids_ran = [x for x in irf_by_rangf[gf] if param_name in trainable[x]]
+                            if len(irf_ids_ran):
+                                irfs_ix = names2ix(irf_by_rangf[gf], irf_ids)
+                                levels_ix = np.arange(self.rangf_n_levels[i] - 1)
 
-                            param_random = self._center_and_constrain(
-                                self.irf_params_random_base[gf][family][param_name],
-                                tf.gather(param_fixed, irfs_ix, axis=1),
-                                lb=param_lb,
-                                ub=param_ub
-                            )
-                            param_random_summary = self._center_and_constrain(
-                                self.irf_params_random_base_summary[gf][family][param_name],
-                                tf.gather(param_summary, irfs_ix, axis=1),
-                                lb=param_lb,
-                                ub=param_ub
-                            )
+                                param_random = self._center_and_constrain(
+                                    self.irf_params_random_base[gf][family][param_name],
+                                    tf.gather(param_fixed, irfs_ix, axis=1),
+                                    lb=param_lb,
+                                    ub=param_ub
+                                )
+                                param_random_summary = self._center_and_constrain(
+                                    self.irf_params_random_base_summary[gf][family][param_name],
+                                    tf.gather(param_summary, irfs_ix, axis=1),
+                                    lb=param_lb,
+                                    ub=param_ub
+                                )
 
-                            self._regularize(param_random, type='ranef', var_name='%s_by_%s' % (param_name, gf))
+                                self._regularize(param_random, type='ranef', var_name='%s_by_%s' % (param_name, gf))
 
-                            param_random = self._scatter_along_axis(
-                                irfs_ix,
-                                self._scatter_along_axis(
-                                    levels_ix,
-                                    param_random,
-                                    [self.rangf_n_levels[i], len(irfs_ix)]
-                                ),
-                                [self.rangf_n_levels[i], len(irfs_ix)],
-                                axis=1
-                            )
-                            param_random_summary = self._scatter_along_axis(
-                                irfs_ix,
-                                self._scatter_along_axis(
-                                    levels_ix,
-                                    param_random_summary,
-                                    [self.rangf_n_levels[i], len(irfs_ix)]
-                                ),
-                                [self.rangf_n_levels[i], len(irfs_ix)],
-                                axis=1
-                            )
+                                param_random = self._scatter_along_axis(
+                                    irfs_ix,
+                                    self._scatter_along_axis(
+                                        levels_ix,
+                                        param_random,
+                                        [self.rangf_n_levels[i], len(irfs_ix)]
+                                    ),
+                                    [self.rangf_n_levels[i], len(irfs_ix)],
+                                    axis=1
+                                )
+                                param_random_summary = self._scatter_along_axis(
+                                    irfs_ix,
+                                    self._scatter_along_axis(
+                                        levels_ix,
+                                        param_random_summary,
+                                        [self.rangf_n_levels[i], len(irfs_ix)]
+                                    ),
+                                    [self.rangf_n_levels[i], len(irfs_ix)],
+                                    axis=1
+                                )
 
-                            param_random_by_rangf[gf] = param_random
-                            param_random_summary_by_rangf[gf] = param_random_summary
-                            if gf not in self.irf_params_random_means:
-                                self.irf_params_random_means[gf] = {}
-                            if family not in self.irf_params_random_means[gf]:
-                                self.irf_params_random_means[gf][family] = {}
-                            self.irf_params_random_means[gf][family][param_name] = tf.reduce_mean(param_random_summary, axis=0)
+                                param_random_by_rangf[gf] = param_random
+                                param_random_summary_by_rangf[gf] = param_random_summary
+                                if gf not in self.irf_params_random_means:
+                                    self.irf_params_random_means[gf] = {}
+                                if family not in self.irf_params_random_means[gf]:
+                                    self.irf_params_random_means[gf][family] = {}
+                                self.irf_params_random_means[gf][family][param_name] = tf.reduce_mean(param_random_summary, axis=0)
 
-                            param += tf.gather(param_random, self.gf_y[:, i], axis=0)
+                                param += tf.gather(param_random, self.gf_y[:, i], axis=0)
 
-                            if self.log_random:
-                                for j in range(len(irf_by_rangf[gf])):
-                                    irf_name = irf_by_rangf[gf][j]
-                                    ix = irfs_ix[j]
-                                    tf.summary.histogram(
-                                        'by_%s/%s/%s' % (gf, param_name, irf_name),
-                                        param_random_summary[:, ix],
-                                        collections=['random']
-                                    )
+                                if self.log_random:
+                                    for j in range(len(irf_by_rangf[gf])):
+                                        irf_name = irf_by_rangf[gf][j]
+                                        ix = irfs_ix[j]
+                                        tf.summary.histogram(
+                                            'by_%s/%s/%s' % (gf, param_name, irf_name),
+                                            param_random_summary[:, ix],
+                                            collections=['random']
+                                        )
+                            else:
+                                param_random = param_random_summary = None
                         else:
                             param_random = param_random_summary = None
 

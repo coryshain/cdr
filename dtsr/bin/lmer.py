@@ -29,7 +29,7 @@ if __name__ == '__main__':
 
         models = filter_models(p.model_list, args.models, dtsr_only=True)
 
-        models = [x for x in models if x.startswith('DTSR_')]
+        models = [x for x in models if x.startswith('DTSR')]
 
         partitions = get_partition_list(args.partition)
         partition_str = '-'.join(partitions)
