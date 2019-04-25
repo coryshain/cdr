@@ -33,6 +33,7 @@ MOCK_MODULES = [
     'tensorflow',
     'tensorflow.python',
     'tensorflow.python.framework',
+    'tensorflow.python.ops',
     'edward',
     'matplotlib',
     'matplotlib.pyplot'
