@@ -332,6 +332,7 @@ class DTSRMLE(DTSR):
                             skewness=self.y_skewness,
                             tailweight=self.y_tailweight
                         )
+
                         self.err_dist_standardized = tf.contrib.distributions.SinhArcsinh(
                             loc=0.,
                             scale=self.y_sd,
