@@ -28,7 +28,8 @@ class Mock(MagicMock):
 MOCK_MODULES = [
     'rpy2',
     'rpy2.globalenv',
-    'tensorflow'
+    'tensorflow',
+    'edward'
 ]
 sys.modules.update((mod_name, Mock()) for mod_name in MOCK_MODULES)
 
