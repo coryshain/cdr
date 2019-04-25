@@ -130,7 +130,7 @@ def double_gamma_1_irf(params, session=None, epsilon=4*np.finfo('float32').eps, 
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
-            beta = params[:, 1:2]
+            beta = params[:, 0:1]
 
             pdf_main = tf.contrib.distributions.Gamma(
                 concentration=6.,
