@@ -32,7 +32,7 @@ MOCK_MODULES = [
     'rpy2.globalenv',
     'tensorflow',
     'edward',
-    'matplotlib'
+    'matplotlib',
     'matplotlib.pyplot'
 ]
 sys.modules.update((mod_name, Mock()) for mod_name in MOCK_MODULES)
