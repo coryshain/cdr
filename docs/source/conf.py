@@ -31,6 +31,7 @@ MOCK_MODULES = [
     'rpy2',
     'rpy2.globalenv',
     'tensorflow',
+    'tensorflow.python',
     'edward',
     'matplotlib',
     'matplotlib.pyplot'
