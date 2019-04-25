@@ -20,6 +20,8 @@ import os
 import sys
 from unittest.mock import MagicMock
 
+from unittest.mock import MagicMock
+
 class Mock(MagicMock):
     @classmethod
     def __getattr__(cls, name):
