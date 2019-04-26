@@ -2355,7 +2355,15 @@ class IRFNode(object):
 
         out = []
         if self.terminal():
-            if self.fixed and not Formula.is_spline(self.p.family):
+            skip = False
+            parent_is_spline = Formula.is_spline(self.p.family)
+            if parent_is_spline:
+                child_coefs = set()
+                for c in self.p.children:
+                    child_coefs.add(c.coef_id())
+                if len(child_coefs) == 1:
+                    skip = True
+            if self.fixed and not skip:
                 out.append(self.coef_id())
         else:
             for c in self.children:
@@ -2367,8 +2375,7 @@ class IRFNode(object):
 
     def spline_coef_names(self):
         """
-        Get list of names of spline coefficients dominated by node. Because splines are non-parametric, their coefficients are fixed at 1. Trainable coefficients would be perfectly confounded with the spline parameters.
-
+        Get list of names of spline coefficients dominated by node.
         :return: ``list`` of ``str``; names of spline coefficients dominated by node.
         """
 
@@ -2379,6 +2386,32 @@ class IRFNode(object):
         else:
             for c in self.children:
                 names = c.spline_coef_names()
+                for name in names:
+                    if name not in out:
+                        out.append(name)
+        return out
+
+    def unary_spline_coef_names(self):
+        """
+        Get list of names of spline coefficients with no siblings dominated by node.
+        Because unary splines are non-parametric, their coefficients are fixed at 1.
+        Trainable coefficients are therefore perfectly confounded with the spline parameters.
+        Splines dominating multiple coefficients are excepted, since the same kernel shape must be scaled in different ways.
+
+        :return: ``list`` of ``str``; names of unary spline coefficients dominated by node.
+        """
+
+        out = []
+        if self.terminal():
+            if Formula.is_spline(self.p.family):
+                child_coefs = set()
+                for c in self.p.children:
+                    child_coefs.add(c.coef_id())
+                if len(child_coefs) == 1:
+                    out.append(self.coef_id())
+        else:
+            for c in self.children:
+                names = c.unary_spline_coef_names()
                 for name in names:
                     if name not in out:
                         out.append(name)
@@ -2567,7 +2600,15 @@ class IRFNode(object):
         out = {}
         if self.terminal():
             for gf in self.rangf:
-                if not (Formula.is_spline(self.p.family) and gf in self.p.rangf):
+                skip = False
+                parent_is_spline = Formula.is_spline(self.p.family) and gf in self.p.rangf
+                if parent_is_spline:
+                    child_coefs = set()
+                    for c in self.p.children:
+                        child_coefs.add(c.coef_id())
+                    if len(child_coefs) == 1:
+                        skip = True
+                if not skip:
                     out[gf] = []
                     if self.coef_id() not in out[gf]:
                         out[gf].append(self.coef_id())

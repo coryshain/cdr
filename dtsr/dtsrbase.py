@@ -457,7 +457,7 @@ class DTSR(object):
             self.node_table = t.node_table()
             self.coef_names = t.coef_names()
             self.fixed_coef_names = t.fixed_coef_names()
-            self.spline_coef_names = t.spline_coef_names()
+            self.unary_spline_coef_names = t.unary_spline_coef_names()
             self.interaction_list = t.interactions()
             self.interaction_names = t.interaction_names()
             self.fixed_interaction_names = t.fixed_interaction_names()
@@ -526,7 +526,7 @@ class DTSR(object):
             self.node_table = t.node_table()
             self.coef_names = t.coef_names()
             self.fixed_coef_names = t.fixed_coef_names()
-            self.spline_coef_names = t.spline_coef_names()
+            self.unary_spline_coef_names = t.unary_spline_coef_names()
             self.interaction_list = t.interactions()
             self.interaction_names = t.interaction_names()
             self.fixed_interaction_names = t.fixed_interaction_names()
@@ -1035,22 +1035,22 @@ class DTSR(object):
                 # Coefficients
                 fixef_ix = names2ix(self.fixed_coef_names, self.coef_names)
                 coef_ids = self.coef_names
-                if len(self.spline_coef_names) > 0:
+                if len(self.unary_spline_coef_names) > 0:
                     nonzero_coefficients = tf.concat(
                         [
                             self.coefficient_fixed_base,
-                            tf.ones([len(self.spline_coef_names)], dtype=self.FLOAT_TF)
+                            tf.ones([len(self.unary_spline_coef_names)], dtype=self.FLOAT_TF)
                         ],
                         axis=0
                     )
                     nonzero_coefficients_summary = tf.concat(
                         [
                             self.coefficient_fixed_base_summary,
-                            tf.ones([len(self.spline_coef_names)], dtype=self.FLOAT_TF)
+                            tf.ones([len(self.unary_spline_coef_names)], dtype=self.FLOAT_TF)
                         ],
                         axis=0
                     )
-                    nonzero_coef_ix = names2ix(self.fixed_coef_names + self.spline_coef_names, self.coef_names)
+                    nonzero_coef_ix = names2ix(self.fixed_coef_names + self.unary_spline_coef_names, self.coef_names)
                 else:
                     nonzero_coefficients = self.coefficient_fixed_base
                     nonzero_coefficients_summary = self.coefficient_fixed_base_summary
