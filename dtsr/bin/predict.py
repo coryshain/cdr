@@ -10,7 +10,7 @@ pd.options.mode.chained_assignment = None
 from dtsr.config import Config
 from dtsr.io import read_data
 from dtsr.formula import Formula
-from dtsr.data import filter_invalid_responses, preprocess_data, compute_splitID, compute_partition, get_first_last_obs_lists
+from dtsr.data import add_dv, filter_invalid_responses, preprocess_data, compute_splitID, compute_partition, get_first_last_obs_lists
 from dtsr.util import mse, mae, percent_variance_explained
 from dtsr.util import load_dtsr, filter_models, get_partition_list, paths_from_partition_cliarg
 from dtsr.plot import plot_qq
@@ -160,10 +160,19 @@ if __name__ == '__main__':
                 X_baseline = X_baseline[part_select]
             X_baseline = X_baseline.reset_index(drop=True)[select]
 
-            for i in range(len(dtsr_formula_list)):
-                x = dtsr_formula_list[i]
-                if x.dv not in X_baseline.columns and x.dv in y.columns:
-                    X_baseline[x.dv] = y[x.dv]
+            for m in models:
+                if not m in dtsr_formula_name_list:
+                    p.set_model(m)
+                    form = p['formula']
+                    dv = form.split('~')[0].strip()
+                    y = add_dv(dv, y)
+                    if not dv in X_baseline.columns:
+                        X_baseline[dv] = y[dv]
+
+#            for i in range(len(dtsr_formula_list)):
+#                x = dtsr_formula_list[i]
+#                if x.dv not in X_baseline.columns and x.dv in y.columns:
+#                    X_baseline[x.dv] = y[x.dv]
 
             for c in X_baseline.columns:
                 if X_baseline[c].dtype.name == 'category':
