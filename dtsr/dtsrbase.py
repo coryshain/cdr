@@ -5223,6 +5223,8 @@ class DTSR(object):
             irf_name_map=None,
             irf_ids=None,
             sort_names=True,
+            plot_unscaled=False,
+            plot_composite=False,
             prop_cycle_length=None,
             prop_cycle_ix=None,
             plot_dirac=False,
@@ -5260,7 +5262,9 @@ class DTSR(object):
         :param standardize_response: ``bool``; Whether to report response using standard units. Ignored unless model was fitted using ``standardize_response==True``.
         :param summed: ``bool``; whether to plot individual IRFs or their sum.
         :param irf_ids: ``list`` or ``None``; list of irf ID's to plot. If ``None``, all IRF's are plotted.
-        :param sort_names: ``sort_names``; alphabetically sort IRF names.
+        :param sort_names: ``bool``; alphabetically sort IRF names.
+        :param plot_unscaled: ``bool``; plot unscaled IRFs.
+        :param plot_composite: ``bool``; plot any composite IRFs. If ``False``, only plots terminal IRFs.
         :param prop_cycle_length: ``int`` or ``None``; Length of plotting properties cycle (defines step size in the color map). If ``None``, inferred from **irf_names**.
         :param prop_cycle_ix: ``list`` of ``int``, or ``None``; Integer indices to use in the properties cycle for each entry in **irf_names**. If ``None``, indices are automatically assigned.
         :param plot_dirac: ``bool``; include any linear Dirac delta IRF's (stick functions at t=0) in plot.
@@ -5355,7 +5359,11 @@ class DTSR(object):
 
                 plot_x = self.sess.run(self.support, fd)
 
-                switches = [['atomic', 'composite'], ['scaled', 'unscaled']]
+                switches = [['atomic'], ['scaled']]
+                if plot_composite:
+                    switches[0].append('composite')
+                if plot_unscaled:
+                    switches[1].append('unscaled')
 
                 for a in switches[0]:
                     if self.t.has_composed_irf() or a == 'atomic':
