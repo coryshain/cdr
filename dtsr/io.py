@@ -58,8 +58,10 @@ def read_data(X_paths, y_paths, series_ids, categorical_columns=None, sep=' '):
                 y[col] = y[col].astype('category')
 
     for x in X:
+        assert not 'rate' in x.columns, '"rate" is a reserved column name in DTSR. Rename your input column...'
         x['rate'] = 1.
-        x['trial'] = x.groupby(series_ids).rate.cumsum()
+        if 'trial' not in x.columns:
+            x['trial'] = x.groupby(series_ids).rate.cumsum()
     # X_groups = X.groupby(series_ids)
     # X['percentTrialsComplete'] = X_groups['trial'].apply(lambda x: x / max(x))
     # X['percentTimeComplete'] = X_groups['time'].apply(lambda x: x / max(x))

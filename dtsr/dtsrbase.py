@@ -710,7 +710,13 @@ class DTSR(object):
                     ),
                     self.FLOAT_TF
                 )
-                self.gf_y = tf.placeholder(shape=[None, len(self.rangf)], dtype=self.INT_TF)
+                # self.gf_y = tf.placeholder(shape=[None, len(self.rangf)], dtype=self.INT_TF)
+                gf_defaults = np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1
+                self.gf_y = tf.placeholder_with_default(
+                    tf.cast(gf_defaults, dtype=self.INT_TF),
+                    shape=[None, len(self.rangf)],
+                    name='gf_y'
+                )
 
                 # Tensors used for interpolated IRF composition
                 self.max_tdelta_batch = tf.reduce_max(self.t_delta)
@@ -3247,7 +3253,6 @@ class DTSR(object):
                     self.support_start: 0.,
                     self.n_time_units: n_time_units,
                     self.n_time_points: n_time_points,
-                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1,
                     self.time_y: [n_time_units],
                     self.time_X: np.zeros((1, self.history_length, n_impulse))
                 }
@@ -5349,7 +5354,6 @@ class DTSR(object):
                     self.support_start: 0.,
                     self.n_time_units: plot_n_time_units,
                     self.n_time_points: plot_n_time_points,
-                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1,
                     self.max_tdelta_batch: plot_n_time_units
                 }
 
@@ -5595,7 +5599,6 @@ class DTSR(object):
                     self.support_start: 0.,
                     self.n_time_units: n_time_units,
                     self.n_time_points: n_time_points,
-                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1,
                     self.max_tdelta_batch: n_time_units
                 }
 

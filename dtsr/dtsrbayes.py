@@ -1481,7 +1481,6 @@ class DTSRBayes(DTSR):
                     self.support_start: 0.,
                     self.n_time_units: n_time_units,
                     self.n_time_points: n_time_points,
-                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1,
                     self.time_y: [n_time_units],
                     self.time_X: np.zeros((1, self.history_length, n_impulse))
                 }
@@ -1577,7 +1576,6 @@ class DTSRBayes(DTSR):
                     self.support_start: support_start,
                     self.n_time_units: n_time_units,
                     self.n_time_points: n_time_points,
-                    self.gf_y: np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1,
                     self.time_y: np.ones((1,)) * n_time_units,
                     self.time_X: np.zeros((1, self.history_length, n_impulse))
                 }
