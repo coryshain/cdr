@@ -62,7 +62,7 @@ def plot_irf(
         prop_cycle_ix = list(range(n_colors))
     prop_cycle_kwargs = {'color': [cm(1. * prop_cycle_ix[i] / n_colors) for i in range(len(irf_names))]}
     if use_line_markers:
-        markers_keys = list(markers.MarkerStyle.markers.keys())[:-3]
+        markers_keys = sorted([x for x in markers.MarkerStyle.markers.keys() if x and isinstance(x, str) and x.strip()])
         prop_cycle_kwargs['marker'] = [markers_keys[prop_cycle_ix[i]] for i in range(len(irf_names))]
     plt.gca().set_prop_cycle(**prop_cycle_kwargs)
     plt.gca().spines['top'].set_visible(False)

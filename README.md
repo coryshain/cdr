@@ -1,28 +1,21 @@
 # Deconvolutional time series regression (DTSR)
-DTSR is a regression technique for modeling temporally diffuse effects (Shain & Schuler, to appear).
+DTSR is a regression technique for modeling temporally diffuse effects (Shain & Schuler, 2018).
 
-This repository contains source code for the `dtsr` Python module as well as support for reproducing published experiments.
-Full documentation for the `dtsr` module is available at [http://dtsr.readthedocs.io/en/latest/](http://dtsr.readthedocs.io/en/latest/).
+This branch (emnlp18) exists to support reprodiction of results reported in Shain & Schuler (2018).
+It locks the repository at a previous state and therefore lacks any subsequent improvements or bug fixes.
+Do not use this branch to run regressions on your own data.
+Instead, first run the following command from the repository root:
 
-DTSR models can be trained and evaluated using provided utility executables.
-Full documentation is provided at the link above.
-For example, to fit a DTSR model to the EMNLP18 synthetic data, run the following from the repository root:
-
-`python -m dtsr.bin.train experiments_emnlp18/synth.ini`
-
-Note that some published experiments below also involve fitting LME and GAM models, which require `rpy2` and therefore won't work on Windows systems without some serious hacking.
-The `dtsr` module is cross-platform and therefore DTSR models should train regardless of operating system.
-
-## Reproducing published results
+`git checkout -b master`
 
 Published results depend on both (1) datasets and (2) models as defined in experiment-specific configuration files.
-In general, with the exception of a small synthetic dataset, we do not distribute data with this repository.
+In general, with the exception of small synthetic datasets, we do not distribute data with this repository.
 The datasets used can be provided by email upon request.
 Once the data are in hand, the paths to them in the appropriate experiment config files must be updated.
 
-### EMNLP18
-The EMNLP18 experiments (Shain & Schuler, to appear) are defined in the `experiments_emnlp18` directory.
-The files `natstor_emnlp18.ini`, `dundee_emnlp18.ini`, and `ucl_emnlp18.ini` define the experiments and contain pointers to data.
+### NAACL19
+The NAACL19 experiments (Shain, 2019) are defined in the `experiments_naacl19` directory.
+The files `natstor_naacl19.ini`, `dundee_naacl19.ini`, and `ucl_naacl19.ini` define the experiments and contain pointers to data.
 These experiments depend on the following 12 data files that are not distributed with this repository, but can be provided upon request:
 
   - `natstor_X.csv`
@@ -38,16 +31,16 @@ These experiments depend on the following 12 data files that are not distributed
   - `ucl_y_dev.csv`
   - `ucl_y_test.csv`
   
-The ``*.ini`` files expect to find these resources in the ``experiments_emnlp18`` directory of the DTSR repository.
+The ``*.ini`` files expect to find these resources in the ``experiments_naacl19`` directory of the DTSR repository.
 Once the source data are in hand, there are three ways to link them up so you can run the experiments:
 
-  - Place the source data files in the ``experiments_emnlp18`` directory.
-  - Put symbolic links in the ``experiments_emnlp18`` directory to source files stored elsewhere.
+  - Create a new directory called ``reading_data`` and place the source data files into it.
+  - Create a new directory called ``reading_data`` and put symbolic links in it to source files stored elsewhere.
   - Change the data pointers in the ``*.ini`` files above to point to the locations of the data files.
 
 Once this step is complete, results can be reproduced on UNIX-based systems by navigating to the repository root and invoking the following command:
 
-`make emnlp18`
+`make naacl19`
 
 Windows users without the ``make`` utility will need to either obtain it or run the commands specified in the `emnlp18` target of the Makefile by hand.
 
@@ -58,4 +51,5 @@ Bug reports can be logged in the issue tracker on [Github](https://github.com/co
 
 
 ## References
+Shain, C. A large-scale deconvolutional study of predictability and frequency effects in naturalistic reading. _NAACL 2019_.
 Shain, Cory and Schuler, William (2018). Deconvolutional time series regression: A technique for modeling temporally diffuse effects. _EMNLP18_.

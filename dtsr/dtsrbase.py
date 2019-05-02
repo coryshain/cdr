@@ -311,6 +311,8 @@ class DTSR(object):
 
         # Parse and store model data from formula
         form = Formula(self.form_str)
+        print(form)
+        print(form.t.interactions())
         form = form.categorical_transform(X)
         form = form.categorical_transform(y)
         self.form = form
@@ -4529,7 +4531,7 @@ class DTSR(object):
                 if (self.global_step.eval(session=self.sess) < n_iter) and not self.has_converged():
                     self.set_training_complete(False)
 
-                if self.training_complete.eval(session=self.sess):
+                if False and self.training_complete.eval(session=self.sess):
                     sys.stderr.write('Model training is already complete; no additional updates to perform. To train for additional iterations, re-run fit() with a larger n_iter.\n\n')
                 else:
                     if self.global_step.eval(session=self.sess) == 0:
@@ -4628,6 +4630,9 @@ class DTSR(object):
 
                         t1_iter = pytime.time()
                         sys.stderr.write('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
+
+                    print('Saving')
+                    print(self.form.t.interactions())
 
                     self.save()
 
