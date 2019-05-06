@@ -4,24 +4,24 @@ import numpy as np
 import pandas as pd
 from dtsr.config import Config
 from dtsr.signif import permutation_test
-from dtsr.util import filter_models, get_partition_list
+from dtsr.util import filter_models, get_partition_list, nested
 import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 
-from dtsr.util import nested
 
 def scale(a, b):
     df = np.stack([np.array(a), np.array(b)], axis=1)
     scaling_factor = df.std()
     return a/scaling_factor, b/scaling_factor
 
+
 if __name__ == '__main__':
 
     argparser = argparse.ArgumentParser('''
         Performs pairwise permutation test for significance of differences in prediction quality between models.
         Can be used for in-sample and out-of-sample evaluation.
-        Can be used (1) to compare models of different structure (e.g. DTSR vs. LME), (2) (using the "-a" flag) to perform hypothesis testing between DTSR models within one or more ablation sets, or (3) (using the "-P" flag) to perform a pooled test comparing DTSR models fitted to multiple responses. 
+        Used (1) to perform hypothesis testing between DTSR models within one or more ablation sets, or (2) (using the "-P" flag) to perform a pooled test comparing DTSR models fitted to multiple responses. 
     ''')
     argparser.add_argument('config_paths', nargs='*', help='Path(s) to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of models (or model basenames if using -a) to compare. Regex permitted. If unspecified, uses all models.')
