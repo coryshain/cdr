@@ -15,6 +15,7 @@ if __name__ == '__main__':
         ''')
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of model names for which to compute LRT tests. Regex permitted. If unspecified, uses all DTSR models.')
+    argparser.add_argument('-z', '--zscore', action='store_true', help='Compare models fitted with Z-transformed predictors.')
     argparser.add_argument('-a', '--ablation', action='store_true', help='Only compare models within an ablation set (those defined using the "ablate" param in the config file)')
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
     args, unknown = argparser.parse_known_args()
@@ -51,19 +52,19 @@ if __name__ == '__main__':
                 sys.stderr.write('Comparing models within ablation set "%s"...\n' %s)
             for i in range(len(model_set)):
                 model_name_1 = model_set[i]
-                lme_path_1 = p.outdir + '/' + model_name_1 + '/lm_%s.obj' % partition_str
+                lme_path_1 = p.outdir + '/' + model_name_1 + '/lm_%s.obj' % ('z_%s' % partition_str if args.zscore else partition_str)
                 with open(lme_path_1, 'rb') as m_file:
                     lme1 = pickle.load(m_file)
 
                 for j in range(i+1, len(model_set)):
                     model_name_2 = model_set[j]
                     if nested(model_name_1, model_name_2) or not args.ablation:
-                        lme_path_2 = p.outdir + '/' + model_name_2 + '/lm_%s.obj' % partition_str
+                        lme_path_2 = p.outdir + '/' + model_name_2 + '/lm_%s.obj' % ('z_%s' % partition_str if args.zscore else partition_str)
                         with open(lme_path_2, 'rb') as m_file:
                             lme2 = pickle.load(m_file)
                         anova_summary = str(anova(lme1.m, lme2.m))
                         name = '%s_v_%s' %(model_name_1, model_name_2)
-                        out_path = p.outdir + '/' + name + '_2stepLRT_' + partition_str + '.txt'
+                        out_path = p.outdir + '/' + name + '_2stepLRT_%s.txt' % ('z_%s' % partition_str if args.zscore else partition_str)
                         with open(out_path, 'w') as f:
                             sys.stderr.write('Saving output to %s...\n' %out_path)
                             summary = '='*50 + '\n'
