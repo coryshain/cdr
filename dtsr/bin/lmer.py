@@ -65,8 +65,8 @@ if __name__ == '__main__':
 
                 dv = f.dv
 
-                model_path = dir_path + '/lm_%s.obj' % partition_str
-                model_summary_path = dir_path + '/lm_%s_summary.txt' % partition_str
+                model_path = dir_path + '/lm_%s.obj' % ('z_%s' % partition_str if args.zscore else partition_str)
+                model_summary_path = dir_path + '/lm_%s_summary.txt' % ('z_%s' % partition_str if args.zscore else partition_str)
 
                 if not args.force and os.path.exists(model_path):
                     sys.stderr.write('Retrieving saved L(ME) regression of DTSR model %s...\n' % m)
