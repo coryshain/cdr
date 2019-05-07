@@ -65,6 +65,7 @@ def gamma_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_
             ).prob
             return lambda x: pdf(x + epsilon)
 
+
 def shifted_gamma_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
     session = get_session(session)
     with session.as_default():
@@ -75,6 +76,7 @@ def shifted_gamma_irf(params, session=None, epsilon=4*np.finfo('float32').eps, v
                 validate_args=validate_irf_args
             ).prob
             return lambda x: pdf(x - params[:, 2:3] + epsilon)
+
 
 def normal_irf(params, session=None):
     session = get_session(session)
@@ -4140,6 +4142,7 @@ class DTSR(object):
             mse=None,
             mae=None,
             loglik=None,
+            loss=None,
             percent_variance_explained=None,
             true_variance=None,
             ks_results=None,
@@ -4151,6 +4154,7 @@ class DTSR(object):
         :param mse: ``float`` or ``None``; mean squared error, skipped if ``None``.
         :param mae: ``float`` or ``None``; mean absolute error, skipped if ``None``.
         :param loglik: ``float`` or ``None``; log likelihood, skipped if ``None``.
+        :param loss: ``float`` or ``None``; loss per training objective, skipped if ``None``.
         :param true_variance: ``float`` or ``None``; variance of targets, skipped if ``None``.
         :param percent_variance_explained: ``float`` or ``None``; percent variance explained, skipped if ``None``.
         :param true_variance: ``float`` or ``None``; true variance, skipped if ``None``.
@@ -4165,6 +4169,8 @@ class DTSR(object):
             out += ' ' * (indent+2) + 'MAE: %s\n' %mae
         if loglik is not None:
             out += ' ' * (indent+2) + 'Log likelihood: %s\n' %loglik
+        if loss is not None:
+            out += ' ' * (indent+2) + 'Loss per training objective: %s\n' %loss
         if true_variance is not None:
             out += ' ' * (indent+2) + 'True variance: %s\n' %true_variance
         if percent_variance_explained is not None:
@@ -5065,6 +5071,133 @@ class DTSR(object):
                 self.set_predict_mode(False)
 
                 return log_lik
+
+    def loss(
+            self,
+            X,
+            y,
+            X_response_aligned_predictor_names=None,
+            X_response_aligned_predictors=None,
+            X_2d_predictor_names=None,
+            X_2d_predictors=None,
+            n_samples=None,
+            algorithm='MAP',
+            verbose=True
+    ):
+        """
+        Compute compute the loss over a dataset using the model's optimization objective.
+        Useful for checking divergence between optimization objective and other evaluation metrics.
+
+        :param X: list of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+            Each element of **X** must contain the following columns (additional columns are ignored):
+
+            * ``time``: Timestamp associated with each observation in **X**
+
+            Across all elements of **X**, there must be a column for each independent variable in the DTSR ``form_str`` provided at initialization.
+
+        :param y: ``pandas`` table; the dependent variable. Must contain the following columns:
+
+            * ``time``: Timestamp associated with each observation in ``y``
+            * ``first_obs``:  Index in the design matrix `X` of the first observation in the time series associated with each entry in ``y``
+            * ``last_obs``:  Index in the design matrix `X` of the immediately preceding observation in the time series associated with each entry in ``y``
+            * A column with the same name as the DV specified in ``form_str``
+            * A column for each random grouping factor in the model specified in ``form_str``.
+
+        :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
+        :param X_response_aligned_predictors: ``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
+        :param X_2d_predictor_names: ``list`` or ``None``; List of column names 2D predictors (predictors whose value depends on properties of the most recent impulse) if applicable, ``None`` otherwise.
+        :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
+        :param verbose: ``bool``; Report progress and metrics to standard error.
+        :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
+        """
+
+        if verbose:
+            usingGPU = tf.test.is_gpu_available()
+            sys.stderr.write('Using GPU: %s\n' % usingGPU)
+
+        if self.pc:
+            impulse_names = self.src_impulse_names
+        else:
+            impulse_names  = self.impulse_names
+
+        if verbose:
+            sys.stderr.write('Computing likelihoods...\n')
+
+        y_rangf = y[self.rangf]
+        for i in range(len(self.rangf)):
+            c = self.rangf[i]
+            y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
+
+        first_obs, last_obs = get_first_last_obs_lists(y)
+        time_y = np.array(y.time, dtype=self.FLOAT_NP)
+        y_dv = np.array(y[self.dv], dtype=self.FLOAT_NP)
+        gf_y = np.array(y_rangf, dtype=self.INT_NP)
+
+        X_2d, time_X_2d, time_X_mask = build_DTSR_impulses(
+            X,
+            first_obs,
+            last_obs,
+            impulse_names,
+            time_y=time_y,
+            history_length=self.history_length,
+            X_response_aligned_predictor_names=X_response_aligned_predictor_names,
+            X_response_aligned_predictors=X_response_aligned_predictors,
+            X_2d_predictor_names=X_2d_predictor_names,
+            X_2d_predictors=X_2d_predictors,
+            int_type=self.int_type,
+            float_type=self.float_type,
+        )
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                self.set_predict_mode(True)
+
+                if not np.isfinite(self.minibatch_size):
+                    fd = {
+                        self.X: X_2d,
+                        self.time_X: time_X_2d,
+                        self.time_X_mask: time_X_mask,
+                        self.time_y: time_y,
+                        self.gf_y: gf_y,
+                        self.y: y_dv
+                    }
+                    loss = self.run_loss_op(
+                        fd,
+                        n_samples=n_samples,
+                        algorithm=algorithm,
+                        verbose=verbose
+                    )
+                else:
+                    n_minibatch = math.ceil(len(y) / self.minibatch_size)
+                    loss = np.zeros((n_minibatch,))
+                    for i in range(0, n_minibatch):
+                        if verbose:
+                            sys.stderr.write('\rMinibatch %d/%d' %(i+1, n_minibatch))
+                            sys.stderr.flush()
+                        fd_minibatch = {
+                            self.X: X_2d[i:i + self.minibatch_size],
+                            self.time_X: time_X_2d[i:i + self.minibatch_size],
+                            self.time_X_mask: time_X_mask[i:i + self.minibatch_size],
+                            self.time_y: time_y[i:i + self.minibatch_size],
+                            self.gf_y: gf_y[i:i + self.minibatch_size] if len(gf_y) > 0 else gf_y,
+                            self.y: y_dv[i:i+self.minibatch_size]
+                        }
+                        loss[i] = self.run_loss_op(
+                            fd_minibatch,
+                            n_samples=n_samples,
+                            algorithm=algorithm,
+                            verbose=verbose
+                        )
+                    loss = loss.mean()
+
+                if verbose:
+                    sys.stderr.write('\n\n')
+
+                self.set_predict_mode(False)
+
+                return loss
 
     def convolve_inputs(
             self,
