@@ -30,7 +30,7 @@ if __name__ == '__main__':
     ''')
     argparser.add_argument('paths', nargs='+', help='Space-delimited list of paths, supports regex. Individual elements can also contain ";"-delimited lists of paths, in which case all coefs in the element will be collapsed in plots.')
     argparser.add_argument('-p', '--partition', default='train', help='Partition name (default: "train").')
-    argparser.add_argument('-d', '--search_directory', default='./', help='Root directory (default: "./").')
+    argparser.add_argument('-d', '--search_dir', nargs='+', default=['./'], help='Directory/directories to search (default: "./").')
     argparser.add_argument('-e', '--exclude', nargs='*', default=[], help='Exclude data from paths containing any of the strings in ``exclude``.')
     argparser.add_argument('-n', '--names', nargs='*', help='Names of elements in ``paths``.')
     argparser.add_argument('-o', '--outpath', default='lme_coefs.png', help='Filename to use for saving plot.')
@@ -45,10 +45,11 @@ if __name__ == '__main__':
         names = args.names
 
     summaries = []
-    for root, _, files in os.walk(args.search_directory):
-        for f in files:
-            if f == 'lm_%s_summary.txt' % args.partition:
-                summaries.append(os.path.join(root, f))
+    for directory in args.search_dir:
+        for root, _, files in os.walk(directory):
+            for f in files:
+                if f == 'lm_%s_summary.txt' % args.partition:
+                    summaries.append(os.path.join(root, f))
 
     coefs = []
     for e in paths:

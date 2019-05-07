@@ -57,8 +57,6 @@ def permutation_test(err_1, err_2, n_iter=10000, n_tails=2, mode='loss', nested=
                 hits += 1
         elif n_tails == 2:
             if math.fabs(cur_diff) > math.fabs(base_diff):
-                if verbose:
-                    sys.stderr.write('Hit on iteration %d: %s\n' %(i, cur_diff))
                 hits += 1
         else:
             raise ValueError('Invalid bootstrap parameter n_tails: %s. Must be in {1, 2}.' %n_tails)

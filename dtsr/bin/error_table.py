@@ -49,8 +49,8 @@ def results_to_table(results, tasks, systems, baselines=None, indent=4):
     out += ' ' * indent + '\\begin{tabular}{r|%s}\n' % ('|'.join(['ccc'] * len(results)))
    
     out += ' ' * (indent * 2) + ' & '.join(['Model'] + ['\\multicolumn{3}{|c}{%s}' % t for t in tasks]) + '\\\\\n'
-    out += ' ' * (indent * 2) + ' & '.join(['Train', 'Dev', 'Test'] * len(tasks)) + '\\\\\n'
-    out += ' ' * (indent * 2) + '\\hline\\\\\n'
+    out += ' ' * (indent * 2) + '& ' + ' & '.join(['Train', 'Dev', 'Test'] * len(tasks)) + '\\\\\n'
+    out += ' ' * (indent * 2) + '\\hline\n'
 
     if baselines is None:
         baselines = []
@@ -58,7 +58,7 @@ def results_to_table(results, tasks, systems, baselines=None, indent=4):
     for b in baselines:
         out += ' ' * (indent * 2) + new_row(b, results, tasks)
     if len(baselines) > 0:
-        out += ' ' * (indent * 2) + '\\hline\\\\\n'
+        out += ' ' * (indent * 2) + '\\hline\n'
     for s in systems:
         out += ' ' * (indent * 2) + new_row(s, results, tasks)           
  

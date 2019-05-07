@@ -53,8 +53,8 @@ if __name__ == '__main__':
             model_cur = np.concatenate(model_cur, axis=0)
             baseline_cur = np.concatenate(baseline_cur, axis=0)
         else:
-            model_cur = np.array(model_errors)
-            baseline_cur = np.array(baseline_errors)
+            model_cur = np.array(model_errors[0])
+            baseline_cur = np.array(baseline_errors[i][0])
 
         select = np.logical_and(np.isfinite(np.array(model_cur)), np.isfinite(np.array(baseline_cur)))
         diff = float(len(model_cur) - select.sum())
