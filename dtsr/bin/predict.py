@@ -72,7 +72,7 @@ if __name__ == '__main__':
     argparser.add_argument('-p', '--partition', nargs='+', default=['dev'], help='List of names of partitions to use ("train", "dev", "test", or hyphen-delimited subset of these).')
     argparser.add_argument('-z', '--standardize_response', action='store_true', help='Standardize (Z-transform) response in plots. Ignored for non-DTSR models, and ignored for DTSR models unless fitting used setting ``standardize_respose=True``.')
     argparser.add_argument('-n', '--nsamples', type=int, default=1024, help='Number of posterior samples to average (only used for DTSRBayes)')
-    argparser.add_argument('-M', '--mode', type=str, default=None, help='Predict mode ("response" or "loglik") or default None, which does both')
+    argparser.add_argument('-M', '--mode', nargs='+', default=None, help='Predict mode(s) (set of "response", "loglik", and/or "loss") or default ``None``, which does both "response" and "loglik". Modes "loglik" and "loss" are only valid for DTSR.')
     argparser.add_argument('-a', '--algorithm', type=str, default='MAP', help='Algorithm ("sampling" or "MAP") to use for extracting predictions from DTSRBayes. Ignored for DTSRMLE.')
     argparser.add_argument('-t', '--twostep', action='store_true', help='For DTSR models, predict from fitted LME model from two-step hypothesis test.')
     argparser.add_argument('-A', '--ablated_models', action='store_true', help='For two-step prediction from DTSR models, predict from data convolved using the ablated model. Otherwise predict from data convolved using the full model.')
@@ -331,13 +331,13 @@ if __name__ == '__main__':
                     summary += '  ' + formula + '\n\n'
                     summary += 'Partition: %s\n\n' % partition_str
 
-                    dtsr_mse = dtsr_mae = dtsr_loglik = dtsr_percent_variance_explained = dtsr_true_variance = None
+                    dtsr_mse = dtsr_mae = dtsr_loglik = dtsr_loss = dtsr_percent_variance_explained = dtsr_true_variance = None
 
                     if dtsr_model.standardize_response and args.standardize_response:
                         y_cur = (y_valid[dv] - dtsr_model.y_train_mean) / dtsr_model.y_train_sd
                     else:
                         y_cur = y_valid[dv]
-                    if args.mode in [None, 'response']:
+                    if args.mode is None or 'response' in args.mode:
                         first_obs, last_obs = get_first_last_obs_lists(y_valid)
                         dtsr_preds = dtsr_model.predict(
                             X,
@@ -403,7 +403,7 @@ if __name__ == '__main__':
 
                         D, p_value = dtsr_model.error_ks_test(err)
 
-                    if args.mode in [None, 'loglik']:
+                    if args.mode is None or 'loglik' in args.mode:
                         dtsr_loglik_vector = dtsr_model.log_lik(
                             X,
                             y_valid,
@@ -426,6 +426,18 @@ if __name__ == '__main__':
                                     l_file.write(str(dtsr_loglik_vector[i]) + '\n')
                         dtsr_loglik = dtsr_loglik_vector.sum()
 
+                    if 'loss' in args.mode:
+                        dtsr_loss = dtsr_model.loss(
+                            X,
+                            y_valid,
+                            X_response_aligned_predictor_names=X_response_aligned_predictor_names,
+                            X_response_aligned_predictors=X_response_aligned_predictors_valid,
+                            X_2d_predictor_names=X_2d_predictor_names,
+                            X_2d_predictors=X_2d_predictors,
+                            n_samples=args.nsamples,
+                            algorithm=args.algorithm
+                        )
+
                     if bayes:
                         if dtsr_model.pc:
                             terminal_names = dtsr_model.src_terminal_names
@@ -442,6 +454,7 @@ if __name__ == '__main__':
                         mse=dtsr_mse,
                         mae=dtsr_mae,
                         loglik=dtsr_loglik,
+                        loss=dtsr_loss,
                         percent_variance_explained=dtsr_percent_variance_explained,
                         true_variance=dtsr_true_variance,
                         ks_results=(D, p_value) if args.mode in [None, 'response'] else None

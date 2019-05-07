@@ -480,6 +480,13 @@ class DTSRMLE(DTSR):
                 log_lik = self.sess.run(ll, feed_dict=feed_dict)
                 return log_lik
 
+    def run_loss_op(self, feed_dict, n_samples=None, algorithm='MAP', verbose=True):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                loss = self.sess.run(self.loss_func, feed_dict=feed_dict)
+
+                return loss
+
     def run_conv_op(self, feed_dict, scaled=False, standardize_response=False, n_samples=None, algorithm='MAP', verbose=True):
         with self.sess.as_default():
             with self.sess.graph.as_default():
