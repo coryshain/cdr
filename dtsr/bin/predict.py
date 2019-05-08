@@ -426,7 +426,7 @@ if __name__ == '__main__':
                                     l_file.write(str(dtsr_loglik_vector[i]) + '\n')
                         dtsr_loglik = dtsr_loglik_vector.sum()
 
-                    if 'loss' in args.mode:
+                    if args.mode is not None and 'loss' in args.mode:
                         dtsr_loss = dtsr_model.loss(
                             X,
                             y_valid,
