@@ -19,6 +19,7 @@ if __name__ == '__main__':
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of model names to use for LMER fitting. Regex permitted. If unspecified, fits LMER to all DTSR models.')
     argparser.add_argument('-p', '--partition', type=str, default='train', help='Name of partition to use ("train", "dev", "test", or space- or hyphen-delimited subset of these)')
     argparser.add_argument('-z', '--zscore', action='store_true', help='Z-transform (center and scale) the convolved predictors prior to fitting')
+    argparser.add_argument('-u', '--uncorrelated', action='store_true', help='Use uncorrelated random intercepts and slopes. Simplifies the model and can help avoid convergence problems.')
     argparser.add_argument('-A', '--ablated_models', action='store_true', help='Fit ablated models to data convolved using the ablated model. Otherwise fits ablated models to data convolved using the full model.')
     argparser.add_argument('-f', '--force', action='store_true', help='Refit and overwrite any previously trained models. Otherwise, previously trained models are skipped.')
     args, unknown = argparser.parse_known_args()
@@ -46,7 +47,7 @@ if __name__ == '__main__':
             if os.path.exists(data_path):
                 p.set_model(m)
                 f = Formula(p['formula'])
-                model_form = f.to_lmer_formula_string(z=args.zscore)
+                model_form = f.to_lmer_formula_string(z=args.zscore, correlated=not args.uncorrelated)
                 model_form = model_form.replace('-', '_')
 
                 is_lme = '|' in model_form

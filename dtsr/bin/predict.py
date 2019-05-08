@@ -17,7 +17,36 @@ from dtsr.plot import plot_qq
 from scipy.stats import kstest
 
 
-# This code block is factored out because it is used by both LME objects and DTSR objects under 2-step analysis
+# These code blocks are factored out because they are used by both LM/E objects and DTSR objects under 2-step analysis
+def predict_LM(model_path, outdir, X, y, dv, partition_name, model_name=''):
+    sys.stderr.write('Retrieving saved model %s...\n' % m)
+    with open(model_path, 'rb') as m_file:
+        lm = pickle.load(m_file)
+
+    lm_preds = lm.predict(X)
+    with open(outdir + '/' + model_name + '/preds_%s.txt' % partition_name, 'w') as p_file:
+        for i in range(len(lm_preds)):
+            p_file.write(str(lm_preds[i]) + '\n')
+    losses = np.array(y[dv] - lm_preds) ** 2
+    with open(outdir + '/' + model_name + '/%s_losses_mse.txt' % partition_name, 'w') as p_file:
+        for i in range(len(losses)):
+            p_file.write(str(losses[i]) + '\n')
+    lm_mse = mse(y[dv], lm_preds)
+    lm_mae = mae(y[dv], lm_preds)
+    summary = '=' * 50 + '\n'
+    summary += 'Linear regression\n\n'
+    summary += 'Model name: %s\n\n' % model_name
+    summary += 'Formula:\n'
+    summary += '  ' + formula + '\n'
+    summary += str(lm.summary()) + '\n'
+    summary += 'Loss (%s set):\n' % partition_name
+    summary += '  MSE: %.4f\n' % lm_mse
+    summary += '  MAE: %.4f\n' % lm_mae
+    summary += '=' * 50 + '\n'
+    with open(outdir + '/%seval_%s.txt' % ('' if model_name=='' else model_name + '_', partition_name), 'w') as f_out:
+        f_out.write(summary)
+    sys.stderr.write(summary)
+
 def predict_LME(model_path, outdir, X, y, dv, partition_name, model_name=''):
     sys.stderr.write('Retrieving saved model %s...\n' % m)
     with open(model_path, 'rb') as m_file:
@@ -46,15 +75,6 @@ def predict_LME(model_path, outdir, X, y, dv, partition_name, model_name=''):
         summary += 'Loss (%s set):\n' % partition_name
         summary += '  MSE: %.4f\n' % lme_mse
         summary += '  MAE: %.4f\n' % lme_mae
-
-    # if args.mode in [None, 'loglik']:
-    #     lme_loglik = lme.log_lik(newdata=X, summed=False)
-    #     with open(outdir + '/%sloglik_%s.txt' % ('' if model_name=='' else model_name + '_', partition_name), 'w') as p_file:
-    #         for i in range(len(lme_loglik)):
-    #             p_file.write(str(lme_loglik[i]) + '\n')
-    #     lme_loglik = np.sum(lme_loglik)
-    #
-    #     summary += '  Log Lik: %.4f\n' % lme_loglik
 
     summary += '=' * 50 + '\n'
     with open(outdir + '/%seval_%s.txt' % ('' if model_name=='' else model_name + '_', partition_name), 'w') as f_out:
@@ -210,33 +230,14 @@ if __name__ == '__main__':
             elif m.startswith('LM'):
                 dv = formula.strip().split('~')[0].strip()
 
-                sys.stderr.write('Retrieving saved model %s...\n' % m)
-                with open(p.outdir + '/' + m + '/m.obj', 'rb') as m_file:
-                    lm = pickle.load(m_file)
-
-                lm_preds = lm.predict(X_baseline)
-                with open(p.outdir + '/' + m + '/preds_%s.txt' % partition_str, 'w') as p_file:
-                    for i in range(len(lm_preds)):
-                        p_file.write(str(lm_preds[i]) + '\n')
-                losses = np.array(y[dv] - lm_preds) ** 2
-                with open(p.outdir + '/' + m + '/%s_losses_mse.txt' % partition_str, 'w') as p_file:
-                    for i in range(len(losses)):
-                        p_file.write(str(losses[i]) + '\n')
-                lm_mse = mse(y[dv], lm_preds)
-                lm_mae = mae(y[dv], lm_preds)
-                summary = '=' * 50 + '\n'
-                summary += 'Linear regression\n\n'
-                summary += 'Model name: %s\n\n' % m
-                summary += 'Formula:\n'
-                summary += '  ' + formula + '\n'
-                summary += str(lm.summary()) + '\n'
-                summary += 'Loss (%s set):\n' % partition_str
-                summary += '  MSE: %.4f\n' % lm_mse
-                summary += '  MAE: %.4f\n' % lm_mae
-                summary += '=' * 50 + '\n'
-                with open(p.outdir + '/' + m + '/eval_%s.txt' % partition_str, 'w') as f_out:
-                    f_out.write(summary)
-                sys.stderr.write(summary)
+                predict_LM(
+                    p.outdir + '/' + m + '/m.obj',
+                    p.outdir + '/' + m,
+                    X_baseline,
+                    y,
+                    dv,
+                    partition_str
+                )
 
             elif m.startswith('GAM'):
                 import re
@@ -308,15 +309,28 @@ if __name__ == '__main__':
 
                     df_r = py2ri(df)
 
-                    predict_LME(
-                        p.outdir + '/' + m + '/lmer_train.obj',
-                        p.outdir + '/' + m,
-                        df_r,
-                        df,
-                        dv,
-                        partition_str,
-                        model_name='LMER_2STEP'
-                    )
+                    is_lme = '|' in Formula(p['formula']).to_lmer_formula_string(z=args.zscore)
+
+                    if is_lme:
+                        predict_LME(
+                            p.outdir + '/' + m + '/lm_train.obj',
+                            p.outdir + '/' + m,
+                            df_r,
+                            df,
+                            dv,
+                            partition_str,
+                            model_name='LM_2STEP'
+                        )
+                    else:
+                        predict_LM(
+                            p.outdir + '/' + m + '/lm_train.obj',
+                            p.outdir + '/' + m,
+                            df_r,
+                            df,
+                            dv,
+                            partition_str,
+                            model_name='LM_2STEP'
+                        )
 
                 else:
                     sys.stderr.write('Retrieving saved model %s...\n' % m)

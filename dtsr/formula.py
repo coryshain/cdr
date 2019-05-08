@@ -1353,17 +1353,23 @@ class Formula(object):
 
         self.build(bform)
 
-    def to_lmer_formula_string(self, z=False):
+    def to_lmer_formula_string(self, z=False, correlated=True):
         """
         Generate an ``lme4``-style LMER model string representing the structure of the current DTSR model.
         Useful for 2-step analysis in which data are transformed using DTSR, then fitted using LME.
 
         :param z: ``bool``; z-transform convolved predictors.
+        :param correlated: ``bool``; whether to use correlated random intercepts and slopes.
         :return: ``str``; the LMER formula string.
         """
 
         fixed = []
         random = {}
+
+        if correlated:
+            ranef_op = ' | '
+        else:
+            ranef_op = ' || '
 
         for terminal in self.t.terminals():
             if terminal.p.irfID is None:
@@ -1405,11 +1411,11 @@ class Formula(object):
         out += ' + '.join([x for x in fixed])
 
         for gf in sorted(list(random.keys())):
-            out += ' + (' + ('1 + ' if self.has_intercept[gf] else '0 + ') + ' + '.join([x for x in random[gf]]) + ' | ' + gf + ')'
+            out += ' + (' + ('1 + ' if self.has_intercept[gf] else '0 + ') + ' + '.join([x for x in random[gf]]) + ranef_op + gf + ')'
 
         for gf in sorted(list(self.has_intercept.keys()), key=lambda x: (x is None, x)):
             if gf is not None and gf not in random and self.has_intercept[gf]:
-                out += ' + (1 | ' + gf + ')'
+                out += ' + (1' + ranef_op + gf + ')'
 
         return out
 
