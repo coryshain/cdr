@@ -72,7 +72,6 @@ if __name__ == '__main__':
                 if not args.force and os.path.exists(model_path):
                     sys.stderr.write('Retrieving saved L(ME) regression of DTSR model %s...\n' % m)
                     with open(model_path, 'rb') as m_file:
-                        print(m_file)
                         lm = pickle.load(m_file)
                 else:
                     sys.stderr.write('Fitting L(ME) regression of DTSR model %s...\n' % m)
