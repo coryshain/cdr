@@ -4186,7 +4186,7 @@ class DTSR(object):
                 out += ' ' * (indent+4) + "Check the Q-Q plot in the model's output directory.\n"
                 if not self.asymmetric_error:
                     out += ' ' * (indent+4) + 'Poor error fit can usually be improved without transforming\n'
-                    out += ' ' * (indent+4) + 'the response by optimizing using ``asymptotic_error=True``.\n'
+                    out += ' ' * (indent+4) + 'the response by optimizing using ``asymmetric_error=True``.\n'
                     out += ' ' * (indent+4) + 'Consult the documentation for details.\n'
 
         out += '\n'
@@ -5123,7 +5123,7 @@ class DTSR(object):
             impulse_names  = self.impulse_names
 
         if verbose:
-            sys.stderr.write('Computing likelihoods...\n')
+            sys.stderr.write('Computing loss using objective function...\n')
 
         y_rangf = y[self.rangf]
         for i in range(len(self.rangf)):
