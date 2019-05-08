@@ -108,8 +108,7 @@ def filter_invalid_responses(y, dv):
     first_obs, last_obs = get_first_last_obs_lists(y)
 
     select_y_valid = np.isfinite(y[dv])
-    for first_obs_cur, last_obs_cur in zip(first_obs, last_obs):
-        select_y_valid &= (last_obs_cur > first_obs_cur)
+    
     return y[select_y_valid], select_y_valid
 
 
@@ -444,11 +443,12 @@ def expand_history(X, X_time, first_obs, last_obs, history_length, int_type='int
     time_mask = np.zeros_like(X_2d)
 
     for i, first, last in zip(np.arange(first_obs.shape[0]), first_obs, last_obs):
-        sX = X[first:last]
-        sXt = X_time[first:last]
-        X_2d[i, -sX.shape[0]:] = sX
-        time_X_2d[i][-len(sXt):] = sXt[..., None]
-        time_mask[i][-len(sXt):] = 1
+        if first < last:
+            sX = X[first:last]
+            sXt = X_time[first:last]
+            X_2d[i, -sX.shape[0]:] = sX
+            time_X_2d[i][-len(sXt):] = sXt[..., None]
+            time_mask[i][-len(sXt):] = 1
 
     return X_2d, time_X_2d, time_mask
 
