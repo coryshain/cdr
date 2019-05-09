@@ -24,6 +24,7 @@ if __name__ == '__main__':
         Appropriate for in-sample and out-of-sample evaluation.
     ''')
     argparser.add_argument('model_error_paths', type=str, help='";"-delimited list of paths to files containing model error/likelihood vectors.')
+    argparser.add_argument('-n', '--name', type=str, default='bakeoff', help='Name for this set of bakeoff comparisons. Default: "bakeoff".')
     argparser.add_argument('-b', '--baseline_error_paths', nargs='*', default=[], help='List of ";"-delimited lists of paths to files containing baseline error/likelihood vectors.')
     argparser.add_argument('-M', '--metric', type=str, default='loss', help='Metric to use for comparison (either "loss" or "loglik")')
     argparser.add_argument('-t', '--tails', type=int, default=2, help='Number of tails (1 or 2)')
@@ -62,7 +63,7 @@ if __name__ == '__main__':
         diff = float(len(model_cur) - select.sum())
         p_value, base_diff, diffs = permutation_test(baseline_cur[select], model_cur[select], n_iter=10000, n_tails=args.tails, mode=args.metric, nested=True)
         sys.stderr.write('\n')
-        out_path = args.outdir + '/bakeoff_%d_PT.txt' % i
+        out_path = args.outdir + '/%s_%d_PT.txt' % (args.name, i)
         with open(out_path, 'w') as f:
             sys.stderr.write('Saving output to %s...\n' %out_path)
 
@@ -82,6 +83,6 @@ if __name__ == '__main__':
             sys.stdout.write(summary)
 
         plt.hist(diffs, bins=1000)
-        plt.savefig(args.outdir + '/bakeoff_%d_PT.png' % i)
+        plt.savefig(args.outdir + '/%s_%d_PT.png' % (args.name, i))
         plt.close('all')
 
