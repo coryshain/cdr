@@ -10,7 +10,9 @@ from matplotlib import pyplot as plt
 
 def scale(a, b):
     df = np.stack([np.array(a), np.array(b)], axis=1)
+    df = df[np.where(np.isfinite(df))] 
     scaling_factor = df.std()
+    print(scaling_factor)
     return a/scaling_factor, b/scaling_factor
 
 
@@ -70,7 +72,7 @@ if __name__ == '__main__':
             summary += '  vs\n'
             summary += '  %s\n' % args.model_error_paths
             if diff > 0:
-                summary += '%d NaN rows filtered out (out of %d)\n' % (diff, len(a))
+                summary += '%d NaN rows filtered out (out of %d)\n' % (diff, len(model_cur))
             summary += 'Metric: %s\n' % args.metric
             summary += 'Difference: %.4f\n' % base_diff
             summary += 'p: %.4e%s\n' % (p_value, '' if p_value > 0.05 else '*' if p_value > 0.01 else '**' if p_value > 0.001 else '***')

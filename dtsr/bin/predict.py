@@ -188,11 +188,6 @@ if __name__ == '__main__':
                     if not dv in X_baseline.columns:
                         X_baseline[dv] = y[dv]
 
-#            for i in range(len(dtsr_formula_list)):
-#                x = dtsr_formula_list[i]
-#                if x.dv not in X_baseline.columns and x.dv in y.columns:
-#                    X_baseline[x.dv] = y[x.dv]
-
             for c in X_baseline.columns:
                 if X_baseline[c].dtype.name == 'category':
                     X_baseline[c] = X_baseline[c].astype(str)
@@ -308,7 +303,7 @@ if __name__ == '__main__':
 
                     df_r = py2ri(df)
 
-                    is_lme = '|' in Formula(p['formula']).to_lmer_formula_string(z=args.zscore)
+                    is_lme = '|' in Formula(p['formula']).to_lmer_formula_string()
 
                     if is_lme:
                         predict_LME(
