@@ -1415,7 +1415,7 @@ class Formula(object):
 
         for gf in sorted(list(self.has_intercept.keys()), key=lambda x: (x is None, x)):
             if gf is not None and gf not in random and self.has_intercept[gf]:
-                out += ' + (1' + ranef_op + gf + ')'
+                out += ' + (1 | ' + gf + ')'
 
         return out
 
