@@ -14,7 +14,6 @@ from dtsr.data import add_dv, filter_invalid_responses, preprocess_data, compute
 from dtsr.util import mse, mae, percent_variance_explained
 from dtsr.util import load_dtsr, filter_models, get_partition_list, paths_from_partition_cliarg
 from dtsr.plot import plot_qq
-from scipy.stats import kstest
 
 
 # These code blocks are factored out because they are used by both LM/E objects and DTSR objects under 2-step analysis
@@ -24,11 +23,11 @@ def predict_LM(model_path, outdir, X, y, dv, partition_name, model_name=''):
         lm = pickle.load(m_file)
 
     lm_preds = lm.predict(X)
-    with open(outdir + '/' + model_name + '/preds_%s.txt' % partition_name, 'w') as p_file:
+    with open(outdir + '/' + model_name + '/%spreds_%s.txt' % ('' if model_name=='' else model_name + '_', partition_name), 'w') as p_file:
         for i in range(len(lm_preds)):
             p_file.write(str(lm_preds[i]) + '\n')
     losses = np.array(y[dv] - lm_preds) ** 2
-    with open(outdir + '/' + model_name + '/%s_losses_mse.txt' % partition_name, 'w') as p_file:
+    with open(outdir + '/' + model_name + '/%s_losses_mse_%s.txt' % ('' if model_name=='' else model_name + '_', partition_name), 'w') as p_file:
         for i in range(len(losses)):
             p_file.write(str(losses[i]) + '\n')
     lm_mse = mse(y[dv], lm_preds)
@@ -66,7 +65,7 @@ def predict_LME(model_path, outdir, X, y, dv, partition_name, model_name=''):
             for i in range(len(lme_preds)):
                 p_file.write(str(lme_preds[i]) + '\n')
         losses = np.array(y[dv] - lme_preds) ** 2
-        with open(outdir + '/%s%s_losses_mse.txt' % ('' if model_name=='' else model_name + '_', partition_name), 'w') as p_file:
+        with open(outdir + '/%slosses_mse_%s.txt' % ('' if model_name=='' else model_name + '_', partition_name), 'w') as p_file:
             for i in range(len(losses)):
                 p_file.write(str(losses[i]) + '\n')
         lme_mse = mse(y[dv], lme_preds)
@@ -90,7 +89,7 @@ if __name__ == '__main__':
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of model names from which to predict. Regex permitted. If unspecified, predicts from all models.')
     argparser.add_argument('-d', '--data', nargs='+', default=[], help='Pairs of paths or buffers <predictors, responses>, allowing prediction on arbitrary evaluation data. Predictors may consist of ``;``-delimited paths designating files containing predictors with different timestamps. Within each file, timestamps are treated as identical across predictors.')
     argparser.add_argument('-p', '--partition', nargs='+', default=['dev'], help='List of names of partitions to use ("train", "dev", "test", or hyphen-delimited subset of these).')
-    argparser.add_argument('-z', '--standardize_response', action='store_true', help='Standardize (Z-transform) response in plots. Ignored for non-DTSR models, and ignored for DTSR models unless fitting used setting ``standardize_respose=True``.')
+    argparser.add_argument('-z', '--standardize_response', action='store_true', help='Standardize (Z-transform) response. Ignored for non-DTSR models, and ignored for DTSR models unless fitting used setting ``standardize_respose=True``.')
     argparser.add_argument('-n', '--nsamples', type=int, default=1024, help='Number of posterior samples to average (only used for DTSRBayes)')
     argparser.add_argument('-M', '--mode', nargs='+', default=None, help='Predict mode(s) (set of "response", "loglik", and/or "loss") or default ``None``, which does both "response" and "loglik". Modes "loglik" and "loss" are only valid for DTSR.')
     argparser.add_argument('-a', '--algorithm', type=str, default='MAP', help='Algorithm ("sampling" or "MAP") to use for extracting predictions from DTSRBayes. Ignored for DTSRMLE.')
@@ -260,7 +259,7 @@ if __name__ == '__main__':
                     for i in range(len(gam_preds)):
                         p_file.write(str(gam_preds[i]) + '\n')
                 losses = np.array(y[dv] - gam_preds) ** 2
-                with open(p.outdir + '/' + m + '/%s_losses_mse.txt' % partition_str, 'w') as p_file:
+                with open(p.outdir + '/' + m + '/losses_mse_%s.txt' % partition_str, 'w') as p_file:
                     for i in range(len(losses)):
                         p_file.write(str(losses[i]) + '\n')
                 gam_mse = mse(y[dv], gam_preds)
@@ -381,7 +380,7 @@ if __name__ == '__main__':
                             df_out = pd.concat([y_valid.reset_index(drop=True), df_out], axis=1)
                         else:
                             preds_outfile = p.outdir + '/' + m + '/preds_%s.txt' % partition_str
-                            loss_outfile = p.outdir + '/' + m + '/%s_losses_mse.txt' % partition_str
+                            loss_outfile = p.outdir + '/' + m + '/losses_mse_%s.txt' % partition_str
                             obs_outfile = p.outdir + '/' + m + '/obs_%s.txt' % partition_str
 
                             with open(preds_outfile, 'w') as p_file:

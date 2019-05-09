@@ -17,7 +17,7 @@ if __name__ == '__main__':
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of model names for which to compute LRT tests. Regex permitted. If unspecified, uses all DTSR models.')
     argparser.add_argument('-z', '--zscore', action='store_true', help='Compare models fitted with Z-transformed predictors.')
     argparser.add_argument('-a', '--ablation', action='store_true', help='Only compare models within an ablation set (those defined using the "ablate" param in the config file)')
-    argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
+    argparser.add_argument('-p', '--partition', type=str, default='train', help='Name of partition to use (one of "train", "dev", "test")')
     args, unknown = argparser.parse_known_args()
 
     p = Config(args.config_path)
