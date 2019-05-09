@@ -4713,16 +4713,10 @@ class DTSR(object):
                     # Extract and save losses
                     training_se = np.array((y[self.dv] - preds) ** 2)
                     training_mse = training_se.mean()
-                    with open(self.outdir + '/mse_losses_train.txt','w') as l_file:
-                        for i in range(len(training_se)):
-                            l_file.write(str(training_se[i]) + '\n')
                     training_percent_variance_explained = percent_variance_explained(y[self.dv], preds)
 
                     training_ae = np.array(np.abs(y[self.dv] - preds))
                     training_mae = training_ae.mean()
-                    with open(self.outdir + '/mae_losses_train.txt','w') as l_file:
-                        for i in range(len(training_ae)):
-                            l_file.write(str(training_ae[i]) + '\n')
 
                     # Extract and save log likelihoods
                     training_logliks = self.log_lik(
