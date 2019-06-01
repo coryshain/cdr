@@ -56,6 +56,13 @@ if __name__ == '__main__':
                     outname = p.outdir + '/' + m + '/dtsr_parameters.csv'
 
                 dtsr_model.save_parameter_table(level=args.level, n_samples=args.nsamples, outfile=outname)
+                
+                if args.prefix:
+                    outname = p.outdir + '/' + m + '/' + args.prefix + '_dtsr_irf_integrals.csv'
+                else:
+                    outname = p.outdir + '/' + m + '/dtsr_irf_integrals.csv'
+
+                dtsr_model.save_irf_integral_table(level=args.level, n_samples=args.nsamples, outfile=outname)
 
             dtsr_model.finalize()
 

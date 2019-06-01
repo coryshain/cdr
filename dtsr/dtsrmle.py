@@ -391,7 +391,7 @@ class DTSRMLE(DTSR):
                     self.ll = y_dist.log_prob(self.y)
                     ll_objective = self.ll
 
-                self.err_dist_plot = tf.exp(self.err_dist.log_prob(self.support))
+                self.err_dist_plot = tf.exp(self.err_dist.log_prob(self.support[None,...]))
                 self.err_dist_plot_summary = self.err_dist_plot
                 self.err_dist_lb = self.err_dist.quantile(.025)
                 self.err_dist_ub = self.err_dist.quantile(.975)
@@ -494,3 +494,34 @@ class DTSRMLE(DTSR):
                 if scaled and self.standardize_response and not standardize_response:
                     X_conv = X_conv * self.y_train_sd
                 return X_conv
+
+    def extract_irf_integral(self, terminal_name, rangf=None, level=95, n_samples=None, n_time_units=None, n_time_points=1000):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if n_time_units is None:
+                    n_time_units = self.t_delta_limit
+
+                if self.pc:
+                    n_impulse = len(self.src_impulse_names)
+                else:
+                    n_impulse = len(self.impulse_names)
+
+                fd = {
+                    self.support_start: 0.,
+                    self.n_time_units: n_time_units,
+                    self.n_time_points: n_time_points,
+                    self.time_y: [n_time_units],
+                    self.time_X: np.zeros((1, self.history_length, n_impulse))
+                }
+
+                if rangf is not None:
+                    fd[self.gf_y] = rangf
+
+                if terminal_name in self.irf_integral_tensors:
+                    irf_integral = self.irf_integral_tensors[terminal_name]
+                else:
+                    irf_integral = self.src_irf_integral_tensors[terminal_name]
+
+                out = self.sess.run(irf_integral, feed_dict=fd)
+
+                return (out,)

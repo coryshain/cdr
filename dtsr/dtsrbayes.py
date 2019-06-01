@@ -1334,8 +1334,8 @@ class DTSRBayes(DTSR):
                         )
                         self.MAP_map[self.out] = self.out_mean
 
-                self.err_dist_plot = tf.exp(self.err_dist.log_prob(self.support))
-                self.err_dist_plot_summary = tf.exp(self.err_dist_summary.log_prob(self.support))
+                self.err_dist_plot = tf.exp(self.err_dist.log_prob(self.support[None,...]))
+                self.err_dist_plot_summary = tf.exp(self.err_dist_summary.log_prob(self.support[None,...]))
                 self.err_dist_lb = self.err_dist_summary.quantile(.025)
                 self.err_dist_ub = self.err_dist_summary.quantile(.975)
 
@@ -1465,8 +1465,7 @@ class DTSRBayes(DTSR):
 
             return out
 
-    # Overload this method to perform parameter sampling and compute credible intervals
-    def _extract_irf_integral(self, terminal_name, level=95, n_samples=None, n_time_units=None, n_time_points=1000):
+    def extract_irf_integral(self, terminal_name, rangf=None, level=95, n_samples=None, n_time_units=None, n_time_points=1000):
         if n_samples is None:
             n_samples = self.n_samples_eval
         if n_time_units is None:
@@ -1485,6 +1484,9 @@ class DTSRBayes(DTSR):
                     self.time_X: np.zeros((1, self.history_length, n_impulse))
                 }
 
+                if rangf is not None:
+                    fd[self.gf_y] = rangf
+
                 alpha = 100 - float(level)
 
                 if terminal_name in self.irf_integral_tensors:
@@ -1492,12 +1494,12 @@ class DTSRBayes(DTSR):
                 else:
                     posterior = self.src_irf_integral_tensors[terminal_name]
 
-                samples = [np.squeeze(self.sess.run(posterior, feed_dict=fd)[0]) for _ in range(n_samples)]
-                samples = np.stack(samples, axis=0)
+                samples = [self.sess.run(posterior, feed_dict=fd) for _ in range(n_samples)]
+                samples = np.stack(samples, axis=1)
 
-                mean = samples.mean(axis=0)
-                lower = np.percentile(samples, alpha / 2, axis=0)
-                upper = np.percentile(samples, 100 - (alpha / 2), axis=0)
+                mean = samples.mean(axis=1)
+                lower = np.percentile(samples, alpha / 2, axis=1)
+                upper = np.percentile(samples, 100 - (alpha / 2), axis=1)
 
                 return (mean, lower, upper)
 
@@ -1543,6 +1545,7 @@ class DTSRBayes(DTSR):
     def ci_curve(
             self,
             posterior,
+            rangf=None,
             level=95,
             n_samples=None,
             support_start=0.,
@@ -1553,6 +1556,7 @@ class DTSRBayes(DTSR):
         Extract an IRF with Monte Carlo credible intervals for plotting
 
         :param posterior: the IRF node in the model's graph
+        :param rangf: ``numpy`` array or ``None``; random grouping factor values for which to compute CI curves. If ``None``, only use fixed effects.
         :param level: ``float``; level of the credible interval.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw. If ``None``, use model defaults.
         :param support_start: ``float``; starting point for the support vector.
@@ -1579,15 +1583,27 @@ class DTSRBayes(DTSR):
                     self.time_y: np.ones((1,)) * n_time_units,
                     self.time_X: np.zeros((1, self.history_length, n_impulse))
                 }
+                
+                if rangf is not None:
+                    fd[self.gf_y] = rangf
 
                 alpha = 100-float(level)
 
                 samples = [self.sess.run(posterior, feed_dict=fd) for _ in range(n_samples)]
-                samples = np.concatenate(samples, axis=1)
+                samples = np.concatenate(samples, axis=2)
 
-                mean = samples.mean(axis=1)
-                lower = np.percentile(samples, alpha/2, axis=1)
-                upper = np.percentile(samples, 100-(alpha/2), axis=1)
+                mean = samples.mean(axis=2)
+                lower = np.percentile(samples, alpha/2, axis=2)
+                upper = np.percentile(samples, 100-(alpha/2), axis=2)
+
+                if rangf is not None:
+                    n = len(rangf)
+                    if len(mean) == 1 and n > 1:
+                        mean = np.repeat(mean, n, axis=0)
+                    if len(lower) == 1 and n > 1:
+                        lower = np.repeat(lower, n, axis=0)
+                    if len(upper) == 1 and n > 1:
+                        upper = np.repeat(upper, n, axis=0)
 
                 return (mean, lower, upper, samples)
 

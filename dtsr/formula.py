@@ -315,8 +315,7 @@ class Formula(object):
             impulses_by_name=None,
             interactions_by_name=None,
             under_irf=False,
-            under_interaction=False,
-            under_expansion=False,
+            under_interaction=False
     ):
         """
         Recursively process a node of the Python abstract syntax tree (AST) representation of the formula string and insert data into internal representation of model formula.
@@ -2487,6 +2486,38 @@ class IRFNode(object):
                         if irf not in out[f]:
                             out[f][irf] = c_id_by_family[f][irf]
         return out
+
+    def has_coefficient(self, rangf):
+        """
+        Report whether **rangf** has any coefficients in this subtree
+
+        :param rangf: Random grouping factor
+        :return: ``bool``: Whether **rangf** has any coefficients in this subtree
+        """
+
+        if self.terminal() and rangf in self.rangf:
+            return True
+        else:
+            for c in self.children:
+                if c.has_coefficient(rangf):
+                    return True
+        return False
+
+    def has_irf(self, rangf):
+        """
+        Report whether **rangf** has any IRFs in this subtree
+
+        :param rangf: Random grouping factor
+        :return: ``bool``: Whether **rangf** has any IRFs in this subtree
+        """
+
+        if not self.terminal() and not self.family == 'DiracDelta' and rangf in self.rangf:
+            return True
+        else:
+            for c in self.children:
+                if c.has_irf(rangf):
+                    return True
+        return False
 
     def coef2impulse(self):
         """

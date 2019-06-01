@@ -129,6 +129,8 @@ if __name__ == '__main__':
                 'dpi': p['dpi'] if args.dpi is None else args.dpi
             }
 
+            sys.stderr.write('Plotting...\n')
+
             if args.qq:
                 obs_path = p.outdir + '/%s/obs_%s.txt' % (m, args.qq)
                 preds_path = p.outdir + '/%s/preds_%s.txt' % (m, args.qq)

@@ -367,6 +367,8 @@ class DTSR(object):
         self.INT_TF = getattr(tf, self.int_type)
         self.INT_NP = getattr(np, self.int_type)
 
+        assert not self.pc, 'The use of ``pc=True`` is not currently supported.'
+
         f = self.form
         self.dv = f.dv
         self.has_intercept = f.has_intercept
@@ -713,9 +715,9 @@ class DTSR(object):
                     self.FLOAT_TF
                 )
                 # self.gf_y = tf.placeholder(shape=[None, len(self.rangf)], dtype=self.INT_TF)
-                gf_defaults = np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1
+                self.gf_defaults = np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1
                 self.gf_y = tf.placeholder_with_default(
-                    tf.cast(gf_defaults, dtype=self.INT_TF),
+                    tf.cast(self.gf_defaults, dtype=self.INT_TF),
                     shape=[None, len(self.rangf)],
                     name='gf_y'
                 )
@@ -1040,7 +1042,7 @@ class DTSR(object):
                 self.intercept_random_means = {}
 
 
-                # Coefficients
+                # COEFFICIENTS
                 fixef_ix = names2ix(self.fixed_coef_names, self.coef_names)
                 coef_ids = self.coef_names
                 if len(self.unary_spline_coef_names) > 0:
@@ -1085,12 +1087,14 @@ class DTSR(object):
                     )
 
                 self.coefficient = self.coefficient_fixed
+                self.coefficient_summary = self.coefficient_fixed_summary
                 self.coefficient_random = {}
                 self.coefficient_random_summary = {}
                 self.coefficient_random_means = {}
                 self.coefficient = tf.expand_dims(self.coefficient, 0)
+                self.coefficient_summary = tf.expand_dims(self.coefficient_summary, 0)
 
-                # Interactions
+                # INTERACTIONS
                 fixef_ix = names2ix(self.fixed_interaction_names, self.interaction_names)
                 if len(self.interaction_names) > 0:
                     interaction_ids = self.interaction_names
@@ -1115,14 +1119,13 @@ class DTSR(object):
                             collections=['params']
                         )
                     self.interaction = self.interaction_fixed
+                    self.interaction_summary = self.interaction_fixed_summary
                     self.interaction_random = {}
                     self.interaction_random_summary = {}
                     self.interaction_random_means = {}
                     self.interaction = tf.expand_dims(self.interaction, 0)
-                    interaction_fixed = self.interaction
 
                 # RANDOM EFFECTS
-
                 for i in range(len(self.rangf)):
                     gf = self.rangf[i]
                     levels_ix = np.arange(self.rangf_n_levels[i] - 1)
@@ -1160,6 +1163,7 @@ class DTSR(object):
                             self._add_convergence_tracker(self.intercept_random_summary[gf], 'intercept_by_%s' %gf)
 
                         self.intercept += tf.gather(intercept_random, self.gf_y[:, i])
+                        self.intercept_summary += tf.gather(intercept_random_summary, self.gf_y[:, i])
 
                         if self.log_random:
                             tf.summary.histogram(
@@ -1212,6 +1216,7 @@ class DTSR(object):
                             self._add_convergence_tracker(self.coefficient_random_summary[gf], 'coefficient_by_%s' %gf)
 
                         self.coefficient += tf.gather(coefficient_random, self.gf_y[:, i], axis=0)
+                        self.coefficient_summary += tf.gather(coefficient_random_summary, self.gf_y[:, i], axis=0)
 
                         if self.log_random:
                             for j in range(len(coefs)):
@@ -1268,6 +1273,7 @@ class DTSR(object):
                                 self._add_convergence_tracker(self.interaction_random_summary[gf], 'interaction_by_%s' % gf)
 
                             self.interaction += tf.gather(interaction_random, self.gf_y[:, i], axis=0)
+                            self.interaction_summary += tf.gather(interaction_random_summary, self.gf_y[:, i], axis=0)
 
                             if self.log_random:
                                 for j in range(len(interactions)):
@@ -1756,6 +1762,7 @@ class DTSR(object):
                                 self.irf_params_random_means[gf][family][param_name] = tf.reduce_mean(param_random_summary, axis=0)
 
                                 param += tf.gather(param_random, self.gf_y[:, i], axis=0)
+                                param_summary += tf.gather(param_random_summary, self.gf_y[:, i], axis=0)
 
                                 if self.log_random:
                                     for j in range(len(irf_by_rangf[gf])):
@@ -2292,11 +2299,11 @@ class DTSR(object):
                     assert not t.name() in self.irf_mc, 'Duplicate IRF node name already in self.irf_mc'
                     self.irf_mc[t.name()] = {
                         'atomic': {
-                            'scaled': self.irf_mc[t.p.name()]['atomic']['unscaled'] * tf.gather(self.coefficient_fixed, coef_ix),
+                            'scaled': self.irf_mc[t.p.name()]['atomic']['unscaled'] * tf.expand_dims(tf.gather(self.coefficient, coef_ix, axis=1), axis=-1),
                             'unscaled': self.irf_mc[t.p.name()]['atomic']['unscaled']
                         },
                         'composite': {
-                            'scaled': self.irf_mc[t.p.name()]['composite']['unscaled'] * tf.gather(self.coefficient_fixed, coef_ix),
+                            'scaled': self.irf_mc[t.p.name()]['composite']['unscaled'] * tf.expand_dims(tf.gather(self.coefficient, coef_ix, axis=1), axis=-1),
                             'unscaled': self.irf_mc[t.p.name()]['composite']['unscaled']
                         }
                     }
@@ -2304,24 +2311,21 @@ class DTSR(object):
                     assert not t.name() in self.irf_plot, 'Duplicate IRF node name already in self.irf_plot'
                     self.irf_plot[t.name()] = {
                         'atomic': {
-                            'scaled': self.irf_plot[t.p.name()]['atomic']['unscaled'] * tf.gather(self.coefficient_fixed_summary, coef_ix),
+                            'scaled': self.irf_plot[t.p.name()]['atomic']['unscaled'] * tf.expand_dims(tf.gather(self.coefficient_summary, coef_ix, axis=1), axis=-1),
                             'unscaled': self.irf_plot[t.p.name()]['atomic']['unscaled']
                         },
                         'composite': {
-                            'scaled': self.irf_plot[t.p.name()]['composite']['unscaled'] * tf.gather(self.coefficient_fixed_summary, coef_ix),
+                            'scaled': self.irf_plot[t.p.name()]['composite']['unscaled'] * tf.expand_dims(tf.gather(self.coefficient_summary, coef_ix, axis=1), axis=-1),
                             'unscaled': self.irf_plot[t.p.name()]['composite']['unscaled']
                         }
                     }
 
                     assert not t.name() in self.irf_integral_tensors, 'Duplicate IRF node name already in self.mc_integrals'
                     if t.p.family == 'DiracDelta':
-                        self.irf_integral_tensors[t.name()] = tf.gather(self.coefficient_fixed, coef_ix)
+                        integral_tensor = tf.gather(self.coefficient_summary, coef_ix, axis=1)[:,0]
                     else:
-                        self.irf_integral_tensors[t.name()] = self._reduce_interpolated_sum(
-                            self.irf_mc[t.name()]['composite']['scaled'],
-                            self.support[:,0],
-                            axis=0
-                        )
+                        integral_tensor = tf.reduce_sum(self.irf_mc[t.name()]['composite']['scaled'], axis=(1,2)) * self.n_time_units / tf.cast(self.n_time_points, dtype=self.FLOAT_TF)
+                    self.irf_integral_tensors[t.name()] = integral_tensor
 
                 elif t.family == 'DiracDelta':
                     assert t.p.name() == 'ROOT', 'DiracDelta may not be embedded under other IRF in DTSR formula strings'
@@ -2334,24 +2338,24 @@ class DTSR(object):
                     assert not t.name() in self.irf_mc, 'Duplicate IRF node name already in self.irf_mc'
                     self.irf_mc[t.name()] = {
                         'atomic': {
-                            'scaled': self.dd_support,
-                            'unscaled': self.dd_support
+                            'scaled': self.dd_support[None, ...],
+                            'unscaled': self.dd_support[None, ...]
                         },
                         'composite' : {
-                            'scaled': self.dd_support,
-                            'unscaled': self.dd_support
+                            'scaled': self.dd_support[None, ...],
+                            'unscaled': self.dd_support[None, ...]
                         }
                     }
 
                     assert not t.name() in self.irf_plot, 'Duplicate IRF node name already in self.irf_plot'
                     self.irf_plot[t.name()] = {
                         'atomic': {
-                            'scaled': self.dd_support,
-                            'unscaled': self.dd_support
+                            'scaled': self.dd_support[None, ...],
+                            'unscaled': self.dd_support[None, ...]
                         },
                         'composite' : {
-                            'scaled': self.dd_support,
-                            'unscaled': self.dd_support
+                            'scaled': self.dd_support[None, ...],
+                            'unscaled': self.dd_support[None, ...]
                         }
                     }
                 else:
@@ -2371,15 +2375,15 @@ class DTSR(object):
                     assert t.name() not in self.irf, 'Duplicate IRF node name already in self.irf'
                     self.irf[t.name()] = irf
 
-                    atomic_irf_mc = atomic_irf(self.support)[0]
-                    atomic_irf_plot = atomic_irf_plot(self.support)[0]
+                    atomic_irf_mc = atomic_irf(self.support)
+                    atomic_irf_plot = atomic_irf_plot(self.support)
 
                     if len(irf) > 1:
-                        composite_irf_mc = self._compose_irf(irf)(self.support[None, ...])[0]
+                        composite_irf_mc = self._compose_irf(irf)(self.support[None, ...])
                     else:
                         composite_irf_mc = atomic_irf_mc
                     if len(irf_plot) > 1:
-                        composite_irf_plot = self._compose_irf(irf_plot)(self.support[None, ...])[0]
+                        composite_irf_plot = self._compose_irf(irf_plot)(self.support[None, ...])
                     else:
                         composite_irf_plot = atomic_irf_plot
 
@@ -3240,34 +3244,6 @@ class DTSR(object):
 
             return out
 
-    def _extract_irf_integral(self, terminal_name, level=95, n_samples=None, n_time_units=None, n_time_points=1000):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                if n_time_units is None:
-                    n_time_units = self.t_delta_limit
-
-                if self.pc:
-                    n_impulse = len(self.src_impulse_names)
-                else:
-                    n_impulse = len(self.impulse_names)
-
-                fd = {
-                    self.support_start: 0.,
-                    self.n_time_units: n_time_units,
-                    self.n_time_points: n_time_points,
-                    self.time_y: [n_time_units],
-                    self.time_X: np.zeros((1, self.history_length, n_impulse))
-                }
-
-                if terminal_name in self.irf_integral_tensors:
-                    irf_integral = self.irf_integral_tensors[terminal_name]
-                else:
-                    irf_integral = self.src_irf_integral_tensors[terminal_name]
-
-                out = self.sess.run(irf_integral, feed_dict=fd)[0]
-
-                return out
-
     # Thanks to Ralph Mao (https://github.com/RalphMao) for this workaround
     def _restore_inner(self, path, predict=False, allow_missing=False):
         with self.sess.as_default():
@@ -3705,6 +3681,20 @@ class DTSR(object):
 
         raise NotImplementedError
 
+    def extract_irf_integral(self, terminal_name, rangf=None, level=95, n_samples=None, n_time_units=None, n_time_points=1000):
+        """
+        Extract integrals of IRF defined at **terminal_name**.
+
+        :param terminal_name: ``str``; ID of terminal IRF to extract
+        :param rangf: ``numpy`` array or ``None``; random grouping factor values for which to compute IRF integral. If ``None``, only use fixed effects.
+        :param level: ``float``; level of credible interval (used for ``DTSRBayes`` only)
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw (used for ``DTSRBayes`` only). If ``None``, use model defaults.
+        :param n_time_units: ``float``; number of time units over which to take the integral.
+        :param n_time_points: ``float``; number of points to use in the discrete approximation of the integral.
+        :return: ``float`` or 3-element ``numpy`` vector; either integral or mean, upper quantile, and lower quantile of integral (depending on whether model is instance of ``DTSRBayes``).
+        """
+        raise NotImplementedError
+
 
 
 
@@ -3848,42 +3838,83 @@ class DTSR(object):
         """
         self.sess.close()
 
-    def irf_integrals(self, level=95, n_samples=None, n_time_units=None, n_time_points=1000):
+    def irf_integrals(self, level=95, random=False, n_samples=None, n_time_units=None, n_time_points=1000):
         """
         Generate effect size estimates by computing the area under each IRF curve in the model via discrete approximation.
 
+        :param random: ``bool``; whether to compute IRF integrals for random effects estimates
         :param level: ``float``; level of the credible interval if Bayesian, ignored otherwise.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param n_time_units: ``float``; number of time units over which to take the integral.
         :param n_time_points: ``float``; number of points to use in the discrete approximation of the integral.
-        :return: ``numpy`` array; IRF integrals, one IRF per row. If Bayesian, array also contains credible interval bounds.
+        :return: ``pandas`` DataFrame; IRF integrals, one IRF per row. If Bayesian, array also contains credible interval bounds.
         """
         if self.pc:
             terminal_names = self.src_terminal_names
         else:
             terminal_names = self.terminal_names
         irf_integrals = []
+        
+        rangf_keys = ['']
+        rangf_groups = ['']
+        rangf_vals = [self.gf_defaults[0]]
+        if random:
+            for i in range(len(self.rangf)):
+                if self.t.has_coefficient(self.rangf[i]) or self.t.has_irf(self.rangf[i]):
+                    for k in self.rangf_map[i].keys():
+                        rangf_keys.append(str(k))
+                        rangf_groups.append(self.rangf[i])
+                        rangf_vals.append(np.concatenate([self.gf_defaults[0, :i], [self.rangf_map[i][k]], self.gf_defaults[0, i + 1:]], axis=0))
+        rangf_vals = np.stack(rangf_vals, axis=0)
+        
         for i in range(len(terminal_names)):
             terminal = terminal_names[i]
-            integral = np.array(
+            integral = np.stack(
                 self.irf_integral(
                     terminal,
+                    rangf=rangf_vals,
                     level=level,
                     n_samples=n_samples,
                     n_time_units=n_time_units,
                     n_time_points=n_time_points
-                )
+                ),
+                axis=0
             )
             irf_integrals.append(integral)
         irf_integrals = np.stack(irf_integrals, axis=0)
+        if self.standardize_response:
+            irf_integrals *= self.y_train_sd
+        irf_integrals = np.split(irf_integrals, irf_integrals.shape[2], axis=2)
+        
+        if self.pc:
+            terminal_names = self.src_terminal_names
+        else:
+            terminal_names = self.terminal_names
+        for i, x in enumerate(irf_integrals):
+            if rangf_keys[i]:
+                terminal_names_cur = [y + '_' + rangf_keys[i] for y in terminal_names]
+            else:
+                terminal_names_cur = terminal_names
+            x = pd.DataFrame(x[..., 0], columns=self.parameter_table_columns)
+            x['IRF'] = terminal_names
+            cols = ['IRF']
+            if random:
+                x['Group'] = rangf_groups[i]
+                x['Level'] = rangf_keys[i]
+                cols += ['Group', 'Level']
+            cols += self.parameter_table_columns
+            x = x[cols]
+            irf_integrals[i] = x
+        irf_integrals = pd.concat(irf_integrals, axis=0)
 
         return irf_integrals
 
-    def irf_integral(self, terminal_name, level=95, n_samples=None, n_time_units=None, n_time_points=1000):
+    def irf_integral(self, terminal_name, rangf=None, level=95, n_samples=None, n_time_units=None, n_time_points=1000):
         """
         Generate effect size estimates by computing the area under a specific IRF curve via discrete approximation.
 
         :param terminal_name: ``str``; string ID of IRF to extract.
+        :param rangf: ``numpy`` array or ``None``; random grouping factor values for which to compute IRF integral. If ``None``, only use fixed effects.
         :param level: ``float``; level of the credible interval if Bayesian, ignored otherwise.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param n_time_units: ``float``; number of time units over which to take the integral.
@@ -3892,8 +3923,9 @@ class DTSR(object):
         """
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                return self._extract_irf_integral(
+                return self.extract_irf_integral(
                     terminal_name,
+                    rangf=rangf,
                     level=level,
                     n_samples=n_samples,
                     n_time_units=n_time_units,
@@ -4257,40 +4289,44 @@ class DTSR(object):
 
         return out
 
-    def report_irf_integrals(self, level=95, n_samples=None, integral_n_time_units=None, indent=0):
+    def report_irf_integrals(self, random=False, level=95, n_samples=None, integral_n_time_units=None, indent=0):
         """
         Generate a string representation of the model's IRF integrals (effect sizes)
 
+        :param random: ``bool``; whether to compute IRF integrals for random effects estimates
         :param level: ``float``; significance level for credible intervals if Bayesian, otherwise ignored.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param integral_n_time_units: ``float``; number if time units over which to take the integral.
         :param indent: ``int``; indentation level.
         :return: ``str``; the IRF integrals report
         """
+        
+        pd.set_option("display.max_colwidth", 10000)
+        left_justified_formatter = lambda df, col: '{{:<{}s}}'.format(df[col].str.len().max()).format
 
         if integral_n_time_units is None:
             integral_n_time_units = self.t_delta_limit
 
         irf_integrals = self.irf_integrals(
+            random=random,
             level=level,
             n_samples=n_samples,
             n_time_units=integral_n_time_units,
             n_time_points=1000
         )
-        if self.pc:
-            terminal_names = self.src_terminal_names
-        else:
-            terminal_names = self.terminal_names
-        irf_integrals = pd.DataFrame(
-            irf_integrals,
-            index=terminal_names,
-            columns=self.parameter_table_columns
-        )
+
+        formatters = {
+            'IRF': left_justified_formatter(irf_integrals, 'IRF')
+        }
 
         out = ' ' * indent + 'IRF INTEGRALS (EFFECT SIZES):\n'
         out += ' ' * (indent + 2) + 'Integral upper bound (time): %s\n\n' % integral_n_time_units
 
-        ci_str = irf_integrals.to_string()
+        ci_str = irf_integrals.to_string(
+            index=False,
+            justify='left',
+            formatters=formatters
+        )
 
         for line in ci_str.splitlines():
             out += ' ' * (indent + 2) + line + '\n'
@@ -4409,6 +4445,7 @@ class DTSR(object):
         out += ' ' * indent + '-----------------\n\n'
 
         out += self.report_irf_integrals(
+            random=random,
             level=level,
             n_samples=n_samples,
             integral_n_time_units=integral_n_time_units,
@@ -4766,6 +4803,7 @@ class DTSR(object):
                         e_file.write(eval_train)
 
                     self.save_parameter_table()
+                    self.save_integral_table()
 
                     self.set_training_complete(True)
 
@@ -5355,11 +5393,12 @@ class DTSR(object):
             irf_name_map=None,
             irf_ids=None,
             sort_names=True,
-            plot_unscaled=False,
+            plot_unscaled=True,
             plot_composite=False,
             prop_cycle_length=None,
             prop_cycle_ix=None,
             plot_dirac=False,
+            plot_rangf=True,
             plot_n_time_units=2.5,
             plot_n_time_points=1000,
             plot_x_inches=6.,
@@ -5400,6 +5439,7 @@ class DTSR(object):
         :param prop_cycle_length: ``int`` or ``None``; Length of plotting properties cycle (defines step size in the color map). If ``None``, inferred from **irf_names**.
         :param prop_cycle_ix: ``list`` of ``int``, or ``None``; Integer indices to use in the properties cycle for each entry in **irf_names**. If ``None``, indices are automatically assigned.
         :param plot_dirac: ``bool``; include any linear Dirac delta IRF's (stick functions at t=0) in plot.
+        :param plot_rangf: ``bool``; plot all (marginal) random effects.
         :param plot_n_time_units: ``float``; number if time units to use for plotting.
         :param plot_n_time_points: ``int``; number of points to use for plotting.
         :param plot_x_inches: ``int``; width of plot in inches.
@@ -5420,6 +5460,10 @@ class DTSR(object):
 
         assert not mc or type(self).__name__ == 'DTSRBayes', 'Monte Carlo estimation of credible intervals (mc=True) is only supported for DTSRBayes models.'
 
+        if mc and not hasattr(self, 'ci_curve'):
+            sys.stderr.write('Credible intervals are not supported for instances of %s. Re-run ``make_plots`` with ``mc=False``.\n' % type(self))
+            mc = False
+
         if len(self.terminal_names) == 0:
             return
 
@@ -5435,6 +5479,16 @@ class DTSR(object):
 
         if summed:
             alpha = 100 - float(level)
+
+        rangf_keys = [None]
+        rangf_vals = [self.gf_defaults[0]]
+        if plot_rangf:
+            for i in range(len(self.rangf)):
+                if self.t.has_coefficient(self.rangf[i]) or self.t.has_irf(self.rangf[i]):
+                    for k in self.rangf_map[i].keys():
+                        rangf_keys.append(str(k))
+                        rangf_vals.append(np.concatenate([self.gf_defaults[0, :i], [self.rangf_map[i][k]], self.gf_defaults[0, i+1:]], axis=0))
+        rangf_vals = np.stack(rangf_vals, axis=0)
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -5459,17 +5513,18 @@ class DTSR(object):
                             n_time_units=n_time_units,
                             n_time_points=plot_n_time_points,
                         )
-                        plot_y = plot_y[..., None]
-                        lq = lq[..., None]
-                        uq = uq[..., None]
+                        plot_y = plot_y[0, ..., None]
+                        lq = lq[0, ..., None]
+                        uq = uq[0, ..., None]
                         plot_name = 'mc_error_distribution_%s.png' % self.global_step.eval(sess=self.sess) \
                             if self.keep_plot_history else 'mc_error_distribution.png'
                     else:
-                        plot_y = self.sess.run(self.err_dist_plot_summary, feed_dict=fd)
+                        plot_y = self.sess.run(self.err_dist_plot_summary, feed_dict=fd)[0]
                         lq = None
                         uq = None
                         plot_name = 'error_distribution_%s.png' % self.global_step.eval(sess=self.sess) \
                             if self.keep_plot_history else 'error_distribution.png'
+                        
                     plot_irf(
                         plot_x,
                         plot_y,
@@ -5485,7 +5540,8 @@ class DTSR(object):
                     self.support_start: 0.,
                     self.n_time_units: plot_n_time_units,
                     self.n_time_points: plot_n_time_points,
-                    self.max_tdelta_batch: plot_n_time_units
+                    self.max_tdelta_batch: plot_n_time_units,
+                    self.gf_y: rangf_vals
                 }
 
                 plot_x = self.sess.run(self.support, fd)
@@ -5522,6 +5578,7 @@ class DTSR(object):
                                     for name in names:
                                         mean_cur, lq_cur, uq_cur, samples_cur = self.ci_curve(
                                             self.irf_mc[name][a][b],
+                                            rangf=rangf_vals,
                                             level=level,
                                             n_samples=n_samples,
                                             n_time_units=plot_n_time_units,
@@ -5536,15 +5593,15 @@ class DTSR(object):
                                             uq.append(uq_cur)
 
                                     if summed:
-                                        samples = np.stack(samples, axis=2)
-                                        samples = samples.sum(axis=2, keepdims=True)
-                                        lq = np.percentile(samples, alpha / 2, axis=1)
-                                        uq = np.percentile(samples, 100 - (alpha / 2), axis=1)
-                                        plot_y = samples.mean(axis=1)
+                                        samples = np.stack(samples, axis=3)
+                                        samples = samples.sum(axis=3, keepdims=True)
+                                        lq = np.percentile(samples, alpha / 2, axis=2)
+                                        uq = np.percentile(samples, 100 - (alpha / 2), axis=2)
+                                        plot_y = samples.mean(axis=2)
                                     else:
-                                        lq = np.stack(lq, axis=1)
-                                        uq = np.stack(uq, axis=1)
-                                        plot_y = np.stack(plot_y, axis=1)
+                                        lq = np.stack(lq, axis=2)
+                                        uq = np.stack(uq, axis=2)
+                                        plot_y = np.stack(plot_y, axis=2)
 
                                     if self.standardize_response and not standardize_response:
                                         plot_y = plot_y * self.y_train_sd
@@ -5554,12 +5611,18 @@ class DTSR(object):
                                     plot_name = 'mc_' + plot_name
 
                                 else:
-                                    plot_y = [self.sess.run(self.plots[a][b][dirac]['plot'][i], feed_dict=fd) for i in range(len(self.plots[a][b][dirac]['plot'])) if self.plots[a][b][dirac]['names'][i] in names]
+                                    plot_y = []
+                                    for i in range(len(self.plots[a][b][dirac]['plot'])):
+                                        if self.plots[a][b][dirac]['names'][i] in names:
+                                            plot_y_cur = self.sess.run(self.plots[a][b][dirac]['plot'][i], feed_dict=fd)
+                                            if len(plot_y_cur) == 1 and len(rangf_vals) > 1:
+                                                plot_y_cur = np.repeat(plot_y_cur, len(rangf_vals), axis=0)
+                                            plot_y.append(plot_y_cur)
                                     lq = None
                                     uq = None
-                                    plot_y = np.concatenate(plot_y, axis=1)
+                                    plot_y = np.concatenate(plot_y, axis=2)
                                     if summed:
-                                        plot_y = plot_y.sum(axis=1, keepdims=True)
+                                        plot_y = plot_y.sum(axis=2, keepdims=True)
                                     if self.standardize_response and not standardize_response:
                                         plot_y = plot_y * self.y_train_sd
 
@@ -5568,28 +5631,33 @@ class DTSR(object):
                                 else:
                                     names_cur = names
 
-                                plot_irf(
-                                    plot_x,
-                                    plot_y,
-                                    names_cur,
-                                    lq=lq,
-                                    uq=uq,
-                                    sort_names=sort_names,
-                                    prop_cycle_length=prop_cycle_length,
-                                    prop_cycle_ix=prop_cycle_ix,
-                                    dir=self.outdir,
-                                    filename=prefix + plot_name,
-                                    irf_name_map=irf_name_map,
-                                    plot_x_inches=plot_x_inches,
-                                    plot_y_inches=plot_y_inches,
-                                    cmap=cmap,
-                                    dpi=dpi,
-                                    legend=legend,
-                                    xlab=xlab,
-                                    ylab=ylab,
-                                    use_line_markers=use_line_markers,
-                                    transparent_background=transparent_background
-                                )
+                                for g in range(len(rangf_keys)):
+                                    if rangf_keys[g]:
+                                        filename = prefix + rangf_keys[g] + '_' + plot_name
+                                    else:
+                                        filename = prefix + plot_name
+                                    plot_irf(
+                                        plot_x,
+                                        plot_y[g],
+                                        names_cur,
+                                        lq=None if lq is None else lq[g],
+                                        uq=None if uq is None else uq[g],
+                                        sort_names=sort_names,
+                                        prop_cycle_length=prop_cycle_length,
+                                        prop_cycle_ix=prop_cycle_ix,
+                                        dir=self.outdir,
+                                        filename=filename,
+                                        irf_name_map=irf_name_map,
+                                        plot_x_inches=plot_x_inches,
+                                        plot_y_inches=plot_y_inches,
+                                        cmap=cmap,
+                                        dpi=dpi,
+                                        legend=legend,
+                                        xlab=xlab,
+                                        ylab=ylab,
+                                        use_line_markers=use_line_markers,
+                                        transparent_background=transparent_background
+                                    )
 
                 if self.pc:
                     for a in switches[0]:
@@ -5863,4 +5931,34 @@ class DTSR(object):
             outname = outfile
 
         parameter_table.to_csv(outname, index=False)
+
+    def save_integral_table(self, random=True, level=95, n_samples=None, integral_n_time_units=None, outfile=None):
+        """
+        Save space-delimited table of IRF integrals (effect sizes) to the model's output directory
+
+        :param random: ``bool``; whether to compute IRF integrals for random effects estimates
+        :param level: ``float``; significance level for credible intervals if Bayesian, otherwise ignored.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param integral_n_time_units: ``float``; number if time units over which to take the integral.
+        :param outfile: ``str``; Path to output file. If ``None``, use model defaults.
+        :return: ``str``; the IRF integrals report
+        """
+
+        if integral_n_time_units is None:
+            integral_n_time_units = self.t_delta_limit
+
+        irf_integrals = self.irf_integrals(
+            random=random,
+            level=level,
+            n_samples=n_samples,
+            n_time_units=integral_n_time_units,
+            n_time_points=1000
+        )
+
+        if outfile:
+            outname = self.outdir + '/dtsr_irf_integrals.csv'
+        else:
+            outname = outfile
+
+        irf_integrals.to_csv(outname, index=False)
 
