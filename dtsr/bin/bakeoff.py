@@ -61,7 +61,7 @@ if __name__ == '__main__':
 
         select = np.logical_and(np.isfinite(np.array(model_cur)), np.isfinite(np.array(baseline_cur)))
         diff = float(len(model_cur) - select.sum())
-        p_value, base_diff, diffs = permutation_test(baseline_cur[select], model_cur[select], n_iter=10000, n_tails=args.tails, mode=args.metric)
+        p_value, base_diff, diffs = permutation_test(baseline_cur[select], model_cur[select], n_iter=10000, n_tails=args.tails, mode=args.metric, nested=True)
         sys.stderr.write('\n')
         out_path = args.outdir + '/%s_%d_PT.txt' % (args.name, i)
         with open(out_path, 'w') as f:
