@@ -5183,7 +5183,7 @@ class DTSR(object):
             legend=True,
             xlab=None,
             ylab=None,
-            use_line_markers=False,
+            line_markers=None,
             transparent_background=False,
             keep_plot_history=False
     ):
@@ -5220,6 +5220,7 @@ class DTSR(object):
         :param legend: ``bool``; generate a plot legend.
         :param xlab: ``str`` or ``None``; x-axis label. If ``None``, no label.
         :param ylab: ``str`` or ``None``; y-axis label. If ``None``, no label.
+        :param line_markers: ``float`` or ``None``; size of line markers in pt. If ``0`` or ``None`` no line markers.
         :param transparent_background: ``bool``; use a transparent background. If ``False``, uses a white background.
         :param keep_plot_history: ``bool``; keep the history of all plots by adding a suffix with the iteration number. Can help visualize learning but can also consume a lot of disk space. If ``False``, always overwrite with most recent plot.
         :return: ``None``
@@ -5349,7 +5350,7 @@ class DTSR(object):
                                     legend=legend,
                                     xlab=xlab,
                                     ylab=ylab,
-                                    use_line_markers=use_line_markers,
+                                    line_markers=line_markers,
                                     transparent_background=transparent_background
                                 )
 
@@ -5446,7 +5447,7 @@ class DTSR(object):
                                             legend=legend,
                                             xlab=xlab,
                                             ylab=ylab,
-                                            use_line_markers=use_line_markers,
+                                            line_markers=line_markers,
                                             transparent_background=transparent_background
                                         )
 

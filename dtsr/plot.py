@@ -24,7 +24,7 @@ def plot_irf(
         legend=True,
         xlab=None,
         ylab=None,
-        use_line_markers=False,
+        line_markers=None,
         transparent_background=False
 ):
     """
@@ -47,7 +47,7 @@ def plot_irf(
     :param legend: ``bool``; include a legend.
     :param xlab: ``str`` or ``None``; x-axis label. If ``None``, no label.
     :param ylab: ``str`` or ``None``; y-axis label. If ``None``, no label.
-    :param use_line_markers: ``bool``; add markers to IRF lines.
+    :param line_markers: ``float`` or ``None``; size of line markers in pt. If ``0`` or ``None`` no line markers.
     :param transparent_background: ``bool``; use a transparent background. If ``False``, uses a white background.
     :return: ``None``
     """
@@ -61,7 +61,7 @@ def plot_irf(
     if not prop_cycle_ix:
         prop_cycle_ix = list(range(n_colors))
     prop_cycle_kwargs = {'color': [cm(1. * prop_cycle_ix[i] / n_colors) for i in range(len(irf_names))]}
-    if use_line_markers:
+    if line_markers:
         markers_keys = sorted([x for x in markers.MarkerStyle.markers.keys() if x and isinstance(x, str) and x.strip()])
         prop_cycle_kwargs['marker'] = [markers_keys[prop_cycle_ix[i]] for i in range(len(irf_names))]
     plt.gca().set_prop_cycle(**prop_cycle_kwargs)
@@ -82,12 +82,16 @@ def plot_irf(
         sort_ix = [i[0] for i in sorted(enumerate(irf_names_processed), key=lambda x:x[1])]
     else:
         sort_ix = range(len(irf_names_processed))
+    if line_markers:
+        markersize = line_markers
+    else:
+        markersize = 0.
     for i in range(len(sort_ix)):
         if plot_y[1:,sort_ix[i]].sum() == 0:
-            plt.plot(plot_x[:2], plot_y[:2,sort_ix[i]], label=irf_names_processed[sort_ix[i]], lw=2, alpha=0.8, linestyle='-', solid_capstyle='butt')
+            plt.plot(plot_x[:2], plot_y[:2,sort_ix[i]], label=irf_names_processed[sort_ix[i]], lw=2, alpha=0.8, linestyle='-', solid_capstyle='butt', markersize=markersize)
         else:
             markevery = int(len(plot_y) / 10)
-            plt.plot(plot_x, plot_y[:,sort_ix[i]], label=irf_names_processed[sort_ix[i]], lw=2, alpha=0.8, linestyle='-', markevery=markevery, solid_capstyle='butt')
+            plt.plot(plot_x, plot_y[:,sort_ix[i]], label=irf_names_processed[sort_ix[i]], lw=2, alpha=0.8, linestyle='-', markevery=markevery, solid_capstyle='butt', markersize=markersize)
         if uq is not None and lq is not None:
             plt.fill_between(plot_x[:,0], lq[:,sort_ix[i]], uq[:,sort_ix[i]], alpha=0.25)
 
