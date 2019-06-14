@@ -21,6 +21,7 @@ if __name__ == '__main__':
     argparser.add_argument('-i', '--irf_ids', nargs='*', default = [], help='List of IDs for IRF to include in the plot. Regex supported.')
     argparser.add_argument('-U', '--unsorted_irf_ids', action='store_true', help='Leave IRF IDs unsorted (otherwise, they are sorted alphabetically).')
     argparser.add_argument('-d', '--plot_dirac', action='store_true', help='Also plot linear effects and interaction estimates (stick functions at 0).')
+    argparser.add_argument('-R', '--plot_rangf', action='store_true', help='Also plot random effects estimates.')
     argparser.add_argument('-P', '--prop_cycle_length', type=int, default=None, help='Length of plotting properties cycle (defines step size in the color map). If unspecified, inferred from **irf_names**.')
     argparser.add_argument('-I', '--prop_cycle_ix', nargs='*', type=int, default=None, help='Integer indices to use in the properties cycle for each entry in **irf_names**. If unspecified, indices are automatically assigned.')
     argparser.add_argument('-s', '--plot_true_synthetic', action='store_true', help='If the models are fit to synthetic data, also generate plots of the true IRF')
@@ -194,6 +195,7 @@ if __name__ == '__main__':
                 prop_cycle_length=args.prop_cycle_length,
                 prop_cycle_ix=args.prop_cycle_ix,
                 plot_dirac=args.plot_dirac,
+                plot_rangf=args.plot_rangf,
                 prefix=prefix + m,
                 legend=legend,
                 xlab=args.xlab,
@@ -212,6 +214,7 @@ if __name__ == '__main__':
                     prop_cycle_length=args.prop_cycle_length,
                     prop_cycle_ix=args.prop_cycle_ix,
                     plot_dirac=args.plot_dirac,
+                    plot_rangf=args.plot_rangf,
                     mc=True,
                     prefix=prefix + m,
                     legend=legend,
