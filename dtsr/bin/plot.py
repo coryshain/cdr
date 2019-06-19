@@ -32,7 +32,7 @@ if __name__ == '__main__':
     argparser.add_argument('-X', '--xlab', type=str, default=None, help='x-axis label (if default -- None -- no label)')
     argparser.add_argument('-y', '--y', type=float, default=None, help='Height of plot in inches')
     argparser.add_argument('-Y', '--ylab', type=str, default=None, help='y-axis label (if default -- None -- no label)')
-    argparser.add_argument('-b', '--ylim', type=int, nargs=2, default=None, help='Fixed ylim value to use for all IRF plots. If unspecified, automatically inferred.')
+    argparser.add_argument('-b', '--ylim', type=float, nargs=2, default=None, help='Fixed ylim value to use for all IRF plots. If unspecified, automatically inferred.')
     argparser.add_argument('-c', '--cmap', type=str, default=None, help='Name of matplotlib colormap library to use for curves')
     argparser.add_argument('-D', '--dpi', type=int, default=None, help='Dots per inch')
     argparser.add_argument('-l', '--nolegend', action='store_true', help='Omit legend from figure')
