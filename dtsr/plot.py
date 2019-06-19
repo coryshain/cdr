@@ -101,6 +101,9 @@ def plot_irf(
         plt.ylabel(ylab, weight='bold')
     if legend:
         plt.legend(fancybox=True, framealpha=0.75, frameon=True, facecolor='white', edgecolor='gray')
+        
+    if ylim is not None:
+        plt.ylim(ylim)
 
     plt.gcf().set_size_inches(plot_x_inches, plot_y_inches)
     plt.tight_layout()
@@ -170,9 +173,6 @@ def plot_qq(
         plt.ylabel(ylab, weight='bold')
     if legend:
         plt.legend(fancybox=True, framealpha=0.75, frameon=True, facecolor='white', edgecolor='gray')
-
-    if ylim is not None:
-        plt.ylim(ylim)
 
     plt.gcf().set_size_inches(plot_x_inches, plot_y_inches)
     plt.tight_layout()
