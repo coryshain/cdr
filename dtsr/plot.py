@@ -20,6 +20,7 @@ def plot_irf(
         irf_name_map=None,
         plot_x_inches=6,
         plot_y_inches=4,
+        ylim=None,
         cmap='gist_rainbow',
         legend=True,
         xlab=None,
@@ -44,6 +45,7 @@ def plot_irf(
     :param irf_name_map: ``dict`` of ``str`` to ``str``; map from DTSR IRF ID's to more readable names to appear in legend. Any plotted IRF whose ID is not found in **irf_name_map** will be represented with the DTSR IRF ID.
     :param plot_x_inches: ``float``; width of plot in inches.
     :param plot_y_inches: ``float``; height of plot in inches.
+    :param ylim: 2-element ``tuple`` or ``list``; (lower_bound, upper_bound) to use for y axis. If ``None``, automatically inferred.
     :param cmap: ``str``; name of ``matplotlib`` ``cmap`` object (determines colors of plotted IRF).
     :param legend: ``bool``; include a legend.
     :param xlab: ``str`` or ``None``; x-axis label. If ``None``, no label.
@@ -118,7 +120,6 @@ def plot_qq(
         filename='qq_plot.png',
         plot_x_inches=6,
         plot_y_inches=4,
-        ylim=None,
         legend=True,
         xlab='Theoretical',
         ylab='Empirical',
@@ -138,7 +139,6 @@ def plot_qq(
     :param filename: ``str``; filename.
     :param plot_x_inches: ``float``; width of plot in inches.
     :param plot_y_inches: ``float``; height of plot in inches.
-    :param ylim: 2-element ``tuple`` or ``list``; (lower_bound, upper_bound) to use for y axis. If ``None``, automatically inferred.
     :param legend: ``bool``; include a legend.
     :param xlab: ``str`` or ``None``; x-axis label. If ``None``, no label.
     :param ylab: ``str`` or ``None``; y-axis label. If ``None``, no label.
