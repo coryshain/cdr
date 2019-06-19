@@ -5403,6 +5403,7 @@ class DTSR(object):
             plot_n_time_points=1000,
             plot_x_inches=6.,
             plot_y_inches=4.,
+            ylim=None,
             cmap=None,
             dpi=300,
             mc=False,
@@ -5444,6 +5445,7 @@ class DTSR(object):
         :param plot_n_time_points: ``int``; number of points to use for plotting.
         :param plot_x_inches: ``int``; width of plot in inches.
         :param plot_y_inches: ``int``; height of plot in inches.
+        :param ylim: 2-element ``tuple`` or ``list``; (lower_bound, upper_bound) to use for y axis. If ``None``, automatically inferred.
         :param cmap: ``str``; name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot).
         :param dpi: ``int``; dots per inch.
         :param mc: ``bool``; compute and plot Monte Carlo credible intervals (only supported for DTSRBayes).
@@ -5650,6 +5652,7 @@ class DTSR(object):
                                         irf_name_map=irf_name_map,
                                         plot_x_inches=plot_x_inches,
                                         plot_y_inches=plot_y_inches,
+                                        ylim=ylim,
                                         cmap=cmap,
                                         dpi=dpi,
                                         legend=legend,
@@ -5748,6 +5751,7 @@ class DTSR(object):
                                             irf_name_map=irf_name_map,
                                             plot_x_inches=plot_x_inches,
                                             plot_y_inches=plot_y_inches,
+                                            ylim=ylim,
                                             cmap=cmap,
                                             dpi=dpi,
                                             legend=legend,
