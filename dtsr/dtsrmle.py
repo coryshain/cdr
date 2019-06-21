@@ -9,7 +9,6 @@ from .util import names2ix, sn
 
 import tensorflow as tf
 
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 tf_config = tf.ConfigProto()
 tf_config.gpu_options.allow_growth = True
 
@@ -417,18 +416,7 @@ class DTSRMLE(DTSR):
                 self.optim = self._initialize_optimizer(self.optim_name)
                 assert self.optim_name is not None, 'An optimizer name must be supplied'
 
-                # self.train_op = self.optim.minimize(self.loss_func, global_step=self.global_batch_step,
-                #                                     name=sn('optim'))
-                # self.gradients = self.optim.compute_gradients(self.loss_func)
-
-                self.gradients, variables = zip(*self.optim.compute_gradients(self.loss_func))
-                # ## CLIP GRADIENT NORM
-                # self.gradients, _ = tf.clip_by_global_norm(self.gradients, 1.0)
-                self.train_op = self.optim.apply_gradients(
-                    zip(self.gradients, variables),
-                    global_step=self.global_batch_step,
-                    name=sn('optim')
-                )
+                self.train_op = self.optim.minimize(self.loss_func, global_step=self.global_batch_step)
 
 
 

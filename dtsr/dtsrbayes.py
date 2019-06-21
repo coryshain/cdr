@@ -6,7 +6,6 @@ import pandas as pd
 pd.options.mode.chained_assignment = None
 
 import tensorflow as tf
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 tf_config = tf.ConfigProto()
 tf_config.gpu_options.allow_growth = True
@@ -1362,7 +1361,7 @@ class DTSRBayes(DTSR):
                     out_model = self.out
                     y = self.y
 
-                self.opt = self._initialize_optimizer(self.optim_name)
+                self.optim = self._initialize_optimizer(self.optim_name)
                 if self.variational():
                     self.inference = getattr(ed,self.inference_name)(self.inference_map, data={out_model: y})
                     self.inference.initialize(
@@ -1372,7 +1371,7 @@ class DTSRBayes(DTSR):
                         logdir=self.outdir + '/tensorboard/edward',
                         log_timestamp=False,
                         scale={out_model: self.minibatch_scale},
-                        optimizer=self.opt
+                        optimizer=self.optim
                     )
                 elif self.inference_name == 'MetropolisHastings':
                     self.inference = getattr(ed, self.inference_name)(self.inference_map, self.proposal_map, data={out_model: y})

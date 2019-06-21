@@ -270,6 +270,12 @@ DTSR_INITIALIZATION_KWARGS = [
             - ``None`` (DTSRBayes only; uses the default optimizer defined by Edward, which currently includes steep learning rate decay and is therefore not recommended in the general case)"""
     ),
     Kwarg(
+        'max_global_gradient_norm',
+        None,
+        [float, None],
+        'Maximum allowable value for the global norm of the gradient, which will be clipped as needed. If ``None``, no gradient clipping.'
+    ),
+    Kwarg(
         'optim_epsilon',
         1e-8,
         float,

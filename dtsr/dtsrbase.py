@@ -36,6 +36,27 @@ def get_session(session):
     return sess
 
 
+def normalize_irf(irf, support, session=None, epsilon=4*np.finfo('float32').eps):
+    def f(x, support=support, session=session, epsilon=epsilon):
+        session = get_session(session)
+        with session.as_default():
+            with session.graph.as_default():
+                out = irf(x)
+                _support = support
+                while len(_support.shape) < len(out.shape):
+                    _support = _support[None, ...]
+                n_time_units = tf.squeeze(tf.cast(_support[...,-1,0], dtype=tf.float32))
+                n_time_points = tf.cast(tf.shape(_support)[-2], dtype=tf.float32)
+                irf_samples = irf(_support)
+                normalization_constant = (tf.reduce_sum(irf_samples, axis=-2, keepdims=True)) * (n_time_units / n_time_points)
+                e = tf.ones_like(normalization_constant) * epsilon
+                tf.where(tf.not_equal(normalization_constant, 0.), normalization_constant, e)
+                out /= normalization_constant
+                return out
+
+    return f
+
+
 def unnormalized_gamma(alpha, beta):
     return lambda x: x ** (alpha - 1) * tf.exp(-beta * x)
 
@@ -49,7 +70,8 @@ def exponential_irf(params, session=None):
     with session.as_default():
         with session.graph.as_default():
             beta = params[:, 0:1]
-            return lambda x: tf.exp(- beta * x)
+            pdf = tf.contrib.distributions.Exponential(beta)
+            return lambda x: pdf(x)
 
 
 def gamma_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
@@ -58,11 +80,14 @@ def gamma_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_
         with session.graph.as_default():
             alpha = params[:, 0:1]
             beta = params[:, 1:2]
-            pdf = tf.contrib.distributions.Gamma(
+            
+            dist = tf.contrib.distributions.Gamma(
                 concentration=alpha,
                 rate=beta,
                 validate_args=validate_irf_args
-            ).prob
+            )
+            pdf = dist.prob
+            
             return lambda x: pdf(x + epsilon)
 
 
@@ -70,22 +95,39 @@ def shifted_gamma_irf(params, session=None, epsilon=4*np.finfo('float32').eps, v
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
-            pdf = tf.contrib.distributions.Gamma(
-                concentration=params[:, 0:1],
-                rate=params[:, 1:2],
+            alpha = params[:, 0:1]
+            beta = params[:, 1:2]
+            delta = params[:, 2:3]
+            
+            dist = tf.contrib.distributions.Gamma(
+                concentration=alpha,
+                rate=beta,
                 validate_args=validate_irf_args
-            ).prob
-            return lambda x: pdf(x - params[:, 2:3] + epsilon)
+            )
+            pdf = dist.prob
+            cdf = dist.cdf
+            
+            return lambda x: pdf(x - delta + epsilon) / (1 - cdf(- delta + epsilon) + epsilon)
 
 
-def normal_irf(params, session=None):
+def normal_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
-            return lambda x: unnormalized_gaussian(params[:, 0:1], params[:, 1:2])(x)
+            mu = params[:, 0:1]
+            sigma = params[:, 1:2]
+
+            dist = tf.contrib.distributions.Normal(
+                mu,
+                sigma
+            )
+            pdf = dist.prob
+            cdf = dist.cdf
+            
+            return lambda x: pdf(x) / (1 - cdf(0.) + epsilon)
 
 
-def skew_normal_irf(params, session=None):
+def skew_normal_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
@@ -95,18 +137,26 @@ def skew_normal_irf(params, session=None):
             stdnorm = tf.contrib.distributions.Normal(loc=0., scale=1.)
             stdnorm_pdf = stdnorm.prob
             stdnorm_cdf = stdnorm.cdf
-            return lambda x: stdnorm_pdf((x - mu) / sigma) * stdnorm_cdf(alpha * (x - mu) / sigma)
+
+            return lambda x: (stdnorm_pdf((x - mu) / sigma) * stdnorm_cdf(alpha * (x - mu) / sigma))
 
 
-def emg_irf(params, session=None):
+def emg_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
             mu = params[:, 0:1]
             sigma = params[:, 1:2]
             L = params[:, 2:3]
+
+            def cdf(x):
+                return tf.contrib.distributions.Normal(
+                    loc=0.,
+                    scale=L*sigma
+                )(L * (x - mu))
+
             return lambda x: L / 2 * tf.exp(0.5 * L * (2. * mu + L * sigma ** 2. - 2. * x)) * tf.erfc(
-                (mu + L * sigma ** 2 - x) / (tf.sqrt(2.) * sigma))
+                (mu + L * sigma ** 2 - x) / (tf.sqrt(2.) * sigma)) / (1 - cdf(0) + epsilon)
 
 
 def beta_prime_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
@@ -115,7 +165,11 @@ def beta_prime_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
         with session.graph.as_default():
             alpha = params[:, 1:2]
             beta = params[:, 2:3]
-            return lambda x: (x + epsilon) ** (alpha - 1.) * (1. + (x + epsilon)) ** (-alpha - beta)
+
+            def cdf(x):
+                return tf.betainc(alpha, beta, x / (1+x)) * tf.exp(tf.lbeta(alpha, beta))
+
+            return lambda x: ((x + epsilon) ** (alpha - 1.) * (1. + (x + epsilon)) ** (-alpha - beta)) / (1 - cdf(epsilon) + epsilon)
 
 
 def shifted_beta_prime_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
@@ -125,7 +179,11 @@ def shifted_beta_prime_irf(params, session=None, epsilon=4*np.finfo('float32').e
             alpha = params[:, 0:1]
             beta = params[:, 1:2]
             delta = params[:, 2:3]
-            return lambda x: (x - delta + epsilon) ** (alpha - 1) * (1 + (x - delta + epsilon)) ** (-alpha - beta)
+
+            def cdf(x):
+                return tf.betainc(alpha, beta, (x-delta) / (1+x-delta)) * tf.exp(tf.lbeta(alpha, beta))
+
+            return lambda x: ((x - delta + epsilon) ** (alpha - 1) * (1 + (x - delta + epsilon)) ** (-alpha - beta)) / (1 - cdf(-delta + epsilon) + epsilon)
 
 
 def double_gamma_1_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
@@ -133,6 +191,7 @@ def double_gamma_1_irf(params, session=None, epsilon=4*np.finfo('float32').eps, 
     with session.as_default():
         with session.graph.as_default():
             beta = params[:, 0:1]
+            c = 1. / 6.
 
             pdf_main = tf.contrib.distributions.Gamma(
                 concentration=6.,
@@ -145,7 +204,7 @@ def double_gamma_1_irf(params, session=None, epsilon=4*np.finfo('float32').eps, 
                 validate_args=validate_irf_args
             ).prob
 
-            return lambda x: pdf_main(x + epsilon) - 1. / 6. * pdf_undershoot(x + epsilon)
+            return lambda x: (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (1 - c)
 
 
 def double_gamma_2_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
@@ -154,6 +213,7 @@ def double_gamma_2_irf(params, session=None, epsilon=4*np.finfo('float32').eps, 
         with session.graph.as_default():
             alpha = params[:, 0:1]
             beta = params[:, 1:2]
+            c = 1. / 6.
 
             pdf_main = tf.contrib.distributions.Gamma(
                 concentration=alpha,
@@ -166,7 +226,7 @@ def double_gamma_2_irf(params, session=None, epsilon=4*np.finfo('float32').eps, 
                 validate_args=validate_irf_args
             ).prob
 
-            return lambda x: pdf_main(x + epsilon) - 1. / 6. * pdf_undershoot(x + epsilon)
+            return lambda x: (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (1 - c)
 
 
 def double_gamma_3_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
@@ -188,7 +248,7 @@ def double_gamma_3_irf(params, session=None, epsilon=4*np.finfo('float32').eps, 
                 validate_args=validate_irf_args
             ).prob
 
-            return lambda x: pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)
+            return lambda x: (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (1 - c)
 
 
 def double_gamma_4_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
@@ -211,7 +271,7 @@ def double_gamma_4_irf(params, session=None, epsilon=4*np.finfo('float32').eps, 
                 validate_args=validate_irf_args
             ).prob
 
-            return lambda x: pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)
+            return lambda x: (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (1 - c)
 
 
 def double_gamma_5_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
@@ -235,7 +295,315 @@ def double_gamma_5_irf(params, session=None, epsilon=4*np.finfo('float32').eps, 
                 validate_args=validate_irf_args
             ).prob
 
-            return lambda x: pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)
+            return lambda x: (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (1 - c)
+
+
+def piecewise_linear_interpolant(c, y, session=None):
+    # c: knot locations, shape=[B, Q, K], B = batch, Q = query points or 1, K = n knots
+    # y: knot values, shape identical to c
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            if len(c.shape) == 1:
+                # No batch or query dim
+                c = c[None, None, ...]
+            elif len(c.shape) == 2:
+                # No query dim
+                c = tf.expand_dims(c, axis=-2)
+            elif len(c.shape) > 3:
+                # Too many dims
+                raise ValueError('Rank of knot location tensor c to piecewise resampler must be >= 1 and <= 3. Saw "%d"' % len(c.shape))
+            if len(y.shape) == 1:
+                # No batch or query dim
+                y = y[None, None, ...]
+            elif len(y.shape) == 2:
+                # No query dim
+                y = tf.expand_dims(y, axis=-2)
+            elif len(y.shape) > 3:
+                # Too many dims
+                raise ValueError('Rank of knot amplitude tensor c to piecewise resampler must be >= 1 and <= 3. Saw "%d"' % len(y.shape))
+
+            c_t = c[..., 1:]
+            c_tm1 = c[..., :-1]
+            y_t = y[..., 1:]
+            y_tm1 = y[..., :-1]
+
+            # Compute intercepts a_ and slopes b_ of line segments
+            a_ = (y_t - y_tm1) / (c_t - c_tm1)
+            valid = c_t > c_tm1
+            a_ = tf.where(valid, a_, tf.zeros_like(a_))
+            b_ = y_t - a_ * c_t
+
+            # Handle points beyond final knot location (0 response)
+            a_ = tf.concat([a_, tf.zeros_like(a_[..., -1:])], axis=-1)
+            b_ = tf.concat([b_, tf.zeros_like(b_[..., -1:])], axis=-1)
+            c_ = tf.concat([c, tf.ones_like(c[..., -1:]) * np.inf], axis=-1)
+
+            def make_piecewise(a, b, c):
+                def select_segment(x, c):
+                    c_t = c[..., 1:]
+                    c_tm1 = c[..., :-1]
+                    select = tf.cast(tf.logical_and(x >= c_tm1, x < c_t), dtype=self.FLOAT_TF)
+                    return select
+
+                def piecewise(x):
+                    select = select_segment(x, c)
+                    # a_select = tf.reduce_sum(a * select, axis=-1, keepdims=True)
+                    # b_select = tf.reduce_sum(b * select, axis=-1, keepdims=True)
+                    # response = a_select * x + b_select
+                    response = tf.reduce_sum((a * x + b) * select, axis=-1, keepdims=True)
+                    return response
+
+                return piecewise
+
+            out = make_piecewise(a_, b_, c_)
+
+            return out
+
+
+def spline(c, y, dynamic_batch_dim, order, roughness_penalty=0., int_type=None, session=None):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            if int_type is None:
+                INT_TF = getattr(tf, 'int32')
+            elif isinstance(int_type, str):
+                INT_TF = getattr(tf, int_type)
+            else:
+                INT_TF = int_type
+
+            def apply_spline(x):
+                x_ = x
+                if len(x_.shape) == 1:
+                    x_ = x_[None, :, None]
+                elif len(x_.shape) == 2:
+                    x_ = x_[None, ...]
+                if len(x_.shape) != 3:
+                    raise ValueError('Query to spline IRF must be exactly rank 3')
+
+                batch_max = tf.reduce_max(tf.stack([tf.shape(x_)[0], dynamic_batch_dim], axis=0))
+
+                x_batch = tf.shape(x_)[0]
+                x_tile = tf.cast(batch_max / x_batch, dtype=INT_TF)
+                x_ = tf.cond(x_tile > 1, lambda: tf.tile(x_, [x_tile, 1, 1]), lambda: x_)
+
+                splines = []
+
+                for i in range(len(c)):
+                    if order == 1:
+                        interp = piecewise_linear_interpolant(c[i], y[i], session=session)(x_)
+                    else:
+                        c_ = c[i]
+                        c_batch = tf.shape(c_)[0]
+                        c_tile = tf.cast(batch_max / c_batch, dtype=INT_TF)
+                        c_ = tf.tile(c_[..., None], [c_tile, 1, 1])
+
+                        y_ = y[i]
+                        y_batch = tf.shape(y_)[0]
+                        y_tile = tf.cast(batch_max / y_batch, dtype=INT_TF)
+                        y_ = tf.tile(y_[..., None], [y_tile, 1, 1])
+
+                        interp = tf.where(
+                            x_ <= c_[:,-1:],
+                            interpolate_spline(
+                                c_,
+                                y_,
+                                x_,
+                                order,
+                                regularization_weight=roughness_penalty
+                            ),
+                            tf.zeros_like(x_)
+                        )
+
+                        # interp = interpolate_spline(
+                        #     c_,
+                        #     y_,
+                        #     x_,
+                        #     order,
+                        #     regularization_weight=roughness_penalty
+                        # )
+
+                    splines.append(interp)
+
+                out = tf.concat(splines, axis=2)
+
+                return out
+
+            out = apply_spline
+
+            return out
+
+
+def kernel_smooth(c, v, b, epsilon=4 * np.finfo('float32').eps, session=None):
+    def f(x, c=c, v=v, b=b, epsilon=epsilon, session=session):
+        session = get_session(session)
+        with session.as_default():
+            with session.graph.as_default():
+                _x = x
+                if len(x.shape) == 1:
+                    _x = _x[None, :, None]
+                elif len(x.shape) == 2:
+                    _x = _x[None, ...]
+                if len(_x.shape) != 3:
+                    raise ValueError('Query to kernel smooth IRF must be exactly rank 3')
+                _x = tf.expand_dims(_x, axis=-2)
+
+                _c = c
+                _b = b
+
+                while len(_c.shape) < len(x.shape):
+                    _c = _c[None, ...]
+                while len(_b.shape) < len(x.shape):
+                    _b = _b[None, ...]
+
+                _c = tf.expand_dims(_c, axis=-3)
+                _b = tf.expand_dims(_b, axis=-3)
+
+                dist = tf.contrib.distributions.Normal(
+                    loc=_c,
+                    scale=_b
+                )
+
+                r = dist.prob(_x - _c)
+
+                _v = v
+                while len(_v.shape) < len(_x.shape):
+                    _v = _v[None, ...]
+                _v = tf.expand_dims(_v, axis=-3)
+
+                num = tf.reduce_sum(r * _v, axis=-2)
+                denom = tf.reduce_sum(r, axis=-2) + epsilon
+
+                return num / denom
+
+    return f
+
+
+def summed_gaussians(c, v, b, session=None):
+    def f(x, c=c, v=v, b=b, session=session):
+        session = get_session(session)
+        with session.as_default():
+            with session.graph.as_default():
+                _x = x
+                if len(x.shape) == 1:
+                    _x = _x[None, :, None]
+                elif len(x.shape) == 2:
+                    _x = _x[None, ...]
+                if len(_x.shape) != 3:
+                    raise ValueError('Query to summed gaussians IRF must be exactly rank 3')
+                _x = _x[..., None]
+                _c = c
+                _b = b
+                _v = v
+
+                while len(_c.shape) < len(x.shape):
+                    _c = _c[None, ...]
+                while len(_b.shape) < len(x.shape):
+                    _b = _b[None, ...]
+                while len(_v.shape) < len(x.shape):
+                    _v = _v[None, ...]
+
+                _c = tf.expand_dims(_c, axis=-3)
+                _b = tf.expand_dims(_b, axis=-3)
+                _v = tf.expand_dims(_v, axis=-3)
+
+                dist = tf.contrib.distributions.Normal(
+                    loc=_c,
+                    scale=_b,
+                )
+
+                def sum_gaussians(x):
+                    unnormalized = tf.reduce_sum(dist.prob(x) * _v, axis=-2)
+                    normalization_constant = tf.reduce_sum(1. - dist.cdf(0.), axis=-2)
+                    normalized = unnormalized / normalization_constant
+                    return normalized
+
+                return sum_gaussians(_x)
+
+    return f
+
+
+def nonparametric_smooth(
+        method,
+        params,
+        bases,
+        support=None,
+        epsilon=4 * np.finfo('float32').eps,
+        int_type=None,
+        float_type=None,
+        session=None,
+        **kwargs
+):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            if int_type is None:
+                INT_TF = getattr(tf, 'int32')
+            elif isinstance(float_type, str):
+                INT_TF = getattr(tf, int_type)
+            else:
+                INT_TF = int_type
+
+            if float_type is None:
+                FLOAT_TF = getattr(tf, 'float32')
+            elif isinstance(float_type, str):
+                FLOAT_TF = getattr(tf, float_type)
+            else:
+                FLOAT_TF = float_type
+
+            # Build control point locations
+            c = params[:, 0:bases - 1]
+
+            # Build values at control points
+            y = params[:, bases - 1:2 * (bases - 1)]
+
+            if method.lower() == 'spline': # Pad appropriately
+                c_endpoint_shape = [tf.shape(c)[0], 1, tf.shape(params)[2]]
+                zero = tf.zeros(c_endpoint_shape, dtype=FLOAT_TF)
+                c = tf.concat([zero, c], axis=1)
+                # c = tf.cumsum(c, axis=1)
+
+                c = tf.unstack(c, axis=2)
+
+                if not kwargs['instantaneous']:
+                    y = [zero] + y[:, :-1]
+                y = tf.concat(y, axis=1)
+                y = tf.unstack(y, axis=2)
+
+                assert len(c) == len(
+                    y), 'c and y coordinates of spline unpacked into lists of different lengths (%s and %s, respectively)' % (
+                    len(c), len(y))
+
+                dynamic_batch_dim = tf.shape(params)[0]
+
+                f = spline(
+                    c,
+                    y,
+                    dynamic_batch_dim,
+                    kwargs['order'],
+                    roughness_penalty=kwargs['roughness_penalty'],
+                    int_type=INT_TF,
+                    session=session
+                )
+
+                assert support is not None, 'Argument ``support`` must be provided for spline IRFs'
+                f = normalize_irf(f, support, session=session, epsilon=epsilon)
+
+            else:
+                # Build scales at control points
+                b = params[:, 2 * (bases - 1):]
+                if method.lower() == 'kernel_smooth':
+                    f = kernel_smooth(c, y, b, epsilon=epsilon, session=session)
+                    assert support is not None, 'Argument ``support`` must be provided for kernel smooth IRFS'
+                    f = normalize_irf(f, support, session=session, epsilon=epsilon)
+
+                elif method.lower() == 'summed_gaussians':
+                    f = summed_gaussians(c, y, b, session=session)
+
+                else:
+                    raise ValueError('Unrecognized non-parametric IRF type: %s' % method)
+
+            return f
 
 
 def corr(A, B):
@@ -727,9 +1095,21 @@ class DTSR(object):
                 self.interpolation_support = tf.linspace(0., self.max_tdelta_batch, self.n_interp)[..., None]
 
                 # Linspace tensor used for plotting
-                self.support_start = tf.placeholder(self.FLOAT_TF, shape=[], name='support_start')
-                self.n_time_units = tf.placeholder(self.FLOAT_TF, shape=[], name='n_time_units')
-                self.n_time_points = tf.placeholder(self.INT_TF, shape=[], name='n_time_points')
+                self.support_start = tf.placeholder_with_default(
+                    tf.cast(0., self.FLOAT_TF),
+                    shape=[],
+                    name='support_start'
+                )
+                self.n_time_units = tf.placeholder_with_default(
+                    tf.cast(self.t_delta_limit, self.FLOAT_TF),
+                    shape=[],
+                    name='n_time_units'
+                )
+                self.n_time_points = tf.placeholder_with_default(
+                    tf.cast(self.interp_hz, self.FLOAT_TF),
+                    shape=[],
+                    name='n_time_points'
+                )
                 self.support = tf.lin_space(
                     self.support_start,
                     self.n_time_units+self.support_start,
@@ -992,7 +1372,7 @@ class DTSR(object):
                         self._initialize_base_irf_param('beta_undershoot', family, lb=0., default=1.)
                         self._initialize_base_irf_param('c', family, default=1./6.)
 
-                    elif Formula.is_spline(family):
+                    elif Formula.is_nonparametric(family):
                         bases = Formula.bases(family)
                         spacing_power = Formula.spacing_power(family)
                         x_init = np.cumsum(np.ones(bases-1)) ** spacing_power
@@ -1001,16 +1381,19 @@ class DTSR(object):
                         if time_limit is None:
                             time_limit = self.t_delta_limit
                         x_init *= time_limit / x_init[-1]
-                        x_init[1:] -= x_init[:-1]
+                        # x_init[1:] -= x_init[:-1]
 
                         for param_name in Formula.irf_params(family):
                             if param_name.startswith('x'):
                                 n = int(param_name[1:])
                                 default = x_init[n-2]
                                 lb = 0
-                            else:
-                                default = 0
+                            elif param_name.startswith('y'):
+                                default = np.sqrt(2 * np.pi)
                                 lb = None
+                            else:
+                                default = 1
+                                lb = 0
                             self._initialize_base_irf_param(param_name, family, default=default, lb=lb)
 
     def _initialize_intercepts_coefficients_interactions(self):
@@ -1045,26 +1428,26 @@ class DTSR(object):
                 # COEFFICIENTS
                 fixef_ix = names2ix(self.fixed_coef_names, self.coef_names)
                 coef_ids = self.coef_names
-                if len(self.unary_spline_coef_names) > 0:
-                    nonzero_coefficients = tf.concat(
-                        [
-                            self.coefficient_fixed_base,
-                            tf.ones([len(self.unary_spline_coef_names)], dtype=self.FLOAT_TF)
-                        ],
-                        axis=0
-                    )
-                    nonzero_coefficients_summary = tf.concat(
-                        [
-                            self.coefficient_fixed_base_summary,
-                            tf.ones([len(self.unary_spline_coef_names)], dtype=self.FLOAT_TF)
-                        ],
-                        axis=0
-                    )
-                    nonzero_coef_ix = names2ix(self.fixed_coef_names + self.unary_spline_coef_names, self.coef_names)
-                else:
-                    nonzero_coefficients = self.coefficient_fixed_base
-                    nonzero_coefficients_summary = self.coefficient_fixed_base_summary
-                    nonzero_coef_ix = fixef_ix
+                # if len(self.unary_spline_coef_names) > 0:
+                #     nonzero_coefficients = tf.concat(
+                #         [
+                #             self.coefficient_fixed_base,
+                #             tf.ones([len(self.unary_spline_coef_names)], dtype=self.FLOAT_TF)
+                #         ],
+                #         axis=0
+                #     )
+                #     nonzero_coefficients_summary = tf.concat(
+                #         [
+                #             self.coefficient_fixed_base_summary,
+                #             tf.ones([len(self.unary_spline_coef_names)], dtype=self.FLOAT_TF)
+                #         ],
+                #         axis=0
+                #     )
+                #     nonzero_coef_ix = names2ix(self.fixed_coef_names + self.unary_spline_coef_names, self.coef_names)
+                # else:
+                nonzero_coefficients = self.coefficient_fixed_base
+                nonzero_coefficients_summary = self.coefficient_fixed_base_summary
+                nonzero_coef_ix = fixef_ix
                 self.coefficient_fixed = self._scatter_along_axis(
                     nonzero_coef_ix,
                     nonzero_coefficients,
@@ -1326,7 +1709,8 @@ class DTSR(object):
                 def normal(params):
                     return lambda x: normal_irf(
                         params,
-                        session=self.sess
+                        session=self.sess,
+                        epsilon=self.epsilon
                     )(x)
 
                 self.irf_lambdas['Normal'] = normal
@@ -1334,15 +1718,17 @@ class DTSR(object):
                 def skew_normal(params):
                     return lambda x: skew_normal_irf(
                         params,
-                        session=self.sess
+                        session=self.sess,
+                        epsilon=self.epsilon
                     )(x)
 
-                self.irf_lambdas['SkewNormal'] = skew_normal
+                self.irf_lambdas['SkewNormal'] = normalize_irf(skew_normal, self.support, session=self.sess, epsilon=self.epsilon)
 
                 def emg(params):
                     return lambda x: emg_irf(
                         params,
-                        session=self.sess
+                        session=self.sess,
+                        epsilon=self.epsilon
                     )(x)
 
                 self.irf_lambdas['EMG'] = emg
@@ -1476,78 +1862,40 @@ class DTSR(object):
 
                 return out
 
-    def _initialize_spline(self, order, bases, instantaneous=True, roughness_penalty=0.):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                def spline(params):
-                    target_shape = bases * 2 - 2 - (1-int(instantaneous))
-                    assert params.shape[1] == target_shape, 'Incorrect number of parameters for spline with bases "%d". Should be %s, got %s.' %(bases, target_shape)
+    def _initialize_spline(self, order, bases, method='spline', instantaneous=True, roughness_penalty=0.):
+        def f(
+                params,
+                order=order,
+                bases=bases,
+                method=method,
+                instantaneous=instantaneous,
+                roughness_penalty=roughness_penalty,
+                support=self.support,
+                epsilon=self.epsilon,
+                int_type=self.INT_TF,
+                float_type=self.FLOAT_TF,
+                session=self.sess
+        ):
+            return nonparametric_smooth(
+                method,
+                params,
+                bases,
+                order=order,
+                instantaneous=instantaneous,
+                roughness_penalty=roughness_penalty,
+                support=support,
+                epsilon=epsilon,
+                int_type=int_type,
+                float_type=float_type,
+                session=session
+            )
 
-                    # Build knot locations
-                    c_endpoint_shape = [tf.shape(params)[0], 1, tf.shape(params)[2]]
-                    zero = tf.zeros(c_endpoint_shape, dtype=self.FLOAT_TF)
-                    c = params[:, 0:bases-1]
-                    c = tf.cumsum(tf.concat([zero, c], axis=1), axis=1)
-                    c = tf.unstack(c, axis=2)
-
-                    # Build values at knots
-                    y = [params[:, bases-1:], zero]
-                    if not instantaneous:
-                        y = [zero] + y
-                    y = tf.concat(y, axis=1)
-                    y = tf.unstack(y, axis=2)
-
-                    assert len(c) == len(y), 'c and y coordinates of spline unpacked into lists of different lengths (%s and %s, respectively)' %(len(c), len(y))
-
-                    def apply_spline(x):
-                        splines = []
-
-                        if len(x.shape) == 1:
-                            x = x[None, :, None]
-                        elif len(x.shape) == 2:
-                            x = x[None, ...]
-                        if len(x.shape) != 3:
-                            raise ValueError('Query to spline IRF must be exactly rank 3')
-
-                        for i in range(len(c)):
-                            if order == 1:
-                                out = self._get_piecewise_linear_resampler(c[i], y[i])
-                            else:
-                                if c[i].shape[0] == 1:
-                                    c_ = tf.tile(c[i][..., None], [tf.shape(x)[0], 1, 1])
-                                else:
-                                    c_ = c[i][..., None]
-                                if y[i].shape[0] == 1:
-                                    y_ = tf.tile(y[i][..., None], [tf.shape(x)[0], 1, 1])
-                                else:
-                                    y_ = y[i][..., None]
-
-                                out = lambda x: tf.where(
-                                    x <= c[i][:,-1:][..., None],
-                                    interpolate_spline(
-                                        c_,
-                                        y_,
-                                        x,
-                                        order,
-                                        regularization_weight=roughness_penalty
-                                    ),
-                                    tf.zeros_like(x)
-                                )
-
-                            splines.append(out)
-
-                        out = tf.concat([s(x) for s in splines], axis=2)
-
-                        return out
-
-                    return apply_spline
-
-                return spline
+        return f
 
     def _get_irf_lambda(self, family):
         if family in self.irf_lambdas:
             return self.irf_lambdas[family]
-        elif Formula.is_spline(family):
+        elif Formula.is_nonparametric(family):
             order = Formula.order(family)
             bases = Formula.bases(family)
             instantaneous = Formula.instantaneous(family)
@@ -2551,7 +2899,7 @@ class DTSR(object):
                                 tf.transpose(self.irf_impulses[name], [0, 2, 1]),
                                 axis=[-1]
                             )
-                            impulse_resampler = self._get_piecewise_linear_resampler(knot_location, knot_amplitude)
+                            impulse_resampler = piecewise_linear_interpolant(knot_location, knot_amplitude, session=self.sess)
                             t_delta = tf.linspace(self.interp_step * (self.history_length-1), 0, self.history_length)[None, ..., None]
                             t_delta = tf.tile(t_delta, [tf.shape(self.t_delta)[0], 1, 1])
                             impulse = impulse_resampler(t_delta)
@@ -2661,6 +3009,37 @@ class DTSR(object):
                 # Hack needed for MAP evaluation of DTSRBayes
                 self.out_mean = self.out
 
+    ## Thanks to Keisuke Fujii (https://github.com/blei-lab/edward/issues/708) for this idea
+    def _clipped_optimizer_class(self, base_optimizer):
+        class ClippedOptimizer(base_optimizer):
+            def __init__(self, *args, max_global_norm=None, **kwargs):
+                super(ClippedOptimizer, self).__init__(*args, **kwargs)
+                self.max_global_norm = max_global_norm
+
+            def compute_gradients(self, *args, **kwargs):
+                grads_and_vars = super(ClippedOptimizer, self).compute_gradients(*args, **kwargs)
+                if self.max_global_norm is None:
+                    return grads_and_vars
+                grads = tf.clip_by_global_norm([g for g, _ in grads_and_vars], self.max_global_norm)[0]
+                vars = [v for _, v in grads_and_vars]
+                grads_and_vars = []
+                for grad, var in zip(grads, vars):
+                    grads_and_vars.append((grad, var))
+                return grads_and_vars
+
+            def apply_gradients(self, grads_and_vars, **kwargs):
+                if self.max_global_norm is None:
+                    return grads_and_vars
+                grads = tf.clip_by_global_norm([g for g, _ in grads_and_vars], self.max_global_norm)[0]
+                vars = [v for _, v in grads_and_vars]
+                grads_and_vars = []
+                for grad, var in zip(grads, vars):
+                    grads_and_vars.append((grad, var))
+
+                return super(ClippedOptimizer, self).apply_gradients(grads_and_vars, **kwargs)
+
+        return ClippedOptimizer
+
     def _initialize_optimizer(self, name):
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -2672,18 +3051,19 @@ class DTSR(object):
                     lr_decay_steps = tf.constant(self.lr_decay_steps, dtype=self.INT_TF)
                     lr_decay_rate = tf.constant(self.lr_decay_rate, dtype=self.FLOAT_TF)
                     lr_decay_staircase = self.lr_decay_staircase
+
                     if self.lr_decay_iteration_power != 1:
                         t = tf.cast(self.global_step, dtype=self.FLOAT_TF) ** self.lr_decay_iteration_power
                     else:
                         t = self.global_step
 
-                    if 'cosine' in self.lr_decay_family:
-                        self.lr = getattr(tf.train, self.lr_decay_family)(
-                            lr,
-                            t,
-                            lr_decay_steps,
-                            name='learning_rate'
-                        )
+                    if self.lr_decay_family.lower() == 'linear_decay':
+                        if lr_decay_staircase:
+                            decay = tf.floor(t / lr_decay_steps)
+                        else:
+                            decay = t / lr_decay_steps
+                        decay *= lr_decay_rate
+                        self.lr = lr - decay
                     else:
                         self.lr = getattr(tf.train, self.lr_decay_family)(
                             lr,
@@ -2695,21 +3075,73 @@ class DTSR(object):
                         )
                     if np.isfinite(self.learning_rate_min):
                         lr_min = tf.constant(self.learning_rate_min, dtype=self.FLOAT_TF)
-                        INF_TF = tf.constant(inf, dtype=self.FLOAT_TF)
+                        INF_TF = tf.constant(np.inf, dtype=self.FLOAT_TF)
                         self.lr = tf.clip_by_value(self.lr, lr_min, INF_TF)
                 else:
                     self.lr = lr
 
+                clip = self.max_global_gradient_norm
+
                 return {
-                    'SGD': lambda x: tf.train.GradientDescentOptimizer(x),
-                    'Momentum': lambda x: tf.train.MomentumOptimizer(x, 0.9),
-                    'AdaGrad': lambda x: tf.train.AdagradOptimizer(x),
-                    'AdaDelta': lambda x: tf.train.AdadeltaOptimizer(x),
-                    'Adam': lambda x: tf.train.AdamOptimizer(x, epsilon=self.optim_epsilon),
-                    'FTRL': lambda x: tf.train.FtrlOptimizer(x),
-                    'RMSProp': lambda x: tf.train.RMSPropOptimizer(x),
-                    'Nadam': lambda x: tf.contrib.opt.NadamOptimizer(x, epsilon=self.optim_epsilon)
+                    'SGD': lambda x: self._clipped_optimizer_class(tf.train.GradientDescentOptimizer)(x, max_global_norm=clip) if clip else tf.train.GradientDescentOptimizer(x),
+                    'Momentum': lambda x: self._clipped_optimizer_class(tf.train.MomentumOptimizer)(x, 0.9, max_global_norm=clip) if clip else tf.train.MomentumOptimizer(x, 0.9),
+                    'AdaGrad': lambda x: self._clipped_optimizer_class(tf.train.AdagradOptimizer)(x, max_global_norm=clip) if clip else tf.train.AdagradOptimizer(x),
+                    'AdaDelta': lambda x: self._clipped_optimizer_class(tf.train.AdadeltaOptimizer)(x, max_global_norm=clip) if clip else tf.train.AdadeltaOptimizer(x),
+                    'Adam': lambda x: self._clipped_optimizer_class(tf.train.AdamOptimizer)(x, max_global_norm=clip) if clip else tf.train.AdamOptimizer(x),
+                    'FTRL': lambda x: self._clipped_optimizer_class(tf.train.FtrlOptimizer)(x, max_global_norm=clip) if clip else tf.train.FtrlOptimizer(x),
+                    'RMSProp': lambda x: self._clipped_optimizer_class(tf.train.RMSPropOptimizer)(x, max_global_norm=clip) if clip else tf.train.RMSPropOptimizer(x),
+                    'Nadam': lambda x: self._clipped_optimizer_class(tf.contrib.opt.NadamOptimizer)(x, max_global_norm=clip) if clip else tf.contrib.opt.NadamOptimizer(x)
                 }[name](self.lr)
+    #
+    # def _initialize_optimizer(self, name):
+    #     with self.sess.as_default():
+    #         with self.sess.graph.as_default():
+    #             lr = tf.constant(self.learning_rate, dtype=self.FLOAT_TF)
+    #             if name is None:
+    #                 self.lr = lr
+    #                 return None
+    #             if self.lr_decay_family is not None:
+    #                 lr_decay_steps = tf.constant(self.lr_decay_steps, dtype=self.INT_TF)
+    #                 lr_decay_rate = tf.constant(self.lr_decay_rate, dtype=self.FLOAT_TF)
+    #                 lr_decay_staircase = self.lr_decay_staircase
+    #                 if self.lr_decay_iteration_power != 1:
+    #                     t = tf.cast(self.global_step, dtype=self.FLOAT_TF) ** self.lr_decay_iteration_power
+    #                 else:
+    #                     t = self.global_step
+    #
+    #                 if 'cosine' in self.lr_decay_family:
+    #                     self.lr = getattr(tf.train, self.lr_decay_family)(
+    #                         lr,
+    #                         t,
+    #                         lr_decay_steps,
+    #                         name='learning_rate'
+    #                     )
+    #                 else:
+    #                     self.lr = getattr(tf.train, self.lr_decay_family)(
+    #                         lr,
+    #                         t,
+    #                         lr_decay_steps,
+    #                         lr_decay_rate,
+    #                         staircase=lr_decay_staircase,
+    #                         name='learning_rate'
+    #                     )
+    #                 if np.isfinite(self.learning_rate_min):
+    #                     lr_min = tf.constant(self.learning_rate_min, dtype=self.FLOAT_TF)
+    #                     INF_TF = tf.constant(inf, dtype=self.FLOAT_TF)
+    #                     self.lr = tf.clip_by_value(self.lr, lr_min, INF_TF)
+    #             else:
+    #                 self.lr = lr
+    #
+    #             return {
+    #                 'SGD': lambda x: tf.train.GradientDescentOptimizer(x),
+    #                 'Momentum': lambda x: tf.train.MomentumOptimizer(x, 0.9),
+    #                 'AdaGrad': lambda x: tf.train.AdagradOptimizer(x),
+    #                 'AdaDelta': lambda x: tf.train.AdadeltaOptimizer(x),
+    #                 'Adam': lambda x: tf.train.AdamOptimizer(x, epsilon=self.optim_epsilon),
+    #                 'FTRL': lambda x: tf.train.FtrlOptimizer(x),
+    #                 'RMSProp': lambda x: tf.train.RMSPropOptimizer(x),
+    #                 'Nadam': lambda x: tf.contrib.opt.NadamOptimizer(x, epsilon=self.optim_epsilon)
+    #             }[name](self.lr)
 
     def _initialize_logging(self):
         with self.sess.as_default():
@@ -4610,6 +5042,17 @@ class DTSR(object):
         rho = corr_dtsr(X_2d, impulse_names, impulse_names_2d, time_X_2d, time_X_mask)
         sys.stderr.write(str(rho) + '\n\n')
 
+        # self.make_plots(
+        #     irf_name_map=irf_name_map,
+        #     plot_n_time_units=plot_n_time_units,
+        #     plot_n_time_points=plot_n_time_points,
+        #     plot_x_inches=plot_x_inches,
+        #     plot_y_inches=plot_y_inches,
+        #     cmap=cmap,
+        #     dpi=dpi,
+        #     keep_plot_history=self.keep_plot_history
+        # )
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.run_convergence_check(verbose=False)
@@ -5398,7 +5841,7 @@ class DTSR(object):
             prop_cycle_length=None,
             prop_cycle_ix=None,
             plot_dirac=False,
-            plot_rangf=True,
+            plot_rangf=False,
             plot_n_time_units=2.5,
             plot_n_time_points=1000,
             plot_x_inches=6.,

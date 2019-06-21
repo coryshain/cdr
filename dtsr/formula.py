@@ -11,7 +11,7 @@ from .util import names2ix, sn
 interact = re.compile('([^ ]+):([^ ]+)')
 spillover = re.compile('^.+S[0-9]+$')
 split_irf = re.compile('(.+)\(([^(]+)')
-spline = re.compile('S((o([0-9]+))?(b([0-9]+))?(l([0-9]*\.?[0-9]+))?(p([0-9]+))?(t([0-9]*\.?[0-9]+))?(i([0-1]))?)?$')
+nonparametric = re.compile('[SOG]((o([0-9]+))?(b([0-9]+))?(l([0-9]*\.?[0-9]+))?(p([0-9]+))?(t([0-9]*\.?[0-9]+))?(i([0-1]))?)?$')
 starts_numeric = re.compile('^[0-9]')
 non_alphanumeric = re.compile('[^0-9a-zA-Z_]')
 
@@ -89,19 +89,20 @@ class Formula(object):
         """
         if family in Formula.IRF_PARAMS:
             out = Formula.IRF_PARAMS[family]
-        elif Formula.is_spline(family):
+        elif Formula.is_nonparametric(family):
             bs = Formula.bases(family)
             instantaneous = Formula.instantaneous(family)
-            out = ['x%s' % i for i in range(2, bs + 1)] + ['y%s' % i for i in range(1 + (1-instantaneous), bs)]
+            # out = ['x%s' % i for i in range(2, bs + 1)] + ['y%s' % i for i in range(1 + (1-instantaneous), bs)]
+            out = ['x%s' % i for i in range(2, bs + 1)] + ['y%s' % i for i in range(1 + (1-instantaneous), bs)] + ['s%s' % i for i in range(1 + (1-instantaneous), bs)]
         else:
             out = []
 
         return out
 
     @staticmethod
-    def is_spline(family):
+    def is_nonparametric(family):
         """
-        Check whether a family name designates a spline kernel.
+        Check whether a family name designates a nonparametric kernel.
 
         :param family: ``str``; name of IRF family
         :return: ``bool``; ``True`` if spline kernel, ``False`` otherwise
@@ -110,7 +111,7 @@ class Formula(object):
         if family is None:
             out = False
         else:
-            out = spline.match(family) is not None
+            out = nonparametric.match(family) is not None
         return out
 
     @staticmethod
@@ -125,8 +126,8 @@ class Formula(object):
         if family is None:
             out = None
         else:
-            if Formula.is_spline(family):
-                order = spline.match(family).group(3)
+            if Formula.is_nonparametric(family):
+                order = nonparametric.match(family).group(3)
                 if order is None:
                     order = Formula.SPLINE_DEFAULT_ORDER
                 out = int(order)
@@ -146,8 +147,8 @@ class Formula(object):
         if family is None:
             out = None
         else:
-            if Formula.is_spline(family):
-                bases = spline.match(family).group(5)
+            if Formula.is_nonparametric(family):
+                bases = nonparametric.match(family).group(5)
                 if bases is None:
                     bases = Formula.SPLINE_DEFAULT_BASES
                 out = int(bases)
@@ -167,8 +168,8 @@ class Formula(object):
         if family is None:
             out = None
         else:
-            if Formula.is_spline(family):
-                roughness_penalty = spline.match(family).group(7)
+            if Formula.is_nonparametric(family):
+                roughness_penalty = nonparametric.match(family).group(7)
                 if roughness_penalty is None:
                     out = Formula.SPLINE_DEFAULT_ROUGHNESS_PENALTY
                 else:
@@ -191,8 +192,8 @@ class Formula(object):
         if family is None:
             out = None
         else:
-            if Formula.is_spline(family):
-                spacing_power = spline.match(family).group(9)
+            if Formula.is_nonparametric(family):
+                spacing_power = nonparametric.match(family).group(9)
                 if spacing_power is None:
                     spacing_power = Formula.SPLINE_DEFAULT_SPACING_POWER
                 out = int(spacing_power)
@@ -213,8 +214,8 @@ class Formula(object):
         if family is None:
             out = None
         else:
-            if Formula.is_spline(family):
-                time_limit = spline.match(family).group(11)
+            if Formula.is_nonparametric(family):
+                time_limit = nonparametric.match(family).group(11)
                 if time_limit is None:
                     out = None
                 else:
@@ -235,8 +236,8 @@ class Formula(object):
         if family is None:
             out = None
         else:
-            if Formula.is_spline(family):
-                instantaneous = spline.match(family).group(13)
+            if Formula.is_nonparametric(family):
+                instantaneous = nonparametric.match(family).group(13)
                 if instantaneous is None:
                     instantaneous = Formula.SPLINE_DEFAULT_BASES
                 out = bool(int(instantaneous))
@@ -738,7 +739,7 @@ class Formula(object):
                         new = self.process_irf(t.args[1], input=s, ops=None, rangf=rangf)
                         new_subterms.append(new)
                 terms.append(new_subterms)
-            elif t.func.id in Formula.IRF_PARAMS.keys() or spline.match(t.func.id) is not None:
+            elif t.func.id in Formula.IRF_PARAMS.keys() or nonparametric.match(t.func.id) is not None:
                 raise ValueError('IRF calls can only occur as inputs to C() in DTSR formula strings')
             else:
                 # Unary transform
@@ -829,7 +830,7 @@ class Formula(object):
 
         if ops is None:
             ops = []
-        assert t.func.id in Formula.IRF_PARAMS.keys() or spline.match(t.func.id) is not None, 'Ill-formed model string: process_irf() called on non-IRF node'
+        assert t.func.id in Formula.IRF_PARAMS.keys() or nonparametric.match(t.func.id) is not None, 'Ill-formed model string: process_irf() called on non-IRF node'
         irf_id = None
         coef_id = None
         cont = False
@@ -2157,7 +2158,7 @@ class IRFNode(object):
         :return: ``bool``; whether node is a spline IRF.
         """
 
-        return Formula.is_spline(self.family)
+        return Formula.is_nonparametric(self.family)
 
     def order(self):
         """
@@ -2360,15 +2361,10 @@ class IRFNode(object):
 
         out = []
         if self.terminal():
-            skip = False
-            parent_is_spline = Formula.is_spline(self.p.family)
-            if parent_is_spline:
-                child_coefs = set()
-                for c in self.p.children:
-                    child_coefs.add(c.coef_id())
-                if len(child_coefs) == 1:
-                    skip = True
-            if self.fixed and not skip:
+            child_coefs = set()
+            for c in self.p.children:
+                child_coefs.add(c.coef_id())
+            if self.fixed:
                 out.append(self.coef_id())
         else:
             for c in self.children:
@@ -2386,7 +2382,7 @@ class IRFNode(object):
 
         out = []
         if self.terminal():
-            if Formula.is_spline(self.p.family):
+            if Formula.is_nonparametric(self.p.family):
                 out.append(self.coef_id())
         else:
             for c in self.children:
@@ -2408,7 +2404,7 @@ class IRFNode(object):
 
         out = []
         if self.terminal():
-            if Formula.is_spline(self.p.family):
+            if Formula.is_nonparametric(self.p.family):
                 child_coefs = set()
                 for c in self.p.children:
                     child_coefs.add(c.coef_id())
@@ -2637,18 +2633,12 @@ class IRFNode(object):
         out = {}
         if self.terminal():
             for gf in self.rangf:
-                skip = False
-                parent_is_spline = Formula.is_spline(self.p.family) and gf in self.p.rangf
-                if parent_is_spline:
-                    child_coefs = set()
-                    for c in self.p.children:
-                        child_coefs.add(c.coef_id())
-                    if len(child_coefs) == 1:
-                        skip = True
-                if not skip:
-                    out[gf] = []
-                    if self.coef_id() not in out[gf]:
-                        out[gf].append(self.coef_id())
+                child_coefs = set()
+                for c in self.p.children:
+                    child_coefs.add(c.coef_id())
+                out[gf] = []
+                if self.coef_id() not in out[gf]:
+                    out[gf].append(self.coef_id())
         for c in self.children:
             c_out = c.coef_by_rangf()
             for gf in c_out:
