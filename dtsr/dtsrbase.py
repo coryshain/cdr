@@ -1862,7 +1862,7 @@ class DTSR(object):
 
                 return out
 
-    def _initialize_spline(self, order, bases, method='spline', instantaneous=True, roughness_penalty=0.):
+    def _initialize_nonparametric_irf(self, order, bases, method='spline', instantaneous=True, roughness_penalty=0.):
         def f(
                 params,
                 order=order,
@@ -1900,7 +1900,7 @@ class DTSR(object):
             bases = Formula.bases(family)
             instantaneous = Formula.instantaneous(family)
             roughness_penalty = Formula.roughness_penalty(family)
-            return self._initialize_spline(
+            return self._initialize_nonparametric_irf(
                 order,
                 bases,
                 instantaneous=instantaneous,
