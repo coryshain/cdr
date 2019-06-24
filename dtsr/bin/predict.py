@@ -128,7 +128,7 @@ if __name__ == '__main__':
             y,
             dtsr_formula_list,
             p.series_ids,
-            filter_map=p.filter_map,
+            filters=p.filter_map,
             compute_history=run_dtsr,
             history_length=p.history_length
         )
@@ -147,7 +147,7 @@ if __name__ == '__main__':
             y,
             dtsr_formula_list,
             p.series_ids,
-            filter_map=p.filter_map,
+            filters=p.filter_map,
             compute_history=run_dtsr,
             history_length=p.history_length
         )

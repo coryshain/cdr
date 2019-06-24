@@ -334,22 +334,37 @@ def corr_dtsr(X_2d, impulse_names, impulse_names_2d, time, time_mask):
     return rho
 
 
-def compute_filters(y, filter_map=None):
+def compute_filters(y, filters=None):
     """
     Compute filters given a filter map.
 
     :param y: ``pandas`` ``DataFrame``; response data.
-    :param filter_map: ``dict``; maps column names to filtering criteria for their values.
+    :param filters: ``list``; list of key-value pairs mapping column names to filtering criteria for their values.
     :return: ``numpy`` vector; boolean mask to use for ``pandas`` subsetting operations.
     """
 
-    if filter_map is None:
+    if filters is None:
         return y
     select = np.ones(len(y), dtype=bool)
-    for field in filter_map:
+    for f in filters:
+        field = f[0]
+        cond = f[1]
         if field in y.columns:
-            for cond in filter_map[field]:
+            select &= compute_filter(y, field, cond)
+        elif field.lower().endswith('nunique'):
+            print(field)
+            name = field[:-7]
+            if name in y.columns:
+                vals, counts = np.unique(y[name][select], return_counts=True)
+                count_map = {}
+                for v, c in zip(vals, counts):
+                    count_map[v] = c
+                y[field] = y[name].map(count_map)
                 select &= compute_filter(y, field, cond)
+            else:
+                sys.stderr.write('Skipping unique-counts filter for column "%s", which was not found in the data...\n' % name)
+        else:
+            sys.stderr.write('Skipping filter for column "%s", which was not found in the data...\n' % field)
     return select
 
 
@@ -481,7 +496,7 @@ def compute_time_mask(X_time, first_obs, last_obs, history_length, int_type='int
     return time_mask
 
 
-def preprocess_data(X, y, formula_list, series_ids, filter_map=None, compute_history=True, history_length=128, debug=False):
+def preprocess_data(X, y, formula_list, series_ids, filters=None, compute_history=True, history_length=128, debug=False):
     """
     Preprocess DTSR data.
 
@@ -489,7 +504,7 @@ def preprocess_data(X, y, formula_list, series_ids, filter_map=None, compute_his
     :param y: ``pandas`` ``DataFrame``; response data.
     :param formula_list: ``list`` of ``Formula``; DTSR formula for which to preprocess data.
     :param series_ids: ``list`` of ``str``; column names whose jointly unique values define unique time series.
-    :param filter_map: ``dict``; map from column names to string representations of filters to apply using those columns' values. See the DTSR config file reference for details.
+    :param filters: ``list``; list of key-value pairs mapping column names to filtering criteria for their values.
     :param compute_history: ``bool``; compute history intervals for each regression target.
     :param history_length: ``int``; maximum number of history observations.
     :param debug: ``bool``; print debugging information
@@ -501,10 +516,10 @@ def preprocess_data(X, y, formula_list, series_ids, filter_map=None, compute_his
     if not isinstance(X, list):
         X = [X]
 
-    if filter_map is None:
+    if filters is None:
         select = np.full((len(y),), True, dtype='bool')
     else:
-        select = compute_filters(y, filter_map)
+        select = compute_filters(y, filters)
         y = y[select]
 
     X_response_aligned_predictor_names = None

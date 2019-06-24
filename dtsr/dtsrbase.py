@@ -475,8 +475,6 @@ def kernel_smooth(c, v, b, epsilon=4 * np.finfo('float32').eps, session=None):
 
                 out = num / denom
 
-                print(out)
-
                 return num / denom
 
     return f
@@ -720,6 +718,21 @@ class DTSR(object):
         for i in range(len(rangf)):
             gf = rangf[i]
             keys = np.sort(y[gf].astype('str').unique())
+            vals, counts = np.unique(y[gf].astype('str'), return_counts=True)
+            sd = counts.std()
+            if np.isfinite(sd):
+                mu = counts.mean()
+                lb = mu - 2 * sd
+                too_few = []
+                for v, c in zip(vals, counts):
+                    if c < lb:
+                        too_few.append((v, c))
+                if len(too_few) > 0:
+                    report = '\nWARNING: Some random effects levels had fewer than 2 standard deviations (%.2f)\nbelow the mean number of data points per level (%.2f):\n' % (sd*2, mu)
+                    for t in too_few:
+                        report += ' ' * 4 + str(t[0]) + ': %d\n' % t[1]
+                    report += 'Having too few instances for some levels can lead to degenerate random effects estimates.\nConsider filtering out these levels.\n\n'
+                    sys.stderr.write(report)
             vals = np.arange(len(keys), dtype=getattr(np, self.int_type))
             rangf_map = pd.DataFrame({'id':vals},index=keys).to_dict()['id']
             self.rangf_map_base.append(rangf_map)
@@ -1389,18 +1402,23 @@ class DTSR(object):
 
                         for param_name in Formula.irf_params(family):
                             if param_name.startswith('x'):
-                                # n = int(param_name[1:])
+                                n = int(param_name[1:])
                                 # default = x_init[n-2]
                                 default = 0.
                                 # lb = 0
                                 lb = None
                             elif param_name.startswith('y'):
+                                n = int(param_name[1:])
+                                if n == 1:
+                                    default = 1
                                 # default = np.sqrt(2 * np.pi)
-                                default = 1
+                                else:
+                                    default = 0
                                 lb = None
                             else:
                                 n = int(param_name[1:])
                                 default = n
+                                # default = 1
                                 lb = 0
                             self._initialize_base_irf_param(param_name, family, default=default, lb=lb)
 
@@ -2471,7 +2489,6 @@ class DTSR(object):
                     )
                 for irf_id in self.irf_params_fixed:
                     family = self.atomic_irf_family_by_name[irf_id]
-                    print(self.atomic_irf_param_trainable_by_family[family][irf_id])
                     for param in self.atomic_irf_param_trainable_by_family[family][irf_id]:
                         param_ix = names2ix(param, Formula.irf_params(family))
                         parameter_table_fixed_keys.append(param + '_' + irf_id)

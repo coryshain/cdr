@@ -10,6 +10,7 @@ This reference assumes familiarity with the INI protocol.
 DTSR configuration files contain the sections and fields described below.
 
 
+
 Section: ``[data]``
 -------------------
 
@@ -33,6 +34,28 @@ The system will treat each unique combination of values in the columns given in 
 - **X_test**: ``str``; Path to test data (impulse matrix)
 - **y_test**: ``str``; Path to test data (response matrix)
 - **history_length**: ``int``; Length of history window in timesteps (default: ``128``)
+- **filters**: ``str``; List of filters to apply to response data (``;``-delimited).
+All variables used in a filter must be contained in the data files indicated by the ``y_*`` parameters in the ``[data]`` section of the config file.
+The variable name is specified as an INI field, and the condition is specified as its value.
+Supported logical operators are ``<``, ``<=``, ``>``, ``>=``, ``==``, and ``!=``.
+For example, to keep only data points for which column ``foo`` is less or equal to 100, the following filter can be added::
+
+    filters = foo <= 100
+
+To keep only data points for which the column ``foo`` does not equal ``bar``, the following filter can be added::
+
+    filters = foo != bar
+
+Filters can be conjunctively combined::
+
+    filters = foo > 5; foo <= 100
+
+Count-based filters are also supported, using the designated ``nunique`` suffix.
+For example, if the column ``subject`` is being used to define a random effects level and we want to exclude all subjects with fewer than 100 data points, this can be accomplished using the following filter::
+
+    filters = subjectsnunique > 100
+
+More complex filtration conditions are not supported automatically in DTSR but can be applied to the data by the user as a preprocess.
 
 Several DTSR utilities (e.g. for prediction and evaluation) are designed to handle train, dev, and test partitions of the input data, but these partitions must be constructed in advance.
 This package also provides a ``partition`` utility that can be used to partition input data by applying modular arithmetic to some subset of the variables in the data.
@@ -60,7 +83,6 @@ For usage details run:
 
 
 
-
 Section: ``[global_settings]``
 ------------------------------
 The ``[global_settings]`` section supports the following fields:
@@ -72,8 +94,6 @@ The ``[global_settings]`` section supports the following fields:
 
 
 
-
-
 Section: ``[dtsr_settings]``
 ----------------------------
 
@@ -82,25 +102,6 @@ The ``[dtsr_settings]`` section supports the following fields:
 .. exec::
     from dtsr.kwargs import dtsr_kwarg_docstring
     print(dtsr_kwarg_docstring())
-
-
-
-Section: ``[filters]``
-----------------------
-
-The optional ``[filters]`` section allows specification of simple data censoring, which will be applied only to the vector of regression targets.
-All variables used in a filter must be contained in the data files indicated by the ``y_*`` parameters in the ``[data]`` section of the config file.
-The variable name is specified as an INI field, and the condition is specified as its value.
-Supported logical operators are ``<``, ``<=``, ``>``, ``>=``, ``==``, and ``!=``.
-For example, to keep only data points for which column ``foo`` is less or equal to 100, the following filter can be added::
-
-    foo = <= 100
-
-To keep only data points for which the column ``foo`` does not equal ``bar``, the following filter can be added::
-
-    foo = != bar
-
-More complex filtration conditions are not supported automatically in DTSR but can be applied to the data by the user as a preprocess.
 
 
 
