@@ -128,9 +128,6 @@ def shifted_gamma_irf(params, integral_ub=None, session=None, epsilon=4*np.finfo
             pdf = dist.prob
             cdf = dist.cdf
 
-            print(integral_ub)
-            print(np.dtype(integral_ub))
-
             if integral_ub is None:
                 ub = 1.
             else:
