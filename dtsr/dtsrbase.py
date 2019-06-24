@@ -128,6 +128,9 @@ def shifted_gamma_irf(params, integral_ub=None, session=None, epsilon=4*np.finfo
             pdf = dist.prob
             cdf = dist.cdf
 
+            print(integral_ub)
+            print(np.dtype(integral_ub))
+
             if integral_ub is None:
                 ub = 1.
             else:
@@ -1807,6 +1810,8 @@ class DTSR(object):
     def _initialize_irf_lambdas(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                integral_ub = self.t_delta_limit.astype(dtype=self.FLOAT_NP)
+
                 def exponential(params):
                     return lambda x: exponential_irf(
                         params,
@@ -1819,7 +1824,7 @@ class DTSR(object):
                 def gamma(params):
                     return lambda x: gamma_irf(
                         params,
-                        integral_ub=self.t_delta_limit,
+                        integral_ub=integral_ub,
                         session=self.sess,
                         epsilon=self.epsilon,
                         validate_irf_args=self.validate_irf_args
@@ -1834,7 +1839,7 @@ class DTSR(object):
                 def shifted_gamma(params):
                     return lambda x: shifted_gamma_irf(
                         params,
-                        integral_ub=self.t_delta_limit,
+                        integral_ub=integral_ub,
                         session=self.sess,
                         epsilon=self.epsilon,
                         validate_irf_args=self.validate_irf_args
@@ -1847,7 +1852,7 @@ class DTSR(object):
                 def normal(params):
                     return lambda x: normal_irf(
                         params,
-                        integral_ub=self.t_delta_limit,
+                        integral_ub=integral_ub,
                         session=self.sess,
                         epsilon=self.epsilon
                     )(x)
@@ -1866,15 +1871,17 @@ class DTSR(object):
                 def emg(params):
                     return lambda x: emg_irf(
                         params,
-                        integral_ub=self.t_delta_limit,
+                        integral_ub=integral_ub,
                         session=self.sess,
                         epsilon=self.epsilon
                     )(x)
 
+                self.irf_lambdas['EMG'] = emg
+
                 def beta_prime(params):
                     return lambda x: beta_prime_irf(
                         params,
-                        integral_ub=self.t_delta_limit,
+                        integral_ub=integral_ub,
                         session=self.sess,
                         epsilon=self.epsilon
                     )(x)
@@ -1884,7 +1891,7 @@ class DTSR(object):
                 def shifted_beta_prime(params):
                     return lambda x: shifted_beta_prime_irf(
                         params,
-                        integral_ub=self.t_delta_limit,
+                        integral_ub=integral_ub,
                         session=self.sess,
                         epsilon=self.epsilon
                     )(x)
@@ -1894,7 +1901,7 @@ class DTSR(object):
                 def double_gamma_1(params):
                     return lambda x: double_gamma_1_irf(
                         params,
-                        integral_ub=self.t_delta_limit,
+                        integral_ub=integral_ub,
                         session=self.sess,
                         epsilon=self.epsilon,
                         validate_irf_args=self.validate_irf_args
@@ -1905,6 +1912,7 @@ class DTSR(object):
                 def double_gamma_2(params):
                     return lambda x: double_gamma_2_irf(
                         params,
+                        integral_ub=integral_ub,
                         session=self.sess,
                         epsilon=self.epsilon,
                         validate_irf_args=self.validate_irf_args
@@ -1915,7 +1923,7 @@ class DTSR(object):
                 def double_gamma_3(params):
                     return lambda x: double_gamma_3_irf(
                         params,
-                        integral_ub=self.t_delta_limit,
+                        integral_ub=integral_ub,
                         session=self.sess,
                         epsilon=self.epsilon,
                         validate_irf_args=self.validate_irf_args
@@ -1926,7 +1934,7 @@ class DTSR(object):
                 def double_gamma_4(params):
                     return lambda x: double_gamma_4_irf(
                         params,
-                        integral_ub=self.t_delta_limit,
+                        integral_ub=integral_ub,
                         session=self.sess,
                         epsilon=self.epsilon,
                         validate_irf_args=self.validate_irf_args
@@ -1937,7 +1945,7 @@ class DTSR(object):
                 def double_gamma_5(params):
                     return lambda x: double_gamma_5_irf(
                         params,
-                        integral_ub=self.t_delta_limit,
+                        integral_ub=integral_ub,
                         session=self.sess,
                         epsilon=self.epsilon,
                         validate_irf_args=self.validate_irf_args
@@ -1963,7 +1971,7 @@ class DTSR(object):
                 method,
                 params,
                 bases,
-                integral_ub=self.t_delta_limit,
+                integral_ub=self.t_delta_limit.astype(dtype=self.FLOAT_NP),
                 order=order,
                 instantaneous=instantaneous,
                 roughness_penalty=roughness_penalty,
