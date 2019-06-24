@@ -65,16 +65,28 @@ def unnormalized_gaussian(mu, sigma2):
     return lambda x: tf.exp(-(x - mu) ** 2 / sigma2)
 
 
-def exponential_irf(params, session=None):
+def exponential_irf(params, integral_ub=None, session=None):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
             beta = params[:, 0:1]
-            pdf = tf.contrib.distributions.Exponential(beta)
-            return lambda x: pdf(x)
+
+            dist = tf.contrib.distributions.Exponential(beta)
+            pdf = dist.prob
+            cdf = dist.cdf
+
+            if integral_ub is None:
+                ub = None
+            else:
+                ub = cdf(integral_ub)
+
+            if integral_ub is None:
+                return lambda x, pdf=pdf: pdf(x)
+            else:
+                return lambda x, pdf=pdf, cdf=cdf, ub=ub: pdf(x) / ub
 
 
-def gamma_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
+def gamma_irf(params, integral_ub=None, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
@@ -87,11 +99,20 @@ def gamma_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_
                 validate_args=validate_irf_args
             )
             pdf = dist.prob
-            
-            return lambda x: pdf(x + epsilon)
+            cdf = dist.cdf
+
+            if integral_ub is None:
+                ub = None
+            else:
+                ub = cdf(integral_ub)
+
+            if integral_ub is None:
+                return lambda x, pdf=pdf, epsilon=epsilon: pdf(x + epsilon)
+            else:
+                return lambda x, pdf=pdf, cdf=cdf, ub=ub, epsilon=epsilon: pdf(x + epsilon) / ub
 
 
-def shifted_gamma_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
+def shifted_gamma_irf(params, integral_ub=None, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
@@ -106,11 +127,16 @@ def shifted_gamma_irf(params, session=None, epsilon=4*np.finfo('float32').eps, v
             )
             pdf = dist.prob
             cdf = dist.cdf
-            
-            return lambda x: pdf(x - delta + epsilon) / (1 - cdf(- delta + epsilon) + epsilon)
+
+            if integral_ub is None:
+                ub = 1
+            else:
+                ub = cdf(integral_ub)
+
+            return lambda x, pdf=pdf, cdf=cdf, delta=delta, ub=ub, epsilon=epsilon: pdf(x - delta + epsilon) / (ub - cdf(- delta + epsilon) + epsilon)
 
 
-def normal_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
+def normal_irf(params, integral_ub=None, session=None, epsilon=4*np.finfo('float32').eps):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
@@ -123,8 +149,13 @@ def normal_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
             )
             pdf = dist.prob
             cdf = dist.cdf
-            
-            return lambda x: pdf(x) / (1 - cdf(0.) + epsilon)
+
+            if integral_ub is None:
+                ub = 1
+            else:
+                ub = cdf(integral_ub)
+                
+            return lambda x, pdf=pdf, cdf=cdf, ub=ub: pdf(x) / (ub - cdf(0.) + epsilon)
 
 
 def skew_normal_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
@@ -134,11 +165,12 @@ def skew_normal_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
             mu = params[:, 0:1]
             sigma = params[:, 1:2]
             alpha = params[:, 2:3]
+            
             stdnorm = tf.contrib.distributions.Normal(loc=0., scale=1.)
             stdnorm_pdf = stdnorm.prob
             stdnorm_cdf = stdnorm.cdf
 
-            return lambda x: (stdnorm_pdf((x - mu) / sigma) * stdnorm_cdf(alpha * (x - mu) / sigma))
+            return lambda x, mu=mu, sigma=sigma, alpha=alpha, pdf=stdnorm_pdf, cdf=stdnorm_cdf: (stdnorm_pdf((x - mu) / sigma) * stdnorm_cdf(alpha * (x - mu) / sigma))
 
 
 def emg_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
@@ -155,11 +187,11 @@ def emg_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
                     scale=L*sigma
                 )(L * (x - mu))
 
-            return lambda x: L / 2 * tf.exp(0.5 * L * (2. * mu + L * sigma ** 2. - 2. * x)) * tf.erfc(
-                (mu + L * sigma ** 2 - x) / (tf.sqrt(2.) * sigma)) / (1 - cdf(0) + epsilon)
+            return lambda x, L=L, mu=mu, sigma=sigma: L / 2 * tf.exp(0.5 * L * (2. * mu + L * sigma ** 2. - 2. * x)) * tf.erfc(
+                (mu + L * sigma ** 2 - x) / (tf.sqrt(2.) * sigma))
 
 
-def beta_prime_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
+def beta_prime_irf(params, integral_ub=None, session=None, epsilon=4*np.finfo('float32').eps):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
@@ -168,11 +200,16 @@ def beta_prime_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
 
             def cdf(x):
                 return tf.betainc(alpha, beta, x / (1+x)) * tf.exp(tf.lbeta(alpha, beta))
+            
+            if integral_ub is None:
+                ub = 1
+            else:
+                ub = cdf(integral_ub)
 
-            return lambda x: ((x + epsilon) ** (alpha - 1.) * (1. + (x + epsilon)) ** (-alpha - beta)) / (1 - cdf(epsilon) + epsilon)
+            return lambda x, alpha=alpha, beta=beta, ub=ub, epsilon=epsilon: ((x + epsilon) ** (alpha - 1.) * (1. + (x + epsilon)) ** (-alpha - beta)) / (ub - cdf(epsilon) + epsilon)
 
 
-def shifted_beta_prime_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
+def shifted_beta_prime_irf(params, integral_ub=None, session=None, epsilon=4*np.finfo('float32').eps):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
@@ -182,99 +219,151 @@ def shifted_beta_prime_irf(params, session=None, epsilon=4*np.finfo('float32').e
 
             def cdf(x):
                 return tf.betainc(alpha, beta, (x-delta) / (1+x-delta)) * tf.exp(tf.lbeta(alpha, beta))
+            
+            if integral_ub is None:
+                ub = 1
+            else:
+                ub = cdf(integral_ub)
 
-            return lambda x: ((x - delta + epsilon) ** (alpha - 1) * (1 + (x - delta + epsilon)) ** (-alpha - beta)) / (1 - cdf(-delta + epsilon) + epsilon)
+            return lambda x, alpha=alpha, beta=beta, delta=delta, ub=ub, epsilon=epsilon: ((x - delta + epsilon) ** (alpha - 1) * (1 + (x - delta + epsilon)) ** (-alpha - beta)) / (ub - cdf(-delta + epsilon) + epsilon)
 
 
-def double_gamma_1_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
+def double_gamma_1_irf(params, integral_ub=None, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
-            beta = params[:, 0:1]
+            alpha_main = 6.
+            alpha_undershoot = 16.
+            beta_main = params[:, 0:1]
+            beta_undershoot = beta_main
             c = 1. / 6.
 
-            pdf_main = tf.contrib.distributions.Gamma(
-                concentration=6.,
-                rate=beta,
+            dist_main = tf.contrib.distributions.Gamma(
+                concentration=alpha_main,
+                rate=beta_main,
                 validate_args=validate_irf_args
-            ).prob
-            pdf_undershoot = tf.contrib.distributions.Gamma(
-                concentration=16.,
-                rate=beta,
+            )
+            pdf_main = dist_main.prob
+            cdf_main = dist_main.cdf
+            dist_undershoot = tf.contrib.distributions.Gamma(
+                concentration=alpha_undershoot,
+                rate=beta_undershoot,
                 validate_args=validate_irf_args
-            ).prob
+            )
+            pdf_undershoot = dist_undershoot.prob
+            cdf_undershoot = dist_undershoot.cdf
 
-            return lambda x: (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (1 - c)
+            if integral_ub is None:
+                denom = cdf_main(integral_ub) - c * cdf_undershoot(integral_ub)
+            else:
+                denom = 1 - c
+
+            return lambda x, pdf_main=pdf_main, pdf_undershoot=pdf_undershoot, denom=denom, epsilon=epsilon: (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / denom
 
 
-def double_gamma_2_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
+def double_gamma_2_irf(params, integral_ub=None, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
-            alpha = params[:, 0:1]
-            beta = params[:, 1:2]
+            alpha_main = params[:, 0:1]
+            alpha_undershoot = alpha_main + 10.
+            beta_main = params[:, 1:2]
+            beta_undershoot = beta_main
             c = 1. / 6.
 
-            pdf_main = tf.contrib.distributions.Gamma(
-                concentration=alpha,
-                rate=beta,
+            dist_main = tf.contrib.distributions.Gamma(
+                concentration=alpha_main,
+                rate=beta_main,
                 validate_args=validate_irf_args
-            ).prob
-            pdf_undershoot = tf.contrib.distributions.Gamma(
-                concentration=alpha + 10,
-                rate=beta,
+            )
+            pdf_main = dist_main.prob
+            cdf_main = dist_main.cdf
+            dist_undershoot = tf.contrib.distributions.Gamma(
+                concentration=alpha_undershoot,
+                rate=beta_undershoot,
                 validate_args=validate_irf_args
-            ).prob
+            )
+            pdf_undershoot = dist_undershoot.prob
+            cdf_undershoot = dist_undershoot.cdf
 
-            return lambda x: (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (1 - c)
+            if integral_ub is None:
+                denom = cdf_main(integral_ub) - c * cdf_undershoot(integral_ub)
+            else:
+                denom = 1 - c
+
+            return lambda x, pdf_main=pdf_main, pdf_undershoot=pdf_undershoot, denom=denom, epsilon=epsilon: (pdf_main(
+                x + epsilon) - c * pdf_undershoot(x + epsilon)) / denom
 
 
-def double_gamma_3_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
+def double_gamma_3_irf(params, integral_ub=None, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
-            alpha = params[:, 0:1]
-            beta = params[:, 1:2]
+            alpha_main = params[:, 0:1]
+            alpha_undershoot = alpha_main + 10.
+            beta_main = params[:, 1:2]
+            beta_undershoot = beta_main
             c = params[:, 2:3]
 
-            pdf_main = tf.contrib.distributions.Gamma(
-                concentration=alpha,
-                rate=beta,
+            dist_main = tf.contrib.distributions.Gamma(
+                concentration=alpha_main,
+                rate=beta_main,
                 validate_args=validate_irf_args
-            ).prob
-            pdf_undershoot = tf.contrib.distributions.Gamma(
-                concentration=alpha + 10,
-                rate=beta,
+            )
+            pdf_main = dist_main.prob
+            cdf_main = dist_main.cdf
+            dist_undershoot = tf.contrib.distributions.Gamma(
+                concentration=alpha_undershoot,
+                rate=beta_undershoot,
                 validate_args=validate_irf_args
-            ).prob
+            )
+            pdf_undershoot = dist_undershoot.prob
+            cdf_undershoot = dist_undershoot.cdf
 
-            return lambda x: (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (1 - c)
+            if integral_ub is None:
+                denom = cdf_main(integral_ub) - c * cdf_undershoot(integral_ub)
+            else:
+                denom = 1 - c
+
+            return lambda x, pdf_main=pdf_main, pdf_undershoot=pdf_undershoot, denom=denom, epsilon=epsilon: (pdf_main(
+                x + epsilon) - c * pdf_undershoot(x + epsilon)) / denom
 
 
-def double_gamma_4_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
+def double_gamma_4_irf(params, integral_ub=None, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
             alpha_main = params[:, 0:1]
             alpha_undershoot = params[:, 1:2]
-            beta = params[:, 2:3]
+            beta_main = params[:, 2:3]
+            beta_undershoot = beta_main
             c = params[:, 3:4]
 
-            pdf_main = tf.contrib.distributions.Gamma(
+            dist_main = tf.contrib.distributions.Gamma(
                 concentration=alpha_main,
-                rate=beta,
+                rate=beta_main,
                 validate_args=validate_irf_args
-            ).prob
-            pdf_undershoot = tf.contrib.distributions.Gamma(
+            )
+            pdf_main = dist_main.prob
+            cdf_main = dist_main.cdf
+            dist_undershoot = tf.contrib.distributions.Gamma(
                 concentration=alpha_undershoot,
-                rate=beta,
+                rate=beta_undershoot,
                 validate_args=validate_irf_args
-            ).prob
+            )
+            pdf_undershoot = dist_undershoot.prob
+            cdf_undershoot = dist_undershoot.cdf
 
-            return lambda x: (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (1 - c)
+            if integral_ub is None:
+                denom = cdf_main(integral_ub) - c * cdf_undershoot(integral_ub)
+            else:
+                denom = 1 - c
+
+            return lambda x, pdf_main=pdf_main, pdf_undershoot=pdf_undershoot, denom=denom, epsilon=epsilon: (pdf_main(
+                x + epsilon) - c * pdf_undershoot(x + epsilon)) / denom
 
 
-def double_gamma_5_irf(params, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
+def double_gamma_5_irf(params, integral_ub=None, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
@@ -284,18 +373,28 @@ def double_gamma_5_irf(params, session=None, epsilon=4*np.finfo('float32').eps, 
             beta_undershoot = params[:, 3:4]
             c = params[:, 4:5]
 
-            pdf_main = tf.contrib.distributions.Gamma(
+            dist_main = tf.contrib.distributions.Gamma(
                 concentration=alpha_main,
                 rate=beta_main,
                 validate_args=validate_irf_args
-            ).prob
-            pdf_undershoot = tf.contrib.distributions.Gamma(
+            )
+            pdf_main = dist_main.prob
+            cdf_main = dist_main.cdf
+            dist_undershoot = tf.contrib.distributions.Gamma(
                 concentration=alpha_undershoot,
                 rate=beta_undershoot,
                 validate_args=validate_irf_args
-            ).prob
+            )
+            pdf_undershoot = dist_undershoot.prob
+            cdf_undershoot = dist_undershoot.cdf
 
-            return lambda x: (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (1 - c)
+            if integral_ub is None:
+                denom = cdf_main(integral_ub) - c * cdf_undershoot(integral_ub)
+            else:
+                denom = 1 - c
+
+            return lambda x, pdf_main=pdf_main, pdf_undershoot=pdf_undershoot, denom=denom, epsilon=epsilon: (pdf_main(
+                x + epsilon) - c * pdf_undershoot(x + epsilon)) / denom
 
 
 def piecewise_linear_interpolant(c, v, session=None):
@@ -475,12 +574,12 @@ def kernel_smooth(c, v, b, epsilon=4 * np.finfo('float32').eps, session=None):
 
                 out = num / denom
 
-                return num / denom
+                return out
 
     return f
 
 
-def summed_gaussians(c, v, b, session=None):
+def summed_gaussians(c, v, b, integral_ub=None, session=None):
     def f(x, c=c, v=v, b=b, session=session):
         session = get_session(session)
         with session.as_default():
@@ -515,8 +614,13 @@ def summed_gaussians(c, v, b, session=None):
                     scale=_b,
                 )
 
+                if integral_ub is None:
+                    ub = 1.
+                else:
+                    ub = dist.cdf(integral_ub)
+
                 unnormalized = tf.reduce_sum(dist.prob(_x) * _v, axis=-2)
-                normalization_constant = tf.reduce_sum((1. - dist.cdf(0.)) * _v, axis=-2)
+                normalization_constant = tf.reduce_sum((ub - dist.cdf(0.)) * _v, axis=-2)
                 normalized = unnormalized / normalization_constant
 
                 return normalized
@@ -528,6 +632,7 @@ def nonparametric_smooth(
         method,
         params,
         bases,
+        integral_ub=None,
         support=None,
         epsilon=4 * np.finfo('float32').eps,
         int_type=None,
@@ -599,7 +704,7 @@ def nonparametric_smooth(
                     f = normalize_irf(f, support, session=session, epsilon=epsilon)
 
                 elif method.lower() == 'summed_gaussians':
-                    f = summed_gaussians(c, v, b, session=session)
+                    f = summed_gaussians(c, v, b, integral_ub=integral_ub, session=session)
 
                 else:
                     raise ValueError('Unrecognized non-parametric IRF type: %s' % method)
@@ -703,7 +808,7 @@ class DTSR(object):
             t_delta = (y.time - X_time[first_obs_cur])
             t_deltas.append(t_delta)
         t_deltas = np.concatenate(t_deltas, axis=0)
-        self.t_delta_limit = np.percentile(t_deltas, 90)
+        self.t_delta_limit = np.percentile(t_deltas, 75)
         self.max_tdelta = t_deltas.max()
 
         if self.pc:
@@ -1709,6 +1814,7 @@ class DTSR(object):
                 def gamma(params):
                     return lambda x: gamma_irf(
                         params,
+                        integral_ub=self.t_delta_limit,
                         session=self.sess,
                         epsilon=self.epsilon,
                         validate_irf_args=self.validate_irf_args
@@ -1723,6 +1829,7 @@ class DTSR(object):
                 def shifted_gamma(params):
                     return lambda x: shifted_gamma_irf(
                         params,
+                        integral_ub=self.t_delta_limit,
                         session=self.sess,
                         epsilon=self.epsilon,
                         validate_irf_args=self.validate_irf_args
@@ -1735,6 +1842,7 @@ class DTSR(object):
                 def normal(params):
                     return lambda x: normal_irf(
                         params,
+                        integral_ub=self.t_delta_limit,
                         session=self.sess,
                         epsilon=self.epsilon
                     )(x)
@@ -1757,11 +1865,12 @@ class DTSR(object):
                         epsilon=self.epsilon
                     )(x)
 
-                self.irf_lambdas['EMG'] = emg
+                self.irf_lambdas['EMG'] = normalize_irf(emg, self.support, session=self.sess, epsilon=self.epsilon)
 
                 def beta_prime(params):
                     return lambda x: beta_prime_irf(
                         params,
+                        integral_ub=self.t_delta_limit,
                         session=self.sess,
                         epsilon=self.epsilon
                     )(x)
@@ -1771,6 +1880,7 @@ class DTSR(object):
                 def shifted_beta_prime(params):
                     return lambda x: shifted_beta_prime_irf(
                         params,
+                        integral_ub=self.t_delta_limit,
                         session=self.sess,
                         epsilon=self.epsilon
                     )(x)
@@ -1780,6 +1890,7 @@ class DTSR(object):
                 def double_gamma_1(params):
                     return lambda x: double_gamma_1_irf(
                         params,
+                        integral_ub=self.t_delta_limit,
                         session=self.sess,
                         epsilon=self.epsilon,
                         validate_irf_args=self.validate_irf_args
@@ -1800,6 +1911,7 @@ class DTSR(object):
                 def double_gamma_3(params):
                     return lambda x: double_gamma_3_irf(
                         params,
+                        integral_ub=self.t_delta_limit,
                         session=self.sess,
                         epsilon=self.epsilon,
                         validate_irf_args=self.validate_irf_args
@@ -1810,6 +1922,7 @@ class DTSR(object):
                 def double_gamma_4(params):
                     return lambda x: double_gamma_4_irf(
                         params,
+                        integral_ub=self.t_delta_limit,
                         session=self.sess,
                         epsilon=self.epsilon,
                         validate_irf_args=self.validate_irf_args
@@ -1820,6 +1933,7 @@ class DTSR(object):
                 def double_gamma_5(params):
                     return lambda x: double_gamma_5_irf(
                         params,
+                        integral_ub=self.t_delta_limit,
                         session=self.sess,
                         epsilon=self.epsilon,
                         validate_irf_args=self.validate_irf_args
@@ -1845,6 +1959,7 @@ class DTSR(object):
                 method,
                 params,
                 bases,
+                integral_ub=self.t_delta_limit,
                 order=order,
                 instantaneous=instantaneous,
                 roughness_penalty=roughness_penalty,
