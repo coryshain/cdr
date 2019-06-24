@@ -54,13 +54,16 @@ class Config(object):
         self.modulus = data.getint('modulus', 4)
         split_ids = data.get('split_ids', '')
         self.split_ids = split_ids.strip().split()
-        filters = data.get('filters', '')
-        filters = filters.split(';')
-        for i in range(len(filters)):
-            f = filters[i].strip().split()
-            k = f[0]
-            v = ' '.join(f[1:])
-            filters[i] = (k, v)
+        filters = data.get('filters', None)
+        if filters is None:
+            filters = []
+        else:
+            filters = filters.split(';')
+            for i in range(len(filters)):
+                f = filters[i].strip().split()
+                k = f[0]
+                v = ' '.join(f[1:])
+                filters[i] = (k, v)
         self.filters = filters
 
         self.history_length = data.getint('history_length', 128)
