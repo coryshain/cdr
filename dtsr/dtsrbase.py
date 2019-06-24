@@ -129,7 +129,7 @@ def shifted_gamma_irf(params, integral_ub=None, session=None, epsilon=4*np.finfo
             cdf = dist.cdf
 
             if integral_ub is None:
-                ub = 1
+                ub = 1.
             else:
                 ub = cdf(integral_ub)
 
@@ -151,7 +151,7 @@ def normal_irf(params, integral_ub=None, session=None, epsilon=4*np.finfo('float
             cdf = dist.cdf
 
             if integral_ub is None:
-                ub = 1
+                ub = 1.
             else:
                 ub = cdf(integral_ub)
                 
@@ -173,7 +173,7 @@ def skew_normal_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
             return lambda x, mu=mu, sigma=sigma, alpha=alpha, pdf=stdnorm_pdf, cdf=stdnorm_cdf: (stdnorm_pdf((x - mu) / sigma) * stdnorm_cdf(alpha * (x - mu) / sigma))
 
 
-def emg_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
+def emg_irf(params, integral_ub=None, session=None, epsilon=4*np.finfo('float32').eps):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
@@ -187,8 +187,13 @@ def emg_irf(params, session=None, epsilon=4*np.finfo('float32').eps):
                     scale=L*sigma
                 )(L * (x - mu))
 
-            return lambda x, L=L, mu=mu, sigma=sigma: L / 2 * tf.exp(0.5 * L * (2. * mu + L * sigma ** 2. - 2. * x)) * tf.erfc(
-                (mu + L * sigma ** 2 - x) / (tf.sqrt(2.) * sigma))
+            if integral_ub is None:
+                ub = 1.
+            else:
+                ub = cdf(integral_ub)
+
+            return lambda x, L=L, mu=mu, sigma=sigma, ub=ub, cdf=cdf, epsilon=epsilon: (L / 2 * tf.exp(0.5 * L * (2. * mu + L * sigma ** 2. - 2. * x)) * tf.erfc(
+                (mu + L * sigma ** 2 - x) / (tf.sqrt(2.) * sigma))) / (ub - cdf(0.) + epsilon)
 
 
 def beta_prime_irf(params, integral_ub=None, session=None, epsilon=4*np.finfo('float32').eps):
@@ -1861,11 +1866,10 @@ class DTSR(object):
                 def emg(params):
                     return lambda x: emg_irf(
                         params,
+                        integral_ub=self.t_delta_limit
                         session=self.sess,
                         epsilon=self.epsilon
                     )(x)
-
-                self.irf_lambdas['EMG'] = normalize_irf(emg, self.support, session=self.sess, epsilon=self.epsilon)
 
                 def beta_prime(params):
                     return lambda x: beta_prime_irf(

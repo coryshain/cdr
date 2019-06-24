@@ -352,7 +352,6 @@ def compute_filters(y, filters=None):
         if field in y.columns:
             select &= compute_filter(y, field, cond)
         elif field.lower().endswith('nunique'):
-            print(field)
             name = field[:-7]
             if name in y.columns:
                 vals, counts = np.unique(y[name][select], return_counts=True)
