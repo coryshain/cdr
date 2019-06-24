@@ -1866,7 +1866,7 @@ class DTSR(object):
                 def emg(params):
                     return lambda x: emg_irf(
                         params,
-                        integral_ub=self.t_delta_limit
+                        integral_ub=self.t_delta_limit,
                         session=self.sess,
                         epsilon=self.epsilon
                     )(x)
