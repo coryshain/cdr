@@ -298,9 +298,9 @@ def double_gamma_5_irf(params, session=None, epsilon=4*np.finfo('float32').eps, 
             return lambda x: (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (1 - c)
 
 
-def piecewise_linear_interpolant(c, y, session=None):
+def piecewise_linear_interpolant(c, v, session=None):
     # c: knot locations, shape=[B, Q, K], B = batch, Q = query points or 1, K = n knots
-    # y: knot values, shape identical to c
+    # v: knot values, shape identical to c
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
@@ -313,20 +313,20 @@ def piecewise_linear_interpolant(c, y, session=None):
             elif len(c.shape) > 3:
                 # Too many dims
                 raise ValueError('Rank of knot location tensor c to piecewise resampler must be >= 1 and <= 3. Saw "%d"' % len(c.shape))
-            if len(y.shape) == 1:
+            if len(v.shape) == 1:
                 # No batch or query dim
-                y = y[None, None, ...]
-            elif len(y.shape) == 2:
+                v = v[None, None, ...]
+            elif len(v.shape) == 2:
                 # No query dim
-                y = tf.expand_dims(y, axis=-2)
-            elif len(y.shape) > 3:
+                v = tf.expand_dims(v, axis=-2)
+            elif len(v.shape) > 3:
                 # Too many dims
-                raise ValueError('Rank of knot amplitude tensor c to piecewise resampler must be >= 1 and <= 3. Saw "%d"' % len(y.shape))
+                raise ValueError('Rank of knot amplitude tensor c to piecewise resampler must be >= 1 and <= 3. Saw "%d"' % len(v.shape))
 
             c_t = c[..., 1:]
             c_tm1 = c[..., :-1]
-            y_t = y[..., 1:]
-            y_tm1 = y[..., :-1]
+            y_t = v[..., 1:]
+            y_tm1 = v[..., :-1]
 
             # Compute intercepts a_ and slopes b_ of line segments
             a_ = (y_t - y_tm1) / (c_t - c_tm1)
@@ -361,7 +361,7 @@ def piecewise_linear_interpolant(c, y, session=None):
             return out
 
 
-def spline(c, y, dynamic_batch_dim, order, roughness_penalty=0., int_type=None, session=None):
+def spline(c, v, dynamic_batch_dim, order, roughness_penalty=0., int_type=None, session=None):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
@@ -391,23 +391,23 @@ def spline(c, y, dynamic_batch_dim, order, roughness_penalty=0., int_type=None, 
 
                 for i in range(len(c)):
                     if order == 1:
-                        interp = piecewise_linear_interpolant(c[i], y[i], session=session)(x_)
+                        interp = piecewise_linear_interpolant(c[i], v[i], session=session)(x_)
                     else:
                         c_ = c[i]
                         c_batch = tf.shape(c_)[0]
                         c_tile = tf.cast(batch_max / c_batch, dtype=INT_TF)
                         c_ = tf.tile(c_[..., None], [c_tile, 1, 1])
 
-                        y_ = y[i]
-                        y_batch = tf.shape(y_)[0]
+                        v_ = v[i]
+                        y_batch = tf.shape(v_)[0]
                         y_tile = tf.cast(batch_max / y_batch, dtype=INT_TF)
-                        y_ = tf.tile(y_[..., None], [y_tile, 1, 1])
+                        v_ = tf.tile(v_[..., None], [y_tile, 1, 1])
 
                         interp = tf.where(
                             x_ <= c_[:,-1:],
                             interpolate_spline(
                                 c_,
-                                y_,
+                                v_,
                                 x_,
                                 order,
                                 regularization_weight=roughness_penalty
@@ -450,14 +450,18 @@ def kernel_smooth(c, v, b, epsilon=4 * np.finfo('float32').eps, session=None):
 
                 _c = c
                 _b = b
+                _v = v
 
                 while len(_c.shape) < len(x.shape):
                     _c = _c[None, ...]
                 while len(_b.shape) < len(x.shape):
                     _b = _b[None, ...]
+                while len(_v.shape) < len(x.shape):
+                    _v = _v[None, ...]
 
                 _c = tf.expand_dims(_c, axis=-3)
                 _b = tf.expand_dims(_b, axis=-3)
+                _v = tf.expand_dims(_v, axis=-3)
 
                 dist = tf.contrib.distributions.Normal(
                     loc=_c,
@@ -466,13 +470,12 @@ def kernel_smooth(c, v, b, epsilon=4 * np.finfo('float32').eps, session=None):
 
                 r = dist.prob(_x - _c)
 
-                _v = v
-                while len(_v.shape) < len(_x.shape):
-                    _v = _v[None, ...]
-                _v = tf.expand_dims(_v, axis=-3)
-
                 num = tf.reduce_sum(r * _v, axis=-2)
                 denom = tf.reduce_sum(r, axis=-2) + epsilon
+
+                out = num / denom
+
+                print(out)
 
                 return num / denom
 
@@ -507,18 +510,18 @@ def summed_gaussians(c, v, b, session=None):
                 _b = tf.expand_dims(_b, axis=-3)
                 _v = tf.expand_dims(_v, axis=-3)
 
+                _v *= _b * np.sqrt(2 * np.pi) # Rescale by Gaussian normalization constant
+
                 dist = tf.contrib.distributions.Normal(
                     loc=_c,
                     scale=_b,
                 )
 
-                def sum_gaussians(x):
-                    unnormalized = tf.reduce_sum(dist.prob(x) * _v, axis=-2)
-                    normalization_constant = tf.reduce_sum(1. - dist.cdf(0.), axis=-2)
-                    normalized = unnormalized / normalization_constant
-                    return normalized
+                unnormalized = tf.reduce_sum(dist.prob(_x) * _v, axis=-2)
+                normalization_constant = tf.reduce_sum((1. - dist.cdf(0.)) * _v, axis=-2)
+                normalized = unnormalized / normalization_constant
 
-                return sum_gaussians(_x)
+                return normalized
 
     return f
 
@@ -555,7 +558,7 @@ def nonparametric_smooth(
             c = params[:, 0:bases - 1]
 
             # Build values at control points
-            y = params[:, bases - 1:2 * (bases - 1)]
+            v = params[:, bases - 1:2 * (bases - 1)]
 
             if method.lower() == 'spline': # Pad appropriately
                 c_endpoint_shape = [tf.shape(c)[0], 1, tf.shape(params)[2]]
@@ -566,19 +569,19 @@ def nonparametric_smooth(
                 c = tf.unstack(c, axis=2)
 
                 if not kwargs['instantaneous']:
-                    y = [zero] + y[:, :-1]
-                y = tf.concat(y, axis=1)
-                y = tf.unstack(y, axis=2)
+                    v = [zero] + v[:, :-1]
+                v = tf.concat(v, axis=1)
+                v = tf.unstack(v, axis=2)
 
                 assert len(c) == len(
-                    y), 'c and y coordinates of spline unpacked into lists of different lengths (%s and %s, respectively)' % (
-                    len(c), len(y))
+                    v), 'c and y coordinates of spline unpacked into lists of different lengths (%s and %s, respectively)' % (
+                    len(c), len(v))
 
                 dynamic_batch_dim = tf.shape(params)[0]
 
                 f = spline(
                     c,
-                    y,
+                    v,
                     dynamic_batch_dim,
                     kwargs['order'],
                     roughness_penalty=kwargs['roughness_penalty'],
@@ -593,12 +596,12 @@ def nonparametric_smooth(
                 # Build scales at control points
                 b = params[:, 2 * (bases - 1):]
                 if method.lower() == 'kernel_smooth':
-                    f = kernel_smooth(c, y, b, epsilon=epsilon, session=session)
+                    f = kernel_smooth(c, v, b, epsilon=epsilon, session=session)
                     assert support is not None, 'Argument ``support`` must be provided for kernel smooth IRFS'
                     f = normalize_irf(f, support, session=session, epsilon=epsilon)
 
                 elif method.lower() == 'summed_gaussians':
-                    f = summed_gaussians(c, y, b, session=session)
+                    f = summed_gaussians(c, v, b, session=session)
 
                 else:
                     raise ValueError('Unrecognized non-parametric IRF type: %s' % method)
@@ -1375,7 +1378,8 @@ class DTSR(object):
                     elif Formula.is_nonparametric(family):
                         bases = Formula.bases(family)
                         spacing_power = Formula.spacing_power(family)
-                        x_init = np.cumsum(np.ones(bases-1)) ** spacing_power
+                        # x_init = np.cumsum(np.ones(bases-1))
+                        x_init = np.concatenate([[0.], np.cumsum(np.ones(bases-2)) ** spacing_power], axis=0)
 
                         time_limit = Formula.time_limit(family)
                         if time_limit is None:
@@ -1385,14 +1389,18 @@ class DTSR(object):
 
                         for param_name in Formula.irf_params(family):
                             if param_name.startswith('x'):
-                                n = int(param_name[1:])
-                                default = x_init[n-2]
-                                lb = 0
+                                # n = int(param_name[1:])
+                                # default = x_init[n-2]
+                                default = 0.
+                                # lb = 0
+                                lb = None
                             elif param_name.startswith('y'):
-                                default = np.sqrt(2 * np.pi)
+                                # default = np.sqrt(2 * np.pi)
+                                default = 1
                                 lb = None
                             else:
-                                default = 1
+                                n = int(param_name[1:])
+                                default = n
                                 lb = 0
                             self._initialize_base_irf_param(param_name, family, default=default, lb=lb)
 
@@ -1801,68 +1809,7 @@ class DTSR(object):
 
                 self.irf_lambdas['HRFDoubleGamma5'] = double_gamma_5
 
-    def _get_piecewise_linear_resampler(self, c, y):
-        # c: knot locations, shape=[B, Q, K], B = batch, Q = query points or 1, K = n knots
-        # y: knot values, shape identical to c
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                if len(c.shape) == 1:
-                    # No batch or query dim
-                    c = c[None, None, ...]
-                elif len(c.shape) == 2:
-                    # No query dim
-                    c = tf.expand_dims(c, axis=-2)
-                elif len(c.shape) > 3:
-                    # Too many dims
-                    raise ValueError('Rank of knot location tensor c to piecewise resampler must be >= 1 and <= 3. Saw "%d"' % len(c.shape))
-                if len(y.shape) == 1:
-                    # No batch or query dim
-                    y = y[None, None, ...]
-                elif len(y.shape) == 2:
-                    # No query dim
-                    y = tf.expand_dims(y, axis=-2)
-                elif len(y.shape) > 3:
-                    # Too many dims
-                    raise ValueError('Rank of knot amplitude tensor c to piecewise resampler must be >= 1 and <= 3. Saw "%d"' % len(y.shape))
-
-                c_t = c[..., 1:]
-                c_tm1 = c[..., :-1]
-                y_t = y[..., 1:]
-                y_tm1 = y[..., :-1]
-
-                # Compute intercepts a_ and slopes b_ of line segments
-                a_ = (y_t - y_tm1) / (c_t - c_tm1)
-                valid = c_t > c_tm1
-                a_ = tf.where(valid, a_, tf.zeros_like(a_))
-                b_ = y_t - a_ * c_t
-
-                # Handle points beyond final knot location (0 response)
-                a_ = tf.concat([a_, tf.zeros_like(a_[..., -1:])], axis=-1)
-                b_ = tf.concat([b_, tf.zeros_like(b_[..., -1:])], axis=-1)
-                c_ = tf.concat([c, tf.ones_like(c[..., -1:]) * np.inf], axis=-1)
-
-                def make_piecewise(a, b, c):
-                    def select_segment(x, c):
-                        c_t = c[..., 1:]
-                        c_tm1 = c[..., :-1]
-                        select = tf.cast(tf.logical_and(x >= c_tm1, x < c_t), dtype=self.FLOAT_TF)
-                        return select
-
-                    def piecewise(x):
-                        select = select_segment(x, c)
-                        # a_select = tf.reduce_sum(a * select, axis=-1, keepdims=True)
-                        # b_select = tf.reduce_sum(b * select, axis=-1, keepdims=True)
-                        # response = a_select * x + b_select
-                        response = tf.reduce_sum((a * x + b) * select, axis=-1, keepdims=True)
-                        return response
-
-                    return piecewise
-
-                out = make_piecewise(a_, b_, c_)
-
-                return out
-
-    def _initialize_nonparametric_irf(self, order, bases, method='spline', instantaneous=True, roughness_penalty=0.):
+    def _initialize_nonparametric_irf(self, order, bases, method='summed_gaussians', instantaneous=True, roughness_penalty=0.):
         def f(
                 params,
                 order=order,
@@ -2524,6 +2471,7 @@ class DTSR(object):
                     )
                 for irf_id in self.irf_params_fixed:
                     family = self.atomic_irf_family_by_name[irf_id]
+                    print(self.atomic_irf_param_trainable_by_family[family][irf_id])
                     for param in self.atomic_irf_param_trainable_by_family[family][irf_id]:
                         param_ix = names2ix(param, Formula.irf_params(family))
                         parameter_table_fixed_keys.append(param + '_' + irf_id)
