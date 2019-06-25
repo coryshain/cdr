@@ -1,7 +1,6 @@
 import os
 from collections import defaultdict
 import textwrap
-from numpy import inf
 import pandas as pd
 import scipy.stats
 import time as pytime
@@ -538,7 +537,7 @@ def spline(c, v, dynamic_batch_dim, order, roughness_penalty=0., int_type=None, 
             return out
 
 
-def kernel_smooth(c, v, b, epsilon=4 * np.finfo('float32').eps, session=None):
+def kernel_smooth(c, v, b, kernel='gaussian', epsilon=4 * np.finfo('float32').eps, session=None):
     def f(x, c=c, v=v, b=b, epsilon=epsilon, session=session):
         session = get_session(session)
         with session.as_default():
@@ -567,15 +566,18 @@ def kernel_smooth(c, v, b, epsilon=4 * np.finfo('float32').eps, session=None):
                 _b = tf.expand_dims(_b, axis=-3)
                 _v = tf.expand_dims(_v, axis=-3)
 
-                dist = tf.contrib.distributions.Normal(
-                    loc=_c,
-                    scale=_b
-                )
+                _r = _x - _c
 
-                r = dist.prob(_x - _c)
+                if kernel.lower() == 'gaussian':
+                    _r = tf.contrib.distributions.Normal(
+                        loc=_c,
+                        scale=_b
+                    ).prob(_r)
+                else:
+                    raise ValueError('Unrecognized smoother kernel "%s".' % kernel)
 
-                num = tf.reduce_sum(r * _v, axis=-2)
-                denom = tf.reduce_sum(r, axis=-2) + epsilon
+                num = tf.reduce_sum(_r * _v, axis=-2)
+                denom = tf.reduce_sum(_r, axis=-2) + epsilon
 
                 out = num / denom
 
@@ -612,7 +614,7 @@ def summed_gaussians(c, v, b, integral_ub=None, session=None):
                 _b = tf.expand_dims(_b, axis=-3)
                 _v = tf.expand_dims(_v, axis=-3)
 
-                _v *= _b * np.sqrt(2 * np.pi) # Rescale by Gaussian normalization constant
+                # _v *= _b * np.sqrt(2 * np.pi) # Rescale by Gaussian normalization constant
 
                 dist = tf.contrib.distributions.Normal(
                     loc=_c,
@@ -663,22 +665,14 @@ def nonparametric_smooth(
                 FLOAT_TF = float_type
 
             # Build control point locations
-            c = params[:, 0:bases - 1]
+            c = params[:, 0:bases]
 
             # Build values at control points
-            v = params[:, bases - 1:2 * (bases - 1)]
+            v = params[:, bases:2 * bases]
 
             if method.lower() == 'spline': # Pad appropriately
-                c_endpoint_shape = [tf.shape(c)[0], 1, tf.shape(params)[2]]
-                zero = tf.zeros(c_endpoint_shape, dtype=FLOAT_TF)
-                c = tf.concat([zero, c], axis=1)
                 # c = tf.cumsum(c, axis=1)
-
                 c = tf.unstack(c, axis=2)
-
-                if not kwargs['instantaneous']:
-                    v = [zero] + v[:, :-1]
-                v = tf.concat(v, axis=1)
                 v = tf.unstack(v, axis=2)
 
                 assert len(c) == len(
@@ -702,7 +696,7 @@ def nonparametric_smooth(
 
             else:
                 # Build scales at control points
-                b = params[:, 2 * (bases - 1):]
+                b = params[:, 2 * bases:]
                 if method.lower() == 'kernel_smooth':
                     f = kernel_smooth(c, v, b, epsilon=epsilon, session=session)
                     assert support is not None, 'Argument ``support`` must be provided for kernel smooth IRFS'
@@ -841,8 +835,8 @@ class DTSR(object):
                     report = '\nWARNING: Some random effects levels had fewer than 2 standard deviations (%.2f)\nbelow the mean number of data points per level (%.2f):\n' % (sd*2, mu)
                     for t in too_few:
                         report += ' ' * 4 + str(t[0]) + ': %d\n' % t[1]
-                    report += 'Having too few instances for some levels can lead to degenerate random effects estimates.\nConsider filtering out these levels.\n\n'
-                    sys.stderr.write(report)
+                    report += 'Having too few instances for some levels can lead to degenerate random effects estimates.\n'
+                    stderr(report)
             vals = np.arange(len(keys), dtype=getattr(np, self.int_type))
             rangf_map = pd.DataFrame({'id':vals},index=keys).to_dict()['id']
             self.rangf_map_base.append(rangf_map)
@@ -916,7 +910,7 @@ class DTSR(object):
             self.src_node_table = t_src.node_table()
             self.src_coef_names = t_src.coef_names()
             self.src_fixed_coef_names = t_src.fixed_coef_names()
-            self.src_spline_coef_names = t_src.spline_coef_names()
+            self.src_nonparametric_coef_names = t_src.nonparametric_coef_names()
             self.src_interaction_list = t_src.interactions()
             self.src_interaction_names = t_src.interaction_names()
             self.src_fixed_interaction_names = t_src.fixed_interaction_names()
@@ -955,7 +949,7 @@ class DTSR(object):
             self.node_table = t.node_table()
             self.coef_names = t.coef_names()
             self.fixed_coef_names = t.fixed_coef_names()
-            self.unary_spline_coef_names = t.unary_spline_coef_names()
+            self.unary_nonparametric_coef_names = t.unary_nonparametric_coef_names()
             self.interaction_list = t.interactions()
             self.interaction_names = t.interaction_names()
             self.fixed_interaction_names = t.fixed_interaction_names()
@@ -1024,7 +1018,7 @@ class DTSR(object):
             self.node_table = t.node_table()
             self.coef_names = t.coef_names()
             self.fixed_coef_names = t.fixed_coef_names()
-            self.unary_spline_coef_names = t.unary_spline_coef_names()
+            self.unary_nonparametric_coef_names = t.unary_nonparametric_coef_names()
             self.interaction_list = t.interactions()
             self.interaction_names = t.interaction_names()
             self.fixed_interaction_names = t.fixed_interaction_names()
@@ -1498,39 +1492,44 @@ class DTSR(object):
                         self._initialize_base_irf_param('beta_undershoot', family, lb=0., default=1.)
                         self._initialize_base_irf_param('c', family, default=1./6.)
 
-                    elif Formula.is_nonparametric(family):
+                    elif Formula.nonparametric_type(family):
+                        np_type = Formula.nonparametric_type(family)
                         bases = Formula.bases(family)
                         spacing_power = Formula.spacing_power(family)
-                        # x_init = np.cumsum(np.ones(bases-1))
-                        x_init = np.concatenate([[0.], np.cumsum(np.ones(bases-2)) ** spacing_power], axis=0)
+                        if spacing_power == 0:
+                            x_init = np.zeros(bases)
+                        else:
+                            x_init = np.concatenate([[0.], np.cumsum(np.ones(bases-1)) ** spacing_power], axis=0)
 
-                        time_limit = Formula.time_limit(family)
-                        if time_limit is None:
-                            time_limit = self.t_delta_limit
-                        x_init *= time_limit / x_init[-1]
-                        # x_init[1:] -= x_init[:-1]
+                            time_limit = Formula.time_limit(family)
+                            if time_limit is None:
+                                time_limit = self.t_delta_limit
+                            x_init *= time_limit / x_init[-1]
+                            # x_init[1:] -= x_init[:-1]
 
                         for param_name in Formula.irf_params(family):
                             if param_name.startswith('x'):
                                 n = int(param_name[1:])
-                                # default = x_init[n-2]
-                                default = 0.
-                                # lb = 0
+                                default = x_init[n-1]
                                 lb = None
                             elif param_name.startswith('y'):
                                 n = int(param_name[1:])
                                 if n == 1:
                                     default = 1
-                                # default = np.sqrt(2 * np.pi)
                                 else:
                                     default = 0
                                 lb = None
                             else:
                                 n = int(param_name[1:])
-                                default = n
-                                # default = 1
+                                if np_type == 'G':
+                                    default = n
+                                else:
+                                    default = 1
                                 lb = 0
                             self._initialize_base_irf_param(param_name, family, default=default, lb=lb)
+
+                    else:
+                        raise ValueError('Unrecognized IRF kernel family "%s".' % family)
 
     def _initialize_intercepts_coefficients_interactions(self):
         with self.sess.as_default():
@@ -1563,35 +1562,18 @@ class DTSR(object):
 
                 # COEFFICIENTS
                 fixef_ix = names2ix(self.fixed_coef_names, self.coef_names)
+                print(self.fixed_coef_names)
+                print(self.coef_names)
+                print(fixef_ix)
                 coef_ids = self.coef_names
-                # if len(self.unary_spline_coef_names) > 0:
-                #     nonzero_coefficients = tf.concat(
-                #         [
-                #             self.coefficient_fixed_base,
-                #             tf.ones([len(self.unary_spline_coef_names)], dtype=self.FLOAT_TF)
-                #         ],
-                #         axis=0
-                #     )
-                #     nonzero_coefficients_summary = tf.concat(
-                #         [
-                #             self.coefficient_fixed_base_summary,
-                #             tf.ones([len(self.unary_spline_coef_names)], dtype=self.FLOAT_TF)
-                #         ],
-                #         axis=0
-                #     )
-                #     nonzero_coef_ix = names2ix(self.fixed_coef_names + self.unary_spline_coef_names, self.coef_names)
-                # else:
-                nonzero_coefficients = self.coefficient_fixed_base
-                nonzero_coefficients_summary = self.coefficient_fixed_base_summary
-                nonzero_coef_ix = fixef_ix
                 self.coefficient_fixed = self._scatter_along_axis(
-                    nonzero_coef_ix,
-                    nonzero_coefficients,
+                    fixef_ix,
+                    self.coefficient_fixed_base,
                     [len(coef_ids)]
                 )
                 self.coefficient_fixed_summary = self._scatter_along_axis(
-                    nonzero_coef_ix,
-                    nonzero_coefficients_summary,
+                    fixef_ix,
+                    self.coefficient_fixed_base_summary,
                     [len(coef_ids)]
                 )
                 self._regularize(self.coefficient_fixed_base, type='coefficient', var_name='coefficient')
@@ -1950,13 +1932,12 @@ class DTSR(object):
 
                 self.irf_lambdas['HRFDoubleGamma5'] = double_gamma_5
 
-    def _initialize_nonparametric_irf(self, order, bases, method='summed_gaussians', instantaneous=True, roughness_penalty=0.):
+    def _initialize_nonparametric_irf(self, order, bases, method='summed_gaussians', roughness_penalty=0.):
         def f(
                 params,
                 order=order,
                 bases=bases,
                 method=method,
-                instantaneous=instantaneous,
                 roughness_penalty=roughness_penalty,
                 support=self.support,
                 epsilon=self.epsilon,
@@ -1968,9 +1949,8 @@ class DTSR(object):
                 method,
                 params,
                 bases,
-                integral_ub=self.t_delta_limit.astype(dtype=self.FLOAT_NP),
+                # integral_ub=self.t_delta_limit.astype(dtype=self.FLOAT_NP),
                 order=order,
-                instantaneous=instantaneous,
                 roughness_penalty=roughness_penalty,
                 support=support,
                 epsilon=epsilon,
@@ -1984,15 +1964,13 @@ class DTSR(object):
     def _get_irf_lambda(self, family):
         if family in self.irf_lambdas:
             return self.irf_lambdas[family]
-        elif Formula.is_nonparametric(family):
+        elif Formula.nonparametric_type(family):
             order = Formula.order(family)
             bases = Formula.bases(family)
-            instantaneous = Formula.instantaneous(family)
             roughness_penalty = Formula.roughness_penalty(family)
             return self._initialize_nonparametric_irf(
                 order,
                 bases,
-                instantaneous=instantaneous,
                 roughness_penalty=roughness_penalty
             )
         else:
@@ -3559,7 +3537,7 @@ class DTSR(object):
                     update = last_check < cur_step and self.convergence_stride > 0
                     if update and self.convergence_basis == 'loss' and feed_dict is None:
                         update = False
-                        sys.stderr.write('Skipping convergence history update because no feed_dict provided.\n')
+                        stderr('Skipping convergence history update because no feed_dict provided.\n')
 
                     push = update and offset == 0
                     # End of stride if next step is a push
@@ -3635,21 +3613,21 @@ class DTSR(object):
                                 (proportion_converged > self.convergence_alpha)
 
                     if verbose:
-                        sys.stderr.write('rho_t: %s.\n' % rt_at_min_p)
-                        sys.stderr.write('p of rho_t: %s.\n' % min_p)
+                        stderr('rho_t: %s.\n' % rt_at_min_p)
+                        stderr('p of rho_t: %s.\n' % min_p)
                         if self.convergence_basis.lower() == 'parameters':
-                            sys.stderr.write('rho_a: %s.\n' % ra_at_min_p)
-                            sys.stderr.write('p of rho_a: %s.\n' % p_ta_at_min_p)
-                        sys.stderr.write('Location: %s.\n\n' % self.d0_names[min_p_ix])
-                        sys.stderr.write('Iterate meets convergence criteria: %s.\n\n' % converged)
-                        sys.stderr.write('Proportion of recent iterates converged: %s.\n' % proportion_converged)
+                            stderr('rho_a: %s.\n' % ra_at_min_p)
+                            stderr('p of rho_a: %s.\n' % p_ta_at_min_p)
+                        stderr('Location: %s.\n\n' % self.d0_names[min_p_ix])
+                        stderr('Iterate meets convergence criteria: %s.\n\n' % converged)
+                        stderr('Proportion of recent iterates converged: %s.\n' % proportion_converged)
 
                 else:
                     min_p_ix = min_p = rt_at_min_p = ra_at_min_p = p_ta_at_min_p = None
                     proportion_converged = 0
                     converged = False
                     if verbose:
-                        sys.stderr.write('Convergence checking off.\n')
+                        stderr('Convergence checking off.\n')
 
                 self.sess.run(self.set_converged, feed_dict={self.converged_in: converged})
 
@@ -3775,7 +3753,7 @@ class DTSR(object):
                     else:
                         self.saver.restore(self.sess, path)
                 except tf.errors.DataLossError:
-                    sys.stderr.write('Read failure during load. Trying from backup...\n')
+                    stderr('Read failure during load. Trying from backup...\n')
                     if predict:
                         self.ema_saver.restore(self.sess, path[:-5] + '_backup.ckpt')
                     else:
@@ -3793,12 +3771,12 @@ class DTSR(object):
 
                         missing_in_ckpt = model_var_names_set - ckpt_var_names_set
                         if len(missing_in_ckpt) > 0:
-                            sys.stderr.write(
+                            stderr(
                                 'Checkpoint file lacked the variables below. They will be left at their initializations.\n%s.\n\n' % (
                                 sorted(list(missing_in_ckpt))))
                         missing_in_model = ckpt_var_names_set - model_var_names_set
                         if len(missing_in_model) > 0:
-                            sys.stderr.write(
+                            stderr(
                                 'Checkpoint file contained the variables below which do not exist in the current model. They will be ignored.\n%s.\n\n' % (
                                 sorted(list(missing_in_ckpt))))
 
@@ -4319,11 +4297,11 @@ class DTSR(object):
                             pickle.dump(self, f)
                         failed = False
                     except:
-                        sys.stderr.write('Write failure during save. Retrying...\n')
+                        stderr('Write failure during save. Retrying...\n')
                         pytime.sleep(1)
                         i += 1
                 if i >= 10:
-                    sys.stderr.write('Could not save model to checkpoint file. Saving to backup...\n')
+                    stderr('Could not save model to checkpoint file. Saving to backup...\n')
                     self.saver.save(self.sess, dir + '/model_backup.ckpt')
                     with open(dir + '/m.obj', 'wb') as f:
                         pickle.dump(self, f)
@@ -4349,7 +4327,7 @@ class DTSR(object):
                     self._restore_inner(outdir + '/model.ckpt', predict=predict, allow_missing=allow_missing)
                 else:
                     if predict:
-                        sys.stderr.write('No EMA checkpoint available. Leaving internal variables unchanged.\n')
+                        stderr('No EMA checkpoint available. Leaving internal variables unchanged.\n')
 
     def finalize(self):
         """
@@ -5081,13 +5059,10 @@ class DTSR(object):
         :return: ``None``
         """
 
-        sys.stderr.write('*' * 100 + '\n')
-        sys.stderr.write(self.initialization_summary())
-        sys.stderr.write('*' * 100 + '\n\n')
+        stderr('*' * 100 + '\n' + self.initialization_summary() + '*' * 100 + '\n\n')
 
         usingGPU = tf.test.is_gpu_available()
-        sys.stderr.write('Using GPU: %s\n' % usingGPU)
-        sys.stderr.write('Number of training samples: %d\n\n' % len(y))
+        stderr('Using GPU: %s\nNumber of training samples: %d\n\n' % (usingGPU, len(y)))
 
         if self.pc:
             impulse_names = self.src_impulse_names

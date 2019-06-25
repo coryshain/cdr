@@ -2,6 +2,8 @@ import sys
 import numpy as np
 import math
 
+from .util import stderr
+
 def permutation_test(err_1, err_2, n_iter=10000, n_tails=2, mode='loss', nested=False, verbose=True):
     """
     Perform a paired permutation test for significance.
@@ -33,15 +35,14 @@ def permutation_test(err_1, err_2, n_iter=10000, n_tails=2, mode='loss', nested=
 
     hits = 0
     if verbose:
-        sys.stderr.write('Difference in test statistic: %s\n' %base_diff)
-        sys.stderr.write('Permutation testing...\n')
+        stderr('Difference in test statistic: %s\n' %base_diff)
+        stderr('Permutation testing...\n')
 
     diffs = np.zeros((n_iter,))
 
     for i in range(n_iter):
         if verbose:
-            sys.stderr.write('\r%d/%d' %(i+1, n_iter))
-            sys.stderr.flush()
+            stderr('\r%d/%d' %(i+1, n_iter))
         shuffle = (np.random.random((len(err_table))) > 0.5).astype('int')
         m1 = err_table[np.arange(len(err_table)),shuffle]
         m2 = err_table[np.arange(len(err_table)),1-shuffle]
@@ -64,6 +65,6 @@ def permutation_test(err_1, err_2, n_iter=10000, n_tails=2, mode='loss', nested=
     p = float(hits+1)/(n_iter+1)
 
     if verbose:
-        sys.stderr.write('\n')
+        stderr('\n')
 
     return p, base_diff, diffs

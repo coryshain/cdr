@@ -6,12 +6,12 @@ import itertools
 import numpy as np
 
 from .data import z, c, s, compute_time_mask, expand_history
-from .util import names2ix, sn
+from .util import names2ix, sn, stderr
 
 interact = re.compile('([^ ]+):([^ ]+)')
 spillover = re.compile('^.+S[0-9]+$')
 split_irf = re.compile('(.+)\(([^(]+)')
-nonparametric = re.compile('[SOG]((o([0-9]+))?(b([0-9]+))?(l([0-9]*\.?[0-9]+))?(p([0-9]+))?(t([0-9]*\.?[0-9]+))?(i([0-1]))?)?$')
+nonparametric = re.compile('([SOG])(o([0-9]+))?(b([0-9]+))?(l([0-9]*\.?[0-9]+))?(p([0-9]+))?(t([0-9]*\.?[0-9]+))?$')
 starts_numeric = re.compile('^[0-9]')
 non_alphanumeric = re.compile('[^0-9a-zA-Z_]')
 
@@ -72,12 +72,18 @@ class Formula(object):
         'HRFDoubleGamma5': ['alpha_main', 'alpha_undershoot', 'beta_main', 'beta_undershoot', 'c'],
     }
 
-    SPLINE_DEFAULT_ORDER = 1
-    SPLINE_DEFAULT_BASES = 10
-    SPLINE_DEFAULT_ROUGHNESS_PENALTY = 0.
-    SPLINE_DEFAULT_SPACING_POWER = 1
-    SPLINE_DEFAULT_TIME_LIMIT = None
-    SPLINE_DEFAULT_INSTANTANEOUS = True
+    NONPARAMETRIC_TYPE_IX = 1
+    NONPARAMETRIC_ORDER_IX = 3
+    NONPARAMETRIC_BASES_IX = 5
+    NONPARAMETRIC_ROUGHNESS_PENALTY_IX = 7
+    NONPARAMETRIC_SPACING_POWER_IX = 9
+    NONPARAMETRIC_TIME_LIMIT_IX = 11
+
+    NONPARAMETRIC_DEFAULT_ORDER = 1
+    NONPARAMETRIC_DEFAULT_BASES = 10
+    NONPARAMETRIC_DEFAULT_ROUGHNESS_PENALTY = 0.
+    NONPARAMETRIC_DEFAULT_SPACING_POWER = 1
+    NONPARAMETRIC_DEFAULT_TIME_LIMIT = None
 
     @staticmethod
     def irf_params(family):
@@ -87,31 +93,35 @@ class Formula(object):
         :param family: ``str``; name of IRF family
         :return: ``list`` of ``str``; parameter names
         """
+
+        np_type = Formula.nonparametric_type(family)
         if family in Formula.IRF_PARAMS:
             out = Formula.IRF_PARAMS[family]
-        elif Formula.is_nonparametric(family):
+        elif np_type:
             bs = Formula.bases(family)
-            instantaneous = Formula.instantaneous(family)
-            # out = ['x%s' % i for i in range(2, bs + 1)] + ['y%s' % i for i in range(1 + (1-instantaneous), bs)]
-            out = ['x%s' % i for i in range(2, bs + 1)] + ['y%s' % i for i in range(1 + (1-instantaneous), bs)] + ['s%s' % i for i in range(1 + (1-instantaneous), bs)]
+            if np_type == 'S':
+                out = ['x%s' % i for i in range(1, bs + 1)] + ['y%s' % i for i in range(1, bs + 1)]
+            else:
+                out = ['x%s' % i for i in range(1, bs + 1)] + ['y%s' % i for i in range(1, bs + 1)] + ['s%s' % i for i in range(1, bs + 1)]
         else:
             out = []
 
         return out
 
     @staticmethod
-    def is_nonparametric(family):
+    def nonparametric_type(family):
         """
-        Check whether a family name designates a nonparametric kernel.
+        Check the type of a non-parametric kernel, or return ``None`` if parametric.
 
         :param family: ``str``; name of IRF family
-        :return: ``bool``; ``True`` if spline kernel, ``False`` otherwise
+        :return: ``str`` or ``None; name of kernel type if non-parametric, else ``None``.
         """
 
-        if family is None:
-            out = False
-        else:
-            out = nonparametric.match(family) is not None
+        out = None
+        if family is not None:
+            match = nonparametric.match(family)
+            if match is not None:
+                out = match.group(Formula.NONPARAMETRIC_TYPE_IX)
         return out
 
     @staticmethod
@@ -123,13 +133,14 @@ class Formula(object):
         :return: ``int`` or ``None``; order of spline kernel, or ``None`` if **family** is not a spline.
         """
 
+        np_type = Formula.nonparametric_type(family)
         if family is None:
             out = None
         else:
-            if Formula.is_nonparametric(family):
-                order = nonparametric.match(family).group(3)
+            if np_type:
+                order = nonparametric.match(family).group(Formula.NONPARAMETRIC_ORDER_IX)
                 if order is None:
-                    order = Formula.SPLINE_DEFAULT_ORDER
+                    order = Formula.NONPARAMETRIC_DEFAULT_ORDER
                 out = int(order)
             else:
                 out = None
@@ -144,13 +155,14 @@ class Formula(object):
         :return: ``int`` or ``None``; number of bases of spline kernel, or ``None`` if **family** is not a spline.
         """
 
+        np_type = Formula.nonparametric_type(family)
         if family is None:
             out = None
         else:
-            if Formula.is_nonparametric(family):
-                bases = nonparametric.match(family).group(5)
+            if np_type:
+                bases = nonparametric.match(family).group(Formula.NONPARAMETRIC_BASES_IX)
                 if bases is None:
-                    bases = Formula.SPLINE_DEFAULT_BASES
+                    bases = Formula.NONPARAMETRIC_DEFAULT_BASES
                 out = int(bases)
             else:
                 out = None
@@ -165,13 +177,14 @@ class Formula(object):
         :return: ``float`` or ``None``; roughness penalty of spline kernel, or ``None`` if **family** is not a spline.
         """
 
+        np_type = Formula.nonparametric_type(family)
         if family is None:
             out = None
         else:
-            if Formula.is_nonparametric(family):
-                roughness_penalty = nonparametric.match(family).group(7)
+            if np_type:
+                roughness_penalty = nonparametric.match(family).group(Formula.NONPARAMETRIC_ROUGHNESS_PENALTY_IX)
                 if roughness_penalty is None:
-                    out = Formula.SPLINE_DEFAULT_ROUGHNESS_PENALTY
+                    out = Formula.NONPARAMETRIC_DEFAULT_ROUGHNESS_PENALTY
                 else:
                     out = float(roughness_penalty)
             else:
@@ -189,13 +202,17 @@ class Formula(object):
         :return: ``int`` or ``None``; spacing power of spline kernel, or ``None`` if **family** is not a spline.
         """
 
+        np_type = Formula.nonparametric_type(family)
         if family is None:
             out = None
         else:
-            if Formula.is_nonparametric(family):
-                spacing_power = nonparametric.match(family).group(9)
+            if np_type:
+                spacing_power = nonparametric.match(family).group(Formula.NONPARAMETRIC_SPACING_POWER_IX)
                 if spacing_power is None:
-                    spacing_power = Formula.SPLINE_DEFAULT_SPACING_POWER
+                    if np_type == 'G':
+                        spacing_power = 0
+                    else:
+                        spacing_power = Formula.NONPARAMETRIC_DEFAULT_SPACING_POWER
                 out = int(spacing_power)
             else:
                 out = None
@@ -211,36 +228,16 @@ class Formula(object):
         :return: ``float`` or ``None``; initial time_limit of spline kernel, or ``None`` if set empirically.
         """
 
+        np_type = Formula.nonparametric_type(family)
         if family is None:
             out = None
         else:
-            if Formula.is_nonparametric(family):
-                time_limit = nonparametric.match(family).group(11)
+            if np_type:
+                time_limit = nonparametric.match(family).group(Formula.NONPARAMETRIC_TIME_LIMIT_IX)
                 if time_limit is None:
                     out = None
                 else:
                     out = float(time_limit)
-            else:
-                out = None
-        return out
-
-    @staticmethod
-    def instantaneous(family):
-        """
-        Check whether a spline kernel permits a non-zero instantaneous response.
-
-        :param family: ``str``; name of IRF family
-        :return: ``bool`` or ``None``; whether the spline kernel permits a non-zero instantaneous response, or ``None`` if **family** is not a spline.
-        """
-
-        if family is None:
-            out = None
-        else:
-            if Formula.is_nonparametric(family):
-                instantaneous = nonparametric.match(family).group(13)
-                if instantaneous is None:
-                    instantaneous = Formula.SPLINE_DEFAULT_BASES
-                out = bool(int(instantaneous))
             else:
                 out = None
         return out
@@ -830,7 +827,7 @@ class Formula(object):
 
         if ops is None:
             ops = []
-        assert t.func.id in Formula.IRF_PARAMS.keys() or nonparametric.match(t.func.id) is not None, 'Ill-formed model string: process_irf() called on non-IRF node'
+        assert t.func.id in Formula.IRF_PARAMS.keys() or Formula.nonparametric_type(t.func.id) is not None, 'Ill-formed model string: process_irf() called on non-IRF node'
         irf_id = None
         coef_id = None
         cont = False
@@ -1060,14 +1057,13 @@ class Formula(object):
             new_2d_predictor = []
             if predictor_name == 'cosdist2D':
                 new_2d_predictor_name = 'cosdist2D'
-                sys.stderr.write('Computing pointwise cosine distances...\n')
+                stderr('Computing pointwise cosine distances...\n')
             elif predictor_name == 'eucldist2D':
-                sys.stderr.write('Computing pointwise Euclidean distances...\n')
+                stderr('Computing pointwise Euclidean distances...\n')
                 new_2d_predictor_name = 'eucldist2D'
 
             for i in range(0, len(first_obs), minibatch_size):
-                sys.stderr.write('\rProcessing batch %d/%d' %(i/minibatch_size + 1, math.ceil(float(len(first_obs))/minibatch_size)))
-                sys.stderr.flush()
+                stderr('\rProcessing batch %d/%d' %(i/minibatch_size + 1, math.ceil(float(len(first_obs))/minibatch_size)))
                 X_embeddings, _, _ = expand_history(
                     np.array(X[embedding_colnames]),
                     np.array(X['time']),
@@ -1097,7 +1093,7 @@ class Formula(object):
 
                     new_2d_predictor.append(np.expand_dims(euclidean_distances, -1))
 
-            sys.stderr.write('\n')
+            stderr('\n')
             new_2d_predictor = np.concatenate(new_2d_predictor, axis=0)
 
         return new_2d_predictor_name, new_2d_predictor
@@ -2151,14 +2147,14 @@ class IRFNode(object):
 
         return self.depth() > 3
 
-    def is_spline(self):
+    def nonparametric_type(self):
         """
-        Check whether node is a spline IRF.
+        Check the non-parametric type of a node's kernel, or return ``None`` if parametric.
 
-        :return: ``bool``; whether node is a spline IRF.
+        :param family: ``str``; name of IRF family
+        :return: ``str`` or ``None; name of kernel type if non-parametric, else ``None``.
         """
-
-        return Formula.is_nonparametric(self.family)
+        return Formula.nonparametric_type(self.family)
 
     def order(self):
         """
@@ -2206,14 +2202,6 @@ class IRFNode(object):
         """
 
         return Formula.roughness_penalty(self.family)
-
-    def instantaneous(self):
-        """
-        Check whether node permits a non-zero instantaneous response.
-
-        :return: ``bool`` or ``None``; whether node permits a non-zero instantaneous response, or ``None`` if node is not a spline.
-        """
-        return Formula.instantaneous(self.family)
 
     def impulses(self, include_interactions=False):
         """
@@ -2374,27 +2362,27 @@ class IRFNode(object):
                         out.append(name)
         return out
 
-    def spline_coef_names(self):
+    def nonparametric_coef_names(self):
         """
-        Get list of names of spline coefficients dominated by node.
+        Get list of names of nonparametric coefficients dominated by node.
         :return: ``list`` of ``str``; names of spline coefficients dominated by node.
         """
 
         out = []
         if self.terminal():
-            if Formula.is_nonparametric(self.p.family):
+            if Formula.nonparametric_type(self.p.family):
                 out.append(self.coef_id())
         else:
             for c in self.children:
-                names = c.spline_coef_names()
+                names = c.nonparametric_coef_names()
                 for name in names:
                     if name not in out:
                         out.append(name)
         return out
 
-    def unary_spline_coef_names(self):
+    def unary_nonparametric_coef_names(self):
         """
-        Get list of names of spline coefficients with no siblings dominated by node.
+        Get list of names of non-parametric coefficients with no siblings dominated by node.
         Because unary splines are non-parametric, their coefficients are fixed at 1.
         Trainable coefficients are therefore perfectly confounded with the spline parameters.
         Splines dominating multiple coefficients are excepted, since the same kernel shape must be scaled in different ways.
@@ -2404,7 +2392,7 @@ class IRFNode(object):
 
         out = []
         if self.terminal():
-            if Formula.is_nonparametric(self.p.family):
+            if Formula.nonparametric_type(self.p.family):
                 child_coefs = set()
                 for c in self.p.children:
                     child_coefs.add(c.coef_id())
@@ -2412,7 +2400,7 @@ class IRFNode(object):
                     out.append(self.coef_id())
         else:
             for c in self.children:
-                names = c.unary_spline_coef_names()
+                names = c.unary_nonparametric_coef_names()
                 for name in names:
                     if name not in out:
                         out.append(name)
@@ -3099,3 +3087,4 @@ class IRFNode(object):
         for c in self.children:
             s += '\n%s' % indent + str(c).replace('\n', '\n%s' % indent)
         return s
+

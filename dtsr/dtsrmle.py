@@ -5,7 +5,7 @@ import pandas as pd
 
 from .dtsrbase import DTSR
 from .kwargs import DTSRMLE_INITIALIZATION_KWARGS
-from .util import names2ix, sn
+from .util import sn, stderr
 
 import tensorflow as tf
 
@@ -90,8 +90,7 @@ class DTSRMLE(DTSR):
             setattr(self, kwarg.key, md.pop(kwarg.key, kwarg.default_value))
 
         if len(md) > 0:
-            sys.stderr.write(
-                'Saved model contained unrecognized attributes %s which are being ignored\n' % sorted(list(md.keys())))
+            stderr('Saved model contained unrecognized attributes %s which are being ignored\n' % sorted(list(md.keys())))
 
     ######################################################
     #

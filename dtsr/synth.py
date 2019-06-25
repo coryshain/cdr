@@ -5,6 +5,7 @@ import scipy.stats
 import pandas as pd
 
 from .plot import plot_irf
+from .util import stderr
 
 
 def read_params(path):
@@ -155,7 +156,7 @@ class SyntheticModel(object):
         X_conv = np.zeros((len(t_X), self.n_pred))
 
         if verbose:
-            sys.stderr.write('Convolving...\n')
+            stderr('Convolving...\n')
 
         i = 0
         j = 0
@@ -169,8 +170,7 @@ class SyntheticModel(object):
         while j < len(t_y):
             if verbose:
                 if j % 1000 == 0:
-                    sys.stderr.write('\r%d/%d' % (j, len(t_y)))
-                    sys.stderr.flush()
+                    stderr('\r%d/%d' % (j, len(t_y)))
             while i < len(t_X) and cond(t_X[i], t_y[j]):
                 i += 1
             t_delta = t_y[j] - t_X[:i]
@@ -179,11 +179,10 @@ class SyntheticModel(object):
             j += 1
 
         if verbose:
-            sys.stderr.write('\r%d/%d' % (len(t_y), len(t_y)))
-            sys.stderr.flush()
+            stderr('\r%d/%d' % (len(t_y), len(t_y)))
 
         if verbose:
-            sys.stderr.write('\n')
+            stderr('\n')
 
         if err_sd != 0:
             if err_sd is None:

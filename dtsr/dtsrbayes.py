@@ -1,7 +1,3 @@
-import os
-from collections import defaultdict
-import time
-
 import pandas as pd
 pd.options.mode.chained_assignment = None
 
@@ -10,7 +6,6 @@ import tensorflow as tf
 tf_config = tf.ConfigProto()
 tf_config.gpu_options.allow_growth = True
 
-from .formula import *
 from .util import *
 from .dtsrbase import DTSR
 from .kwargs import DTSRBAYES_INITIALIZATION_KWARGS
@@ -66,7 +61,7 @@ class DTSRBayes(DTSR):
 
         if not self.variational():
             if self.n_samples is not None:
-                sys.stderr.write('Parameter n_samples being overridden for sampling optimization\n')
+                stderr('Parameter n_samples being overridden for sampling optimization\n')
             self.n_samples = self.n_iter*self.n_train_minibatch
 
         if not (self.declare_priors_fixef or self.declare_priors_ranef):
@@ -218,7 +213,7 @@ class DTSRBayes(DTSR):
             setattr(self, kwarg.key, md.pop(kwarg.key, kwarg.default_value))
 
         if len(md) > 0:
-            sys.stderr.write('Saved model contained unrecognized attributes %s which are being ignored\n' %sorted(list(md.keys())))
+            stderr('Saved model contained unrecognized attributes %s which are being ignored\n' %sorted(list(md.keys())))
 
 
     ######################################################
@@ -1049,7 +1044,7 @@ class DTSRBayes(DTSR):
                     )
 
                 else:
-                    sys.stderr.write('Fixed y scale: %s\n' % self.y_sd_init)
+                    stderr('Fixed y scale: %s\n' % self.y_sd_init)
                     y_sd = self.y_sd_init_tf
                     y_sd_summary = y_sd
 

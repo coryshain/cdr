@@ -1,8 +1,14 @@
 from __future__ import print_function
+import sys
 import re
 import pickle
 import numpy as np
 from scipy import linalg
+
+
+def stderr(s):
+    sys.stderr.write(s)
+    sys.stderr.flush()
 
 def names2ix(names, l, dtype=np.int32):
     """
@@ -21,6 +27,7 @@ def names2ix(names, l, dtype=np.int32):
         ix.append(l.index(n))
     return np.array(ix, dtype=dtype)
 
+
 def mse(true, preds):
     """
     Compute mean squared error (MSE).
@@ -32,6 +39,7 @@ def mse(true, preds):
 
     return ((true-preds)**2).mean()
 
+
 def mae(true, preds):
     """
     Compute mean absolute error (MAE).
@@ -42,6 +50,7 @@ def mae(true, preds):
     """
 
     return (true-preds).abs().mean()
+
 
 def percent_variance_explained(true, preds):
     """
@@ -55,6 +64,7 @@ def percent_variance_explained(true, preds):
     num = mse(true, preds)
     denom = np.std(true) ** 2
     return max(0., (1 - num / denom) * 100)
+
 
 def get_random_permutation(n):
     """
@@ -73,6 +83,7 @@ def get_random_permutation(n):
     p_inv[p] = np.arange(n)
     return p, p_inv
 
+
 def sn(string):
     """
     Compute a Tensorboard-compatible version of a string.
@@ -82,6 +93,7 @@ def sn(string):
     """
 
     return re.sub('[^A-Za-z0-9_.\\-/]', '.', string)
+
 
 def pca(X, n_dim=None, dtype=np.float32):
     """
@@ -109,6 +121,7 @@ def pca(X, n_dim=None, dtype=np.float32):
     Xpc = np.dot(X, eigenvec)
     return Xpc, eigenvec, eigenval, means, sds
 
+
 def nested(model_name_1, model_name_2):
     """
     Check whether two DTSR models are nested with 1 degree of freedom
@@ -124,6 +137,7 @@ def nested(model_name_1, model_name_2):
     b = 1 - a
 
     return m_base[a] == m_base[b] and len(m_ablated[b] - m_ablated[a]) == 1 and len(m_ablated[a] - m_ablated[b]) == 0
+
 
 def filter_names(names, filters):
     """
@@ -152,6 +166,7 @@ def filter_names(names, filters):
 
     return out
 
+
 def filter_models(names, filters, dtsr_only=False):
     """
     Return models contained in **names** that are permitted by **filters**, preserving order in which filters were matched.
@@ -174,6 +189,7 @@ def filter_models(names, filters, dtsr_only=False):
         out = names
     return out
 
+
 def get_partition_list(partition):
     if not isinstance(partition, list):
         partition = partition.strip().split()
@@ -182,6 +198,7 @@ def get_partition_list(partition):
     if len(partition) == 1:
         partition = partition[0].split('+')
     return partition
+
 
 def paths_from_partition_cliarg(partition, config):
     partition = get_partition_list(partition)

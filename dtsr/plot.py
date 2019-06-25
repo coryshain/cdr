@@ -5,6 +5,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib import markers
 
+from .util import stderr
 
 def plot_irf(
         plot_x,
@@ -110,7 +111,7 @@ def plot_irf(
     try:
         plt.savefig(dir+'/'+filename, dpi=dpi, transparent=transparent_background)
     except:
-        sys.stderr.write('Error saving plot to file %s. Skipping...' %(dir+'/'+filename))
+        stderr('Error saving plot to file %s. Skipping...' %(dir+'/'+filename))
     plt.close('all')
 
 
@@ -179,7 +180,7 @@ def plot_qq(
     try:
         plt.savefig(dir+'/'+filename, dpi=dpi, transparent=transparent_background)
     except:
-        sys.stderr.write('Error saving plot to file %s. Skipping...' %(dir+'/'+filename))
+        stderr('Error saving plot to file %s. Skipping...' %(dir+'/'+filename))
     plt.close('all')
 
 
@@ -219,7 +220,7 @@ def plot_heatmap(
     try:
         plt.savefig(dir+'/'+filename)
     except:
-        sys.stderr.write('Error saving plot to file %s. Skipping...' %(dir+'/'+filename))
+        stderr('Error saving plot to file %s. Skipping...' %(dir+'/'+filename))
     plt.close('all')
 
 

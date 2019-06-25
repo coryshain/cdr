@@ -1,6 +1,8 @@
 import sys
 import pandas as pd
 
+from .util import stderr
+
 def read_data(X_paths, y_paths, series_ids, categorical_columns=None, sep=' '):
     """
     Read impulse and response data into pandas dataframes and perform basic pre-processing.
@@ -18,7 +20,7 @@ def read_data(X_paths, y_paths, series_ids, categorical_columns=None, sep=' '):
     if not isinstance(y_paths, list):
         y_paths = [y_paths]
 
-    sys.stderr.write('Loading data...\n')
+    stderr('Loading data...\n')
     X = []
     y = []
 
@@ -44,7 +46,7 @@ def read_data(X_paths, y_paths, series_ids, categorical_columns=None, sep=' '):
         X.append(pd.concat(x, axis=0))
     y = pd.concat(y, axis=0)
 
-    sys.stderr.write('Ensuring sort order...\n')
+    stderr('Ensuring sort order...\n')
     for x in X:
         x.sort_values(series_ids + ['time'], inplace=True)
     y.sort_values(series_ids + ['time'], inplace=True)
