@@ -818,13 +818,13 @@ class DTSR(object):
         for i in range(len(rangf)):
             gf = rangf[i]
             keys = np.sort(y[gf].astype('str').unique())
-            vals, counts = np.unique(y[gf].astype('str'), return_counts=True)
+            k, counts = np.unique(y[gf].astype('str'), return_counts=True)
             sd = counts.std()
             if np.isfinite(sd):
                 mu = counts.mean()
                 lb = mu - 2 * sd
                 too_few = []
-                for v, c in zip(vals, counts):
+                for v, c in zip(k, counts):
                     if c < lb:
                         too_few.append((v, c))
                 if len(too_few) > 0:
@@ -1782,7 +1782,8 @@ class DTSR(object):
     def _initialize_irf_lambdas(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                integral_ub = self.t_delta_limit.astype(dtype=self.FLOAT_NP)
+                # integral_ub = self.t_delta_limit.astype(dtype=self.FLOAT_NP)
+                integral_ub = None
 
                 def exponential(params):
                     return lambda x: exponential_irf(
