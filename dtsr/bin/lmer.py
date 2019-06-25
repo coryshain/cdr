@@ -6,7 +6,7 @@ import pandas as pd
 from dtsr.config import Config
 from dtsr.baselines import py2ri, LM, LME
 from dtsr.formula import Formula
-from dtsr.util import mse, mae, filter_models, get_partition_list
+from dtsr.util import mse, mae, filter_models, get_partition_list, stderr
 
 pd.options.mode.chained_assignment = None
 
@@ -42,7 +42,7 @@ if __name__ == '__main__':
             else:
                 data_path = p.outdir + '/' + m.split('!')[0] + '/X_conv_' + partition_str + '.csv'
 
-            sys.stderr.write('Two-step analysis using data file %s\n' %data_path)
+            stderr('Two-step analysis using data file %s\n' %data_path)
 
             if os.path.exists(data_path):
                 p.set_model(m)
@@ -70,11 +70,11 @@ if __name__ == '__main__':
                 model_summary_path = dir_path + '/lm_%s_summary.txt' % ('z_%s' % partition_str if args.zscore else partition_str)
 
                 if not args.force and os.path.exists(model_path):
-                    sys.stderr.write('Retrieving saved L(ME) regression of DTSR model %s...\n' % m)
+                    stderr('Retrieving saved L(ME) regression of DTSR model %s...\n' % m)
                     with open(model_path, 'rb') as m_file:
                         lm = pickle.load(m_file)
                 else:
-                    sys.stderr.write('Fitting L(ME) regression of DTSR model %s...\n' % m)
+                    stderr('Fitting L(ME) regression of DTSR model %s...\n' % m)
                     if is_lme:
                         lm = LME(model_form, df_r)
                     else:
@@ -97,6 +97,6 @@ if __name__ == '__main__':
                 summary += '=' * 50 + '\n'
                 with open(model_summary_path, 'w') as f_out:
                     f_out.write(summary)
-                sys.stderr.write(summary)
-                sys.stderr.write('\n\n')
+                stderr(summary)
+                stderr('\n\n')
 

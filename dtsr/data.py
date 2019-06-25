@@ -2,7 +2,7 @@ import sys
 import re
 import numpy as np
 import pandas as pd
-from .util import names2ix
+from .util import names2ix, stderr
 
 op_finder = re.compile('([^()]+)\((.+)\) *')
 
@@ -259,8 +259,7 @@ def compute_history_intervals(X, y, series_ids):
     epsilon = np.finfo(np.float32).eps
     while i < n:
         if i == 0 or i % 1000 == 999 or i == n-1:
-            sys.stderr.write('\r%d/%d' %(i+1, n))
-            sys.stderr.flush()
+            stderr('\r%d/%d' %(i+1, n))
 
         # Check if we've entered a new series in y
         if (id_vectors_y[i] != y_cur_ids).any():
@@ -285,7 +284,7 @@ def compute_history_intervals(X, y, series_ids):
 
         i += 1
 
-    sys.stderr.write('\n')
+    stderr('\n')
     
     return first_obs, last_obs
 
@@ -361,9 +360,9 @@ def compute_filters(y, filters=None):
                 y[field] = y[name].map(count_map)
                 select &= compute_filter(y, field, cond)
             else:
-                sys.stderr.write('Skipping unique-counts filter for column "%s", which was not found in the data...\n' % name)
+                stderr('Skipping unique-counts filter for column "%s", which was not found in the data...\n' % name)
         else:
-            sys.stderr.write('Skipping filter for column "%s", which was not found in the data...\n' % field)
+            stderr('Skipping filter for column "%s", which was not found in the data...\n' % field)
     return select
 
 
@@ -510,7 +509,7 @@ def preprocess_data(X, y, formula_list, series_ids, filters=None, compute_histor
     :return: 7-tuple; predictor data, response data, filtering mask, response-aligned predictor names, response-aligned predictors, 2D predictor names, and 2D predictors
     """
 
-    sys.stderr.write('Pre-processing data...\n')
+    stderr('Pre-processing data...\n')
 
     if not isinstance(X, list):
         X = [X]
@@ -530,7 +529,7 @@ def preprocess_data(X, y, formula_list, series_ids, filters=None, compute_histor
         X_new = []
         for i in range(len(X)):
             X_cur = X[i]
-            sys.stderr.write('Computing history intervals for each regression target in predictor file %d...\n' % (i+1))
+            stderr('Computing history intervals for each regression target in predictor file %d...\n' % (i+1))
             first_obs, last_obs = compute_history_intervals(X_cur, y, series_ids)
             y['first_obs_%d' % i] = first_obs
             y['last_obs_%d' % i] = last_obs

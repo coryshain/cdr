@@ -2,7 +2,7 @@ import argparse
 import sys
 import os
 from dtsr.config import Config
-from dtsr.util import load_dtsr, filter_models
+from dtsr.util import load_dtsr, filter_models, stderr
 
 if __name__ == '__main__':
 
@@ -29,7 +29,7 @@ if __name__ == '__main__':
 
         for m in models:
 
-            sys.stderr.write('Retrieving saved model %s...\n' % m)
+            stderr('Retrieving saved model %s...\n' % m)
             dtsr_model = load_dtsr(p.outdir + '/' + m)
 
             summary = dtsr_model.summary(
@@ -44,10 +44,10 @@ if __name__ == '__main__':
             else:
                 outname = p.outdir + '/' + m + '/summary.txt'
 
-            sys.stderr.write('Saving summary to %s' %outname)
+            stderr('Saving summary to %s' %outname)
             with open(outname, 'w') as f:
                 f.write(summary)
-            sys.stderr.write(summary)
+            stderr(summary)
 
             if args.save_table:
                 if args.prefix:

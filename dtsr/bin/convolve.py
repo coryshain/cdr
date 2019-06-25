@@ -6,7 +6,7 @@ from dtsr.config import Config
 from dtsr.io import read_data
 from dtsr.formula import Formula
 from dtsr.data import preprocess_data, filter_invalid_responses
-from dtsr.util import load_dtsr, filter_models, get_partition_list, paths_from_partition_cliarg
+from dtsr.util import load_dtsr, filter_models, get_partition_list, paths_from_partition_cliarg, stderr
 
 pd.options.mode.chained_assignment = None
 
@@ -104,7 +104,7 @@ if __name__ == '__main__':
                 if X_response_aligned_predictors_valid is not None:
                     X_response_aligned_predictors_valid = X_response_aligned_predictors_valid[select_y_valid]
 
-                sys.stderr.write('Retrieving saved model %s...\n' % m)
+                stderr('Retrieving saved model %s...\n' % m)
                 dtsr_model = load_dtsr(p.outdir + '/' + m)
 
                 X_conv, X_conv_summary = dtsr_model.convolve_inputs(
@@ -122,7 +122,7 @@ if __name__ == '__main__':
 
                 X_conv.to_csv(p.outdir + '/' + m + '/X_conv_%s.csv' %partition_str, sep=' ', index=False, na_rep='nan')
 
-                sys.stderr.write(X_conv_summary)
+                stderr(X_conv_summary)
                 with open(p.outdir + '/' + m + '/X_conv_%s_summary.txt' %partition_str, 'w') as f:
                     f.write(X_conv_summary)
 

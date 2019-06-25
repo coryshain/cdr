@@ -1562,9 +1562,6 @@ class DTSR(object):
 
                 # COEFFICIENTS
                 fixef_ix = names2ix(self.fixed_coef_names, self.coef_names)
-                print(self.fixed_coef_names)
-                print(self.coef_names)
-                print(fixef_ix)
                 coef_ids = self.coef_names
                 self.coefficient_fixed = self._scatter_along_axis(
                     fixef_ix,
@@ -5101,10 +5098,10 @@ class DTSR(object):
             float_type=self.float_type,
         )
 
-        sys.stderr.write('Correlation matrix for input variables:\n')
+        stderr('Correlation matrix for input variables:\n')
         impulse_names_2d = [x for x in impulse_names if x in X_2d_predictor_names]
         rho = corr_dtsr(X_2d, impulse_names, impulse_names_2d, time_X_2d, time_X_mask)
-        sys.stderr.write(str(rho) + '\n\n')
+        stderr(str(rho) + '\n\n')
 
         # self.make_plots(
         #     irf_name_map=irf_name_map,
@@ -5125,7 +5122,7 @@ class DTSR(object):
                     self.set_training_complete(False)
 
                 if self.training_complete.eval(session=self.sess):
-                    sys.stderr.write('Model training is already complete; no additional updates to perform. To train for additional iterations, re-run fit() with a larger n_iter.\n\n')
+                    stderr('Model training is already complete; no additional updates to perform. To train for additional iterations, re-run fit() with a larger n_iter.\n\n')
                 else:
                     if self.global_step.eval(session=self.sess) == 0:
                         summary_params = self.sess.run(self.summary_params)
@@ -5134,16 +5131,16 @@ class DTSR(object):
                             summary_random = self.sess.run(self.summary_random)
                             self.writer.add_summary(summary_random, self.global_step.eval(session=self.sess))
                     else:
-                        sys.stderr.write('Resuming training from most recent checkpoint...\n\n')
+                        stderr('Resuming training from most recent checkpoint...\n\n')
 
                     while not self.has_converged() and self.global_step.eval(session=self.sess) < n_iter:
                         p, p_inv = get_random_permutation(len(y))
                         t0_iter = pytime.time()
-                        sys.stderr.write('-' * 50 + '\n')
-                        sys.stderr.write('Iteration %d\n' % int(self.global_step.eval(session=self.sess) + 1))
-                        sys.stderr.write('\n')
+                        stderr('-' * 50 + '\n')
+                        stderr('Iteration %d\n' % int(self.global_step.eval(session=self.sess) + 1))
+                        stderr('\n')
                         if self.optim_name is not None and self.lr_decay_family is not None:
-                            sys.stderr.write('Learning rate: %s\n' %self.lr.eval(session=self.sess))
+                            stderr('Learning rate: %s\n' %self.lr.eval(session=self.sess))
 
                         pb = tf.contrib.keras.utils.Progbar(self.n_train_minibatch)
 
@@ -5202,7 +5199,7 @@ class DTSR(object):
                             self.verify_random_centering()
 
                         t1_iter = pytime.time()
-                        sys.stderr.write('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
+                        stderr('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
 
                     self.save()
 
@@ -5364,7 +5361,7 @@ class DTSR(object):
 
         if verbose:
             usingGPU = tf.test.is_gpu_available()
-            sys.stderr.write('Using GPU: %s\n' % usingGPU)
+            stderr('Using GPU: %s\n' % usingGPU)
 
         if self.pc:
             impulse_names = self.src_impulse_names
@@ -5372,7 +5369,7 @@ class DTSR(object):
             impulse_names  = self.impulse_names
 
         if verbose:
-            sys.stderr.write('Computing predictions...\n')
+            stderr('Computing predictions...\n')
 
         for i in range(len(self.rangf)):
             c = self.rangf[i]
@@ -5420,8 +5417,7 @@ class DTSR(object):
                     n_eval_minibatch = math.ceil(len(y_time) / self.eval_minibatch_size)
                     for i in range(0, len(y_time), self.eval_minibatch_size):
                         if verbose:
-                            sys.stderr.write('\rMinibatch %d/%d' %((i/self.eval_minibatch_size)+1, n_eval_minibatch))
-                            sys.stderr.flush()
+                            stderr('\rMinibatch %d/%d' %((i/self.eval_minibatch_size)+1, n_eval_minibatch))
                         fd_minibatch = {
                             self.X: X_2d[i:i + self.eval_minibatch_size],
                             self.time_X: time_X_2d[i:i + self.eval_minibatch_size],
@@ -5438,7 +5434,7 @@ class DTSR(object):
                         )
 
                 if verbose:
-                    sys.stderr.write('\n\n')
+                    stderr('\n\n')
 
                 self.set_predict_mode(False)
 
@@ -5526,7 +5522,7 @@ class DTSR(object):
 
         if verbose:
             usingGPU = tf.test.is_gpu_available()
-            sys.stderr.write('Using GPU: %s\n' % usingGPU)
+            stderr('Using GPU: %s\n' % usingGPU)
 
         if self.pc:
             impulse_names = self.src_impulse_names
@@ -5534,7 +5530,7 @@ class DTSR(object):
             impulse_names  = self.impulse_names
 
         if verbose:
-            sys.stderr.write('Computing likelihoods...\n')
+            stderr('Computing likelihoods...\n')
 
         y_rangf = y[self.rangf]
         for i in range(len(self.rangf)):
@@ -5586,8 +5582,7 @@ class DTSR(object):
                     n_eval_minibatch = math.ceil(len(y) / self.eval_minibatch_size)
                     for i in range(0, len(time_y), self.eval_minibatch_size):
                         if verbose:
-                            sys.stderr.write('\rMinibatch %d/%d' %((i/self.eval_minibatch_size)+1, n_eval_minibatch))
-                            sys.stderr.flush()
+                            stderr('\rMinibatch %d/%d' %((i/self.eval_minibatch_size)+1, n_eval_minibatch))
                         fd_minibatch = {
                             self.X: X_2d[i:i + self.eval_minibatch_size],
                             self.time_X: time_X_2d[i:i + self.eval_minibatch_size],
@@ -5605,7 +5600,7 @@ class DTSR(object):
                         )
 
                 if verbose:
-                    sys.stderr.write('\n\n')
+                    stderr('\n\n')
 
                 self.set_predict_mode(False)
 
@@ -5654,7 +5649,7 @@ class DTSR(object):
 
         if verbose:
             usingGPU = tf.test.is_gpu_available()
-            sys.stderr.write('Using GPU: %s\n' % usingGPU)
+            stderr('Using GPU: %s\n' % usingGPU)
 
         if self.pc:
             impulse_names = self.src_impulse_names
@@ -5662,7 +5657,7 @@ class DTSR(object):
             impulse_names  = self.impulse_names
 
         if verbose:
-            sys.stderr.write('Computing loss using objective function...\n')
+            stderr('Computing loss using objective function...\n')
 
         y_rangf = y[self.rangf]
         for i in range(len(self.rangf)):
@@ -5713,8 +5708,7 @@ class DTSR(object):
                     loss = np.zeros((n_minibatch,))
                     for i in range(0, n_minibatch):
                         if verbose:
-                            sys.stderr.write('\rMinibatch %d/%d' %(i+1, n_minibatch))
-                            sys.stderr.flush()
+                            stderr('\rMinibatch %d/%d' %(i+1, n_minibatch))
                         fd_minibatch = {
                             self.X: X_2d[i:i + self.minibatch_size],
                             self.time_X: time_X_2d[i:i + self.minibatch_size],
@@ -5732,7 +5726,7 @@ class DTSR(object):
                     loss = loss.mean()
 
                 if verbose:
-                    sys.stderr.write('\n\n')
+                    stderr('\n\n')
 
                 self.set_predict_mode(False)
 
@@ -5783,7 +5777,7 @@ class DTSR(object):
 
         if verbose:
             usingGPU = tf.test.is_gpu_available()
-            sys.stderr.write('Using GPU: %s\n' % usingGPU)
+            stderr('Using GPU: %s\n' % usingGPU)
 
         if self.pc:
             impulse_names = self.src_impulse_names
@@ -5835,8 +5829,7 @@ class DTSR(object):
                 n_eval_minibatch = math.ceil(len(y) / self.eval_minibatch_size)
                 for i in range(0, len(y), self.eval_minibatch_size):
                     if verbose:
-                        sys.stderr.write('\rMinibatch %d/%d' % ((i / self.eval_minibatch_size) + 1, n_eval_minibatch))
-                        sys.stderr.flush()
+                        stderr('\rMinibatch %d/%d' % ((i / self.eval_minibatch_size) + 1, n_eval_minibatch))
                     fd_minibatch[self.time_y] = time_y[i:i + self.eval_minibatch_size]
                     fd_minibatch[self.gf_y] = gf_y[i:i + self.eval_minibatch_size]
                     fd_minibatch[self.X] = X_2d[i:i + self.eval_minibatch_size]
@@ -5970,7 +5963,7 @@ class DTSR(object):
         assert not mc or type(self).__name__ == 'DTSRBayes', 'Monte Carlo estimation of credible intervals (mc=True) is only supported for DTSRBayes models.'
 
         if mc and not hasattr(self, 'ci_curve'):
-            sys.stderr.write('Credible intervals are not supported for instances of %s. Re-run ``make_plots`` with ``mc=False``.\n' % type(self))
+            stderr('Credible intervals are not supported for instances of %s. Re-run ``make_plots`` with ``mc=False``.\n' % type(self))
             mc = False
 
         if len(self.terminal_names) == 0:

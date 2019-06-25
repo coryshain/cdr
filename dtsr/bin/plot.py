@@ -6,7 +6,7 @@ import pickle
 import numpy as np
 import pandas as pd
 from dtsr.config import Config
-from dtsr.util import load_dtsr, filter_models
+from dtsr.util import load_dtsr, filter_models, stderr
 from dtsr.plot import plot_irf, plot_qq
 
 if __name__ == '__main__':
@@ -121,7 +121,7 @@ if __name__ == '__main__':
         for m in models:
             p.set_model(m)
 
-            sys.stderr.write('Retrieving saved model %s...\n' % m)
+            stderr('Retrieving saved model %s...\n' % m)
             dtsr_model = load_dtsr(p.outdir + '/' + m)
 
             kwargs = {
@@ -133,7 +133,7 @@ if __name__ == '__main__':
                 'dpi': p['dpi'] if args.dpi is None else args.dpi
             }
 
-            sys.stderr.write('Plotting...\n')
+            stderr('Plotting...\n')
 
             if args.qq:
                 obs_path = p.outdir + '/%s/obs_%s.txt' % (m, args.qq)
@@ -187,7 +187,7 @@ if __name__ == '__main__':
                         **qq_kwargs
                     )
                 else:
-                    sys.stderr.write('Model %s missing observation and/or prediction files, skipping Q-Q plot...\n' % m)
+                    stderr('Model %s missing observation and/or prediction files, skipping Q-Q plot...\n' % m)
 
             dtsr_model.make_plots(
                 standardize_response=args.standardize_response,

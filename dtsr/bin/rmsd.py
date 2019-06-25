@@ -3,7 +3,7 @@ import sys
 import os
 import pickle
 from dtsr.config import Config
-from dtsr.util import load_dtsr, filter_models
+from dtsr.util import load_dtsr, filter_models, stderr
 
 if __name__ == '__main__':
 
@@ -38,10 +38,10 @@ if __name__ == '__main__':
             p.set_model(m)
             formula = p.models[m]['formula']
 
-            sys.stderr.write('Retrieving saved model %s...\n' % m)
+            stderr('Retrieving saved model %s...\n' % m)
             dtsr_model = load_dtsr(p.outdir + '/' + m)
 
-            sys.stderr.write('Computing RMSD...\n')
+            stderr('Computing RMSD...\n')
 
             rmsd = dtsr_model.irf_rmsd(
                 gold_irf_lambda,

@@ -7,6 +7,8 @@ import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 
+from dtsr.util import stderr
+
 
 def scale(a, b):
     df = np.stack([np.array(a), np.array(b)], axis=1)
@@ -62,10 +64,10 @@ if __name__ == '__main__':
         select = np.logical_and(np.isfinite(np.array(model_cur)), np.isfinite(np.array(baseline_cur)))
         diff = float(len(model_cur) - select.sum())
         p_value, base_diff, diffs = permutation_test(baseline_cur[select], model_cur[select], n_iter=10000, n_tails=args.tails, mode=args.metric, nested=True)
-        sys.stderr.write('\n')
+        stderr('\n')
         out_path = args.outdir + '/%s_%d_PT.txt' % (args.name, i)
         with open(out_path, 'w') as f:
-            sys.stderr.write('Saving output to %s...\n' %out_path)
+            stderr('Saving output to %s...\n' %out_path)
 
             summary = '='*50 + '\n'
             summary += 'Model comparison:\n'

@@ -12,7 +12,7 @@ from dtsr.config import Config
 from dtsr.io import read_data
 from dtsr.formula import Formula
 from dtsr.data import add_dv, filter_invalid_responses, preprocess_data, compute_splitID, compute_partition
-from dtsr.util import mse, mae, filter_models, get_partition_list, paths_from_partition_cliarg
+from dtsr.util import mse, mae, filter_models, get_partition_list, paths_from_partition_cliarg, stderr
 
 if __name__ == '__main__':
 
@@ -41,7 +41,7 @@ if __name__ == '__main__':
             run_dtsr = True
 
     if not (run_baseline or run_dtsr):
-        sys.stderr.write('No models to run. Exiting...\n')
+        stderr('No models to run. Exiting...\n')
         exit()
 
     dtsr_formula_list = [Formula(p.models[m]['formula']) for m in models if m.startswith('DTSR')]
@@ -105,11 +105,11 @@ if __name__ == '__main__':
             dv = formula.strip().split('~')[0].strip().replace('.','')
 
             if os.path.exists(p.outdir + '/' + m + '/m.obj'):
-                sys.stderr.write('Retrieving saved model %s...\n' % m)
+                stderr('Retrieving saved model %s...\n' % m)
                 with open(p.outdir + '/' + m + '/m.obj', 'rb') as m_file:
                     lme = pickle.load(m_file)
             else:
-                sys.stderr.write('Fitting model %s...\n' % m)
+                stderr('Fitting model %s...\n' % m)
                 lme = LME(formula, X_baseline)
                 with open(p.outdir + '/' + m + '/m.obj', 'wb') as m_file:
                     pickle.dump(lme, m_file)
@@ -129,8 +129,8 @@ if __name__ == '__main__':
             summary += '=' * 50 + '\n'
             with open(p.outdir + '/' + m + '/summary.txt', 'w') as f_out:
                 f_out.write(summary)
-            sys.stderr.write(summary)
-            sys.stderr.write('\n\n')
+            stderr(summary)
+            stderr('\n\n')
 
         elif m.startswith('LM'):
             from dtsr.baselines import LM
@@ -138,11 +138,11 @@ if __name__ == '__main__':
             dv = formula.strip().split('~')[0].strip().replace('.','')
 
             if os.path.exists(p.outdir + '/' + m + '/m.obj'):
-                sys.stderr.write('Retrieving saved model %s...\n' % m)
+                stderr('Retrieving saved model %s...\n' % m)
                 with open(p.outdir + '/' + m + '/m.obj', 'rb') as m_file:
                     lm = pickle.load(m_file)
             else:
-                sys.stderr.write('Fitting model %s...\n' % m)
+                stderr('Fitting model %s...\n' % m)
                 lm = LM(formula, X_baseline)
                 with open(p.outdir + '/' + m + '/m.obj', 'wb') as m_file:
                     pickle.dump(lm, m_file)
@@ -162,8 +162,8 @@ if __name__ == '__main__':
             summary += '=' * 50 + '\n'
             with open(p.outdir + '/' + m + '/summary.txt', 'w') as f_out:
                 f_out.write(summary)
-            sys.stderr.write(summary)
-            sys.stderr.write('\n\n')
+            stderr(summary)
+            stderr('\n\n')
 
         elif m.startswith('GAM'):
             import re
@@ -182,11 +182,11 @@ if __name__ == '__main__':
             formula = ' '.join(formula)
 
             if os.path.exists(p.outdir + '/' + m + '/m.obj'):
-                sys.stderr.write('Retrieving saved model %s...\n' % m)
+                stderr('Retrieving saved model %s...\n' % m)
                 with open(p.outdir + '/' + m + '/m.obj', 'rb') as m_file:
                     gam = pickle.load(m_file)
             else:
-                sys.stderr.write('Fitting model %s...\n' % m)
+                stderr('Fitting model %s...\n' % m)
                 gam = GAM(formula, X_baseline, ran_gf=ran_gf)
                 with open(p.outdir + '/' + m + '/m.obj', 'wb') as m_file:
                     pickle.dump(gam, m_file)
@@ -206,8 +206,8 @@ if __name__ == '__main__':
             summary += '=' * 50 + '\n'
             with open(p.outdir + '/' + m + '/summary.txt', 'w') as f_out:
                 f_out.write(summary)
-            sys.stderr.write(summary)
-            sys.stderr.write('\n\n')
+            stderr(summary)
+            stderr('\n\n')
 
         elif m.startswith('DTSR'):
             dv = formula.strip().split('~')[0].strip()
@@ -216,7 +216,7 @@ if __name__ == '__main__':
             if X_response_aligned_predictors_valid is not None:
                 X_response_aligned_predictors_valid = X_response_aligned_predictors_valid[select_y_valid]
 
-            sys.stderr.write('\nInitializing model %s...\n\n' % m)
+            stderr('\nInitializing model %s...\n\n' % m)
 
             if p['network_type'] in ['mle', 'nn']:
                 bayes = False
@@ -259,7 +259,7 @@ if __name__ == '__main__':
             else:
                 raise ValueError('Network type "%s" not supported' %p['network_type'])
 
-            sys.stderr.write('\nFitting model %s...\n\n' % m)
+            stderr('\nFitting model %s...\n\n' % m)
 
             dtsr_model.fit(
                 X,
@@ -283,8 +283,8 @@ if __name__ == '__main__':
 
             with open(p.outdir + '/' + m + '/summary.txt', 'w') as f_out:
                 f_out.write(summary)
-            sys.stderr.write(summary)
-            sys.stderr.write('\n\n')
+            stderr(summary)
+            stderr('\n\n')
 
             dtsr_model.save_parameter_table()
 

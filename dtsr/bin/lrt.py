@@ -4,7 +4,7 @@ import pickle
 
 from dtsr.baselines import anova
 from dtsr.config import Config
-from dtsr.util import nested, filter_models, get_partition_list
+from dtsr.util import nested, filter_models, get_partition_list, stderr
 
 if __name__ == '__main__':
 
@@ -27,7 +27,7 @@ if __name__ == '__main__':
     partitions = get_partition_list(args.partition)
     partition_str = '-'.join(partitions)
 
-    sys.stderr.write('\n')
+    stderr('\n')
 
     if args.ablation:
         comparison_sets = {}
@@ -49,7 +49,7 @@ if __name__ == '__main__':
         model_set = comparison_sets[s]
         if len(model_set) > 1:
             if s is not None:
-                sys.stderr.write('Comparing models within ablation set "%s"...\n' %s)
+                stderr('Comparing models within ablation set "%s"...\n' %s)
             for i in range(len(model_set)):
                 model_name_1 = model_set[i]
                 lme_path_1 = p.outdir + '/' + model_name_1 + '/lm_%s.obj' % ('z_%s' % partition_str if args.zscore else partition_str)
@@ -66,7 +66,7 @@ if __name__ == '__main__':
                         name = '%s_v_%s' %(model_name_1, model_name_2)
                         out_path = p.outdir + '/' + name + '_2stepLRT_%s.txt' % ('z_%s' % partition_str if args.zscore else partition_str)
                         with open(out_path, 'w') as f:
-                            sys.stderr.write('Saving output to %s...\n' %out_path)
+                            stderr('Saving output to %s...\n' %out_path)
                             summary = '='*50 + '\n'
                             summary += 'Model comparison: %s vs %s\n' % (model_name_1, model_name_2)
                             summary += 'Partition: %s\n\n' % partition_str

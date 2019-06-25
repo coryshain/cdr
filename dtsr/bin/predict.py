@@ -12,13 +12,13 @@ from dtsr.io import read_data
 from dtsr.formula import Formula
 from dtsr.data import add_dv, filter_invalid_responses, preprocess_data, compute_splitID, compute_partition, get_first_last_obs_lists
 from dtsr.util import mse, mae, percent_variance_explained
-from dtsr.util import load_dtsr, filter_models, get_partition_list, paths_from_partition_cliarg
+from dtsr.util import load_dtsr, filter_models, get_partition_list, paths_from_partition_cliarg, stderr
 from dtsr.plot import plot_qq
 
 
 # These code blocks are factored out because they are used by both LM/E objects and DTSR objects under 2-step analysis
 def predict_LM(model_path, outdir, X, y, dv, partition_name, model_name=''):
-    sys.stderr.write('Retrieving saved model %s...\n' % m)
+    stderr('Retrieving saved model %s...\n' % m)
     with open(model_path, 'rb') as m_file:
         lm = pickle.load(m_file)
 
@@ -44,10 +44,10 @@ def predict_LM(model_path, outdir, X, y, dv, partition_name, model_name=''):
     summary += '=' * 50 + '\n'
     with open(outdir + '/%seval_%s.txt' % ('' if model_name=='' else model_name + '_', partition_name), 'w') as f_out:
         f_out.write(summary)
-    sys.stderr.write(summary)
+    stderr(summary)
 
 def predict_LME(model_path, outdir, X, y, dv, partition_name, model_name=''):
-    sys.stderr.write('Retrieving saved model %s...\n' % m)
+    stderr('Retrieving saved model %s...\n' % m)
     with open(model_path, 'rb') as m_file:
         lme = pickle.load(m_file)
 
@@ -78,7 +78,7 @@ def predict_LME(model_path, outdir, X, y, dv, partition_name, model_name=''):
     summary += '=' * 50 + '\n'
     with open(outdir + '/%seval_%s.txt' % ('' if model_name=='' else model_name + '_', partition_name), 'w') as f_out:
         f_out.write(summary)
-    sys.stderr.write(summary)
+    stderr(summary)
 
 
 if __name__ == '__main__':
@@ -246,7 +246,7 @@ if __name__ == '__main__':
                     formula[i] = c_term.sub(r'scale(\1, scale=FALSE)', formula[i])
                 formula = ' '.join(formula)
 
-                sys.stderr.write('Retrieving saved model %s...\n' % m)
+                stderr('Retrieving saved model %s...\n' % m)
                 with open(p.outdir + '/' + m + '/m.obj', 'rb') as m_file:
                     gam = pickle.load(m_file)
                 gam_preds = gam.predict(X_baseline)
@@ -271,7 +271,7 @@ if __name__ == '__main__':
                 summary += '=' * 50 + '\n'
                 with open(p.outdir + '/' + m + '/eval_%s.txt' % partition_str, 'w') as f_out:
                     f_out.write(summary)
-                sys.stderr.write(summary)
+                stderr(summary)
 
             elif m.startswith('DTSR'):
                 if not p.use_gpu_if_available:
@@ -327,7 +327,7 @@ if __name__ == '__main__':
                         )
 
                 else:
-                    sys.stderr.write('Retrieving saved model %s...\n' % m)
+                    stderr('Retrieving saved model %s...\n' % m)
                     dtsr_model = load_dtsr(p.outdir + '/' + m)
 
                     bayes = p['network_type'] == 'bayes'
@@ -472,7 +472,7 @@ if __name__ == '__main__':
 
                     with open(p.outdir + '/' + m + '/eval_%s.txt' % partition_str, 'w') as f_out:
                         f_out.write(summary)
-                    sys.stderr.write(summary)
-                    sys.stderr.write('\n\n')
+                    stderr(summary)
+                    stderr('\n\n')
 
                     dtsr_model.finalize()

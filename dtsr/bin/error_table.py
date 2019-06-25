@@ -1,6 +1,5 @@
 import sys
 import os
-import re
 import argparse
 from dtsr.config import Config
 

@@ -9,6 +9,7 @@ import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 
+from dtsr.util import stderr
 
 def scale(a, b):
     df = np.stack([np.array(a), np.array(b)], axis=1)
@@ -96,7 +97,7 @@ if __name__ == '__main__':
                 model_set = comparison_sets[s]
                 if len(model_set) > 1:
                     if s is not None:
-                        sys.stderr.write('Comparing models within ablation set "%s"...\n' %s)
+                        stderr('Comparing models within ablation set "%s"...\n' %s)
                     for i in range(len(model_set)):
                         m1 = model_set[i]
                         p.set_model(m1)
@@ -121,10 +122,10 @@ if __name__ == '__main__':
                                 select = np.logical_and(np.isfinite(np.array(a)), np.isfinite(np.array(b)))
                                 diff = float(len(a) - select.sum())
                                 p_value, base_diff, diffs = permutation_test(a[select], b[select], n_iter=10000, n_tails=args.tails, mode=args.metric, nested=is_nested)
-                                sys.stderr.write('\n')
+                                stderr('\n')
                                 out_path = p.outdir + '/' + name + '_PT_' + partition_str + '.txt'
                                 with open(out_path, 'w') as f:
-                                    sys.stderr.write('Saving output to %s...\n' %out_path)
+                                    stderr('Saving output to %s...\n' %out_path)
 
                                     summary = '='*50 + '\n'
                                     summary += 'Model comparison: %s vs %s\n' %(a_model, b_model)
@@ -189,11 +190,11 @@ if __name__ == '__main__':
                         df2.shape
                     )
                     p_value, diff, diffs = permutation_test(df1, df2, n_iter=10000, n_tails=args.tails, mode=args.metric)
-                    sys.stderr.write('\n')
+                    stderr('\n')
                     name = '%s_v_%s' % (a_name, b_name)
                     out_path = p.outdir + '/' + name + '_PT_pooled_' + partition_str + '.txt'
                     with open(out_path, 'w') as f:
-                        sys.stderr.write('Saving output to %s...\n' % out_path)
+                        stderr('Saving output to %s...\n' % out_path)
 
                         summary = '=' * 50 + '\n'
                         summary += 'Model comparison: %s vs %s\n' % (a_name, b_name)
