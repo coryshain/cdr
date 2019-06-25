@@ -254,9 +254,9 @@ def double_gamma_1_irf(params, integral_ub=None, session=None, epsilon=4*np.finf
             cdf_undershoot = dist_undershoot.cdf
 
             if integral_ub is None:
-                denom = cdf_main(integral_ub) - c * cdf_undershoot(integral_ub)
-            else:
                 denom = 1 - c
+            else:
+                denom = cdf_main(integral_ub) - c * cdf_undershoot(integral_ub)
 
             return lambda x, pdf_main=pdf_main, pdf_undershoot=pdf_undershoot, denom=denom, epsilon=epsilon: (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / denom
 
@@ -287,9 +287,9 @@ def double_gamma_2_irf(params, integral_ub=None, session=None, epsilon=4*np.finf
             cdf_undershoot = dist_undershoot.cdf
 
             if integral_ub is None:
-                denom = cdf_main(integral_ub) - c * cdf_undershoot(integral_ub)
-            else:
                 denom = 1 - c
+            else:
+                denom = cdf_main(integral_ub) - c * cdf_undershoot(integral_ub)
 
             return lambda x, pdf_main=pdf_main, pdf_undershoot=pdf_undershoot, denom=denom, epsilon=epsilon: (pdf_main(
                 x + epsilon) - c * pdf_undershoot(x + epsilon)) / denom
@@ -321,9 +321,9 @@ def double_gamma_3_irf(params, integral_ub=None, session=None, epsilon=4*np.finf
             cdf_undershoot = dist_undershoot.cdf
 
             if integral_ub is None:
-                denom = cdf_main(integral_ub) - c * cdf_undershoot(integral_ub)
-            else:
                 denom = 1 - c
+            else:
+                denom = cdf_main(integral_ub) - c * cdf_undershoot(integral_ub)
 
             return lambda x, pdf_main=pdf_main, pdf_undershoot=pdf_undershoot, denom=denom, epsilon=epsilon: (pdf_main(
                 x + epsilon) - c * pdf_undershoot(x + epsilon)) / denom
@@ -355,9 +355,9 @@ def double_gamma_4_irf(params, integral_ub=None, session=None, epsilon=4*np.finf
             cdf_undershoot = dist_undershoot.cdf
 
             if integral_ub is None:
-                denom = cdf_main(integral_ub) - c * cdf_undershoot(integral_ub)
-            else:
                 denom = 1 - c
+            else:
+                denom = cdf_main(integral_ub) - c * cdf_undershoot(integral_ub)
 
             return lambda x, pdf_main=pdf_main, pdf_undershoot=pdf_undershoot, denom=denom, epsilon=epsilon: (pdf_main(
                 x + epsilon) - c * pdf_undershoot(x + epsilon)) / denom
@@ -389,9 +389,9 @@ def double_gamma_5_irf(params, integral_ub=None, session=None, epsilon=4*np.finf
             cdf_undershoot = dist_undershoot.cdf
 
             if integral_ub is None:
-                denom = cdf_main(integral_ub) - c * cdf_undershoot(integral_ub)
-            else:
                 denom = 1 - c
+            else:
+                denom = cdf_main(integral_ub) - c * cdf_undershoot(integral_ub)
 
             return lambda x, pdf_main=pdf_main, pdf_undershoot=pdf_undershoot, denom=denom, epsilon=epsilon: (pdf_main(
                 x + epsilon) - c * pdf_undershoot(x + epsilon)) / denom
