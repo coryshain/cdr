@@ -70,19 +70,15 @@ def exponential_irf(params, integral_ub=None, session=None):
         with session.graph.as_default():
             beta = params[:, 0:1]
 
-            dist = tf.contrib.distributions.Exponential(beta)
-            pdf = dist.prob
-            cdf = dist.cdf
-
             if integral_ub is None:
                 ub = None
             else:
-                ub = cdf(integral_ub)
+                ub = 1 - tf.exp(-beta * integral_ub)
 
             if integral_ub is None:
-                return lambda x, pdf=pdf: pdf(x)
+                return lambda x, beta=beta: beta * tf.exp(-beta * x)
             else:
-                return lambda x, pdf=pdf, cdf=cdf, ub=ub: pdf(x) / ub
+                return lambda x, beta=beta, ub=ub: beta * tf.exp(-beta * x) / ub
 
 
 def gamma_irf(params, integral_ub=None, session=None, epsilon=4*np.finfo('float32').eps, validate_irf_args=False):
