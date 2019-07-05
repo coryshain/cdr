@@ -372,6 +372,8 @@ if __name__ == '__main__':
                                     'yStandardized': y_cur
                                 }
                             )
+                            print(df_out.shape)
+                            print(y_valid.shape)
                             df_out = pd.concat([y_valid.reset_index(drop=True), df_out], axis=1)
                         else:
                             preds_outfile = p.outdir + '/' + m + '/preds_%s.txt' % partition_str
@@ -433,7 +435,6 @@ if __name__ == '__main__':
                                 for i in range(len(dtsr_loglik_vector)):
                                     l_file.write(str(dtsr_loglik_vector[i]) + '\n')
                         dtsr_loglik = dtsr_loglik_vector.sum()
-
                     if args.mode is not None and 'loss' in args.mode:
                         dtsr_loss = dtsr_model.loss(
                             X,
@@ -453,7 +454,7 @@ if __name__ == '__main__':
                             terminal_names = dtsr_model.terminal_names
 
                     if args.extra_cols:
-                        preds_outfile = p.outdir + '/' + m + '/dtsr_preds_%s.csv' % partition_str
+                        preds_outfile = p.outdir + '/' + m + '/preds_table_%s.csv' % partition_str
                         df_out.to_csv(preds_outfile, sep=' ', na_rep='NaN', index=False)
 
                     summary += 'Training iterations completed: %d\n\n' % dtsr_model.global_step.eval(session=dtsr_model.sess)
