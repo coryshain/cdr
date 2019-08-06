@@ -1106,6 +1106,8 @@ class DTSR(object):
                     self.last_convergence_check_update = tf.placeholder(self.INT_NP, shape=[], name='last_convergence_check_update')
                     self.last_convergence_check_assign = tf.assign(self.last_convergence_check, self.last_convergence_check_update)
                     self.check_convergence = True
+                else:
+                    self.check_convergence = False
 
         self.parameter_table_columns = ['Estimate']
         self.predict_mode = False
@@ -3236,19 +3238,20 @@ class DTSR(object):
     def _initialize_convergence_checking(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                self.rho_t = tf.placeholder(self.FLOAT_TF, name='rho_t_in')
-                self.p_rho_t = tf.placeholder(self.FLOAT_TF, name='p_rho_t_in')
-                if self.convergence_basis.lower() == 'parameters':
-                    self.rho_a = tf.placeholder(self.FLOAT_TF, name='rho_a_in')
-                    self.p_rho_a = tf.placeholder(self.FLOAT_TF, name='p_rho_a_in')
+                if self.check_convergence:
+                    self.rho_t = tf.placeholder(self.FLOAT_TF, name='rho_t_in')
+                    self.p_rho_t = tf.placeholder(self.FLOAT_TF, name='p_rho_t_in')
+                    if self.convergence_basis.lower() == 'parameters':
+                        self.rho_a = tf.placeholder(self.FLOAT_TF, name='rho_a_in')
+                        self.p_rho_a = tf.placeholder(self.FLOAT_TF, name='p_rho_a_in')
 
-                tf.summary.scalar('convergence/rho_t', self.rho_t, collections=['convergence'])
-                tf.summary.scalar('convergence/p_rho_t', self.p_rho_t, collections=['convergence'])
-                if self.convergence_basis.lower() == 'parameters':
-                    tf.summary.scalar('convergence/rho_a', self.rho_a, collections=['convergence'])
-                    tf.summary.scalar('convergence/p_rho_a', self.p_rho_a, collections=['convergence'])
-                tf.summary.scalar('convergence/proportion_converged', self.proportion_converged, collections=['convergence'])
-                self.summary_convergence = tf.summary.merge_all(key='convergence')
+                    tf.summary.scalar('convergence/rho_t', self.rho_t, collections=['convergence'])
+                    tf.summary.scalar('convergence/p_rho_t', self.p_rho_t, collections=['convergence'])
+                    if self.convergence_basis.lower() == 'parameters':
+                        tf.summary.scalar('convergence/rho_a', self.rho_a, collections=['convergence'])
+                        tf.summary.scalar('convergence/p_rho_a', self.p_rho_a, collections=['convergence'])
+                    tf.summary.scalar('convergence/proportion_converged', self.proportion_converged, collections=['convergence'])
+                    self.summary_convergence = tf.summary.merge_all(key='convergence')
 
 
 
@@ -6310,15 +6313,15 @@ class DTSR(object):
                     if n_samples is None:
                         n_samples = self.n_samples_eval
 
-                    fd[self.time_y] = np.ones((1,)) * n_time_units
-                    fd[self.time_X] = np.zeros((1, self.history_length))
+                    # fd[self.time_y] = np.ones((1,)) * n_time_units
+                    # fd[self.time_X] = np.zeros((1, self.history_length))
 
                     preds = []
 
                     for name in names:
                         posterior = self.irf_mc[name]['atomic']['scaled']
 
-                        samples = [self.sess.run(posterior, feed_dict=fd) for _ in range(n_samples)]
+                        samples = [self.sess.run(posterior, feed_dict=fd)[0] for _ in range(n_samples)]
                         samples = np.concatenate(samples, axis=1)
                         preds.append(samples)
 
@@ -6328,7 +6331,7 @@ class DTSR(object):
                     gold = np.expand_dims(gold, 1)
 
                 else:
-                    preds = [self.sess.run(plots['plot'][i], feed_dict=fd) for i in range(len(plots['plot'])) if plots['names'][i] in names]
+                    preds = [self.sess.run(plots['plot'][i][0], feed_dict=fd) for i in range(len(plots['plot'])) if plots['names'][i] in names]
                     preds = np.concatenate(preds, axis=1)
                     if summed:
                         preds = preds.sum(axis=1)
