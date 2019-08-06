@@ -372,9 +372,7 @@ if __name__ == '__main__':
                                     'yStandardized': y_cur
                                 }
                             )
-                            print(df_out.shape)
-                            print(y_valid.shape)
-                            df_out = pd.concat([y_valid.reset_index(drop=True), df_out], axis=1)
+                            df_out = pd.concat([y_valid.reset_index(drop=True), df_out.reset_index(drop=True)], axis=1)
                         else:
                             preds_outfile = p.outdir + '/' + m + '/preds_%s.txt' % partition_str
                             loss_outfile = p.outdir + '/' + m + '/losses_mse_%s.txt' % partition_str
