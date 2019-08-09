@@ -17,6 +17,7 @@ if __name__ == '__main__':
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of model names for which to compute LRT tests. Regex permitted. If unspecified, uses all DTSR models.')
     argparser.add_argument('-z', '--zscore', action='store_true', help='Compare models fitted with Z-transformed predictors.')
     argparser.add_argument('-a', '--ablation', action='store_true', help='Only compare models within an ablation set (those defined using the "ablate" param in the config file)')
+    argparser.add_argument('-A', '--ablation_components', type=str, nargs='*', help='Names of variables to consider in ablative tests. Useful for excluding some ablated models from consideration')
     argparser.add_argument('-p', '--partition', type=str, default='train', help='Name of partition to use (one of "train", "dev", "test")')
     args, unknown = argparser.parse_known_args()
 
@@ -39,7 +40,16 @@ if __name__ == '__main__':
         for model_name in p.model_list:
             model_basename = model_name.split('!')[0]
             if model_basename in comparison_sets and model_name not in comparison_sets[model_basename]:
-                comparison_sets[model_basename].append(model_name)
+                if len(args.ablation_components) > 0:
+                    components = model_name.split('!')[1:]
+                    hit = True
+                    for c in components:
+                        if c not in args.ablation_components:
+                            hit = False
+                    if hit:
+                        comparison_sets[model_basename].append(model_name)
+                else:
+                    comparison_sets[model_basename].append(model_name)
     else:
         comparison_sets = {
             None: models

@@ -31,7 +31,8 @@ if __name__ == '__main__':
     argparser.add_argument('-A', '--ablation_components', type=str, nargs='*', help='Names of variables to consider in ablative tests. Useful for excluding some ablated models from consideration')
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
     argparser.add_argument('-M', '--metric', type=str, default='loss', help='Metric to use for comparison (either "loss" or "loglik")')
-    argparser.add_argument('-t', '--tails', type=int, default=2, help='Number of tails (1 or 2)')
+    argparser.add_argument('-t', '--twostep', action='store_true', help='For DTSR models, compare predictions from fitted LME model from two-step hypothesis test.')
+    argparser.add_argument('-T', '--tails', type=int, default=2, help='Number of tails (1 or 2)')
     args, unknown = argparser.parse_known_args()
 
     assert args.metric in ['loss', 'loglik'], 'Metric must be one of ["loss", "loglik"].'
@@ -55,6 +56,8 @@ if __name__ == '__main__':
             file_name = 'losses_mse_%s.txt' % partition_str
         else:
             file_name = 'loglik_%s.txt' % partition_str
+        if args.twostep:
+            file_name = 'LM_2STEP_' + file_name 
 
         if args.ablation:
             comparison_sets = {}
