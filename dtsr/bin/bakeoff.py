@@ -14,7 +14,6 @@ def scale(a, b):
     df = np.stack([np.array(a), np.array(b)], axis=1)
     df = df[np.where(np.isfinite(df))] 
     scaling_factor = df.std()
-    print(scaling_factor)
     return a/scaling_factor, b/scaling_factor
 
 
