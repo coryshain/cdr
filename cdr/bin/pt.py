@@ -28,9 +28,11 @@ if __name__ == '__main__':
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of models (or model basenames if using -a) to compare. Regex permitted. If unspecified, uses all models.')
     argparser.add_argument('-P', '--pool', action='store_true', help='Pool test statistic across models by basename using all ablation configurations common to all basenames, forces -a. Evaluation data must already exist for all ablation configurations common to all basenames.')
     argparser.add_argument('-a', '--ablation', action='store_true', help='Only compare models within an ablation set (those defined using the "ablate" param in the config file)')
+    argparser.add_argument('-A', '--ablation_components', type=str, nargs='*', help='Names of variables to consider in ablative tests. Useful for excluding some ablated models from consideration')
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
     argparser.add_argument('-M', '--metric', type=str, default='loss', help='Metric to use for comparison (either "loss" or "loglik")')
-    argparser.add_argument('-t', '--tails', type=int, default=2, help='Number of tails (1 or 2)')
+    argparser.add_argument('-t', '--twostep', action='store_true', help='For DTSR models, compare predictions from fitted LME model from two-step hypothesis test.')
+    argparser.add_argument('-T', '--tails', type=int, default=2, help='Number of tails (1 or 2)')
     args, unknown = argparser.parse_known_args()
 
     assert args.metric in ['loss', 'loglik'], 'Metric must be one of ["loss", "loglik"].'
@@ -54,6 +56,8 @@ if __name__ == '__main__':
             file_name = 'losses_mse_%s.txt' % partition_str
         else:
             file_name = 'loglik_%s.txt' % partition_str
+        if args.twostep:
+            file_name = 'LM_2STEP_' + file_name 
 
         if args.ablation:
             comparison_sets = {}
@@ -65,7 +69,16 @@ if __name__ == '__main__':
             for model_name in p.model_list:
                 model_basename = model_name.split('!')[0]
                 if model_basename in comparison_sets and model_name not in comparison_sets[model_basename]:
-                    comparison_sets[model_basename].append(model_name)
+                    if len(args.ablation_components) > 0:
+                        components = model_name.split('!')[1:]
+                        hit = True
+                        for c in components:
+                            if c not in args.ablation_components:
+                                hit = False
+                        if hit:
+                            comparison_sets[model_basename].append(model_name)
+                    else:
+                        comparison_sets[model_basename].append(model_name)
             if args.pool:
                 ablations_cur = None
                 basenames_to_pool_cur = []
