@@ -1,11 +1,11 @@
-.. _dtsrbayes:
+.. _cdrbayes:
 
-DTSRBayes
+CDRBayes
 =========
 
-DTSR with Bayesian inference.
+CDR with Bayesian inference.
 
-.. autoclass:: dtsr.dtsrbayes.DTSRBayes
+.. autoclass:: cdr.cdrbayes.CDRBayes
     :members:
     :inherited-members:
     :show-inheritance:

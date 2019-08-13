@@ -1,9 +1,9 @@
 .. _index:
 
-DTSR package documentation
+CDR package documentation
 =============================================
 
-Documentation for the ``dtsr`` Python package.
+Documentation for the ``cdr`` Python package.
 
 .. toctree::
    :caption: Contents:
@@ -15,7 +15,7 @@ Documentation for the ``dtsr`` Python package.
    convergence
    api
    irftree
-   dtsr
+   cdr
 
 
 Indices

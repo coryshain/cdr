@@ -1,11 +1,11 @@
 .. _irftree:
 
-IRF Trees in DTSR
+IRF Trees in CDR
 =================
 
-The network of IRFs for each DTSR model are represented by the implementations in this package as *trees* from which properties can be read off for the purposes of model construction.
-This is an implementation detail that will not be pertinent to most users, especially those primarily training and using DTSR models through the bundled executables.
-However, for users who want to program with DTSR classes or directly interface with the associated ``Formula`` class, which is used to store and manipulate information about the model structure, this reference provides a conceptual overview of tree representations of DTSR impulse response structures.
+The network of IRFs for each CDR model are represented by the implementations in this package as *trees* from which properties can be read off for the purposes of model construction.
+This is an implementation detail that will not be pertinent to most users, especially those primarily training and using CDR models through the bundled executables.
+However, for users who want to program with CDR classes or directly interface with the associated ``Formula`` class, which is used to store and manipulate information about the model structure, this reference provides a conceptual overview of tree representations of CDR impulse response structures.
 
 There are several reasons for representing IRFs as nodes on a tree. In particular, tree representations facilitate:
 
@@ -17,9 +17,9 @@ There are several reasons for representing IRFs as nodes on a tree. In particula
 Factorization
 -------------
 
-DTSR models contain *impulses*, *coefficients*, and *IRFs*, each of whose structure can be separably manipulated.
+CDR models contain *impulses*, *coefficients*, and *IRFs*, each of whose structure can be separably manipulated.
 Impulses are timestamped data streams that constitute the predictors of the model.
-Impulses are computed from the input data prior to entering the DTSR computation graph.
+Impulses are computed from the input data prior to entering the CDR computation graph.
 
 Coefficients govern the amplitude of the response to a predictor.
 Specifically, the IRF for a given predictor is multiplied by a coefficient governing the magnitude and sign of the overall response.
@@ -32,7 +32,7 @@ The response is subsequently scaled using a coefficient.
 Arbitrary IRF can be convolved together in a hierarchical fashion using a fast Fourier transform-based discrete approximation to the continuous convolution.
 
 Tree structures permit natural separation of these three components.
-Specifically, the DTSR IRF tree consists of *nodes*, each of which represents the application of an IRF.
+Specifically, the CDR IRF tree consists of *nodes*, each of which represents the application of an IRF.
 IRF composition is represented in the tree as *dominance*: parent IRF are convolved with their children, which are they convolved with their children, etc.
 Coefficients are disallowed except at *terminal* IRF nodes, i.e. "leaves" of the tree that have no children.
 In this implementation, ``Terminal`` is distinguished as special type of IRF kernel.
@@ -59,13 +59,13 @@ The path through the tree describing this structure will be::
     ROOT --> Gamma1 --> Gamma2 --> Terminal
 
 At the terminal, the composed IRF is multiplied by its coefficient and then convolved with its associated impulse.
-Although IRF composition in DTSR respects the hierarchical order in which the IRF are specified, in most cases order of composition does not matter because of associativity of convolution.
+Although IRF composition in CDR respects the hierarchical order in which the IRF are specified, in most cases order of composition does not matter because of associativity of convolution.
 
 
 Parameter tying
 ---------------
 
-IRF can be tied in DTSR, a property which can be conveniently represented via branching structures in the tree.
+IRF can be tied in CDR, a property which can be conveniently represented via branching structures in the tree.
 Specifically, if a single IRF is convolved with (1) multiple downstream IRF in a composition hierarchy or (2) multiple impulses, this fact can be represented by attaching multiple child nodes to a node representing the IRF.
 For example, consider the following two IRF trees involving impulses A, B, and C::
 
@@ -90,10 +90,10 @@ Tying of coefficients is also supported but this is not represented in the tree 
 It is enforced simply by requiring multiple terminals to share the same value for the coefficient ID property.
 
 
-DTSR tree summaries
+CDR tree summaries
 -------------------
 
-In the DTSR model summary, the IRF tree is printed in string format with indentation representing dominance.
+In the CDR model summary, the IRF tree is printed in string format with indentation representing dominance.
 The ID of each IRF on the tree is printed on its own line, along with other metadata when relevant (such as trainable params and associated random grouping factors).
 For example, Tree (1) above would be represented as follows::
 

@@ -1,11 +1,11 @@
-.. _dtsrbase:
+.. _cdrbase:
 
-DTSR
+CDR
 ====
 
-DTSR base class
+CDR base class
 
-.. autoclass:: dtsr.dtsrbase.DTSR
+.. autoclass:: cdr.cdrbase.CDR
     :members:
     :inherited-members:
     :show-inheritance:

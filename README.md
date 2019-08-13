@@ -1,15 +1,15 @@
-# Deconvolutional time series regression (DTSR)
-DTSR is a regression technique for modeling temporally diffuse effects (Shain & Schuler, 2018).
+# Continuous-Time Deconvolutional Regression (CDR)
+CDR (formerly _deconvolutional time series regression_ or _DTSR_) is a regression technique for modeling temporally diffuse effects (Shain & Schuler, 2018, 2019).
 
-This repository contains source code for the `dtsr` Python module as well as support for reproducing published experiments.
-Full documentation for the `dtsr` module is available at [http://dtsr.readthedocs.io/en/latest/](http://dtsr.readthedocs.io/en/latest/).
+This repository contains source code for the `cdr` Python module as well as support for reproducing published experiments.
+Full documentation for the `cdr` module is available at [http://dtsr.readthedocs.io/en/latest/](http://dtsr.readthedocs.io/en/latest/).
 
-DTSR models can be trained and evaluated using provided utility executables.
-Help strings for all available utilities can be viewed by running `python -m dtsr.bin.help`.
+CDR models can be trained and evaluated using provided utility executables.
+Help strings for all available utilities can be viewed by running `python -m cdr.bin.help`.
 Full repository documentation, including an API, is provided at the link above.
 
 Note that some published experiments below also involve fitting LME and GAM models, which require `rpy2` and therefore won't work on Windows systems without some serious hacking.
-The `dtsr` module is cross-platform and therefore DTSR models should train regardless of operating system.
+The `cdr` module is cross-platform and therefore CDR models should train regardless of operating system.
 
 ## Reproducing published results
 
@@ -22,7 +22,7 @@ Current reproduction branches are:
  - `naacl19`
 
 Thus, to reproduce results from NAACL19, for example, run `git checkout naacl19` from the repository root, and follow instructions in the `README` file.
-The reproduction branches are also useful sources of example configuration files to use as templates for setting up your own experiments, although you should consult the docs for full documentation of the structure of DTSR experiment configurations.
+The reproduction branches are also useful sources of example configuration files to use as templates for setting up your own experiments, although you should consult the docs for full documentation of the structure of CDR experiment configurations.
 
 Published results depend on both (1) datasets and (2) models as defined in experiment-specific configuration files.
 In general, we do not distribute data with this repository.
@@ -36,3 +36,4 @@ Bug reports can be logged in the issue tracker on [Github](https://github.com/co
 
 ## References
 Shain, Cory and Schuler, William (2018). Deconvolutional time series regression: A technique for modeling temporally diffuse effects. _EMNLP18_.
+Shain, Cory and Schuler, William (2019). Continuous-time deconvolutional regression for psycholinguistic modeling. _PsyArXiv_. [https://doi.org/10.31234/osf.io/whvk5](https://doi.org/10.31234/osf.io/whvk5).

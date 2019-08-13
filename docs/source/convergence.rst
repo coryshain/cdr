@@ -3,7 +3,7 @@
 Diagnosing convergence
 ======================
 
-Intuitively, DTSR models have converged when have ceased to improve with additional training.
+Intuitively, CDR models have converged when have ceased to improve with additional training.
 Programmatically detecting this condition is difficult because of noise in the parameter iterates introduced by stochastic optimization.
 The level of noise can vary as a function of the data, data size, model structure, learning rate, and optimizer choice.
 This package provides automatic convergence diagnostics that declare convergence when the loss is uncorrelated with training time within a tolerance.

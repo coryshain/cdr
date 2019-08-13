@@ -1,13 +1,13 @@
 .. _config:
 
-DTSR Configuration Files
+CDR Configuration Files
 ========================
 
-The DTSR utilities in this module read config files that follow the INI standard.
+The CDR utilities in this module read config files that follow the INI standard.
 Basic information about INI file syntax can be found e.g. `here <https://en.wikipedia.org/wiki/INI_file>`_.
 This reference assumes familiarity with the INI protocol.
 
-DTSR configuration files contain the sections and fields described below.
+CDR configuration files contain the sections and fields described below.
 
 
 
@@ -22,7 +22,7 @@ The ``[data]`` section supports the following fields:
 - **y_train**: ``str``; Path to training data (response matrix)
 - **series_ids**: space-delimited list of ``str``; Names of columns used to define unique time series
 
-Note that, unlike e.g. linear models, DTSR does not require synchronous predictors (impulses) and responses, which is why separate data objects must be provided for each of these components.
+Note that, unlike e.g. linear models, CDR does not require synchronous predictors (impulses) and responses, which is why separate data objects must be provided for each of these components.
 If the predictors and responses are synchronous, this is fine.
 The ``X_train`` and ``y_train`` fields can point to the same file.
 The system will treat each unique combination of values in the columns given in ``series_ids`` as constituting a unique time series.
@@ -55,13 +55,13 @@ For example, if the column ``subject`` is being used to define a random effects 
 
     filters = subjectsnunique > 100
 
-More complex filtration conditions are not supported automatically in DTSR but can be applied to the data by the user as a preprocess.
+More complex filtration conditions are not supported automatically in CDR but can be applied to the data by the user as a preprocess.
 
-Several DTSR utilities (e.g. for prediction and evaluation) are designed to handle train, dev, and test partitions of the input data, but these partitions must be constructed in advance.
+Several CDR utilities (e.g. for prediction and evaluation) are designed to handle train, dev, and test partitions of the input data, but these partitions must be constructed in advance.
 This package also provides a ``partition`` utility that can be used to partition input data by applying modular arithmetic to some subset of the variables in the data.
 For usage details run:
 
-``python -m dtsr.bin.partition -h``
+``python -m cdr.bin.partition -h``
 
 **IMPORTANT NOTES**
 
@@ -87,21 +87,21 @@ Section: ``[global_settings]``
 ------------------------------
 The ``[global_settings]`` section supports the following fields:
 
-- **outdir**: ``str``; Path to output directory where checkpoints, plots, and Tensorboard logs should be saved (default: ``./dtsr_model/``).
+- **outdir**: ``str``; Path to output directory where checkpoints, plots, and Tensorboard logs should be saved (default: ``./cdr_model/``).
   If it does not exist, this directory will be created.
   At runtime, the ``train`` utility will copy the config file to this directory as ``config.ini``, serving as a record of the settings used to generate the analysis.
 - **use_gpu_if_available**: ``bool``; If available, run on GPU. If ``False``, always runs on CPU even when system has compatible GPU.
 
 
 
-Section: ``[dtsr_settings]``
+Section: ``[cdr_settings]``
 ----------------------------
 
-The ``[dtsr_settings]`` section supports the following fields:
+The ``[cdr_settings]`` section supports the following fields:
 
 .. exec::
-    from dtsr.kwargs import dtsr_kwarg_docstring
-    print(dtsr_kwarg_docstring())
+    from cdr.kwargs import cdr_kwarg_docstring
+    print(cdr_kwarg_docstring())
 
 
 
@@ -119,37 +119,37 @@ Unused entries in the name map are ignored, and model variables that do not have
 
 
 
-Sections: ``[model_DTSR_*]``
+Sections: ``[model_CDR_*]``
 ----------------------------
 
-Arbitrarily many sections named ``[model_DTSR_*]`` can be provided in the config file, where ``*`` stands in for a unique identifier.
-Each such section defines a different DTSR model and must contain at least one field --- ``formula`` --- whose value is a DTSR model formula (see :ref:`formula` for more on DTSR formula syntax)
-The identifier ``DTSR_*`` will be used by the DTSR utilities to reference the fitted model and its output files.
+Arbitrarily many sections named ``[model_CDR_*]`` can be provided in the config file, where ``*`` stands in for a unique identifier.
+Each such section defines a different CDR model and must contain at least one field --- ``formula`` --- whose value is a CDR model formula (see :ref:`formula` for more on CDR formula syntax)
+The identifier ``CDR_*`` will be used by the CDR utilities to reference the fitted model and its output files.
 
-For example, to define a DTSR model called ``readingtimes``, the section header ``[model_DTSR_readingtimes]`` is included in the config file along with an appropriate ``formula`` specification.
-To use this specific model once fitted, it can be referenced using the identifier ``DTSR_readingtimes``.
-For example, the following call will extract predictions on dev data from a fitted ``DTSR_readingtimes`` defined in config file **config.ini**::
+For example, to define a CDR model called ``readingtimes``, the section header ``[model_CDR_readingtimes]`` is included in the config file along with an appropriate ``formula`` specification.
+To use this specific model once fitted, it can be referenced using the identifier ``CDR_readingtimes``.
+For example, the following call will extract predictions on dev data from a fitted ``CDR_readingtimes`` defined in config file **config.ini**::
 
-    python -m dtsr.bin.predict config.ini -m DTSR_readingtimes -p dev
+    python -m cdr.bin.predict config.ini -m CDR_readingtimes -p dev
 
-Additional fields from ``[dtsr_settings]`` may be specified for a given model, in which case the locally-specified setting (rather than the globally specified setting or the default value) will be used to train the model.
-For example, imagine that ``[dtsr_settings]`` contains the field ``n_iter = 1000``.
-All DTSR models subsequently specified in the config file will train for 1000 iterations.
-However, imagine that model ``[model_DTSR_longertrain]`` should train for 5000 iterations instead.
+Additional fields from ``[cdr_settings]`` may be specified for a given model, in which case the locally-specified setting (rather than the globally specified setting or the default value) will be used to train the model.
+For example, imagine that ``[cdr_settings]`` contains the field ``n_iter = 1000``.
+All CDR models subsequently specified in the config file will train for 1000 iterations.
+However, imagine that model ``[model_CDR_longertrain]`` should train for 5000 iterations instead.
 This can be specified within the same config file as::
 
-    [model_DTSR_longertrain]
+    [model_CDR_longertrain]
     n_iter = 5000
     formula = ...
 
-This setup allows a single config file to define a variety of DTSR models, as long as they all share the same data.
+This setup allows a single config file to define a variety of CDR models, as long as they all share the same data.
 Distinct datasets require distinct config files.
 
 For hypothesis testing, fixed effect ablation can be conveniently automated using the ``ablate`` model field.
 For example, the following specification implicitly defines 7 unique models, one for each of the ``|powerset(a, b, c)| - 1 = 7``
 non-null ablations of ``a``, ``b``, and ``c``::
 
-    [model_DTSR_example]
+    [model_CDR_example]
     n_iter = 5000
     ablate = a b c
     formula = C(a + b + c, Normal()) + (C(a + b + c, Normal()) | subject)
@@ -157,30 +157,30 @@ non-null ablations of ``a``, ``b``, and ``c``::
 The ablated models are named using ``'!'`` followed by the ablated impulse name for each ablated impulse.
 Therefore, the above specification is equivalent to (and much easier to write than) the following::
 
-    [model_DTSR_example]
+    [model_CDR_example]
     n_iter = 5000
     formula = C(a + b + c, Normal()) + (C(a + b + c, Normal()) | subject)
 
-    [model_DTSR_example!a]
+    [model_CDR_example!a]
     n_iter = 5000
     formula = C(b + c, Normal()) + (C(a + b + c, Normal()) | subject)
 
-    [model_DTSR_example!b]
+    [model_CDR_example!b]
     n_iter = 5000
     formula = C(a + c, Normal()) + (C(a + b + c, Normal()) | subject)
 
-    [model_DTSR_example!c]
+    [model_CDR_example!c]
     n_iter = 5000
     formula = C(a + b, Normal()) + (C(a + b + c, Normal()) | subject)
 
-    [model_DTSR_example!a!b]
+    [model_CDR_example!a!b]
     n_iter = 5000
     formula = C(c, Normal()) + (C(a + b + c, Normal()) | subject)
 
-    [model_DTSR_example!a!c]
+    [model_CDR_example!a!c]
     n_iter = 5000
     formula = C(b, Normal()) + (C(a + b + c, Normal()) | subject)
 
-    [model_DTSR_example!b!c]
+    [model_CDR_example!b!c]
     n_iter = 5000
     formula = C(a, Normal()) + (C(a + b + c, Normal()) | subject)

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# DTSR documentation build configuration file, created by
+# CDR documentation build configuration file, created by
 # sphinx-quickstart on Fri Jan 05 09:47:28 2018.
 #
 # This file is execfile()d with the current directory set to its
@@ -61,7 +61,7 @@ extensions = ['sphinx.ext.autodoc',
     'sphinx.ext.ifconfig',
     'sphinx.ext.viewcode',
     'sphinx.ext.githubpages',
-    'dtsr.sphinx']
+    'cdr.sphinx']
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -76,7 +76,7 @@ source_suffix = '.rst'
 master_doc = 'index'
 
 # General information about the project.
-project = u'DTSR'
+project = u'CDR'
 copyright = u'2018, Cory Shain'
 author = u'Cory Shain'
 
@@ -137,7 +137,7 @@ html_sidebars = { '**': ['globaltoc.html', 'relations.html', 'sourcelink.html', 
 # -- Options for HTMLHelp output ------------------------------------------
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'DTSRdoc'
+htmlhelp_basename = 'CDRdoc'
 
 
 # -- Options for LaTeX output ---------------------------------------------
@@ -164,7 +164,7 @@ latex_elements = {
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-    (master_doc, 'DTSR.tex', u'DTSR Documentation',
+    (master_doc, 'CDR.tex', u'CDR Documentation',
      u'Cory Shain', 'manual'),
 ]
 
@@ -174,7 +174,7 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    (master_doc, 'dtsr', u'DTSR Documentation',
+    (master_doc, 'cdr', u'CDR Documentation',
      [author], 1)
 ]
 
@@ -185,8 +185,8 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-    (master_doc, 'DTSR', u'DTSR Documentation',
-     author, 'DTSR', 'One line description of project.',
+    (master_doc, 'CDR', u'CDR Documentation',
+     author, 'CDR', 'One line description of project.',
      'Miscellaneous'),
 ]
 

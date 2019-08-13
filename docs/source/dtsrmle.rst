@@ -1,11 +1,11 @@
-.. _dtsrmle:
+.. _cdrmle:
 
-DTSRMLE
+CDRMLE
 =======
 
-DTSR with maximum likelihood estimation.
+CDR with maximum likelihood estimation.
 
-.. autoclass:: dtsr.dtsrmle.DTSRMLE
+.. autoclass:: cdr.cdrmle.CDRMLE
     :members:
     :inherited-members:
     :show-inheritance:

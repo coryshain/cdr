@@ -1,92 +1,92 @@
-DTSR Module Index
+CDR Module Index
 =================
 
 Complete alphabetic API for all public classes and methods in this package, grouped by module.
 
 
-dtsr\.config module
+cdr\.config module
 -------------------
 
-.. automodule:: dtsr.config
+.. automodule:: cdr.config
     :members:
     :show-inheritance:
 
-dtsr\.data module
+cdr\.data module
 -----------------
 
-.. automodule:: dtsr.data
+.. automodule:: cdr.data
     :members:
     :show-inheritance:
 
-dtsr\.dtsrbase module
+cdr\.cdrbase module
 ---------------------
 
-.. automodule:: dtsr.dtsrbase
+.. automodule:: cdr.cdrbase
     :members:
     :show-inheritance:
 
-dtsr\.dtsrmle module
+cdr\.cdrmle module
 --------------------
 
-.. automodule:: dtsr.dtsrmle
+.. automodule:: cdr.cdrmle
     :members:
     :inherited-members:
     :show-inheritance:
 
-dtsr\.dtsrbayes module
+cdr\.cdrbayes module
 ----------------------
 
-.. automodule:: dtsr.dtsrbayes
+.. automodule:: cdr.cdrbayes
     :members:
     :inherited-members:
     :show-inheritance:
 
-dtsr\.formula module
+cdr\.formula module
 --------------------
 
-.. automodule:: dtsr.formula
+.. automodule:: cdr.formula
     :members:
     :show-inheritance:
 
-dtsr\.io module
+cdr\.io module
 ---------------
 
-.. automodule:: dtsr.io
+.. automodule:: cdr.io
     :members:
     :show-inheritance:
 
-dtsr\.kwargs module
+cdr\.kwargs module
 ---------------
 
-.. automodule:: dtsr.kwargs
+.. automodule:: cdr.kwargs
     :members:
     :show-inheritance:
 
-dtsr\.plot module
+cdr\.plot module
 -----------------
 
-.. automodule:: dtsr.plot
+.. automodule:: cdr.plot
     :members:
     :show-inheritance:
 
-dtsr\.signif module
+cdr\.signif module
 -------------------
 
-.. automodule:: dtsr.signif
+.. automodule:: cdr.signif
     :members:
     :show-inheritance:
 
-dtsr\.synth module
+cdr\.synth module
 -------------------
 
-.. automodule:: dtsr.synth
+.. automodule:: cdr.synth
     :members:
     :show-inheritance:
 
-dtsr\.util module
+cdr\.util module
 -----------------
 
-.. automodule:: dtsr.util
+.. automodule:: cdr.util
     :members:
     :show-inheritance:
 

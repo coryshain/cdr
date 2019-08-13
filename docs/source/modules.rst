@@ -1,7 +1,7 @@
-dtsr
+cdr
 ====
 
 .. toctree::
    :maxdepth: 4
 
-   dtsr
+   cdr

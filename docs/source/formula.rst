@@ -1,6 +1,6 @@
 .. _formula:
 
-DTSR Model Formulae
+CDR Model Formulae
 ===================
 
 
@@ -8,8 +8,8 @@ DTSR Model Formulae
 Basic Overview
 --------------
 
-This package constructs DTSR models from **R**-style formula strings defining the model structure.
-A DTSR formula has the following template::
+This package constructs CDR models from **R**-style formula strings defining the model structure.
+A CDR formula has the following template::
 
     RESPONSE ~ FIXED_EFFECTS + RANDOM_EFFECTS
 
@@ -17,10 +17,10 @@ The left-hand side (LHS) of the formula contains the name a single (possibly tra
 Intercept terms can be added by including ``1`` in the RHS and removed by including ``0`` in the RHS.
 If neither of these appears in the RHS, an intercept is added by default.
 
-**WARNING:** The compiler for DTSR formulae is still early in development and may fail to correctly process certain formula strings, especially ones that contain hierarchical term expansions, categorical variable expansions, and/or interactions.
-Please double-check the correctness of the model formula reported at the start of training and report problems in the issue tracker on `Github <https://github.com/coryshain/dtsr>`_.
+**WARNING:** The compiler for CDR formulae is still early in development and may fail to correctly process certain formula strings, especially ones that contain hierarchical term expansions, categorical variable expansions, and/or interactions.
+Please double-check the correctness of the model formula reported at the start of training and report problems in the issue tracker on `Github <https://github.com/coryshain/cdr>`_.
 
-**WARNING:** If you are using interaction terms, it is easy to accidentally mis-specify your formula because interactions are trickier in DTSR than in linear models.
+**WARNING:** If you are using interaction terms, it is easy to accidentally mis-specify your formula because interactions are trickier in CDR than in linear models.
 Make sure to read :ref:`interactions` before fitting models with interactions.
 
 
@@ -31,23 +31,23 @@ Linear (DiracDelta) Predictors:
 
 A trivial way of "deconvolving" a predictor ``A`` is to assume a Dirac delta response to ``A``: :math:`A` at :math:`t=0`, :math:`0` otherwise.
 DiracDelta IRF are thus equivalent to predictors in linear models; only the value of the predictor that coincides with the response measurement is used for prediction.
-Linear (mixed) models of time series are therefore a special subtype of DTSR, namely DTSR models that exclusively use Dirac delta response kernels.
+Linear (mixed) models of time series are therefore a special subtype of CDR, namely CDR models that exclusively use Dirac delta response kernels.
 While you therefore `can` use this package to fit LME models, that doesn't mean you should!
 The stochastic optimization used here is likely much less efficient in this simple case than that of specialized LME regression tools.
 
-However, the availability of Dirac delta responses in this package means that DTSR can combine linear and convolved substructures into a single model, which is important for many use cases.
+However, the availability of Dirac delta responses in this package means that CDR can combine linear and convolved substructures into a single model, which is important for many use cases.
 For example, imagine a bi-variate model with predictors ``stimulus`` and ``condition``, where ``stimulus`` varies within each time series can might engender a temporally diffise response while ``condition`` is held fixed within each time series.
 In this case, a convolution of ``condition`` would be meaningless (or at least perfectly confounded with ``rate``, the deconvolutional intercept); instead, we're interested in a `linear` effect of ``condition`` and a `convolved` effect of ``stimulus`` on the response.
 Dirac delta responses can specified manually using the syntax described in the following sections.
 However, for convenience, bare predictor names in model formulae (outside of convolution calls ``C()``) are automatically interpreted as Dirac delta.
-This allows you to retain stock formula syntax that might already be familiar from linear (mixed) models in **R** in order to define linear substructures of your DTSR model.
+This allows you to retain stock formula syntax that might already be familiar from linear (mixed) models in **R** in order to define linear substructures of your CDR model.
 For example, the following is interpreted as specifying linear effects for each of ``A``, ``B``, and the interaction ``A:B``::
 
     y ~ A + B + C:B
 
 An important caveat in using Dirac delta responses is that the predictors they apply to should be `response-aligned`, that is, measured at the same moments in time that the responses themselves are.
 If the stimuli and responses are measured at different points in time, you cannot fit a Dirac delta response to a stimulus-aligned variable unless that variable happens at least sometimes to accidentally be measured concurrently with the response.
-DTSR does not internally distinguish stimulus-aligned and response-aligned predictors, so it's up to users to make sure that models are sensible in this regard.
+CDR does not internally distinguish stimulus-aligned and response-aligned predictors, so it's up to users to make sure that models are sensible in this regard.
 However, the model does internally mask all elements in a Dirac delta predictor that are not simultaneous with the response.
 Therefore, fitting a Dirac delta response to a stimulus-aligned predictor will not produce an erroneous model; in the worst case, the entire predictor will be masked and therefore ignored by the model.
 
@@ -235,7 +235,7 @@ s default offset (10). Parameter :math:`\beta` is tied between both gammas.
 
 .. _interactions:
 
-Interactions in DTSR
+Interactions in CDR
 --------------------
 
 In comparison to interactions in linear models, deconvolution introduces the additional complexity of needing to decide and specify whether interactions precede (impulse-level interactions) or follow (response-level interactions) the convolution step.
@@ -243,7 +243,7 @@ Impulse-level interactions consider interactions as `events` which may trigger a
 Response-level interactions capture non-additive effects of multiple (possibly convolved) variables; they do not get their own impulse responses.
 Response-level interactions correspond to interactions in linear models and are almost always what you want except in the special case of linear (DiracDelta IRF) predictors, where impulse-level interactions should be used (just like in linear models).
 
-DTSR formulae use a simple syntax to distinguish these two types of interactions: impulse-level interactions are specified `inside` the first argument of convolution calls `C()`, while response-level interactions are specified outside them.
+CDR formulae use a simple syntax to distinguish these two types of interactions: impulse-level interactions are specified `inside` the first argument of convolution calls `C()`, while response-level interactions are specified outside them.
 As in **R**, interaction terms are designated with ``:``, as in ``A:B``.
 And as in **R**, for convenience, two-way cross-product interactions can be designated with ``*`` (e.g. ``A*B`` is shorthand for ``A + B + A:B``) and multi-way cross-product interactions can be designated with power notation ``^<INT>`` or ``**<INT>`` (e.g. ``(A+B+C)^3`` equals ``A + B + C + A:B + B:C + A:C + A:B:C``).
 The following defines an impulse-level interaction between ``A`` and ``B`` underneath a ``Normal`` IRF kernel::
@@ -305,13 +305,13 @@ IRF distribute across the expansion of interaction terms, such that the followin
     C((A + B + C)**3, Gamma())
     C(A, Gamma()) + C(B, Gamma()) + C(C, Gamma()) + C(A:B, Gamma()) + C(B:C, Gamma()) + C(A:C, Gamma()) + C(A:B:C, Gamma())
 
-Categorical variables are automatically discovered and expanded in DTSR models.
+Categorical variables are automatically discovered and expanded in CDR models.
 This process imposes a transformation on the model.
 For example, imagine that predictor ``B`` in the following model turns out to be categorical in the data set with categories ``B1``, ``B2``, and ``B3``::
 
     C(A + B, EMG())
 
-When the DTSR model is initialized, the categorical nature of ``B`` is detected and the model is expanded out as::
+When the CDR model is initialized, the categorical nature of ``B`` is detected and the model is expanded out as::
 
     C(A + B2 + B3, EMG())
 
@@ -329,7 +329,7 @@ Note also that (unlike **R**) redundant terms are **not** automatically collapse
 Random Effects
 --------------
 
-Random effects in DTSR are specified using the following syntax::
+Random effects in CDR are specified using the following syntax::
 
     (RANDOM_TERMS | GROUPING_FACTOR)
 
@@ -350,7 +350,7 @@ This can be accomplished by adding ``ran=T`` to the IRF call, as shown below::
 
 This formula will fit separate coefficients `and` IRF shapes for this predictor for each subject.
 
-An important complication in fitting mixed models with DTSR is that the relevant grouping factor is determined by the current `regression target`, not the properties of the independent variable observations in the series history.
+An important complication in fitting mixed models with CDR is that the relevant grouping factor is determined by the current `regression target`, not the properties of the independent variable observations in the series history.
 This means that random effects are only guaranteed to be meaningful when fit using grouping factors that are constant for the entire series (e.g. the ID of the human subject completing the experiment).
 Random effects fit for grouping factors that vary during the experiment should therefore be avoided unless they are intercept terms only, which are not affected by the temporal convolution.
 
@@ -363,14 +363,14 @@ For example, to initialize a Gamma IRF with :math:`\alpha = 2` and :math:`\beta 
 
     C(A, Gamma(alpha=2, beta=2))
 
-These values will serve as initializations in both DTSRMLE and DTSRBayes, and in DTSRBayes they will additionally serve as the mean of the prior distribution for that parameter.
+These values will serve as initializations in both CDRMLE and CDRBayes, and in CDRBayes they will additionally serve as the mean of the prior distribution for that parameter.
 If no initialization is specified, defaults will be used.
 These defaults are not guaranteed to be plausible for your particular application and may have a detrimental impact on training.
 Therefore, it is generally a good idea to think carefully in advance about what kinds of IRF shapes are `a priori` reasonable and choose initializations in that range.
 
 Note that the initialization values are on the constrained space, so make sure to respect the constraints when choosing them.
 For example, :math:`\alpha` of the Gamma distribution is constrained to be > 0, so an initial :math:`\alpha` of <=0 will result in incorrect behavior.
-However, keep in mind that for DTSRBayes, prior variances are necessarily on the unconstrained space and get squashed by the constraint function, so choosing initializations that are very close to constraint boundaries can indirectly tighten the prior.
+However, keep in mind that for CDRBayes, prior variances are necessarily on the unconstrained space and get squashed by the constraint function, so choosing initializations that are very close to constraint boundaries can indirectly tighten the prior.
 For example, choosing an initialization :math:`\alpha = 0.001` for the Gamma distribution will result in a much tighter prior around small values of :math:`\alpha`.
 
 Initializations for irrelevant parameters in ill-specified formulae will be ignored and the defaults for the parameters will be used instead.
@@ -382,7 +382,7 @@ The correctness of initializations can be checked in the Tensorboard logs.
 
 Using Constant (Non-trainable) Parameters
 -----------------------------------------
-By default, DTSR trains all the variables that parameterize an IRF kernel (e.g. both :math:`\mu` and :math:`\sigma` for a Gaussian IRF kernel).
+By default, CDR trains all the variables that parameterize an IRF kernel (e.g. both :math:`\mu` and :math:`\sigma` for a Gaussian IRF kernel).
 But in some cases it's useful to treat certain IRF parameters as constants and leave them untrained.
 To do this, specify a list of trainable parameters with the keyword argument ``trainable``, using Python list syntax.
 For example, to specify a ShiftedGamma IRF in which the shift parameter :math:`\delta` is held constant at -1, use the following IRF specification::
@@ -393,7 +393,7 @@ The model will then only train the :math:`\alpha` and :math:`\beta` parameters o
 As with parameter initialization, unrecognized parameter names in the ``trainable`` argument will be ignored, and parameter name mismatches can result in more parameters being held constant than intended.
 For example, the IRF specification ``Normal(trainable=[alpha, beta])``, will result in an (untrainable) Normal IRF with all parameters held fixed at their defaults.
 It is therefore important to make sure that parameter names match those given above.
-The correctness of the ``trainable`` specification can be checked in the Tensorboard logs, as well as by the number of trainable parameters reported to standard error at the start of DTSR training.
+The correctness of the ``trainable`` specification can be checked in the Tensorboard logs, as well as by the number of trainable parameters reported to standard error at the start of CDR training.
 Constant parameters will show 0 trainable parameters.
 
 
@@ -401,7 +401,7 @@ Constant parameters will show 0 trainable parameters.
 Parameter Tying
 ---------------
 
-A convolutional term in a DTSR model is factored into two components, an IRF component with appropriate parameters and a coefficient governing the overall amplitude of the estimate.
+A convolutional term in a CDR model is factored into two components, an IRF component with appropriate parameters and a coefficient governing the overall amplitude of the estimate.
 Unless otherwise specified, both of these terms are fit separately for every predictor in the model.
 However, parameter tying is possible by passing keyword arguments to the IRF calls in the model formula.
 Coefficients can be tied using the ``coef_id`` argument, and IRF parameters can be tied using the ``irf_id`` argument.
@@ -425,7 +425,7 @@ And the following fits a single IRF (called "IRF_NAME") and a single coefficient
 
 Transforming Variables
 ----------------------
-DTSR provides limited support for automatic variable transformations based on model formulae.
+CDR provides limited support for automatic variable transformations based on model formulae.
 As in **R** formulae, a transformation is applied by wrapping the predictor name in the transformation function.
 For example, to fit a Gamma IRF to a log transform of predictor ``A``, the following is added to the RHS::
 
@@ -449,9 +449,9 @@ Other transformations must be applied via data preprocessing.
 Continuous predictors
 ---------------------
 
-DTSR's discrete convolution is only exact for discrete impulses (e.g. spikes of stimulus).
+CDR's discrete convolution is only exact for discrete impulses (e.g. spikes of stimulus).
 Impulse streams that constitute `samples` from a continuous source signal cannot be convolved exactly because the source is generally not analytically integrable.
-However, DTSR supports discrete approximation of convolution with continuous inputs through linear interpolation of the impulse between samples, performed at a fixed frequency.
+However, CDR supports discrete approximation of convolution with continuous inputs through linear interpolation of the impulse between samples, performed at a fixed frequency.
 
 To flag a predictor as continuous, use the ``cont`` keyword argument in the IRF call of the model formula, as shown::
 
@@ -464,7 +464,7 @@ Speedups can be obtained at the expense of accuracy by choose a small value for 
 Spline IRF
 ----------
 
-DTSR also supports non-parametric IRF in the form of spline functions.
+CDR also supports non-parametric IRF in the form of spline functions.
 Instead of a parametric IRF kernel, the model is supplied with control points (knots) that define a smooth function which can be moved around the x/y plane.
 The advantage of spline IRF is that they do not require precommitment to a particular functional form for the IRF.
 The disadvantage is that fitting them is much more computationally expensive because computing the spline function between the control points requires matrix inversion.
@@ -494,7 +494,7 @@ For example, it is possible that the BOLD response in fMRI consists underlyingly
 In this case, it would be desirable to be able to model the BOLD response as a composition of neural and hemodynamic responses.
 
 Exact parametric composition of IRF is not possible in the general case because many pairs of IRF do not have a tractable analytical convolution.
-Instead, the DTSR package uses a discrete approximation to the continuous integral of composed IRF by (1) computing the value of each IRF for some number of interpolation points, (2) computing their convolution via FFT, and (3) rescaling by the temporal distance between interpolation points.
+Instead, the CDR package uses a discrete approximation to the continuous integral of composed IRF by (1) computing the value of each IRF for some number of interpolation points, (2) computing their convolution via FFT, and (3) rescaling by the temporal distance between interpolation points.
 The number of interpolation points is defined by the model's **n_interp** initialization parameter.
 
 To compose IRF in a model, simply insert one IRF call into the first argument position of another IRF call.
@@ -515,7 +515,7 @@ As a result, the following composed IRF has infinitely many solutions, and the r
 
     C(A, Normal(Normal()))
 
-DTSR is not able to recognize and flag identifiability problems and it will happily find a solution to such a model, disguising the fact that there are infinitely many other optimal solutions.
+CDR is not able to recognize and flag identifiability problems and it will happily find a solution to such a model, disguising the fact that there are infinitely many other optimal solutions.
 It is up to the user to think carefully about whether the model structure could introduce such problems.
 For example, in the BOLD example discussed above, the neural response is predictor-specific while the hemodynamic response is predictor-independent given the neural response.
 The two responses can thus be separated via parameter tying of the hemodynamic response portion (see below), requiring all predictors to share a single hemodynamic response and forcing predictor-level variation into the neural response alone.
