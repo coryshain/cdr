@@ -26,8 +26,8 @@ Make sure to read :ref:`interactions` before fitting models with interactions.
 
 
 .. _linear:
-Linear (DiracDelta) Predictors:
--------------------------------
+Linear (DiracDelta) Predictors
+------------------------------
 
 A trivial way of "deconvolving" a predictor ``A`` is to assume a Dirac delta response to ``A``: :math:`A` at :math:`t=0`, :math:`0` otherwise.
 DiracDelta IRF are thus equivalent to predictors in linear models; only the value of the predictor that coincides with the response measurement is used for prediction.
@@ -60,10 +60,13 @@ Separate terms are delimited by ``+``.
 For example, to add a Gaussian convolution of predictor ``B``, the RHS above becomes ``C(A, Gamma()) + C(B, Normal())``.
 
 
-Supported Parametric IRF
-------------------------
+Supported Parametric IRFs
+-------------------------
 
-The currently supported parametric IRF families are:
+The currently supported parametric IRF families are the following.
+All IRFs are normalized to integrate to 1 over the positive real line.
+For simplicity, normalization constants are omitted from the equations below.
+For details, see Shain & Schuler (2019).
 
 - ``DiracDelta``: Stick function (equivalent to a predictor in linear regression, see :ref:`linear`)
 
@@ -73,13 +76,13 @@ The currently supported parametric IRF families are:
 
   - Definition: :math:`1` at :math:`x=0`, :math:`0` otherwise
 
-- ``Exp``: Unnormalized PDF of exponential distribution
+- ``Exp``: PDF of exponential distribution
 
   - Parameters:
 
     - :math:`\beta > 0`: ``beta`` (rate)
 
-  - Definition: :math:`e^{-\beta x}`
+  - Definition: :math:`\beta e^{-\beta x}`
   - Note: Dropping the normalization constant from the PDF helps deconfound IRF shape and magnitude. Normalization is unnecessary since this kernel defines an IRF, not a probability distribution.
 
 - ``Gamma``: PDF of gamma distribution
@@ -120,14 +123,14 @@ The currently supported parametric IRF families are:
 
   - Definition: :math:`\frac{\beta^{\alpha}(x - \delta)^{\alpha-1}e^{-\frac{x - \delta}{\beta}}}{\Gamma(\alpha)}`
 
-- ``Normal``: Unnormalized PDF of Gaussian (normal) distribution
+- ``Normal``: PDF of Gaussian (normal) distribution
 
   - Parameters:
 
     - :math:`\mu`: ``mu`` (mean)
     - :math:`\sigma^2 > 0`: ``sigma2`` (variance)
 
-  - Definition: :math:`e^{-\frac{(x - \mu) ^ 2}{2 \sigma ^ 2}}`
+  - Definition: :math:`\frac{1}{\sqrt{2\pi \sigma^2}}e^{-\frac{(x - \mu) ^ 2}{2 \sigma ^ 2}}`
   - Note: Dropping the normalization constant from the PDF helps deconfound IRF shape and magnitude. Normalization is unnecessary since this kernel defines an IRF, not a probability distribution.
 
 - ``SkewNormal``: PDF of SkewNormal distribution (normal distribution augmented with left/right skew parameter)
