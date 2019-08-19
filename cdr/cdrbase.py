@@ -5915,7 +5915,8 @@ class CDR(object):
             ylab=None,
             use_line_markers=False,
             transparent_background=False,
-            keep_plot_history=False
+            keep_plot_history=False,
+            dump_source=False
     ):
         """
         Generate plots of current state of deconvolution.
@@ -5957,6 +5958,7 @@ class CDR(object):
         :param ylab: ``str`` or ``None``; y-axis label. If ``None``, no label.
         :param transparent_background: ``bool``; use a transparent background. If ``False``, uses a white background.
         :param keep_plot_history: ``bool``; keep the history of all plots by adding a suffix with the iteration number. Can help visualize learning but can also consume a lot of disk space. If ``False``, always overwrite with most recent plot.
+        :param dump_source: ``bool``; Whether to dump the plot source array to a csv file.
         :return: ``None``
         """
 
@@ -6058,9 +6060,9 @@ class CDR(object):
                     if self.t.has_composed_irf() or a == 'atomic':
                         for b in switches[1]:
                             if summed:
-                                plot_name = 'irf_%s_%s_summed_%d.png' %(a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'irf_%s_%s_summed.png' %(a, b)
+                                plot_name = 'irf_%s_%s_summed_%d' %(a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'irf_%s_%s_summed' %(a, b)
                             else:
-                                plot_name = 'irf_%s_%s_%d.png' %(a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'irf_%s_%s.png' %(a, b)
+                                plot_name = 'irf_%s_%s_%d' %(a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'irf_%s_%s' %(a, b)
                             names = self.plots[a][b][dirac]['names']
                             if irf_ids is not None and len(irf_ids) > 0:
                                 new_names = []
@@ -6148,7 +6150,7 @@ class CDR(object):
                                         prop_cycle_length=prop_cycle_length,
                                         prop_cycle_ix=prop_cycle_ix,
                                         dir=self.outdir,
-                                        filename=filename,
+                                        filename=filename + 'png',
                                         irf_name_map=irf_name_map,
                                         plot_x_inches=plot_x_inches,
                                         plot_y_inches=plot_y_inches,
@@ -6159,7 +6161,8 @@ class CDR(object):
                                         xlab=xlab,
                                         ylab=ylab,
                                         use_line_markers=use_line_markers,
-                                        transparent_background=transparent_background
+                                        transparent_background=transparent_background,
+                                        dump_source=dump_source
                                     )
 
                 if self.pc:
@@ -6168,9 +6171,9 @@ class CDR(object):
                             for b in switches[1]:
                                 if b == 'scaled':
                                     if summed:
-                                        plot_name = 'src_irf_%s_%s_summed_%d.png' % (a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'src_irf_%s_%s_summed.png' % (a, b)
+                                        plot_name = 'src_irf_%s_%s_summed_%d' % (a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'src_irf_%s_%s_summed' % (a, b)
                                     else:
-                                        plot_name = 'src_irf_%s_%s_%d.png' % (a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'src_irf_%s_%s.png' % (a, b)
+                                        plot_name = 'src_irf_%s_%s_%d' % (a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'src_irf_%s_%s' % (a, b)
                                     names = self.src_plot_tensors[a][b][dirac]['names']
                                     if irf_ids is not None and len(irf_ids) > 0:
                                         new_names = []
@@ -6247,7 +6250,7 @@ class CDR(object):
                                             prop_cycle_length=prop_cycle_length,
                                             prop_cycle_ix=prop_cycle_ix,
                                             dir=self.outdir,
-                                            filename=prefix + plot_name,
+                                            filename=prefix + plot_name + '.png',
                                             irf_name_map=irf_name_map,
                                             plot_x_inches=plot_x_inches,
                                             plot_y_inches=plot_y_inches,
@@ -6258,7 +6261,8 @@ class CDR(object):
                                             xlab=xlab,
                                             ylab=ylab,
                                             use_line_markers=use_line_markers,
-                                            transparent_background=transparent_background
+                                            transparent_background=transparent_background,
+                                            dump_source=dump_source
                                         )
 
                 self.set_predict_mode(False)

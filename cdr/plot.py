@@ -1,5 +1,6 @@
 import sys
 import numpy as np
+import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -28,7 +29,8 @@ def plot_irf(
         ylab=None,
         use_line_markers=False,
         transparent_background=False,
-        dpi=300
+        dpi=300,
+        dump_source=False
 ):
     """
     Plot impulse response functions.
@@ -54,6 +56,7 @@ def plot_irf(
     :param use_line_markers: ``bool``; add markers to IRF lines.
     :param transparent_background: ``bool``; use a transparent background. If ``False``, uses a white background.
     :param dpi: ``int``; dots per inch.
+    :param dump_source: ``bool``; Whether to dump the plot source array to a csv file.
     :return: ``None``
     """
 
@@ -113,6 +116,19 @@ def plot_irf(
     except:
         stderr('Error saving plot to file %s. Skipping...' %(dir+'/'+filename))
     plt.close('all')
+
+    if dump_source:
+        csvname = '.'.join(filename.split('.')[:-1]) + '.csv'
+        df = pd.DataFrame(np.concatenate([plot_x, plot_y], axis=1), columns=['time'] + irf_names)
+        if lq is not None:
+            for i, name in enumerate(irf_names):
+                df[name + 'LB'] = lq[g][i]
+        if uq is not None:
+            for i, name in enumerate(irf_names):
+                df[name + 'UB'] = uq[g][i]
+
+        df.to_csv(dir + '/' + csvname + '.csv')
+
 
 
 def plot_qq(
