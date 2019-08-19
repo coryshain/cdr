@@ -119,16 +119,18 @@ def plot_irf(
 
     if dump_source:
         csvname = '.'.join(filename.split('.')[:-1]) + '.csv'
-        df = pd.DataFrame(np.concatenate([plot_x, plot_y], axis=1), columns=['time'] + irf_names)
+        if irf_name_map is not None:
+            names_cur = [irf_name_map[x] for x in irf_names]
+        df = pd.DataFrame(np.concatenate([plot_x, plot_y], axis=1), columns=['time'] + names_cur)
+        
         if lq is not None:
-            for i, name in enumerate(irf_names):
-                df[name + 'LB'] = lq[g][i]
+            for i, name in enumerate(names_cur):
+                df[name + 'LB'] = lq[:,i]
         if uq is not None:
-            for i, name in enumerate(irf_names):
-                df[name + 'UB'] = uq[g][i]
+            for i, name in enumerate(names_cur):
+                df[name + 'UB'] = uq[:,i]
 
-        df.to_csv(dir + '/' + csvname + '.csv')
-
+        df.to_csv(dir + '/' + csvname, index=False)
 
 
 def plot_qq(

@@ -6060,9 +6060,9 @@ class CDR(object):
                     if self.t.has_composed_irf() or a == 'atomic':
                         for b in switches[1]:
                             if summed:
-                                plot_name = 'irf_%s_%s_summed_%d' %(a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'irf_%s_%s_summed' %(a, b)
+                                plot_name = 'irf_%s_%s_summed_%d.png' %(a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'irf_%s_%s_summed.png' %(a, b)
                             else:
-                                plot_name = 'irf_%s_%s_%d' %(a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'irf_%s_%s' %(a, b)
+                                plot_name = 'irf_%s_%s_%d.png' %(a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'irf_%s_%s.png' %(a, b)
                             names = self.plots[a][b][dirac]['names']
                             if irf_ids is not None and len(irf_ids) > 0:
                                 new_names = []
@@ -6150,7 +6150,7 @@ class CDR(object):
                                         prop_cycle_length=prop_cycle_length,
                                         prop_cycle_ix=prop_cycle_ix,
                                         dir=self.outdir,
-                                        filename=filename + 'png',
+                                        filename=filename,
                                         irf_name_map=irf_name_map,
                                         plot_x_inches=plot_x_inches,
                                         plot_y_inches=plot_y_inches,
@@ -6171,9 +6171,9 @@ class CDR(object):
                             for b in switches[1]:
                                 if b == 'scaled':
                                     if summed:
-                                        plot_name = 'src_irf_%s_%s_summed_%d' % (a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'src_irf_%s_%s_summed' % (a, b)
+                                        plot_name = 'src_irf_%s_%s_summed_%d.png' % (a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'src_irf_%s_%s_summed.png' % (a, b)
                                     else:
-                                        plot_name = 'src_irf_%s_%s_%d' % (a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'src_irf_%s_%s' % (a, b)
+                                        plot_name = 'src_irf_%s_%s_%d.png' % (a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'src_irf_%s_%s.png' % (a, b)
                                     names = self.src_plot_tensors[a][b][dirac]['names']
                                     if irf_ids is not None and len(irf_ids) > 0:
                                         new_names = []
@@ -6250,7 +6250,7 @@ class CDR(object):
                                             prop_cycle_length=prop_cycle_length,
                                             prop_cycle_ix=prop_cycle_ix,
                                             dir=self.outdir,
-                                            filename=prefix + plot_name + '.png',
+                                            filename=prefix + plot_name,
                                             irf_name_map=irf_name_map,
                                             plot_x_inches=plot_x_inches,
                                             plot_y_inches=plot_y_inches,

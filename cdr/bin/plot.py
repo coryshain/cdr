@@ -213,6 +213,8 @@ if __name__ == '__main__':
                 dump_source=args.dump_source,
                 **kwargs
             )
+            
+
             if hasattr(cdr_model, 'inference_name'):
                 cdr_model.make_plots(
                     standardize_response=args.standardize_response,

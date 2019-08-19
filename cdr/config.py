@@ -33,9 +33,12 @@ class Config(object):
 
         data = config['data']
         global_settings = config['global_settings']
-        if 'cdr_settings' not in config:
+        if 'cdr_settings' in config:
+            cdr_settings = config['cdr_settings']
+        elif 'dtsr_settings' in config:
+            cdr_settings = config['dtsr_settings']
+        else:
             config['cdr_settings'] = {}
-        cdr_settings = config['cdr_settings']
 
         ########
         # Data #
@@ -164,7 +167,7 @@ class Config(object):
             # Standardize the model string
             out['formula'] = str(Formula(out['formula']))
         if 'network_type' in settings or add_defaults:
-            out['network_type'] = settings.get('network_type', 'mle')
+            out['network_type'] = settings.get('network_type', 'bayes')
 
         # CDR initialization keyword arguments
         for kwarg in CDR_INITIALIZATION_KWARGS:

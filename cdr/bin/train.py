@@ -23,6 +23,7 @@ if __name__ == '__main__':
     argparser.add_argument('-m', '--models', nargs='*', default = [], help='Path to configuration (*.ini) file')
     argparser.add_argument('-p', '--partition', type=str, default='train', help='Name of partition to train on ("train", "dev", "test", or space- or hyphen-delimited subset of these)')
     argparser.add_argument('-e', '--force_training_evaluation', action='store_true', help='Recompute training evaluation even for models that are already finished.')
+    argparser.add_argument('-s', '--save_and_exit', action='store_true', help='Initialize, save, and exit (CDR only). Useful for bringing non-backward compatible trained models up to spec for plotting and evaluation.')
     args, unknown = argparser.parse_known_args()
 
     p = Config(args.config_path)
@@ -258,6 +259,10 @@ if __name__ == '__main__':
                 )
             else:
                 raise ValueError('Network type "%s" not supported' %p['network_type'])
+
+            if args.save_and_exit:
+                cdr_model.save()
+                continue
 
             stderr('\nFitting model %s...\n\n' % m)
 
