@@ -40,7 +40,7 @@ def extract_signif_pt(path):
                 signif = float(signif)
     return signif, converged
 
-def comparison2str(comparison):
+def comparison2str(c):
     return '_v_'.join([''.join(['!' + x for x in y]) if len(y) > 0 else 'FULL' for y in c])
 
 def extract_comparisons(paths):
@@ -93,7 +93,7 @@ if __name__ == '__main__':
         Generates table of significances of ablative model comparisons
     ''')
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
-    argparser.add_argument('-M', '--mode', type=str, default='2step', help='Type of significance test to use (one of ["pt", "2step"] for permutation testing or 2-step LME/LRT, respectively).')
+    argparser.add_argument('-M', '--mode', type=str, default='pt', help='Type of significance test to use (one of ["pt", "2step"] for permutation testing or 2-step LME/LRT, respectively).')
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
     argparser.add_argument('-H', '--human_readable', action='store_true', help='Return table in human readable format (otherwise return as CSV)')
     args, unknown = argparser.parse_known_args()

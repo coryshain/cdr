@@ -43,6 +43,8 @@ if __name__ == '__main__':
         basenames_to_pool = None
         exps_outdirs = []
 
+    ablation_components = args.ablation_components
+
     for path in args.config_paths:
         p = Config(path)
 
@@ -69,11 +71,11 @@ if __name__ == '__main__':
             for model_name in p.model_list:
                 model_basename = model_name.split('!')[0]
                 if model_basename in comparison_sets and model_name not in comparison_sets[model_basename]:
-                    if len(args.ablation_components) > 0:
+                    if ablation_components is None or len(ablation_components) > 0:
                         components = model_name.split('!')[1:]
                         hit = True
                         for c in components:
-                            if c not in args.ablation_components:
+                            if ablation_components is None or c not in ablation_components:
                                 hit = False
                         if hit:
                             comparison_sets[model_basename].append(model_name)
