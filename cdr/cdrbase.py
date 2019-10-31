@@ -5915,7 +5915,8 @@ class CDR(object):
             ylab=None,
             use_line_markers=False,
             transparent_background=False,
-            keep_plot_history=False
+            keep_plot_history=False,
+            dump_source=False
     ):
         """
         Generate plots of current state of deconvolution.
@@ -5957,6 +5958,7 @@ class CDR(object):
         :param ylab: ``str`` or ``None``; y-axis label. If ``None``, no label.
         :param transparent_background: ``bool``; use a transparent background. If ``False``, uses a white background.
         :param keep_plot_history: ``bool``; keep the history of all plots by adding a suffix with the iteration number. Can help visualize learning but can also consume a lot of disk space. If ``False``, always overwrite with most recent plot.
+        :param dump_source: ``bool``; Whether to dump the plot source array to a csv file.
         :return: ``None``
         """
 
@@ -6159,7 +6161,8 @@ class CDR(object):
                                         xlab=xlab,
                                         ylab=ylab,
                                         use_line_markers=use_line_markers,
-                                        transparent_background=transparent_background
+                                        transparent_background=transparent_background,
+                                        dump_source=dump_source
                                     )
 
                 if self.pc:
@@ -6258,7 +6261,8 @@ class CDR(object):
                                             xlab=xlab,
                                             ylab=ylab,
                                             use_line_markers=use_line_markers,
-                                            transparent_background=transparent_background
+                                            transparent_background=transparent_background,
+                                            dump_source=dump_source
                                         )
 
                 self.set_predict_mode(False)

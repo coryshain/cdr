@@ -42,6 +42,7 @@ if __name__ == '__main__':
     argparser.add_argument('-L', '--qq_nolegend', action='store_true', help='Omit legend from Q-Q plots')
     argparser.add_argument('-M', '--markers', action='store_true', help='Add markers to IRF lines')
     argparser.add_argument('-t', '--transparent_background', action='store_true', help='Use transparent background (otherwise white background)')
+    argparser.add_argument('-C', '--dump_source', action='store_true', help='Dump plot source arrays to CSV')
     args, unknown = argparser.parse_known_args()
 
     for path in args.paths:
@@ -93,7 +94,8 @@ if __name__ == '__main__':
                     xlab=args.xlab,
                     ylab=args.ylab,
                     use_line_markers=args.markers,
-                    transparent_background=args.transparent_background
+                    transparent_background=args.transparent_background,
+                    dump_source=args.dump_source
                 )
 
             else:
@@ -115,7 +117,8 @@ if __name__ == '__main__':
                     xlab=args.xlab,
                     ylab=args.ylab,
                     use_line_markers=args.markers,
-                    transparent_background=args.transparent_background
+                    transparent_background=args.transparent_background,
+                    dump_source=args.dump_source
                 )
 
         for m in models:
@@ -207,8 +210,11 @@ if __name__ == '__main__':
                 ylab=args.ylab,
                 use_line_markers=args.markers,
                 transparent_background=args.transparent_background,
+                dump_source=args.dump_source,
                 **kwargs
             )
+            
+
             if hasattr(cdr_model, 'inference_name'):
                 cdr_model.make_plots(
                     standardize_response=args.standardize_response,
@@ -229,6 +235,7 @@ if __name__ == '__main__':
                     ylab=args.ylab,
                     use_line_markers=args.markers,
                     transparent_background=args.transparent_background,
+                    dump_source=args.dump_source,
                     **kwargs
                 )
 
