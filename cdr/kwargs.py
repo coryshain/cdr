@@ -384,6 +384,18 @@ CDR_INITIALIZATION_KWARGS = [
         "Scale of random effects regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
     Kwarg(
+        'oob_regularizer_threshold',
+        None,
+        [float, None],
+        "Threshold (in units time) for out-of-bounds regularizer. If ``None``, default to 75th percentile of temporal offsets seen in training."
+    ),
+    Kwarg(
+        'oob_regularizer_scale',
+        None,
+        [float, 'inherit', None],
+        "Scale of out-of-bounds regularizer. If ``'inherit'``, inherits **regularizer_scale**. If ``None``, no out-of-bounds regularization."
+    ),
+    Kwarg(
         'ema_decay',
         0.999,
         float,

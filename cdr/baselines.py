@@ -163,6 +163,8 @@ class LME(object):
     def instance_methods(self):
         rstring = '''
             function(bform, df) {
+                print('LME model!!!!')
+                print(head(df))
                 return(lmer(bform, data=df, REML=FALSE))
             }
         '''

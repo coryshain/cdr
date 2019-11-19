@@ -1357,6 +1357,9 @@ class CDRBayes(CDR):
                     y = self.y
 
                 self.optim = self._initialize_optimizer(self.optim_name)
+                self.reg_loss = 0.
+                if len(self.regularizer_losses_varnames) > 0:
+                    self.reg_loss += tf.add_n(self.regularizer_losses)
                 if self.variational():
                     self.inference = getattr(ed,self.inference_name)(self.inference_map, data={out_model: y})
                     self.inference.initialize(

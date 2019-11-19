@@ -409,8 +409,10 @@ class CDRMLE(CDR):
                 self.mse_loss = tf.losses.mean_squared_error(self.y, self.out)
 
                 self.loss_func = -(tf.reduce_sum(ll_objective) * self.minibatch_scale)
+                self.reg_loss = 0.
                 if len(self.regularizer_losses_varnames) > 0:
-                    self.loss_func += tf.add_n(self.regularizer_losses)
+                    self.reg_loss += tf.add_n(self.regularizer_losses)
+                    self.loss_func += self.reg_loss
 
                 self.optim = self._initialize_optimizer(self.optim_name)
                 assert self.optim_name is not None, 'An optimizer name must be supplied'

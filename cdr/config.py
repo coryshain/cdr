@@ -87,7 +87,7 @@ class Config(object):
         self.use_gpu_if_available = global_settings.getboolean('use_gpu_if_available', True)
 
         #################
-        # CDR Settings #
+        # CDR Settings  #
         #################
 
         self.global_cdr_settings = self.build_cdr_settings(cdr_settings)
@@ -100,8 +100,18 @@ class Config(object):
         self.model_list = []
         for model_field in [m for m in config.keys() if m.startswith('model_')]:
             model_name = model_field[6:]
-            is_cdr = model_name.startswith('CDR') or model_name.startswith('DTSR')
-            self.models[model_name] = self.build_cdr_settings(config[model_field], add_defaults=False, is_cdr=is_cdr)
+            reg_type = None
+            if model_name.startswith('CDR') or model_name.startswith('DTSR'):
+                reg_type = 'cdr'
+            elif model_name.startswith('LME'):
+                reg_type = 'lme'
+            self.models[model_name] = self.build_cdr_settings(
+                config[model_field],
+                add_defaults=False,
+                is_cdr=reg_type=='cdr'
+            )
+            if reg_type == 'lme':
+                self.models[model_name]['correlated'] = config[model_field].getboolean('correlated', True)
             self.model_list.append(model_name)
             if 'ablate' in config[model_field]:
                 for ablated in powerset(config[model_field]['ablate'].strip().split()):
@@ -110,7 +120,16 @@ class Config(object):
                     formula = Formula(config[model_field]['formula'])
                     formula.ablate_impulses(ablated)
                     new_model = self.models[model_name].copy()
-                    new_model['formula'] = str(formula)
+                    if reg_type == 'cdr':
+                        new_model['formula'] = str(formula)
+                    elif reg_type == 'lme':
+                        new_model['formula'] = formula.to_lmer_formula_string(
+                            z=False,
+                            correlated=self.models[model_name]['correlated'],
+                            transform_dirac=False
+                        )
+                    else:
+                        raise ValueError('Ablation with reg_type "%s" not currently supported.' % reg_type)
                     self.models[new_name] = new_model
                     self.model_list.append(new_name)
 

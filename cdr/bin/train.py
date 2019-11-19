@@ -33,15 +33,15 @@ if __name__ == '__main__':
 
     models = filter_models(p.model_list, args.models)
 
-    run_baseline = False
+    run_R = False
     run_cdr = False
     for m in models:
-        if not run_baseline and m.startswith('LM') or m.startswith('GAM'):
-            run_baseline = True
-        elif not run_cdr and (m.startswith('CDR') or m.startswith('DTSR')):
+        if m.startswith('CDR') or m.startswith('DTSR'):
             run_cdr = True
+        else:
+            run_R = True
 
-    if not (run_baseline or run_cdr):
+    if not (run_R or run_cdr):
         stderr('No models to run. Exiting...\n')
         exit()
 
@@ -61,22 +61,24 @@ if __name__ == '__main__':
         history_length=p.history_length
     )
 
-    if run_baseline:
-        from cdr.baselines import py2ri
+    if run_R:
+        # from cdr.baselines import py2ri
         assert len(X) == 1, 'Cannot run baselines on asynchronously sampled predictors'
-        X_cur = X[0]
-        X_cur['splitID'] = compute_splitID(X_cur, p.split_ids)
-        part = compute_partition(X_cur, p.modulus, 3)
-        part_select = None
-        partition_name_to_ix = {'train': 0, 'dev': 1, 'test': 2}
-        for partition in partitions:
-            if part_select is None:
-                part_select = part[partition_name_to_ix[partition]]
-            else:
-                part_select &= part[partition_name_to_ix[partition]]
-
-        X_baseline = X_cur[part_select]
-        X_baseline = X_baseline.reset_index(drop=True)[select]
+        X_baseline = X[0]
+        common_cols = sorted(list(set(X_baseline.columns) & set(y.columns)))
+        X_baseline = pd.merge(X_baseline, y, on=common_cols, how='inner')
+        # X_cur['splitID'] = compute_splitID(X_cur, p.split_ids)
+        # part = compute_partition(X_cur, p.modulus, 3)
+        # part_select = None
+        # partition_name_to_ix = {'train': 0, 'dev': 1, 'test': 2}
+        # for partition in partitions:
+        #     if part_select is None:
+        #         part_select = part[partition_name_to_ix[partition]]
+        #     else:
+        #         part_select &= part[partition_name_to_ix[partition]]
+        #
+        # X_baseline = X_cur[part_select]
+        # X_baseline = X_baseline.reset_index(drop=True)[select]
 
         for m in models:
             if not m in cdr_formula_name_list:
@@ -91,7 +93,9 @@ if __name__ == '__main__':
             if X_baseline[c].dtype.name == 'category':
                 X_baseline[c] = X_baseline[c].astype(str)
 
-        X_baseline = py2ri(X_baseline)
+        # print('before py2ri')
+        # X_baseline = py2ri(X_baseline)
+        # print('after py2ri')
 
     n_train_sample = len(y)
 
