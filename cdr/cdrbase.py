@@ -144,12 +144,12 @@ def shifted_gamma_irf_lambdas(params, integral_ub=None, session=None, epsilon=4 
             if integral_ub is None:
                 ub = 1.
             else:
-                ub = cdf(integral_ub)
+                ub = cdf(integral_ub - delta)
 
             norm_const = ub - cdf_0
 
             def irf(x, pdf=pdf, delta=delta, norm_const=norm_const, epsilon=epsilon):
-                return pdf(x - delta + epsilon) / (norm_const + epsilon)
+                return pdf(x - delta + epsilon) / norm_const
 
             def irf_proportion_in_bounds(x, cdf=cdf, cdf_0=cdf_0, delta=delta, norm_const=norm_const, epsilon=epsilon):
                 return (cdf(x - delta + epsilon) - cdf_0) / norm_const
@@ -157,7 +157,7 @@ def shifted_gamma_irf_lambdas(params, integral_ub=None, session=None, epsilon=4 
             return irf, irf_proportion_in_bounds
 
 
-def normal_irf_lambdas(params, integral_ub=None, session=None, epsilon=4 * np.finfo('float32').eps):
+def normal_irf_lambdas(params, integral_ub=None, session=None):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
@@ -180,8 +180,8 @@ def normal_irf_lambdas(params, integral_ub=None, session=None, epsilon=4 * np.fi
 
             norm_const = ub - cdf_0
 
-            def irf(x, pdf=pdf, norm_const=norm_const, epsilon=epsilon):
-                return pdf(x) / (norm_const + epsilon)
+            def irf(x, pdf=pdf, norm_const=norm_const):
+                return pdf(x) / norm_const
 
             def irf_proportion_in_bounds(x, cdf=cdf, cdf_0=cdf_0, norm_const=norm_const):
                 return (cdf(x) - cdf_0) / norm_const
@@ -189,7 +189,7 @@ def normal_irf_lambdas(params, integral_ub=None, session=None, epsilon=4 * np.fi
             return irf, irf_proportion_in_bounds
 
 
-def skew_normal_irf_lambdas(params, integral_ub, session=None, epsilon=4 * np.finfo('float32').eps):
+def skew_normal_irf_lambdas(params, integral_ub, session=None):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
@@ -207,8 +207,8 @@ def skew_normal_irf_lambdas(params, integral_ub, session=None, epsilon=4 * np.fi
             cdf = empirical_integral(irf_base, session=session)
             norm_const = cdf(integral_ub)
             
-            def irf(x, irf_base=irf_base, norm_const=norm_const, epsilon=epsilon):
-                return irf_base(x) / (norm_const + epsilon)
+            def irf(x, irf_base=irf_base, norm_const=norm_const):
+                return irf_base(x) / norm_const
 
             def irf_proportion_in_bounds(x, cdf=cdf, norm_const=norm_const):
                 return cdf(x) / norm_const
@@ -216,7 +216,7 @@ def skew_normal_irf_lambdas(params, integral_ub, session=None, epsilon=4 * np.fi
             return irf, irf_proportion_in_bounds
 
 
-def emg_irf_lambdas(params, integral_ub=None, session=None, epsilon=4 * np.finfo('float32').eps):
+def emg_irf_lambdas(params, integral_ub=None, session=None):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
@@ -239,9 +239,9 @@ def emg_irf_lambdas(params, integral_ub=None, session=None, epsilon=4 * np.finfo
 
             norm_const = ub - cdf(0)
 
-            def irf(x, L=L, mu=mu, sigma=sigma, norm_const=norm_const, epsilon=epsilon):
+            def irf(x, L=L, mu=mu, sigma=sigma, norm_const=norm_const):
                 return (L / 2 * tf.exp(0.5 * L * (2. * mu + L * sigma ** 2. - 2. * x)) *
-                       tf.erfc((mu + L * sigma ** 2 - x) / (tf.sqrt(2.) * sigma))) / (norm_const + epsilon)
+                       tf.erfc((mu + L * sigma ** 2 - x) / (tf.sqrt(2.) * sigma))) / norm_const
 
             def irf_proportion_in_bounds(x, cdf=cdf, norm_const=norm_const, cdf_0=cdf_0):
                 return (cdf(x) - cdf_0) / norm_const
@@ -269,7 +269,7 @@ def beta_prime_irf_lambdas(params, integral_ub=None, session=None, epsilon=4 * n
             norm_const = ub - cdf_0
 
             def irf(x, alpha=alpha, beta=beta, norm_const=norm_const, epsilon=epsilon):
-                return ((x + epsilon) ** (alpha - 1.) * (1. + (x + epsilon)) ** (-alpha - beta)) / (norm_const + epsilon)
+                return ((x + epsilon) ** (alpha - 1.) * (1. + (x + epsilon)) ** (-alpha - beta)) / norm_const
 
             def irf_proportion_in_bounds(x, cdf=cdf, cdf_0=cdf_0, norm_const=norm_const):
                 return (cdf(x) - cdf_0) / norm_const
@@ -291,14 +291,14 @@ def shifted_beta_prime_irf_lambdas(params, integral_ub=None, session=None, epsil
             if integral_ub is None:
                 ub = 1
             else:
-                ub = cdf(integral_ub)
+                ub = cdf(integral_ub - delta)
 
             cdf_0 = cdf(-delta + epsilon)
 
             norm_const = ub - cdf_0
 
             def irf(x, alpha=alpha, beta=beta, delta=delta, norm_const=norm_const, epsilon=epsilon):
-                return ((x - delta + epsilon) ** (alpha - 1) * (1 + (x - delta + epsilon)) ** (-alpha - beta)) / (norm_const + epsilon)
+                return ((x - delta + epsilon) ** (alpha - 1) * (1 + (x - delta + epsilon)) ** (-alpha - beta)) / norm_const
 
             def irf_proportion_in_bounds(x, cdf=cdf, cdf_0=cdf_0, delta=delta, norm_const=norm_const, epsilon=epsilon):
                 return (cdf(x - delta + epsilon) - cdf_0) / norm_const
@@ -1949,8 +1949,7 @@ class CDR(object):
                     return normal_irf_lambdas(
                         params,
                         integral_ub=integral_ub,
-                        session=self.sess,
-                        epsilon=self.epsilon
+                        session=self.sess
                     )
 
                 self.irf_lambdas['Normal'] = normal
@@ -1958,8 +1957,8 @@ class CDR(object):
                 def skew_normal(params):
                     return skew_normal_irf_lambdas(
                         params,
-                        session=self.sess,
-                        epsilon=self.epsilon
+                        self.t_delta_limit.astype(dtype=self.FLOAT_NP) if integral_ub is None else integral_ub,
+                        session=self.sess
                     )
 
                 self.irf_lambdas['SkewNormal'] = skew_normal
@@ -1968,8 +1967,7 @@ class CDR(object):
                     return emg_irf_lambdas(
                         params,
                         integral_ub=integral_ub,
-                        session=self.sess,
-                        epsilon=self.epsilon
+                        session=self.sess
                     )
 
                 self.irf_lambdas['EMG'] = emg
