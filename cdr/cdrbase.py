@@ -694,13 +694,6 @@ def summed_gaussians(c, v, b, integral_ub=None, session=None):
             _b = b
             _v = v
 
-            while len(_c.shape) < len(x.shape):
-                _c = _c[None, ...]
-            while len(_b.shape) < len(x.shape):
-                _b = _b[None, ...]
-            while len(_v.shape) < len(x.shape):
-                _v = _v[None, ...]
-
             _c = tf.expand_dims(_c, axis=-3)
             _b = tf.expand_dims(_b, axis=-3)
             _v = tf.expand_dims(_v, axis=-3)
