@@ -162,10 +162,7 @@ class Kwarg(object):
             return 0
 
 
-
-
-
-CDR_INITIALIZATION_KWARGS = [
+MODEL_INITIALIZATION_KWARGS = [
     Kwarg(
         'outdir',
         './cdr_model/',
@@ -191,36 +188,28 @@ CDR_INITIALIZATION_KWARGS = [
         "Length of the history window to use."
     ),
     Kwarg(
-        'pc',
-        False,
-        bool,
-        "Transform input variables using principal components analysis. Experimental, not thoroughly tested."
-    ),
-    Kwarg(
-        'covarying_fixef',
-        False,
-        bool,
-        "Use multivariate model that fits covariances between fixed parameters. Experimental, not thoroughly tested. If ``False``, fixed parameter distributions are treated as independent.",
-        aliases=['mv']
-    ),
-    Kwarg(
-        'covarying_ranef',
-        False,
-        bool,
-        "Use multivariate model that fits covariances between random parameters within a random grouping factor. Experimental, not thoroughly tested. If ``False``, random parameter distributions are treated as independent.",
-        aliases=['mv_ran']
-    ),
-    Kwarg(
         'n_samples',
         1,
         int,
-        "For CDRMLE, number of samples from joint distribution (used only if either **covarying_fixef** or **covarying_ranef** is ``True``, otherwise ignored). For BBVI, number of posterior samples to draw at each training step during variational inference. If using MCMC inferences, the number of samples is set deterministically as ``n_iter * n_minibatch``, so this user-supplied parameter is overridden."
+        "For MLE models, number of samples from joint distribution (used only if either **covarying_fixef** or **covarying_ranef** is ``True``, otherwise ignored). For BBVI models, number of posterior samples to draw at each training step during variational inference. If using MCMC inference, the number of samples is set deterministically as ``n_iter * n_minibatch``, so this user-supplied parameter is overridden."
     ),
     Kwarg(
         'n_interp',
         1000,
         int,
         "Number of interpolation points to use for discrete approximation of composed IRF. Ignored unless IRF composition is required by the model."
+    ),
+    Kwarg(
+        'interp_hz',
+        1000,
+        float,
+        "Frequency in Hz at which to interpolate continuous impulses for approximating the IRF integral."
+    ),
+    Kwarg(
+        'interp_step',
+        0.1,
+        float,
+        "Step length for resampling from interpolated continuous predictors."
     ),
     Kwarg(
         'intercept_init',
@@ -240,18 +229,6 @@ CDR_INITIALIZATION_KWARGS = [
         'softplus',
         str,
         "Constraint function to use for bounded variables. One of ``['abs', 'softplus']``."
-    ),
-    Kwarg(
-        'interp_hz',
-        1000,
-        float,
-        "Frequency in Hz at which to interpolate continuous impulses for approximating the IRF integral."
-    ),
-    Kwarg(
-        'interp_step',
-        0.1,
-        float,
-        "Step length for resampling from interpolated continuous predictors."
     ),
     Kwarg(
         'optim_name',
@@ -348,30 +325,6 @@ CDR_INITIALIZATION_KWARGS = [
         "Scale of intercept regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
     Kwarg(
-        'coefficient_regularizer_name',
-        'inherit',
-        [str, 'inherit', None],
-        "Name of coefficient regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
-    ),
-    Kwarg(
-        'coefficient_regularizer_scale',
-        'inherit',
-        [float, 'inherit'],
-        "Scale of coefficient regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
-    ),
-    Kwarg(
-        'irf_regularizer_name',
-        'inherit',
-        [str, 'inherit', None],
-        "Name of IRF parameter regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
-    ),
-    Kwarg(
-        'irf_regularizer_scale',
-        'inherit',
-        [float, 'inherit'],
-        "Scale of IRF parameter regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
-    ),
-    Kwarg(
         'ranef_regularizer_name',
         'inherit',
         [str, 'inherit', None],
@@ -384,21 +337,9 @@ CDR_INITIALIZATION_KWARGS = [
         "Scale of random effects regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
     Kwarg(
-        'oob_regularizer_threshold',
-        None,
-        [float, None],
-        "Threshold (in units time) for out-of-bounds regularizer. If ``None``, default to 75th percentile of temporal offsets seen in training."
-    ),
-    Kwarg(
-        'oob_regularizer_scale',
-        None,
-        [float, 'inherit', None],
-        "Scale of out-of-bounds regularizer. If ``'inherit'``, inherits **regularizer_scale**. If ``None``, no out-of-bounds regularization."
-    ),
-    Kwarg(
         'ema_decay',
         0.999,
-        float,
+        [float, None],
         "Decay factor to use for exponential moving average for parameters (used in prediction)."
     ),
     Kwarg(
@@ -450,12 +391,6 @@ CDR_INITIALIZATION_KWARGS = [
         "``int`` type to use throughout the network (used for tensor slicing)."
     ),
     Kwarg(
-        'validate_irf_args',
-        True,
-        bool,
-        "Check whether inputs and parameters to IRF obey constraints. Imposes a small performance cost but helps catch and report bugs in the model."
-    ),
-    Kwarg(
         'save_freq',
         1,
         int,
@@ -484,6 +419,72 @@ CDR_INITIALIZATION_KWARGS = [
         False,
         bool,
         "Keep IRF plots from each checkpoint of a run, which can help visualize learning trajectories but can also consume a lot of disk space. If ``False``, only the most recent plot of each type is kept."
+    )
+]
+
+
+CDR_INITIALIZATION_KWARGS = [
+    Kwarg(
+        'pc',
+        False,
+        bool,
+        "Transform input variables using principal components analysis. Experimental, not thoroughly tested."
+    ),
+    Kwarg(
+        'covarying_fixef',
+        False,
+        bool,
+        "Use multivariate model that fits covariances between fixed parameters. Experimental, not thoroughly tested. If ``False``, fixed parameter distributions are treated as independent.",
+        aliases=['mv']
+    ),
+    Kwarg(
+        'covarying_ranef',
+        False,
+        bool,
+        "Use multivariate model that fits covariances between random parameters within a random grouping factor. Experimental, not thoroughly tested. If ``False``, random parameter distributions are treated as independent.",
+        aliases=['mv_ran']
+    ),
+    Kwarg(
+        'coefficient_regularizer_name',
+        'inherit',
+        [str, 'inherit', None],
+        "Name of coefficient regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
+    ),
+    Kwarg(
+        'coefficient_regularizer_scale',
+        'inherit',
+        [float, 'inherit'],
+        "Scale of coefficient regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
+    ),
+    Kwarg(
+        'irf_regularizer_name',
+        'inherit',
+        [str, 'inherit', None],
+        "Name of IRF parameter regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
+    ),
+    Kwarg(
+        'irf_regularizer_scale',
+        'inherit',
+        [float, 'inherit'],
+        "Scale of IRF parameter regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
+    ),
+    Kwarg(
+        'oob_regularizer_threshold',
+        None,
+        [float, None],
+        "Threshold (in units time) for out-of-bounds regularizer. If ``None``, default to 75th percentile of temporal offsets seen in training."
+    ),
+    Kwarg(
+        'oob_regularizer_scale',
+        None,
+        [float, 'inherit', None],
+        "Scale of out-of-bounds regularizer. If ``'inherit'``, inherits **regularizer_scale**. If ``None``, no out-of-bounds regularization."
+    ),
+    Kwarg(
+        'validate_irf_args',
+        True,
+        bool,
+        "Check whether inputs and parameters to IRF obey constraints. Imposes a small performance cost but helps catch and report bugs in the model."
     )
 ]
 
@@ -641,6 +642,144 @@ CDRBAYES_INITIALIZATION_KWARGS = [
     )
 ]
 
+CDRNN_INITIALIZATION_KWARGS = [
+    Kwarg(
+        'rnn_type',
+        'LSTM',
+        str,
+        "Type of RNN unit to use. One of ``['LSTM', 'GRU', 'SimpleRNN']."
+    ),
+    Kwarg(
+        'rescale_t_delta',
+        False,
+        bool,
+        "Whether to rescale temporal offsets by their training SD under the hood, which can help with convergence. Offsets are automatically reconverted back to the source scale for plotting and model criticism."
+    ),
+    Kwarg(
+        'n_layers',
+        None,
+        [int, None],
+        "Number of RNN layers. If ``None``, inferred from length of **n_units**."
+    ),
+    Kwarg(
+        'n_units',
+        None,
+        [int, str, None],
+        "Number of units per RNN layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_encoder** space-delimited integers, one for each layer in order from bottom to top. ``None`` is not permitted and will raise an error -- it exists here simply to force users to specify a value."
+    ),
+    Kwarg(
+        'n_layers_projection',
+        1,
+        int,
+        "Number of layers in dense projection from RNN encoder to prediction. Must be at least 1."
+    ),
+    Kwarg(
+        'projection_activation_inner',
+        'elu',
+        str,
+        "Name of activation function to use for hidden layers in projection."
+    ),
+    Kwarg(
+        'encoder_activation',
+        'tanh',
+        [str, None],
+        "Name of activation to use in encoder layers.",
+    ),
+    Kwarg(
+        'encoder_recurrent_activation',
+        'sigmoid',
+        [str, None],
+        "Name of recurrent activation to use in encoder layers.",
+    ),
+    Kwarg(
+        'kernel_initializer',
+        'glorot_uniform_initializer',
+        [str, None],
+        "Name of initializer to use in encoder kernels.",
+    ),
+    Kwarg(
+        'recurrent_initializer',
+        'orthogonal_initializer',
+        [str, None],
+        "Name of initializer to use in encoder recurrent kernels.",
+    ),
+    Kwarg(
+        'predictor_dropout_rate',
+        None,
+        [float, None],
+        "Rate at which to drop predictors.",
+        aliases=['input_dropout_rate']
+    ),
+    Kwarg(
+        'all_predictor_dropout_rate',
+        None,
+        [float, None],
+        "Rate at which to drop all predictors.",
+        aliases=['input_dropout_rate']
+    ),
+    Kwarg(
+        'event_dropout_rate',
+        None,
+        [float, None],
+        "Rate at which to drop events (input vectors).",
+        aliases=['input_dropout_rate']
+    ),
+    Kwarg(
+        'tail_dropout_rate',
+        None,
+        [float, None],
+        "Rate at which to drop the tail of events (input vectors).",
+        aliases=['input_dropout_rate']
+    ),
+    Kwarg(
+        'tail_dropout_max',
+        None,
+        [int, None],
+        "Maximum number of final events to randomly dropout from time series during training."
+    ),
+    Kwarg(
+        'rangf_dropout_rate',
+        None,
+        [float, None],
+        "Rate at which to drop random grouping factors.",
+        aliases=['input_dropout_rate']
+    ),
+    Kwarg(
+        'encoder_dropout_rate',
+        None,
+        [float, None],
+        "Rate at which to drop bottom-up neurons in the RNN encoder.",
+        aliases=['hidden_dropout_rate']
+    ),
+    Kwarg(
+        'encoder_recurrent_dropout_rate',
+        None,
+        [float, None],
+        "Rate at which to drop recurrent neurons in the RNN encoder.",
+        aliases=['hidden_dropout_rate']
+    ),
+    Kwarg(
+        'encoder_projection_dropout_rate',
+        None,
+        [float, None],
+        "Rate at which to drop neurons from the encoder projection function.",
+        aliases=['hidden_dropout_rate']
+    ),
+]
+
+CDRNNMLE_INITIALIZATION_KWARGS = [
+
+]
+
+CDRNNBAYES_INITIALIZATION_KWARGS = [
+    Kwarg(
+        'n_samples_eval',
+        1024,
+        int,
+        "Number of posterior predictive samples to draw for prediction/evaluation."
+    ),
+]
+
 
 def cdr_kwarg_docstring():
     """
@@ -649,10 +788,16 @@ def cdr_kwarg_docstring():
     :return: ``str``; docstring snippet
     """
 
-    out = "**Both CDRMLE and CDRBayes**\n\n"
+    out = "**All models**\n\n"
+
+    for kwarg in MODEL_INITIALIZATION_KWARGS:
+        if kwarg.key not in ['outdir']:
+            out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
+
+    out = "**All CDR models**\n\n"
 
     for kwarg in CDR_INITIALIZATION_KWARGS:
-        if kwarg.key not in ['outdir', 'history_length']:
+        if kwarg.key not in ['history_length']:
             out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
 
     out += '\n**CDRMLE only**\n\n'
@@ -664,6 +809,22 @@ def cdr_kwarg_docstring():
 
     for kwarg in CDRBAYES_INITIALIZATION_KWARGS:
         out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
+
+    out += '\n**All CDRNN models**\n\n'
+
+    for kwarg in CDRNN_INITIALIZATION_KWARGS:
+        out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
+
+    out += '\n**CDRNNMLE only**\n\n'
+
+    for kwarg in CDRNNMLE_INITIALIZATION_KWARGS:
+        out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
+
+    out += '\n**CDRNNBayes only**\n\n'
+
+    for kwarg in CDRNNBAYES_INITIALIZATION_KWARGS:
+        out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
+
 
     out += '\n'
 

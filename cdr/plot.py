@@ -1,12 +1,27 @@
 import sys
 import numpy as np
 import pandas as pd
+from mpl_toolkits.mplot3d import Axes3D
 import matplotlib
+import matplotlib.colors
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib import markers
 
 from .util import stderr
+
+
+class MidpointNormalize(matplotlib.colors.Normalize):
+    def __init__(self, vcenter=0., vmin=None, vmax=None, clip=False):
+        self.vcenter = vcenter
+        matplotlib.colors.Normalize.__init__(self, vmin, vmax, clip)
+
+    def __call__(self, value, clip=None):
+        # I'm ignoring masked values and all kinds of edge cases to make a
+        # simple example...
+        x, y = [self.vmin, self.vcenter, self.vmax], [0, 0.5, 1]
+        return np.ma.masked_array(np.interp(value, x, y))
+
 
 def plot_irf(
         plot_x,
@@ -114,7 +129,7 @@ def plot_irf(
     try:
         plt.savefig(dir+'/'+filename, dpi=dpi, transparent=transparent_background)
     except:
-        stderr('Error saving plot to file %s. Skipping...' %(dir+'/'+filename))
+        stderr('Error saving plot to file %s. Skipping...\n' %(dir+'/'+filename))
     plt.close('all')
 
     if dump_source:
@@ -131,6 +146,114 @@ def plot_irf(
                 df[name + 'UB'] = uq[:,i]
 
         df.to_csv(dir + '/' + csvname, index=False)
+
+def plot_surface(
+        plot_x,
+        plot_y,
+        plot_z,
+        irf_names,
+        sort_names=True,
+        dir='.',
+        prefix='surface_plot',
+        suffix='.png',
+        irf_name_map=None,
+        plot_x_inches=6,
+        plot_y_inches=4,
+        ylim='infer',
+        cmap='coolwarm',
+        xlab='Time',
+        ylab='infer',
+        zlab='Response',
+        transparent_background=False,
+        dpi=300,
+        dump_source=False
+):
+    """
+    Plot an IRF or interaction surface.
+
+    :param plot_x: ``numpy`` array with shape (T,1); time points for which to plot the response. For example, if the plots contain 1000 points from 0s to 10s, **plot_x** could be generated as ``np.linspace(0, 10, 1000)``.
+    :param plot_y: ``numpy`` array with shape (T, N); response of each IRF at each time point.
+    :param irf_names: ``list`` of ``str``; CDR ID's of IRFs in the same order as they appear in axis 1 of **plot_y**.
+    :param uq: ``numpy`` array with shape (T, N), or ``None``; upper bound of credible interval for each time point. If ``None``, no credible interval will be plotted.
+    :param lq: ``numpy`` array with shape (T, N), or ``None``; lower bound of credible interval for each time point. If ``None``, no credible interval will be plotted.
+    :param sort_names: ``bool``; alphabetically sort IRF names.
+    :param prop_cycle_length: ``int`` or ``None``; Length of plotting properties cycle (defines step size in the color map). If ``None``, inferred from **irf_names**.
+    :param prop_cycle_ix: ``list`` of ``int``, or ``None``; Integer indices to use in the properties cycle for each entry in **irf_names**. If ``None``, indices are automatically assigned.
+    :param dir: ``str``; output directory.
+    :param filename: ``str``; filename.
+    :param irf_name_map: ``dict`` of ``str`` to ``str``; map from CDR IRF ID's to more readable names to appear in legend. Any plotted IRF whose ID is not found in **irf_name_map** will be represented with the CDR IRF ID.
+    :param plot_x_inches: ``float``; width of plot in inches.
+    :param plot_y_inches: ``float``; height of plot in inches.
+    :param ylim: 2-element ``tuple`` or ``list``; (lower_bound, upper_bound) to use for y axis. If ``None``, automatically inferred.
+    :param cmap: ``str``; name of ``matplotlib`` ``cmap`` object (determines colors of plotted IRF).
+    :param legend: ``bool``; include a legend.
+    :param xlab: ``str`` or ``None``; x-axis label. If ``None``, no label.
+    :param ylab: ``str`` or ``None``; y-axis label. If ``None``, no label.
+    :param use_line_markers: ``bool``; add markers to IRF lines.
+    :param transparent_background: ``bool``; use a transparent background. If ``False``, uses a white background.
+    :param dpi: ``int``; dots per inch.
+    :param dump_source: ``bool``; Whether to dump the plot source array to a csv file.
+    :return: ``None``
+    """
+
+    plt.rcParams["font.family"] = "sans-serif"
+
+    fig = plt.figure()
+    fig.set_size_inches(plot_x_inches, plot_y_inches)
+    ax = fig.gca(projection='3d')
+    ax.view_init(40, 215)
+    ax.w_xaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))
+    ax.w_yaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))
+    ax.w_zaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))
+
+    irf_names_processed = irf_names[:]
+    if irf_name_map is not None:
+        for i in range(len(irf_names_processed)):
+            irf_names_processed[i] = ':'.join([irf_name_map.get(x, x) for x in irf_names_processed[i].split(':')])
+    if sort_names:
+        sort_ix = [i[0] for i in sorted(enumerate(irf_names_processed), key=lambda x:x[1])]
+    else:
+        sort_ix = range(len(irf_names_processed))
+    for i in range(len(sort_ix)):
+        ax.contour3D(
+            plot_x[sort_ix[i]],
+            plot_y[sort_ix[i]],
+            plot_z[sort_ix[i]],
+            50,
+            cmap=cmap,
+            norm=MidpointNormalize(0.)
+        )
+        fig.suptitle(irf_names_processed[sort_ix[i]])
+        if ylab is not None and ylab.lower() == 'infer' and xlab is not None and xlab.lower() == 'infer':
+            xlab_cur, ylab_cur = irf_names_processed[sort_ix[i]].split(':')
+        elif ylab is not None and ylab.lower() == 'infer':
+            xlab_cur = xlab
+            ylab_cur = irf_names_processed[sort_ix[i]]
+        else:
+            ylab_cur = ylab
+            xlab_cur = xlab
+        zlab_cur = zlab
+
+        if xlab_cur:
+            ax.set_xlabel(xlab_cur, weight='bold')
+        if ylab_cur:
+            ax.set_ylabel(ylab_cur, weight='bold')
+        if zlab_cur:
+            ax.set_zlabel(zlab_cur, weight='bold')
+
+        filename = (prefix + '_' + '%s_' %  irf_names_processed[sort_ix[i]] + suffix).replace(':', '_by_').replace(' ', '_')
+
+        try:
+            fig.savefig(
+                dir + '/' + filename,
+                dpi=dpi,
+                transparent=transparent_background
+            )
+        except:
+            stderr('Error saving plot to file %s. Skipping...\n' % (dir + '/' + filename))
+        ax.clear()
+
+    plt.close('all')
 
 
 def plot_qq(
@@ -198,7 +321,7 @@ def plot_qq(
     try:
         plt.savefig(dir+'/'+filename, dpi=dpi, transparent=transparent_background)
     except:
-        stderr('Error saving plot to file %s. Skipping...' %(dir+'/'+filename))
+        stderr('Error saving plot to file %s. Skipping...\n' %(dir+'/'+filename))
     plt.close('all')
 
 
@@ -238,7 +361,7 @@ def plot_heatmap(
     try:
         plt.savefig(dir+'/'+filename)
     except:
-        stderr('Error saving plot to file %s. Skipping...' %(dir+'/'+filename))
+        stderr('Error saving plot to file %s. Skipping...\n' %(dir+'/'+filename))
     plt.close('all')
 
 

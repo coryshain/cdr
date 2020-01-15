@@ -1166,7 +1166,8 @@ class Formula(object):
             X_response_aligned_predictors=None,
             X_2d_predictor_names=None,
             X_2d_predictors=None,
-            history_length=128
+            history_length=128,
+            all_interactions=False
     ):
         """
         Extract all data and compute all transforms required by the model formula.
@@ -1178,6 +1179,7 @@ class Formula(object):
         :param X_2d_predictor_names: ``list`` or ``None``; List of column names 2D predictors (predictors whose value depends on properties of the most recent impulse) if applicable, ``None`` otherwise.
         :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
         :param history_length: ``int``; maximum number of timesteps in the history dimension.
+        :param all_interactions: ``bool``; add powerset of all conformable interactions.
         :return: 6-tuple; transformed **X**, transformed **y**, transformed response-aligned predictor names, transformed response-aligned predictors, transformed 2D predictor names, transformed 2D predictors
         """
         if not isinstance(X, list):
@@ -1186,6 +1188,21 @@ class Formula(object):
         if self.dv not in y.columns:
             y = self.apply_ops(self.dv_term, y)
         impulses = self.t.impulses(include_interactions=True)
+
+        if all_interactions:
+            impulse_names = self.t.impulse_names(include_interactions=False)
+            interaction_names = set(self.t.impulse_names(include_interactions=True)) - set(impulse_names)
+            atomic_impulses = self.t.impulses(include_interactions=False)
+            extra_interactions = set(
+                itertools.chain.from_iterable(
+                    itertools.combinations(atomic_impulses, n) for n in range(2, len(atomic_impulses) + 1)
+                )
+            )
+            for x in extra_interactions:
+                name = ':'.join(impulse.name() for impulse in x)
+                if name not in interaction_names:
+                    impulses.append(ImpulseInteraction(x))
+
         impulses = sorted(list(set(impulses)), key=lambda x: x.name())
 
         if X_2d_predictor_names is None:
@@ -1283,6 +1300,7 @@ class Formula(object):
         for i in range(len(X)):
             X_cur = X[i]
             for col in [x for x in X_cur.columns if spillover.match(x)]:
+                X_cur[col] = X_cur[col].fillna(0)
                 X_cur[col] = X_cur[col].fillna(0)
             X[i] = X_cur
 
