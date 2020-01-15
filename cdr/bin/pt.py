@@ -75,7 +75,7 @@ if __name__ == '__main__':
                         components = model_name.split('!')[1:]
                         hit = True
                         for c in components:
-                            if ablation_components is None or c not in ablation_components:
+                            if ablation_components is not None and c not in ablation_components:
                                 hit = False
                         if hit:
                             comparison_sets[model_basename].append(model_name)

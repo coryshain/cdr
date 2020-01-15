@@ -67,9 +67,11 @@ def exponential_irf_lambdas(params, integral_ub=None, session=None):
         with session.graph.as_default():
             beta = params[:, 0:1]
 
-            dist = tf.contrib.distributions.Exponential(rate=beta)
-            pdf = dist.prob
-            cdf = dist.cdf
+            def pdf(x, beta=beta):
+                return beta * tf.exp(-beta * x)
+
+            def cdf(x, beta=beta):
+                return 1 - tf.exp(-beta * x)
 
             if integral_ub is None:
                 def irf(x, pdf=pdf):
