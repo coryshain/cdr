@@ -219,13 +219,14 @@ def build_CDR_impulses(
     return X_2d, time_X_2d, time_mask
 
 
-def compute_history_intervals(X, y, series_ids):
+def compute_history_intervals(X, y, series_ids, verbose=True):
     """
     Compute row indices in **X** of initial and final impulses for each element of **y**.
 
     :param X: ``pandas`` ``DataFrame``; impulse (predictor) data.
     :param y: ``pandas`` ``DataFrame``; response data.
     :param series_ids: ``list`` of ``str``; column names whose jointly unique values define unique time series.
+    :param verbose: ``bool``; whether to report progress to stderr
     :return: 2-tuple of ``numpy`` vectors; first and last impulse observations (respectively) for each response in **y**
     """
 
@@ -258,7 +259,7 @@ def compute_history_intervals(X, y, series_ids):
     end = 0
     epsilon = np.finfo(np.float32).eps
     while i < n:
-        if i == 0 or i % 1000 == 999 or i == n-1:
+        if verbose and i == 0 or i % 1000 == 999 or i == n-1:
             stderr('\r%d/%d' %(i+1, n))
 
         # Check if we've entered a new series in y
@@ -494,7 +495,18 @@ def compute_time_mask(X_time, first_obs, last_obs, history_length, int_type='int
     return time_mask
 
 
-def preprocess_data(X, y, formula_list, series_ids, filters=None, compute_history=True, history_length=128, debug=False):
+def preprocess_data(
+        X,
+        y,
+        formula_list,
+        series_ids,
+        filters=None,
+        compute_history=True,
+        history_length=128,
+        all_interactions=False,
+        verbose=True,
+        debug=False
+):
     """
     Preprocess CDR data.
 
@@ -505,11 +517,14 @@ def preprocess_data(X, y, formula_list, series_ids, filters=None, compute_histor
     :param filters: ``list``; list of key-value pairs mapping column names to filtering criteria for their values.
     :param compute_history: ``bool``; compute history intervals for each regression target.
     :param history_length: ``int``; maximum number of history observations.
+    :param all_interactions: ``bool``; add powerset of all conformable interactions.
+    :param verbose: ``bool``; whether to report progress to stderr
     :param debug: ``bool``; print debugging information
     :return: 7-tuple; predictor data, response data, filtering mask, response-aligned predictor names, response-aligned predictors, 2D predictor names, and 2D predictors
     """
 
-    stderr('Pre-processing data...\n')
+    if verbose:
+        stderr('Pre-processing data...\n')
 
     if not isinstance(X, list):
         X = [X]
@@ -529,7 +544,8 @@ def preprocess_data(X, y, formula_list, series_ids, filters=None, compute_histor
         X_new = []
         for i in range(len(X)):
             X_cur = X[i]
-            stderr('Computing history intervals for each regression target in predictor file %d...\n' % (i+1))
+            if verbose:
+                stderr('Computing history intervals for each regression target in predictor file %d...\n' % (i+1))
             first_obs, last_obs = compute_history_intervals(X_cur, y, series_ids)
             y['first_obs_%d' % i] = first_obs
             y['last_obs_%d' % i] = last_obs
@@ -556,7 +572,8 @@ def preprocess_data(X, y, formula_list, series_ids, filters=None, compute_histor
                 X_2d_predictors=X_2d_predictors,
                 X_response_aligned_predictor_names=X_response_aligned_predictor_names,
                 X_response_aligned_predictors=X_response_aligned_predictors,
-                history_length=history_length
+                history_length=history_length,
+                all_interactions=all_interactions
             )
     else:
         X_new = X

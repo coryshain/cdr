@@ -8,7 +8,9 @@ else:
     import configparser
 
 from .formula import Formula
-from .kwargs import CDR_INITIALIZATION_KWARGS, CDRMLE_INITIALIZATION_KWARGS, CDRBAYES_INITIALIZATION_KWARGS
+from .kwargs import MODEL_INITIALIZATION_KWARGS, \
+    CDR_INITIALIZATION_KWARGS, CDRMLE_INITIALIZATION_KWARGS, CDRBAYES_INITIALIZATION_KWARGS, \
+    CDRNN_INITIALIZATION_KWARGS, CDRNNMLE_INITIALIZATION_KWARGS, CDRNNBAYES_INITIALIZATION_KWARGS
 
 
 # Thanks to Brice (https://stackoverflow.com/users/140264/brice) at Stack Overflow for this
@@ -82,7 +84,7 @@ class Config(object):
             self.outdir = './cdr_model/'
         if not os.path.exists(self.outdir):
             os.makedirs(self.outdir)
-        if os.path.realpath(path) != os.path.realpath(self.outdir + '/config.ini'):
+        if not os.path.normpath(os.path.realpath(path)) == os.path.normpath(os.path.realpath(self.outdir + '/config.ini')):
             shutil.copy2(path, self.outdir + '/config.ini')
         self.use_gpu_if_available = global_settings.getboolean('use_gpu_if_available', True)
 
@@ -138,7 +140,7 @@ class Config(object):
             for x in config['irf_name_map']:
                 self.irf_name_map[x] = config['irf_name_map'][x]
         else:
-            self.irf_name_map = None
+            self.irf_name_map = {}
 
     def __getitem__(self, item):
         if self.current_model is None:
@@ -188,6 +190,11 @@ class Config(object):
         if 'network_type' in settings or add_defaults:
             out['network_type'] = settings.get('network_type', 'bayes')
 
+        # Model initialization keyword arguments
+        for kwarg in MODEL_INITIALIZATION_KWARGS:
+            if kwarg.in_settings(settings) or add_defaults:
+                out[kwarg.key] = kwarg.kwarg_from_config(settings)
+
         # CDR initialization keyword arguments
         for kwarg in CDR_INITIALIZATION_KWARGS:
             if kwarg.in_settings(settings) or add_defaults:
@@ -203,11 +210,34 @@ class Config(object):
             if kwarg.in_settings(settings) or add_defaults:
                 out[kwarg.key] = kwarg.kwarg_from_config(settings)
 
+        # CDRNN initialization keyword arguments
+        for kwarg in CDRNN_INITIALIZATION_KWARGS:
+            if kwarg.in_settings(settings) or add_defaults:
+                out[kwarg.key] = kwarg.kwarg_from_config(settings)
+
+        # CDRNNMLE initialization keyword arguments
+        for kwarg in CDRNNMLE_INITIALIZATION_KWARGS:
+            if kwarg.in_settings(settings) or add_defaults:
+                out[kwarg.key] = kwarg.kwarg_from_config(settings)
+
+        # CDRNNBayes initialization keyword arguments
+        for kwarg in CDRNNBAYES_INITIALIZATION_KWARGS:
+            if kwarg.in_settings(settings) or add_defaults:
+                out[kwarg.key] = kwarg.kwarg_from_config(settings)
+
         # Plotting defaults
         if 'plot_n_time_units' in settings or add_defaults:
             out['plot_n_time_units'] = settings.getfloat('plot_n_time_units', 2.5)
         if 'plot_n_time_points' in settings or add_defaults:
             out['plot_n_time_points'] = settings.getfloat('plot_n_time_points', 1000)
+        if 'surface_plot_n_time_points' in settings or add_defaults:
+            out['surface_plot_n_time_points'] = settings.getfloat('surface_plot_n_time_points', 1024)
+        if 'generate_irf_surface_plots' in settings or add_defaults:
+            out['generate_irf_surface_plots'] = settings.getboolean('generate_irf_surface_plots', False)
+        if 'generate_interaction_surface_plots' in settings or add_defaults:
+            out['generate_interaction_surface_plots'] = settings.getboolean('generate_interaction_surface_plots', False)
+        if 'generate_curvature_plots' in settings or add_defaults:
+            out['generate_curvature_plots'] = settings.getboolean('generate_curvature_plots', False)
         if 'plot_x_inches' in settings or add_defaults:
             out['plot_x_inches'] = settings.getfloat('plot_x_inches', 6)
         if 'plot_y_inches' in settings or add_defaults:

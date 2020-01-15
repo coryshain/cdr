@@ -130,6 +130,7 @@ if __name__ == '__main__':
             kwargs = {
                 'plot_n_time_units': p['plot_n_time_units'] if n_time_units is None else n_time_units,
                 'plot_n_time_points': p['plot_n_time_points'] if resolution is None else resolution,
+                'surface_plot_n_time_points': p['surface_plot_n_time_points'] if resolution is None else resolution,
                 'plot_x_inches': p['plot_x_inches'] if x_inches is None else x_inches,
                 'plot_y_inches': p['plot_y_inches'] if y_inches is None else y_inches,
                 'cmap': p['cmap'] if cmap is None else cmap,

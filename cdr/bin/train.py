@@ -7,7 +7,9 @@ import pandas as pd
 
 pd.options.mode.chained_assignment = None
 
-from cdr.kwargs import CDR_INITIALIZATION_KWARGS, CDRMLE_INITIALIZATION_KWARGS, CDRBAYES_INITIALIZATION_KWARGS
+from cdr.kwargs import MODEL_INITIALIZATION_KWARGS, \
+    CDR_INITIALIZATION_KWARGS, CDRMLE_INITIALIZATION_KWARGS, CDRBAYES_INITIALIZATION_KWARGS, \
+    CDRNN_INITIALIZATION_KWARGS, CDRNNMLE_INITIALIZATION_KWARGS, CDRNNBAYES_INITIALIZATION_KWARGS
 from cdr.config import Config
 from cdr.io import read_data
 from cdr.formula import Formula
@@ -49,6 +51,10 @@ if __name__ == '__main__':
     cdr_formula_name_list = [m for m in p.model_list if (m.startswith('CDR') or m.startswith('DTSR'))]
     all_rangf = [v for x in cdr_formula_list for v in x.rangf]
     partitions = get_partition_list(args.partition)
+    all_interactions = False
+    # for m in models:
+    #     if m.startswith('CDRNN'):
+    #         all_interactions = True
     X_paths, y_paths = paths_from_partition_cliarg(partitions, p)
     X, y = read_data(X_paths, y_paths, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in cdr_formula_list for v in x.rangf])))
     X, y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors = preprocess_data(
@@ -58,7 +64,8 @@ if __name__ == '__main__':
         p.series_ids,
         filters=p.filters,
         compute_history=run_cdr,
-        history_length=p.history_length
+        history_length=p.history_length,
+        all_interactions=all_interactions
     )
 
     if run_R:
@@ -229,40 +236,77 @@ if __name__ == '__main__':
                 bayes = True
 
             kwargs = {}
-            for kwarg in CDR_INITIALIZATION_KWARGS:
+            for kwarg in MODEL_INITIALIZATION_KWARGS:
                 if kwarg.key not in ['outdir', 'history_length']:
                     kwargs[kwarg.key] = p[kwarg.key]
 
-            if p['network_type'] in ['mle', 'nn']:
-                from cdr.cdrmle import CDRMLE
-
-                for kwarg in CDRMLE_INITIALIZATION_KWARGS:
+            if m.startswith('CDRNN'):
+                for kwarg in CDRNN_INITIALIZATION_KWARGS:
                     kwargs[kwarg.key] = p[kwarg.key]
+                if p['network_type'].lower() in ['mle', 'nn']:
+                    from cdr.cdrnnmle import CDRNNMLE
 
-                cdr_model = CDRMLE(
-                    formula,
-                    X,
-                    y_valid,
-                    outdir=p.outdir + '/' + m,
-                    history_length=p.history_length,
-                    **kwargs
-                )
-            elif p['network_type'].startswith('bayes'):
-                from cdr.cdrbayes import CDRBayes
+                    for kwarg in CDRNNMLE_INITIALIZATION_KWARGS:
+                        kwargs[kwarg.key] = p[kwarg.key]
 
-                for kwarg in CDRBAYES_INITIALIZATION_KWARGS:
-                    kwargs[kwarg.key] = p[kwarg.key]
+                    cdr_model = CDRNNMLE(
+                        formula,
+                        X,
+                        y_valid,
+                        outdir=p.outdir + '/' + m,
+                        history_length=p.history_length,
+                        **kwargs
+                    )
+                elif p['network_type'].lower() in ['bbvi', 'bayes', 'bayesian']:
+                    from cdr.cdrnnbayes import CDRNNBayes
 
-                cdr_model = CDRBayes(
-                    formula,
-                    X,
-                    y_valid,
-                    outdir=p.outdir + '/' + m,
-                    history_length=p.history_length,
-                    **kwargs
-                )
+                    for kwarg in CDRNNBAYES_INITIALIZATION_KWARGS:
+                        kwargs[kwarg.key] = p[kwarg.key]
+
+                    cdr_model = CDRNNBayes(
+                        formula,
+                        X,
+                        y_valid,
+                        outdir=p.outdir + '/' + m,
+                        history_length=p.history_length,
+                        **kwargs
+                    )
+                else:
+                    raise ValueError('Unrecognized network type %s.' % p['network_type'])
             else:
-                raise ValueError('Network type "%s" not supported' %p['network_type'])
+                for kwarg in CDR_INITIALIZATION_KWARGS:
+                    kwargs[kwarg.key] = p[kwarg.key]
+
+                if p['network_type'].lower() in ['mle', 'nn']:
+                    from cdr.cdrmle import CDRMLE
+
+                    for kwarg in CDRMLE_INITIALIZATION_KWARGS:
+                        kwargs[kwarg.key] = p[kwarg.key]
+
+                    cdr_model = CDRMLE(
+                        formula,
+                        X,
+                        y_valid,
+                        outdir=p.outdir + '/' + m,
+                        history_length=p.history_length,
+                        **kwargs
+                    )
+                elif p['network_type'].lower() in ['bbvi', 'bayes', 'bayesian']:
+                    from cdr.cdrbayes import CDRBayes
+
+                    for kwarg in CDRBAYES_INITIALIZATION_KWARGS:
+                        kwargs[kwarg.key] = p[kwarg.key]
+
+                    cdr_model = CDRBayes(
+                        formula,
+                        X,
+                        y_valid,
+                        outdir=p.outdir + '/' + m,
+                        history_length=p.history_length,
+                        **kwargs
+                    )
+                else:
+                    raise ValueError('Unrecognized network type %s.' % p['network_type'])
 
             if args.save_and_exit:
                 cdr_model.save()
@@ -282,6 +326,10 @@ if __name__ == '__main__':
                 irf_name_map=p.irf_name_map,
                 plot_n_time_units=p['plot_n_time_units'],
                 plot_n_time_points=p['plot_n_time_points'],
+                surface_plot_n_time_points=p['surface_plot_n_time_points'],
+                generate_irf_surface_plots=p['generate_irf_surface_plots'],
+                generate_interaction_surface_plots=p['generate_interaction_surface_plots'],
+                generate_curvature_plots=p['generate_curvature_plots'],
                 plot_x_inches=p['plot_x_inches'],
                 plot_y_inches=p['plot_y_inches'],
                 cmap=p['cmap'],
