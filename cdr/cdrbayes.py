@@ -43,7 +43,6 @@ class CDRBayes(CDR):
     #####################################################
 
     def __init__(self, form_str, X, y, **kwargs):
-
         super(CDRBayes, self).__init__(
             form_str,
             X,
@@ -53,11 +52,6 @@ class CDRBayes(CDR):
 
         for kwarg in CDRBayes._INITIALIZATION_KWARGS:
             setattr(self, kwarg.key, kwargs.pop(kwarg.key, kwarg.default_value))
-
-        kwarg_keys = [x.key for x in CDR._INITIALIZATION_KWARGS]
-        for kwarg_key in kwargs:
-            if kwarg_key not in kwarg_keys:
-                raise TypeError('__init__() got an unexpected keyword argument %s' %kwarg_key)
 
         if not self.variational():
             if self.n_samples is not None:

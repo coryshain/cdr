@@ -791,8 +791,7 @@ def cdr_kwarg_docstring():
     out = "**All models**\n\n"
 
     for kwarg in MODEL_INITIALIZATION_KWARGS:
-        if kwarg.key not in ['outdir']:
-            out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
+        out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
 
     out = "**All CDR models**\n\n"
 

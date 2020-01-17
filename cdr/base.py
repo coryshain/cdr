@@ -159,7 +159,7 @@ class Model(object):
             found = False
             # varset = set(name)
             # name = ':'.join(name)
-            for df in X:
+            for df in X + [y]:
                 # df_name = None
                 # for col in df.columns:
                 #     colset = set(col.split(':'))

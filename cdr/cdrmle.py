@@ -58,11 +58,6 @@ class CDRMLE(CDR):
         for kwarg in CDRMLE._INITIALIZATION_KWARGS:
             setattr(self, kwarg.key, kwargs.pop(kwarg.key, kwarg.default_value))
 
-        kwarg_keys = [x.key for x in CDR._INITIALIZATION_KWARGS]
-        for kwarg_key in kwargs:
-            if kwarg_key not in kwarg_keys:
-                raise TypeError('__init__() got an unexpected keyword argument %s' % kwarg_key)
-
         self._initialize_metadata()
 
         self.build()

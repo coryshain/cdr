@@ -3353,7 +3353,7 @@ class CDR(Model):
                 self.training: not self.predict_mode
             }
             ix = self.plots[composite][scaled][dirac]['names'].index(name)
-            return self.sess.run([self.support, self.plots[composite][scaled][dirac]['plots'][ix]], feed_dict=fd)
+            return self.sess.run([self.support, self.plots[composite][scaled][dirac]['plot'][ix]], feed_dict=fd)
         else:
             raise ValueError('Plot type "%s" not supported.' % plot_type)
 
