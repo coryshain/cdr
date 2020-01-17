@@ -1899,20 +1899,20 @@ class Model(object):
         rho = corr_cdr(X_2d, impulse_names, impulse_names_2d, time_X_2d, time_X_mask)
         stderr(str(rho) + '\n\n')
 
-        self.make_plots(
-            irf_name_map=irf_name_map,
-            plot_n_time_units=plot_n_time_units,
-            plot_n_time_points=plot_n_time_points,
-            surface_plot_n_time_points=surface_plot_n_time_points,
-            generate_irf_surface_plots=generate_irf_surface_plots,
-            generate_interaction_surface_plots=generate_interaction_surface_plots,
-            generate_curvature_plots=generate_curvature_plots,
-            plot_x_inches=plot_x_inches,
-            plot_y_inches=plot_y_inches,
-            cmap=cmap,
-            dpi=dpi,
-            keep_plot_history=self.keep_plot_history
-        )
+        # self.make_plots(
+        #     irf_name_map=irf_name_map,
+        #     plot_n_time_units=plot_n_time_units,
+        #     plot_n_time_points=plot_n_time_points,
+        #     surface_plot_n_time_points=surface_plot_n_time_points,
+        #     generate_irf_surface_plots=generate_irf_surface_plots,
+        #     generate_interaction_surface_plots=generate_interaction_surface_plots,
+        #     generate_curvature_plots=generate_curvature_plots,
+        #     plot_x_inches=plot_x_inches,
+        #     plot_y_inches=plot_y_inches,
+        #     cmap=cmap,
+        #     dpi=dpi,
+        #     keep_plot_history=self.keep_plot_history
+        # )
 
         with self.sess.as_default():
             with self.sess.graph.as_default():

@@ -1255,8 +1255,10 @@ class Formula(object):
                     )
 
                 elif x.id not in X_columns:
+                    y = self.apply_ops(x, y)
                     if x.name() not in X_response_aligned_predictor_names:
                         X_response_aligned_predictor_names.append(x.name())
+
                         if X_response_aligned_predictors is None:
                             X_response_aligned_predictors = y[[x.id]]
                         else:
