@@ -379,23 +379,23 @@ def compute_filter(y, field, cond):
 
     assert isinstance(cond, str), 'Argument ``cond`` must be of type ``str``.'
 
-    cond = cond.strip().split()
+    cond = cond.strip()
     if cond.startswith('<='):
         op = '<='
         var = cond[2:].strip()
     elif cond.startswith('>='):
         op = '<='
         var = cond[2:].strip()
-    if cond.startswith('<'):
+    elif cond.startswith('<'):
         op = '<'
         var = cond[1:].strip()
-    if cond.startswith('>'):
+    elif cond.startswith('>'):
         op = '>'
         var = cond[1:].strip()
-    if cond.startswith('=='):
+    elif cond.startswith('=='):
         op = '=='
         var = cond[2:].strip()
-    if cond.startswith('!='):
+    elif cond.startswith('!='):
         op = '!='
         var = cond[2:].strip()
     else:
