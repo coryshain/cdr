@@ -377,20 +377,52 @@ def compute_filter(y, field, cond):
     :return: ``numpy`` vector; boolean mask to use for ``pandas`` subsetting operations.
     """
 
-    cond = cond.strip()
+    assert isinstance(cond, str), 'Argument ``cond`` must be of type ``str``.'
+
+    cond = cond.strip().split()
     if cond.startswith('<='):
-        return y[field] <= (np.inf if cond[2:].strip() == 'inf' else float(cond[2:].strip()))
-    if cond.startswith('>='):
-        return y[field] >= (np.inf if cond[2:].strip() == 'inf' else float(cond[2:].strip()))
+        op = '<='
+        var = cond[2:].strip()
+    elif cond.startswith('>='):
+        op = '<='
+        var = cond[2:].strip()
     if cond.startswith('<'):
-        return y[field] < (np.inf if cond[1:].strip() == 'inf' else float(cond[1:].strip()))
+        op = '<'
+        var = cond[1:].strip()
     if cond.startswith('>'):
-        return y[field] > (np.inf if cond[1:].strip() == 'inf' else float(cond[1:].strip()))
+        op = '>'
+        var = cond[1:].strip()
+    if cond.startswith('=='):
+        op = '=='
+        var = cond[2:].strip()
+    if cond.startswith('!='):
+        op = '!='
+        var = cond[2:].strip()
+    else:
+        raise ValueError('Unrecognized filtering condition: %s' % cond)
+
+    if var == 'inf':
+        var = np.inf
+    else:
+        try:
+            var = float(var)
+        except ValueError:
+            if var in y:
+                var = y[var]
+
+    if op == '<=':
+        return y[field] <= var
+    if cond.startswith('>='):
+        return y[field] >= var
+    if cond.startswith('<'):
+        return y[field] < var
+    if cond.startswith('>'):
+        return y[field] > var
     if cond.startswith('=='):
         try:
-            return y[field] == (np.inf if cond[2:].strip() == 'inf' else float(cond[2:].strip()))
+            return y[field] == var
         except:
-            return y[field].astype('str') == cond[2:].strip()
+            return y[field].astype('str') == var
     if cond.startswith('!='):
         try:
             return y[field] != (np.inf if cond[2:].strip() == 'inf' else float(cond[2:].strip()))

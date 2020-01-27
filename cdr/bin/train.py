@@ -93,8 +93,9 @@ if __name__ == '__main__':
                 form = p['formula']
                 dv = form.split('~')[0].strip()
                 y = add_dv(dv, y)
-                if not dv in X_baseline.columns:
-                    X_baseline[dv] = y[dv]
+        for c in y.columns:
+            if c not in X_baseline.columns:
+                X_baseline[c] = y[c]
 
         for c in X_baseline.columns:
             if X_baseline[c].dtype.name == 'category':
