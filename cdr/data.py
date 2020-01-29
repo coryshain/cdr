@@ -411,23 +411,23 @@ def compute_filter(y, field, cond):
                 var = y[var]
 
     if op == '<=':
-        return y[field] <= var
+        return ~pd.isna(y[field]) & (y[field] <= var)
     if cond.startswith('>='):
-        return y[field] >= var
+        return ~pd.isna(y[field]) & (y[field] >= var)
     if cond.startswith('<'):
-        return y[field] < var
+        return ~pd.isna(y[field]) & (y[field] < var)
     if cond.startswith('>'):
-        return y[field] > var
+        return ~pd.isna(y[field]) & (y[field] > var)
     if cond.startswith('=='):
         try:
-            return y[field] == var
+            return ~pd.isna(y[field]) & (y[field] == var)
         except:
-            return y[field].astype('str') == var
+            return ~pd.isna(y[field]) & (y[field].astype('str') == var)
     if cond.startswith('!='):
         try:
-            return y[field] != (np.inf if cond[2:].strip() == 'inf' else float(cond[2:].strip()))
+            return ~pd.isna(y[field]) & (y[field] != var)
         except:
-            return y[field].astype('str') != cond[2:].strip()
+            return ~pd.isna(y[field]) & (y[field].astype('str') != var)
     raise ValueError('Unsupported comparator in filter "%s"' %cond)
 
 
