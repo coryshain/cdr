@@ -1,6 +1,7 @@
 import argparse
 import os
 import sys
+import re
 import pickle
 import numpy as np
 import pandas as pd
@@ -15,6 +16,10 @@ from cdr.io import read_data
 from cdr.formula import Formula
 from cdr.data import add_dv, filter_invalid_responses, preprocess_data, compute_splitID, compute_partition
 from cdr.util import mse, mae, filter_models, get_partition_list, paths_from_partition_cliarg, stderr
+
+
+spillover = re.compile('(z_)?([^ (),]+)S([0-9]+)')
+
 
 if __name__ == '__main__':
 
@@ -71,39 +76,41 @@ if __name__ == '__main__':
     if run_R:
         # from cdr.baselines import py2ri
         assert len(X) == 1, 'Cannot run baselines on asynchronously sampled predictors'
-        X_baseline = X[0]
-        common_cols = sorted(list(set(X_baseline.columns) & set(y.columns)))
-        X_baseline = pd.merge(X_baseline, y, on=common_cols, how='inner')
-        # X_cur['splitID'] = compute_splitID(X_cur, p.split_ids)
-        # part = compute_partition(X_cur, p.modulus, 3)
-        # part_select = None
-        # partition_name_to_ix = {'train': 0, 'dev': 1, 'test': 2}
-        # for partition in partitions:
-        #     if part_select is None:
-        #         part_select = part[partition_name_to_ix[partition]]
-        #     else:
-        #         part_select &= part[partition_name_to_ix[partition]]
-        #
-        # X_baseline = X_cur[part_select]
-        # X_baseline = X_baseline.reset_index(drop=True)[select]
+        assert len(X) == 1, 'Cannot run baselines on asynchronously sampled predictors'
+        X_cur = X[0]
+        X_cur['splitID'] = compute_splitID(X_cur, p.split_ids)
+        part = compute_partition(X_cur, p.modulus, 3)
+        part_select = None
+        partition_name_to_ix = {'train': 0, 'dev': 1, 'test': 2}
+        for partition in partitions:
+            if part_select is None:
+                part_select = part[partition_name_to_ix[partition]]
+            else:
+                part_select &= part[partition_name_to_ix[partition]]
+
+        X_baseline = X_cur
 
         for m in models:
             if not m in cdr_formula_name_list:
                 p.set_model(m)
                 form = p['formula']
-                dv = form.split('~')[0].strip()
-                y = add_dv(dv, y)
-        for c in y.columns:
-            if c not in X_baseline.columns:
-                X_baseline[c] = y[c]
+                lhs, rhs = form.split('~')
+                preds = rhs.split('+')
+                for pred in preds:
+                    sp = spillover.search(pred)
+                    if sp and sp.group(2) in X_baseline.columns:
+                        x_id = sp.group(2)
+                        n = int(sp.group(3))
+                        x_id_sp = x_id + 'S' + str(n)
+                        if x_id_sp not in X_baseline.columns:
+                            X_baseline[x_id_sp] = X_baseline.groupby(p.series_ids)[x_id].shift(n, fill_value=0.)
 
-        for c in X_baseline.columns:
-            if X_baseline[c].dtype.name == 'category':
-                X_baseline[c] = X_baseline[c].astype(str)
-
-        # print('before py2ri')
-        # X_baseline = py2ri(X_baseline)
-        # print('after py2ri')
+        X_baseline = X_baseline[part_select]
+        if p.merge_cols is None:
+            merge_cols = sorted(list(set(X_baseline.columns) & set(y.columns)))
+        else:
+            merge_cols = p.merge_cols
+        X_baseline = pd.merge(X_baseline, y, on=merge_cols, how='inner')
 
     n_train_sample = len(y)
 

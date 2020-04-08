@@ -410,24 +410,29 @@ def compute_filter(y, field, cond):
             if var in y:
                 var = y[var]
 
+    if var in y.colunms:
+        comparison = y[var]
+    else:
+        comparison = var
+
     if op == '<=':
-        return ~pd.isna(y[field]) & (y[field] <= var)
+        return ~pd.isna(y[field]) & (y[field] <= comparison)
     if cond.startswith('>='):
-        return ~pd.isna(y[field]) & (y[field] >= var)
+        return ~pd.isna(y[field]) & (y[field] >= comparison)
     if cond.startswith('<'):
-        return ~pd.isna(y[field]) & (y[field] < var)
+        return ~pd.isna(y[field]) & (y[field] < comparison)
     if cond.startswith('>'):
-        return ~pd.isna(y[field]) & (y[field] > var)
+        return ~pd.isna(y[field]) & (y[field] > comparison)
     if cond.startswith('=='):
         try:
-            return ~pd.isna(y[field]) & (y[field] == var)
+            return ~pd.isna(y[field]) & (y[field] == comparison)
         except:
-            return ~pd.isna(y[field]) & (y[field].astype('str') == var)
+            return ~pd.isna(y[field]) & (y[field].astype('str') == comparison)
     if cond.startswith('!='):
         try:
-            return ~pd.isna(y[field]) & (y[field] != var)
+            return ~pd.isna(y[field]) & (y[field] != comparison)
         except:
-            return ~pd.isna(y[field]) & (y[field].astype('str') != var)
+            return ~pd.isna(y[field]) & (y[field].astype('str') != comparison)
     raise ValueError('Unsupported comparator in filter "%s"' %cond)
 
 
@@ -605,7 +610,8 @@ def preprocess_data(
                 X_response_aligned_predictor_names=X_response_aligned_predictor_names,
                 X_response_aligned_predictors=X_response_aligned_predictors,
                 history_length=history_length,
-                all_interactions=all_interactions
+                all_interactions=all_interactions,
+                series_ids=series_ids
             )
     else:
         X_new = X
