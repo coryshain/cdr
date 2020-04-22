@@ -773,7 +773,7 @@ class CDRBayes(CDR):
                                 stddev=self.epsilon,
                                 dtype=self.FLOAT_TF
                             ),
-                            name=sn('%s_q_loc_%s_by_%s' % (param_name, '-'.join(ids), ran_gf))
+                            name=sn('%s_q_loc_%s_by_%s' % (param_name, '-'.join(ids), sn(ran_gf)))
                         )
 
                         param_q_scale = tf.Variable(
@@ -784,13 +784,13 @@ class CDRBayes(CDR):
                             #     dtype=self.FLOAT_TF
                             # ),
                             tf.ones([rangf_n_levels, len(ids)], dtype=self.FLOAT_TF) * self.irf_param_ranef_posterior_sd_init_unconstrained,
-                            name=sn('%s_q_scale_%s_by_%s' % (param_name, '-'.join(ids), ran_gf))
+                            name=sn('%s_q_scale_%s_by_%s' % (param_name, '-'.join(ids), sn(ran_gf)))
                         )
 
                         param_q = Normal(
                             loc=param_q_loc,
                             scale=self.constraint_fn(param_q_scale),
-                            name=sn('%s_q_%s_by_%s' % (param_name, '-'.join(ids), ran_gf))
+                            name=sn('%s_q_%s_by_%s' % (param_name, '-'.join(ids), sn(ran_gf)))
                         )
 
                         param_summary = param_q.mean()
@@ -801,7 +801,7 @@ class CDRBayes(CDR):
                                 sample_shape=[rangf_n_levels, len(ids)],
                                 loc=0.,
                                 scale=self.irf_param_ranef_prior_sd_tf,
-                                name='%s_by_%s' % (param_name, ran_gf)
+                                name='%s_by_%s' % (param_name, sn(ran_gf))
                             )
                             self.inference_map[param] = param_q
                         else:
@@ -813,17 +813,17 @@ class CDRBayes(CDR):
                             sample_shape=[rangf_n_levels, len(ids)],
                             loc=0.,
                             scale=self.irf_param_ranef_prior_sd_tf,
-                            name='%s_by_%s' % (param_name, ran_gf)
+                            name='%s_by_%s' % (param_name, sn(ran_gf))
                         )
 
                         # Posterior distribution
                         param_q_samples = tf.Variable(
                             tf.zeros((self.n_samples, rangf_n_levels, len(ids)), dtype=self.FLOAT_TF),
-                            name=sn('%s_q_%s_by_%s_samples' % (param_name, '-'.join(ids), ran_gf))
+                            name=sn('%s_q_%s_by_%s_samples' % (param_name, '-'.join(ids), sn(ran_gf)))
                         )
                         param_q = Empirical(
                             params=param_q_samples,
-                            name=sn('%s_q_%s_by_%s' % (param_name, '-'.join(ids), ran_gf))
+                            name=sn('%s_q_%s_by_%s' % (param_name, '-'.join(ids), sn(ran_gf)))
                         )
 
                         param_summary = param_q.params[self.global_batch_step - 1]
@@ -833,7 +833,7 @@ class CDRBayes(CDR):
                             param_proposal = Normal(
                                 loc=param,
                                 scale=self.mh_proposal_sd,
-                                name=sn('%s_proposal_%s_by_%s' % (param_name, '-'.join(ids), ran_gf))
+                                name=sn('%s_proposal_%s_by_%s' % (param_name, '-'.join(ids), sn(ran_gf)))
                             )
                             self.proposal_map[param] = param_proposal
 
@@ -858,7 +858,7 @@ class CDRBayes(CDR):
                         #     dtype=self.FLOAT_TF
                         # ),
                         tf.ones([dim], dtype=self.FLOAT_TF) * means,
-                        name='joint_q_loc' if ran_gf is None else 'joint_q_loc_by_%s' %ran_gf
+                        name='joint_q_loc' if ran_gf is None else 'joint_q_loc_by_%s' % sn(ran_gf)
                     )
 
                     # Construct cholesky decomposition of initial covariance using sds, then use for initialization
@@ -882,13 +882,13 @@ class CDRBayes(CDR):
                         #     dtype=self.FLOAT_TF
                         # ),
                         tf.ones([n_scale], dtype=self.FLOAT_TF) * scale_posterior_init,
-                        name='joint_q_scale' if ran_gf is None else 'joint_q_scale_by_%s' %ran_gf
+                        name='joint_q_scale' if ran_gf is None else 'joint_q_scale_by_%s' % sn(ran_gf)
                     )
 
                     joint_q = MultivariateNormalTriL(
                         loc=joint_q_loc,
                         scale_tril=tf.contrib.distributions.fill_triangular(joint_q_scale),
-                        name='joint_q' if ran_gf is None else 'joint_q_by_%s' %ran_gf
+                        name='joint_q' if ran_gf is None else 'joint_q_by_%s' % sn(ran_gf)
                     )
 
                     joint_summary = joint_q.mean()
@@ -898,7 +898,7 @@ class CDRBayes(CDR):
                         joint = MultivariateNormalTriL(
                             loc=means,
                             scale_tril=tf.contrib.distributions.fill_triangular(scale_init),
-                            name='joint' if ran_gf is None else 'joint_by_%s' %ran_gf
+                            name='joint' if ran_gf is None else 'joint_by_%s' % sn(ran_gf)
                         )
 
                         self.inference_map[joint] = joint_q
@@ -918,18 +918,18 @@ class CDRBayes(CDR):
                     joint = MultivariateNormalTriL(
                         loc=means,
                         scale_tril=tf.contrib.distributions.fill_triangular(scale_init),
-                        name='joint' if ran_gf is None else 'joint_by_%s' %ran_gf
+                        name='joint' if ran_gf is None else 'joint_by_%s' % sn(ran_gf)
                     )
 
                     # Posterior distribution
                     joint_q_samples = tf.Variable(
                         tf.ones((self.n_samples), dtype=self.FLOAT_TF) * means,
-                        name='joint_q_samples'  if ran_gf is None else 'joint_q_samples_by_%s' %ran_gf
+                        name='joint_q_samples'  if ran_gf is None else 'joint_q_samples_by_%s' % sn(ran_gf)
                     )
 
                     joint_q = Empirical(
                         params=joint_q_samples,
-                        name='joint_q' if ran_gf is None else 'joint_q_by_%s' %ran_gf
+                        name='joint_q' if ran_gf is None else 'joint_q_by_%s' % sn(ran_gf)
                     )
 
                     if self.inference_name == 'MetropolisHastings':
@@ -937,7 +937,7 @@ class CDRBayes(CDR):
                         joint_proposal = Normal(
                             loc=joint,
                             scale=self.mh_proposal_sd,
-                            name='joint_proposal' if ran_gf is None else 'joint_q_proposal_by_%s' %ran_gf
+                            name='joint_proposal' if ran_gf is None else 'joint_q_proposal_by_%s' % sn(ran_gf)
                         )
                         self.proposal_map[joint] = joint_proposal
 

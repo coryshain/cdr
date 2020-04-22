@@ -210,7 +210,7 @@ class CDRMLE(CDR):
                             dtype=self.FLOAT_TF
                         ),
                         # tf.zeros([rangf_n_levels, len(ids)], dtype=self.FLOAT_TF),
-                        name=sn('%s_%s_by_%s' % (param_name, '-'.join(ids), ran_gf))
+                        name=sn('%s_%s_by_%s' % (param_name, '-'.join(ids), sn(ran_gf)))
                     )
                     param_summary = param
 
