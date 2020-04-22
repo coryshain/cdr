@@ -112,7 +112,7 @@ class CDRMLE(CDR):
                         #     dtype=self.FLOAT_TF
                         # ),
                         tf.zeros([rangf_n_levels], dtype=self.FLOAT_TF),
-                        name='intercept_by_%s' % ran_gf
+                        name='intercept_by_%s' % sn(ran_gf)
                     )
                     intercept_summary = intercept
                 return intercept, intercept_summary
@@ -143,7 +143,7 @@ class CDRMLE(CDR):
                         #     dtype=self.FLOAT_TF
                         # ),
                         tf.zeros([rangf_n_levels, len(coef_ids)], dtype=self.FLOAT_TF),
-                        name='coefficient_by_%s' % ran_gf
+                        name='coefficient_by_%s' % sn(ran_gf)
                     )
                     coefficient_summary = coefficient
                 return coefficient, coefficient_summary
@@ -174,7 +174,7 @@ class CDRMLE(CDR):
                         #     dtype=self.FLOAT_TF
                         # ),
                         tf.zeros([rangf_n_levels, len(interaction_ids)], dtype=self.FLOAT_TF),
-                        name='coefficient_by_%s' % ran_gf
+                        name='coefficient_by_%s' % sn(ran_gf)
                     )
                     interaction_summary = interaction
                 return interaction, interaction_summary
@@ -229,7 +229,7 @@ class CDRMLE(CDR):
                     #     dtype=self.FLOAT_TF
                     # ),
                     tf.ones([dim], dtype=self.FLOAT_TF) * means,
-                    name='joint_loc' if ran_gf is None else 'joint_loc_by_%s' % ran_gf
+                    name='joint_loc' if ran_gf is None else 'joint_loc_by_%s' % sn(ran_gf)
                 )
 
                 # Construct cholesky decomposition of initial covariance using sds, then use for initialization
@@ -251,13 +251,13 @@ class CDRMLE(CDR):
                     #     dtype=self.FLOAT_TF
                     # ),
                     tf.ones([n_scale], dtype=self.FLOAT_TF) * scale_init,
-                    name='joint_scale' if ran_gf is None else 'joint_scale_by_%s' % ran_gf
+                    name='joint_scale' if ran_gf is None else 'joint_scale_by_%s' % sn(ran_gf)
                 )
 
                 joint_dist = tf.contrib.distributions.MultivariateNormalTriL(
                     loc=joint_loc,
                     scale_tril=tf.contrib.distributions.fill_triangular(joint_scale),
-                    name='joint' if ran_gf is None else 'joint_by_%s' % ran_gf
+                    name='joint' if ran_gf is None else 'joint_by_%s' % sn(ran_gf)
                 )
 
                 joint = tf.reduce_mean(joint_dist.sample(sample_shape=[100]), axis=0)

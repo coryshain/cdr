@@ -91,7 +91,7 @@ class CDRNNMLE(CDRNN):
                         #     dtype=self.FLOAT_TF
                         # ),
                         tf.zeros([rangf_n_levels], dtype=self.FLOAT_TF),
-                        name='intercept_by_%s' % ran_gf
+                        name='intercept_by_%s' % sn(ran_gf)
                     )
                     intercept_summary = intercept
                 return intercept, intercept_summary

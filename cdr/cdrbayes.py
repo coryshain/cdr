@@ -296,7 +296,7 @@ class CDRBayes(CDR):
                             #     dtype=self.FLOAT_TF
                             # ),
                             tf.zeros([rangf_n_levels], dtype=self.FLOAT_TF),
-                            name='intercept_q_loc_by_%s' % ran_gf
+                            name='intercept_q_loc_by_%s' % sn(ran_gf)
                         )
 
                         intercept_q_scale = tf.Variable(
@@ -307,13 +307,13 @@ class CDRBayes(CDR):
                             #     dtype=self.FLOAT_TF
                             # ),
                             tf.ones([rangf_n_levels], dtype=self.FLOAT_TF) * self.intercept_ranef_posterior_sd_init_unconstrained,
-                            name='intercept_q_scale_by_%s' % ran_gf
+                            name='intercept_q_scale_by_%s' % sn(ran_gf)
                         )
 
                         intercept_q = Normal(
                             loc=intercept_q_loc,
                             scale=self.constraint_fn(intercept_q_scale),
-                            name='intercept_q_by_%s' % ran_gf
+                            name='intercept_q_by_%s' % sn(ran_gf)
                         )
 
                         intercept_summary = intercept_q.mean()
@@ -324,7 +324,7 @@ class CDRBayes(CDR):
                                 sample_shape=[rangf_n_levels],
                                 loc=0.,
                                 scale=self.intercept_ranef_prior_sd_tf,
-                                name='intercept_by_%s' % ran_gf
+                                name='intercept_by_%s' % sn(ran_gf)
                             )
                             self.inference_map[intercept] = intercept_q
                         else:
@@ -336,17 +336,17 @@ class CDRBayes(CDR):
                             sample_shape=[rangf_n_levels],
                             loc=0.,
                             scale=self.intercept_ranef_prior_sd_tf,
-                            name='intercept_by_%s' % ran_gf
+                            name='intercept_by_%s' % sn(ran_gf)
                         )
 
                         # Posterior distribution
                         intercept_q_ran_samples = tf.Variable(
                             tf.zeros((self.n_samples, rangf_n_levels), dtype=self.FLOAT_TF),
-                            name='intercept_q_by_%s_samples' % ran_gf
+                            name='intercept_q_by_%s_samples' % sn(ran_gf)
                         )
                         intercept_q = Empirical(
                             params=intercept_q_ran_samples,
-                            name='intercept_q_by_%s' % ran_gf
+                            name='intercept_q_by_%s' % sn(ran_gf)
                         )
 
                         if self.inference_name == 'MetropolisHastings':
@@ -354,7 +354,7 @@ class CDRBayes(CDR):
                             intercept_proposal = Normal(
                                 loc=intercept,
                                 scale=self.mh_proposal_sd,
-                                name='intercept_proposal_by_%s' % ran_gf
+                                name='intercept_proposal_by_%s' % sn(ran_gf)
                             )
                             self.proposal_map[intercept] = intercept_proposal
 
@@ -455,7 +455,7 @@ class CDRBayes(CDR):
                             #     dtype=self.FLOAT_TF
                             # ),
                             tf.zeros([rangf_n_levels, len(coef_ids)], dtype=self.FLOAT_TF),
-                            name='coefficient_q_loc_by_%s' % ran_gf
+                            name='coefficient_q_loc_by_%s' % sn(ran_gf)
                         )
 
                         coefficient_q_scale = tf.Variable(
@@ -466,13 +466,13 @@ class CDRBayes(CDR):
                             #     dtype=self.FLOAT_TF
                             # ),
                             tf.ones([rangf_n_levels, len(coef_ids)], dtype=self.FLOAT_TF) * self.coef_ranef_posterior_sd_init_unconstrained,
-                            name='coefficient_q_scale_by_%s' % ran_gf
+                            name='coefficient_q_scale_by_%s' % sn(ran_gf)
                         )
 
                         coefficient_q = Normal(
                             loc=coefficient_q_loc,
                             scale=self.constraint_fn(coefficient_q_scale),
-                            name='coefficient_q_by_%s' % ran_gf
+                            name='coefficient_q_by_%s' % sn(ran_gf)
                         )
                         coefficient_summary = coefficient_q.mean()
 
@@ -482,7 +482,7 @@ class CDRBayes(CDR):
                                 sample_shape=[rangf_n_levels, len(coef_ids)],
                                 loc=0.,
                                 scale=self.coef_ranef_prior_sd_tf,
-                                name='coefficient_by_%s' % ran_gf
+                                name='coefficient_by_%s' % sn(ran_gf)
                             )
                             self.inference_map[coefficient] = coefficient_q
                         else:
@@ -494,7 +494,7 @@ class CDRBayes(CDR):
                             sample_shape=[rangf_n_levels, len(coef_ids)],
                             loc=0.,
                             scale=self.coef_ranef_prior_sd_tf,
-                            name='coefficient_by_%s' % ran_gf
+                            name='coefficient_by_%s' % sn(ran_gf)
                         )
 
                         # Posterior distribution
@@ -504,9 +504,9 @@ class CDRBayes(CDR):
                                     (self.n_samples, rangf_n_levels, len(coef_ids)),
                                     dtype=self.FLOAT_TF
                                 ),
-                                name='coefficient_q_by_%s_samples' % ran_gf
+                                name='coefficient_q_by_%s_samples' % sn(ran_gf)
                             ),
-                            name='coefficient_q_by_%s' % ran_gf
+                            name='coefficient_q_by_%s' % sn(ran_gf)
                         )
 
                         if self.inference_name == 'MetropolisHastings':
@@ -514,7 +514,7 @@ class CDRBayes(CDR):
                             coefficient_proposal = Normal(
                                 loc=coefficient,
                                 scale=self.mh_proposal_sd,
-                                name='coefficient_proposal_by_%s' % ran_gf
+                                name='coefficient_proposal_by_%s' % sn(ran_gf)
                             )
                             self.proposal_map[coefficient] = coefficient_proposal
 
@@ -615,7 +615,7 @@ class CDRBayes(CDR):
                             #     dtype=self.FLOAT_TF
                             # ),
                             tf.zeros([rangf_n_levels, len(interaction_ids)], dtype=self.FLOAT_TF),
-                            name='interaction_q_loc_by_%s' % ran_gf
+                            name='interaction_q_loc_by_%s' % sn(ran_gf)
                         )
 
                         interaction_q_scale = tf.Variable(
@@ -626,13 +626,13 @@ class CDRBayes(CDR):
                             #     dtype=self.FLOAT_TF
                             # ),
                             tf.ones([rangf_n_levels, len(interaction_ids)], dtype=self.FLOAT_TF) * self.coef_ranef_posterior_sd_init_unconstrained,
-                            name='interaction_q_scale_by_%s' % ran_gf
+                            name='interaction_q_scale_by_%s' % sn(ran_gf)
                         )
 
                         interaction_q = Normal(
                             loc=interaction_q_loc,
                             scale=self.constraint_fn(interaction_q_scale),
-                            name='interaction_q_by_%s' % ran_gf
+                            name='interaction_q_by_%s' % sn(ran_gf)
                         )
                         interaction_summary = interaction_q.mean()
 
@@ -642,7 +642,7 @@ class CDRBayes(CDR):
                                 sample_shape=[rangf_n_levels, len(interaction_ids)],
                                 loc=0.,
                                 scale=self.coef_ranef_prior_sd_tf,
-                                name='interaction_by_%s' % ran_gf
+                                name='interaction_by_%s' % sn(ran_gf)
                             )
                             self.inference_map[interaction] = interaction_q
                         else:
@@ -654,7 +654,7 @@ class CDRBayes(CDR):
                             sample_shape=[rangf_n_levels, len(interaction_ids)],
                             loc=0.,
                             scale=self.coef_ranef_prior_sd_tf,
-                            name='interaction_by_%s' % ran_gf
+                            name='interaction_by_%s' % sn(ran_gf)
                         )
 
                         # Posterior distribution
@@ -664,9 +664,9 @@ class CDRBayes(CDR):
                                     (self.n_samples, rangf_n_levels, len(interaction_ids)),
                                     dtype=self.FLOAT_TF
                                 ),
-                                name='interaction_q_by_%s_samples' % ran_gf
+                                name='interaction_q_by_%s_samples' % sn(ran_gf)
                             ),
-                            name='interaction_q_by_%s' % ran_gf
+                            name='interaction_q_by_%s' % sn(ran_gf)
                         )
 
                         if self.inference_name == 'MetropolisHastings':
@@ -674,7 +674,7 @@ class CDRBayes(CDR):
                             interaction_proposal = Normal(
                                 loc=interaction,
                                 scale=self.mh_proposal_sd,
-                                name='interaction_proposal_by_%s' % ran_gf
+                                name='interaction_proposal_by_%s' % sn(ran_gf)
                             )
                             self.proposal_map[interaction] = interaction_proposal
 

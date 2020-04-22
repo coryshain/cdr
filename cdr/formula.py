@@ -42,6 +42,18 @@ def standardize_formula_string(s):
 
     return str(Formula(s, standardize=False))
 
+
+def unparse_rangf(t):
+    if hasattr(t, 'id'):
+        out = t.id
+    elif type(t.op).__name__ == 'Mod':
+        out = unparse_rangf(t.left) + ':' + unparse_rangf(t.right)
+    else:
+        raise ValueError('Ill-formed random grouping factor')
+
+    return out
+
+
 class Formula(object):
     """
     A class for parsing R-style mixed-effects CDR model formula strings and applying them to CDR data matrices.
@@ -376,7 +388,7 @@ class Formula(object):
                 self.process_ast(
                     t.left,
                     has_intercept=has_intercept,
-                    rangf=t.right.id,
+                    rangf=unparse_rangf(t.right),
                     impulses_by_name=impulses_by_name,
                     interactions_by_name=interactions_by_name,
                     under_irf=under_irf,
@@ -1319,6 +1331,11 @@ class Formula(object):
                 X_cur[col] = X_cur[col].fillna(0)
                 X_cur[col] = X_cur[col].fillna(0)
             X[i] = X_cur
+
+        for gf in self.rangf:
+            gf_s = gf.split(':')
+            if len(gf_s) > 1 and gf not in y:
+                y[gf] = y[gf_s].agg(lambda x: '_'.join([str(_x) for _x in x]), axis=1)
 
         return X, y, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors
 

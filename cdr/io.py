@@ -52,12 +52,13 @@ def read_data(X_paths, y_paths, series_ids, categorical_columns=None, sep=' '):
     y = y.sort_values(series_ids + ['time']).reset_index(drop=True)
 
     if categorical_columns is not None:
-        for col in categorical_columns:
-            for x in X:
-                if col in x.columns:
-                    x[col] = x[col].astype('category')
-            if col in y.columns:
-                y[col] = y[col].astype('category')
+        for t in categorical_columns:
+            for col in t.split(':'):
+                for x in X:
+                    if col in x.columns:
+                        x[col] = x[col].astype('category')
+                if col in y.columns:
+                    y[col] = y[col].astype('category')
 
     for x in X:
         assert not 'rate' in x.columns, '"rate" is a reserved column name in CDR. Rename your input column...'
