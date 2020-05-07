@@ -778,6 +778,8 @@ class Formula(object):
             else: # type(t).__name__ == 'Num'
                 t_id = str(t.n)
                 if t_id in ['0', '1'] and len(ops) == 0:
+                    if t_id == '0':
+                        has_intercept[rangf] = False
                     return [[t_id]]
 
             if under_irf or under_interaction:
@@ -814,11 +816,6 @@ class Formula(object):
 
         else:
             raise ValueError('Operation "%s" is not supported in CDR formula strings' %type(t).__name___)
-
-        for T in terms:
-            for t in T:
-                if t.name() == '0':
-                    has_intercept[rangf] = False
 
     def process_irf(
             self,
