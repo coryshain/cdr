@@ -1257,12 +1257,6 @@ class CDR(Model):
                         self._initialize_base_irf_param('alpha', family, lb=1., default=6.)
                         self._initialize_base_irf_param('beta', family, lb=0., default=1.)
 
-                    elif family == 'HRFDoubleGamma':
-                        self._initialize_base_irf_param('alpha_main', family, lb=1., default=6.)
-                        self._initialize_base_irf_param('beta', family, lb=0., default=1.)
-                        self._initialize_base_irf_param('alpha_undershoot_offset', family, lb=0., default=10.)
-                        self._initialize_base_irf_param('c', family, default=1./6.)
-
                     elif family == 'HRFDoubleGamma1':
                         self._initialize_base_irf_param('beta', family, lb=0., default=1.)
 
@@ -1281,7 +1275,7 @@ class CDR(Model):
                         self._initialize_base_irf_param('beta', family, lb=0., default=1.)
                         self._initialize_base_irf_param('c', family, default=1./6.)
 
-                    elif family == 'HRFDoubleGamma5':
+                    elif family in ['HRFDoubleGamma', 'HRFDoubleGamma5']:
                         self._initialize_base_irf_param('alpha_main', family, lb=1., default=6.)
                         self._initialize_base_irf_param('alpha_undershoot', family, lb=1., default=16.)
                         self._initialize_base_irf_param('beta_main', family, lb=0., default=1.)
@@ -1290,8 +1284,8 @@ class CDR(Model):
 
                     elif family == 'HRFDoubleGammaUnconstrained':
                         self._initialize_base_irf_param('alpha_main', family, lb=1., default=6.)
-                        self._initialize_base_irf_param('beta_main', family, lb=0., default=1.)
                         self._initialize_base_irf_param('alpha_undershoot', family, lb=0., default=16.)
+                        self._initialize_base_irf_param('beta_main', family, lb=0., default=1.)
                         self._initialize_base_irf_param('beta_undershoot', family, lb=0., default=1.)
                         self._initialize_base_irf_param('c', family, default=1./6.)
 
@@ -1729,6 +1723,7 @@ class CDR(Model):
                         validate_irf_args=self.validate_irf_args
                     )
 
+                self.irf_lambdas['HRFDoubleGamma'] = double_gamma_5
                 self.irf_lambdas['HRFDoubleGamma5'] = double_gamma_5
 
     def _initialize_nonparametric_irf(

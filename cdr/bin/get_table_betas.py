@@ -64,22 +64,23 @@ if __name__ == '__main__':
         m = models[i]
         name = names[i]
         beta_summaries[name] = {}
-        with open(p.outdir + '/' + m + '/summary.txt', 'r') as f:
-            l = f.readline()
-            while l and not l.startswith('Posterior integral summaries by predictor'):
+        if os.path.exists(p.outdir + '/' + m + '/summary.txt'):
+            with open(p.outdir + '/' + m + '/summary.txt', 'r') as f:
                 l = f.readline()
-            f.readline()
-            l = f.readline()
-            while l and len(l.strip()) > 0:
-                row = l.strip().split()
-                assert len(row) == 4, 'Ill-formed row in effect table: "%s"' %l.strip()
-                beta_names.add(row[0])
-                beta_summaries[name][row[0]] = {
-                    'mean': float(row[1]),
-                    'lower': float(row[2]),
-                    'upper': float(row[3])
-                }
+                while l and not l.startswith('Posterior integral summaries by predictor'):
+                    l = f.readline()
+                f.readline()
                 l = f.readline()
+                while l and len(l.strip()) > 0:
+                    row = l.strip().split()
+                    assert len(row) == 4, 'Ill-formed row in effect table: "%s"' %l.strip()
+                    beta_names.add(row[0])
+                    beta_summaries[name][row[0]] = {
+                        'mean': float(row[1]),
+                        'lower': float(row[2]),
+                        'upper': float(row[3])
+                    }
+                    l = f.readline()
 
     print_table(beta_summaries, names, beta_names)
 

@@ -82,6 +82,7 @@ class Formula(object):
         'HRFDoubleGamma3': ['alpha', 'beta', 'c'],
         'HRFDoubleGamma4': ['alpha_main', 'alpha_undershoot', 'beta', 'c'],
         'HRFDoubleGamma5': ['alpha_main', 'alpha_undershoot', 'beta_main', 'beta_undershoot', 'c'],
+        'HRFDoubleGamma': ['alpha_main', 'alpha_undershoot', 'beta_main', 'beta_undershoot', 'c']
     }
 
     NONPARAMETRIC_TYPE_IX = 1
