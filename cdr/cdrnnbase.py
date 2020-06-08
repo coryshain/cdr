@@ -691,13 +691,11 @@ class RNNLayer(object):
                             [input_dim, output_dim * 4],
                             initializer=self.kernel_initializer
                         )
-                        print(kernel.shape)
                         recurrent_kernel = tf.get_variable(
                             self.name + '/recurrent_kernel',
                             [output_dim, output_dim * 4],
                             initializer=self.recurrent_initializer
                         )
-                        print(recurrent_kernel.shape)
                         if self.unit_forget_bias:
                             bias = tf.concat(
                                 [
@@ -1132,7 +1130,23 @@ class CDRNN(Model):
                 )
                 self.rangf_embeddings = tf.expand_dims(self.rangf_encoder(self.rangf_1hot), axis=1)
 
-                self.encoder_layers = []
+                self.encoder_layers = [
+                    # make_lambda(
+                    #     DenseLayer(
+                    #         training=self.training,
+                    #         units=self.n_units_cdrnn[0],
+                    #         use_bias=True,
+                    #         activation=self.encoder_activation,
+                    #         kernel_initializer=self.kernel_initializer,
+                    #         bias_initializer='zeros_initializer',
+                    #         reuse=None,
+                    #         session=self.sess,
+                    #         name='input_projection'
+                    #     ),
+                    #     session=self.sess,
+                    #     use_kwargs=False
+                    # )
+                ]
 
                 for l in range(self.n_layers_cdrnn):
                     if l < self.n_layers_cdrnn - 1:

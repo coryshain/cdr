@@ -900,6 +900,9 @@ class Formula(object):
                     else:
                         raise ValueError('Non-numeric initialization provided to IRF parameter "%s"' %k.arg)
 
+                    print(param_init)
+                    print()
+
 
         if isinstance(input, IRFNode):
             new = IRFNode(
