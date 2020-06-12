@@ -1319,7 +1319,6 @@ class Formula(object):
                                 in_X = False
                         if in_X:
                             X_cur = self.apply_ops(impulse, X_cur)
-                            X_cur = self.apply_ops(impulse, X_cur)
                             X[i] = X_cur
                             found = True
                             break
@@ -1329,7 +1328,6 @@ class Formula(object):
         for i in range(len(X)):
             X_cur = X[i]
             for col in [x for x in X_cur.columns if spillover.match(x)]:
-                X_cur[col] = X_cur[col].fillna(0)
                 X_cur[col] = X_cur[col].fillna(0)
             X[i] = X_cur
 

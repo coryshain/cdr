@@ -155,7 +155,9 @@ class Model(object):
         #     itertools.combinations(impulse_names, n) for n in range(1, len(impulse_names) + 1)
         # ))
 
-        for name in impulse_names:
+        for impulse in self.form.t.impulses():
+            name = impulse.name()
+            is_interaction = type(impulse).__name__ == 'ImpulseInteraction'
             found = False
             # varset = set(name)
             # name = ':'.join(name)
@@ -176,6 +178,22 @@ class Model(object):
                     impulse_max[name] = df[name].max()
                     found = True
                     break
+                elif is_interaction:
+                    found = True
+                    for x in impulse.impulses():
+                        if not x.name() in df.columns:
+                            found = False
+                            break
+                    if found:
+                        column = df[[x.name() for x in impulse.impulses()]].product(axis=1)
+                        impulse_means[name] = column.mean()
+                        impulse_sds[name] = column.std()
+                        impulse_medians[name] = column.quantile(0.5)
+                        impulse_lq[name] = column.quantile(0.1)
+                        impulse_uq[name] = column.quantile(0.9)
+                        impulse_min[name] = column.min()
+                        impulse_max[name] = column.max()
+                        
             if not found:
                 raise ValueError('Impulse %s was not found in an input file.' % name)
 
