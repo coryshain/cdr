@@ -407,7 +407,7 @@ def compute_filter(y, field, cond):
         try:
             var = float(var)
         except ValueError:
-            if var in y:
+            if var in y and not var in y[field].unique():
                 var = y[var]
 
     if op == '<=':
