@@ -4,10 +4,12 @@ import time as pytime
 import scipy.stats
 import pandas as pd
 from collections import defaultdict
+
 from .kwargs import MODEL_INITIALIZATION_KWARGS
 from .formula import *
 from .util import *
 from .data import build_CDR_impulses, corr_cdr, get_first_last_obs_lists
+from .opt import *
 from .plot import *
 
 
@@ -101,19 +103,30 @@ class Model(object):
         self.y_train_sd = float(y[dv].std())
 
         t_deltas = []
+        time_X = []
         first_obs, last_obs = get_first_last_obs_lists(y)
         for i, cols in enumerate(zip(first_obs, last_obs)):
             first_obs_cur, last_obs_cur = cols
-            X_time = np.array(X[i].time, dtype=getattr(np, self.float_type))
+            time_X_cur = np.array(X[i].time, dtype=getattr(np, self.float_type))
             last_obs_cur = np.array(last_obs_cur, dtype=getattr(np, self.int_type))
             first_obs_cur = np.maximum(np.array(first_obs_cur, dtype=getattr(np, self.int_type)),
                                        last_obs_cur - self.history_length + 1)
-            t_delta = (y.time - X_time[first_obs_cur])
+            t_delta = (y.time - time_X_cur[first_obs_cur])
+            time_X.append(time_X_cur)
             t_deltas.append(t_delta)
+
+        time_X = np.concatenate(time_X, axis=0)
         t_deltas = np.concatenate(t_deltas, axis=0)
+
         self.t_delta_limit = np.percentile(t_deltas, 75)
         self.max_tdelta = t_deltas.max()
+        self.t_delta_mean = t_deltas.mean()
         self.t_delta_sd = t_deltas.std()
+
+        self.time_X_limit = np.percentile(time_X, 75)
+        self.max_time_X = time_X.max()
+        self.time_X_mean = time_X.mean()
+        self.time_X_sd = time_X.std()
 
         ## Set up hash table for random effects lookup
         self.rangf_map_base = []
@@ -341,8 +354,13 @@ class Model(object):
             'y_train_mean': self.y_train_mean,
             'y_train_sd': self.y_train_sd,
             'max_tdelta': self.max_tdelta,
+            't_delta_mean': self.t_delta_mean,
             't_delta_sd': self.t_delta_sd,
             't_delta_limit': self.t_delta_limit,
+            'max_time_X': self.max_time_X,
+            'time_X_mean': self.time_X_mean,
+            'time_X_sd': self.time_X_sd,
+            'time_X_limit': self.time_X_limit,
             'rangf_map_base': self.rangf_map_base,
             'rangf_n_levels': self.rangf_n_levels,
             'impulse_means': self.impulse_means,
@@ -366,7 +384,12 @@ class Model(object):
         self.y_train_sd = md.pop('y_train_sd')
         self.max_tdelta = md.pop('max_tdelta')
         self.t_delta_sd = md.pop('t_delta_sd', 1.)
+        self.t_delta_mean = md.pop('t_delta_mean', 1.)
         self.t_delta_limit = md.pop('t_delta_limit', self.max_tdelta)
+        self.max_time_X = md.pop('max_time_X', None)
+        self.time_X_sd = md.pop('time_X_sd', 1.)
+        self.time_X_mean = md.pop('time_X_mean', 1.)
+        self.time_X_limit = md.pop('time_X_limit', self.max_tdelta)
         self.rangf_map_base = md.pop('rangf_map_base')
         self.rangf_n_levels = md.pop('rangf_n_levels')
         self.impulse_means = md.pop('impulse_means', {})
@@ -393,27 +416,39 @@ class Model(object):
     def _initialize_inputs(self, n_impulse):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                self.training = tf.placeholder_with_default(tf.constant(True, dtype=tf.bool), shape=[], name='training')
+                self.training = tf.placeholder_with_default(tf.constant(False, dtype=tf.bool), shape=[], name='training')
 
                 self.X = tf.placeholder(
                     shape=[None, self.history_length, n_impulse],
                     dtype=self.FLOAT_TF,
                     name='X'
                 )
-                self.time_X = tf.placeholder(
+                X_batch = tf.shape(self.X)[0]
+                self.X_batch = X_batch
+                self.time_X = tf.placeholder_with_default(
+                    tf.zeros([X_batch, self.history_length, n_impulse], dtype=self.FLOAT_TF),
                     shape=[None, self.history_length, n_impulse],
-                    dtype=self.FLOAT_TF,
                     name='time_X'
                 )
 
-                self.time_X_mask = tf.placeholder(
+                self.time_X_mask = tf.placeholder_with_default(
+                    tf.ones([X_batch, self.history_length, n_impulse], dtype=tf.bool),
                     shape=[None, self.history_length, n_impulse],
-                    dtype=tf.bool,
                     name='time_X_mask'
                 )
 
-                self.y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('y'))
-                self.time_y = tf.placeholder(shape=[None], dtype=self.FLOAT_TF, name=sn('time_y'))
+                self.y = tf.placeholder(
+                    shape=[None],
+                    dtype=self.FLOAT_TF,
+                    name=sn('y')
+                )
+                y_batch = tf.shape(self.y)[0]
+                self.time_y = tf.placeholder_with_default(
+                    tf.ones([y_batch], dtype=self.FLOAT_TF),
+                    shape=[None],
+                    name=sn('time_y')
+                )
+
                 # Tensor of temporal offsets with shape (?, history_length, 1)
                 self.t_delta = self.time_y[..., None, None] - self.time_X
                 # self.gf_y = tf.placeholder(shape=[None, len(self.rangf)], dtype=self.INT_TF)
@@ -496,6 +531,7 @@ class Model(object):
                     self.regularizer = getattr(tf.contrib.layers, self.regularizer_name)(self.regularizer_scale)
 
                 self.loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='loss_total')
+                self.reg_loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='reg_loss_total')
 
                 self.training_mse_in = tf.placeholder(self.FLOAT_TF, shape=[], name='training_mse_in')
                 self.training_mse = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_mse')
@@ -569,7 +605,10 @@ class Model(object):
 
         return ClippedOptimizer
 
-    def _initialize_optimizer(self, name):
+    def _initialize_optimizer(self):
+        name = self.optim_name.lower()
+        use_jtps = self.use_jtps
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 lr = tf.constant(self.learning_rate, dtype=self.FLOAT_TF)
@@ -582,9 +621,9 @@ class Model(object):
                     lr_decay_staircase = self.lr_decay_staircase
 
                     if self.lr_decay_iteration_power != 1:
-                        t = tf.cast(self.global_step, dtype=self.FLOAT_TF) ** self.lr_decay_iteration_power
+                        t = tf.cast(self.step, dtype=self.FLOAT_TF) ** self.lr_decay_iteration_power
                     else:
-                        t = self.global_step
+                        t = self.step
 
                     if self.lr_decay_family.lower() == 'linear_decay':
                         if lr_decay_staircase:
@@ -611,21 +650,39 @@ class Model(object):
 
                 clip = self.max_global_gradient_norm
 
-                return {
-                    'sgd': lambda x: self._clipped_optimizer_class(tf.train.GradientDescentOptimizer)(x, max_global_norm=clip) if clip else tf.train.GradientDescentOptimizer(x),
-                    'momentum': lambda x: self._clipped_optimizer_class(tf.train.MomentumOptimizer)(x, 0.9, max_global_norm=clip) if clip else tf.train.MomentumOptimizer(x, 0.9),
-                    'adagrad': lambda x: self._clipped_optimizer_class(tf.train.AdagradOptimizer)(x, max_global_norm=clip) if clip else tf.train.AdagradOptimizer(x),
-                    'adadelta': lambda x: self._clipped_optimizer_class(tf.train.AdadeltaOptimizer)(x, max_global_norm=clip) if clip else tf.train.AdadeltaOptimizer(x),
-                    'adam': lambda x: self._clipped_optimizer_class(tf.train.AdamOptimizer)(x, max_global_norm=clip) if clip else tf.train.AdamOptimizer(x),
-                    'ftrl': lambda x: self._clipped_optimizer_class(tf.train.FtrlOptimizer)(x, max_global_norm=clip) if clip else tf.train.FtrlOptimizer(x),
-                    'rmsprop': lambda x: self._clipped_optimizer_class(tf.train.RMSPropOptimizer)(x, max_global_norm=clip) if clip else tf.train.RMSPropOptimizer(x),
-                    'nadam': lambda x: self._clipped_optimizer_class(tf.contrib.opt.NadamOptimizer)(x, max_global_norm=clip) if clip else tf.contrib.opt.NadamOptimizer(x)
-                }[name.lower()](self.lr)
+                optimizer_args = [self.lr]
+                optimizer_kwargs = {}
+                if name == 'momentum':
+                    optimizer_args += [0.9]
+
+                optimizer_class = {
+                    'sgd': tf.train.GradientDescentOptimizer,
+                    'momentum': tf.train.MomentumOptimizer,
+                    'adagrad': tf.train.AdagradOptimizer,
+                    'adadelta': tf.train.AdadeltaOptimizer,
+                    'ftrl': tf.train.FtrlOptimizer,
+                    'rmsprop': tf.train.RMSPropOptimizer,
+                    'adam': tf.train.AdamOptimizer,
+                    'nadam': tf.contrib.opt.NadamOptimizer
+                }[name]
+
+                if clip:
+                    optimizer_class = get_clipped_optimizer_class(optimizer_class, session=self.sess)
+                    optimizer_kwargs['max_global_norm'] = clip
+
+                if use_jtps:
+                    optimizer_class = get_JTPS_optimizer_class(optimizer_class, session=self.sess)
+                    optimizer_kwargs['meta_learning_rate'] = 1
+
+                optim = optimizer_class(*optimizer_args, **optimizer_kwargs)
+
+                return optim
 
     def _initialize_logging(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 tf.summary.scalar('loss_by_iter', self.loss_total, collections=['loss'])
+                tf.summary.scalar('reg_loss_by_iter', self.reg_loss_total, collections=['loss'])
                 if self.log_graph:
                     self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/cdr', self.sess.graph)
                 else:
@@ -638,7 +695,9 @@ class Model(object):
     def _initialize_saver(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                    self.saver = tf.train.Saver()
+                self.saver = tf.train.Saver()
+
+                self.check_numerics_ops = [tf.check_numerics(v, 'Numerics check failed') for v in tf.trainable_variables()]
 
     def _initialize_ema(self):
         with self.sess.as_default():
@@ -1018,7 +1077,7 @@ class Model(object):
     ######################################################
 
     def _regularize(self, var, center=None, type=None, var_name=None):
-        assert type in [None, 'intercept', 'coefficient', 'irf', 'ranef', 'oob']
+        assert type in [None, 'intercept', 'coefficient', 'irf', 'ranef', 'oob', 'nn', 'context']
         if type is None:
             regularizer = self.regularizer
         else:
@@ -1175,8 +1234,8 @@ class Model(object):
                     proportion_converged = self.proportion_converged.eval(session=self.sess)
                     converged = cur_step > self.convergence_n_iterates and \
                                 (min_p > self.convergence_alpha) and \
-                                (p_ta_at_min_p > self.convergence_alpha) and \
                                 (proportion_converged > self.convergence_alpha)
+                                # (p_ta_at_min_p > self.convergence_alpha)
 
                     if verbose:
                         stderr('rho_t: %s.\n' % rt_at_min_p)
@@ -1204,16 +1263,14 @@ class Model(object):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 try:
+                    self.saver.restore(self.sess, path)
                     if predict and self.ema_decay:
                         self.ema_saver.restore(self.sess, path)
-                    else:
-                        self.saver.restore(self.sess, path)
                 except tf.errors.DataLossError:
                     stderr('Read failure during load. Trying from backup...\n')
+                    self.saver.restore(self.sess, path[:-5] + '_backup.ckpt')
                     if predict:
                         self.ema_saver.restore(self.sess, path[:-5] + '_backup.ckpt')
-                    else:
-                        self.saver.restore(self.sess, path[:-5] + '_backup.ckpt')
                 except tf.errors.NotFoundError as err:  # Model contains variables that are missing in checkpoint, special handling needed
                     if allow_missing:
                         reader = tf.train.NewCheckpointReader(path)
@@ -1247,15 +1304,16 @@ class Model(object):
                                 if var_shape == saved_shapes[saved_var_name]:
                                     restore_vars.append(curr_var)
 
+                        saver_tmp = tf.train.Saver(restore_vars)
+                        saver_tmp.restore(self.sess, path)
+
                         if predict:
                             self.ema_map = {}
                             for v in restore_vars:
                                 self.ema_map[self.ema.average_name(v)] = v
                             saver_tmp = tf.train.Saver(self.ema_map)
-                        else:
-                            saver_tmp = tf.train.Saver(restore_vars)
+                            saver_tmp.restore(self.sess, path)
 
-                        saver_tmp.restore(self.sess, path)
                     else:
                         raise err
 
@@ -1318,6 +1376,17 @@ class Model(object):
     #  Shared public methods
     #
     ######################################################
+
+    def check_numerics(self):
+        """
+        Check that all trainable parameters are finite. Throws an error if not.
+
+        :return: ``None``
+        """
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                for op in self.check_numerics_ops:
+                    self.sess.run(op)
 
     def initialized(self):
         """
@@ -1639,6 +1708,7 @@ class Model(object):
             self,
             mse=None,
             mae=None,
+            corr=None,
             loglik=None,
             loss=None,
             percent_variance_explained=None,
@@ -1651,6 +1721,7 @@ class Model(object):
 
         :param mse: ``float`` or ``None``; mean squared error, skipped if ``None``.
         :param mae: ``float`` or ``None``; mean absolute error, skipped if ``None``.
+        :param corr: ``float`` or ``None``; Pearson correlation of predictions with observed response, skipped if ``None``.
         :param loglik: ``float`` or ``None``; log likelihood, skipped if ``None``.
         :param loss: ``float`` or ``None``; loss per training objective, skipped if ``None``.
         :param true_variance: ``float`` or ``None``; variance of targets, skipped if ``None``.
@@ -1665,6 +1736,8 @@ class Model(object):
             out += ' ' * (indent+2) + 'MSE: %s\n' %mse
         if mae is not None:
             out += ' ' * (indent+2) + 'MAE: %s\n' %mae
+        if corr is not None:
+            out += ' ' * (indent+2) + 'r(pred, true): %s\n' %corr
         if loglik is not None:
             out += ' ' * (indent+2) + 'Log likelihood: %s\n' %loglik
         if loss is not None:
@@ -1825,6 +1898,7 @@ class Model(object):
             generate_curvature_plots=False,
             plot_x_inches=7,
             plot_y_inches=5,
+            plot_legend=True,
             cmap='gist_rainbow',
             dpi=300
             ):
@@ -1927,6 +2001,7 @@ class Model(object):
         #     generate_curvature_plots=generate_curvature_plots,
         #     plot_x_inches=plot_x_inches,
         #     plot_y_inches=plot_y_inches,
+        #     legend=plot_legend,
         #     cmap=cmap,
         #     dpi=dpi,
         #     keep_plot_history=self.keep_plot_history
@@ -1946,9 +2021,6 @@ class Model(object):
                         if not type(self).__name__.startswith('CDRNN'):
                             summary_params = self.sess.run(self.summary_params)
                             self.writer.add_summary(summary_params, self.global_step.eval(session=self.sess))
-                            if self.log_random and len(self.rangf) > 0:
-                                summary_random = self.sess.run(self.summary_random)
-                                self.writer.add_summary(summary_random, self.global_step.eval(session=self.sess))
                     else:
                         stderr('Resuming training from most recent checkpoint...\n\n')
 
@@ -1964,6 +2036,7 @@ class Model(object):
                         pb = tf.contrib.keras.utils.Progbar(self.n_train_minibatch)
 
                         loss_total = 0.
+                        reg_loss_total = 0.
 
                         for j in range(0, len(y), minibatch_size):
                             indices = p[j:j+minibatch_size]
@@ -1978,6 +2051,9 @@ class Model(object):
                             }
 
                             info_dict = self.run_train_step(fd_minibatch)
+
+                            self.check_numerics()
+
                             loss_cur = info_dict['loss']
                             if self.ema_decay:
                                 self.sess.run(self.ema_op)
@@ -1985,7 +2061,31 @@ class Model(object):
                                 loss_cur = 0
                             loss_total += loss_cur
 
-                            pb.update((j/minibatch_size)+1, values=[('loss', loss_cur)])
+                            pb_update = [('loss', loss_cur)]
+                            if 'reg_loss' in info_dict:
+                                reg_loss_cur = info_dict['reg_loss']
+                                reg_loss_total += reg_loss_cur
+                                pb_update.append(('reg', reg_loss_cur))
+
+                            pb.update((j/minibatch_size)+1, values=pb_update)
+
+                            # if self.global_batch_step.eval(session=self.sess) % 1000 == 0:
+                            #     self.save()
+                            #     self.make_plots(
+                            #         irf_name_map=irf_name_map,
+                            #         plot_n_time_units=plot_n_time_units,
+                            #         plot_n_time_points=plot_n_time_points,
+                            #         surface_plot_n_time_points=surface_plot_n_time_points,
+                            #         generate_irf_surface_plots=generate_irf_surface_plots,
+                            #         generate_interaction_surface_plots=generate_interaction_surface_plots,
+                            #         generate_curvature_plots=generate_curvature_plots,
+                            #         plot_x_inches=plot_x_inches,
+                            #         plot_y_inches=plot_y_inches,
+                            #         legend=plot_legend,
+                            #         cmap=cmap,
+                            #         dpi=dpi,
+                            #         keep_plot_history=self.keep_plot_history
+                            #     )
 
                         self.sess.run(self.incr_global_step)
 
@@ -1997,13 +2097,11 @@ class Model(object):
 
                         if self.log_freq > 0 and self.global_step.eval(session=self.sess) % self.log_freq == 0:
                             loss_total /= n_minibatch
-                            summary_train_loss = self.sess.run(self.summary_losses, {self.loss_total: loss_total})
+                            reg_loss_total /= n_minibatch
+                            summary_train_loss = self.sess.run(self.summary_losses, {self.loss_total: loss_total, self.reg_loss_total: reg_loss_total})
                             self.writer.add_summary(summary_train_loss, self.global_step.eval(session=self.sess))
                             summary_params = self.sess.run(self.summary_params)
                             self.writer.add_summary(summary_params, self.global_step.eval(session=self.sess))
-                            if self.log_random and len(self.rangf) > 0:
-                                summary_random = self.sess.run(self.summary_random)
-                                self.writer.add_summary(summary_random, self.global_step.eval(session=self.sess))
 
                         if self.save_freq > 0 and self.global_step.eval(session=self.sess) % self.save_freq == 0:
                             self.save()
@@ -2017,6 +2115,7 @@ class Model(object):
                                 generate_curvature_plots=generate_curvature_plots,
                                 plot_x_inches=plot_x_inches,
                                 plot_y_inches=plot_y_inches,
+                                legend=plot_legend,
                                 cmap=cmap,
                                 dpi=dpi,
                                 keep_plot_history=self.keep_plot_history
@@ -2041,6 +2140,7 @@ class Model(object):
                         generate_curvature_plots=generate_curvature_plots,
                         plot_x_inches=plot_x_inches,
                         plot_y_inches=plot_y_inches,
+                        legend=plot_legend,
                         cmap=cmap,
                         dpi=dpi,
                         keep_plot_history=self.keep_plot_history
@@ -2058,6 +2158,7 @@ class Model(object):
                             generate_curvature_plots=generate_curvature_plots,
                             plot_x_inches=plot_x_inches,
                             plot_y_inches=plot_y_inches,
+                            legend=plot_legend,
                             cmap=cmap,
                             dpi=dpi,
                             mc=True,
@@ -2540,11 +2641,13 @@ class Model(object):
     ):
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                self.set_predict_mode(True)
                 fd = {
                     self.n_errors: n_errors,
                     self.training: not self.predict_mode
                 }
                 err_q = self.sess.run(self.err_dist_summary_theoretical_quantiles, feed_dict=fd)
+                self.set_predict_mode(False)
 
                 return err_q
 

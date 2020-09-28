@@ -3,779 +3,18 @@ import re
 import itertools
 import numpy as np
 import pandas as pd
+import tensorflow as tf
 
 from .kwargs import CDRNN_INITIALIZATION_KWARGS
+from .backend import *
 from .base import Model
 from .util import *
-
-import tensorflow as tf
-from tensorflow.python.ops import rnn_cell_impl
-if hasattr(rnn_cell_impl, 'LayerRNNCell'):
-    LayerRNNCell = rnn_cell_impl.LayerRNNCell
-else:
-    LayerRNNCell = rnn_cell_impl._LayerRNNCell
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 tf_config = tf.ConfigProto()
 tf_config.gpu_options.allow_growth = True
 
 pd.options.mode.chained_assignment = None
-
-
-parse_initializer = re.compile('(.*_initializer)(_(.*))?')
-
-
-def get_session(session):
-    if session is None:
-        sess = tf.get_default_session()
-    else:
-        sess = session
-
-    return sess
-
-
-def get_activation(activation, session=None, training=True, from_logits=True, sample_at_train=True, sample_at_eval=False):
-    session = get_session(session)
-    with session.as_default():
-        with session.graph.as_default():
-            hard_sigmoid = tf.keras.backend.hard_sigmoid
-
-            if activation:
-                if isinstance(activation, str):
-                    if activation.lower() == 'hard_sigmoid':
-                        out = hard_sigmoid
-                    else:
-                        out = getattr(tf.nn, activation)
-                else:
-                    out = activation
-            else:
-                out = lambda x: x
-
-    return out
-
-
-def get_initializer(initializer, session=None):
-    session = get_session(session)
-    with session.as_default():
-        with session.graph.as_default():
-            if isinstance(initializer, str):
-                initializer_name, _, initializer_params = parse_initializer.match(initializer).groups()
-
-                kwargs = {}
-                if initializer_params:
-                    kwarg_list = initializer_params.split('-')
-                    for kwarg in kwarg_list:
-                        key, val = kwarg.split('=')
-                        try:
-                            val = float(val)
-                        except Exception:
-                            pass
-                        kwargs[key] = val
-
-                tf.keras.initializers.he_normal()
-
-                if 'identity' in initializer_name:
-                    return tf.keras.initializers.Identity
-                elif 'he_' in initializer_name:
-                    return tf.keras.initializers.VarianceScaling(scale=2., mode='fan_in', distribution='normal')
-                else:
-                    out = getattr(tf, initializer_name)
-                    if 'glorot' in initializer:
-                        out = out()
-                    else:
-                        out = out(**kwargs)
-            else:
-                out = initializer
-
-            return out
-
-
-def get_regularizer(init, scale=None, session=None):
-    session = get_session(session)
-    with session.as_default():
-        with session.graph.as_default():
-            if scale is None and isinstance(init, str) and '_' in init:
-                try:
-                    init_split = init.split('_')
-                    scale = float(init_split[-1])
-                    init = '_'.join(init_split[:-1])
-                except ValueError:
-                    pass
-
-            if scale is None:
-                scale = 0.001
-
-            if init is None:
-                out = None
-            elif isinstance(init, str):
-                out = getattr(tf.contrib.layers, init)(scale=scale)
-            elif isinstance(init, float):
-                out = tf.contrib.layers.l2_regularizer(scale=init)
-            else:
-                out = init
-
-            return out
-
-
-def get_dropout(rate, training=True, noise_shape=None, session=None):
-    session = get_session(session)
-    with session.as_default():
-        with session.graph.as_default():
-            if rate:
-                def make_dropout(rate):
-                    return lambda x: tf.layers.dropout(x, rate=rate, noise_shape=noise_shape, training=training)
-                out = make_dropout(rate)
-            else:
-                out = lambda x: x
-
-            return out
-
-
-def compose_lambdas(lambdas):
-    def composed_lambdas(x, **kwargs):
-        out = x
-        for l in lambdas:
-            out = l(out, **kwargs)
-        return out
-
-    return composed_lambdas
-
-
-def make_lambda(layer, session=None, use_kwargs=False):
-    session = get_session(session)
-    with session.as_default():
-        with session.graph.as_default():
-            if use_kwargs:
-                def apply_layer(x, **kwargs):
-                    return layer(x, **kwargs)
-            else:
-                def apply_layer(x, **kwargs):
-                    return layer(x)
-            return apply_layer
-
-
-
-class MaskedLSTMCell(LayerRNNCell):
-    def __init__(
-            self,
-            units,
-            kernel,
-            recurrent_kernel,
-            bias=None,
-            training=False,
-            activation=None,
-            recurrent_activation='sigmoid',
-            prefinal_activation='tanh',
-            bottomup_dropout=None,
-            recurrent_dropout=None,
-            weight_normalization=False,
-            layer_normalization=False,
-            use_bias=True,
-            global_step=None,
-            batch_normalization_decay=None,
-            reuse=None,
-            name=None,
-            dtype=None,
-            epsilon=1e-8,
-            session=None
-    ):
-        self._session = get_session(session)
-        with self._session.as_default():
-            with self._session.graph.as_default():
-                super(MaskedLSTMCell, self).__init__(_reuse=reuse, name=name, dtype=dtype)
-
-                self._num_units = units
-
-                self._kernel = kernel
-                self._recurrent_kernel = recurrent_kernel
-                self._bias = bias
-
-                self._training = training
-
-                self._activation = get_activation(activation, session=self._session, training=self._training)
-                self._prefinal_activation = get_activation(prefinal_activation, session=self._session, training=self._training)
-                self._recurrent_activation = get_activation(recurrent_activation, session=self._session, training=self._training)
-
-                self._bottomup_dropout = get_dropout(bottomup_dropout, training=self._training, session=self._session)
-                self._recurrent_dropout = get_dropout(recurrent_dropout, training=self._training, session=self._session)
-
-                self._weight_normalization = weight_normalization
-                self._layer_normalization = layer_normalization
-                self._use_bias = use_bias
-                self._global_step = global_step
-
-                self._batch_normalization_decay = batch_normalization_decay
-
-                self._epsilon = epsilon
-
-                self._regularizer_map = {}
-                self._regularization_initialized = False
-
-    @property
-    def state_size(self):
-        return tf.nn.rnn_cell.LSTMStateTuple(c=self._num_units,h=self._num_units)
-
-    @property
-    def output_size(self):
-        return self._num_units
-
-    def _add_regularization(self, var, regularizer):
-        if regularizer is not None:
-            with self._session.as_default():
-                with self._session.graph.as_default():
-                    self._regularizer_map[var] = regularizer
-
-    def initialize_regularization(self):
-        assert self.built, "Cannot initialize regularization before calling the LSTM layer because the weight matrices haven't been built."
-
-        if not self._regularization_initialized:
-            for var in tf.trainable_variables(scope=self.name):
-                n1, n2 = var.name.split('/')[-2:]
-                if 'bias' in n2:
-                    self._add_regularization(var, self._bias_regularizer)
-                if 'kernel' in n2:
-                    if 'bottomup' in n1 or 'revnet' in n1:
-                        self._add_regularization(var, self._bottomup_regularizer)
-                    elif 'recurrent' in n1:
-                        self._add_regularization(var, self._recurrent_regularizer)
-            self._regularization_initialized = True
-
-    def get_regularization(self):
-        self.initialize_regularization()
-        return self._regularizer_map.copy()
-
-    def build(self, inputs_shape):
-        with self._session.as_default():
-            with self._session.graph.as_default():
-                if isinstance(inputs_shape, list): # Has a mask
-                    inputs_shape = inputs_shape[0]
-                if inputs_shape[1].value is None:
-                    raise ValueError("Expected inputs.shape[-1] to be known, saw shape: %s" % inputs_shape)
-
-                self._input_dims = inputs_shape[1].value
-                bottomup_dim = self._input_dims
-                recurrent_dim = self._num_units
-                output_dim = self._num_units * 4 # forget, input, and output gates, plus cell proposal
-
-                # Build LSTM kernels (bottomup and recurrent)
-                self.apply_kernel = lambda x: tf.matmul(x, self._kernel)
-                self.apply_recurrent_kernel = lambda x: tf.matmul(x, self._recurrent_kernel)
-
-                if not self._layer_normalization and self._use_bias:
-                    self.apply_bias = lambda x: x + self._bias
-                else:
-                    self.apply_bias = lambda x: x
-
-        self.built = True
-
-    def call(self, inputs, state):
-        with self._session.as_default():
-            with self._session.graph.as_default():
-                if isinstance(inputs, list):
-                    inputs, mask = inputs
-                else:
-                    mask = None
-
-                units = self._num_units
-                c_prev = state.c
-                h_prev = state.h
-
-                s_bottomup = self.apply_kernel(inputs)
-                s_recurrent = self.apply_recurrent_kernel(h_prev)
-                s = s_bottomup + s_recurrent
-                if not self._layer_normalization and self._use_bias:
-                    s = self.apply_bias(s)
-
-                # Forget gate
-                f = s[:, :units]
-                if self._layer_normalization:
-                    f = self.norm(f, 'f_ln')
-                f = self._recurrent_activation(f + self._forget_bias)
-
-                # Input gate
-                i = s[:, units:units * 2]
-                if self._layer_normalization:
-                    i = self.norm(i, 'i_ln')
-                i = self._recurrent_activation(i)
-
-                # Output gate
-                o = s[:, units * 2:units * 3]
-                if self._layer_normalization:
-                    o = self.norm(o, 'o_ln')
-                o = self._recurrent_activation(o)
-
-                # Cell proposal
-                g = s[:, units * 3:units * 4]
-                if self._layer_normalization:
-                    g = self.norm(g, 'g_ln')
-                g = self._activation(g)
-
-                c = f * c_prev + i * g
-                h = o * self._activation(c)
-
-                if mask is not None:
-                    c = c * mask + c_prev * (1 - mask)
-                    h = h * mask + h_prev * (1 - mask)
-
-                return h, tf.nn.rnn_cell.LSTMStateTuple(c=c, h=h)
-
-
-class MaskedLSTMLayer(object):
-    def __init__(
-            self,
-            units=None,
-            training=False,
-            kernel_depth=1,
-            resnet_n_layers=1,
-            prefinal_mode='max',
-            forget_bias=1.0,
-            activation=None,
-            recurrent_activation='sigmoid',
-            prefinal_activation='tanh',
-            bottomup_initializer='glorot_uniform_initializer',
-            recurrent_initializer='orthogonal_initializer',
-            bias_initializer='zeros_initializer',
-            bottomup_regularizer=None,
-            recurrent_regularizer=None,
-            bias_regularizer=None,
-            bottomup_dropout=None,
-            recurrent_dropout=None,
-            weight_normalization=False,
-            layer_normalization=False,
-            use_bias=True,
-            global_step=None,
-            batch_normalization_decay=None,
-            return_sequences=True,
-            reuse=None,
-            name=None,
-            dtype=None,
-            epsilon=1e-8,
-            session=None
-    ):
-        self.session = get_session(session)
-
-        self.training = training
-        self.units = units
-        self.kernel_depth = kernel_depth
-        self.resnet_n_layers = resnet_n_layers
-        self.prefinal_mode = prefinal_mode
-        self.forget_bias = forget_bias
-        self.activation = activation
-        self.recurrent_activation = recurrent_activation
-        self.prefinal_activation = prefinal_activation
-        self.bottomup_initializer = bottomup_initializer
-        self.recurrent_initializer = recurrent_initializer
-        self.bias_initializer = bias_initializer
-        self.bottomup_regularizer = bottomup_regularizer
-        self.recurrent_regularizer = recurrent_regularizer
-        self.bias_regularizer = bias_regularizer
-        self.bottomup_dropout = bottomup_dropout
-        self.recurrent_dropout = recurrent_dropout
-        self.weight_normalization = weight_normalization
-        self.layer_normalization = layer_normalization
-        self.use_bias = use_bias
-        self.global_step = global_step
-        self.batch_normalization_decay = batch_normalization_decay
-        self.return_sequences = return_sequences
-        self.reuse = reuse
-        self.name = name
-        self.dtype = dtype
-        self.epsilon = epsilon
-
-        self.cell = None
-
-        self.built = False
-
-    def build(self, inputs):
-        if not self.built:
-            with self.session.as_default():
-                with self.session.graph.as_default():
-
-                    if self.units is None:
-                        units = inputs.shape[-1]
-                    else:
-                        units = self.units
-
-                    self.cell = MaskedLSTMCell(
-                        units,
-                        training=self.training,
-                        kernel_depth=self.kernel_depth,
-                        resnet_n_layers=self.resnet_n_layers,
-                        prefinal_mode=self.prefinal_mode,
-                        forget_bias=self.forget_bias,
-                        activation=self.activation,
-                        recurrent_activation=self.recurrent_activation,
-                        prefinal_activation=self.prefinal_activation,
-                        bottomup_initializer=self.bottomup_initializer,
-                        recurrent_initializer=self.recurrent_initializer,
-                        bias_initializer=self.bias_initializer,
-                        bottomup_regularizer=self.bottomup_regularizer,
-                        recurrent_regularizer=self.recurrent_regularizer,
-                        bias_regularizer=self.bias_regularizer,
-                        bottomup_dropout=self.bottomup_dropout,
-                        recurrent_dropout=self.recurrent_dropout,
-                        weight_normalization=self.weight_normalization,
-                        layer_normalization=self.layer_normalization,
-                        use_bias=self.use_bias,
-                        global_step=self.global_step,
-                        batch_normalization_decay=self.batch_normalization_decay,
-                        reuse=self.reuse,
-                        name=self.name,
-                        dtype=self.dtype,
-                        epsilon=self.epsilon,
-                    )
-
-                    self.cell.build(inputs.shape[1:])
-
-            self.built = True
-
-    def __call__(self, inputs, mask=None):
-        if not self.built:
-            self.build(inputs)
-
-        with self.session.as_default():
-            with self.session.graph.as_default():
-                if mask is None:
-                    sequence_length = None
-                else:
-                    sequence_length = tf.reduce_sum(mask, axis=1)
-                    while len(mask.shape) < 3:
-                        mask = mask[..., None]
-                    inputs = [inputs, mask]
-
-                H, _ = tf.nn.dynamic_rnn(
-                    self.cell,
-                    inputs,
-                    sequence_length=sequence_length,
-                    dtype=tf.float32
-                )
-
-                if not self.return_sequences:
-                    H = H[:, -1]
-
-                return H
-
-
-class LSTMCell(LayerRNNCell):
-    """
-    An LSTM in which weights are externally initialized.
-    This makes the module compatible with black-box variational inference, since weights can be initialized as
-    random variables.
-    """
-
-    def __init__(
-            self,
-            kernel,
-            recurrent_kernel,
-            bias=None,
-            training=False,
-            activation='tanh',
-            recurrent_activation='sigmoid',
-            dropout=None,
-            recurrent_dropout=None,
-            forget_bias=1.0,
-            reuse=None,
-            name=None,
-            dtype=None,
-            session=None
-    ):
-        self.session = get_session(session)
-
-        with self.session.as_default():
-            with self.session.graph.as_default():
-                super(LSTMCell, self).__init__(_reuse=reuse, name=name, dtype=dtype)
-
-                self.kernel = kernel
-                self.recurrent_kernel = recurrent_kernel
-                self.bias = bias
-                self.training = training
-                self.activation = activation
-                self.recurrent_activation = recurrent_activation
-                self.dropout = dropout
-                self.recurrent_dropout = recurrent_dropout
-                self.forget_bias = forget_bias
-
-                self.n_units = int(self.kernel.shape[-1]) // 4
-
-    @property
-    def state_size(self):
-        return tf.nn.rnn_cell.LSTMStateTuple(h=self.n_units, c=self.n_units)
-
-    @property
-    def output_size(self):
-        return self.n_units
-
-    def build(self, inputs_shape):
-        with self.session.as_default():
-            with self.session.graph.as_default():
-                if inputs_shape[1].value is None:
-                    raise ValueError("Expected inputs.shape[-1] to be known, saw shape: %s" % inputs_shape)
-
-    def call(self, inputs, state):
-        with self.session.as_default():
-            with self.session.graph.as_default():
-                h_prev = state.h
-                c_prev = state.c
-
-
-
-
-class DenseLayer(object):
-
-    def __init__(
-            self,
-            training=True,
-            units=None,
-            use_bias=True,
-            activation=None,
-            kernel_initializer='he_normal_initializer',
-            bias_initializer='zeros_initializer',
-            dropout=None,
-            kernel_regularizer=None,
-            bias_regularizer=None,
-            batch_normalization_decay=None,
-            normalize_weights=False,
-            reuse=None,
-            session=None,
-            name=None
-    ):
-        self.session = get_session(session)
-        with session.as_default():
-            with session.graph.as_default():
-                self.training = training
-                self.units = units
-                self.use_bias = use_bias
-                self.activation = get_activation(activation, session=self.session, training=self.training)
-                self.kernel_initializer = get_initializer(kernel_initializer, session=self.session)
-                if bias_initializer is None:
-                    bias_initializer = 'zeros_initializer'
-                self.bias_initializer = get_initializer(bias_initializer, session=self.session)
-                self.dropout = get_dropout(dropout, training=self.training, session=self.session)
-                self.kernel_regularizer = get_regularizer(kernel_regularizer, session=self.session)
-                self.bias_regularizer = get_regularizer(bias_regularizer, session=self.session)
-                self.batch_normalization_decay = batch_normalization_decay
-                self.normalize_weights = normalize_weights
-                self.reuse = reuse
-                self.name = name
-
-                self.dense_layer = None
-                self.kernel_lambdas = []
-                self.projection = None
-
-                self.initializer = get_initializer(kernel_initializer, self.session)
-
-
-                self.built = False
-
-    def build(self, inputs):
-        if not self.built:
-            if self.units is None:
-                out_dim = inputs.shape[-1]
-            else:
-                out_dim = self.units
-
-            with self.session.as_default():
-                with self.session.graph.as_default():
-                    self.dense_layer = tf.layers.Dense(
-                        out_dim,
-                        use_bias=self.use_bias,
-                        kernel_initializer=self.kernel_initializer,
-                        bias_initializer=self.bias_initializer,
-                        kernel_regularizer=self.kernel_regularizer,
-                        bias_regularizer=self.bias_regularizer,
-                        _reuse=self.reuse,
-                        name=self.name
-                    )
-
-                    self.kernel_lambdas.append(self.dense_layer)
-                    if self.dropout:
-                        self.kernel_lambdas.append(make_lambda(self.dropout, use_kwargs=False, session=self.session))
-                    self.kernel = compose_lambdas(self.kernel_lambdas)
-
-            self.built = True
-
-    def __call__(self, inputs):
-        if not self.built:
-            self.build(inputs)
-
-        with self.session.as_default():
-            with self.session.graph.as_default():
-
-                H = self.kernel(inputs)
-
-                if self.normalize_weights:
-                    self.w = self.dense_layer.kernel
-                    self.g = tf.Variable(tf.ones(self.w.shape[1]), dtype=tf.float32)
-                    self.v = tf.norm(self.w, axis=0)
-                    self.dense_layer.kernel = self.v
-
-                if self.batch_normalization_decay:
-                    H = tf.contrib.layers.batch_norm(
-                        H,
-                        decay=self.batch_normalization_decay,
-                        center=True,
-                        scale=True,
-                        zero_debias_moving_mean=True,
-                        is_training=self.training,
-                        updates_collections=None,
-                        reuse=self.reuse,
-                        scope=self.name
-                    )
-                if self.activation is not None:
-                    H = self.activation(H)
-
-                return H
-
-    def call(self, *args, **kwargs):
-        self.__call__(*args, **kwargs)
-
-
-class RNNLayer(object):
-    def __init__(
-            self,
-            rnn_type='LSTM',
-            training=True,
-            units=None,
-            activation=None,
-            recurrent_activation='sigmoid',
-            kernel_initializer='glorot_uniform_initializer',
-            recurrent_initializer='orthogonal_initializer',
-            bias_initializer='zeros_initializer',
-            unit_forget_bias=True,
-            dropout=None,
-            recurrent_dropout=None,
-            refeed_outputs=False,
-            return_sequences=True,
-            batch_normalization_decay=None,
-            name=None,
-            session=None
-    ):
-        self.session = get_session(session)
-
-        self.rnn_type = rnn_type
-        self.training = training
-        self.units = units
-        self.activation = get_activation(activation, session=self.session, training=self.training)
-        self.recurrent_activation = get_activation(recurrent_activation, session=self.session, training=self.training)
-        self.kernel_initializer = get_initializer(kernel_initializer, session=self.session)
-        self.recurrent_initializer = get_initializer(recurrent_initializer, session=self.session)
-        self.bias_initializer = get_initializer(bias_initializer, session=self.session)
-        self.unit_forget_bias = unit_forget_bias
-        self.dropout = dropout
-        self.recurrent_dropout = recurrent_dropout
-        self.refeed_outputs = refeed_outputs
-        self.return_sequences = return_sequences
-        self.batch_normalization_decay = batch_normalization_decay
-        self.name = name
-
-        self.rnn_layer = None
-
-        self.built = False
-
-    def build(self, input_shape):
-        if not self.built:
-            with self.session.as_default():
-                with self.session.graph.as_default():
-                    RNN = getattr(tf.keras.layers, self.rnn_type)
-
-                    input_dim = input_shape[-1]
-
-                    if self.units:
-                        output_dim = self.units
-                    else:
-                        output_dim = input_dim
-
-                    if self.rnn_type == 'LSTM':
-                        kernel = tf.get_variable(
-                            self.name + '/kernel',
-                            [input_dim, output_dim * 4],
-                            initializer=self.kernel_initializer
-                        )
-                        recurrent_kernel = tf.get_variable(
-                            self.name + '/recurrent_kernel',
-                            [output_dim, output_dim * 4],
-                            initializer=self.recurrent_initializer
-                        )
-                        if self.unit_forget_bias:
-                            bias = tf.concat(
-                                [
-                                    tf.get_variable(
-                                        self.name + '/bias_i',
-                                        [output_dim],
-                                        initializer=self.bias_initializer
-                                    ),
-                                    tf.get_variable(
-                                        self.name + '/bias_f',
-                                        [output_dim],
-                                        initializer=tf.ones_initializer
-                                    ),
-                                    tf.get_variable(
-                                        self.name + '/bias_co',
-                                        [output_dim * 2],
-                                        initializer=self.bias_initializer
-                                    )
-                                ],
-                                axis=0
-                            )
-                        else:
-                            bias = tf.get_variable(
-                                self.name + '/bias',
-                                [output_dim * 4],
-                                initializer=self.bias_initializer
-                            )
-                        print(bias.shape)
-                    #
-                    # def kernel_initializer(shape, weights=kernel, **kwargs):
-                    #     return weights
-                    #
-                    # def recurrent_initializer(shape, weights=recurrent_kernel, **kwargs):
-                    #     return weights
-                    #
-                    # def bias_initializer(shape, weights=bias, **kwargs):
-                    #     return weights
-
-                    kernel_initializer = self.kernel_initializer
-                    recurrent_initializer = self.recurrent_initializer
-                    bias_initializer = self.bias_initializer
-
-                    kwargs = {
-                        'return_sequences': self.return_sequences,
-                        'activation': self.activation,
-                        'kernel_initializer': kernel_initializer,
-                        'recurrent_initializer': recurrent_initializer,
-                        'bias_initializer': bias_initializer,
-                        'dropout': self.dropout,
-                        'recurrent_dropout': self.recurrent_dropout,
-                        'name': self.name
-                    }
-                    if self.rnn_type != 'SimpleRNN':
-                        kwargs['recurrent_activation'] = self.recurrent_activation
-                        kwargs['unit_forget_bias'] = False
-
-                    self.rnn_layer = RNN(output_dim, **kwargs)
-
-            self.built = True
-
-    def __call__(self, inputs, mask=None):
-        if not self.built:
-            self.build(inputs.shape)
-
-        with self.session.as_default():
-            with self.session.graph.as_default():
-
-                H = self.rnn_layer(inputs, mask=mask)
-                if self.batch_normalization_decay:
-                    H = tf.contrib.layers.batch_norm(
-                        H,
-                        decay=self.batch_normalization_decay,
-                        center=True,
-                        scale=True,
-                        zero_debias_moving_mean=True,
-                        is_training=self.training,
-                        updates_collections=None
-                    )
-
-                return H
 
 
 class CDRNN(Model):
@@ -860,26 +99,109 @@ class CDRNN(Model):
         if len(irf_families) == 1:
             assert irf_families[0] == 'DiracDelta', 'CDRNN does not support parametric impulse response functions.'
 
-        assert not self.n_units is None, 'You must provide a value for **n_units** when initializing a CDRNN model.'
-        if isinstance(self.n_units, str):
-            self.n_units_cdrnn = [int(x) for x in self.n_units.split()]
-        elif isinstance(self.n_units, int):
-            if self.n_units is None:
-                self.n_units_cdrnn = [self.n_units]
+        if self.n_units_input_projection:
+            if isinstance(self.n_units_input_projection, str):
+                self.n_units_input_projection = [int(x) for x in self.n_units_input_projection.split()]
+            elif isinstance(self.n_units_input_projection, int):
+                if self.n_units_input_projection is None:
+                    self.n_units_input_projection = [self.n_units_input_projection]
+                else:
+                    self.n_units_input_projection = [self.n_units_input_projection] * self.n_layers_input_projection
+            if self.n_layers_input_projection is None:
+                self.n_layers_input_projection = len(self.n_units_input_projection)
+            if len(self.n_units_input_projection) == 1 and self.n_layers_input_projection != 1:
+                self.n_units_input_projection = [self.n_units_input_projection[0]] * self.n_layers_input_projection
+                self.n_layers_input_projection = len(self.n_units_input_projection)
+        else:
+            self.n_units_input_projection = []
+            self.n_layers_input_projection = 0
+        assert self.n_layers_input_projection == len(self.n_units_input_projection), 'Inferred n_layers_input_projection and n_units_input_projection must have the same number of layers. Saw %d and %d, respectively.' % (self.n_layers_input_projection, len(self.n_units_input_projection))
+
+        if self.n_units_rnn:
+            if isinstance(self.n_units_rnn, str):
+                self.n_units_rnn = [int(x) for x in self.n_units_rnn.split()]
+            elif isinstance(self.n_units_rnn, int):
+                if self.n_units_rnn is None:
+                    self.n_units_rnn = [self.n_units_rnn]
+                else:
+                    self.n_units_rnn = [self.n_units_rnn] * self.n_layers_rnn
+            if self.n_layers_rnn is None:
+                self.n_layers_rnn = len(self.n_units_rnn)
+            if len(self.n_units_rnn) == 1 and self.n_layers_rnn != 1:
+                self.n_units_rnn = [self.n_units_rnn[0]] * self.n_layers_rnn
+                self.n_layers_rnn = len(self.n_units_rnn)
+        else:
+            self.n_units_rnn = []
+            self.n_layers_rnn = 0
+        assert self.n_layers_rnn == len(self.n_units_rnn), 'Inferred n_layers_rnn and n_units_rnn must have the same number of layers. Saw %d and %d, respectively.' % (self.n_layers_rnn, len(self.n_units_rnn))
+
+        if self.n_units_rnn_projection:
+            if isinstance(self.n_units_rnn_projection, str):
+                self.n_units_rnn_projection = [int(x) for x in self.n_units_rnn_projection.split()]
+            elif isinstance(self.n_units_rnn_projection, int):
+                if self.n_units_rnn_projection is None:
+                    self.n_units_rnn_projection = [self.n_units_rnn_projection]
+                else:
+                    self.n_units_rnn_projection = [self.n_units_rnn_projection] * self.n_layers_rnn_projection
+            if self.n_layers_rnn_projection is None:
+                self.n_layers_rnn_projection = len(self.n_units_rnn_projection)
+            if len(self.n_units_rnn_projection) == 1 and self.n_layers_rnn_projection != 1:
+                self.n_units_rnn_projection = [self.n_units_rnn_projection[0]] * self.n_layers_rnn_projection
+                self.n_layers_rnn_projection = len(self.n_units_rnn_projection)
+        else:
+            self.n_units_rnn_projection = []
+            self.n_layers_rnn_projection = 0
+        assert self.n_layers_rnn_projection == len(self.n_units_rnn_projection), 'Inferred n_layers_rnn_projection and n_units_rnn_projection must have the same number of layers. Saw %d and %d, respectively.' % (self.n_layers_rnn_projection, len(self.n_units_rnn_projection))
+
+        if self.n_units_irf:
+            if isinstance(self.n_units_irf, str):
+                self.n_units_irf = [int(x) for x in self.n_units_irf.split()]
+            elif isinstance(self.n_units_irf, int):
+                if self.n_units_irf is None:
+                    self.n_units_irf = [self.n_units_irf]
+                else:
+                    self.n_units_irf = [self.n_units_irf] * self.n_layers_irf
+            if self.n_layers_irf is None:
+                self.n_layers_irf = len(self.n_units_irf)
+            if len(self.n_units_irf) == 1 and self.n_layers_irf != 1:
+                self.n_units_irf = [self.n_units_irf[0]] * self.n_layers_irf
+                self.n_layers_irf = len(self.n_units_irf)
+        else:
+            self.n_units_irf = []
+            self.n_layers_irf = 0
+        assert self.n_layers_irf == len(self.n_units_irf), 'Inferred n_layers_irf and n_units_irf must have the same number of layers. Saw %d and %d, respectively.' % (self.n_layers_irf, len(self.n_units_irf))
+
+        if self.n_units_error_params_fn:
+            if isinstance(self.n_units_error_params_fn, str):
+                self.n_units_error_params_fn = [int(x) for x in self.n_units_error_params_fn.split()]
+            elif isinstance(self.n_units_error_params_fn, int):
+                if self.n_units_error_params_fn is None:
+                    self.n_units_error_params_fn = [self.n_units_error_params_fn]
+                else:
+                    self.n_units_error_params_fn = [self.n_units_error_params_fn] * self.n_layers_error_params_fn
+            if self.n_layers_error_params_fn is None:
+                self.n_layers_error_params_fn = len(self.n_units_error_params_fn)
+            if len(self.n_units_error_params_fn) == 1 and self.n_layers_error_params_fn != 1:
+                self.n_units_error_params_fn = [self.n_units_error_params_fn[0]] * self.n_layers_error_params_fn
+                self.n_layers_error_params_fn = len(self.n_units_error_params_fn)
+        else:
+            self.n_units_error_params_fn = []
+            self.n_layers_error_params_fn = 0
+        assert self.n_layers_error_params_fn == len(self.n_units_error_params_fn), 'Inferred n_layers_error_params_fn and n_units_error_params_fn must have the same number of layers. Saw %d and %d, respectively.' % (self.n_layers_error_params_fn, len(self.n_units_error_params_fn))
+
+        if self.n_units_t_delta_embedding is None:
+            if self.n_units_irf and self.n_units_irf[0]:
+                self.n_units_t_delta_embedding = self.n_units_irf[0]
+            elif self.n_units_rnn and self.n_units_rnn[-1]:
+                self.n_units_t_delta_embedding = self.n_units_rnn[-1]
             else:
-                self.n_units_cdrnn = [self.n_units] * self.n_layers
-        else:
-            self.n_units_cdrnn = self.n_units
+                raise ValueError('At least one of n_units_rnn, n_units_irf, or n_units_t_delta_embedding must be specified.')
 
-        if self.n_layers is None:
-            self.n_layers_cdrnn = len(self.n_units_cdrnn)
-        else:
-            self.n_layers_cdrnn = self.n_layers
-        if len(self.n_units_cdrnn) == 1:
-            self.n_units_cdrnn = [self.n_units_cdrnn[0]] * self.n_layers_cdrnn
-
-        assert len(self.n_units_cdrnn) == self.n_layers_cdrnn, 'Misalignment in number of layers between n_layers and n_units.'
-
+        if self.n_units_hidden_state is None:
+            if self.n_units_rnn:
+                self.n_units_hidden_state = self.n_units_rnn[-1]
+            else:
+                self.n_units_hidden_state = self.n_units_t_delta_embedding
 
     def _pack_metadata(self):
         md = super(CDRNN, self)._pack_metadata()
@@ -908,24 +230,11 @@ class CDRNN(Model):
                 # so we can safely assume the same mask and timestamps for all impulses
                 self.time_X_cdrnn = self.time_X[:, :, 0:1]
                 self.t_delta_cdrnn = self.t_delta[:, :, 0:1]
-                if self.rescale_t_delta:
+                if self.rescale_time:
+                    self.time_X_cdrnn /= self.time_X_sd
                     self.t_delta_cdrnn /= self.t_delta_sd
 
-                time_X_mask_cdrnn = self.time_X_mask[:, :, 0]
-
-                if self.event_dropout_rate:
-                    def event_dropout_train_fn(mask=time_X_mask_cdrnn):
-                        dropout_mask = tf.random_uniform(shape=tf.shape(mask)) > self.event_dropout_rate
-                        return mask & dropout_mask
-
-                    def event_dropout_eval_fn(mask=time_X_mask_cdrnn):
-                        return mask
-
-                    time_X_mask_cdrnn = tf.cond(
-                        self.training,
-                        event_dropout_train_fn,
-                        event_dropout_eval_fn
-                    )
+                time_X_mask_cdrnn = tf.cast(self.time_X_mask[:, :, 0], dtype=self.FLOAT_TF)
 
                 if self.tail_dropout_rate and self.tail_dropout_max:
                     def tail_dropout_train_fn(mask=time_X_mask_cdrnn):
@@ -963,48 +272,39 @@ class CDRNN(Model):
                 self.time_X_mask_cdrnn = time_X_mask_cdrnn
 
                 X = self.X
-                if self.predictor_dropout_rate:
-                    X = tf.layers.dropout(
-                        X,
-                        rate=self.predictor_dropout_rate,
-                        training=self.training
-                    )
 
-                # if self.all_predictor_dropout_rate:
-                #     X = tf.layers.dropout(
-                #         X,
-                #         rate=self.all_predictor_dropout_rate,
-                #         noise_shape=[None, None, 1],
-                #         training=self.training
-                #     )
-
-                rangf_1hot = []
-                for i in range(len(self.rangf)):
-                    rangf_1hot_cur = tf.one_hot(
-                        self.gf_y[:,i],
-                        tf.cast(self.rangf_n_levels[i], dtype=self.INT_TF),
-                        dtype=self.FLOAT_TF
-                    )[:, :-1]
-                    rangf_1hot.append(rangf_1hot_cur)
-                if len(rangf_1hot) > 0:
-                    rangf_1hot = tf.concat(rangf_1hot, axis=-1)
-                    if self.rangf_dropout_rate:
-                        rangf_1hot = tf.layers.dropout(
-                            rangf_1hot,
-                            rate=self.rangf_dropout_rate,
-                            training=self.training
+                if len(self.rangf):
+                    self.use_rangf = True
+                    rangf_1hot = []
+                    for i in range(len(self.rangf)):
+                        rangf_1hot_cur = tf.one_hot(
+                            self.gf_y[:,i],
+                            tf.cast(self.rangf_n_levels[i], dtype=self.INT_TF),
+                            dtype=self.FLOAT_TF
+                        )[:, :-1]
+                        rangf_1hot.append(rangf_1hot_cur)
+                    if len(rangf_1hot) > 0:
+                        rangf_1hot = tf.concat(rangf_1hot, axis=-1)
+                        if self.rangf_dropout_rate:
+                            rangf_1hot = tf.layers.dropout(
+                                rangf_1hot,
+                                rate=self.rangf_dropout_rate,
+                                training=self.trainings
+                            )
+                    else:
+                        rangf_1hot = tf.zeros(
+                            [tf.shape(self.gf_y)[0], 0],
+                            dtype=self.FLOAT_TF
                         )
+                    self.rangf_1hot = rangf_1hot
                 else:
-                    rangf_1hot = tf.zeros(
-                        [tf.shape(self.gf_y)[0], 0],
-                        dtype=self.FLOAT_TF
-                    )
-                self.rangf_1hot = rangf_1hot
+                    self.use_rangf = False
 
-                self.inputs = tf.concat(
-                    [X, self.t_delta_cdrnn],
-                    axis=-1
-                )
+                # self.inputs = tf.concat(
+                #     [X, self.t_delta_cdrnn],
+                #     axis=-1
+                # )
+                self.inputs = X
 
                 self.n_surface_plot_points = tf.placeholder_with_default(
                     tf.cast(self.interp_hz, self.FLOAT_TF),
@@ -1098,108 +398,187 @@ class CDRNN(Model):
                 self.plot_impulse_1hot_expanded = self.plot_impulse_1hot[None, None, ...]
                 self.plot_impulse_1hot_2_expanded = self.plot_impulse_1hot_2[None, None, ...]
 
+                if self.nn_regularizer_name is None:
+                    self.nn_regularizer = None
+                elif self.nn_regularizer_name == 'inherit':
+                    self.nn_regularizer = self.regularizer
+                else:
+                    if self.nn_regularizer_name == 'l1_l2_regularizer':
+                        self.nn_regularizer = getattr(tf.contrib.layers, self.nn_regularizer_name)(
+                            self.nn_regularizer_scale,
+                            self.nn_regularizer_scale
+                        )
+                    else:
+                        self.nn_regularizer = getattr(tf.contrib.layers, self.nn_regularizer_name)(self.nn_regularizer_scale)
+
+                if self.context_regularizer_name is None:
+                    self.context_regularizer = None
+                elif self.context_regularizer_name == 'inherit':
+                    self.context_regularizer = self.regularizer
+                else:
+                    self.context_regularizer = getattr(tf.contrib.layers, self.context_regularizer_name)(self.context_regularizer_scale)
+
+                self.regularizable_layers = []
+
+    def _add_rangf(self, x, rangf_embeddings=None):
+        if rangf_embeddings is None:
+            rangf_embeddings = self.rangf_embeddings
+        multiples = tf.shape(x)[0] // tf.shape(rangf_embeddings)[0]
+        t = tf.shape(x)[1]
+        rangf_embeddings = tf.tile(
+            rangf_embeddings,
+            tf.convert_to_tensor([multiples, t, 1], dtype=self.INT_TF)
+        )
+        out = tf.concat([x, rangf_embeddings], axis=-1)
+
+        return out
+
     def _initialize_encoder(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if self.encoder_dropout_rate is None:
-                    encoder_dropout_rate = 0.
+                if self.hidden_dropout_rate is None:
+                    hidden_dropout_rate = 0.
                 else:
-                    encoder_dropout_rate = self.encoder_dropout_rate
+                    hidden_dropout_rate = self.hidden_dropout_rate
                     
-                if self.encoder_recurrent_dropout_rate is None:
-                    encoder_recurrent_dropout_rate = 0.
+                if self.recurrent_dropout_rate is None:
+                    recurrent_dropout_rate = 0.
                 else:
-                    encoder_recurrent_dropout_rate = self.encoder_recurrent_dropout_rate
+                    recurrent_dropout_rate = self.recurrent_dropout_rate
 
-                if self.encoder_projection_dropout_rate is None:
-                    encoder_projection_dropout_rate = 0.
-                else:
-                    encoder_projection_dropout_rate = self.encoder_projection_dropout_rate
-                    
-                self.rangf_encoder = DenseLayer(
-                    training=self.training,
-                    units=self.n_units_cdrnn[-1],
-                    use_bias=False,
-                    activation=None,
-                    kernel_initializer='zeros_initializer',
-                    bias_initializer='zeros_initializer',
-                    dropout=encoder_projection_dropout_rate,
-                    reuse=None,
-                    session=self.sess,
-                    name='rangf_encoder'
-                )
-                self.rangf_embeddings = tf.expand_dims(self.rangf_encoder(self.rangf_1hot), axis=1)
+                self.input_projection_layers = []
+                for l in range(self.n_layers_input_projection + 1):
+                    if l < self.n_layers_input_projection:
+                        units = self.n_units_input_projection[l]
+                        activation = self.input_projection_inner_activation
+                        dropout = self.input_projection_dropout_rate
+                    else:
+                        units = self.n_units_hidden_state
+                        activation = self.input_projection_activation
+                        dropout = None
+                    projection = DenseLayer(
+                        training=self.training,
+                        units=units,
+                        use_bias=True,
+                        activation=activation,
+                        kernel_initializer=self.kernel_initializer,
+                        bias_initializer='zeros_initializer',
+                        dropout=dropout,
+                        batch_normalization_decay=self.batch_normalization_decay,
+                        session=self.sess,
+                        name='input_projection_l%s' % (l + 1)
+                    )
+                    self.regularizable_layers.append(projection)
+                    self.input_projection_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
 
-                self.encoder_layers = [
-                    # make_lambda(
-                    #     DenseLayer(
-                    #         training=self.training,
-                    #         units=self.n_units_cdrnn[0],
-                    #         use_bias=True,
-                    #         activation=self.encoder_activation,
-                    #         kernel_initializer=self.kernel_initializer,
-                    #         bias_initializer='zeros_initializer',
-                    #         reuse=None,
-                    #         session=self.sess,
-                    #         name='input_projection'
-                    #     ),
-                    #     session=self.sess,
-                    #     use_kwargs=False
-                    # )
-                ]
+                self.input_projection_fn = compose_lambdas(self.input_projection_layers)
 
-                for l in range(self.n_layers_cdrnn):
-                    if l < self.n_layers_cdrnn - 1:
+                self.rnn_layers = []
+                self.rnn_h_ema = []
+                self.rnn_c_ema = []
+                for l in range(self.n_layers_rnn):
+                    if l < self.n_layers_rnn - 1:
                         return_seqs = True
                     else:
-                        # return_seqs = False
                         return_seqs = True
+                    units = self.n_units_rnn[l]
 
-                    layer = RNNLayer(
-                        rnn_type=self.rnn_type,
+                    h_init_src = tf.Variable(tf.zeros(units), trainable=False, name='rnn_h_%d' % (l+1))
+                    self.rnn_h_ema.append(h_init_src)
+                    
+                    c_init_src = tf.Variable(tf.zeros(units), trainable=False, name='rnn_c_%d' % (l+1))
+                    self.rnn_c_ema.append(c_init_src)
+
+                    layer = CDRNNLayer(
                         training=self.training,
-                        units=self.n_units_cdrnn[l],
-                        activation=self.encoder_activation,
-                        recurrent_activation=self.encoder_recurrent_activation,
-                        kernel_initializer=self.kernel_initializer,
+                        units=units,
+                        time_projection_depth=self.n_layers_irf+1,
+                        activation=self.rnn_activation,
+                        recurrent_activation=self.recurrent_activation,
+                        time_projection_inner_activation=self.irf_inner_activation,
+                        bottomup_initializer=self.kernel_initializer,
                         recurrent_initializer=self.recurrent_initializer,
-                        dropout=encoder_dropout_rate,
-                        recurrent_dropout=encoder_recurrent_dropout_rate,
+                        h_dropout=self.rnn_h_dropout_rate,
+                        c_dropout=self.rnn_c_dropout_rate,
+                        forget_rate=self.forget_rate,
                         bias_initializer='zeros_initializer',
-                        refeed_outputs=False,
                         return_sequences=return_seqs,
                         batch_normalization_decay=None,
                         name='rnn_l%d' % (l + 1),
                         session=self.sess
                     )
-                    self.encoder_layers.append(make_lambda(layer, session=self.sess, use_kwargs=True))
+                    self.regularizable_layers.append(layer)
+                    self.rnn_layers.append(make_lambda(layer, session=self.sess, use_kwargs=True))
 
-                def add_rangf(x, rangf_embeddings=self.rangf_embeddings):
-                    multiples = tf.shape(x)[0] // tf.shape(self.rangf_embeddings)[0]
-                    t = tf.shape(x)[1]
-                    rangf_embeddings = tf.tile(
-                        rangf_embeddings,
-                        tf.convert_to_tensor([multiples, t, 1], dtype=self.INT_TF)
-                    )
-                    out = tf.concat([x, rangf_embeddings], axis=-1)
+                self.rnn_encoder = compose_lambdas(self.rnn_layers)
 
-                    # out = x + rangf_embeddings
-
-                    return out
-
-                self.encoder_layers.append(make_lambda(add_rangf, session=self.sess, use_kwargs=False))
-
-                assert self.n_layers_projection > 0, 'n_layers_projection must be a positive integer.'
-
-                for l in range(self.n_layers_projection):
-                    if l < self.n_layers_projection - 1:
-                        units = self.n_units_cdrnn[l]
-                        use_bias = True
-                        activation = self.projection_activation_inner
+                self.rnn_projection_layers = []
+                for l in range(self.n_layers_rnn_projection + 1):
+                    if l < self.n_layers_rnn_projection:
+                        units = self.n_units_rnn_projection[l]
+                        activation = self.rnn_projection_inner_activation
                     else:
+                        units = self.n_units_hidden_state
+                        activation = self.rnn_projection_activation
+
+                    projection = DenseLayer(
+                        training=self.training,
+                        units=units,
+                        use_bias=True,
+                        activation=activation,
+                        kernel_initializer=self.kernel_initializer,
+                        bias_initializer='zeros_initializer',
+                        dropout=None,
+                        batch_normalization_decay=self.batch_normalization_decay,
+                        session=self.sess,
+                        name='rnn_projection_l%s' % (l + 1)
+                    )
+                    self.regularizable_layers.append(projection)
+                    self.rnn_projection_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
+
+                self.rnn_projection_fn = compose_lambdas(self.rnn_projection_layers)
+
+                self.t_delta_embedding_W = tf.get_variable(
+                    't_delta_embedding_W',
+                    shape=[1, 1, self.n_units_t_delta_embedding],
+                    initializer=get_initializer(self.kernel_initializer, self.sess)
+                )
+                self.t_delta_embedding_b = tf.get_variable(
+                    't_delta_embedding_b',
+                    shape=[1, 1, self.n_units_t_delta_embedding],
+                    initializer=tf.zeros_initializer
+                )
+                self.regularizable_layers += [self.t_delta_embedding_W, self.t_delta_embedding_b]
+
+                self.hidden_state_to_irf_l1 = DenseLayer(
+                    training=self.training,
+                    units=self.n_units_t_delta_embedding * 2,
+                    use_bias=True,
+                    activation=None,
+                    kernel_initializer=self.kernel_initializer,
+                    bias_initializer='zeros_initializer',
+                    dropout=self.irf_dropout_rate,
+                    batch_normalization_decay=self.batch_normalization_decay,
+                    session=self.sess,
+                    name='hidden_state_to_irf_l1'
+                )
+                self.regularizable_layers.append(self.hidden_state_to_irf_l1)
+
+                self.irf_layers = []
+                for l in range(self.n_layers_irf + 1):
+                    if l < self.n_layers_irf:
+                        units = self.n_units_irf[l]
+                        use_bias = True
+                        activation = self.irf_inner_activation
+                        dropout = self.irf_dropout_rate
+                        bn = self.batch_normalization_decay
+                    else:
+                        # units = 1
                         units = 1
                         use_bias = False
-                        activation = None
+                        activation = self.irf_activation
+                        dropout = None
+                        bn = None
 
                     projection = DenseLayer(
                         training=self.training,
@@ -1208,12 +587,70 @@ class CDRNN(Model):
                         activation=activation,
                         kernel_initializer=self.kernel_initializer,
                         bias_initializer='zeros_initializer',
-                        dropout=encoder_projection_dropout_rate,
-                        reuse=None,
+                        dropout=dropout,
+                        batch_normalization_decay=bn,
                         session=self.sess,
-                        name='projection_l%s' % (l + 1)
+                        name='irf_l%s' % (l + 1)
                     )
-                    self.encoder_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
+                    if l < self.n_layers_irf:
+                        self.regularizable_layers.append(projection)
+                    self.irf_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
+
+                self.irf = compose_lambdas(self.irf_layers)
+                
+                self.error_params_fn_layers = []
+                for l in range(self.n_layers_error_params_fn + 1):
+                    if l < self.n_layers_error_params_fn:
+                        units = self.n_units_error_params_fn[l]
+                        activation = self.error_params_fn_inner_activation
+                        dropout = self.error_params_fn_dropout_rate
+                        bn = self.batch_normalization_decay
+                    else:
+                        units = 1
+                        if self.asymmetric_error:
+                            units += 2
+                        activation = self.error_params_fn_activation
+                        dropout = None
+                        bn = None
+
+                    projection = DenseLayer(
+                        training=self.training,
+                        units=units,
+                        use_bias=True,
+                        activation=activation,
+                        kernel_initializer=self.kernel_initializer,
+                        bias_initializer='zeros_initializer',
+                        dropout=dropout,
+                        batch_normalization_decay=bn,
+                        session=self.sess,
+                        name='error_params_fn_l%s' % (l + 1)
+                    )
+                    if l < self.n_layers_error_params_fn:
+                        self.regularizable_layers.append(projection)
+                    self.error_params_fn_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
+
+                self.error_params_fn = compose_lambdas(self.error_params_fn_layers)
+
+
+                # Gates
+                self.input_gates = tf.tanh(tf.Variable(
+                    tf.zeros([len(self.impulse_names)+1], dtype=self.FLOAT_TF),
+                    name='input_gate_logits'
+                ))[None, None, ...]
+                self.t_delta_gate = tf.identity(tf.Variable(
+                    tf.zeros([], dtype=self.FLOAT_TF),
+                    name='t_delta_gate_logit'
+                ))
+                self.y_sd_delta_gate = tf.tanh(tf.Variable(
+                    tf.zeros([], dtype=self.FLOAT_TF), name='y_sd_delta_gate_logit'
+                ))
+                if self.asymmetric_error:
+                    self.y_skewness_delta_gate = tf.tanh(tf.Variable(
+                        tf.zeros([], dtype=self.FLOAT_TF), name='y_skewness_delta_gate_logit'
+                    ))
+                    self.y_tailweight_delta_gate = tf.tanh(
+                        tf.Variable(tf.zeros([], dtype=self.FLOAT_TF), name='y_tailweight_delta_gate_logit'
+                    ))
 
                 def sum_predictions(x, mask=None):
                     if mask is not None:
@@ -1221,15 +658,12 @@ class CDRNN(Model):
 
                     return tf.reduce_sum(x, axis=1)
 
-                self.encoder_layers.append(make_lambda(sum_predictions, session=self.sess, use_kwargs=True))
-
-                self.encoder = compose_lambdas(self.encoder_layers)
+                self.summed_predictions = make_lambda(sum_predictions, session=self.sess, use_kwargs=True)
 
                 # Intercept
                 if self.has_intercept[None]:
-                    self.intercept_fixed_base, self.intercept_fixed_base_summary = self.initialize_intercept()
-                    self.intercept_fixed = self.intercept_fixed_base
-                    self.intercept_fixed_summary = self.intercept_fixed_base_summary
+                    self.intercept_fixed = tf.Variable(0., name='intercept_fixed')
+                    self.intercept_fixed_summary = self.intercept_fixed
                     tf.summary.scalar(
                         'intercept',
                         self.intercept_fixed_summary,
@@ -1240,28 +674,28 @@ class CDRNN(Model):
                         self._add_convergence_tracker(self.intercept_fixed_summary, 'intercept_fixed')
 
                 else:
-                    self.intercept_fixed_base = tf.constant(0., dtype=self.FLOAT_TF, name='intercept')
                     self.intercept_fixed = self.intercept_fixed_base
 
                 self.intercept = self.intercept_fixed
                 self.intercept_summary = self.intercept_fixed_summary
-                self.intercept_random_base = {}
-                self.intercept_random_base_summary = {}
                 self.intercept_random = {}
                 self.intercept_random_summary = {}
                 self.intercept_random_means = {}
 
-
                 # RANDOM EFFECTS
+                self.random_effects = []
+                self.random_effects_embeddings = []
                 for i in range(len(self.rangf)):
                     gf = self.rangf[i]
                     levels_ix = np.arange(self.rangf_n_levels[i] - 1)
 
                     # Random intercepts
                     if self.has_intercept[gf]:
-                        self.intercept_random_base[gf], self.intercept_random_base_summary[gf] = self.initialize_intercept(ran_gf=gf)
-                        intercept_random = self.intercept_random_base[gf]
-                        intercept_random_summary = self.intercept_random_base_summary[gf]
+                        intercept_random = tf.Variable(
+                            tf.zeros([len(levels_ix)], dtype=self.FLOAT_TF),
+                            name='intercept_by_%s' % sn(gf)
+                        )
+                        intercept_random_summary = intercept_random
 
                         intercept_random_means = tf.reduce_mean(intercept_random, axis=0, keepdims=True)
                         intercept_random_summary_means = tf.reduce_mean(intercept_random_summary, axis=0, keepdims=True)
@@ -1300,15 +734,292 @@ class CDRNN(Model):
                                 collections=['random']
                             )
 
+                        # Random hidden state offsets
+                        random_effects = tf.Variable(
+                            tf.zeros([len(levels_ix), self.n_units_hidden_state], dtype=self.FLOAT_TF),
+                            name='h_ran_by_%s' % sn(gf)
+                        )
+                        random_effects -= tf.reduce_mean(random_effects, axis=0, keepdims=True)
+                        self._regularize(random_effects, type='ranef', var_name='h_ran_by_%s' % sn(gf))
+
+                        random_effects = tf.concat(
+                            [
+                                random_effects,
+                                tf.zeros([1, self.n_units_hidden_state])
+                            ],
+                            axis=0
+                        )
+                        random_effects_embeddings = tf.gather(random_effects, self.gf_y[:, i])
+
+                        self.random_effects.append(random_effects)
+                        self.random_effects_embeddings.append(random_effects_embeddings)
+
+    def _rnn_encoder(self, x, zero_rnn_initial_state=False, **kwargs):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                h = [x]
+                c = []
+                for l in range(len(self.rnn_layers)):
+                    if zero_rnn_initial_state:
+                        initial_state = None
+                    else:
+                        b = tf.shape(x)[0]
+                        tile_dims = [b, 1]
+                        h_init = tf.tile(self.rnn_h_ema[l][None, ...], tile_dims)
+                        c_init = tf.tile(self.rnn_c_ema[l][None, ...], tile_dims)
+                        t_init = tf.zeros([b, 1], dtype=self.FLOAT_TF)
+                        initial_state = CDRNNStateTuple(c=c_init, h=h_init, t=t_init)
+
+                    layer = self.rnn_layers[l]
+                    h_cur, c_cur = layer(h[-1], return_state=True, initial_state=initial_state, **kwargs)
+                    h.append(h_cur)
+                    c.append(c_cur)
+
+                return h, c
+
+    def _apply_model(self, inputs, t_delta, mask=None, times=None, zero_rnn_initial_state=False):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if times is None:
+                    inputs_shape = tf.shape(inputs)
+                    times_shape = []
+                    for i in range(len(inputs.shape)-1):
+                        s = inputs.shape[i]
+                        try:
+                            s = int(s)
+                        except TypeError:
+                            s = inputs_shape[i]
+                        times_shape.append(s)
+                    times_shape.append(1)
+                    times = tf.ones(times_shape, dtype=self.FLOAT_TF)
+                    time_mean =  self.time_X_mean
+                    if self.rescale_time:
+                        time_mean /= self.time_X_sd
+                    times *= time_mean
+
+                if self.input_jitter_level:
+                    jitter_sd = self.input_jitter_level
+                    inputs = tf.cond(
+                        self.training,
+                        lambda: tf.random_normal(tf.shape(inputs), inputs, jitter_sd),
+                        lambda: inputs
+                    )
+                    t_delta = tf.cond(
+                        self.training,
+                        lambda: tf.random_normal(tf.shape(t_delta), t_delta, jitter_sd),
+                        lambda: t_delta
+                    )
+                    times = tf.cond(
+                        self.training,
+                        lambda: tf.random_normal(tf.shape(times), times, jitter_sd),
+                        lambda: times
+                    )
+
+                inputs = tf.concat([inputs, times], axis=-1) * self.input_gates
+
+                if self.predictor_dropout_rate:
+                    inputs = tf.layers.dropout(
+                        inputs,
+                        rate=self.predictor_dropout_rate,
+                        training=self.training
+                    )
+
+                if self.event_dropout_rate:
+                    inputs_shape = tf.shape(inputs)
+                    noise_shape = []
+                    for i in range(len(inputs.shape)-1):
+                        try:
+                            s = int(inputs.shape[i])
+                        except TypeError:
+                            s = inputs_shape[i]
+                        noise_shape.append(s)
+                    noise_shape.append(1)
+
+                    mask_is_none = mask is None
+
+                    def train_fn(inputs=inputs, noise_shape=noise_shape, mask=mask):
+                        dropout_mask = tf.cast(tf.random_uniform(noise_shape) > self.event_dropout_rate, dtype=self.FLOAT_TF)
+                        print(dropout_mask)
+                        inputs_out = inputs * dropout_mask
+                        if mask is not None:
+                            mask_out = mask * dropout_mask[..., 0]
+                        else:
+                            mask_out = tf.zeros(tf.shape(inputs)[:-1])
+
+                        return inputs_out, mask_out
+
+                    def eval_fn(inputs=inputs, mask=mask):
+                        if mask is None:
+                            mask = tf.zeros(tf.shape(inputs)[:-1])
+                        return inputs, mask
+
+                    inputs, mask = tf.cond(self.training, train_fn, eval_fn)
+
+                    if mask_is_none:
+                        mask = None
+
+                # Compute hidden state
+                h_in = self.input_projection_fn(inputs)
+                if self.h_in_noise_sd:
+                    def h_in_train_fn(h_in=h_in):
+                        return tf.random_normal(tf.shape(h_in), h_in, stddev=self.h_in_noise_sd)
+                    def h_in_eval_fn(h_in=h_in):
+                        return h_in
+                    h_in = tf.cond(self.training, h_in_train_fn, h_in_eval_fn)
+                if self.h_in_dropout_rate:
+                    h_in = get_dropout(self.h_in_dropout_rate, training=self.training, session=self.sess)(h_in)
+                h = h_in
+
+                if self.n_layers_rnn:
+                    rnn_hidden, rnn_cell = self._rnn_encoder(inputs, mask=mask, times=times, zero_rnn_initial_state=zero_rnn_initial_state)
+                    h_rnn = self.rnn_projection_fn(rnn_hidden[-1])
+                    if self.h_rnn_noise_sd:
+                        def h_rnn_train_fn(h_rnn=h_rnn):
+                            return tf.random_normal(tf.shape(h_rnn), h_rnn, stddev=self.h_rnn_noise_sd)
+                        def h_rnn_eval_fn(h_rnn=h_rnn):
+                            return h_rnn
+                        h_rnn = tf.cond(self.training, h_rnn_train_fn, h_rnn_eval_fn)
+                    if self.h_rnn_dropout_rate:
+                        h_rnn = get_dropout(self.h_rnn_dropout_rate, training=self.training, session=self.sess)(h_rnn)
+                    # h_rnn = tf.Print(h_rnn, [tf.reduce_mean(tf.abs(h_rnn)), tf.reduce_mean(tf.abs(h))])
+                    h = h + h_rnn
+                    # h = h * self.input_projection_proportion + h_rnn * self.rnn_proportion
+                else:
+                    h_rnn = rnn_hidden = rnn_cell = None
+
+                if self.use_rangf:
+                    for h_ran in self.random_effects_embeddings:
+                        h_ran = tf.expand_dims(h_ran, axis=-2)
+                        h += h_ran
+
+                h = get_activation(self.hidden_state_activation, session=self.sess)(h)
+
+                # Compute response
+                W = self.t_delta_embedding_W
+                b = self.t_delta_embedding_b
+
+                Wb_proj = self.hidden_state_to_irf_l1(h)
+                W_proj = Wb_proj[..., :self.n_units_t_delta_embedding]
+                b_proj = Wb_proj[..., self.n_units_t_delta_embedding:]
+
+                W += W_proj
+                b += b_proj
+
+                activation = get_activation(self.irf_inner_activation, session=self.sess)
+
+                # t_delta *= self.t_delta_gate
+
+                t_delta_embedding_preactivations = W * t_delta + b
+                t_delta_embeddings = activation(t_delta_embedding_preactivations)
+
+                y = self.summed_predictions(self.irf(t_delta_embeddings))
+                # y *= self.y_coef
+
+                error_params = self.error_params_fn(h[..., -1, :])
+
+                y_sd_delta = error_params[..., 0] * self.y_sd_delta_gate
+                if self.asymmetric_error:
+                    y_skewness_delta = error_params[..., 1] * self.y_skewness_delta_gate
+                    y_tailweight_delta = error_params[..., 2] * self.y_tailweight_delta_gate
+                else:
+                    y_skewness_delta = None
+                    y_tailweight_delta = None
+
+                return {
+                    'y': y,
+                    'y_sd_delta': y_sd_delta,
+                    'y_skewness_delta': y_skewness_delta,
+                    'y_tailweight_delta': y_tailweight_delta,
+                    'rnn_hidden': rnn_hidden,
+                    'rnn_cell': rnn_cell,
+                    'h_rnn': h_rnn,
+                    'h_in': h_in,
+                    'h': h
+                }
+
     def _construct_network(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                out = tf.squeeze(self.encoder(self.inputs, mask=self.time_X_mask_cdrnn), axis=-1)
-                out += self.intercept
+                model_dict = self._apply_model(
+                    self.inputs,
+                    self.t_delta_cdrnn,
+                    mask=self.time_X_mask_cdrnn,
+                    times=self.time_X_cdrnn,
+                    zero_rnn_initial_state=True
+                )
 
-                self.out = out
+                y = model_dict['y']
+                y_sd_delta = model_dict['y_sd_delta']
+                y_skewness_delta = model_dict['y_skewness_delta']
+                y_tailweight_delta = model_dict['y_tailweight_delta']
+
+                y = tf.squeeze(y, axis=-1)
+                y += self.intercept
+
+                self.out = y
                 # Hack needed for MAP evaluation of CDRNNBayes
                 self.out_mean = self.out
+
+                ema_rate = self.ema_decay
+                if ema_rate is None:
+                    ema_rate = 0.
+
+                h_rnn = model_dict['h_rnn']
+                if h_rnn is not None:
+                    rnn_hidden = model_dict['rnn_hidden']
+                    rnn_cell = model_dict['rnn_cell']
+                    reduction_axes = list(range(len(h_rnn.shape) - 1))
+                    self._regularize(tf.reduce_mean(h_rnn, axis=reduction_axes), type='context', var_name='context')
+
+                    self.rnn_h_ema_ops = []
+                    self.rnn_c_ema_ops = []
+
+                    mask = self.time_X_mask_cdrnn[..., None]
+
+                    for l in range(self.n_layers_rnn):
+                        reduction_axes = list(range(len(rnn_hidden[l].shape)-1))
+
+                        denom = tf.reduce_sum(mask)
+
+                        h_sum = tf.reduce_sum(rnn_hidden[l+1] * mask, axis=reduction_axes) # 0th layer is the input, so + 1
+                        h_mean = h_sum / tf.maximum(denom, self.epsilon)
+                        h_ema = self.rnn_h_ema[l]
+                        h_ema_op = tf.assign(
+                            h_ema,
+                            ema_rate * h_ema + (1 - ema_rate) * h_mean
+                        )
+                        self.rnn_h_ema_ops.append(h_ema_op)
+
+                        c_sum = tf.reduce_sum(rnn_cell[l] * mask, axis=reduction_axes)
+                        c_mean = c_sum / tf.maximum(denom, self.epsilon)
+                        c_ema = self.rnn_c_ema[l]
+                        c_ema_op = tf.assign(
+                            c_ema,
+                            ema_rate * c_ema + (1 - ema_rate) * c_mean
+                        )
+                        self.rnn_c_ema_ops.append(c_ema_op)
+
+                self.y_sd_delta = y_sd_delta
+                self.y_sd_delta_ema = tf.Variable(0., trainable=False, name='y_sd_delta_ema')
+                self.y_sd_delta_ema_op = tf.assign(
+                    self.y_sd_delta_ema,
+                    ema_rate * self.y_sd_delta_ema + (1 - ema_rate) * tf.reduce_mean(y_sd_delta)
+                )
+
+                if self.asymmetric_error:
+                    self.y_skewness_delta = y_skewness_delta
+                    self.y_skewness_delta_ema = tf.Variable(0., trainable=False, name='y_skewness_delta_ema')
+                    self.y_skewness_delta_ema_op = tf.assign(
+                        self.y_skewness_delta_ema,
+                        ema_rate * self.y_skewness_delta_ema + (1 - ema_rate) * tf.reduce_mean(y_skewness_delta)
+                    )
+
+                    self.y_tailweight_delta = y_tailweight_delta
+                    self.y_tailweight_delta_ema = tf.Variable(0., trainable=False, name='y_tailweight_delta_ema')
+                    self.y_tailweight_delta_ema_op = tf.assign(
+                        self.y_tailweight_delta_ema,
+                        ema_rate * self.y_tailweight_delta_ema + (1 - ema_rate) * tf.reduce_mean(y_tailweight_delta)
+                    )
 
 
 
@@ -1327,7 +1038,7 @@ class CDRNN(Model):
                 t = tf.shape(self.support)[0]
 
                 t_delta = self.support[..., None]
-                if self.rescale_t_delta:
+                if self.rescale_time:
                     t_delta /= self.t_delta_sd
 
                 x = self.plot_impulse_1hot_expanded
@@ -1340,17 +1051,18 @@ class CDRNN(Model):
                     self.plot_impulse_base_expanded,
                     [t, 1, 1]
                 )
-                inputs = tf.concat([X_rate, t_delta], axis=-1)
+
                 self.irf_1d_rate_support = self.support
-                self.irf_1d_rate_plot = self.encoder(inputs)[None, ...]
+                irf_1d_rate_plot = self._apply_model(X_rate, t_delta)['y']
+                self.irf_1d_rate_plot = irf_1d_rate_plot[None, ...]
 
                 X = tf.tile(
                      x * (c + s) + b,
                     [t, 1, 1]
                 )
-                inputs = tf.concat([X, t_delta], axis=-1)
                 self.irf_1d_support = self.support
-                self.irf_1d_plot = self.encoder(inputs)[None, ...] - self.irf_1d_rate_plot
+                irf_1d_plot = self._apply_model(X, t_delta)['y']
+                self.irf_1d_plot = irf_1d_plot[None, ...] - self.irf_1d_rate_plot
 
                 # IRF SURFACE PLOTS
                 time_support = tf.linspace(
@@ -1363,7 +1075,7 @@ class CDRNN(Model):
                     time_support[..., None, None],
                     [self.n_surface_plot_points_per_side, 1, 1]
                 )
-                if self.rescale_t_delta:
+                if self.rescale_time:
                     t_delta_square /= self.t_delta_sd
 
                 u_src = tf.linspace(
@@ -1378,9 +1090,9 @@ class CDRNN(Model):
                     self.plot_impulse_base_expanded,
                     [self.n_surface_plot_points_normalized, 1, 1]
                 )
-                inputs = tf.concat([X_rate, t_delta_square], axis=-1)
+                irf_surface_rate_plot = self._apply_model(X_rate, t_delta_square)['y']
                 self.irf_surface_rate_plot = tf.reshape(
-                    self.encoder(inputs)[None, ...],
+                    irf_surface_rate_plot[None, ...],
                     [self.n_surface_plot_points_per_side, self.n_surface_plot_points_per_side]
                 )
                 self.irf_surface_rate_meshgrid = tf.meshgrid(time_support, u_rate)
@@ -1393,9 +1105,9 @@ class CDRNN(Model):
                     ),
                     [-1, 1, len(self.impulse_names)]
                 )
-                inputs = tf.concat([X, t_delta_square], axis=-1)
+                irf_surface_plot = self._apply_model(X, t_delta_square)['y']
                 self.irf_surface_plot = tf.reshape(
-                    self.encoder(inputs)[None, ...],
+                    irf_surface_plot[None, ...],
                     [self.n_surface_plot_points_per_side, self.n_surface_plot_points_per_side]
                 ) - self.irf_surface_rate_plot
                 self.irf_surface_meshgrid = tf.meshgrid(
@@ -1408,20 +1120,14 @@ class CDRNN(Model):
 
                 # CURVATURE PLOTS
                 t_interaction = self.t_interaction
-                if self.rescale_t_delta:
+                if self.rescale_time:
                     t_interaction /= self.t_delta_sd
 
-                rate_at_t = tf.squeeze(
-                    self.encoder(
-                        tf.concat(
-                            [
-                                self.plot_impulse_base_expanded,
-                                tf.ones([1, 1, 1], dtype=self.FLOAT_TF) * t_interaction
-                            ],
-                            axis=-1
-                        )
-                    )
-                )
+                rate_at_t = self._apply_model(
+                    self.plot_impulse_base_expanded,
+                    tf.ones([1, 1, 1], dtype=self.FLOAT_TF) * t_interaction
+                )['y']
+                rate_at_t = tf.squeeze(rate_at_t)
 
                 t_delta = tf.ones([t, 1, 1], dtype=self.FLOAT_TF) * t_interaction
 
@@ -1432,8 +1138,8 @@ class CDRNN(Model):
                 )[..., None, None]
                 u = x * (c + u)
                 X = u + b
-                inputs = tf.concat([X, t_delta], axis=-1)
-                self.curvature_plot = self.encoder(inputs) - rate_at_t
+                curvature_plot = self._apply_model(X, t_delta)['y']
+                self.curvature_plot = curvature_plot - rate_at_t
                 self.curvature_support = tf.reduce_prod(
                     u + x * b + (1 - x),  # Fill empty one-hot cols with ones so we only reduce_prod on valid cols
                     axis=[1,2]
@@ -1470,8 +1176,8 @@ class CDRNN(Model):
                 )
 
                 X = X_1 + X_2 + b
-                inputs = tf.concat([X, t_delta], axis=-1)
-                self.interaction_surface_plot = self.encoder(inputs) - rate_at_t
+                interaction_surface_plot = self._apply_model(X, t_delta)['y']
+                self.interaction_surface_plot = interaction_surface_plot - rate_at_t
                 self.interaction_surface_support = tf.meshgrid(
                     tf.reduce_prod(
                         u_1 + x * b + (1 - x),  # Fill empty one-hot cols with ones so we only reduce_prod on valid cols
@@ -1539,7 +1245,6 @@ class CDRNN(Model):
             out = [x for x in itertools.chain.from_iterable(
                 itertools.combinations(self.impulse_names, 2)
             )]
-            print(out)
         else:
             raise ValueError('Plot type "%s" not supported.' % plot_type)
 
@@ -1619,7 +1324,6 @@ class CDRNN(Model):
             out = self.sess.run([self.curvature_support, self.curvature_plot], feed_dict=fd)
         elif plot_type.lower().startswith('interaction_surface'):
             names = name.split(':')
-            print(names)
             assert len(names) == 2, 'Interaction surface plots require interactions of order 2'
             impulse_one_hot1 = self.plot_impulse_name_to_1hot(names[0])
             impulse_one_hot2 = self.plot_impulse_name_to_1hot(names[1])

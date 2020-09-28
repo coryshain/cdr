@@ -21,6 +21,8 @@ def irf(x, irf_name, irf_params, coefs=None):
         out = scipy.stats.gamma.pdf(x[..., None], irf_params['alpha'], scale=1./irf_params['beta'])
     elif irf_name.lower() == 'shiftedgamma':
         out = scipy.stats.gamma.pdf(x[..., None], irf_params['alpha'], scale=1./irf_params['beta'], loc=irf_params['delta'])
+    elif irf_name.lower() == 'periodic':
+        out = np.cos(x[..., None] * irf_params['frequency'][None, ...] - irf_params['phase'][None, ...]) * np.exp(-x[..., None] * irf_params['rate'][None, ...])
     else:
         raise ValueError('Unrecognized IRF family "%s"' % irf_name)
 
@@ -48,7 +50,8 @@ class SyntheticModel(object):
         'Exp': ['beta'],
         'Gamma': ['alpha', 'beta'],
         'ShiftedGamma': ['alpha', 'beta', 'delta'],
-        'HRF': ['alpha', 'beta']
+        'HRF': ['alpha', 'beta'],
+        'Periodic': ['frequency', 'phase', 'rate']
     }
 
     IRF_BOUNDS = {
@@ -56,7 +59,8 @@ class SyntheticModel(object):
         'Normal': {'mu': [-2,2], 'sigma2': [0, 2]},
         'Gamma': {'alpha': [1, 6], 'beta': [0, 5]},
         'ShiftedGamma': {'alpha': [1, 6], 'beta': [0, 5], 'delta': [-1, 0]},
-        'HRF': {'alpha': [3, 9], 'beta': [0, 2]}
+        'HRF': {'alpha': [3, 9], 'beta': [0, 2]},
+        'Periodic': {'frequency': [0.1, 10], 'phase': [0, 2*np.pi], 'rate': [0, 5]}
     }
 
     def __init__(
@@ -139,13 +143,14 @@ class SyntheticModel(object):
 
         return X, t_X, t_y
 
-    def convolve(self, X, t_X, t_y, err_sd=None, allow_instantaneous=True, verbose=True):
+    def convolve(self, X, t_X, t_y, history_length=None, err_sd=None, allow_instantaneous=True, verbose=True):
         """
         Convolve data using the model's IRFs.
 
         :param X: numpy array; 2-D array of predictors.
         :param t_X: numpy array; 1-D vector of predictor timestamps.
         :param t_y: numpy array; 1-D vector of response timestamps.
+        :param history_length: ``int`` or ``None``; Drop preceding events more than ``history_length`` steps into the past. If ``None``, no history clipping.
         :param err_sd: ``float`` or ``None``; Standard deviation of Gaussian noise to inject into responses. If ``None``, use the empirical standard deviation of the response vector.
         :param allow_instantaneous: ``bool``; Whether to compute responses when ``t==0``.
         :param verbose: ``bool``; Verbosity.
@@ -173,8 +178,12 @@ class SyntheticModel(object):
                     stderr('\r%d/%d' % (j, len(t_y)))
             while i < len(t_X) and cond(t_X[i], t_y[j]):
                 i += 1
-            t_delta = t_y[j] - t_X[:i]
-            X_conv[j] = np.sum(self.irf(t_delta) * X[0:i], axis=0, keepdims=True) * self.coefs[None, ...]
+            if history_length:
+                s_ix = i - history_length
+            else:
+                s_ix = 0
+            t_delta = t_y[j] - t_X[s_ix:i]
+            X_conv[j] = np.sum(self.irf(t_delta) * X[s_ix:i], axis=0, keepdims=True) * self.coefs[None, ...]
             y[j] = X_conv[j].sum(axis=-1)
             j += 1
 

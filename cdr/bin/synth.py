@@ -18,11 +18,12 @@ if __name__ == '__main__':
     argparser.add_argument('-n', '--n', nargs='+', type=int, default=[10000], help='Number of responses')
     argparser.add_argument('-k', '--k', nargs='+', type=int, default=[20], help='Number of predictors')
     argparser.add_argument('-p', '--partition', nargs='*', default=[None], help='Generate len(partition) different partitions from each synthetic parameterization. If unspecified, generates 1 unnamed partition.')
-    argparser.add_argument('-a', '--async', nargs='+', type=int, default=[0], help='Use asynchronous impulses/responses.')
+    argparser.add_argument('-a', '--asynchronous', nargs='+', type=int, default=[0], help='Use asynchronous impulses/responses.')
     argparser.add_argument('-g', '--irf', nargs='+', type=str, default=['ShiftedGamma'], help='Default IRF type (one of ["Exp", "Normal", "Gamma", "ShiftedGamma"])')
     argparser.add_argument('-x', '--X_interval', nargs='+', type=str, default=[0.1], help='Interval definition for the impulse stream. Either a float (fixed-length step) or "-"-delimited tuple of <distribution>_(<param>)+')
     argparser.add_argument('-y', '--y_interval', nargs='+', type=str, default=[0.1], help='Interval definition for the response stream. Either a float (fixed-length step) or "-"-delimited tuple of <distribution>_(<param>)+')
     argparser.add_argument('-r', '--rho', nargs='+', type=float, default=[0.], help='Fixed correlation level for covariates. If ``None`` or ``0``, uncorrelated covariates.')
+    argparser.add_argument('-l', '--history_length', nargs='+', type=str, default=['None'], help='Maximum history length. If ``None`` or ``0``, no history_clipping.')
     argparser.add_argument('-e', '--error', nargs='+', type=float, default=[None], help='SD of error distribution')
     argparser.add_argument('-u', '--ntimeunits', type=float, default=None, help='Number of time units on x-axis of plots')
     argparser.add_argument('-R', '--resolution', type=float, default=None, help='Number of points on x-axis of plots')
@@ -37,15 +38,18 @@ if __name__ == '__main__':
 
     args, unknown = argparser.parse_known_args()
 
-    for m, n, k, a, g, X_interval, y_interval, rho, partition in itertools.product(*[
+    history_length = [None if x.lower() == 'none' else int(x) for x in args.history_length]
+
+    for m, n, k, a, g, X_interval, y_interval, rho, h, partition in itertools.product(*[
         args.m,
         args.n,
         args.k,
-        args.async,
+        args.asynchronous,
         args.irf,
         args.X_interval,
         args.y_interval,
         args.rho,
+        history_length,
         args.partition
     ]):
         if not os.path.exists(args.outdir):
@@ -114,7 +118,7 @@ if __name__ == '__main__':
             align_X_y=not a
         )
 
-        X_conv, y = d.convolve(X, t_X, t_y, allow_instantaneous=not g == 'Gamma')
+        X_conv, y = d.convolve(X, t_X, t_y, history_length=h, allow_instantaneous=not g == 'Gamma')
 
         for e in args.error:
             if e is None:
@@ -141,6 +145,7 @@ if __name__ == '__main__':
                 'x%s' % X_interval_name,
                 'y%s' % y_interval_name,
                 'r%0.4f' % rho,
+                'l%s' % h,
                 'e%s' % ('None' if e is None else '%.4f' % e)
             ]
             if a:

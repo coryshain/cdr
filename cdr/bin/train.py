@@ -340,6 +340,7 @@ if __name__ == '__main__':
                 generate_curvature_plots=p['generate_curvature_plots'],
                 plot_x_inches=p['plot_x_inches'],
                 plot_y_inches=p['plot_y_inches'],
+                plot_legend=p['plot_legend'],
                 cmap=p['cmap'],
                 dpi=p['dpi']
             )
@@ -350,8 +351,6 @@ if __name__ == '__main__':
                 f_out.write(summary)
             stderr(summary)
             stderr('\n\n')
-
-            cdr_model.save_parameter_table()
 
             cdr_model.finalize()
 

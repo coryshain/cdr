@@ -99,14 +99,13 @@ class CDRNNMLE(CDRNN):
     def initialize_objective(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                self.y_sd = self.constraint_fn(
-                    tf.Variable(
-                        self.y_sd_init_unconstrained,
-                        dtype=self.FLOAT_TF,
-                        name='y_sd'
-                    )
+                self.y_sd_base_unconstrained = tf.Variable(
+                    self.y_sd_init_unconstrained,
+                    dtype=self.FLOAT_TF,
+                    name='y_sd_base_unconstrained'
                 )
-                self.y_sd_summary = self.y_sd
+                self.y_sd = tf.maximum(self.constraint_fn(self.y_sd_base_unconstrained + self.y_sd_delta), self.epsilon)
+                self.y_sd_summary = self.constraint_fn(self.y_sd_base_unconstrained + self.y_sd_delta_ema)
                 tf.summary.scalar(
                     'error/y_sd',
                     self.y_sd_summary,
@@ -114,26 +113,26 @@ class CDRNNMLE(CDRNN):
                 )
 
                 if self.asymmetric_error:
-                    self.y_skewness = tf.Variable(
+                    self.y_skewness_base = tf.Variable(
                         0.,
                         dtype=self.FLOAT_TF,
-                        name='y_skewness'
+                        name='y_skewness_base'
                     )
-                    self.y_skewness_summary = self.y_skewness
+                    self.y_skewness = self.y_skewness_base + self.y_skewness_delta
+                    self.y_skewness_summary = self.y_skewness_base + self.y_skewness_delta_ema
                     tf.summary.scalar(
                         'error/y_skewness',
                         self.y_skewness_summary,
                         collections=['params']
                     )
 
-                    self.y_tailweight = self.constraint_fn(
-                        tf.Variable(
-                            self.y_tailweight_init_unconstrained,
-                            dtype=self.FLOAT_TF,
-                            name='y_skewness'
-                        )
+                    self.y_tailweight_base_unconstrained = tf.Variable(
+                        self.y_tailweight_init_unconstrained,
+                        dtype=self.FLOAT_TF,
+                        name='y_tailweight_base_unconstrained'
                     )
-                    self.y_tailweight_summary = self.y_tailweight
+                    self.y_tailweight = tf.maximum(self.constraint_fn(self.y_tailweight_base_unconstrained + self.y_tailweight_delta), self.epsilon)
+                    self.y_tailweight_summary = self.constraint_fn(self.y_tailweight_base_unconstrained + self.y_tailweight_delta_ema)
                     tf.summary.scalar(
                         'error/y_tailweight',
                         self.y_tailweight_summary,
@@ -169,6 +168,19 @@ class CDRNNMLE(CDRNN):
                             skewness=self.y_skewness,
                             tailweight=self.y_tailweight
                         )
+
+                        self.err_dist_summary_standardized = tf.contrib.distributions.SinhArcsinh(
+                            loc=0.,
+                            scale=self.y_sd_summary,
+                            skewness=self.y_skewness_summary,
+                            tailweight=self.y_tailweight_summary
+                        )
+                        self.err_dist_summary = tf.contrib.distributions.SinhArcsinh(
+                            loc=0.,
+                            scale=self.y_sd_summary * self.y_train_sd,
+                            skewness=self.y_skewness_summary,
+                            tailweight=self.y_tailweight_summary
+                        )
                     else:
                         y_dist_standardized = tf.distributions.Normal(
                             loc=self.out,
@@ -178,6 +190,7 @@ class CDRNNMLE(CDRNN):
                             loc=self.out * self.y_train_sd + self.y_train_mean,
                             scale=self.y_sd * self.y_train_sd
                         )
+
                         self.err_dist_standardized = tf.distributions.Normal(
                             loc=0.,
                             scale=self.y_sd
@@ -186,9 +199,20 @@ class CDRNNMLE(CDRNN):
                             loc=0.,
                             scale=self.y_sd * self.y_train_sd
                         )
+
+                        self.err_dist_summary_standardized = tf.distributions.Normal(
+                            loc=0.,
+                            scale=self.y_sd_summary
+                        )
+                        self.err_dist_summary = tf.distributions.Normal(
+                            loc=0.,
+                            scale=self.y_sd_summary * self.y_train_sd
+                        )
+
                     self.ll_standardized = y_dist_standardized.log_prob(y_standardized)
                     self.ll = y_dist.log_prob(self.y)
                     ll_objective = self.ll_standardized
+                    # ll_objective = tf.Print(ll_objective, [self.y_sd, ll_objective], summarize=10)
                 else:
                     if self.asymmetric_error:
                         y_dist = tf.contrib.distributions.SinhArcsinh(
@@ -203,6 +227,12 @@ class CDRNNMLE(CDRNN):
                             skewness=self.y_skewness,
                             tailweight=self.y_tailweight
                         )
+                        self.err_dist_summary = tf.contrib.distributions.SinhArcsinh(
+                            loc=0.,
+                            scale=self.y_sd_summary,
+                            skewness=self.y_skewness_summary,
+                            tailweight=self.y_tailweight_summary
+                        )
                     else:
                         y_dist = tf.distributions.Normal(
                             loc=self.out,
@@ -212,35 +242,61 @@ class CDRNNMLE(CDRNN):
                             loc=0.,
                             scale=self.y_sd
                         )
+                        self.err_dist_summary = tf.distributions.Normal(
+                            loc=0.,
+                            scale=self.y_sd_summary
+                        )
                     self.ll = y_dist.log_prob(self.y)
                     ll_objective = self.ll
 
                 self.err_dist_plot = tf.exp(self.err_dist.log_prob(self.support[None,...]))
-                self.err_dist_plot_summary = self.err_dist_plot
-                self.err_dist_lb = self.err_dist.quantile(.025)
-                self.err_dist_ub = self.err_dist.quantile(.975)
+                self.err_dist_plot_summary = tf.exp(self.err_dist_summary.log_prob(self.support[None,...]))
+                self.err_dist_lb = self.err_dist_summary.quantile(.025)
+                self.err_dist_ub = self.err_dist_summary.quantile(.975)
 
                 empirical_quantiles = tf.linspace(0., 1., self.n_errors)
                 if self.standardize_response:
                     self.err_dist_standardized_theoretical_quantiles = self.err_dist_standardized.quantile(empirical_quantiles)
                     self.err_dist_standardized_theoretical_cdf = self.err_dist_standardized.cdf(self.errors)
-                    self.err_dist_standardized_summary_theoretical_quantiles = self.err_dist_standardized_theoretical_quantiles
-                    self.err_dist_standardized_summary_theoretical_cdf = self.err_dist_standardized_theoretical_cdf
+                    self.err_dist_standardized_summary_theoretical_quantiles = self.err_dist_summary_standardized.quantile(empirical_quantiles)
+                    self.err_dist_standardized_summary_theoretical_cdf = self.err_dist_summary_standardized.cdf(self.errors)
                 self.err_dist_theoretical_quantiles = self.err_dist.quantile(empirical_quantiles)
                 self.err_dist_theoretical_cdf = self.err_dist.cdf(self.errors)
-                self.err_dist_summary_theoretical_quantiles = self.err_dist_theoretical_quantiles
-                self.err_dist_summary_theoretical_cdf = self.err_dist_theoretical_cdf
+                self.err_dist_summary_theoretical_quantiles = self.err_dist_summary.quantile(empirical_quantiles)
+                self.err_dist_summary_theoretical_cdf = self.err_dist_summary.cdf(self.errors)
 
                 self.mae_loss = tf.losses.absolute_difference(self.y, self.out)
                 self.mse_loss = tf.losses.mean_squared_error(self.y, self.out)
 
                 self.loss_func = -(tf.reduce_sum(ll_objective) * self.minibatch_scale)
-                self.reg_loss = 0.
+
+                for l in self.regularizable_layers:
+                    if hasattr(l, 'weights'):
+                        vars = l.weights
+                    else:
+                        vars = [l]
+                    for v in vars:
+                        name = v.name.split(':')[0]
+                        name = name.replace('/', '_')
+                        cap = True
+                        var_name = ''
+                        for c in name:
+                            if c == '_':
+                                cap = True
+                            else:
+                                if cap:
+                                    var_name += c.upper()
+                                else:
+                                    var_name += c
+                                cap = False
+                        self._regularize(v, type='nn', var_name=var_name)
+
+                self.reg_loss = tf.constant(0., dtype=self.FLOAT_TF)
                 if len(self.regularizer_losses_varnames) > 0:
                     self.reg_loss += tf.add_n(self.regularizer_losses)
                     self.loss_func += self.reg_loss
 
-                self.optim = self._initialize_optimizer(self.optim_name)
+                self.optim = self._initialize_optimizer()
                 assert self.optim_name is not None, 'An optimizer name must be supplied'
 
                 self.train_op = self.optim.minimize(self.loss_func, global_step=self.global_batch_step)
@@ -267,13 +323,18 @@ class CDRNNMLE(CDRNN):
     def run_train_step(self, feed_dict, verbose=True):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                _, _, loss = self.sess.run(
-                    [self.train_op, self.ema_op, self.loss_func],
-                    feed_dict=feed_dict
-                )
+                to_run = [self.train_op, self.ema_op, self.y_sd_delta_ema_op]
+                if self.n_layers_rnn:
+                    to_run += self.rnn_h_ema_ops + self.rnn_c_ema_ops
+                if self.asymmetric_error:
+                    to_run += [self.y_skewness_delta_ema_op, self.y_tailweight_delta_ema_op]
+                to_run += [self.loss_func, self.reg_loss]
+                out = self.sess.run(to_run, feed_dict=feed_dict)
+                loss, reg_loss = out[-2:]
 
                 out_dict = {
-                    'loss': loss
+                    'loss': loss,
+                    'reg_loss': reg_loss
                 }
 
                 return out_dict

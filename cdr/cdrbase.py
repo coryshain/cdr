@@ -1065,11 +1065,6 @@ class CDR(Model):
             self.irf_by_rangf = t.irf_by_rangf()
             self.interactions_list = t.interactions()
 
-        if self.log_random:
-            self.summary_random_writers = {}
-            self.summary_random_indexers = {}
-            self.summary_random = {}
-
         self.parameter_table_columns = ['Estimate']
 
     def __getstate__(self):

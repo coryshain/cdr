@@ -409,7 +409,7 @@ class CDRMLE(CDR):
                     self.reg_loss += tf.add_n(self.regularizer_losses)
                     self.loss_func += self.reg_loss
 
-                self.optim = self._initialize_optimizer(self.optim_name)
+                self.optim = self._initialize_optimizer()
                 assert self.optim_name is not None, 'An optimizer name must be supplied'
 
                 self.train_op = self.optim.minimize(self.loss_func, global_step=self.global_batch_step)

@@ -247,6 +247,12 @@ MODEL_INITIALIZATION_KWARGS = [
             - ``None`` (CDRBayes only; uses the default optimizer defined by Edward, which currently includes steep learning rate decay and is therefore not recommended in the general case)"""
     ),
     Kwarg(
+        'use_jtps',
+        False,
+        bool,
+        "Whether to modify the base optimizer using JTPS. If ``False``, runs a baseline model. If ``True``, runs a test model."
+    ),
+    Kwarg(
         'max_global_gradient_norm',
         None,
         [float, None],
@@ -341,6 +347,12 @@ MODEL_INITIALIZATION_KWARGS = [
         0.999,
         [float, None],
         "Decay factor to use for exponential moving average for parameters (used in prediction)."
+    ),
+    Kwarg(
+        'batch_normalization_decay',
+        None,
+        [float, None],
+        "Decay rate to use for batch normalization in internal layers. If ``None``, no batch normalization.",
     ),
     Kwarg(
         'convergence_n_iterates',
@@ -650,46 +662,158 @@ CDRNN_INITIALIZATION_KWARGS = [
         "Type of RNN unit to use. One of ``['LSTM', 'GRU', 'SimpleRNN']."
     ),
     Kwarg(
-        'rescale_t_delta',
+        'rescale_time',
         False,
         bool,
-        "Whether to rescale temporal offsets by their training SD under the hood, which can help with convergence. Offsets are automatically reconverted back to the source scale for plotting and model criticism."
+        "Whether to rescale time values by their training SD under the hood, which can help with convergence. Times are automatically reconverted back to the source scale for plotting and model criticism.",
+        aliases=['rescale_t_delta']
     ),
     Kwarg(
-        'n_layers',
+        'n_layers_input_projection',
         None,
         [int, None],
-        "Number of RNN layers. If ``None``, inferred from length of **n_units**."
+        "Number of hidden layers in input projection. If ``None``, inferred from length of **n_units_input_projection**."
     ),
     Kwarg(
-        'n_units',
+        'n_units_input_projection',
         None,
         [int, str, None],
-        "Number of units per RNN layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_encoder** space-delimited integers, one for each layer in order from bottom to top. ``None`` is not permitted and will raise an error -- it exists here simply to force users to specify a value."
+        "Number of units per input projection hidden layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_rnn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers in input projection."
     ),
     Kwarg(
-        'n_layers_projection',
-        1,
-        int,
-        "Number of layers in dense projection from RNN encoder to prediction. Must be at least 1."
+        'n_layers_rnn',
+        None,
+        [int, None],
+        "Number of RNN layers. If ``None``, inferred from length of **n_units_rnn**."
     ),
     Kwarg(
-        'projection_activation_inner',
-        'elu',
-        str,
-        "Name of activation function to use for hidden layers in projection."
+        'n_units_rnn',
+        None,
+        [int, str, None],
+        "Number of units per RNN layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_rnn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no RNN encoding (i.e. use a stationary convolution kernel)."
     ),
     Kwarg(
-        'encoder_activation',
+        'n_layers_rnn_projection',
+        None,
+        [int, None],
+        "Number of hidden layers in projection of RNN state (or of timestamp + predictors if no RNN). If ``None``, inferred automatically."
+    ),
+    Kwarg(
+        'n_units_rnn_projection',
+        None,
+        [int, str, None],
+        "Number of units per hidden layer in projection of RNN state. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_units_rnn_projection** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers in RNN projection."
+    ),
+    Kwarg(
+        'n_units_hidden_state',
+        None,
+        [int, None],
+        "Number of units in CDRNN hidden. Must be an ``int``. If ``None``, no RNN encoding (i.e. use a stationary convolution kernel)."
+    ),
+    Kwarg(
+        'n_units_t_delta_embedding',
+        None,
+        [int, None],
+        "Number of units in the embedding of the temporal offset t_delta. If ``None``, inferred automatically.",
+        aliases=['n_units_decoder', 'n_units_embedding']
+    ),
+    Kwarg(
+        'n_layers_irf',
+        None,
+        [int, None],
+        "Number of IRF layers. If ``None``, inferred from length of **n_units_irf**.",
+        aliases=['n_layers_decoder']
+    ),
+    Kwarg(
+        'n_units_irf',
+        None,
+        [int, str, None],
+        "Number of units per hidden layer in IRF. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_units_irf** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers.",
+        aliases=['n_units_decoder']
+    ),
+    Kwarg(
+        'n_layers_error_params_fn',
+        None,
+        [int, None],
+        "Number of hidden layers mapping hidden state to parameters of error distribution (e.g. variance). If ``None``, inferred from length of **n_units_error_params_fn**.",
+        aliases=['n_layers_decoder']
+    ),
+    Kwarg(
+        'n_units_error_params_fn',
+        None,
+        [int, str, None],
+        "Number of units per hidden layer in mapping from hidden state to parameters of error distribution. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_units_variance_fn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers.",
+        aliases=['n_units_decoder']
+    ),
+    Kwarg(
+        'input_projection_inner_activation',
+        'gelu',
+        [str, None],
+        "Name of activation function to use for hidden layers in input projection."
+    ),
+    Kwarg(
+        'input_projection_activation',
+        None,
+        [str, None],
+        "Name of activation function to use for output of input projection."
+    ),
+    Kwarg(
+        'rnn_activation',
         'tanh',
         [str, None],
-        "Name of activation to use in encoder layers.",
+        "Name of activation to use in RNN layers.",
     ),
     Kwarg(
-        'encoder_recurrent_activation',
+        'recurrent_activation',
         'sigmoid',
         [str, None],
-        "Name of recurrent activation to use in encoder layers.",
+        "Name of recurrent activation to use in RNN layers.",
+    ),
+    Kwarg(
+        'rnn_projection_inner_activation',
+        'gelu',
+        [str, None],
+        "Name of activation function to use for hidden layers in projection of RNN state."
+    ),
+    Kwarg(
+        'rnn_projection_activation',
+        None,
+        [str, None],
+        "Name of activation function to use for final layer in projection of RNN state."
+    ),
+    Kwarg(
+        'hidden_state_activation',
+        'gelu',
+        [str, None],
+        "Name of activation function to use for CDRNN hidden state."
+    ),
+    Kwarg(
+        'irf_inner_activation',
+        'gelu',
+        [str, None],
+        "Name of activation function to use for hidden layers in IRF.",
+        aliases=['decoder_inner_activation']
+    ),
+    Kwarg(
+        'irf_activation',
+        None,
+        [str, None],
+        "Name of activation function to use for final layer in IRF.",
+        aliases=['decoder_activation']
+    ),
+    Kwarg(
+        'error_params_fn_inner_activation',
+        None,
+        [str, None],
+        "Name of activation function to use for hidden layers of error params function.",
+        aliases=['decoder_inner_activation']
+    ),
+    Kwarg(
+        'error_params_fn_activation',
+        None,
+        [str, None],
+        "Name of activation function to use for final layer in error params function.",
+        aliases=['decoder_activation']
     ),
     Kwarg(
         'kernel_initializer',
@@ -704,17 +828,34 @@ CDRNN_INITIALIZATION_KWARGS = [
         "Name of initializer to use in encoder recurrent kernels.",
     ),
     Kwarg(
+        'nn_regularizer_name',
+        None,
+        [str, 'inherit', None],
+        "Name of weight regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
+    ),
+    Kwarg(
+        'nn_regularizer_scale',
+        1.,
+        [float, 'inherit'],
+        "Scale of weight regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
+    ),
+    Kwarg(
+        'context_regularizer_name',
+        None,
+        [str, 'inherit', None],
+        "Name of regularizer on contribution of context (RNN) to hidden state (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
+    ),
+    Kwarg(
+        'context_regularizer_scale',
+        1.,
+        [float, 'inherit'],
+        "Scale of weight regularizer (ignored if ``context_regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
+    ),
+    Kwarg(
         'predictor_dropout_rate',
         None,
         [float, None],
         "Rate at which to drop predictors.",
-        aliases=['input_dropout_rate']
-    ),
-    Kwarg(
-        'all_predictor_dropout_rate',
-        None,
-        [float, None],
-        "Rate at which to drop all predictors.",
         aliases=['input_dropout_rate']
     ),
     Kwarg(
@@ -745,26 +886,83 @@ CDRNN_INITIALIZATION_KWARGS = [
         aliases=['input_dropout_rate']
     ),
     Kwarg(
-        'encoder_dropout_rate',
+        'hidden_dropout_rate',
         None,
         [float, None],
-        "Rate at which to drop bottom-up neurons in the RNN encoder.",
-        aliases=['hidden_dropout_rate']
+        "Rate at which to drop bottom-up neurons in the encoder."
     ),
     Kwarg(
-        'encoder_recurrent_dropout_rate',
+        'recurrent_dropout_rate',
         None,
         [float, None],
-        "Rate at which to drop recurrent neurons in the RNN encoder.",
-        aliases=['hidden_dropout_rate']
+        "Rate at which to drop recurrent neurons in the encoder."
     ),
     Kwarg(
-        'encoder_projection_dropout_rate',
+        'input_projection_dropout_rate',
         None,
         [float, None],
-        "Rate at which to drop neurons from the encoder projection function.",
-        aliases=['hidden_dropout_rate']
+        "Rate at which to drop neurons of input projection layers."
     ),
+    Kwarg(
+        'rnn_h_dropout_rate',
+        None,
+        [float, None],
+        "Rate at which to drop neurons of RNN hidden state."
+    ),
+    Kwarg(
+        'rnn_c_dropout_rate',
+        None,
+        [float, None],
+        "Rate at which to drop neurons of RNN cell state."
+    ),
+    Kwarg(
+        'h_in_dropout_rate',
+        None,
+        [float, None],
+        "Rate at which to drop neurons of h_in."
+    ),
+    Kwarg(
+        'h_rnn_dropout_rate',
+        None,
+        [float, None],
+        "Rate at which to drop neurons of h_rnn."
+    ),
+    Kwarg(
+        'irf_dropout_rate',
+        None,
+        [float, None],
+        "Rate at which to drop neurons of IRF layers."
+    ),
+    Kwarg(
+        'error_params_fn_dropout_rate',
+        None,
+        [float, None],
+        "Rate at which to drop neurons of error params function."
+    ),
+    Kwarg(
+        'h_in_noise_sd',
+        None,
+        [float, None],
+        "SD of white-out noise to inject into h_in."
+    ),
+    Kwarg(
+        'h_rnn_noise_sd',
+        None,
+        [float, None],
+        "SD of white-out noise to inject into h_rnn."
+    ),
+    Kwarg(
+        'forget_rate',
+        None,
+        [float, None],
+        "Rate at which to drop recurrent connection entirely."
+    ),
+    Kwarg(
+        'input_jitter_level',
+        None,
+        [float, None],
+        "Standard deviation of jitter injected into inputs (predictors and timesteps) during training. If ``0`` or ``None``, no input jitter."
+    )
 ]
 
 CDRNNMLE_INITIALIZATION_KWARGS = [

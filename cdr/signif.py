@@ -1,15 +1,18 @@
 import sys
-import numpy as np
 import math
+from scipy.stats import norm
+import numpy as np
 
 from .util import stderr
 
-def permutation_test(err_1, err_2, n_iter=10000, n_tails=2, mode='loss', nested=False, verbose=True):
+
+def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', nested=False, verbose=True):
     """
     Perform a paired permutation test for significance.
 
-    :param err_1: ``numpy`` vector; first error/loss vector.
-    :param err_2: ``numpy`` vector; second error/loss vector.
+    :param a: ``numpy`` vector; first error/loss/prediction vector.
+    :param b: ``numpy`` vector; second error/loss/prediction vector.
+    :param y: ``numpy`` vector; response vector. Used only if ``mode == 'corr'``. Assumes all vectors are standardized (Z-transformed).
     :param n_iter: ``int``; number of resampling iterations.
     :param n_tails: ``int``; number of tails.
     :param mode: ``str``; one of ``["loss", "loglik"]``, the type of error used (losses are averaged while loglik's are summed).
@@ -18,7 +21,7 @@ def permutation_test(err_1, err_2, n_iter=10000, n_tails=2, mode='loss', nested=
     :return:
     """
 
-    err_table = np.stack([err_1, err_2], 1)
+    err_table = np.stack([a, b], 1)
     if mode == 'loss':
         base_diff = err_table[:,0].mean() - err_table[:,1].mean()
         if nested and base_diff <= 0:
@@ -27,8 +30,13 @@ def permutation_test(err_1, err_2, n_iter=10000, n_tails=2, mode='loss', nested=
         base_diff = err_table[:,0].sum() - err_table[:,1].sum()
         if nested and base_diff >= 0:
             return (1.0, base_diff, np.zeros((n_iter,)))
+    elif mode == 'corr':
+        denom = len(err_table) - 1
+        base_diff = (err_table[:,0].sum() - err_table[:,1].sum()) / denom
+        if nested and base_diff >= 0:
+            return (1.0, base_diff, np.zeros((n_iter,)))
     else:
-        raise ValueError('Unrecognized aggregation function "%s" in permutation test' %mode)
+        raise ValueError('Unrecognized metric "%s" in permutation test' %mode)
 
     if base_diff == 0:
         return (1.0, base_diff, np.zeros((n_iter,)))
@@ -48,8 +56,12 @@ def permutation_test(err_1, err_2, n_iter=10000, n_tails=2, mode='loss', nested=
         m2 = err_table[np.arange(len(err_table)),1-shuffle]
         if mode == 'loss':
             cur_diff = m1.mean() - m2.mean()
-        else:
+        elif mode == 'loglik':
             cur_diff = m1.sum() - m2.sum()
+        elif mode == 'corr':
+            cur_diff = (m1.sum() - m2.sum()) / denom
+        else:
+            raise ValueError('Unrecognized metric "%s" in permutation test' %mode)
         diffs[i] = cur_diff
         if n_tails == 1:
             if base_diff < 0 and cur_diff <= base_diff:
@@ -68,3 +80,41 @@ def permutation_test(err_1, err_2, n_iter=10000, n_tails=2, mode='loss', nested=
         stderr('\n')
 
     return p, base_diff, diffs
+
+
+def correlation_test(y, x1, x2, nested=False, verbose=True):
+    """
+    Perform a parametric test of difference in correlation with observations between two prediction vectors, based on Steiger (1980).
+
+    :param y: ``numpy`` vector; observation vector.
+    :param x1: ``numpy`` vector; first prediction vector.
+    :param x2: ``numpy`` vector; second prediction vector.
+    :param nested: ``bool``; assume that the second model is nested within the first.
+    :param verbose: ``bool``; report progress logs to standard error.
+    :return:
+    """
+
+    n = len(y)
+
+    r1 = np.corrcoef(y, x1, rowvar=False)[0, 1]
+    r2 = np.corrcoef(y, x2, rowvar=False)[0, 1]
+    rx = np.corrcoef(x1, x2, rowvar=False)[0, 1]
+    rdiff = r1 - r2
+    if nested and r1 >= r2:
+        return 1.0, 0.0, r1, r2, rx, rdiff
+
+    r_2_mu = (r1**2 + r2 **2) / 2
+
+    f = (1 - rx) / (2 * (1 - r_2_mu))
+
+    h = (1 - f * r_2_mu) / (1 - r_2_mu)
+
+    z1 = np.arctanh(r1)
+    z2 = np.arctanh(r2)
+
+    Z = (z1 - z2) * np.sqrt((n-3)/(2*(1-rx)*h))
+
+    p = 2 * norm.sf(np.abs(Z))
+
+    return p, Z, r1, r2, rx, rdiff
+

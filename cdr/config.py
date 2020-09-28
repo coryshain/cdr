@@ -246,6 +246,8 @@ class Config(object):
             out['plot_x_inches'] = settings.getfloat('plot_x_inches', 6)
         if 'plot_y_inches' in settings or add_defaults:
             out['plot_y_inches'] = settings.getfloat('plot_y_inches', 4)
+        if 'plot_legend' in settings or add_defaults:
+            out['plot_legend'] = settings.getboolean('plot_legend', True)
         if 'cmap' in settings or add_defaults:
             out['cmap'] = settings.get('cmap', 'gist_rainbow')
         if 'dpi' in settings or add_defaults:

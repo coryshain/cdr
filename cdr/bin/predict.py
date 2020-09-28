@@ -21,11 +21,7 @@ spillover = re.compile('(z_)?([^ (),]+)S([0-9]+)')
 
 
 # These code blocks are factored out because they are used by both LM/E objects and CDR objects under 2-step analysis
-def predict_LM(model_path, outdir, X, y, dv, partition_name, model_name=''):
-    stderr('Retrieving saved model %s...\n' % m)
-    with open(model_path, 'rb') as m_file:
-        lm = pickle.load(m_file)
-
+def predict_LM(lm, outdir, X, y, dv, partition_name, model_name=''):
     lm_preds = lm.predict(X)
     with open(outdir + '/' + model_name + '/%spreds_%s.txt' % ('' if model_name=='' else model_name + '_', partition_name), 'w') as p_file:
         for i in range(len(lm_preds)):
@@ -105,6 +101,9 @@ if __name__ == '__main__':
     p = Config(args.config_path)
 
     models = filter_models(p.model_list, args.models)
+
+    model_cache = {}
+    model_cache_twostep = {}
 
     run_baseline = False
     run_cdr = False
@@ -232,11 +231,22 @@ if __name__ == '__main__':
                 f.write('%s\n' % (' '.join(evaluation_set_paths[d][0])))
                 f.write('%s\n' % (' '.join(evaluation_set_paths[d][1])))
 
+            if m in model_cache:
+                model_cur = model_cache[m]
+            else:
+                stderr('Retrieving saved model %s...\n' % m)
+                if (m.startswith('CDR') or m.startswith('DTSR')):
+                    model_cur = load_cdr(p.outdir + '/' + m)
+                else:
+                    with open(p.outdir + '/' + m + '/m.obj', 'rb') as m_file:
+                        model_cur = pickle.load(m_file)
+                model_cache[m] = model_cur
+
             if m.startswith('LME'):
                 dv = formula.strip().split('~')[0].strip()
 
                 predict_LME(
-                    p.outdir + '/' + m + '/m.obj',
+                    model_cur,
                     p.outdir + '/' + m,
                     X_baseline,
                     y,
@@ -248,7 +258,7 @@ if __name__ == '__main__':
                 dv = formula.strip().split('~')[0].strip()
 
                 predict_LM(
-                    p.outdir + '/' + m + '/m.obj',
+                    model_cur,
                     p.outdir + '/' + m,
                     X_baseline,
                     y,
@@ -269,10 +279,7 @@ if __name__ == '__main__':
                     formula[i] = c_term.sub(r'scale(\1, scale=FALSE)', formula[i])
                 formula = ' '.join(formula)
 
-                stderr('Retrieving saved model %s...\n' % m)
-                with open(p.outdir + '/' + m + '/m.obj', 'rb') as m_file:
-                    gam = pickle.load(m_file)
-                gam_preds = gam.predict(X_baseline)
+                gam_preds = model_cur.predict(X_baseline)
                 with open(p.outdir + '/' + m + '/preds_%s.txt' % partition_str, 'w') as p_file:
                     for i in range(len(gam_preds)):
                         p_file.write(str(gam_preds[i]) + '\n')
@@ -287,7 +294,7 @@ if __name__ == '__main__':
                 summary += 'Model name: %s\n\n' % m
                 summary += 'Formula:\n'
                 summary += '  ' + formula + '\n'
-                summary += str(gam.summary()) + '\n'
+                summary += str(model_cur.summary()) + '\n'
                 summary += 'Loss (%s set):\n' % partition_str
                 summary += '  MSE: %.4f\n' % gam_mse
                 summary += '  MAE: %.4f\n' % gam_mae
@@ -328,9 +335,17 @@ if __name__ == '__main__':
 
                     is_lme = '|' in Formula(p['formula']).to_lmer_formula_string()
 
+                    if m in model_cache_twostep:
+                        model_cur = model_cache_twostep[m]
+                    else:
+                        stderr('Retrieving saved model %s...\n' % m)
+                        with open(p.outdir + '/' + m + '/lm_train.obj', 'rb') as m_file:
+                            model_cur = pickle.load(m_file)
+                        model_cache_twostep[m] = model_cur
+
                     if is_lme:
                         predict_LME(
-                            p.outdir + '/' + m + '/lm_train.obj',
+                            model_cur,
                             p.outdir + '/' + m,
                             df_r,
                             df,
@@ -340,7 +355,7 @@ if __name__ == '__main__':
                         )
                     else:
                         predict_LM(
-                            p.outdir + '/' + m + '/lm_train.obj',
+                            model_cur,
                             p.outdir + '/' + m,
                             df_r,
                             df,
@@ -350,9 +365,6 @@ if __name__ == '__main__':
                         )
 
                 else:
-                    stderr('Retrieving saved model %s...\n' % m)
-                    cdr_model = load_cdr(p.outdir + '/' + m)
-
                     bayes = p['network_type'] == 'bayes'
 
                     summary = '=' * 50 + '\n'
@@ -362,18 +374,18 @@ if __name__ == '__main__':
                     summary += '  ' + formula + '\n\n'
                     summary += 'Partition: %s\n\n' % partition_str
 
-                    cdr_mse = cdr_mae = cdr_loglik = cdr_loss = cdr_percent_variance_explained = cdr_true_variance = None
+                    cdr_mse = cdr_mae = cdr_corr = cdr_loglik = cdr_loss = cdr_percent_variance_explained = cdr_true_variance = None
 
-                    if cdr_model.standardize_response and args.standardize_response:
-                        y_cur = (y_valid[dv] - cdr_model.y_train_mean) / cdr_model.y_train_sd
+                    if model_cur.standardize_response and args.standardize_response:
+                        y_cur = (y_valid[dv] - model_cur.y_train_mean) / model_cur.y_train_sd
                     else:
                         y_cur = y_valid[dv]
                     if args.mode is None or 'response' in args.mode:
                         first_obs, last_obs = get_first_last_obs_lists(y_valid)
-                        cdr_preds = cdr_model.predict(
+                        cdr_preds = model_cur.predict(
                             X,
                             y_valid.time,
-                            y_valid[cdr_model.form.rangf],
+                            y_valid[model_cur.form.rangf],
                             first_obs,
                             last_obs,
                             X_response_aligned_predictor_names=X_response_aligned_predictor_names,
@@ -413,12 +425,13 @@ if __name__ == '__main__':
 
                         cdr_mse = mse(y_cur, cdr_preds)
                         cdr_mae = mae(y_cur, cdr_preds)
+                        cdr_corr = np.corrcoef(y_cur, cdr_preds, rowvar=False)[0,1]
                         cdr_percent_variance_explained = percent_variance_explained(y_cur, cdr_preds)
                         cdr_true_variance = np.std(y_cur) ** 2
                         y_dv_mean = y_cur.mean()
 
                         err = np.sort(y_cur - cdr_preds)
-                        err_theoretical_q = cdr_model.error_theoretical_quantiles(len(err))
+                        err_theoretical_q = model_cur.error_theoretical_quantiles(len(err))
                         valid = np.isfinite(err_theoretical_q)
                         err = err[valid]
                         err_theoretical_q = err_theoretical_q[valid]
@@ -426,16 +439,16 @@ if __name__ == '__main__':
                         plot_qq(
                             err_theoretical_q,
                             err,
-                            dir=cdr_model.outdir,
+                            dir=model_cur.outdir,
                             filename='error_qq_plot_%s.png' % partition_str,
                             xlab='Theoretical',
                             ylab='Empirical'
                         )
 
-                        D, p_value = cdr_model.error_ks_test(err)
+                        D, p_value = model_cur.error_ks_test(err)
 
                     if args.mode is None or 'loglik' in args.mode:
-                        cdr_loglik_vector = cdr_model.log_lik(
+                        cdr_loglik_vector = model_cur.log_lik(
                             X,
                             y_valid,
                             X_response_aligned_predictor_names=X_response_aligned_predictor_names,
@@ -457,7 +470,7 @@ if __name__ == '__main__':
                                     l_file.write(str(cdr_loglik_vector[i]) + '\n')
                         cdr_loglik = cdr_loglik_vector.sum()
                     if args.mode is not None and 'loss' in args.mode:
-                        cdr_loss = cdr_model.loss(
+                        cdr_loss = model_cur.loss(
                             X,
                             y_valid,
                             X_response_aligned_predictor_names=X_response_aligned_predictor_names,
@@ -469,20 +482,21 @@ if __name__ == '__main__':
                         )
 
                     if bayes:
-                        if cdr_model.pc:
-                            terminal_names = cdr_model.src_terminal_names
+                        if model_cur.pc:
+                            terminal_names = model_cur.src_terminal_names
                         else:
-                            terminal_names = cdr_model.terminal_names
+                            terminal_names = model_cur.terminal_names
 
                     if args.extra_cols:
                         preds_outfile = p.outdir + '/' + m + '/preds_table_%s.csv' % partition_str
                         df_out.to_csv(preds_outfile, sep=' ', na_rep='NaN', index=False)
 
-                    summary += 'Training iterations completed: %d\n\n' % cdr_model.global_step.eval(session=cdr_model.sess)
+                    summary += 'Training iterations completed: %d\n\n' % model_cur.global_step.eval(session=model_cur.sess)
 
-                    summary += cdr_model.report_evaluation(
+                    summary += model_cur.report_evaluation(
                         mse=cdr_mse,
                         mae=cdr_mae,
+                        corr=cdr_corr,
                         loglik=cdr_loglik,
                         loss=cdr_loss,
                         percent_variance_explained=cdr_percent_variance_explained,
@@ -496,5 +510,3 @@ if __name__ == '__main__':
                         f_out.write(summary)
                     stderr(summary)
                     stderr('\n\n')
-
-                    cdr_model.finalize()
