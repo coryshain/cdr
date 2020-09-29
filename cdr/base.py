@@ -290,7 +290,6 @@ class Model(object):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.intercept_init_tf = tf.constant(self.intercept_init, dtype=self.FLOAT_TF)
-                self.epsilon = tf.constant(4 * np.finfo(self.FLOAT_NP).eps, dtype=self.FLOAT_TF)
 
                 self.y_sd_init_tf = tf.constant(float(self.y_sd_init), dtype=self.FLOAT_TF)
                 if self.constraint.lower() == 'softplus':
@@ -835,73 +834,6 @@ class Model(object):
 
                 g = ln(exp(c) / ( (exp(c) + 1) * exp( -f(c) * (x - a) / c ) - 1) - 1) + a
                 return g
-
-    def _center_and_constrain(self, param_random, param_fixed, lb=None, ub=None, use_softplus_sigmoid=True):
-        with self.sess.as_default():
-            # If the parameter is constrained, passes random effects matrix first through a non-linearity, then
-            # mean-centers its columns. However, centering after constraint can cause the constraint to be violated,
-            # so the recentered weights must be renormalized proportionally to their pre-centering mean in order
-            # to guarantee that the constraint is obeyed. How this renormalization is done depends on whether
-            # the parameter is upper-bounded, lower-bounded, or both.
-
-            with self.sess.graph.as_default():
-
-                if lb is None and ub is None:
-                    param_random -= tf.reduce_mean(param_random, axis=0, keepdims=True)
-
-                    return param_random
-
-                elif lb is not None and ub is None:
-                    max_lower_offset = param_fixed - (lb + self.epsilon)
-
-                    # Enforce constraint
-                    param_random = self.constraint_fn(param_random)
-
-                    # Center
-                    param_random_mean = tf.reduce_mean(param_random, axis=0, keepdims=True)
-                    param_random -= param_random_mean
-
-                    # Rescale to re-enforce constraint
-                    correction_factor = max_lower_offset / (param_random_mean + self.epsilon) # Add epsilon in case of underflow in softplus
-                    param_random *= correction_factor
-
-                    return param_random
-
-                elif lb is None and ub is not None:
-                    max_upper_offset = ub - param_fixed - self.epsilon
-
-                    # Enforce constraint
-                    param_random = -self.constraint_fn(param_random)
-
-                    # Center
-                    param_random_mean = tf.reduce_mean(param_random, axis=0, keepdims=True)
-                    param_random -= param_random_mean
-
-                    # Rescale to re-enforce constraint
-                    correction_factor = max_upper_offset / (-param_random_mean + self.epsilon) # Add epsilon in case of underflow in softplus
-                    param_random *= correction_factor
-
-                    return param_random
-
-                else:
-                    max_lower_offset = param_fixed - (lb + self.epsilon)
-
-                    # Enforce constraint
-                    if use_softplus_sigmoid:
-                        param_random = self._softplus_sigmoid(param_random, a=lb, b=ub)
-                    else:
-                        max_range_param = ub - lb
-                        param_random = tf.sigmoid(param_random) * max_range_param
-
-                    # Center
-                    param_random_mean = tf.reduce_mean(param_random, axis=0, keepdims=True)
-                    param_random -= param_random_mean
-
-                    # Rescale to re-enforce constraint
-                    correction_factor = max_lower_offset / (param_random_mean + self.epsilon) # Add epsilon in case of underflow in softplus
-                    param_random *= correction_factor
-
-                    return param_random
 
     def _linspace_nd(self, B, A=None, axis=0, n_interp=None):
         if n_interp is None:
@@ -2021,6 +1953,9 @@ class Model(object):
                         if not type(self).__name__.startswith('CDRNN'):
                             summary_params = self.sess.run(self.summary_params)
                             self.writer.add_summary(summary_params, self.global_step.eval(session=self.sess))
+                            if self.log_random:
+                                summary_random = self.sess.run(self.summary_random)
+                                self.writer.add_summary(summary_random, self.global_step.eval(session=self.sess))
                     else:
                         stderr('Resuming training from most recent checkpoint...\n\n')
 
@@ -2102,6 +2037,9 @@ class Model(object):
                             self.writer.add_summary(summary_train_loss, self.global_step.eval(session=self.sess))
                             summary_params = self.sess.run(self.summary_params)
                             self.writer.add_summary(summary_params, self.global_step.eval(session=self.sess))
+                            if self.log_random:
+                                summary_random = self.sess.run(self.summary_random)
+                                self.writer.add_summary(summary_random, self.global_step.eval(session=self.sess))
 
                         if self.save_freq > 0 and self.global_step.eval(session=self.sess) % self.save_freq == 0:
                             self.save()

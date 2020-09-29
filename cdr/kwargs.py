@@ -259,6 +259,12 @@ MODEL_INITIALIZATION_KWARGS = [
         'Maximum allowable value for the global norm of the gradient, which will be clipped as needed. If ``None``, no gradient clipping.'
     ),
     Kwarg(
+        'epsilon',
+        1e-6,
+        float,
+        "Epsilon parameter to use for numerical stability in bounded parameter estimation."
+    ),
+    Kwarg(
         'optim_epsilon',
         1e-8,
         float,

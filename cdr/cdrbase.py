@@ -1877,27 +1877,8 @@ class CDR(Model):
                 if dim > 0:
                     param_fixed = self.irf_params_fixed_base[family][param_name]
                     param_fixed_summary = self.irf_params_fixed_base_summary[family][param_name]
-
-                    if param_lb is not None and param_ub is None:
-                        param_fixed = param_lb + self.epsilon + self.constraint_fn(param_fixed)
-                        param_fixed_summary = param_lb + self.epsilon + self.constraint_fn(param_fixed_summary)
-                    elif param_lb is None and param_ub is not None:
-                        param_fixed = param_ub - self.epsilon - self.constraint_fn(param_fixed)
-                        param_fixed_summary = param_ub - self.epsilon - self.constraint_fn(param_fixed_summary)
-                    elif param_lb is not None and param_ub is not None:
-                        param_fixed = self._softplus_sigmoid(param_fixed, a=param_lb, b=param_ub)
-                        param_fixed_summary = self._softplus_sigmoid(param_fixed_summary, a=param_lb, b=param_ub)
-
-                    self._regularize(param_fixed, trainable_means, type='irf', var_name=param_name)
                 else:
                     param_fixed = param_fixed_summary = None
-
-                for i in range(dim):
-                    tf.summary.scalar(
-                        sn('%s/%s' % (param_name, irf_ids[i])),
-                        param_fixed_summary[0, i],
-                        collections=['params']
-                    )
 
                 # Initialize untrainable IRF parameters as constants
                 param_untrainable = tf.expand_dims(
@@ -1931,18 +1912,12 @@ class CDR(Model):
                                 irfs_ix = names2ix(irf_by_rangf[gf], irf_ids)
                                 levels_ix = np.arange(self.rangf_n_levels[i] - 1)
 
-                                param_random = self._center_and_constrain(
-                                    self.irf_params_random_base[gf][family][param_name],
-                                    tf.gather(param_fixed, irfs_ix, axis=1),
-                                    lb=param_lb,
-                                    ub=param_ub
-                                )
-                                param_random_summary = self._center_and_constrain(
-                                    self.irf_params_random_base_summary[gf][family][param_name],
-                                    tf.gather(param_summary, irfs_ix, axis=1),
-                                    lb=param_lb,
-                                    ub=param_ub
-                                )
+                                param_random = self.irf_params_random_base[gf][family][param_name]
+                                param_random_mean = tf.reduce_mean(param_random, axis=0, keepdims=True)
+                                param_random -= param_random_mean
+                                param_random_summary = self.irf_params_random_base_summary[gf][family][param_name]
+                                param_random_summary_mean = tf.reduce_mean(param_random_summary, axis=0, keepdims=True)
+                                param_random_summary -= param_random_summary_mean
 
                                 self._regularize(param_random, type='ranef', var_name='%s_by_%s' % (param_name, gf))
 
@@ -1967,8 +1942,6 @@ class CDR(Model):
                                     axis=1
                                 )
 
-                                param_random_by_rangf[gf] = param_random
-                                param_random_summary_by_rangf[gf] = param_random_summary
                                 if gf not in self.irf_params_random_means:
                                     self.irf_params_random_means[gf] = {}
                                 if family not in self.irf_params_random_means[gf]:
@@ -1978,19 +1951,51 @@ class CDR(Model):
                                 param += tf.gather(param_random, self.gf_y[:, i], axis=0)
                                 param_summary += tf.gather(param_random_summary, self.gf_y[:, i], axis=0)
 
+                                param_random_by_rangf[gf] = param_random
+                                param_random_summary_by_rangf[gf] = param_random_summary
+
                                 if self.log_random:
                                     for j in range(len(irf_by_rangf[gf])):
                                         irf_name = irf_by_rangf[gf][j]
                                         ix = irfs_ix[j]
+
                                         tf.summary.histogram(
-                                            'by_%s/%s/%s' % (gf, param_name, irf_name),
+                                            'by_%s/%s_logit/%s' % (gf, param_name, irf_name),
                                             param_random_summary[:, ix],
                                             collections=['random']
                                         )
-                            else:
-                                param_random = param_random_summary = None
-                        else:
-                            param_random = param_random_summary = None
+
+                # Initialize trainable IRF parameters as trainable variables
+                if dim > 0:
+                    param_fixed = self.irf_params_fixed_base[family][param_name]
+                    param_fixed_summary = self.irf_params_fixed_base_summary[family][param_name]
+
+                    if param_lb is not None and param_ub is None:
+                        param_fixed = param_lb + self.constraint_fn(param_fixed)
+                        param_fixed_summary = param_lb + self.constraint_fn(param_fixed_summary)
+                        param = param_lb + self.constraint_fn(param)
+                        param_summary = param_lb + self.constraint_fn(param_summary)
+                    elif param_lb is None and param_ub is not None:
+                        param_fixed = param_ub - self.constraint_fn(param_fixed)
+                        param_fixed_summary = param_ub - self.constraint_fn(param_fixed_summary)
+                        param = param_ub - self.constraint_fn(param)
+                        param_summary = param_ub - self.constraint_fn(param_summary)
+                    elif param_lb is not None and param_ub is not None:
+                        param_fixed = self._softplus_sigmoid(param_fixed, a=param_lb, b=param_ub)
+                        param_fixed_summary = self._softplus_sigmoid(param_fixed_summary, a=param_lb, b=param_ub)
+                        param = self._softplus_sigmoid(param, a=param_lb, b=param_ub)
+                        param_summary = self._softplus_sigmoid(param_summary, a=param_lb, b=param_ub)
+
+                    self._regularize(param_fixed, trainable_means, type='irf', var_name=param_name)
+                else:
+                    param_fixed = param_fixed_summary = None
+
+                for i in range(dim):
+                    tf.summary.scalar(
+                        sn('%s/%s' % (param_name, irf_ids[i])),
+                        param_fixed_summary[0, i],
+                        collections=['params']
+                    )
 
                 # Combine trainable and untrainable parameters
                 if len(untrainable_ix) > 0:
