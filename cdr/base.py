@@ -1953,7 +1953,7 @@ class Model(object):
                         if not type(self).__name__.startswith('CDRNN'):
                             summary_params = self.sess.run(self.summary_params)
                             self.writer.add_summary(summary_params, self.global_step.eval(session=self.sess))
-                            if self.log_random:
+                            if self.log_random and len(self.rangf) > 0:
                                 summary_random = self.sess.run(self.summary_random)
                                 self.writer.add_summary(summary_random, self.global_step.eval(session=self.sess))
                     else:
@@ -2037,7 +2037,7 @@ class Model(object):
                             self.writer.add_summary(summary_train_loss, self.global_step.eval(session=self.sess))
                             summary_params = self.sess.run(self.summary_params)
                             self.writer.add_summary(summary_params, self.global_step.eval(session=self.sess))
-                            if self.log_random:
+                            if self.log_random and len(self.rangf) > 0:
                                 summary_random = self.sess.run(self.summary_random)
                                 self.writer.add_summary(summary_random, self.global_step.eval(session=self.sess))
 

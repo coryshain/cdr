@@ -260,7 +260,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'epsilon',
-        1e-6,
+        1e-5,
         float,
         "Epsilon parameter to use for numerical stability in bounded parameter estimation."
     ),

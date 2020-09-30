@@ -52,15 +52,7 @@ def empirical_integral(irf, session=None):
     return f
 
 
-def unnormalized_gamma(alpha, beta):
-    return lambda x: x ** (alpha - 1) * tf.exp(-beta * x)
-
-
-def unnormalized_gaussian(mu, sigma2):
-    return lambda x: tf.exp(-(x - mu) ** 2 / sigma2)
-
-
-def exponential_irf_lambdas(params, integral_ub=None, session=None):
+def exponential_irf_lambdas(params, integral_ub=None, epsilon=4 * np.finfo('float32').eps, session=None):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
@@ -81,11 +73,11 @@ def exponential_irf_lambdas(params, integral_ub=None, session=None):
             else:
                 norm_const = cdf(integral_ub)
 
-                def irf(x, pdf=pdf, norm_const=norm_const):
-                    return pdf(x) / norm_const
+                def irf(x, pdf=pdf, norm_const=norm_const, epsilon=epsilon):
+                    return pdf(x) / (norm_const + epsilon)
 
-                def irf_proportion_in_bounds(x, cdf=cdf, norm_const=norm_const):
-                    return cdf(x) / norm_const
+                def irf_proportion_in_bounds(x, cdf=cdf, norm_const=norm_const, epsilon=epsilon):
+                    return cdf(x) / (norm_const + epsilon)
 
             return irf, irf_proportion_in_bounds
 
@@ -116,10 +108,10 @@ def gamma_irf_lambdas(params, integral_ub=None, session=None, epsilon=4 * np.fin
                 norm_const = cdf(integral_ub)
 
                 def irf(x, pdf=pdf, norm_const=norm_const, epsilon=epsilon):
-                    return pdf(x + epsilon) / norm_const
+                    return pdf(x + epsilon) / (norm_const + epsilon)
 
                 def irf_proportion_in_bounds(x, cdf=cdf, norm_const=norm_const, epsilon=epsilon):
-                    return cdf(x + epsilon) / norm_const
+                    return cdf(x + epsilon) / (norm_const + epsilon)
 
             return irf, irf_proportion_in_bounds
 
@@ -150,15 +142,15 @@ def shifted_gamma_irf_lambdas(params, integral_ub=None, session=None, epsilon=4 
             norm_const = ub - cdf_0
 
             def irf(x, pdf=pdf, delta=delta, norm_const=norm_const, epsilon=epsilon):
-                return pdf(x - delta + epsilon) / norm_const
+                return pdf(x - delta + epsilon) / (norm_const + epsilon)
 
             def irf_proportion_in_bounds(x, cdf=cdf, cdf_0=cdf_0, delta=delta, norm_const=norm_const, epsilon=epsilon):
-                return (cdf(x - delta + epsilon) - cdf_0) / norm_const
+                return (cdf(x - delta + epsilon) - cdf_0) / (norm_const + epsilon)
 
             return irf, irf_proportion_in_bounds
 
 
-def normal_irf_lambdas(params, integral_ub=None, session=None):
+def normal_irf_lambdas(params, integral_ub=None, epsilon=4 * np.finfo('float32').eps, session=None):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
@@ -181,16 +173,16 @@ def normal_irf_lambdas(params, integral_ub=None, session=None):
 
             norm_const = ub - cdf_0
 
-            def irf(x, pdf=pdf, norm_const=norm_const):
-                return pdf(x) / norm_const
+            def irf(x, pdf=pdf, norm_const=norm_const, epsilon=epsilon):
+                return pdf(x) / (norm_const + epsilon)
 
-            def irf_proportion_in_bounds(x, cdf=cdf, cdf_0=cdf_0, norm_const=norm_const):
-                return (cdf(x) - cdf_0) / norm_const
+            def irf_proportion_in_bounds(x, cdf=cdf, cdf_0=cdf_0, norm_const=norm_const, epsilon=epsilon):
+                return (cdf(x) - cdf_0) / (norm_const + epsilon)
                 
             return irf, irf_proportion_in_bounds
 
 
-def skew_normal_irf_lambdas(params, integral_ub, session=None):
+def skew_normal_irf_lambdas(params, integral_ub, epsilon=4 * np.finfo('float32').eps, session=None):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
@@ -202,22 +194,22 @@ def skew_normal_irf_lambdas(params, integral_ub, session=None):
             stdnorm_pdf = stdnorm.prob
             stdnorm_cdf = stdnorm.cdf
             
-            def irf_base(x,  mu=mu, sigma=sigma, alpha=alpha, pdf=stdnorm_pdf, cdf=stdnorm_cdf):
-                return (stdnorm_pdf((x - mu) / sigma) * stdnorm_cdf(alpha * (x - mu) / sigma))
+            def irf_base(x,  mu=mu, sigma=sigma, alpha=alpha, pdf=stdnorm_pdf, cdf=stdnorm_cdf, epsilon=epsilon):
+                return (pdf((x - mu) / (sigma + epsilon)) * cdf(alpha * (x - mu) / (sigma + epsilon)))
             
             cdf = empirical_integral(irf_base, session=session)
             norm_const = cdf(integral_ub)
             
-            def irf(x, irf_base=irf_base, norm_const=norm_const):
-                return irf_base(x) / norm_const
+            def irf(x, irf_base=irf_base, norm_const=norm_const, epsilon=epsilon):
+                return irf_base(x) / (norm_const + epsilon)
 
-            def irf_proportion_in_bounds(x, cdf=cdf, norm_const=norm_const):
-                return cdf(x) / norm_const
+            def irf_proportion_in_bounds(x, cdf=cdf, norm_const=norm_const, epsilon=epsilon):
+                return cdf(x) / (norm_const + epsilon)
 
             return irf, irf_proportion_in_bounds
 
 
-def emg_irf_lambdas(params, integral_ub=None, session=None):
+def emg_irf_lambdas(params, integral_ub=None, epsilon=4 * np.finfo('float32').eps, session=None):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
@@ -240,12 +232,12 @@ def emg_irf_lambdas(params, integral_ub=None, session=None):
 
             norm_const = ub - cdf(0)
 
-            def irf(x, L=L, mu=mu, sigma=sigma, norm_const=norm_const):
+            def irf(x, L=L, mu=mu, sigma=sigma, norm_const=norm_const, epsilon=epsilon):
                 return (L / 2 * tf.exp(0.5 * L * (2. * mu + L * sigma ** 2. - 2. * x)) *
-                       tf.erfc((mu + L * sigma ** 2 - x) / (tf.sqrt(2.) * sigma))) / norm_const
+                       tf.erfc((mu + L * sigma ** 2 - x) / (tf.sqrt(2.) * sigma + epsilon))) / (norm_const + epsilon)
 
-            def irf_proportion_in_bounds(x, cdf=cdf, norm_const=norm_const, cdf_0=cdf_0):
-                return (cdf(x) - cdf_0) / norm_const
+            def irf_proportion_in_bounds(x, cdf=cdf, norm_const=norm_const, cdf_0=cdf_0, epsilon=epsilon):
+                return (cdf(x) - cdf_0) / (norm_const + epsilon)
 
             return irf, irf_proportion_in_bounds
 
@@ -270,10 +262,10 @@ def beta_prime_irf_lambdas(params, integral_ub=None, session=None, epsilon=4 * n
             norm_const = ub - cdf_0
 
             def irf(x, alpha=alpha, beta=beta, norm_const=norm_const, epsilon=epsilon):
-                return ((x + epsilon) ** (alpha - 1.) * (1. + (x + epsilon)) ** (-alpha - beta)) / norm_const
+                return ((x + epsilon) ** (alpha - 1.) * (1. + (x + epsilon)) ** (-alpha - beta)) / (norm_const + epsilon)
 
-            def irf_proportion_in_bounds(x, cdf=cdf, cdf_0=cdf_0, norm_const=norm_const):
-                return (cdf(x) - cdf_0) / norm_const
+            def irf_proportion_in_bounds(x, cdf=cdf, cdf_0=cdf_0, norm_const=norm_const, epsilon=epsilon):
+                return (cdf(x) - cdf_0) / (norm_const + epsilon)
 
             return irf, irf_proportion_in_bounds
 
@@ -299,10 +291,10 @@ def shifted_beta_prime_irf_lambdas(params, integral_ub=None, session=None, epsil
             norm_const = ub - cdf_0
 
             def irf(x, alpha=alpha, beta=beta, delta=delta, norm_const=norm_const, epsilon=epsilon):
-                return ((x - delta + epsilon) ** (alpha - 1) * (1 + (x - delta + epsilon)) ** (-alpha - beta)) / norm_const
+                return ((x - delta + epsilon) ** (alpha - 1) * (1 + (x - delta + epsilon)) ** (-alpha - beta)) / (norm_const + epsilon)
 
             def irf_proportion_in_bounds(x, cdf=cdf, cdf_0=cdf_0, delta=delta, norm_const=norm_const, epsilon=epsilon):
-                return (cdf(x - delta + epsilon) - cdf_0) / norm_const
+                return (cdf(x - delta + epsilon) - cdf_0) / (norm_const + epsilon)
 
             return irf, irf_proportion_in_bounds
 
@@ -338,10 +330,10 @@ def double_gamma_1_irf_lambdas(params, integral_ub=None, session=None, epsilon=4
                 norm_const = cdf_main(integral_ub) - c * cdf_undershoot(integral_ub)
 
             def irf(x, pdf_main=pdf_main, pdf_undershoot=pdf_undershoot, norm_const=norm_const, epsilon=epsilon):
-                return (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / norm_const
+                return (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (norm_const + epsilon)
 
             def irf_proportion_in_bounds(x, cdf_main=cdf_main, cdf_undershoot=cdf_undershoot, norm_const=norm_const, epsilon=epsilon):
-                return (cdf_main(x) - cdf_undershoot(x)) / norm_const
+                return (cdf_main(x) - cdf_undershoot(x)) / (norm_const + epsilon)
 
             return irf, irf_proportion_in_bounds
 
@@ -377,10 +369,10 @@ def double_gamma_2_irf_lambdas(params, integral_ub=None, session=None, epsilon=4
                 norm_const = cdf_main(integral_ub) - c * cdf_undershoot(integral_ub)
 
             def irf(x, pdf_main=pdf_main, pdf_undershoot=pdf_undershoot, norm_const=norm_const, epsilon=epsilon):
-                return (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / norm_const
+                return (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (norm_const + epsilon)
 
             def irf_proportion_in_bounds(x, cdf_main=cdf_main, cdf_undershoot=cdf_undershoot, norm_const=norm_const, epsilon=epsilon):
-                return (cdf_main(x) - cdf_undershoot(x)) / norm_const
+                return (cdf_main(x) - cdf_undershoot(x)) / (norm_const + epsilon)
 
             return irf, irf_proportion_in_bounds
 
@@ -416,10 +408,10 @@ def double_gamma_3_irf_lambdas(params, integral_ub=None, session=None, epsilon=4
                 norm_const = cdf_main(integral_ub) - c * cdf_undershoot(integral_ub)
 
             def irf(x, pdf_main=pdf_main, pdf_undershoot=pdf_undershoot, norm_const=norm_const, epsilon=epsilon):
-                return (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / norm_const
+                return (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (norm_const + epsilon)
 
             def irf_proportion_in_bounds(x, cdf_main=cdf_main, cdf_undershoot=cdf_undershoot, norm_const=norm_const, epsilon=epsilon):
-                return (cdf_main(x) - cdf_undershoot(x)) / norm_const
+                return (cdf_main(x) - cdf_undershoot(x)) / (norm_const + epsilon)
 
             return irf, irf_proportion_in_bounds
 
@@ -455,10 +447,10 @@ def double_gamma_4_irf_lambdas(params, integral_ub=None, session=None, epsilon=4
                 norm_const = cdf_main(integral_ub) - c * cdf_undershoot(integral_ub)
 
             def irf(x, pdf_main=pdf_main, pdf_undershoot=pdf_undershoot, norm_const=norm_const, epsilon=epsilon):
-                return (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / norm_const
+                return (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (norm_const + epsilon)
 
             def irf_proportion_in_bounds(x, cdf_main=cdf_main, cdf_undershoot=cdf_undershoot, norm_const=norm_const, epsilon=epsilon):
-                return (cdf_main(x) - cdf_undershoot(x)) / norm_const
+                return (cdf_main(x) - cdf_undershoot(x)) / (norm_const + epsilon)
 
             return irf, irf_proportion_in_bounds
 
@@ -494,10 +486,10 @@ def double_gamma_5_irf_lambdas(params, integral_ub=None, session=None, epsilon=4
                 norm_const = cdf_main(integral_ub) - c * cdf_undershoot(integral_ub)
 
             def irf(x, pdf_main=pdf_main, pdf_undershoot=pdf_undershoot, norm_const=norm_const, epsilon=epsilon):
-                return (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / norm_const
+                return (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (norm_const + epsilon)
 
             def irf_proportion_in_bounds(x, cdf_main=cdf_main, cdf_undershoot=cdf_undershoot, norm_const=norm_const, epsilon=epsilon):
-                return (cdf_main(x) - cdf_undershoot(x)) / norm_const
+                return (cdf_main(x) - cdf_undershoot(x)) / (norm_const + epsilon)
 
             return irf, irf_proportion_in_bounds
 
@@ -678,16 +670,16 @@ def kernel_smooth(c, v, b, kernel='gaussian', epsilon=4 * np.finfo('float32').ep
                     raise ValueError('Unrecognized smoother kernel "%s".' % kernel)
 
                 num = tf.reduce_sum(_r * _v, axis=-2)
-                denom = tf.reduce_sum(_r, axis=-2) + epsilon
+                denom = tf.reduce_sum(_r, axis=-2)
 
-                out = num / denom
+                out = num / (denom + epsilon)
 
                 return out
 
     return f
 
 
-def summed_gaussians(c, v, b, integral_ub=None, session=None):
+def summed_gaussians(c, v, b, integral_ub=None, epsilon=4 * np.finfo('float32').eps, session=None):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
@@ -703,7 +695,7 @@ def summed_gaussians(c, v, b, integral_ub=None, session=None):
 
             dist = tf.contrib.distributions.Normal(
                 loc=_c,
-                scale=_b,
+                scale=_b + epsilon,
             )
             cdf = dist.cdf
 
@@ -716,7 +708,7 @@ def summed_gaussians(c, v, b, integral_ub=None, session=None):
 
             norm_const = tf.reduce_sum((ub - cdf_0) * _v, axis=-2)
 
-            def irf(x, _v=_v, norm_const=norm_const):
+            def irf(x, _v=_v, norm_const=norm_const, epsilon=epsilon):
                 _x = x
                 if len(x.shape) == 1:
                     _x = _x[None, :, None]
@@ -726,10 +718,10 @@ def summed_gaussians(c, v, b, integral_ub=None, session=None):
                     raise ValueError('Query to summed gaussians IRF must be exactly rank 3')
                 _x = _x[..., None]
 
-                return tf.reduce_sum(dist.prob(_x) * _v, axis=-2) / norm_const
+                return tf.reduce_sum(dist.prob(_x) * _v, axis=-2) / (norm_const + epsilon)
             
-            def irf_proportion_in_bounds(x, cdf=cdf, cdf_0=cdf_0, _v=_v, norm_const=norm_const):
-                return (tf.reduce_sum((ub - cdf(x)) * _v, axis=-2) - tf.reduce_sum(cdf_0 * _v, axis=-2)) / norm_const
+            def irf_proportion_in_bounds(x, cdf=cdf, cdf_0=cdf_0, _v=_v, norm_const=norm_const, epsilon=epsilon):
+                return (tf.reduce_sum((ub - cdf(x)) * _v, axis=-2) - tf.reduce_sum(cdf_0 * _v, axis=-2)) / (norm_const + epsilon)
 
             return irf, irf_proportion_in_bounds
 
@@ -792,8 +784,8 @@ def nonparametric_smooth(
 
                 assert support is not None, 'Argument ``support`` must be provided for spline IRFs'
 
-                def out(x, f=f, session=session, integral_ub=integral_ub):
-                    return f(x) / empirical_integral(integral_ub, session=session), lambda x: empirical_integral(x, session=session)
+                def out(x, f=f, session=session, integral_ub=integral_ub, epsilon=epsilon):
+                    return f(x) / (empirical_integral(integral_ub, session=session) + epsilon), lambda x: empirical_integral(x, session=session)
 
             else:
                 # Build scales at control points
@@ -802,11 +794,11 @@ def nonparametric_smooth(
                     f = kernel_smooth(c, v, b, epsilon=epsilon, session=session)
                     assert support is not None, 'Argument ``support`` must be provided for kernel smooth IRFS'
 
-                    def out(x, f=f, session=session, integral_ub=integral_ub):
-                        return f(x)/ empirical_integral(integral_ub, session=session), lambda x: empirical_integral(x, session=session)
+                    def out(x, f=f, session=session, integral_ub=integral_ub, epsilon=epsilon):
+                        return f(x) / (empirical_integral(integral_ub, session=session) + epsilon), lambda x: empirical_integral(x, session=session)
 
                 elif method.lower() == 'summed_gaussians':
-                    out = summed_gaussians(c, v, b, integral_ub=integral_ub, session=session)
+                    out = summed_gaussians(c, v, b, integral_ub=integral_ub, epsilon=epsilon, session=session)
 
                 else:
                     raise ValueError('Unrecognized non-parametric IRF type: %s' % method)
@@ -1584,7 +1576,8 @@ class CDR(Model):
                 def exponential(params):
                     return exponential_irf_lambdas(
                         params,
-                        session=self.sess
+                        session=self.sess,
+                        epsilon=self.epsilon
                     )
 
                 self.irf_lambdas['Exp'] = exponential
@@ -1622,7 +1615,8 @@ class CDR(Model):
                     return normal_irf_lambdas(
                         params,
                         integral_ub=integral_ub,
-                        session=self.sess
+                        session=self.sess,
+                        epsilon=self.epsilon,
                     )
 
                 self.irf_lambdas['Normal'] = normal
@@ -1631,7 +1625,8 @@ class CDR(Model):
                     return skew_normal_irf_lambdas(
                         params,
                         self.t_delta_limit.astype(dtype=self.FLOAT_NP) if integral_ub is None else integral_ub,
-                        session=self.sess
+                        session=self.sess,
+                        epsilon=self.epsilon
                     )
 
                 self.irf_lambdas['SkewNormal'] = skew_normal
@@ -1640,7 +1635,8 @@ class CDR(Model):
                     return emg_irf_lambdas(
                         params,
                         integral_ub=integral_ub,
-                        session=self.sess
+                        session=self.sess,
+                        epsilon=self.epsilon
                     )
 
                 self.irf_lambdas['EMG'] = emg
@@ -2886,7 +2882,7 @@ class CDR(Model):
                         t = self.t_delta_limit.astype(dtype=self.FLOAT_NP)
                     for x in self.irf_proportion_in_bounds_mc:
                         prop_before_cur = self.irf_proportion_in_bounds_mc[x]['composite']['scaled'](t)
-                        penalty_cur = tf.exp(1 / prop_before_cur)
+                        penalty_cur = tf.exp(1 / (prop_before_cur + self.epsilon))
                         n += 1
                         oob_penalty += penalty_cur
                     if n > 0:
@@ -3452,8 +3448,6 @@ class CDR(Model):
         for kwarg in CDR_INITIALIZATION_KWARGS:
             val = getattr(self, kwarg.key)
             out += ' ' * indent + '  %s: %s\n' %(kwarg.key, "\"%s\"" %val if isinstance(val, str) else val)
-
-        out += '\n'
 
         return out
 
