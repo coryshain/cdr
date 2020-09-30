@@ -982,7 +982,7 @@ class CDRNN(Model):
                         denom = tf.reduce_sum(mask)
 
                         h_sum = tf.reduce_sum(rnn_hidden[l+1] * mask, axis=reduction_axes) # 0th layer is the input, so + 1
-                        h_mean = h_sum / tf.maximum(denom, self.epsilon)
+                        h_mean = h_sum / (denom + self.epsilon)
                         h_ema = self.rnn_h_ema[l]
                         h_ema_op = tf.assign(
                             h_ema,
@@ -991,7 +991,7 @@ class CDRNN(Model):
                         self.rnn_h_ema_ops.append(h_ema_op)
 
                         c_sum = tf.reduce_sum(rnn_cell[l] * mask, axis=reduction_axes)
-                        c_mean = c_sum / tf.maximum(denom, self.epsilon)
+                        c_mean = c_sum / (denom + self.epsilon)
                         c_ema = self.rnn_c_ema[l]
                         c_ema_op = tf.assign(
                             c_ema,
