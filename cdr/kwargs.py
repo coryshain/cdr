@@ -266,7 +266,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'optim_epsilon',
-        1e-8,
+        1e-2,
         float,
         "Epsilon parameter to use if **optim_name** in ``['Adam', 'Nadam']``, ignored otherwise."
     ),

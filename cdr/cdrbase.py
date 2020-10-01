@@ -1576,8 +1576,7 @@ class CDR(Model):
                 def exponential(params):
                     return exponential_irf_lambdas(
                         params,
-                        session=self.sess,
-                        epsilon=self.epsilon
+                        session=self.sess
                     )
 
                 self.irf_lambdas['Exp'] = exponential
@@ -1588,7 +1587,6 @@ class CDR(Model):
                         params,
                         integral_ub=integral_ub,
                         session=self.sess,
-                        epsilon=self.epsilon,
                         validate_irf_args=self.validate_irf_args
                     )
 
@@ -1603,7 +1601,6 @@ class CDR(Model):
                         params,
                         integral_ub=integral_ub,
                         session=self.sess,
-                        epsilon=self.epsilon,
                         validate_irf_args=self.validate_irf_args
                     )
 
@@ -1615,8 +1612,7 @@ class CDR(Model):
                     return normal_irf_lambdas(
                         params,
                         integral_ub=integral_ub,
-                        session=self.sess,
-                        epsilon=self.epsilon,
+                        session=self.sess
                     )
 
                 self.irf_lambdas['Normal'] = normal
@@ -1625,8 +1621,7 @@ class CDR(Model):
                     return skew_normal_irf_lambdas(
                         params,
                         self.t_delta_limit.astype(dtype=self.FLOAT_NP) if integral_ub is None else integral_ub,
-                        session=self.sess,
-                        epsilon=self.epsilon
+                        session=self.sess
                     )
 
                 self.irf_lambdas['SkewNormal'] = skew_normal
@@ -1635,8 +1630,7 @@ class CDR(Model):
                     return emg_irf_lambdas(
                         params,
                         integral_ub=integral_ub,
-                        session=self.sess,
-                        epsilon=self.epsilon
+                        session=self.sess
                     )
 
                 self.irf_lambdas['EMG'] = emg
@@ -1645,8 +1639,7 @@ class CDR(Model):
                     return beta_prime_irf_lambdas(
                         params,
                         integral_ub=integral_ub,
-                        session=self.sess,
-                        epsilon=self.epsilon
+                        session=self.sess
                     )
 
                 self.irf_lambdas['BetaPrime'] = beta_prime
@@ -1655,8 +1648,7 @@ class CDR(Model):
                     return shifted_beta_prime_irf_lambdas(
                         params,
                         integral_ub=integral_ub,
-                        session=self.sess,
-                        epsilon=self.epsilon
+                        session=self.sess
                     )
 
                 self.irf_lambdas['ShiftedBetaPrime'] = shifted_beta_prime
@@ -1666,7 +1658,6 @@ class CDR(Model):
                         params,
                         integral_ub=integral_ub,
                         session=self.sess,
-                        epsilon=self.epsilon,
                         validate_irf_args=self.validate_irf_args
                     )
 
@@ -1677,7 +1668,6 @@ class CDR(Model):
                         params,
                         integral_ub=integral_ub,
                         session=self.sess,
-                        epsilon=self.epsilon,
                         validate_irf_args=self.validate_irf_args
                     )
 
@@ -1688,7 +1678,6 @@ class CDR(Model):
                         params,
                         integral_ub=integral_ub,
                         session=self.sess,
-                        epsilon=self.epsilon,
                         validate_irf_args=self.validate_irf_args
                     )
 
@@ -1699,7 +1688,6 @@ class CDR(Model):
                         params,
                         integral_ub=integral_ub,
                         session=self.sess,
-                        epsilon=self.epsilon,
                         validate_irf_args=self.validate_irf_args
                     )
 
@@ -1710,7 +1698,6 @@ class CDR(Model):
                         params,
                         integral_ub=integral_ub,
                         session=self.sess,
-                        epsilon=self.epsilon,
                         validate_irf_args=self.validate_irf_args
                     )
 
@@ -1735,7 +1722,6 @@ class CDR(Model):
                 method=method,
                 roughness_penalty=roughness_penalty,
                 support=support,
-                epsilon=self.epsilon,
                 int_type=self.INT_TF,
                 float_type=self.FLOAT_TF,
                 session=self.sess
@@ -1748,7 +1734,6 @@ class CDR(Model):
                 order=order,
                 roughness_penalty=roughness_penalty,
                 support=support,
-                epsilon=epsilon,
                 int_type=int_type,
                 float_type=float_type,
                 session=session

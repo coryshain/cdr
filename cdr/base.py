@@ -535,12 +535,10 @@ class Model(object):
                 self.training_mse_in = tf.placeholder(self.FLOAT_TF, shape=[], name='training_mse_in')
                 self.training_mse = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_mse')
                 self.set_training_mse = tf.assign(self.training_mse, self.training_mse_in)
-                if self.standardize_response:
-                    max_sd = 1
-                else:
-                    max_sd = self.y_train_sd
-                self.training_percent_variance_explained = tf.maximum(0.,
-                                                                      (1. - self.training_mse / (max_sd ** 2)) * 100.)
+                self.training_percent_variance_explained = tf.maximum(
+                    0.,
+                    (1. - self.training_mse / (self.y_train_sd ** 2)) * 100.
+                )
 
                 self.training_mae_in = tf.placeholder(self.FLOAT_TF, shape=[], name='training_mae_in')
                 self.training_mae = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_mae')
