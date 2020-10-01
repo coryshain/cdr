@@ -274,7 +274,7 @@ class CDRMLE(CDR):
                         dtype=self.FLOAT_TF,
                         name='y_sd'
                     )
-                )
+                ) + self.epsilon
                 self.y_sd_summary = self.y_sd
                 tf.summary.scalar(
                     'error/y_sd',
@@ -301,7 +301,7 @@ class CDRMLE(CDR):
                             dtype=self.FLOAT_TF,
                             name='y_skewness'
                         )
-                    )
+                    ) + self.epsilon
                     self.y_tailweight_summary = self.y_tailweight
                     tf.summary.scalar(
                         'error/y_tailweight',

@@ -465,6 +465,7 @@ class CDRNN(Model):
                         bias_initializer='zeros_initializer',
                         dropout=dropout,
                         batch_normalization_decay=self.batch_normalization_decay,
+                        epsilon=self.epsilon,
                         session=self.sess,
                         name='input_projection_l%s' % (l + 1)
                     )
@@ -505,6 +506,7 @@ class CDRNN(Model):
                         return_sequences=return_seqs,
                         batch_normalization_decay=None,
                         name='rnn_l%d' % (l + 1),
+                        epsilon=self.epsilon,
                         session=self.sess
                     )
                     self.regularizable_layers.append(layer)
@@ -530,6 +532,7 @@ class CDRNN(Model):
                         bias_initializer='zeros_initializer',
                         dropout=None,
                         batch_normalization_decay=self.batch_normalization_decay,
+                        epsilon=self.epsilon,
                         session=self.sess,
                         name='rnn_projection_l%s' % (l + 1)
                     )
@@ -559,6 +562,7 @@ class CDRNN(Model):
                     bias_initializer='zeros_initializer',
                     dropout=self.irf_dropout_rate,
                     batch_normalization_decay=self.batch_normalization_decay,
+                    epsilon=self.epsilon,
                     session=self.sess,
                     name='hidden_state_to_irf_l1'
                 )
@@ -568,17 +572,17 @@ class CDRNN(Model):
                 for l in range(self.n_layers_irf + 1):
                     if l < self.n_layers_irf:
                         units = self.n_units_irf[l]
-                        use_bias = True
                         activation = self.irf_inner_activation
                         dropout = self.irf_dropout_rate
                         bn = self.batch_normalization_decay
+                        use_bias = True
                     else:
                         # units = 1
                         units = 1
-                        use_bias = False
                         activation = self.irf_activation
                         dropout = None
                         bn = None
+                        use_bias = False
 
                     projection = DenseLayer(
                         training=self.training,
@@ -589,6 +593,7 @@ class CDRNN(Model):
                         bias_initializer='zeros_initializer',
                         dropout=dropout,
                         batch_normalization_decay=bn,
+                        epsilon=self.epsilon,
                         session=self.sess,
                         name='irf_l%s' % (l + 1)
                     )
@@ -605,6 +610,7 @@ class CDRNN(Model):
                         activation = self.error_params_fn_inner_activation
                         dropout = self.error_params_fn_dropout_rate
                         bn = self.batch_normalization_decay
+                        use_bias = True
                     else:
                         units = 1
                         if self.asymmetric_error:
@@ -612,16 +618,18 @@ class CDRNN(Model):
                         activation = self.error_params_fn_activation
                         dropout = None
                         bn = None
+                        use_bias = False
 
                     projection = DenseLayer(
                         training=self.training,
                         units=units,
-                        use_bias=True,
+                        use_bias=use_bias,
                         activation=activation,
                         kernel_initializer=self.kernel_initializer,
                         bias_initializer='zeros_initializer',
                         dropout=dropout,
                         batch_normalization_decay=bn,
+                        epsilon=self.epsilon,
                         session=self.sess,
                         name='error_params_fn_l%s' % (l + 1)
                     )

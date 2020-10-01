@@ -355,6 +355,7 @@ class CDRNNCell(LayerRNNCell):
                             project_inputs=False,
                             normalize_weights=self._weight_normalization,
                             reuse=tf.AUTO_REUSE,
+                            epsilon=self._epsilon,
                             session=self._session,
                             name=name_cur
                         )
@@ -368,6 +369,7 @@ class CDRNNCell(LayerRNNCell):
                             activation=activation,
                             batch_normalization_decay=self._batch_normalization_decay,
                             normalize_weights=self._weight_normalization,
+                            epsilon=self._epsilon,
                             session=self._session,
                             reuse=tf.AUTO_REUSE,
                             name=name_cur
@@ -788,6 +790,7 @@ class DenseLayer(object):
             batch_normalization_use_gamma=True,
             normalize_weights=False,
             reuse=tf.AUTO_REUSE,
+            epsilon=1e-3,
             session=None,
             name=None
     ):
@@ -810,6 +813,7 @@ class DenseLayer(object):
                 self.batch_normalization_use_gamma = batch_normalization_use_gamma
                 self.normalize_weights = normalize_weights
                 self.reuse = reuse
+                self.epsilon = epsilon
                 self.name = name
 
                 self.dense_layer = None
@@ -874,6 +878,7 @@ class DenseLayer(object):
                         center=self.batch_normalization_use_beta,
                         scale=self.batch_normalization_use_gamma,
                         zero_debias_moving_mean=True,
+                        epsilon=self.epsilon,
                         is_training=self.training,
                         updates_collections=None,
                         reuse=self.reuse,
@@ -907,6 +912,7 @@ class DenseResidualLayer(object):
             project_inputs=False,
             normalize_weights=False,
             reuse=None,
+            epsilon=1e-3,
             session=None,
             name=None
     ):
@@ -943,6 +949,7 @@ class DenseResidualLayer(object):
         self.project_inputs = project_inputs
         self.normalize_weights = normalize_weights
         self.reuse = reuse
+        self.epsilon = epsilon
         self.name = name
 
         self.dense_layers = None
@@ -1026,6 +1033,7 @@ class DenseResidualLayer(object):
                             decay=self.batch_normalization_decay,
                             center=True,
                             scale=True,
+                            epsilon=self.epsilon,
                             zero_debias_moving_mean=True,
                             is_training=self.training,
                             updates_collections=None,
@@ -1046,6 +1054,7 @@ class DenseResidualLayer(object):
                         decay=self.batch_normalization_decay,
                         center=True,
                         scale=True,
+                        epsilon=self.epsilon,
                         zero_debias_moving_mean=True,
                         is_training=self.training,
                         updates_collections=None,
@@ -1083,6 +1092,7 @@ class RNNLayer(object):
             refeed_outputs=False,
             return_sequences=True,
             batch_normalization_decay=None,
+            epsilon=1e-3,
             name=None,
             session=None
     ):
@@ -1102,6 +1112,7 @@ class RNNLayer(object):
         self.refeed_outputs = refeed_outputs
         self.return_sequences = return_sequences
         self.batch_normalization_decay = batch_normalization_decay
+        self.epsilon = epsilon
         self.name = name
 
         self.rnn_layer = None
@@ -1206,6 +1217,7 @@ class RNNLayer(object):
                         decay=self.batch_normalization_decay,
                         center=True,
                         scale=True,
+                        epsilon=self.epsilon,
                         zero_debias_moving_mean=True,
                         is_training=self.training,
                         updates_collections=None

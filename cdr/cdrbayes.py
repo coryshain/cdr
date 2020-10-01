@@ -234,7 +234,7 @@ class CDRBayes(CDR):
 
                         intercept_q = Normal(
                             loc=intercept_q_loc,
-                            scale=self.constraint_fn(intercept_q_scale),
+                            scale=self.constraint_fn(intercept_q_scale) + self.epsilon,
                             name='intercept_q'
                         )
 
@@ -312,7 +312,7 @@ class CDRBayes(CDR):
 
                         intercept_q = Normal(
                             loc=intercept_q_loc,
-                            scale=self.constraint_fn(intercept_q_scale),
+                            scale=self.constraint_fn(intercept_q_scale) + self.epsilon,
                             name='intercept_q_by_%s' % sn(ran_gf)
                         )
 
@@ -397,7 +397,7 @@ class CDRBayes(CDR):
 
                         coefficient_q = Normal(
                             loc=coefficient_q_loc,
-                            scale=self.constraint_fn(coefficient_q_scale),
+                            scale=self.constraint_fn(coefficient_q_scale) + self.epsilon,
                             name='coefficient_q'
                         )
                         coefficient_summary = coefficient_q.mean()
@@ -471,7 +471,7 @@ class CDRBayes(CDR):
 
                         coefficient_q = Normal(
                             loc=coefficient_q_loc,
-                            scale=self.constraint_fn(coefficient_q_scale),
+                            scale=self.constraint_fn(coefficient_q_scale) + self.epsilon,
                             name='coefficient_q_by_%s' % sn(ran_gf)
                         )
                         coefficient_summary = coefficient_q.mean()
@@ -557,7 +557,7 @@ class CDRBayes(CDR):
 
                         interaction_q = Normal(
                             loc=interaction_q_loc,
-                            scale=self.constraint_fn(interaction_q_scale),
+                            scale=self.constraint_fn(interaction_q_scale) + self.epsilon,
                             name='interaction_q'
                         )
                         interaction_summary = interaction_q.mean()
@@ -631,7 +631,7 @@ class CDRBayes(CDR):
 
                         interaction_q = Normal(
                             loc=interaction_q_loc,
-                            scale=self.constraint_fn(interaction_q_scale),
+                            scale=self.constraint_fn(interaction_q_scale) + self.epsilon,
                             name='interaction_q_by_%s' % sn(ran_gf)
                         )
                         interaction_summary = interaction_q.mean()
@@ -716,7 +716,7 @@ class CDRBayes(CDR):
 
                         param_q = Normal(
                             loc=param_q_loc,
-                            scale=self.constraint_fn(param_q_scale),
+                            scale=self.constraint_fn(param_q_scale) + self.epsilon,
                             name=sn('%s_q_%s' % (param_name, '-'.join(ids)))
                         )
 
@@ -789,7 +789,7 @@ class CDRBayes(CDR):
 
                         param_q = Normal(
                             loc=param_q_loc,
-                            scale=self.constraint_fn(param_q_scale),
+                            scale=self.constraint_fn(param_q_scale) + self.epsilon,
                             name=sn('%s_q_%s_by_%s' % (param_name, '-'.join(ids), sn(ran_gf)))
                         )
 
@@ -980,7 +980,7 @@ class CDRBayes(CDR):
                         )
                         y_sd_q = Normal(
                             loc=y_sd_loc_q,
-                            scale=self.constraint_fn(y_sd_scale_q),
+                            scale=self.constraint_fn(y_sd_scale_q) + self.epsilon,
                             name='y_sd_q'
                         )
                         y_sd_summary = y_sd_q.mean()
@@ -1028,8 +1028,8 @@ class CDRBayes(CDR):
 
                     self.MAP_map[y_sd] = y_sd_summary
 
-                    y_sd = self.constraint_fn(y_sd)
-                    y_sd_summary = self.constraint_fn(y_sd_summary)
+                    y_sd = self.constraint_fn(y_sd) + self.epsilon
+                    y_sd_summary = self.constraint_fn(y_sd_summary) + self.epsilon
 
                     tf.summary.scalar(
                         'error/y_sd',
@@ -1071,7 +1071,7 @@ class CDRBayes(CDR):
 
                         self.y_skewness_q = Normal(
                             loc=y_skewness_loc_q,
-                            scale=self.constraint_fn(y_skewness_scale_q),
+                            scale=self.constraint_fn(y_skewness_scale_q) + self.epsilon,
                             name='y_skewness_q'
                         )
                         self.y_skewness_summary = self.y_skewness_q.mean()
@@ -1103,13 +1103,13 @@ class CDRBayes(CDR):
                         )
                         self.y_tailweight_q = Normal(
                             loc=y_tailweight_loc_q,
-                            scale=self.constraint_fn(y_tailweight_scale_q),
+                            scale=self.constraint_fn(y_tailweight_scale_q) + self.epsilon,
                             name='y_tailweight_q'
                         )
                         self.y_tailweight_summary = self.y_tailweight_q.mean()
                         tf.summary.scalar(
                             'error/y_tailweight',
-                            self.constraint_fn(self.y_tailweight_summary),
+                            self.constraint_fn(self.y_tailweight_summary) + self.epsilon,
                             collections=['params']
                         )
 
@@ -1188,7 +1188,7 @@ class CDRBayes(CDR):
                         )
                         tf.summary.scalar(
                             'error/y_tailweight',
-                            self.constraint_fn(self.y_tailweight_summary),
+                            self.constraint_fn(self.y_tailweight_summary) + self.epsilon,
                             collections=['params']
                         )
 
@@ -1203,21 +1203,21 @@ class CDRBayes(CDR):
                             loc=self.out,
                             scale=y_sd,
                             skewness=self.y_skewness,
-                            tailweight=self.constraint_fn(self.y_tailweight),
+                            tailweight=self.constraint_fn(self.y_tailweight) + self.epsilon,
                             name='output_standardized'
                         )
                         self.err_dist_standardized = SinhArcsinh(
                             loc=0.,
                             scale=y_sd,
                             skewness=self.y_skewness,
-                            tailweight=self.constraint_fn(self.y_tailweight),
+                            tailweight=self.constraint_fn(self.y_tailweight) + self.epsilon,
                             name='err_dist_standardized'
                         )
                         self.err_dist_standardized_summary = SinhArcsinh(
                             loc=0.,
                             scale=y_sd_summary,
                             skewness=self.y_skewness_summary,
-                            tailweight=self.constraint_fn(self.y_tailweight_summary),
+                            tailweight=self.constraint_fn(self.y_tailweight_summary) + self.epsilon,
                             name='err_dist_standardized_summary'
                         )
                         self.MAP_map[self.out_standardized] = self.out_mean
@@ -1226,21 +1226,21 @@ class CDRBayes(CDR):
                             loc=self.out * self.y_train_sd + self.y_train_mean,
                             scale=y_sd * self.y_train_sd,
                             skewness=self.y_skewness,
-                            tailweight=self.constraint_fn(self.y_tailweight),
+                            tailweight=self.constraint_fn(self.y_tailweight) + self.epsilon,
                             name='output'
                         )
                         self.err_dist = SinhArcsinh(
                             loc=0.,
                             scale=y_sd * self.y_train_sd,
                             skewness=self.y_skewness,
-                            tailweight=self.constraint_fn(self.y_tailweight),
+                            tailweight=self.constraint_fn(self.y_tailweight) + self.epsilon,
                             name='err_dist'
                         )
                         self.err_dist_summary = SinhArcsinh(
                             loc=0.,
                             scale=y_sd_summary * self.y_train_sd,
                             skewness=self.y_skewness_summary,
-                            tailweight=self.constraint_fn(self.y_tailweight_summary),
+                            tailweight=self.constraint_fn(self.y_tailweight_summary) + self.epsilon,
                             name='err_dist_summary'
                         )
                         self.MAP_map[self.out] = self.out_mean * self.y_train_sd + self.y_train_mean
@@ -1249,21 +1249,21 @@ class CDRBayes(CDR):
                             loc=self.out,
                             scale=y_sd,
                             skewness=self.y_skewness,
-                            tailweight=self.constraint_fn(self.y_tailweight),
+                            tailweight=self.constraint_fn(self.y_tailweight) + self.epsilon,
                             name='output'
                         )
                         self.err_dist = SinhArcsinh(
                             loc=0.,
                             scale=y_sd,
                             skewness=self.y_skewness,
-                            tailweight=self.constraint_fn(self.y_tailweight),
+                            tailweight=self.constraint_fn(self.y_tailweight) + self.epsilon,
                             name='err_dist'
                         )
                         self.err_dist_summary = SinhArcsinh(
                             loc=0.,
                             scale=y_sd_summary,
                             skewness=self.y_skewness_summary,
-                            tailweight=self.constraint_fn(self.y_tailweight_summary),
+                            tailweight=self.constraint_fn(self.y_tailweight_summary) + self.epsilon,
                             name='err_dist_summary'
                         )
                         self.MAP_map[self.out] = self.out_mean

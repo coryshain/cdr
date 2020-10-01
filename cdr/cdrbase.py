@@ -101,8 +101,8 @@ def gamma_irf_lambdas(params, integral_ub=None, session=None, epsilon=4 * np.fin
                 def irf(x, pdf=pdf, epsilon=epsilon):
                     return pdf(x + epsilon)
 
-                def irf_proportion_in_bounds(x, cdf=cdf):
-                    return cdf(x)
+                def irf_proportion_in_bounds(x, cdf=cdf, epsilon=epsilon):
+                    return cdf(x + epsilon)
 
             else:
                 norm_const = cdf(integral_ub)
@@ -132,7 +132,7 @@ def shifted_gamma_irf_lambdas(params, integral_ub=None, session=None, epsilon=4 
 
             pdf = dist.prob
             cdf = dist.cdf
-            cdf_0 = cdf(-delta + epsilon)
+            cdf_0 = cdf(-delta)
 
             if integral_ub is None:
                 ub = 1.
@@ -142,10 +142,10 @@ def shifted_gamma_irf_lambdas(params, integral_ub=None, session=None, epsilon=4 
             norm_const = ub - cdf_0
 
             def irf(x, pdf=pdf, delta=delta, norm_const=norm_const, epsilon=epsilon):
-                return pdf(x - delta + epsilon) / (norm_const + epsilon)
+                return pdf(x - delta) / (norm_const + epsilon)
 
             def irf_proportion_in_bounds(x, cdf=cdf, cdf_0=cdf_0, delta=delta, norm_const=norm_const, epsilon=epsilon):
-                return (cdf(x - delta + epsilon) - cdf_0) / (norm_const + epsilon)
+                return (cdf(x - delta) - cdf_0) / (norm_const + epsilon)
 
             return irf, irf_proportion_in_bounds
 
@@ -194,8 +194,8 @@ def skew_normal_irf_lambdas(params, integral_ub, epsilon=4 * np.finfo('float32')
             stdnorm_pdf = stdnorm.prob
             stdnorm_cdf = stdnorm.cdf
             
-            def irf_base(x,  mu=mu, sigma=sigma, alpha=alpha, pdf=stdnorm_pdf, cdf=stdnorm_cdf, epsilon=epsilon):
-                return (pdf((x - mu) / (sigma + epsilon)) * cdf(alpha * (x - mu) / (sigma + epsilon)))
+            def irf_base(x,  mu=mu, sigma=sigma, alpha=alpha, pdf=stdnorm_pdf, cdf=stdnorm_cdf):
+                return (pdf((x - mu) / (sigma)) * cdf(alpha * (x - mu) / (sigma)))
             
             cdf = empirical_integral(irf_base, session=session)
             norm_const = cdf(integral_ub)
@@ -234,7 +234,7 @@ def emg_irf_lambdas(params, integral_ub=None, epsilon=4 * np.finfo('float32').ep
 
             def irf(x, L=L, mu=mu, sigma=sigma, norm_const=norm_const, epsilon=epsilon):
                 return (L / 2 * tf.exp(0.5 * L * (2. * mu + L * sigma ** 2. - 2. * x)) *
-                       tf.erfc((mu + L * sigma ** 2 - x) / (tf.sqrt(2.) * sigma + epsilon))) / (norm_const + epsilon)
+                       tf.erfc((mu + L * sigma ** 2 - x) / (tf.sqrt(2.) * sigma))) / (norm_const + epsilon)
 
             def irf_proportion_in_bounds(x, cdf=cdf, norm_const=norm_const, cdf_0=cdf_0, epsilon=epsilon):
                 return (cdf(x) - cdf_0) / (norm_const + epsilon)
@@ -286,15 +286,15 @@ def shifted_beta_prime_irf_lambdas(params, integral_ub=None, session=None, epsil
             else:
                 ub = cdf(integral_ub - delta)
 
-            cdf_0 = cdf(-delta + epsilon)
+            cdf_0 = cdf(-delta)
 
             norm_const = ub - cdf_0
 
             def irf(x, alpha=alpha, beta=beta, delta=delta, norm_const=norm_const, epsilon=epsilon):
-                return ((x - delta + epsilon) ** (alpha - 1) * (1 + (x - delta + epsilon)) ** (-alpha - beta)) / (norm_const + epsilon)
+                return ((x - delta) ** (alpha - 1) * (1 + (x - delta)) ** (-alpha - beta)) / (norm_const + epsilon)
 
             def irf_proportion_in_bounds(x, cdf=cdf, cdf_0=cdf_0, delta=delta, norm_const=norm_const, epsilon=epsilon):
-                return (cdf(x - delta + epsilon) - cdf_0) / (norm_const + epsilon)
+                return (cdf(x - delta) - cdf_0) / (norm_const + epsilon)
 
             return irf, irf_proportion_in_bounds
 
@@ -333,7 +333,7 @@ def double_gamma_1_irf_lambdas(params, integral_ub=None, session=None, epsilon=4
                 return (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (norm_const + epsilon)
 
             def irf_proportion_in_bounds(x, cdf_main=cdf_main, cdf_undershoot=cdf_undershoot, norm_const=norm_const, epsilon=epsilon):
-                return (cdf_main(x) - cdf_undershoot(x)) / (norm_const + epsilon)
+                return (cdf_main(x + epsilon) - cdf_undershoot(x + epsilon)) / (norm_const + epsilon)
 
             return irf, irf_proportion_in_bounds
 
@@ -372,7 +372,7 @@ def double_gamma_2_irf_lambdas(params, integral_ub=None, session=None, epsilon=4
                 return (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (norm_const + epsilon)
 
             def irf_proportion_in_bounds(x, cdf_main=cdf_main, cdf_undershoot=cdf_undershoot, norm_const=norm_const, epsilon=epsilon):
-                return (cdf_main(x) - cdf_undershoot(x)) / (norm_const + epsilon)
+                return (cdf_main(x + epsilon) - cdf_undershoot(x + epsilon)) / (norm_const + epsilon)
 
             return irf, irf_proportion_in_bounds
 
@@ -411,7 +411,7 @@ def double_gamma_3_irf_lambdas(params, integral_ub=None, session=None, epsilon=4
                 return (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (norm_const + epsilon)
 
             def irf_proportion_in_bounds(x, cdf_main=cdf_main, cdf_undershoot=cdf_undershoot, norm_const=norm_const, epsilon=epsilon):
-                return (cdf_main(x) - cdf_undershoot(x)) / (norm_const + epsilon)
+                return (cdf_main(x + epsilon) - cdf_undershoot(x + epsilon)) / (norm_const + epsilon)
 
             return irf, irf_proportion_in_bounds
 
@@ -450,7 +450,7 @@ def double_gamma_4_irf_lambdas(params, integral_ub=None, session=None, epsilon=4
                 return (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (norm_const + epsilon)
 
             def irf_proportion_in_bounds(x, cdf_main=cdf_main, cdf_undershoot=cdf_undershoot, norm_const=norm_const, epsilon=epsilon):
-                return (cdf_main(x) - cdf_undershoot(x)) / (norm_const + epsilon)
+                return (cdf_main(x + epsilon) - cdf_undershoot(x + epsilon)) / (norm_const + epsilon)
 
             return irf, irf_proportion_in_bounds
 
@@ -489,7 +489,7 @@ def double_gamma_5_irf_lambdas(params, integral_ub=None, session=None, epsilon=4
                 return (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (norm_const + epsilon)
 
             def irf_proportion_in_bounds(x, cdf_main=cdf_main, cdf_undershoot=cdf_undershoot, norm_const=norm_const, epsilon=epsilon):
-                return (cdf_main(x) - cdf_undershoot(x)) / (norm_const + epsilon)
+                return (cdf_main(x + epsilon) - cdf_undershoot(x)) / (norm_const + epsilon)
 
             return irf, irf_proportion_in_bounds
 
@@ -1967,15 +1967,15 @@ class CDR(Model):
                     param_fixed_summary = self.irf_params_fixed_base_summary[family][param_name]
 
                     if param_lb is not None and param_ub is None:
-                        param_fixed = param_lb + self.constraint_fn(param_fixed)
-                        param_fixed_summary = param_lb + self.constraint_fn(param_fixed_summary)
-                        param = param_lb + self.constraint_fn(param)
-                        param_summary = param_lb + self.constraint_fn(param_summary)
+                        param_fixed = param_lb + self.constraint_fn(param_fixed) + self.epsilon
+                        param_fixed_summary = param_lb + self.constraint_fn(param_fixed_summary) + self.epsilon
+                        param = param_lb + self.constraint_fn(param) + self.epsilon
+                        param_summary = param_lb + self.constraint_fn(param_summary) + self.epsilon
                     elif param_lb is None and param_ub is not None:
-                        param_fixed = param_ub - self.constraint_fn(param_fixed)
-                        param_fixed_summary = param_ub - self.constraint_fn(param_fixed_summary)
-                        param = param_ub - self.constraint_fn(param)
-                        param_summary = param_ub - self.constraint_fn(param_summary)
+                        param_fixed = param_ub - self.constraint_fn(param_fixed) - self.epsilon
+                        param_fixed_summary = param_ub - self.constraint_fn(param_fixed_summary) - self.epsilon
+                        param = param_ub - self.constraint_fn(param) - self.epsilon
+                        param_summary = param_ub - self.constraint_fn(param_summary) - self.epsilon
                     elif param_lb is not None and param_ub is not None:
                         param_fixed = self._softplus_sigmoid(param_fixed, a=param_lb, b=param_ub)
                         param_fixed_summary = self._softplus_sigmoid(param_fixed_summary, a=param_lb, b=param_ub)
