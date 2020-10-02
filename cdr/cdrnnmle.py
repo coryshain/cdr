@@ -105,7 +105,7 @@ class CDRNNMLE(CDRNN):
                     name='y_sd_base_unconstrained'
                 )
                 self.y_sd = self.constraint_fn(self.y_sd_base_unconstrained + self.y_sd_delta) + self.epsilon
-                self.y_sd_summary = self.constraint_fn(self.y_sd_base_unconstrained + self.y_sd_delta_ema)
+                self.y_sd_summary = self.constraint_fn(self.y_sd_base_unconstrained + self.y_sd_delta_ema) + self.epsilon
                 tf.summary.scalar(
                     'error/y_sd',
                     self.y_sd_summary,
@@ -131,8 +131,8 @@ class CDRNNMLE(CDRNN):
                         dtype=self.FLOAT_TF,
                         name='y_tailweight_base_unconstrained'
                     )
-                    self.y_tailweight = self.constraint_fn(self.y_tailweight_base_unconstrained + self.y_tailweight_delta + self.epsilon)
-                    self.y_tailweight_summary = self.constraint_fn(self.y_tailweight_base_unconstrained + self.y_tailweight_delta_ema)
+                    self.y_tailweight = self.constraint_fn(self.y_tailweight_base_unconstrained + self.y_tailweight_delta) + self.epsilon
+                    self.y_tailweight_summary = self.constraint_fn(self.y_tailweight_base_unconstrained + self.y_tailweight_delta_ema) + self.epsilon
                     tf.summary.scalar(
                         'error/y_tailweight',
                         self.y_tailweight_summary,
