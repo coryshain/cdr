@@ -254,7 +254,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'max_global_gradient_norm',
-        None,
+        1,
         [float, None],
         'Maximum allowable value for the global norm of the gradient, which will be clipped as needed. If ``None``, no gradient clipping.'
     ),
@@ -266,7 +266,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'optim_epsilon',
-        1e-2,
+        1,
         float,
         "Epsilon parameter to use if **optim_name** in ``['Adam', 'Nadam']``, ignored otherwise."
     ),
