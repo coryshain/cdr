@@ -12,7 +12,6 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', nested=False, v
 
     :param a: ``numpy`` vector; first error/loss/prediction vector.
     :param b: ``numpy`` vector; second error/loss/prediction vector.
-    :param y: ``numpy`` vector; response vector. Used only if ``mode == 'corr'``. Assumes all vectors are standardized (Z-transformed).
     :param n_iter: ``int``; number of resampling iterations.
     :param n_tails: ``int``; number of tails.
     :param mode: ``str``; one of ``["loss", "loglik"]``, the type of error used (losses are averaged while loglik's are summed).

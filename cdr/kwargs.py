@@ -313,6 +313,12 @@ MODEL_INITIALIZATION_KWARGS = [
         "Keep learning rate flat between ``lr_decay_steps`` (ignored if ``lr_decay_family==None``)."
     ),
     Kwarg(
+        'loss_filter_n_sds',
+        None,
+        [float, None],
+        "How many moving standard deviations above the moving mean of the loss to use as a cut-off for stability (suppressing large losses). If ``None``, or ``0``, no loss filtering."
+    ),
+    Kwarg(
         'regularizer_name',
         None,
         [str, None],
@@ -944,6 +950,12 @@ CDRNN_INITIALIZATION_KWARGS = [
         None,
         [float, None],
         "Rate at which to drop neurons of error params function."
+    ),
+    Kwarg(
+        'ranef_dropout_rate',
+        None,
+        [float, None],
+        "Rate at which to drop random effects indicators."
     ),
     Kwarg(
         'h_in_noise_sd',

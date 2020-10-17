@@ -181,6 +181,7 @@ class CDRNNCell(LayerRNNCell):
             bottomup_regularizer=None,
             recurrent_regularizer=None,
             bias_regularizer=None,
+            bottomup_dropout=None,
             h_dropout=None,
             c_dropout=None,
             forget_rate=None,
@@ -223,6 +224,7 @@ class CDRNNCell(LayerRNNCell):
                 self._recurrent_regularizer = get_regularizer(recurrent_regularizer, session=self._session)
                 self._bias_regularizer = get_regularizer(bias_regularizer, session=self._session)
 
+                self._bottomup_dropout = get_dropout(bottomup_dropout, training=self._training, session=self._session)
                 self._h_dropout = get_dropout(h_dropout, training=self._training, session=self._session)
                 self._c_dropout = get_dropout(c_dropout, training=self._training, session=self._session)
                 self._forget_rate = forget_rate
@@ -466,6 +468,7 @@ class CDRNNCell(LayerRNNCell):
                     mask = None
 
                 inputs = inputs['inputs']
+                inputs = self._bottomup_dropout(inputs)
 
                 units = self._num_units
                 c_prev = state.c
@@ -564,6 +567,7 @@ class CDRNNLayer(object):
             bottomup_regularizer=None,
             recurrent_regularizer=None,
             bias_regularizer=None,
+            bottomup_dropout=None,
             h_dropout=None,
             c_dropout=None,
             forget_rate=None,
@@ -599,6 +603,7 @@ class CDRNNLayer(object):
         self.bottomup_regularizer = bottomup_regularizer
         self.recurrent_regularizer = recurrent_regularizer
         self.bias_regularizer = bias_regularizer
+        self.bottomup_dropout = bottomup_dropout
         self.h_dropout = h_dropout
         self.c_dropout = c_dropout
         self.forget_rate = forget_rate
@@ -646,6 +651,7 @@ class CDRNNLayer(object):
                         bottomup_regularizer=self.bottomup_regularizer,
                         recurrent_regularizer=self.recurrent_regularizer,
                         bias_regularizer=self.bias_regularizer,
+                        bottomup_dropout=self.bottomup_dropout,
                         h_dropout=self.h_dropout,
                         c_dropout=self.c_dropout,
                         forget_rate=self.forget_rate,

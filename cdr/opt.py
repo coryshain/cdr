@@ -20,6 +20,33 @@ def get_safe_optimizer_class(base_optimizer_class, session=None):
             return SafeOptimizer
 
 
+class AMSGradOptimizer(tf.keras.optimizers.Adam):
+    def __init__(self, *args, **kwargs):
+        super(AMSGradOptimizer, self).__init__(*args, amsgrad=True, **kwargs)
+
+    def minimize(self, loss, global_step=None, var_list=None, grad_loss=None, name=None):
+        if var_list is None:
+            var_list = [v for v in tf.trainable_variables() if type(self).__name__ not in v.name]
+        print(dir(self))
+        print(var_list)
+
+        # for var in var_list:
+        #     print(var)
+        #     print(self.get_gradients(loss, [var]))
+        #     print()
+
+        # op = super(AMSGradOptimizer, self).minimize(loss, var_list, grad_loss=grad_loss, name=name)
+
+        grads = self.get_gradients(loss, var_list)
+        grads_and_vars = [(g, v) for g, v in zip(grads, var_list)]
+        op = self.apply_gradients(grads_and_vars)
+
+        if global_step is not None:
+            step_incr = tf.assign_add(global_step, 1)
+            op = control_flow_ops.group(op, step_incr)
+        return op
+
+
 def get_clipped_optimizer_class(base_optimizer_class, session=None):
     session = get_session(session)
     with session.as_default():

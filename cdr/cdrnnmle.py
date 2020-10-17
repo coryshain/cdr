@@ -6,9 +6,6 @@ from .util import sn, stderr
 
 import tensorflow as tf
 
-tf_config = tf.ConfigProto()
-tf_config.gpu_options.allow_growth = True
-
 pd.options.mode.chained_assignment = None
 
 
@@ -268,7 +265,41 @@ class CDRNNMLE(CDRNN):
                 self.mae_loss = tf.losses.absolute_difference(self.y, self.out)
                 self.mse_loss = tf.losses.mean_squared_error(self.y, self.out)
 
-                self.loss_func = -(tf.reduce_sum(ll_objective) * self.minibatch_scale)
+                loss_func = - ll_objective
+
+                if self.loss_filter_n_sds and self.ema_decay:
+                    beta = self.ema_decay
+                    ema_warm_up = int(2/(1 - self.ema_decay))
+                    n_sds = self.loss_filter_n_sds
+
+                    self.loss_ema = tf.Variable(0., trainable=False, name='loss_ema')
+                    self.loss_sd_ema = tf.Variable(0., trainable=False, name='loss_sd_ema')
+
+                    loss_cutoff = self.loss_ema + n_sds * self.loss_sd_ema
+                    loss_func_filter = tf.cast(loss_func < loss_cutoff, dtype=self.FLOAT_TF)
+                    loss_func_filtered = loss_func * loss_func_filter
+                    n_batch = tf.cast(tf.shape(loss_func)[0], dtype=self.FLOAT_TF)
+                    n_retained = tf.reduce_sum(loss_func_filter)
+                    self.n_dropped = n_batch - n_retained
+
+                    loss_func, n_retained = tf.cond(
+                        self.global_batch_step > ema_warm_up,
+                        lambda loss_func_filtered=loss_func_filtered, n_retained=n_retained: (loss_func_filtered, n_retained),
+                        lambda loss_func=loss_func: (loss_func, n_batch),
+                    )
+
+                    # loss_func = tf.Print(loss_func, ['cutoff', loss_cutoff, 'n_retained', n_retained, 'ema', self.loss_ema, 'sd ema', self.loss_sd_ema])
+
+                    loss_mean_cur = tf.reduce_sum(loss_func) / (n_retained + self.epsilon)
+                    loss_sd_cur = tf.sqrt(tf.reduce_sum((loss_func - self.loss_ema)**2)) / (n_retained + self.epsilon)
+
+                    loss_ema_update = (beta * self.loss_ema + (1 - beta) * loss_mean_cur)
+                    loss_sd_ema_update = beta * self.loss_sd_ema + (1 - beta) * loss_sd_cur
+
+                    self.loss_ema_op = tf.assign(self.loss_ema, loss_ema_update)
+                    self.loss_sd_ema_op = tf.assign(self.loss_sd_ema, loss_sd_ema_update)
+
+                self.loss_func = tf.reduce_sum(loss_func) * self.minibatch_scale
 
                 for l in self.regularizable_layers:
                     if hasattr(l, 'weights'):
@@ -323,19 +354,20 @@ class CDRNNMLE(CDRNN):
     def run_train_step(self, feed_dict, verbose=True):
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                to_run_names = []
                 to_run = [self.train_op, self.ema_op, self.y_sd_delta_ema_op]
                 if self.n_layers_rnn:
                     to_run += self.rnn_h_ema_ops + self.rnn_c_ema_ops
                 if self.asymmetric_error:
                     to_run += [self.y_skewness_delta_ema_op, self.y_tailweight_delta_ema_op]
+                if self.loss_filter_n_sds:
+                    to_run_names.append('n_dropped')
+                    to_run += [self.loss_ema_op, self.loss_sd_ema_op, self.n_dropped]
+                to_run_names += ['loss', 'reg_loss']
                 to_run += [self.loss_func, self.reg_loss]
                 out = self.sess.run(to_run, feed_dict=feed_dict)
-                loss, reg_loss = out[-2:]
 
-                out_dict = {
-                    'loss': loss,
-                    'reg_loss': reg_loss
-                }
+                out_dict = {x: y for x, y in zip(to_run_names, out[-len(to_run_names):])}
 
                 return out_dict
 

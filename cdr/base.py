@@ -291,7 +291,7 @@ class Model(object):
             with self.sess.graph.as_default():
                 self.intercept_init_tf = tf.constant(self.intercept_init, dtype=self.FLOAT_TF)
 
-                self.y_sd_init_tf = tf.constant(float(self.y_sd_init), dtype=self.FLOAT_TF)
+                self.y_sd_init_tf = tf.constant(float(self.y_sd_init))
                 if self.constraint.lower() == 'softplus':
                     self.y_sd_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.y_sd_init_tf)
                     if self.asymmetric_error:
@@ -531,6 +531,7 @@ class Model(object):
 
                 self.loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='loss_total')
                 self.reg_loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='reg_loss_total')
+                self.proportion_dropped = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='proportion_dropped')
 
                 self.training_mse_in = tf.placeholder(self.FLOAT_TF, shape=[], name='training_mse_in')
                 self.training_mse = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_mse')
@@ -660,7 +661,8 @@ class Model(object):
                     'ftrl': tf.train.FtrlOptimizer,
                     'rmsprop': tf.train.RMSPropOptimizer,
                     'adam': tf.train.AdamOptimizer,
-                    'nadam': tf.contrib.opt.NadamOptimizer
+                    'nadam': tf.contrib.opt.NadamOptimizer,
+                    'amsgrad': AMSGradOptimizer
                 }[name]
 
                 if clip:
@@ -678,13 +680,15 @@ class Model(object):
     def _initialize_logging(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                tf.summary.scalar('loss_by_iter', self.loss_total, collections=['loss'])
-                tf.summary.scalar('reg_loss_by_iter', self.reg_loss_total, collections=['loss'])
+                tf.summary.scalar('opt/loss_by_iter', self.loss_total, collections=['opt'])
+                tf.summary.scalar('opt/reg_loss_by_iter', self.reg_loss_total, collections=['opt'])
+                if self.loss_filter_n_sds:
+                    tf.summary.scalar('opt/proportion_dropped', self.proportion_dropped, collections=['opt'])
                 if self.log_graph:
                     self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/cdr', self.sess.graph)
                 else:
                     self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/cdr')
-                self.summary_losses = tf.summary.merge_all(key='loss')
+                self.summary_opt = tf.summary.merge_all(key='opt')
                 self.summary_params = tf.summary.merge_all(key='params')
                 if self.log_random and len(self.rangf) > 0:
                     self.summary_random = tf.summary.merge_all(key='random')
@@ -1047,7 +1051,7 @@ class Model(object):
 
                     # Initialize tracker of parameter iterates
                     var_d0_iterates = tf.Variable(
-                        tf.zeros([int(self.convergence_n_iterates / self.convergence_stride)] + list(var.shape), dtype=self.FLOAT_TF),
+                        tf.zeros([int(self.convergence_n_iterates / self.convergence_stride)] + list(var.shape)),
                         name=name + '_d0',
                         trainable=False
                     )
@@ -1970,6 +1974,8 @@ class Model(object):
 
                         loss_total = 0.
                         reg_loss_total = 0.
+                        if self.loss_filter_n_sds:
+                            n_dropped = 0.
 
                         for j in range(0, len(y), minibatch_size):
                             indices = p[j:j+minibatch_size]
@@ -1986,6 +1992,9 @@ class Model(object):
                             info_dict = self.run_train_step(fd_minibatch)
 
                             self.check_numerics()
+
+                            if self.loss_filter_n_sds:
+                                n_dropped += info_dict['n_dropped']
 
                             loss_cur = info_dict['loss']
                             if self.ema_decay:
@@ -2031,7 +2040,10 @@ class Model(object):
                         if self.log_freq > 0 and self.global_step.eval(session=self.sess) % self.log_freq == 0:
                             loss_total /= n_minibatch
                             reg_loss_total /= n_minibatch
-                            summary_train_loss = self.sess.run(self.summary_losses, {self.loss_total: loss_total, self.reg_loss_total: reg_loss_total})
+                            log_fd = {self.loss_total: loss_total, self.reg_loss_total: reg_loss_total}
+                            if self.loss_filter_n_sds:
+                                log_fd[self.proportion_dropped] = n_dropped / len(y)
+                            summary_train_loss = self.sess.run(self.summary_opt, feed_dict=log_fd)
                             self.writer.add_summary(summary_train_loss, self.global_step.eval(session=self.sess))
                             summary_params = self.sess.run(self.summary_params)
                             self.writer.add_summary(summary_params, self.global_step.eval(session=self.sess))

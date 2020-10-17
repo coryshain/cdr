@@ -11,8 +11,6 @@ from .base import Model
 from .util import *
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-tf_config = tf.ConfigProto()
-tf_config.gpu_options.allow_growth = True
 
 pd.options.mode.chained_assignment = None
 
@@ -436,15 +434,6 @@ class CDRNN(Model):
     def _initialize_encoder(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if self.hidden_dropout_rate is None:
-                    hidden_dropout_rate = 0.
-                else:
-                    hidden_dropout_rate = self.hidden_dropout_rate
-                    
-                if self.recurrent_dropout_rate is None:
-                    recurrent_dropout_rate = 0.
-                else:
-                    recurrent_dropout_rate = self.recurrent_dropout_rate
 
                 self.input_projection_layers = []
                 for l in range(self.n_layers_input_projection + 1):
@@ -475,7 +464,9 @@ class CDRNN(Model):
                 self.input_projection_fn = compose_lambdas(self.input_projection_layers)
 
                 self.rnn_layers = []
+                self.rnn_h_init = []
                 self.rnn_h_ema = []
+                self.rnn_c_init = []
                 self.rnn_c_ema = []
                 for l in range(self.n_layers_rnn):
                     if l < self.n_layers_rnn - 1:
@@ -484,11 +475,17 @@ class CDRNN(Model):
                         return_seqs = True
                     units = self.n_units_rnn[l]
 
-                    h_init_src = tf.Variable(tf.zeros(units), trainable=False, name='rnn_h_%d' % (l+1))
-                    self.rnn_h_ema.append(h_init_src)
+                    h_init = tf.Variable(tf.zeros(units), name='rnn_h_%d' % (l+1))
+                    self.rnn_h_init.append(h_init)
+
+                    h_ema_init = tf.Variable(tf.zeros(units), trainable=False, name='rnn_h_ema_%d' % (l+1))
+                    self.rnn_h_ema.append(h_ema_init)
+
+                    c_init = tf.Variable(tf.zeros(units), name='rnn_c_%d' % (l+1))
+                    self.rnn_c_init.append(c_init)
                     
-                    c_init_src = tf.Variable(tf.zeros(units), trainable=False, name='rnn_c_%d' % (l+1))
-                    self.rnn_c_ema.append(c_init_src)
+                    c_ema_init = tf.Variable(tf.zeros(units), trainable=False, name='rnn_c_ema_%d' % (l+1))
+                    self.rnn_c_ema.append(c_ema_init)
 
                     layer = CDRNNLayer(
                         training=self.training,
@@ -499,6 +496,7 @@ class CDRNN(Model):
                         time_projection_inner_activation=self.irf_inner_activation,
                         bottomup_initializer=self.kernel_initializer,
                         recurrent_initializer=self.recurrent_initializer,
+                        bottomup_dropout=self.input_projection_dropout_rate,
                         h_dropout=self.rnn_h_dropout_rate,
                         c_dropout=self.rnn_c_dropout_rate,
                         forget_rate=self.forget_rate,
@@ -642,22 +640,22 @@ class CDRNN(Model):
 
                 # Gates
                 self.input_gates = tf.tanh(tf.Variable(
-                    tf.zeros([len(self.impulse_names)+1], dtype=self.FLOAT_TF),
+                    tf.zeros([len(self.impulse_names)+1]),
                     name='input_gate_logits'
                 ))[None, None, ...]
-                self.t_delta_gate = tf.identity(tf.Variable(
-                    tf.zeros([], dtype=self.FLOAT_TF),
-                    name='t_delta_gate_logit'
-                ))
+                # self.t_delta_gate = tf.identity(tf.Variable(
+                #     tf.zeros([]),
+                #     name='t_delta_gate_logit'
+                # ))
                 self.y_sd_delta_gate = tf.tanh(tf.Variable(
-                    tf.zeros([], dtype=self.FLOAT_TF), name='y_sd_delta_gate_logit'
+                    tf.zeros([]), name='y_sd_delta_gate_logit'
                 ))
                 if self.asymmetric_error:
                     self.y_skewness_delta_gate = tf.tanh(tf.Variable(
-                        tf.zeros([], dtype=self.FLOAT_TF), name='y_skewness_delta_gate_logit'
+                        tf.zeros([]), name='y_skewness_delta_gate_logit'
                     ))
                     self.y_tailweight_delta_gate = tf.tanh(
-                        tf.Variable(tf.zeros([], dtype=self.FLOAT_TF), name='y_tailweight_delta_gate_logit'
+                        tf.Variable(tf.zeros([]), name='y_tailweight_delta_gate_logit'
                     ))
 
                 def sum_predictions(x, mask=None):
@@ -691,16 +689,31 @@ class CDRNN(Model):
                 self.intercept_random_means = {}
 
                 # RANDOM EFFECTS
-                self.random_effects = []
-                self.random_effects_embeddings = []
+                self.h_ran_matrix = []
+                self.h_ran = []
+                self.rnn_h_ran_matrix = [[] for l in range(self.n_layers_rnn)]
+                self.rnn_h_ran = [[] for l in range(self.n_layers_rnn)]
+                self.rnn_c_ran_matrix = [[] for l in range(self.n_layers_rnn)]
+                self.rnn_c_ran = [[] for l in range(self.n_layers_rnn)]
                 for i in range(len(self.rangf)):
                     gf = self.rangf[i]
                     levels_ix = np.arange(self.rangf_n_levels[i] - 1)
+                    gf_y = self.gf_y[:, i]
+                    if self.ranef_dropout_rate:
+                        def gf_train_fn(gf_y=gf_y):
+                            dropout_mask = tf.cast(tf.random_uniform(tf.shape(gf_y)) > self.ranef_dropout_rate, tf.bool)
+                            alt = tf.zeros_like(gf_y)
+                            return tf.where(dropout_mask, gf_y, alt)
+
+                        def gf_eval_fn(gf_y=gf_y):
+                            return gf_y
+
+                        gf_y = tf.cond(self.training, gf_train_fn, gf_eval_fn)
 
                     # Random intercepts
                     if self.has_intercept[gf]:
                         intercept_random = tf.Variable(
-                            tf.zeros([len(levels_ix)], dtype=self.FLOAT_TF),
+                            tf.zeros([len(levels_ix)]),
                             name='intercept_by_%s' % sn(gf)
                         )
                         intercept_random_summary = intercept_random
@@ -732,8 +745,8 @@ class CDRNN(Model):
                         if self.convergence_basis.lower() == 'parameters':
                             self._add_convergence_tracker(self.intercept_random_summary[gf], 'intercept_by_%s' %gf)
 
-                        self.intercept += tf.gather(intercept_random, self.gf_y[:, i])
-                        self.intercept_summary += tf.gather(intercept_random_summary, self.gf_y[:, i])
+                        self.intercept += tf.gather(intercept_random, gf_y)
+                        self.intercept_summary += tf.gather(intercept_random_summary, gf_y)
 
                         if self.log_random:
                             tf.summary.histogram(
@@ -742,25 +755,59 @@ class CDRNN(Model):
                                 collections=['random']
                             )
 
+                        # Random rnn initialization offsets
+                        for l in range(self.n_layers_rnn):
+                            rnn_h_ran_matrix = tf.Variable(
+                                tf.zeros([len(levels_ix), self.n_units_rnn[l]]),
+                                name='rnn_h_ran_%d_by_%s' % (l, sn(gf))
+                            )
+                            rnn_h_ran_matrix -= tf.reduce_mean(rnn_h_ran_matrix, axis=0, keepdims=True)
+                            self._regularize(rnn_h_ran_matrix, type='ranef', var_name='rnn_h_ran_%d_by_%s' % (l, sn(gf)))
+
+                            rnn_h_ran_matrix = tf.concat(
+                                [
+                                    rnn_h_ran_matrix,
+                                    tf.zeros([1, self.n_units_rnn[l]])
+                                ],
+                                axis=0
+                            )
+                            self.rnn_h_ran_matrix[l].append(rnn_h_ran_matrix)
+                            self.rnn_h_ran[l].append(tf.gather(rnn_h_ran_matrix, gf_y))
+                            
+                            rnn_c_ran_matrix = tf.Variable(
+                                tf.zeros([len(levels_ix), self.n_units_rnn[l]]),
+                                name='rnn_c_ran_%d_by_%s' % (l, sn(gf))
+                            )
+                            rnn_c_ran_matrix -= tf.reduce_mean(rnn_c_ran_matrix, axis=0, keepdims=True)
+                            self._regularize(rnn_c_ran_matrix, type='ranef', var_name='rnn_c_ran_%d_by_%s' % (l, sn(gf)))
+
+                            rnn_c_ran_matrix = tf.concat(
+                                [
+                                    rnn_c_ran_matrix,
+                                    tf.zeros([1, self.n_units_rnn[l]])
+                                ],
+                                axis=0
+                            )
+                            self.rnn_c_ran_matrix[l].append(rnn_c_ran_matrix)
+                            self.rnn_c_ran[l].append(tf.gather(rnn_c_ran_matrix, gf_y))
+
                         # Random hidden state offsets
-                        random_effects = tf.Variable(
-                            tf.zeros([len(levels_ix), self.n_units_hidden_state], dtype=self.FLOAT_TF),
+                        h_ran_matrix = tf.Variable(
+                            tf.zeros([len(levels_ix), self.n_units_hidden_state]),
                             name='h_ran_by_%s' % sn(gf)
                         )
-                        random_effects -= tf.reduce_mean(random_effects, axis=0, keepdims=True)
-                        self._regularize(random_effects, type='ranef', var_name='h_ran_by_%s' % sn(gf))
+                        h_ran_matrix -= tf.reduce_mean(h_ran_matrix, axis=0, keepdims=True)
+                        self._regularize(h_ran_matrix, type='ranef', var_name='h_ran_by_%s' % sn(gf))
 
-                        random_effects = tf.concat(
+                        h_ran_matrix = tf.concat(
                             [
-                                random_effects,
+                                h_ran_matrix,
                                 tf.zeros([1, self.n_units_hidden_state])
                             ],
                             axis=0
                         )
-                        random_effects_embeddings = tf.gather(random_effects, self.gf_y[:, i])
-
-                        self.random_effects.append(random_effects)
-                        self.random_effects_embeddings.append(random_effects_embeddings)
+                        self.h_ran_matrix.append(h_ran_matrix)
+                        self.h_ran.append(tf.gather(h_ran_matrix, gf_y))
 
     def _rnn_encoder(self, x, zero_rnn_initial_state=False, **kwargs):
         with self.sess.as_default():
@@ -769,14 +816,24 @@ class CDRNN(Model):
                 c = []
                 for l in range(len(self.rnn_layers)):
                     if zero_rnn_initial_state:
-                        initial_state = None
+                        b = tf.shape(x)[0]
+                        tile_dims = [b, 1]
+                        h_init = tf.tile(self.rnn_h_init[l][None, ...], tile_dims)
+                        c_init = tf.tile(self.rnn_c_init[l][None, ...], tile_dims)
                     else:
                         b = tf.shape(x)[0]
                         tile_dims = [b, 1]
                         h_init = tf.tile(self.rnn_h_ema[l][None, ...], tile_dims)
                         c_init = tf.tile(self.rnn_c_ema[l][None, ...], tile_dims)
-                        t_init = tf.zeros([b, 1], dtype=self.FLOAT_TF)
-                        initial_state = CDRNNStateTuple(c=c_init, h=h_init, t=t_init)
+                        # h_init = tf.tile(self.rnn_h_init[l][None, ...], tile_dims)
+                        # c_init = tf.tile(self.rnn_c_init[l][None, ...], tile_dims)
+
+                    if self.use_rangf:
+                        h_init += tf.add_n(self.rnn_h_ran[l])
+                        c_init += tf.add_n(self.rnn_c_ran[l])
+
+                    t_init = tf.zeros([b, 1], dtype=self.FLOAT_TF)
+                    initial_state = CDRNNStateTuple(c=c_init, h=h_init, t=t_init)
 
                     layer = self.rnn_layers[l]
                     h_cur, c_cur = layer(h[-1], return_state=True, initial_state=initial_state, **kwargs)
@@ -896,9 +953,7 @@ class CDRNN(Model):
                     h_rnn = rnn_hidden = rnn_cell = None
 
                 if self.use_rangf:
-                    for h_ran in self.random_effects_embeddings:
-                        h_ran = tf.expand_dims(h_ran, axis=-2)
-                        h += h_ran
+                    h += tf.expand_dims(tf.add_n(self.h_ran), axis=-2)
 
                 h = get_activation(self.hidden_state_activation, session=self.sess)(h)
 
@@ -1196,7 +1251,6 @@ class CDRNN(Model):
                         axis=[1,2]
                     )
                 )
-
 
 
 
