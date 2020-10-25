@@ -89,6 +89,12 @@ class Model(object):
         for kwarg in Model._INITIALIZATION_KWARGS:
             setattr(self, kwarg.key, kwargs.pop(kwarg.key, kwarg.default_value))
 
+        # Cross validation settings
+        self.crossval_factor = kwargs['crossval_factor']
+        del kwargs['crossval_factor']
+        self.crossval_fold = kwargs['crossval_fold']
+        del kwargs['crossval_fold']
+
         # Parse and store model data from formula
         form = Formula(self.form_str)
         form = form.categorical_transform(X)
@@ -168,13 +174,15 @@ class Model(object):
         #     itertools.combinations(impulse_names, n) for n in range(1, len(impulse_names) + 1)
         # ))
 
+        impulse_df_ix = []
         for impulse in self.form.t.impulses():
             name = impulse.name()
             is_interaction = type(impulse).__name__ == 'ImpulseInteraction'
             found = False
             # varset = set(name)
             # name = ':'.join(name)
-            for df in X + [y]:
+            i = 0
+            for i, df in enumerate(X + [y]):
                 # df_name = None
                 # for col in df.columns:
                 #     colset = set(col.split(':'))
@@ -210,6 +218,8 @@ class Model(object):
             if not found:
                 raise ValueError('Impulse %s was not found in an input file.' % name)
 
+            impulse_df_ix.append(i)
+        self.impulse_df_ix = impulse_df_ix
 
         self.impulse_means = impulse_means
         self.impulse_sds = impulse_sds
@@ -287,6 +297,18 @@ class Model(object):
             else:
                 self.y_sd_init = self.y_train_sd
 
+        if self.impulse_df_ix is None:
+            self.impulse_df_ix = np.zeros(len(self.form.t.impulses()))
+        self.impulse_df_ix = np.array(self.impulse_df_ix, dtype=self.INT_NP)
+        self.impulse_df_ix_unique = sorted(list(set(self.impulse_df_ix)))
+        self.impulse_gather_indices = []
+        for i in range(len(self.impulse_df_ix_unique)):
+            arange = np.arange(len(self.form.t.impulses()))
+            ix = arange[np.where(self.impulse_df_ix == i)[0]]
+            self.impulse_gather_indices.append(ix)
+
+        self.use_crossval = bool(self.crossval_factor)
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.intercept_init_tf = tf.constant(self.intercept_init, dtype=self.FLOAT_TF)
@@ -356,6 +378,7 @@ class Model(object):
             't_delta_mean': self.t_delta_mean,
             't_delta_sd': self.t_delta_sd,
             't_delta_limit': self.t_delta_limit,
+            'impulse_df_ix': self.impulse_df_ix,
             'max_time_X': self.max_time_X,
             'time_X_mean': self.time_X_mean,
             'time_X_sd': self.time_X_sd,
@@ -369,7 +392,9 @@ class Model(object):
             'impulse_uq': self.impulse_uq,
             'impulse_min': self.impulse_min,
             'impulse_max': self.impulse_max,
-            'outdir': self.outdir
+            'outdir': self.outdir,
+            'crossval_factor': self.crossval_factor,
+            'crossval_fold': self.crossval_fold
         }
         for kwarg in Model._INITIALIZATION_KWARGS:
             md[kwarg.key] = getattr(self, kwarg.key)
@@ -385,6 +410,7 @@ class Model(object):
         self.t_delta_sd = md.pop('t_delta_sd', 1.)
         self.t_delta_mean = md.pop('t_delta_mean', 1.)
         self.t_delta_limit = md.pop('t_delta_limit', self.max_tdelta)
+        self.impulse_df_ix = md.pop('impulse_df_ix', None)
         self.max_time_X = md.pop('max_time_X', None)
         self.time_X_sd = md.pop('time_X_sd', 1.)
         self.time_X_mean = md.pop('time_X_mean', 1.)
@@ -399,6 +425,8 @@ class Model(object):
         self.impulse_min = md.pop('impulse_min', {})
         self.impulse_max = md.pop('impulse_max', {})
         self.outdir = md.pop('outdir', './cdr_model/')
+        self.crossval_factor = md.pop('crossval_factor', None)
+        self.crossval_fold = md.pop('crossval_fold', [])
 
         for kwarg in Model._INITIALIZATION_KWARGS:
             setattr(self, kwarg.key, md.pop(kwarg.key, kwarg.default_value))
@@ -431,7 +459,7 @@ class Model(object):
                 )
 
                 self.time_X_mask = tf.placeholder_with_default(
-                    tf.ones([X_batch, self.history_length, n_impulse], dtype=tf.bool),
+                    tf.ones([X_batch, self.history_length, n_impulse], dtype=self.FLOAT_TF),
                     shape=[None, self.history_length, n_impulse],
                     name='time_X_mask'
                 )
@@ -527,7 +555,10 @@ class Model(object):
                 if self.regularizer_name is None:
                     self.regularizer = None
                 else:
-                    self.regularizer = getattr(tf.contrib.layers, self.regularizer_name)(self.regularizer_scale)
+                    scale = self.regularizer_scale
+                    if self.scale_regularizer_with_data:
+                        scale *= self.minibatch_size * self.minibatch_scale
+                    self.regularizer = getattr(tf.contrib.layers, self.regularizer_name)(scale)
 
                 self.loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='loss_total')
                 self.reg_loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='reg_loss_total')
@@ -561,16 +592,20 @@ class Model(object):
                 elif self.intercept_regularizer_name == 'inherit':
                     self.intercept_regularizer = self.regularizer
                 else:
-                    self.intercept_regularizer = getattr(tf.contrib.layers, self.intercept_regularizer_name)(
-                        self.intercept_regularizer_scale)
+                    scale = self.intercept_regularizer_scale
+                    if self.scale_regularizer_with_data:
+                        scale *= self.minibatch_size * self.minibatch_scale
+                    self.intercept_regularizer = getattr(tf.contrib.layers, self.intercept_regularizer_name)(scale)
 
                 if self.ranef_regularizer_name is None:
                     self.ranef_regularizer = None
                 elif self.ranef_regularizer_name == 'inherit':
                     self.ranef_regularizer = self.regularizer
                 else:
-                    self.ranef_regularizer = getattr(tf.contrib.layers, self.ranef_regularizer_name)(
-                        self.ranef_regularizer_scale)
+                    scale = self.ranef_regularizer_scale
+                    if self.scale_regularizer_with_data:
+                        scale *= self.minibatch_size * self.minibatch_scale
+                    self.ranef_regularizer = getattr(tf.contrib.layers, self.ranef_regularizer_name)(scale)
 
     ## Thanks to Keisuke Fujii (https://github.com/blei-lab/edward/issues/708) for this idea
     def _clipped_optimizer_class(self, base_optimizer):
@@ -1029,6 +1064,8 @@ class Model(object):
                     if type is None:
                         reg_name = self.regularizer_name
                         reg_scale = self.regularizer_scale
+                        if self.scale_regularizer_with_data:
+                            reg_scale *= self.minibatch_size * self.minibatch_scale
                     else:
                         reg_name = getattr(self, '%s_regularizer_name' %type)
                         reg_scale = getattr(self, '%s_regularizer_scale' %type)
@@ -1036,6 +1073,8 @@ class Model(object):
                         reg_name = self.regularizer_name
                     if reg_scale == 'inherit':
                         reg_scale = self.regularizer_scale
+                        if self.scale_regularizer_with_data:
+                            reg_scale *= self.minibatch_size * self.minibatch_scale
                     self.regularizer_losses_names.append(reg_name)
                     self.regularizer_losses_scales.append(reg_scale)
 
@@ -1470,6 +1509,8 @@ class Model(object):
         for kwarg in MODEL_INITIALIZATION_KWARGS:
             val = getattr(self, kwarg.key)
             out += ' ' * (indent + 2) + '%s: %s\n' %(kwarg.key, "\"%s\"" %val if isinstance(val, str) else val)
+        out += ' ' * (indent + 2) + '%s: %s\n' % ('crossval_factor', "\"%s\"" % self.crossval_factor)
+        out += ' ' * (indent + 2) + '%s: %s\n' % ('crossval_fold', self.crossval_fold)
 
         return out
 
@@ -1878,11 +1919,6 @@ class Model(object):
         :return: ``None``
         """
 
-        stderr('*' * 100 + '\n' + self.initialization_summary() + '*' * 100 + '\n\n')
-
-        usingGPU = tf.test.is_gpu_available()
-        stderr('Using GPU: %s\nNumber of training samples: %d\n\n' % (usingGPU, len(y)))
-
         if hasattr(self, 'pc') and self.pc:
             impulse_names = self.src_impulse_names
             assert X_2d_predictors is None, 'Principal components regression not supported for models with 2d predictors'
@@ -1919,6 +1955,26 @@ class Model(object):
             int_type=self.int_type,
             float_type=self.float_type,
         )
+
+        if self.use_crossval:
+            sel = ~y[self.crossval_factor].isin(self.crossval_folds)
+            first_obs = first_obs[sel]
+            last_obs = last_obs[sel]
+            time_y = time_y[sel]
+            y_dv = y_dv[sel]
+            gf_y = gf_y[sel]
+            X_2d = X_2d[sel]
+            time_X_2d = time_X_2d[sel]
+            time_X_mask = time_X_mask[sel]
+
+            n_train = len(y_dv)
+        else:
+            n_train = len(y)
+
+        stderr('*' * 100 + '\n' + self.initialization_summary() + '*' * 100 + '\n\n')
+
+        usingGPU = tf.test.is_gpu_available()
+        stderr('Using GPU: %s\nNumber of training samples: %d\n\n' % (usingGPU, n_train))
 
         stderr('Correlation matrix for input variables:\n')
         impulse_names_2d = [x for x in impulse_names if x in X_2d_predictor_names]
@@ -1958,11 +2014,12 @@ class Model(object):
                             if self.log_random and len(self.rangf) > 0:
                                 summary_random = self.sess.run(self.summary_random)
                                 self.writer.add_summary(summary_random, self.global_step.eval(session=self.sess))
+                            self.writer.flush()
                     else:
                         stderr('Resuming training from most recent checkpoint...\n\n')
 
                     while not self.has_converged() and self.global_step.eval(session=self.sess) < n_iter:
-                        p, p_inv = get_random_permutation(len(y))
+                        p, p_inv = get_random_permutation(n_train)
                         t0_iter = pytime.time()
                         stderr('-' * 50 + '\n')
                         stderr('Iteration %d\n' % int(self.global_step.eval(session=self.sess) + 1))
@@ -1977,7 +2034,7 @@ class Model(object):
                         if self.loss_filter_n_sds:
                             n_dropped = 0.
 
-                        for j in range(0, len(y), minibatch_size):
+                        for j in range(0, n_train, minibatch_size):
                             indices = p[j:j+minibatch_size]
                             fd_minibatch = {
                                 self.X: X_2d[indices],
@@ -2042,7 +2099,7 @@ class Model(object):
                             reg_loss_total /= n_minibatch
                             log_fd = {self.loss_total: loss_total, self.reg_loss_total: reg_loss_total}
                             if self.loss_filter_n_sds:
-                                log_fd[self.proportion_dropped] = n_dropped / len(y)
+                                log_fd[self.proportion_dropped] = n_dropped / n_train
                             summary_train_loss = self.sess.run(self.summary_opt, feed_dict=log_fd)
                             self.writer.add_summary(summary_train_loss, self.global_step.eval(session=self.sess))
                             summary_params = self.sess.run(self.summary_params)
@@ -2050,6 +2107,7 @@ class Model(object):
                             if self.log_random and len(self.rangf) > 0:
                                 summary_random = self.sess.run(self.summary_random)
                                 self.writer.add_summary(summary_random, self.global_step.eval(session=self.sess))
+                            self.writer.flush()
 
                         if self.save_freq > 0 and self.global_step.eval(session=self.sess) % self.save_freq == 0:
                             self.save()

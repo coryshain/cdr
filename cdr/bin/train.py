@@ -247,6 +247,8 @@ if __name__ == '__main__':
             for kwarg in MODEL_INITIALIZATION_KWARGS:
                 if kwarg.key not in ['outdir', 'history_length']:
                     kwargs[kwarg.key] = p[kwarg.key]
+            kwargs['crossval_factor'] = p['crossval_factor']
+            kwargs['crossval_fold'] = p['crossval_fold']
 
             if m.startswith('CDRNN'):
                 for kwarg in CDRNN_INITIALIZATION_KWARGS:

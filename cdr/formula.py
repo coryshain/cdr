@@ -816,7 +816,7 @@ class Formula(object):
                 terms += subterms
 
         else:
-            raise ValueError('Operation "%s" is not supported in CDR formula strings' %type(t).__name___)
+            raise ValueError('Operation "%s" is not supported in CDR formula strings' %type(t).__name__)
 
     def process_irf(
             self,

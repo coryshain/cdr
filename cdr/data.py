@@ -96,18 +96,23 @@ def get_first_last_obs_lists(y):
     return first_obs, last_obs
 
 
-def filter_invalid_responses(y, dv):
+def filter_invalid_responses(y, dv, crossval_factor=None, crossval_fold=None):
     """
     Filter out rows with non-finite responses.
 
     :param y: ``pandas`` ``DataFrame``; response data.
     :param dv: ``str``; name of column containing the dependent variable
+    :param crossval_factor: ``str`` or ``None``; name of column containing the selection variable for cross validation. If ``None``, no cross validation filtering.
+    :param crossval_fold: ``list`` or ``None``; list of valid values for cross-validation selection. Used only if ``crossval_factor`` is not ``None``.
     :return: 2-tuple of ``pandas`` ``DataFrame`` and ``pandas`` ``Series``; valid data and indicator vector used to filter out invalid data.
     """
 
-    first_obs, last_obs = get_first_last_obs_lists(y)
+    if crossval_fold is None:
+        crossval_fold = []
 
     select_y_valid = np.isfinite(y[dv])
+    if crossval_factor:
+        select_y_valid &= y[crossval_factor].isin(crossval_fold)
     
     return y[select_y_valid], select_y_valid
 

@@ -1363,6 +1363,7 @@ class CDRBayes(CDR):
                         logdir=self.outdir + '/tensorboard/edward',
                         log_timestamp=False,
                         scale={out_model: self.minibatch_scale},
+                        # scale={out_model: 1},
                         optimizer=self.optim
                     )
                 elif self.inference_name == 'MetropolisHastings':
@@ -1372,6 +1373,7 @@ class CDRBayes(CDR):
                         logdir=self.outdir + '/tensorboard/edward',
                         log_timestamp=False,
                         scale={out_model: self.minibatch_scale}
+                        # scale={out_model: 1}
                     )
                 else:
                     self.inference = getattr(ed,self.inference_name)(self.inference_map, data={out_model: y})
@@ -1381,6 +1383,7 @@ class CDRBayes(CDR):
                         logdir=self.outdir + '/tensorboard/edward',
                         log_timestamp=False,
                         scale={out_model: self.minibatch_scale}
+                        # scale={out_model: 1}
                     )
 
                 ## Set up posteriors and MAP estimates

@@ -331,6 +331,12 @@ MODEL_INITIALIZATION_KWARGS = [
         "Scale of global regularizer; can be overridden by more regularizers for more specific parameters (ignored if ``regularizer_name==None``)."
     ),
     Kwarg(
+        'scale_regularizer_with_data',
+        False,
+        bool,
+        "Whether to multiply the scale of all weight regularization by B * N, where batch size and N is num batches. Because the loss is based on the expected log likelihood of the full dataset, which scales linearly with data size, this approach ensures a stable regularization strength (relative to the loss) across datasets and batch sizes. If ``False``, the same regularization penalty is added to each batch regardless of batch or data size, and therefore different batch/data sizes will yield different implicit regularization strengths for the same regularization constant. If ``True``, this greatly increases the regularizer loss, so regularizer scales should be chosen accordingly."
+    ),
+    Kwarg(
         'intercept_regularizer_name',
         'inherit',
         [str, 'inherit', None],
@@ -688,7 +694,7 @@ CDRNN_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'n_units_input_projection',
-        None,
+        32,
         [int, str, None],
         "Number of units per input projection hidden layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_rnn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers in input projection."
     ),
@@ -700,7 +706,7 @@ CDRNN_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'n_units_rnn',
-        None,
+        32,
         [int, str, None],
         "Number of units per RNN layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_rnn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no RNN encoding (i.e. use a stationary convolution kernel)."
     ),
@@ -718,13 +724,13 @@ CDRNN_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'n_units_hidden_state',
-        None,
+        32,
         [int, None],
         "Number of units in CDRNN hidden. Must be an ``int``. If ``None``, no RNN encoding (i.e. use a stationary convolution kernel)."
     ),
     Kwarg(
         'n_units_t_delta_embedding',
-        None,
+        32,
         [int, None],
         "Number of units in the embedding of the temporal offset t_delta. If ``None``, inferred automatically.",
         aliases=['n_units_decoder', 'n_units_embedding']
@@ -738,7 +744,7 @@ CDRNN_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'n_units_irf',
-        None,
+        32,
         [int, str, None],
         "Number of units per hidden layer in IRF. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_units_irf** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers.",
         aliases=['n_units_decoder']
@@ -752,7 +758,7 @@ CDRNN_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'n_units_error_params_fn',
-        None,
+        32,
         [int, str, None],
         "Number of units per hidden layer in mapping from hidden state to parameters of error distribution. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_units_variance_fn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers.",
         aliases=['n_units_decoder']
@@ -878,36 +884,11 @@ CDRNN_INITIALIZATION_KWARGS = [
         aliases=['input_dropout_rate']
     ),
     Kwarg(
-        'tail_dropout_rate',
-        None,
-        [float, None],
-        "Rate at which to drop the tail of events (input vectors).",
-        aliases=['input_dropout_rate']
-    ),
-    Kwarg(
-        'tail_dropout_max',
-        None,
-        [int, None],
-        "Maximum number of final events to randomly dropout from time series during training."
-    ),
-    Kwarg(
         'rangf_dropout_rate',
         None,
         [float, None],
         "Rate at which to drop random grouping factors.",
         aliases=['input_dropout_rate']
-    ),
-    Kwarg(
-        'hidden_dropout_rate',
-        None,
-        [float, None],
-        "Rate at which to drop bottom-up neurons in the encoder."
-    ),
-    Kwarg(
-        'recurrent_dropout_rate',
-        None,
-        [float, None],
-        "Rate at which to drop recurrent neurons in the encoder."
     ),
     Kwarg(
         'input_projection_dropout_rate',

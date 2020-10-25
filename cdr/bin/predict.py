@@ -308,7 +308,18 @@ if __name__ == '__main__':
                     os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
                 dv = formula.strip().split('~')[0].strip()
-                y_valid, select_y_valid = filter_invalid_responses(y, dv)
+                if model_cur.use_crossval:
+                    crossval_factor = model_cur.crossval_factor
+                    crossval_fold = model_cur.crossval_fold
+                else:
+                    crossval_factor = None
+                    crossval_fold = None
+                y_valid, select_y_valid = filter_invalid_responses(
+                    y,
+                    dv,
+                    crossval_factor=crossval_factor,
+                    crossval_fold=crossval_fold
+                )
                 X_response_aligned_predictors_valid = X_response_aligned_predictors
                 if X_response_aligned_predictors_valid is not None:
                     X_response_aligned_predictors_valid = X_response_aligned_predictors_valid[select_y_valid]

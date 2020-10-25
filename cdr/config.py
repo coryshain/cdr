@@ -102,6 +102,7 @@ class Config(object):
         # Model(s) #
         ############
 
+        # Add ablations
         self.models = {}
         self.model_list = []
         for model_field in [m for m in config.keys() if m.startswith('model_')]:
@@ -111,33 +112,51 @@ class Config(object):
                 reg_type = 'cdr'
             elif model_name.startswith('LME'):
                 reg_type = 'lme'
-            self.models[model_name] = self.build_cdr_settings(
-                config[model_field],
-                add_defaults=False,
-                is_cdr=reg_type=='cdr'
-            )
-            if reg_type == 'lme':
-                self.models[model_name]['correlated'] = config[model_field].getboolean('correlated', True)
-            self.model_list.append(model_name)
-            if 'ablate' in config[model_field]:
-                for ablated in powerset(config[model_field]['ablate'].strip().split()):
-                    ablated = list(ablated)
-                    new_name = model_name + '!' + '!'.join(ablated)
-                    formula = Formula(config[model_field]['formula'])
-                    formula.ablate_impulses(ablated)
-                    new_model = self.models[model_name].copy()
-                    if reg_type == 'cdr':
-                        new_model['formula'] = str(formula)
-                    elif reg_type == 'lme':
-                        new_model['formula'] = formula.to_lmer_formula_string(
-                            z=False,
-                            correlated=self.models[model_name]['correlated'],
-                            transform_dirac=False
-                        )
-                    else:
-                        raise ValueError('Ablation with reg_type "%s" not currently supported.' % reg_type)
-                    self.models[new_name] = new_model
-                    self.model_list.append(new_name)
+            use_crossval = 'crossval_factor' in config[model_field]
+            if use_crossval:
+                model_configs = {}
+                folds = config[model_field]['crossval_folds'].split()
+                for fold in folds:
+                    levels = fold.split(';')
+                    fold_name = model_name + '_CV%s~%s' % (config[model_field]['crossval_factor'], '~'.join(levels))
+                    model_config = configparser.ConfigParser()
+                    model_config[model_field] = config[model_field]
+                    model_config = model_config[model_field]
+                    del model_config['crossval_folds']
+                    model_config['crossval_fold'] = fold
+                    model_configs[fold_name] = model_config
+            else:
+                model_configs = {model_name: config[model_field]}
+            for model_name in model_configs:
+                model_config = model_configs[model_name]
+                model_settings = self.build_cdr_settings(
+                    model_config,
+                    add_defaults=False,
+                    is_cdr=reg_type=='cdr'
+                )
+                self.models[model_name] = model_settings
+                if reg_type == 'lme':
+                    self.models[model_name]['correlated'] = config[model_field].getboolean('correlated', True)
+                self.model_list.append(model_name)
+                if 'ablate' in config[model_field]:
+                    for ablated in powerset(config[model_field]['ablate'].strip().split()):
+                        ablated = list(ablated)
+                        new_name = model_name + '!' + '!'.join(ablated)
+                        formula = Formula(config[model_field]['formula'])
+                        formula.ablate_impulses(ablated)
+                        new_model = self.models[model_name].copy()
+                        if reg_type == 'cdr':
+                            new_model['formula'] = str(formula)
+                        elif reg_type == 'lme':
+                            new_model['formula'] = formula.to_lmer_formula_string(
+                                z=False,
+                                correlated=self.models[model_name]['correlated'],
+                                transform_dirac=False
+                            )
+                        else:
+                            raise ValueError('Ablation with reg_type "%s" not currently supported.' % reg_type)
+                        self.models[new_name] = new_model
+                        self.model_list.append(new_name)
 
         if 'irf_name_map' in config:
             self.irf_name_map = {}
@@ -228,6 +247,16 @@ class Config(object):
         for kwarg in CDRNNBAYES_INITIALIZATION_KWARGS:
             if kwarg.in_settings(settings) or add_defaults:
                 out[kwarg.key] = kwarg.kwarg_from_config(settings)
+
+        # Cross validation settings
+        if 'crossval_factor' in settings or add_defaults:
+            out['crossval_factor'] = settings.get('crossval_factor', None)
+        if 'crossval_fold' in settings or add_defaults:
+            if 'crossval_fold' in settings:
+                crossval_fold = settings['crossval_fold'].split(';')
+            else:
+                crossval_fold = []
+            out['crossval_fold'] = crossval_fold
 
         # Plotting defaults
         if 'plot_n_time_units' in settings or add_defaults:

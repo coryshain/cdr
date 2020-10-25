@@ -1113,18 +1113,25 @@ class CDR(Model):
                 elif self.coefficient_regularizer_name == 'inherit':
                     self.coefficient_regularizer = self.regularizer
                 else:
-                    self.coefficient_regularizer = getattr(tf.contrib.layers, self.coefficient_regularizer_name)(self.coefficient_regularizer_scale)
+                    scale = self.coefficient_regularizer_scale
+                    if self.scale_regularizer_with_data:
+                        scale *= self.minibatch_size * self.minibatch_scale
+                    self.coefficient_regularizer = getattr(tf.contrib.layers, self.coefficient_regularizer_name)(scale)
                     
                 if self.irf_regularizer_name is None:
                     self.irf_regularizer = None
                 elif self.irf_regularizer_name == 'inherit':
                     self.irf_regularizer = self.regularizer
                 else:
-                    self.irf_regularizer = getattr(tf.contrib.layers, self.irf_regularizer_name)(self.irf_regularizer_scale)
+                    scale = self.irf_regularizer_scale
+                    if self.scale_regularizer_with_data:
+                        scale *= self.minibatch_size * self.minibatch_scale
+                    self.irf_regularizer = getattr(tf.contrib.layers, self.irf_regularizer_name)(scale)
 
                 self.oob_regularizer_name = 'l1_regularizer'
                 if self.oob_regularizer_scale:
-                    self.oob_regularizer = getattr(tf.contrib.layers, self.oob_regularizer_name)(self.oob_regularizer_scale)
+                    scale = self.oob_regularizer_scale
+                    self.oob_regularizer = getattr(tf.contrib.layers, self.oob_regularizer_name)(scale)
                 else:
                     self.oob_regularizer = None
 
