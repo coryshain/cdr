@@ -125,7 +125,13 @@ if __name__ == '__main__':
         partitions = get_partition_list(p_name)
         partition_str = '-'.join(partitions)
         X_paths, y_paths = paths_from_partition_cliarg(partitions, p)
-        X, y = read_data(X_paths, y_paths, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in cdr_formula_list for v in x.rangf])))
+        X, y = read_data(
+            X_paths,
+            y_paths,
+            p.series_ids,
+            sep=p.sep,
+            categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in cdr_formula_list for v in x.rangf]))
+        )
         X, y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors = preprocess_data(
             X,
             y,
@@ -144,7 +150,13 @@ if __name__ == '__main__':
     for i in range(0, len(args.data), 2):
         partition_str = '%d' % (int(i / 2) + 1)
         X_paths, y_paths = args.data[i:i+2]
-        X, y = read_data(X_paths, y_paths, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in cdr_formula_list for v in x.rangf])))
+        X, y = read_data(
+            X_paths,
+            y_paths,
+            p.series_ids,
+            sep=p.sep,
+            categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in cdr_formula_list for v in x.rangf]))
+        )
         X, y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors = preprocess_data(
             X,
             y,

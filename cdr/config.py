@@ -54,6 +54,11 @@ class Config(object):
         self.y_dev = data.get('y_dev', None)
         self.y_test = data.get('y_test', None)
 
+        sep = data.get('sep', ' ')
+        if sep.lower() in ['', "' '", '" "', 's', 'space']:
+            sep = ' '
+        self.sep = sep
+
         series_ids = data.get('series_ids')
         self.series_ids = series_ids.strip().split()
         self.modulus = data.getint('modulus', 4)

@@ -61,7 +61,13 @@ if __name__ == '__main__':
     #     if m.startswith('CDRNN'):
     #         all_interactions = True
     X_paths, y_paths = paths_from_partition_cliarg(partitions, p)
-    X, y = read_data(X_paths, y_paths, p.series_ids, categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in cdr_formula_list for v in x.rangf])))
+    X, y = read_data(
+        X_paths,
+        y_paths,
+        p.series_ids,
+        sep=p.sep,
+        categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in cdr_formula_list for v in x.rangf]))
+    )
     X, y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors = preprocess_data(
         X,
         y,
