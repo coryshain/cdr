@@ -1,0 +1,15 @@
+name: cdr
+channels:
+  - defaults
+dependencies:
+  - matplotlib
+  - numpy
+  - pandas
+  - pip
+  - scipy
+  - seaborn
+  - tensorflow<2.0
+  - pip:
+    - scikit-learn
+prefix: /home/shain.3/.conda/envs/cdr
+

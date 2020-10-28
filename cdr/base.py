@@ -15,6 +15,10 @@ from .plot import *
 
 import tensorflow as tf
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
+tf.logging.set_verbosity(tf.logging.ERROR)
+tf.logging.info('TensorFlow')
+
 tf_config = tf.ConfigProto()
 tf_config.gpu_options.allow_growth = True
 
