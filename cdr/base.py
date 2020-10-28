@@ -1575,10 +1575,10 @@ class Model(object):
                 n_params = 0
                 var_names = [v.name for v in tf.trainable_variables()]
                 var_vals = self.sess.run(tf.trainable_variables())
+                vars_and_vals = zip(var_names, var_vals)
+                vars_and_vals = sorted(list(vars_and_vals), key=lambda x: x[0])
                 out = ' ' * indent + 'TRAINABLE PARAMETERS:\n'
-                for i in range(len(var_names)):
-                    v_name = var_names[i]
-                    v_val = var_vals[i]
+                for v_name, v_val in vars_and_vals:
                     cur_params = int(np.prod(np.array(v_val).shape))
                     n_params += cur_params
                     out += ' ' * indent + '  ' + v_name.split(':')[0] + ': %s\n' % str(cur_params)

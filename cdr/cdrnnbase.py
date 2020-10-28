@@ -281,30 +281,14 @@ class CDRNN(Model):
                     name='plot_n_sds'
                 )
 
-                self.PLOT_AT_MEANS = True
-
-                if self.PLOT_AT_MEANS:
-                    plot_impulse_base_default = tf.convert_to_tensor(
-                        [self.impulse_means[x] for x in self.impulse_names],
-                        dtype=self.FLOAT_TF
-                    )
-                    plot_impulse_center_default = tf.zeros(
-                        [len(self.impulse_names)],
-                        dtype=self.FLOAT_TF
-                    )
-                else:
-                    plot_impulse_base_default = tf.zeros(
-                        [len(self.impulse_names)],
-                        dtype=self.FLOAT_TF
-                    )
-                    plot_impulse_center_default = tf.convert_to_tensor(
-                        [self.impulse_means[x] for x in self.impulse_names],
-                        dtype=self.FLOAT_TF
-                    )
-                    # plot_impulse_center_default = tf.zeros(
-                    #     [len(self.impulse_names)],
-                    #     dtype=self.FLOAT_TF
-                    # )
+                plot_impulse_base_default = tf.convert_to_tensor(
+                    [self.impulse_means[x] for x in self.impulse_names],
+                    dtype=self.FLOAT_TF
+                )
+                plot_impulse_center_default = tf.zeros(
+                    [len(self.impulse_names)],
+                    dtype=self.FLOAT_TF
+                )
                 plot_impulse_offset_default = tf.convert_to_tensor(
                     [self.impulse_sds[x] for x in self.impulse_names],
                     dtype=self.FLOAT_TF
@@ -329,10 +313,11 @@ class CDRNN(Model):
                     shape=[len(self.impulse_names)],
                     name='plot_impulse_1hot'
                 )
+                self.plot_impulse_1hot = tf.Print(self.plot_impulse_1hot, ['impulse 1h', self.plot_impulse_1hot])
                 self.plot_impulse_1hot_2 = tf.placeholder_with_default(
                     tf.zeros([len(self.impulse_names)], dtype=self.FLOAT_TF),
                     shape=[len(self.impulse_names)],
-                    name='plot_impulse_1hot'
+                    name='plot_impulse_1hot_2'
                 )
 
                 self.plot_impulse_base_expanded = self.plot_impulse_base[None, None, ...]
@@ -476,426 +461,420 @@ class CDRNN(Model):
                             )
 
                 # CDRNN MODEL
-                self.input_projection_layers = []
-                self.input_projection_fn = []
-                self.rnn_layers = []
-                self.rnn_h_init = []
-                self.rnn_h_ema = []
-                self.rnn_c_init = []
-                self.rnn_c_ema = []
-                self.rnn_encoder = []
-                self.rnn_projection_layers = []
-                self.rnn_projection_fn = []
-                self.t_delta_embedding_W = []
-                self.t_delta_embedding_b = []
-                self.hidden_state_to_irf_l1 = []
-                self.irf_layers = []
-                self.irf = []
-                self.error_params_fn_layers = []
-                self.error_params_fn = []
-                self.input_gates = []
-                self.y_sd_delta_gate = []
-                self.y_skewness_delta_gate = []
-                self.y_tailweight_delta_gate = []
-                self.rnn_h_ran_matrix = []
-                self.rnn_h_ran = []
-                self.rnn_c_ran_matrix = []
-                self.rnn_c_ran = []
-                self.h_ran_matrix = []
-                self.h_ran = []
 
-                for i in range(len(self.impulse_gather_indices)):
-                    if len(self.impulse_gather_indices) > 1:
-                        suf = '_%d' % (i + 1)
+                # FEEDFORWARD ENCODER
+                input_projection_layers = []
+                for l in range(self.n_layers_input_projection + 1):
+                    if l < self.n_layers_input_projection:
+                        units = self.n_units_input_projection[l]
+                        activation = self.input_projection_inner_activation
+                        dropout = self.input_projection_dropout_rate
                     else:
-                        suf = ''
-
-                    # FEEDFORWARD ENCODER
-                    input_projection_layers = []
-                    for l in range(self.n_layers_input_projection + 1):
-                        if l < self.n_layers_input_projection:
-                            units = self.n_units_input_projection[l]
-                            activation = self.input_projection_inner_activation
-                            dropout = self.input_projection_dropout_rate
-                        else:
-                            units = self.n_units_hidden_state
-                            activation = self.input_projection_activation
-                            dropout = None
-                        projection = DenseLayer(
-                            training=self.training,
-                            units=units,
-                            use_bias=True,
-                            activation=activation,
-                            kernel_initializer=self.kernel_initializer,
-                            bias_initializer='zeros_initializer',
-                            dropout=dropout,
-                            batch_normalization_decay=self.batch_normalization_decay,
-                            epsilon=self.epsilon,
-                            session=self.sess,
-                            name='input_projection_l%s%s' % (l + 1, suf)
-                        )
-                        self.regularizable_layers.append(projection)
-                        input_projection_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
-
-                    input_projection_fn = compose_lambdas(input_projection_layers)
-
-                    self.input_projection_layers.append(input_projection_layers)
-                    self.input_projection_fn.append(input_projection_fn)
-
-                    # RNN ENCODER
-                    rnn_layers = []
-                    rnn_h_init = []
-                    rnn_h_ema = []
-                    rnn_c_init = []
-                    rnn_c_ema = []
-                    for l in range(self.n_layers_rnn):
-                        if l < self.n_layers_rnn - 1:
-                            return_seqs = True
-                        else:
-                            return_seqs = True
-                        units = self.n_units_rnn[l]
-
-                        # TODO: Fix this varname
-                        h_init = tf.Variable(tf.zeros(units), name='rnn_h_%d%s' % (l+1, suf))
-                        rnn_h_init.append(h_init)
-
-                        h_ema_init = tf.Variable(tf.zeros(units), trainable=False, name='rnn_h_ema_%d%s' % (l+1, suf))
-                        rnn_h_ema.append(h_ema_init)
-
-                        c_init = tf.Variable(tf.zeros(units), name='rnn_c_%d%s' % (l+1, suf))
-                        rnn_c_init.append(c_init)
-
-                        c_ema_init = tf.Variable(tf.zeros(units), trainable=False, name='rnn_c_ema_%d%s' % (l+1, suf))
-                        rnn_c_ema.append(c_ema_init)
-
-                        layer = CDRNNLayer(
-                            training=self.training,
-                            units=units,
-                            time_projection_depth=self.n_layers_irf+1,
-                            activation=self.rnn_activation,
-                            recurrent_activation=self.recurrent_activation,
-                            time_projection_inner_activation=self.irf_inner_activation,
-                            bottomup_initializer=self.kernel_initializer,
-                            recurrent_initializer=self.recurrent_initializer,
-                            bottomup_dropout=self.input_projection_dropout_rate,
-                            h_dropout=self.rnn_h_dropout_rate,
-                            c_dropout=self.rnn_c_dropout_rate,
-                            forget_rate=self.forget_rate,
-                            bias_initializer='zeros_initializer',
-                            return_sequences=return_seqs,
-                            batch_normalization_decay=None,
-                            name='rnn_l%d%s' % (l + 1, suf),
-                            epsilon=self.epsilon,
-                            session=self.sess
-                        )
-                        self.regularizable_layers.append(layer)
-                        rnn_layers.append(make_lambda(layer, session=self.sess, use_kwargs=True))
-
-                    rnn_encoder = compose_lambdas(rnn_layers)
-
-                    self.rnn_layers.append(rnn_layers)
-                    self.rnn_h_init.append(rnn_h_init)
-                    self.rnn_h_ema.append(rnn_h_ema)
-                    self.rnn_c_init.append(rnn_c_init)
-                    self.rnn_c_ema.append(rnn_c_ema)
-                    self.rnn_encoder.append(rnn_encoder)
-
-                    rnn_projection_layers = []
-                    for l in range(self.n_layers_rnn_projection + 1):
-                        if l < self.n_layers_rnn_projection:
-                            units = self.n_units_rnn_projection[l]
-                            activation = self.rnn_projection_inner_activation
-                        else:
-                            units = self.n_units_hidden_state
-                            activation = self.rnn_projection_activation
-
-                        projection = DenseLayer(
-                            training=self.training,
-                            units=units,
-                            use_bias=True,
-                            activation=activation,
-                            kernel_initializer=self.kernel_initializer,
-                            bias_initializer='zeros_initializer',
-                            dropout=None,
-                            batch_normalization_decay=self.batch_normalization_decay,
-                            epsilon=self.epsilon,
-                            session=self.sess,
-                            name='rnn_projection_l%s%s' % (l + 1, suf)
-                        )
-                        self.regularizable_layers.append(projection)
-                        rnn_projection_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
-
-                    rnn_projection_fn = compose_lambdas(rnn_projection_layers)
-
-                    self.rnn_projection_layers.append(rnn_projection_layers)
-                    self.rnn_projection_fn.append(rnn_projection_fn)
-
-                    # t_delta embedding (i.e. multidim transform of time in IRF)
-                    t_delta_embedding_W = tf.get_variable(
-                        't_delta_embedding_W%s' % suf,
-                        shape=[1, 1, self.n_units_t_delta_embedding],
-                        initializer=get_initializer(self.kernel_initializer, self.sess)
-                    )
-                    t_delta_embedding_b = tf.get_variable(
-                        't_delta_embedding_b%s' % suf,
-                        shape=[1, 1, self.n_units_t_delta_embedding],
-                        initializer=tf.zeros_initializer
-                    )
-                    self.regularizable_layers += [t_delta_embedding_W, t_delta_embedding_b]
-
-                    self.t_delta_embedding_W.append(t_delta_embedding_W)
-                    self.t_delta_embedding_b.append(t_delta_embedding_b)
-
-                    # Projection from hidden state to first layer (weights and biases) of IRF
-                    hidden_state_to_irf_l1 = DenseLayer(
+                        units = self.n_units_hidden_state
+                        activation = self.input_projection_activation
+                        dropout = None
+                    projection = DenseLayer(
                         training=self.training,
-                        units=self.n_units_t_delta_embedding * 2,
+                        units=units,
                         use_bias=True,
-                        activation=None,
+                        activation=activation,
                         kernel_initializer=self.kernel_initializer,
                         bias_initializer='zeros_initializer',
-                        dropout=self.irf_dropout_rate,
+                        dropout=dropout,
                         batch_normalization_decay=self.batch_normalization_decay,
                         epsilon=self.epsilon,
                         session=self.sess,
-                        name='hidden_state_to_irf_l1%s' % suf
+                        name='input_projection_l%s' % (l + 1)
                     )
-                    self.regularizable_layers.append(hidden_state_to_irf_l1)
+                    self.regularizable_layers.append(projection)
+                    input_projection_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
 
-                    self.hidden_state_to_irf_l1.append(hidden_state_to_irf_l1)
+                input_projection_fn = compose_lambdas(input_projection_layers)
 
-                    # IRF
-                    irf_layers = []
-                    for l in range(self.n_layers_irf + 1):
-                        if l < self.n_layers_irf:
-                            units = self.n_units_irf[l]
-                            activation = self.irf_inner_activation
-                            dropout = self.irf_dropout_rate
-                            bn = self.batch_normalization_decay
-                            use_bias = True
-                        else:
-                            units = 1
-                            activation = self.irf_activation
-                            dropout = None
-                            bn = None
-                            use_bias = False
+                self.input_projection_layers = input_projection_layers
+                self.input_projection_fn = input_projection_fn
 
-                        projection = DenseLayer(
-                            training=self.training,
-                            units=units,
-                            use_bias=use_bias,
-                            activation=activation,
-                            kernel_initializer=self.kernel_initializer,
-                            bias_initializer='zeros_initializer',
-                            dropout=dropout,
-                            batch_normalization_decay=bn,
-                            epsilon=self.epsilon,
-                            session=self.sess,
-                            name='irf_l%s%s' % (l + 1, suf)
-                        )
-                        if l < self.n_layers_irf:
-                            self.regularizable_layers.append(projection)
-                        irf_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
+                # RNN ENCODER
+                rnn_layers = []
+                rnn_h_init = []
+                rnn_h_ema = []
+                rnn_c_init = []
+                rnn_c_ema = []
+                for l in range(self.n_layers_rnn):
+                    if l < self.n_layers_rnn - 1:
+                        return_seqs = True
+                    else:
+                        return_seqs = True
+                    units = self.n_units_rnn[l]
 
-                    irf = compose_lambdas(irf_layers)
+                    # TODO: Fix this varname
+                    h_init = tf.Variable(tf.zeros(units), name='rnn_h_l%d' % (l+1))
+                    rnn_h_init.append(h_init)
 
-                    self.irf_layers.append(irf_layers)
-                    self.irf.append(irf)
+                    h_ema_init = tf.Variable(tf.zeros(units), trainable=False, name='rnn_h_ema_l%d' % (l+1))
+                    rnn_h_ema.append(h_ema_init)
 
-                    # ERROR PARAMS
-                    error_params_fn_layers = []
-                    for l in range(self.n_layers_error_params_fn + 1):
-                        if l < self.n_layers_error_params_fn:
-                            units = self.n_units_error_params_fn[l]
-                            activation = self.error_params_fn_inner_activation
-                            dropout = self.error_params_fn_dropout_rate
-                            bn = self.batch_normalization_decay
-                            use_bias = True
-                        else:
-                            units = 1
-                            if self.asymmetric_error:
-                                units += 2
-                            activation = self.error_params_fn_activation
-                            dropout = None
-                            bn = None
-                            use_bias = False
+                    c_init = tf.Variable(tf.zeros(units), name='rnn_c_l%d' % (l+1))
+                    rnn_c_init.append(c_init)
 
-                        projection = DenseLayer(
-                            training=self.training,
-                            units=units,
-                            use_bias=use_bias,
-                            activation=activation,
-                            kernel_initializer=self.kernel_initializer,
-                            bias_initializer='zeros_initializer',
-                            dropout=dropout,
-                            batch_normalization_decay=bn,
-                            epsilon=self.epsilon,
-                            session=self.sess,
-                            name='error_params_fn_l%s%s' % (l + 1, suf)
-                        )
-                        if l < self.n_layers_error_params_fn:
-                            self.regularizable_layers.append(projection)
-                        error_params_fn_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
+                    c_ema_init = tf.Variable(tf.zeros(units), trainable=False, name='rnn_c_ema_l%d' % (l+1))
+                    rnn_c_ema.append(c_ema_init)
 
-                    error_params_fn = compose_lambdas(error_params_fn_layers)
+                    layer = CDRNNLayer(
+                        training=self.training,
+                        units=units,
+                        time_projection_depth=self.n_layers_irf+1,
+                        activation=self.rnn_activation,
+                        recurrent_activation=self.recurrent_activation,
+                        time_projection_inner_activation=self.irf_inner_activation,
+                        bottomup_initializer=self.kernel_initializer,
+                        recurrent_initializer=self.recurrent_initializer,
+                        bottomup_dropout=self.input_projection_dropout_rate,
+                        h_dropout=self.rnn_h_dropout_rate,
+                        c_dropout=self.rnn_c_dropout_rate,
+                        forget_rate=self.forget_rate,
+                        bias_initializer='zeros_initializer',
+                        return_sequences=return_seqs,
+                        batch_normalization_decay=None,
+                        name='rnn_l%d' % (l + 1),
+                        epsilon=self.epsilon,
+                        session=self.sess
+                    )
+                    self.regularizable_layers.append(layer)
+                    rnn_layers.append(make_lambda(layer, session=self.sess, use_kwargs=True))
 
-                    self.error_params_fn_layers.append(error_params_fn_layers)
-                    self.error_params_fn.append(error_params_fn)
+                rnn_encoder = compose_lambdas(rnn_layers)
 
-                    # GATES
-                    self.input_gates.append(tf.tanh(tf.Variable(
-                        tf.zeros([len(self.impulse_gather_indices[i])+1]),
-                        name='input_gate_logits%s' % suf
-                    ))[None, None, ...])
-                    self.y_sd_delta_gate.append(tf.tanh(tf.Variable(
-                        tf.zeros([]), name='y_sd_delta_gate_logit%s' % suf
-                    )))
-                    if self.asymmetric_error:
-                        self.y_skewness_delta_gate.append(tf.tanh(tf.Variable(
-                            tf.zeros([]), name='y_skewness_delta_gate_logit%s' % suf
-                        )))
-                        self.y_tailweight_delta_gate.append(tf.tanh(
-                            tf.Variable(tf.zeros([]), name='y_tailweight_delta_gate_logit%s' % suf
-                        )))
+                self.rnn_layers = rnn_layers
+                self.rnn_h_init = rnn_h_init
+                self.rnn_h_ema = rnn_h_ema
+                self.rnn_c_init = rnn_c_init
+                self.rnn_c_ema = rnn_c_ema
+                self.rnn_encoder = rnn_encoder
 
-                    # RANDOM EFFECTS
-                    rnn_h_ran_matrix = [[] for l in range(self.n_layers_rnn)]
-                    rnn_h_ran = [[] for l in range(self.n_layers_rnn)]
-                    rnn_c_ran_matrix = [[] for l in range(self.n_layers_rnn)]
-                    rnn_c_ran = [[] for l in range(self.n_layers_rnn)]
-                    h_ran_matrix = []
-                    h_ran = []
-                    for j in range(len(self.rangf)):
-                        gf = self.rangf[j]
-                        levels_ix = np.arange(self.rangf_n_levels[j] - 1)
+                rnn_projection_layers = []
+                for l in range(self.n_layers_rnn_projection + 1):
+                    if l < self.n_layers_rnn_projection:
+                        units = self.n_units_rnn_projection[l]
+                        activation = self.rnn_projection_inner_activation
+                    else:
+                        units = self.n_units_hidden_state
+                        activation = self.rnn_projection_activation
 
-                        if self.has_intercept[gf]:
-                            # Random rnn initialization offsets
-                            for l in range(self.n_layers_rnn):
-                                rnn_h_ran_matrix_cur = tf.Variable(
-                                    tf.zeros([len(levels_ix), self.n_units_rnn[l]]),
-                                    name='rnn_h_ran_%d_by_%s%s' % (l+1, sn(gf), suf)
-                                )
-                                self.regularizable_layers.append(rnn_h_ran_matrix_cur)
-                                rnn_h_ran_matrix_cur -= tf.reduce_mean(rnn_h_ran_matrix_cur, axis=0, keepdims=True)
-                                self._regularize(rnn_h_ran_matrix_cur, type='ranef', var_name='rnn_h_ran_%d_by_%s%s' % (l, sn(gf), suf))
+                    projection = DenseLayer(
+                        training=self.training,
+                        units=units,
+                        use_bias=True,
+                        activation=activation,
+                        kernel_initializer=self.kernel_initializer,
+                        bias_initializer='zeros_initializer',
+                        dropout=None,
+                        batch_normalization_decay=self.batch_normalization_decay,
+                        epsilon=self.epsilon,
+                        session=self.sess,
+                        name='rnn_projection_l%s' % (l + 1)
+                    )
+                    self.regularizable_layers.append(projection)
+                    rnn_projection_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
 
-                                if self.log_random:
-                                    tf.summary.histogram(
-                                        sn('by_%s/rnn_h_l%d%s' % (sn(gf), l+1, suf)),
-                                        rnn_h_ran_matrix_cur,
-                                        collections=['random']
-                                    )
+                rnn_projection_fn = compose_lambdas(rnn_projection_layers)
 
-                                rnn_h_ran_matrix_cur = tf.concat(
-                                    [
-                                        rnn_h_ran_matrix_cur,
-                                        tf.zeros([1, self.n_units_rnn[l]])
-                                    ],
-                                    axis=0
-                                )
-                                rnn_h_ran_matrix[l].append(rnn_h_ran_matrix_cur)
-                                rnn_h_ran[l].append(tf.gather(rnn_h_ran_matrix_cur, gf_y[j]))
+                self.rnn_projection_layers = rnn_projection_layers
+                self.rnn_projection_fn = rnn_projection_fn
 
-                                rnn_c_ran_matrix_cur = tf.Variable(
-                                    tf.zeros([len(levels_ix), self.n_units_rnn[l]]),
-                                    name='rnn_c_ran_%d_by_%s%s' % (l+1, sn(gf), suf)
-                                )
-                                self.regularizable_layers.append(rnn_c_ran_matrix_cur)
-                                rnn_c_ran_matrix_cur -= tf.reduce_mean(rnn_c_ran_matrix_cur, axis=0, keepdims=True)
-                                self._regularize(rnn_c_ran_matrix_cur, type='ranef', var_name='rnn_c_ran_%d_by_%s%s' % (l+1, sn(gf), suf))
+                # t_delta embedding (i.e. multidim transform of time in IRF)
+                t_delta_embedding_W = tf.get_variable(
+                    't_delta_embedding_W',
+                    shape=[1, 1, self.n_units_t_delta_embedding],
+                    initializer=get_initializer(self.kernel_initializer, self.sess)
+                )
+                t_delta_embedding_b = tf.get_variable(
+                    't_delta_embedding_b',
+                    shape=[1, 1, self.n_units_t_delta_embedding],
+                    initializer=tf.zeros_initializer
+                )
+                self.regularizable_layers += [t_delta_embedding_W, t_delta_embedding_b]
 
-                                if self.log_random:
-                                    tf.summary.histogram(
-                                        sn('by_%s/rnn_c_l%d%s' % (sn(gf), l+1, suf)),
-                                        rnn_c_ran_matrix_cur,
-                                        collections=['random']
-                                    )
+                self.t_delta_embedding_W = t_delta_embedding_W
+                self.t_delta_embedding_b = t_delta_embedding_b
 
-                                rnn_c_ran_matrix_cur = tf.concat(
-                                    [
-                                        rnn_c_ran_matrix_cur,
-                                        tf.zeros([1, self.n_units_rnn[l]])
-                                    ],
-                                    axis=0
-                                )
-                                rnn_c_ran_matrix[l].append(rnn_c_ran_matrix_cur)
-                                rnn_c_ran[l].append(tf.gather(rnn_c_ran_matrix_cur, gf_y[j]))
+                # Projection from hidden state to first layer (weights and biases) of IRF
+                hidden_state_to_irf_l1 = DenseLayer(
+                    training=self.training,
+                    units=self.n_units_t_delta_embedding * 2,
+                    use_bias=True,
+                    activation=None,
+                    kernel_initializer=self.kernel_initializer,
+                    bias_initializer='zeros_initializer',
+                    dropout=self.irf_dropout_rate,
+                    batch_normalization_decay=self.batch_normalization_decay,
+                    epsilon=self.epsilon,
+                    session=self.sess,
+                    name='hidden_state_to_irf_l1'
+                )
+                self.regularizable_layers.append(hidden_state_to_irf_l1)
 
-                            # Random hidden state offsets
-                            h_ran_matrix_cur = tf.Variable(
-                                tf.zeros([len(levels_ix), self.n_units_hidden_state]),
-                                name='h_ran_by_%s%s' % (sn(gf), suf)
+                self.hidden_state_to_irf_l1 = hidden_state_to_irf_l1
+
+                # IRF
+                irf_layers = []
+                for l in range(self.n_layers_irf + 1):
+                    if l < self.n_layers_irf:
+                        units = self.n_units_irf[l]
+                        activation = self.irf_inner_activation
+                        dropout = self.irf_dropout_rate
+                        bn = self.batch_normalization_decay
+                        use_bias = True
+                    else:
+                        units = 1
+                        activation = self.irf_activation
+                        dropout = None
+                        bn = None
+                        use_bias = False
+
+                    projection = DenseLayer(
+                        training=self.training,
+                        units=units,
+                        use_bias=use_bias,
+                        activation=activation,
+                        kernel_initializer=self.kernel_initializer,
+                        bias_initializer='zeros_initializer',
+                        dropout=dropout,
+                        batch_normalization_decay=bn,
+                        epsilon=self.epsilon,
+                        session=self.sess,
+                        name='irf_l%s' % (l + 1)
+                    )
+                    if l < self.n_layers_irf:
+                        self.regularizable_layers.append(projection)
+                    irf_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
+
+                irf = compose_lambdas(irf_layers)
+
+                self.irf_layers = irf_layers
+                self.irf = irf
+
+                # RANDOM EFFECTS
+                rnn_h_ran_matrix = [[] for l in range(self.n_layers_rnn)]
+                rnn_h_ran = [[] for l in range(self.n_layers_rnn)]
+                rnn_c_ran_matrix = [[] for l in range(self.n_layers_rnn)]
+                rnn_c_ran = [[] for l in range(self.n_layers_rnn)]
+                h_ran_matrix = []
+                h_ran = []
+                for j in range(len(self.rangf)):
+                    gf = self.rangf[j]
+                    levels_ix = np.arange(self.rangf_n_levels[j] - 1)
+
+                    if self.has_intercept[gf]:
+                        # Random rnn initialization offsets
+                        for l in range(self.n_layers_rnn):
+                            rnn_h_ran_matrix_cur = tf.Variable(
+                                tf.zeros([len(levels_ix), self.n_units_rnn[l]]),
+                                name='rnn_h_ran_%d_by_%s' % (l+1, sn(gf))
                             )
-                            self.regularizable_layers.append(h_ran_matrix_cur)
-                            h_ran_matrix_cur -= tf.reduce_mean(h_ran_matrix_cur, axis=0, keepdims=True)
-                            self._regularize(h_ran_matrix_cur, type='ranef', var_name='h_ran_by_%s%s' % (sn(gf), suf))
+                            self.regularizable_layers.append(rnn_h_ran_matrix_cur)
+                            rnn_h_ran_matrix_cur -= tf.reduce_mean(rnn_h_ran_matrix_cur, axis=0, keepdims=True)
+                            self._regularize(rnn_h_ran_matrix_cur, type='ranef', var_name='rnn_h_ran_%d_by_%s' % (l, sn(gf)))
 
                             if self.log_random:
                                 tf.summary.histogram(
-                                    sn('by_%s/h_l%d%s' % (sn(gf), l+1, suf)),
-                                    h_ran_matrix_cur,
+                                    sn('by_%s/rnn_h_l%d' % (sn(gf), l+1)),
+                                    rnn_h_ran_matrix_cur,
                                     collections=['random']
                                 )
 
-                            h_ran_matrix_cur = tf.concat(
+                            rnn_h_ran_matrix_cur = tf.concat(
                                 [
-                                    h_ran_matrix_cur,
-                                    tf.zeros([1, self.n_units_hidden_state])
+                                    rnn_h_ran_matrix_cur,
+                                    tf.zeros([1, self.n_units_rnn[l]])
                                 ],
                                 axis=0
                             )
-                            h_ran_matrix.append(h_ran_matrix_cur)
-                            h_ran.append(tf.gather(h_ran_matrix_cur, gf_y[j]))
+                            rnn_h_ran_matrix[l].append(rnn_h_ran_matrix_cur)
+                            rnn_h_ran[l].append(tf.gather(rnn_h_ran_matrix_cur, gf_y[j]))
 
-                    self.rnn_h_ran_matrix.append(rnn_h_ran_matrix)
-                    self.rnn_h_ran.append(rnn_h_ran)
-                    self.rnn_c_ran_matrix.append(rnn_c_ran_matrix)
-                    self.rnn_c_ran.append(rnn_c_ran)
-                    self.h_ran_matrix.append(h_ran_matrix)
-                    self.h_ran.append(h_ran)
+                            rnn_c_ran_matrix_cur = tf.Variable(
+                                tf.zeros([len(levels_ix), self.n_units_rnn[l]]),
+                                name='rnn_c_ran_%d_by_%s' % (l+1, sn(gf))
+                            )
+                            self.regularizable_layers.append(rnn_c_ran_matrix_cur)
+                            rnn_c_ran_matrix_cur -= tf.reduce_mean(rnn_c_ran_matrix_cur, axis=0, keepdims=True)
+                            self._regularize(rnn_c_ran_matrix_cur, type='ranef', var_name='rnn_c_ran_%d_by_%s' % (l+1, sn(gf)))
 
-                # ATTENTION FOR MULTI-INPUT MODELS
-                if len(self.impulse_gather_indices) > 1:
-                    n = len(self.impulse_gather_indices)
-                    self.y_attn = tf.nn.softmax(tf.Variable(
-                        tf.zeros([n]), name='y_attn_logit'
+                            if self.log_random:
+                                tf.summary.histogram(
+                                    sn('by_%s/rnn_c_l%d' % (sn(gf), l+1)),
+                                    rnn_c_ran_matrix_cur,
+                                    collections=['random']
+                                )
+
+                            rnn_c_ran_matrix_cur = tf.concat(
+                                [
+                                    rnn_c_ran_matrix_cur,
+                                    tf.zeros([1, self.n_units_rnn[l]])
+                                ],
+                                axis=0
+                            )
+                            rnn_c_ran_matrix[l].append(rnn_c_ran_matrix_cur)
+                            rnn_c_ran[l].append(tf.gather(rnn_c_ran_matrix_cur, gf_y[j]))
+
+                        # Random hidden state offsets
+                        h_ran_matrix_cur = tf.Variable(
+                            tf.zeros([len(levels_ix), self.n_units_hidden_state]),
+                            name='h_ran_by_%s' % (sn(gf))
+                        )
+                        self.regularizable_layers.append(h_ran_matrix_cur)
+                        h_ran_matrix_cur -= tf.reduce_mean(h_ran_matrix_cur, axis=0, keepdims=True)
+                        self._regularize(h_ran_matrix_cur, type='ranef', var_name='h_ran_by_%s' % (sn(gf)))
+
+                        if self.log_random:
+                            tf.summary.histogram(
+                                sn('by_%s/h_l%d' % (sn(gf), l+1)),
+                                h_ran_matrix_cur,
+                                collections=['random']
+                            )
+
+                        h_ran_matrix_cur = tf.concat(
+                            [
+                                h_ran_matrix_cur,
+                                tf.zeros([1, self.n_units_hidden_state])
+                            ],
+                            axis=0
+                        )
+                        h_ran_matrix.append(h_ran_matrix_cur)
+                        h_ran.append(tf.gather(h_ran_matrix_cur, gf_y[j]))
+
+                self.rnn_h_ran_matrix = rnn_h_ran_matrix
+                self.rnn_h_ran = rnn_h_ran
+                self.rnn_c_ran_matrix = rnn_c_ran_matrix
+                self.rnn_c_ran = rnn_c_ran
+                self.h_ran_matrix = h_ran_matrix
+                self.h_ran = h_ran
+
+                # GATES
+                self.input_gates = tf.tanh(tf.Variable(
+                    # tf.zeros([len(self.impulse_gather_indices[i])+1]),
+                    tf.zeros([len(self.impulse_names)+1]),
+                    name='input_gate_logits'
+                ))[None, None, ...]
+                self.y_sd_delta_gate = tf.tanh(tf.Variable(
+                    tf.zeros([]), name='y_sd_delta_gate_logit'
+                ))
+                if self.asymmetric_error:
+                    self.y_skewness_delta_gate = tf.tanh(tf.Variable(
+                        tf.zeros([]), name='y_skewness_delta_gate_logit'
                     ))
-                    self.y_sd_delta_attn = tf.nn.softmax(tf.Variable(
-                        tf.zeros([n]), name='y_sd_delta_attn_logit'
+                    self.y_tailweight_delta_gate = tf.tanh(
+                        tf.Variable(tf.zeros([]), name='y_tailweight_delta_gate_logit'
                     ))
-                    if self.asymmetric_error:
-                        self.y_skewness_delta_attn = tf.nn.softmax(tf.Variable(
-                            tf.zeros([n]), name='y_skewness_delta_attn_logit'
-                        ))
-                        self.y_tailweight_delta_attn = tf.nn.softmax(tf.Variable(
-                            tf.zeros([n]), name='y_tailweight_delta_attn_logit'
-                        ))
 
-    def _rnn_encoder(self, X, i=0, zero_rnn_initial_state=False, **kwargs):
+                # ERROR PARAMS
+                error_params_fn_layers = []
+                for l in range(self.n_layers_error_params_fn + 1):
+                    if l < self.n_layers_error_params_fn:
+                        units = self.n_units_error_params_fn[l]
+                        activation = self.error_params_fn_inner_activation
+                        dropout = self.error_params_fn_dropout_rate
+                        bn = self.batch_normalization_decay
+                        use_bias = True
+                    else:
+                        units = 1
+                        if self.asymmetric_error:
+                            units += 2
+                        n = len(self.impulse_gather_indices)
+                        if n > 1:
+                            if n == 2:
+                                units += 1
+                            else:
+                                units += n
+                        activation = self.error_params_fn_activation
+                        dropout = None
+                        bn = None
+                        use_bias = False
+
+                    projection = DenseLayer(
+                        training=self.training,
+                        units=units,
+                        use_bias=use_bias,
+                        activation=activation,
+                        kernel_initializer=self.kernel_initializer,
+                        bias_initializer='zeros_initializer',
+                        dropout=dropout,
+                        batch_normalization_decay=bn,
+                        epsilon=self.epsilon,
+                        session=self.sess,
+                        name='error_params_fn_l%s' % (l + 1)
+                    )
+                    if l < self.n_layers_error_params_fn:
+                        self.regularizable_layers.append(projection)
+                    error_params_fn_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
+
+                self.error_params_fn_layers = error_params_fn_layers
+                self.error_params_fn = compose_lambdas(error_params_fn_layers)
+
+                # # ATTENTION FOR MULTI-INPUT MODELS
+                # if len(self.impulse_gather_indices) > 1:
+                #     n = len(self.impulse_gather_indices)
+                #     if n > 2:
+                #         self.y_attn = tf.nn.softmax(tf.Variable(
+                #             tf.zeros([n]), name='y_attn_logit'
+                #         ))
+                #         self.y_sd_delta_attn = tf.nn.softmax(tf.Variable(
+                #             tf.zeros([n]), name='y_sd_delta_attn_logit'
+                #         ))
+                #         if self.asymmetric_error:
+                #             self.y_skewness_delta_attn = tf.nn.softmax(tf.Variable(
+                #                 tf.zeros([n]), name='y_skewness_delta_attn_logit'
+                #             ))
+                #             self.y_tailweight_delta_attn = tf.nn.softmax(tf.Variable(
+                #                 tf.zeros([n]), name='y_tailweight_delta_attn_logit'
+                #             ))
+                #     else:
+                #         y_attn_logit = tf.Variable(
+                #             tf.zeros([]), name='y_attn_logit'
+                #         )
+                #         y_attn = tf.nn.sigmoid(y_attn_logit)
+                #
+                #         self.y_attn = tf.stack([y_attn, 1-y_attn], axis=0)
+                #         y_sd_delta_attn = tf.nn.sigmoid(tf.Variable(
+                #             tf.zeros([]), name='y_sd_delta_attn_logit'
+                #         ))
+                #         self.y_sd_delta_attn = tf.stack([y_sd_delta_attn, 1-y_sd_delta_attn], axis=0)
+                #         if self.asymmetric_error:
+                #             y_skewness_delta_attn = tf.nn.sigmoid(tf.Variable(
+                #                 tf.zeros([]), name='y_skewness_delta_attn_logit'
+                #             ))
+                #             self.y_skewness_delta_attn = tf.stack([y_skewness_delta_attn, 1 - y_skewness_delta_attn], axis=0)
+                #             y_tailweight_delta_attn = tf.nn.sigmoid(tf.Variable(
+                #                 tf.zeros([]), name='y_tailweight_delta_attn_logit'
+                #             ))
+                #             self.y_tailweight_delta_attn = tf.stack([y_tailweight_delta_attn, 1 - y_tailweight_delta_attn], axis=0)
+
+
+    def _rnn_encoder(self, X, plot_mode=False, **kwargs):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 h = [X]
                 c = []
-                for l in range(len(self.rnn_layers[i])):
-                    if zero_rnn_initial_state:
+                for l in range(len(self.rnn_layers)):
+                    if plot_mode:
                         b = tf.shape(X)[0]
                         tile_dims = [b, 1]
-                        h_init = tf.tile(self.rnn_h_init[i][l][None, ...], tile_dims)
-                        c_init = tf.tile(self.rnn_c_init[i][l][None, ...], tile_dims)
+                        h_init = tf.tile(self.rnn_h_init[l][None, ...], tile_dims)
+                        c_init = tf.tile(self.rnn_c_init[l][None, ...], tile_dims)
                         if self.use_rangf:
-                            h_init += tf.add_n(self.rnn_h_ran[i][l])
-                            c_init += tf.add_n(self.rnn_c_ran[i][l])
+                            h_init += tf.add_n(self.rnn_h_ran[l])
+                            c_init += tf.add_n(self.rnn_c_ran[l])
                     else:
                         b = tf.shape(X)[0]
                         tile_dims = [b, 1]
-                        h_init = tf.tile(self.rnn_h_ema[i][l][None, ...], tile_dims)
-                        c_init = tf.tile(self.rnn_c_ema[i][l][None, ...], tile_dims)
+                        h_init = tf.tile(self.rnn_h_ema[l][None, ...], tile_dims)
+                        c_init = tf.tile(self.rnn_c_ema[l][None, ...], tile_dims)
 
                     t_init = tf.zeros([b, 1], dtype=self.FLOAT_TF)
                     initial_state = CDRNNStateTuple(c=c_init, h=h_init, t=t_init)
 
-                    layer = self.rnn_layers[i][l]
+                    layer = self.rnn_layers[l]
                     h_l, c_l = layer(h[-1], return_state=True, initial_state=initial_state, **kwargs)
                     h.append(h_l)
                     c.append(c_l)
@@ -908,212 +887,232 @@ class CDRNN(Model):
 
         return tf.reduce_sum(x, axis=1)
 
-    def _apply_model(self, X, t_delta, time_X=None, time_X_mask=None, zero_rnn_initial_state=False):
+    def _apply_model(self, X, t_delta, time_X=None, time_X_mask=None, plot_mode=False, add_print=False):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                time_X_mask_cdrnn = []
-                y = []
-                y_sd_delta = []
+                if time_X is None:
+                    X_shape = tf.shape(X)
+                    time_X_shape = []
+                    for j in range(len(X.shape) - 1):
+                        s = X.shape[j]
+                        try:
+                            s = int(s)
+                        except TypeError:
+                            s = X_shape[j]
+                        time_X_shape.append(s)
+                    time_X_shape.append(1)
+                    time_X = tf.ones(time_X_shape, dtype=self.FLOAT_TF)
+                    time_X_mean = self.time_X_mean
+                    time_X *= time_X_mean
+
+                if self.rescale_time:
+                    t_delta /= self.t_delta_sd
+                    time_X_mean /= self.time_X_sd
+
+                # if not plot_mode:# and len(self.impulse_gather_indices) > 1:
+                if not plot_mode and len(self.impulse_gather_indices) > 1:
+                    X_cdrnn = []
+                    t_delta_cdrnn = []
+                    time_X_cdrnn = []
+                    time_X_mask_cdrnn = []
+
+                    X_shape = tf.shape(X)
+                    B = X_shape[0]
+                    T = X_shape[1]
+
+                    for i, ix in enumerate(self.impulse_gather_indices):
+                        X_cur = [tf.gather(X, ix, axis=-1)]
+                        prec_dim = sum([len(self.impulse_gather_indices[j]) for j in range(i)])
+                        if prec_dim:
+                            X_cur.insert(0, tf.zeros([B, T, prec_dim], dtype=self.FLOAT_TF))
+                        fol_dim = sum([len(self.impulse_gather_indices[j]) for j in range(i+1, len(self.impulse_gather_indices))])
+                        if fol_dim:
+                            X_cur.append(tf.zeros([B, T, fol_dim], dtype=self.FLOAT_TF))
+                        if len(X_cur) > 1:
+                            X_cur = tf.concat(X_cur, axis=-1)
+                        else:
+                            X_cur = X_cur[0]
+                        if add_print:
+                            X_cur = tf.Print(X_cur, ['X_cur_%d' % i, self.plot_impulse_1hot, X_cur], summarize=40)
+
+                        if t_delta.shape[-1] > 1:
+                            t_delta_cur = t_delta[..., ix[0]:ix[0]+1]
+                        else:
+                            t_delta_cur = t_delta
+
+                        if time_X.shape[-1] > 1:
+                            time_X_cur = time_X[..., ix[0]:ix[0]+1]
+                        else:
+                            time_X_cur = time_X
+
+                        if time_X_mask is not None and time_X_mask.shape[-1] > 1:
+                            time_X_mask_cur = time_X_mask[..., ix[0]]
+                        else:
+                            time_X_mask_cur = time_X_mask
+
+                        X_cdrnn.append(X_cur)
+                        t_delta_cdrnn.append(t_delta_cur)
+                        time_X_cdrnn.append(time_X_cur)
+                        if time_X_mask is not None:
+                            time_X_mask_cdrnn.append(time_X_mask_cur)
+
+                    X_cdrnn = tf.concat(X_cdrnn, axis=1)
+                    t_delta_cdrnn = tf.concat(t_delta_cdrnn, axis=1)
+                    time_X_cdrnn = tf.concat(time_X_cdrnn, axis=1)
+                    if time_X_mask is not None:
+                        time_X_mask_cdrnn = tf.concat(time_X_mask_cdrnn, axis=1)
+
+                    sort_ix = tf.contrib.framework.argsort(tf.squeeze(time_X_cdrnn, axis=-1), axis=1)
+                    B_ix = tf.tile(
+                        tf.range(B)[..., None],
+                        [1, T * len(self.impulse_gather_indices)]
+                    )
+                    gather_ix = tf.stack([B_ix, sort_ix], axis=-1)
+
+                    X = tf.gather_nd(X_cdrnn, gather_ix)
+                    t_delta = tf.gather_nd(t_delta_cdrnn, gather_ix)
+                    time_X = tf.gather_nd(time_X_cdrnn, gather_ix)
+                    if time_X_mask is not None:
+                        time_X_mask = tf.gather_nd(time_X_mask_cdrnn, gather_ix)
+                    sum_list = ['sort_ix', tf.shape(sort_ix), sort_ix, 'X', tf.shape(X), X, 't_delta', tf.shape(t_delta), t_delta, 'time_X', tf.shape(time_X), time_X]
+                    if time_X_mask is not None:
+                        sum_list += ['time_X_mask', tf.shape(time_X_mask), time_X_mask]
+                    # time_X = tf.Print(time_X, sum_list, summarize=1000)
+                else:
+                    t_delta = t_delta[..., :1]
+                    time_X = time_X[..., :1]
+                    if time_X_mask is not None and len(time_X_mask.shape) == 3:
+                        time_X_mask = time_X_mask[..., 0]
+                    # time_X = tf.Print(time_X, ['X', X, 't_delta', t_delta, 'time_X_cdrnn', time_X], summarize=1000)
+
+                if self.input_jitter_level:
+                    jitter_sd = self.input_jitter_level
+                    X = tf.cond(
+                        self.training,
+                        lambda: tf.random_normal(tf.shape(X), X, jitter_sd),
+                        lambda: X
+                    )
+                    t_delta = tf.cond(
+                        self.training,
+                        lambda: tf.random_normal(tf.shape(t_delta), t_delta, jitter_sd),
+                        lambda: t_delta
+                    )
+                    time_X = tf.cond(
+                        self.training,
+                        lambda: tf.random_normal(tf.shape(time_X), time_X, jitter_sd),
+                        lambda: time_X
+                    )
+
+                X = tf.concat([X, time_X], axis=-1) * self.input_gates[0]
+
+                if self.predictor_dropout_rate:
+                    X = tf.layers.dropout(
+                        X,
+                        rate=self.predictor_dropout_rate,
+                        training=self.training
+                    )
+
+                if self.event_dropout_rate:
+                    X_shape = tf.shape(X)
+                    noise_shape = []
+                    for j in range(len(X.shape) - 1):
+                        try:
+                            s = int(X.shape[j])
+                        except TypeError:
+                            s = X_shape[j]
+                        noise_shape.append(s)
+                    noise_shape.append(1)
+
+                    mask_is_none = time_X_mask is None
+
+                    def train_fn(inputs=X, noise_shape=noise_shape, mask=time_X_mask):
+                        dropout_mask = tf.cast(tf.random_uniform(noise_shape) > self.event_dropout_rate,
+                                               dtype=self.FLOAT_TF)
+                        inputs_out = inputs * dropout_mask
+                        if mask is not None:
+                            mask_out = mask * dropout_mask[..., 0]
+                        else:
+                            mask_out = tf.zeros(tf.shape(inputs)[:-1])
+
+                        return inputs_out, mask_out
+
+                    def eval_fn(inputs=X, mask=time_X_mask):
+                        if mask is None:
+                            mask = tf.zeros(tf.shape(inputs)[:-1])
+                        return inputs, mask
+
+                    X, time_X_mask = tf.cond(self.training, train_fn, eval_fn)
+
+                    if mask_is_none:
+                        time_X_mask = None
+
+                # Compute hidden state
+                h_in = self.input_projection_fn(X)
+                if self.h_in_noise_sd:
+                    def h_in_train_fn(h_in=h_in):
+                        return tf.random_normal(tf.shape(h_in), h_in, stddev=self.h_in_noise_sd)
+                    def h_in_eval_fn(h_in=h_in):
+                        return h_in
+                    h_in = tf.cond(self.training, h_in_train_fn, h_in_eval_fn)
+                if self.h_in_dropout_rate:
+                    h_in = get_dropout(self.h_in_dropout_rate, training=self.training, session=self.sess)(h_in)
+                h = h_in
+
+                if self.n_layers_rnn:
+                    rnn_hidden, rnn_cell = self._rnn_encoder(
+                        X,
+                        times=time_X,
+                        mask=time_X_mask,
+                        plot_mode=plot_mode
+                    )
+                    h_rnn = self.rnn_projection_fn(rnn_hidden[-1])
+                    if self.h_rnn_noise_sd:
+                        def h_rnn_train_fn(h_rnn=h_rnn):
+                            return tf.random_normal(tf.shape(h_rnn), h_rnn, stddev=self.h_rnn_noise_sd)
+                        def h_rnn_eval_fn(h_rnn=h_rnn):
+                            return h_rnn
+                        h_rnn = tf.cond(self.training, h_rnn_train_fn, h_rnn_eval_fn)
+                    if self.h_rnn_dropout_rate:
+                        h_rnn = get_dropout(self.h_rnn_dropout_rate, training=self.training, session=self.sess)(h_rnn)
+                    h += h_rnn
+                else:
+                    h_rnn = rnn_hidden = rnn_cell = None
+
+                if self.use_rangf:
+                    h += tf.expand_dims(tf.add_n(self.h_ran), axis=-2)
+
+                h = get_activation(self.hidden_state_activation, session=self.sess)(h)
+
+                # Compute response
+                W = self.t_delta_embedding_W
+                b = self.t_delta_embedding_b
+
+                Wb_proj = self.hidden_state_to_irf_l1(h)
+                W_proj = Wb_proj[..., :self.n_units_t_delta_embedding]
+                b_proj = Wb_proj[..., self.n_units_t_delta_embedding:]
+
+                W += W_proj
+                b += b_proj
+
+                activation = get_activation(self.irf_inner_activation, session=self.sess)
+
+                t_delta_embedding_preactivations = W * t_delta + b
+                t_delta_embeddings = activation(t_delta_embedding_preactivations)
+
+                y = self.irf(t_delta_embeddings)
+                if time_X_mask is not None:
+                    y *= time_X_mask[..., None]
+                y = tf.reduce_sum(y, axis=1)
+
+                error_params = self.error_params_fn(h[..., -1, :])
+
+                y_sd_delta = error_params[..., 0] * self.y_sd_delta_gate
                 if self.asymmetric_error:
-                    y_skewness_delta = []
-                    y_tailweight_delta = []
+                    y_skewness_delta = error_params[..., 1] * self.y_skewness_delta_gate
+                    y_tailweight_delta = error_params[..., 2] * self.y_tailweight_delta_gate
                 else:
-                    y_skewness_delta = None
-                    y_tailweight_delta = None
-                rnn_hidden = []
-                rnn_cell = []
-                h_rnn = []
-                h_in = []
-                h = []
+                    y_skewness_delta = y_tailweight_delta = None
 
-                for i, ix in enumerate(self.impulse_gather_indices):
-                    X_cur = tf.gather(X, ix, axis=-1)
-                    if t_delta.shape[-1] > 1:
-                        t_delta_cur = t_delta[:, :, ix[0]:ix[0]+1]
-                    else:
-                        t_delta_cur = t_delta
-                    if time_X is None:
-                        X_shape = tf.shape(X_cur)
-                        time_X_shape = []
-                        for j in range(len(X_cur.shape) - 1):
-                            s = X_cur.shape[j]
-                            try:
-                                s = int(s)
-                            except TypeError:
-                                s = X_shape[j]
-                            time_X_shape.append(s)
-                        time_X_shape.append(1)
-                        time_X_cur = tf.ones(time_X_shape, dtype=self.FLOAT_TF)
-                        time_X_mean =  self.time_X_mean
-                        if self.rescale_time:
-                            time_X_mean /= self.time_X_sd
-                        time_X_cur *= time_X_mean
-                    elif time_X.shape[-1] > 1:
-                        time_X_cur = time_X[:, :, ix[0]:ix[0]+1]
-                    else:
-                        time_X_cur = time_X
-                    if time_X_mask is not None and time_X_mask.shape[-1] > 1:
-                        time_X_mask_cur = time_X_mask[:, :, ix[0]]
-                    else:
-                        time_X_mask_cur = time_X_mask
-                    time_X_mask_cdrnn.append(time_X_mask_cur)
-                    if self.rescale_time:
-                        t_delta_cur /= self.t_delta_sd
-                        time_X_cur /= self.time_X_sd
-
-                    if self.input_jitter_level:
-                        jitter_sd = self.input_jitter_level
-                        X_cur = tf.cond(
-                            self.training,
-                            lambda: tf.random_normal(tf.shape(X_cur), X_cur, jitter_sd),
-                            lambda: X_cur
-                        )
-                        t_delta_cur = tf.cond(
-                            self.training,
-                            lambda: tf.random_normal(tf.shape(t_delta_cur), t_delta_cur, jitter_sd),
-                            lambda: t_delta_cur
-                        )
-                        time_X_cur = tf.cond(
-                            self.training,
-                            lambda: tf.random_normal(tf.shape(time_X_cur), time_X_cur, jitter_sd),
-                            lambda: time_X_cur
-                        )
-
-                    X_cur = tf.concat([X_cur, time_X_cur], axis=-1) * self.input_gates[i]
-
-                    if self.predictor_dropout_rate:
-                        X_cur = tf.layers.dropout(
-                            X_cur,
-                            rate=self.predictor_dropout_rate,
-                            training=self.training
-                        )
-
-                    if self.event_dropout_rate:
-                        X_cur_shape = tf.shape(X_cur)
-                        noise_shape = []
-                        for j in range(len(X_cur.shape) - 1):
-                            try:
-                                s = int(X_cur.shape[j])
-                            except TypeError:
-                                s = X_cur_shape[j]
-                            noise_shape.append(s)
-                        noise_shape.append(1)
-
-                        mask_is_none = time_X_mask_cur is None
-
-                        def train_fn(inputs=X_cur, noise_shape=noise_shape, mask=time_X_mask_cur):
-                            dropout_mask = tf.cast(tf.random_uniform(noise_shape) > self.event_dropout_rate,
-                                                   dtype=self.FLOAT_TF)
-                            print(dropout_mask)
-                            inputs_out = inputs * dropout_mask
-                            if mask is not None:
-                                mask_out = mask * dropout_mask[..., 0]
-                            else:
-                                mask_out = tf.zeros(tf.shape(inputs)[:-1])
-
-                            return inputs_out, mask_out
-
-                        def eval_fn(inputs=X_cur, mask=time_X_mask_cur):
-                            if mask is None:
-                                mask = tf.zeros(tf.shape(inputs)[:-1])
-                            return inputs, mask
-
-                        X_cur, time_X_mask_cur = tf.cond(self.training, train_fn, eval_fn)
-
-                        if mask_is_none:
-                            time_X_mask_cur = None
-
-                    # Compute hidden state
-                    h_in_cur = self.input_projection_fn[i](X_cur)
-                    if self.h_in_noise_sd:
-                        def h_in_train_fn(h_in=h_in_cur):
-                            return tf.random_normal(tf.shape(h_in), h_in, stddev=self.h_in_noise_sd)
-                        def h_in_eval_fn(h_in=h_in_cur):
-                            return h_in
-                        h_in_cur = tf.cond(self.training, h_in_train_fn, h_in_eval_fn)
-                    if self.h_in_dropout_rate:
-                        h_in_cur = get_dropout(self.h_in_dropout_rate, training=self.training, session=self.sess)(h_in_cur)
-                    h_cur = h_in_cur
-
-                    if self.n_layers_rnn:
-                        rnn_hidden_cur, rnn_cell_cur = self._rnn_encoder(
-                            X_cur,
-                            i=i,
-                            times=time_X_cur,
-                            mask=time_X_mask_cur,
-                            zero_rnn_initial_state=zero_rnn_initial_state
-                        )
-                        h_rnn_cur = self.rnn_projection_fn[i](rnn_hidden_cur[-1])
-                        if self.h_rnn_noise_sd:
-                            def h_rnn_train_fn(h_rnn=h_rnn_cur):
-                                return tf.random_normal(tf.shape(h_rnn), h_rnn, stddev=self.h_rnn_noise_sd)
-                            def h_rnn_eval_fn(h_rnn=h_rnn_cur):
-                                return h_rnn
-                            h_rnn_cur = tf.cond(self.training, h_rnn_train_fn, h_rnn_eval_fn)
-                        if self.h_rnn_dropout_rate:
-                            h_rnn_cur = get_dropout(self.h_rnn_dropout_rate, training=self.training, session=self.sess)(h_rnn_cur)
-                        # h_rnn_cur = tf.Print(h_rnn_cur, [tf.reduce_mean(tf.abs(h_rnn_cur)), tf.reduce_mean(tf.abs(h_cur))])
-                        h_cur = h_cur + h_rnn_cur
-                        # h_cur = h_cur * self.input_projection_proportion + h_rnn_cur * self.rnn_proportion
-                    else:
-                        h_rnn_cur = rnn_hidden_cur = rnn_cell_cur = None
-
-                    if self.use_rangf:
-                        h_cur += tf.expand_dims(tf.add_n(self.h_ran[i]), axis=-2)
-
-                    h_cur = get_activation(self.hidden_state_activation, session=self.sess)(h_cur)
-
-                    # Compute response
-                    W = self.t_delta_embedding_W[i]
-                    b = self.t_delta_embedding_b[i]
-
-                    Wb_proj = self.hidden_state_to_irf_l1[i](h_cur)
-                    W_proj = Wb_proj[..., :self.n_units_t_delta_embedding]
-                    b_proj = Wb_proj[..., self.n_units_t_delta_embedding:]
-
-                    W += W_proj
-                    b += b_proj
-
-                    activation = get_activation(self.irf_inner_activation, session=self.sess)
-
-                    t_delta_embedding_preactivations = W * t_delta_cur + b
-                    t_delta_embeddings = activation(t_delta_embedding_preactivations)
-
-                    y_cur = self.irf[i](t_delta_embeddings)
-                    if time_X_mask_cur is not None:
-                        y_cur *= time_X_mask_cur[..., None]
-                    y_cur = tf.reduce_sum(y_cur, axis=1)
-
-                    error_params = self.error_params_fn[i](h_cur[..., -1, :])
-
-                    y_sd_delta_cur = error_params[..., 0] * self.y_sd_delta_gate[i]
-                    if self.asymmetric_error:
-                        y_skewness_delta_cur = error_params[..., 1] * self.y_skewness_delta_gate[i]
-                        y_tailweight_delta_cur = error_params[..., 2] * self.y_tailweight_delta_gate[i]
-
-                    y.append(y_cur)
-                    y_sd_delta.append(y_sd_delta_cur)
-                    if self.asymmetric_error:
-                        y_skewness_delta.append(y_skewness_delta_cur)
-                        y_tailweight_delta.append(y_tailweight_delta_cur)
-                    rnn_hidden.append(rnn_hidden_cur)
-                    rnn_cell.append(rnn_cell_cur)
-                    h_rnn.append(h_rnn_cur)
-                    h_in.append(h_in_cur)
-                    h.append(h_cur)
-
-                if len(self.impulse_gather_indices) > 1:
-                    y = tf.reduce_sum(tf.stack(y, axis=-1) * self.y_attn[None, None, ...], axis=-1)
-                    y_sd_delta = tf.reduce_sum(tf.stack(y_sd_delta, axis=-1) * self.y_sd_delta_attn[None, None, ...], axis=-1)
-                    if self.asymmetric_error:
-                        y_skewness_delta = tf.reduce_sum(tf.stack(y_skewness_delta, axis=-1) * self.y_skewness_delta_attn[None, None, ...], axis=-1)
-                        y_tailweight_delta = tf.reduce_sum(tf.stack(y_tailweight_delta, axis=-1) * self.y_tailweight_delta_attn[None, None, ...], axis=-1)
-                else:
-                    y = y[0]
-                    y_sd_delta = y_sd_delta[0]
-                    if self.asymmetric_error:
-                        y_skewness_delta = y_skewness_delta[0]
-                        y_tailweight_delta = y_tailweight_delta[0]
 
                 return {
                     'y': y,
@@ -1125,7 +1124,7 @@ class CDRNN(Model):
                     'h_rnn': h_rnn,
                     'h_in': h_in,
                     'h': h,
-                    'time_X_mask': time_X_mask_cdrnn
+                    'time_X_mask': time_X_mask
                 }
 
     def _construct_network(self):
@@ -1136,7 +1135,7 @@ class CDRNN(Model):
                     self.t_delta,
                     time_X=self.time_X,
                     time_X_mask=self.time_X_mask,
-                    zero_rnn_initial_state=True
+                    plot_mode=False
                 )
 
                 y = model_dict['y']
@@ -1156,40 +1155,39 @@ class CDRNN(Model):
                     ema_rate = 0.
 
                 h_rnn = model_dict['h_rnn']
-                if len(h_rnn) > 0:
-                    self.rnn_h_ema_ops = []
-                    self.rnn_c_ema_ops = []
-                    for i in range(len(self.impulse_gather_indices)):
-                        mask = model_dict['time_X_mask'][i][..., None]
+                self.rnn_h_ema_ops = []
+                self.rnn_c_ema_ops = []
 
-                        rnn_hidden = model_dict['rnn_hidden'][i]
-                        rnn_cell = model_dict['rnn_cell'][i]
+                mask = model_dict['time_X_mask'][..., None]
 
-                        for l in range(self.n_layers_rnn):
-                            h_rnn_penalty = h_rnn[l] * mask
-                            self._regularize(h_rnn_penalty, type='context', var_name='context')
+                rnn_hidden = model_dict['rnn_hidden']
+                rnn_cell = model_dict['rnn_cell']
 
-                            reduction_axes = list(range(len(rnn_hidden[l].shape)-1))
+                for l in range(self.n_layers_rnn):
+                    h_rnn_penalty = h_rnn[l] * mask
+                    self._regularize(h_rnn_penalty, type='context', var_name='context')
 
-                            denom = tf.reduce_sum(mask)
+                    reduction_axes = list(range(len(rnn_hidden[l].shape)-1))
 
-                            h_sum = tf.reduce_sum(rnn_hidden[l+1] * mask, axis=reduction_axes) # 0th layer is the input, so + 1
-                            h_mean = h_sum / (denom + self.epsilon)
-                            h_ema = self.rnn_h_ema[i][l]
-                            h_ema_op = tf.assign(
-                                h_ema,
-                                ema_rate * h_ema + (1. - ema_rate) * h_mean
-                            )
-                            self.rnn_h_ema_ops.append(h_ema_op)
+                    denom = tf.reduce_sum(mask)
 
-                            c_sum = tf.reduce_sum(rnn_cell[l] * mask, axis=reduction_axes)
-                            c_mean = c_sum / (denom + self.epsilon)
-                            c_ema = self.rnn_c_ema[i][l]
-                            c_ema_op = tf.assign(
-                                c_ema,
-                                ema_rate * c_ema + (1. - ema_rate) * c_mean
-                            )
-                            self.rnn_c_ema_ops.append(c_ema_op)
+                    h_sum = tf.reduce_sum(rnn_hidden[l+1] * mask, axis=reduction_axes) # 0th layer is the input, so + 1
+                    h_mean = h_sum / (denom + self.epsilon)
+                    h_ema = self.rnn_h_ema[l]
+                    h_ema_op = tf.assign(
+                        h_ema,
+                        ema_rate * h_ema + (1. - ema_rate) * h_mean
+                    )
+                    self.rnn_h_ema_ops.append(h_ema_op)
+
+                    c_sum = tf.reduce_sum(rnn_cell[l] * mask, axis=reduction_axes)
+                    c_mean = c_sum / (denom + self.epsilon)
+                    c_ema = self.rnn_c_ema[l]
+                    c_ema_op = tf.assign(
+                        c_ema,
+                        ema_rate * c_ema + (1. - ema_rate) * c_mean
+                    )
+                    self.rnn_c_ema_ops.append(c_ema_op)
 
                 self.y_sd_delta = y_sd_delta
                 self.y_sd_delta_ema = tf.Variable(0., trainable=False, name='y_sd_delta_ema')
@@ -1230,8 +1228,6 @@ class CDRNN(Model):
                 t = tf.shape(self.support)[0]
 
                 t_delta = self.support[..., None]
-                if self.rescale_time:
-                    t_delta /= self.t_delta_sd
 
                 x = self.plot_impulse_1hot_expanded
                 y = self.plot_impulse_1hot_2_expanded
@@ -1245,7 +1241,7 @@ class CDRNN(Model):
                 )
 
                 self.irf_1d_rate_support = self.support
-                irf_1d_rate_plot = self._apply_model(X_rate, t_delta)['y']
+                irf_1d_rate_plot = self._apply_model(X_rate, t_delta, plot_mode=True)['y']
                 self.irf_1d_rate_plot = irf_1d_rate_plot[None, ...]
 
                 X = tf.tile(
@@ -1253,7 +1249,7 @@ class CDRNN(Model):
                     [t, 1, 1]
                 )
                 self.irf_1d_support = self.support
-                irf_1d_plot = self._apply_model(X, t_delta)['y']
+                irf_1d_plot = self._apply_model(X, t_delta, plot_mode=True)['y']
                 self.irf_1d_plot = irf_1d_plot[None, ...] - self.irf_1d_rate_plot
 
                 # IRF SURFACE PLOTS
@@ -1267,8 +1263,6 @@ class CDRNN(Model):
                     time_support[..., None, None],
                     [self.n_surface_plot_points_per_side, 1, 1]
                 )
-                if self.rescale_time:
-                    t_delta_square /= self.t_delta_sd
 
                 u_src = tf.linspace(
                     tf.cast(-self.plot_n_sds, dtype=self.FLOAT_TF),
@@ -1282,7 +1276,7 @@ class CDRNN(Model):
                     self.plot_impulse_base_expanded,
                     [self.n_surface_plot_points_normalized, 1, 1]
                 )
-                irf_surface_rate_plot = self._apply_model(X_rate, t_delta_square)['y']
+                irf_surface_rate_plot = self._apply_model(X_rate, t_delta_square, plot_mode=True)['y']
                 self.irf_surface_rate_plot = tf.reshape(
                     irf_surface_rate_plot[None, ...],
                     [self.n_surface_plot_points_per_side, self.n_surface_plot_points_per_side]
@@ -1297,7 +1291,7 @@ class CDRNN(Model):
                     ),
                     [-1, 1, len(self.impulse_names)]
                 )
-                irf_surface_plot = self._apply_model(X, t_delta_square)['y']
+                irf_surface_plot = self._apply_model(X, t_delta_square, add_print=False, plot_mode=True)['y']
                 self.irf_surface_plot = tf.reshape(
                     irf_surface_plot[None, ...],
                     [self.n_surface_plot_points_per_side, self.n_surface_plot_points_per_side]
@@ -1312,12 +1306,11 @@ class CDRNN(Model):
 
                 # CURVATURE PLOTS
                 t_interaction = self.t_interaction
-                if self.rescale_time:
-                    t_interaction /= self.t_delta_sd
 
                 rate_at_t = self._apply_model(
                     self.plot_impulse_base_expanded,
-                    tf.ones([1, 1, 1], dtype=self.FLOAT_TF) * t_interaction
+                    tf.ones([1, 1, 1], dtype=self.FLOAT_TF) * t_interaction,
+                    plot_mode=True
                 )['y']
                 rate_at_t = tf.squeeze(rate_at_t)
 
@@ -1330,7 +1323,7 @@ class CDRNN(Model):
                 )[..., None, None]
                 u = x * (c + u)
                 X = u + b
-                curvature_plot = self._apply_model(X, t_delta)['y']
+                curvature_plot = self._apply_model(X, t_delta, plot_mode=True)['y']
                 self.curvature_plot = curvature_plot - rate_at_t
                 self.curvature_support = tf.reduce_prod(
                     u + x * b + (1 - x),  # Fill empty one-hot cols with ones so we only reduce_prod on valid cols
@@ -1368,7 +1361,7 @@ class CDRNN(Model):
                 )
 
                 X = X_1 + X_2 + b
-                interaction_surface_plot = self._apply_model(X, t_delta)['y']
+                interaction_surface_plot = self._apply_model(X, t_delta, plot_mode=True)['y']
                 self.interaction_surface_plot = interaction_surface_plot - rate_at_t
                 self.interaction_surface_support = tf.meshgrid(
                     tf.reduce_prod(
