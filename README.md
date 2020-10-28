@@ -40,14 +40,14 @@ Once CDR is installed system-wide as described above (and the `cdr` conda enviro
 
     import cdr
     
-Most users will not need to program with CDR, but will instead in run command-line executables for model fitting and criticism.
+Most users will not need to program with CDR, but will instead run command-line executables for model fitting and criticism.
 These can be run as
 
     python -m cdr.bin.<EXECUTABLE-NAME> ...
     
 For documentation of available CDR executables, run
 
-    python -m cdr.bin.help
+    python -m cdr.bin.help( <SCRIPT-NAME>)*
 
 CDR models are defined using configuration (`*.ini`) files, which can be more convenient than shell arguments for specifying many settings, and which provide written documentation of the specific settings used to generate any given result.
 For convenience, we have provided annotated CDR and CDRNN model templates:
