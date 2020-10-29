@@ -765,9 +765,10 @@ CDRNN_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'input_projection_inner_activation',
-        'gelu',
+        'tanh',
         [str, None],
-        "Name of activation function to use for hidden layers in input projection."
+        "Name of activation function to use for hidden layers in input projection.",
+        aliases=['activation']
     ),
     Kwarg(
         'input_projection_activation',
@@ -789,9 +790,10 @@ CDRNN_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'rnn_projection_inner_activation',
-        'gelu',
+        'tanh',
         [str, None],
-        "Name of activation function to use for hidden layers in projection of RNN state."
+        "Name of activation function to use for hidden layers in projection of RNN state.",
+        aliases=['activation']
     ),
     Kwarg(
         'rnn_projection_activation',
@@ -801,37 +803,36 @@ CDRNN_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'hidden_state_activation',
-        'gelu',
+        'tanh',
         [str, None],
-        "Name of activation function to use for CDRNN hidden state."
+        "Name of activation function to use for CDRNN hidden state.",
+        aliases=['activation']
     ),
     Kwarg(
         'irf_inner_activation',
-        'gelu',
+        'tanh',
         [str, None],
         "Name of activation function to use for hidden layers in IRF.",
-        aliases=['decoder_inner_activation']
+        aliases=['activation']
     ),
     Kwarg(
         'irf_activation',
         None,
         [str, None],
-        "Name of activation function to use for final layer in IRF.",
-        aliases=['decoder_activation']
+        "Name of activation function to use for final layer in IRF."
     ),
     Kwarg(
         'error_params_fn_inner_activation',
-        None,
+        'tanh',
         [str, None],
         "Name of activation function to use for hidden layers of error params function.",
-        aliases=['decoder_inner_activation']
+        aliases=['activation']
     ),
     Kwarg(
         'error_params_fn_activation',
         None,
         [str, None],
-        "Name of activation function to use for final layer in error params function.",
-        aliases=['decoder_activation']
+        "Name of activation function to use for final layer in error params function."
     ),
     Kwarg(
         'kernel_initializer',
