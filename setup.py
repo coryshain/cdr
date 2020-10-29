@@ -13,7 +13,6 @@ setup(name='CDR',
                         'pandas>=0.19.2',
                         'matplotlib',
                         'tensorflow>=1.9,<2.0',
-                        'scipy>=0.14',
-                        'edward'],
+                        'scipy>=0.14'],
       packages=find_packages(),
 )
