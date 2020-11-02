@@ -790,15 +790,19 @@ class CDRNN(Model):
                     -1.,
                     name='t_delta_gate_logit'
                 ))
+                self.y_delta_gate = tf.sigmoid(tf.Variable(
+                    -1., name='y_delta_gate_logit'
+                ))
                 self.y_sd_delta_gate = tf.sigmoid(tf.Variable(
                     -1., name='y_sd_delta_gate_logit'
                 ))
                 if self.asymmetric_error:
-                    self.y_skewness_delta_gate = tf.sigmoid(tf.Variable(
-                        -1., name='y_skewness_delta_gate_logit'
+                    # Use tanh "gates" to initialize at 0, since large initial vals can cause instability
+                    self.y_skewness_delta_gate = tf.tanh(tf.Variable(
+                        0., name='y_skewness_delta_gate_logit'
                     ))
-                    self.y_tailweight_delta_gate = tf.sigmoid(tf.Variable(
-                        -1., name='y_tailweight_delta_gate_logit'
+                    self.y_tailweight_delta_gate = tf.tanh(tf.Variable(
+                        0., name='y_tailweight_delta_gate_logit'
                     ))
 
                 # ERROR PARAMS
@@ -1096,10 +1100,10 @@ class CDRNN(Model):
                 t_delta_embedding_preactivations = W * t_delta + b
                 t_delta_embeddings = activation(t_delta_embedding_preactivations)
 
-                y = self.irf(t_delta_embeddings)
+                y_delta = self.irf(t_delta_embeddings)
                 if time_X_mask is not None:
-                    y *= time_X_mask[..., None]
-                y = tf.reduce_sum(y, axis=1)
+                    y_delta *= time_X_mask[..., None]
+                y_delta = tf.reduce_sum(y_delta, axis=1) * self.y_delta_gate
 
                 error_params = self.error_params_fn(h[..., -1, :])
 
@@ -1112,7 +1116,7 @@ class CDRNN(Model):
 
 
                 return {
-                    'y': y,
+                    'y_delta': y_delta,
                     'y_sd_delta': y_sd_delta,
                     'y_skewness_delta': y_skewness_delta,
                     'y_tailweight_delta': y_tailweight_delta,
@@ -1135,7 +1139,7 @@ class CDRNN(Model):
                     plot_mode=False
                 )
 
-                y = model_dict['y']
+                y = model_dict['y_delta']
                 y_sd_delta = model_dict['y_sd_delta']
                 y_skewness_delta = model_dict['y_skewness_delta']
                 y_tailweight_delta = model_dict['y_tailweight_delta']
