@@ -2903,7 +2903,7 @@ class CDR(Model):
 
                 self.out = out
                 # Hack needed for MAP evaluation of CDRBayes
-                self.out_mean = self.out
+                self.out_summary = self.out
 
 
 

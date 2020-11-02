@@ -2,7 +2,7 @@ import pandas as pd
 
 from .kwargs import CDRNNMLE_INITIALIZATION_KWARGS
 from .cdrnnbase import CDRNN
-from .util import sn, stderr
+from .util import sn, reg_name, stderr
 
 import tensorflow as tf
 
@@ -299,7 +299,8 @@ class CDRNNMLE(CDRNN):
                     self.loss_ema_op = tf.assign(self.loss_ema, loss_ema_update)
                     self.loss_sd_ema_op = tf.assign(self.loss_sd_ema, loss_sd_ema_update)
 
-                self.loss_func = tf.reduce_sum(loss_func) * self.minibatch_scale
+                self.loss_func = tf.reduce_mean(loss_func)
+                # self.loss_func = tf.reduce_sum(loss_func) * self.minibatch_scale
                 # self.loss_func = tf.reduce_sum(loss_func)
 
                 for l in self.regularizable_layers:
@@ -308,20 +309,7 @@ class CDRNNMLE(CDRNN):
                     else:
                         vars = [l]
                     for v in vars:
-                        name = v.name.split(':')[0]
-                        name = name.replace('/', '_')
-                        cap = True
-                        var_name = ''
-                        for c in name:
-                            if c == '_':
-                                cap = True
-                            else:
-                                if cap:
-                                    var_name += c.upper()
-                                else:
-                                    var_name += c
-                                cap = False
-                        self._regularize(v, type='nn', var_name=var_name)
+                        self._regularize(v, type='nn', var_name=reg_name(v.name))
 
                 self.reg_loss = tf.constant(0., dtype=self.FLOAT_TF)
                 if len(self.regularizer_losses_varnames) > 0:

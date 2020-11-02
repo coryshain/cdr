@@ -765,7 +765,7 @@ CDRNN_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'input_projection_inner_activation',
-        'tanh',
+        'gelu',
         [str, None],
         "Name of activation function to use for hidden layers in input projection.",
         aliases=['activation']
@@ -790,7 +790,7 @@ CDRNN_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'rnn_projection_inner_activation',
-        'tanh',
+        'gelu',
         [str, None],
         "Name of activation function to use for hidden layers in projection of RNN state.",
         aliases=['activation']
@@ -803,14 +803,14 @@ CDRNN_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'hidden_state_activation',
-        'tanh',
+        'gelu',
         [str, None],
         "Name of activation function to use for CDRNN hidden state.",
         aliases=['activation']
     ),
     Kwarg(
         'irf_inner_activation',
-        'tanh',
+        'gelu',
         [str, None],
         "Name of activation function to use for hidden layers in IRF.",
         aliases=['activation']
@@ -823,7 +823,7 @@ CDRNN_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'error_params_fn_inner_activation',
-        'tanh',
+        'gelu',
         [str, None],
         "Name of activation function to use for hidden layers of error params function.",
         aliases=['activation']

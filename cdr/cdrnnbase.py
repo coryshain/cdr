@@ -281,16 +281,44 @@ class CDRNN(Model):
                     name='plot_n_sds'
                 )
 
-                plot_impulse_base_default = tf.convert_to_tensor(
-                    [self.impulse_means[x] for x in self.impulse_names],
-                    dtype=self.FLOAT_TF
+                self.plot_mean_as_reference = tf.placeholder_with_default(
+                    True,
+                    shape=[],
+                    name='plot_mean_as_reference'
                 )
-                plot_impulse_center_default = tf.zeros(
+
+                def get_plot_reference_mean():
+                    plot_impulse_base_default = tf.convert_to_tensor(
+                        [self.impulse_means[x] for x in self.impulse_names],
+                        dtype=self.FLOAT_TF
+                    )
+                    plot_impulse_center_default = tf.zeros(
+                        [len(self.impulse_names)],
+                        dtype=self.FLOAT_TF
+                    )
+
+                    return plot_impulse_base_default, plot_impulse_center_default
+
+                def get_plot_reference_zero():
+                    plot_impulse_base_default = tf.zeros(
+                        [len(self.impulse_names)],
+                        dtype=self.FLOAT_TF
+                    )
+                    plot_impulse_center_default = tf.convert_to_tensor(
+                        [self.impulse_means[x] for x in self.impulse_names],
+                        dtype=self.FLOAT_TF
+                    )
+
+                    return plot_impulse_base_default, plot_impulse_center_default
+
+                plot_impulse_base_default, plot_impulse_center_default = tf.cond(
+                    self.plot_mean_as_reference,
+                    get_plot_reference_mean,
+                    get_plot_reference_zero
+                )
+
+                plot_impulse_offset_default = tf.ones(
                     [len(self.impulse_names)],
-                    dtype=self.FLOAT_TF
-                )
-                plot_impulse_offset_default = tf.convert_to_tensor(
-                    [self.impulse_sds[x] for x in self.impulse_names],
                     dtype=self.FLOAT_TF
                 )
                 self.plot_impulse_base = tf.placeholder_with_default(
@@ -383,7 +411,7 @@ class CDRNN(Model):
                         self.intercept_fixed_summary,
                         collections=['params']
                     )
-                    self._regularize(self.intercept_fixed, type='intercept', var_name='intercept')
+                    self._regularize(self.intercept_fixed, type='intercept', var_name=reg_name('intercept'))
                     if self.convergence_basis.lower() == 'parameters':
                         self._add_convergence_tracker(self.intercept_fixed_summary, 'intercept_fixed')
 
@@ -421,6 +449,7 @@ class CDRNN(Model):
                             name='intercept_by_%s' % sn(gf)
                         )
                         self.regularizable_layers.append(intercept_random)
+
                         intercept_random_summary = intercept_random
 
                         intercept_random_means = tf.reduce_mean(intercept_random, axis=0, keepdims=True)
@@ -429,7 +458,7 @@ class CDRNN(Model):
                         intercept_random -= intercept_random_means
                         intercept_random_summary -= intercept_random_summary_means
 
-                        self._regularize(intercept_random, type='ranef', var_name='intercept_by_%s' % gf)
+                        self._regularize(intercept_random, type='ranef', var_name=reg_name('intercept_by_%s' % gf))
 
                         intercept_random = self._scatter_along_axis(
                             levels_ix,
@@ -670,11 +699,11 @@ class CDRNN(Model):
                         for l in range(self.n_layers_rnn):
                             rnn_h_ran_matrix_cur = tf.Variable(
                                 tf.zeros([len(levels_ix), self.n_units_rnn[l]]),
-                                name='rnn_h_ran_%d_by_%s' % (l+1, sn(gf))
+                                name='rnn_h_ran_l%d_by_%s' % (l+1, sn(gf))
                             )
                             self.regularizable_layers.append(rnn_h_ran_matrix_cur)
                             rnn_h_ran_matrix_cur -= tf.reduce_mean(rnn_h_ran_matrix_cur, axis=0, keepdims=True)
-                            self._regularize(rnn_h_ran_matrix_cur, type='ranef', var_name='rnn_h_ran_%d_by_%s' % (l, sn(gf)))
+                            self._regularize(rnn_h_ran_matrix_cur, type='ranef', var_name=reg_name('rnn_h_ran_l%d_by_%s' % (l, sn(gf))))
 
                             if self.log_random:
                                 tf.summary.histogram(
@@ -695,11 +724,11 @@ class CDRNN(Model):
 
                             rnn_c_ran_matrix_cur = tf.Variable(
                                 tf.zeros([len(levels_ix), self.n_units_rnn[l]]),
-                                name='rnn_c_ran_%d_by_%s' % (l+1, sn(gf))
+                                name='rnn_c_ran_l%d_by_%s' % (l+1, sn(gf))
                             )
                             self.regularizable_layers.append(rnn_c_ran_matrix_cur)
                             rnn_c_ran_matrix_cur -= tf.reduce_mean(rnn_c_ran_matrix_cur, axis=0, keepdims=True)
-                            self._regularize(rnn_c_ran_matrix_cur, type='ranef', var_name='rnn_c_ran_%d_by_%s' % (l+1, sn(gf)))
+                            self._regularize(rnn_c_ran_matrix_cur, type='ranef', var_name=reg_name('rnn_c_ran_l%d_by_%s' % (l+1, sn(gf))))
 
                             if self.log_random:
                                 tf.summary.histogram(
@@ -725,7 +754,7 @@ class CDRNN(Model):
                         )
                         self.regularizable_layers.append(h_ran_matrix_cur)
                         h_ran_matrix_cur -= tf.reduce_mean(h_ran_matrix_cur, axis=0, keepdims=True)
-                        self._regularize(h_ran_matrix_cur, type='ranef', var_name='h_ran_by_%s' % (sn(gf)))
+                        self._regularize(h_ran_matrix_cur, type='ranef', var_name=reg_name('h_ran_by_%s' % (sn(gf))))
 
                         if self.log_random:
                             tf.summary.histogram(
@@ -752,20 +781,24 @@ class CDRNN(Model):
                 self.h_ran = h_ran
 
                 # GATES
-                self.input_gates = tf.tanh(tf.Variable(
+                self.input_gates = tf.sigmoid(tf.Variable(
                     # tf.zeros([len(self.impulse_gather_indices[i])+1]),
-                    tf.zeros([len(self.impulse_names)+1]),
+                    tf.zeros([len(self.impulse_names)+1]) - 1,
                     name='input_gate_logits'
                 ))[None, None, ...]
-                self.y_sd_delta_gate = tf.tanh(tf.Variable(
-                    tf.zeros([]), name='y_sd_delta_gate_logit'
+                self.t_delta_gate = tf.sigmoid(tf.Variable(
+                    -1.,
+                    name='t_delta_gate_logit'
+                ))
+                self.y_sd_delta_gate = tf.sigmoid(tf.Variable(
+                    -1., name='y_sd_delta_gate_logit'
                 ))
                 if self.asymmetric_error:
-                    self.y_skewness_delta_gate = tf.tanh(tf.Variable(
-                        tf.zeros([]), name='y_skewness_delta_gate_logit'
+                    self.y_skewness_delta_gate = tf.sigmoid(tf.Variable(
+                        -1., name='y_skewness_delta_gate_logit'
                     ))
-                    self.y_tailweight_delta_gate = tf.tanh(
-                        tf.Variable(tf.zeros([]), name='y_tailweight_delta_gate_logit'
+                    self.y_tailweight_delta_gate = tf.sigmoid(tf.Variable(
+                        -1., name='y_tailweight_delta_gate_logit'
                     ))
 
                 # ERROR PARAMS
@@ -812,45 +845,6 @@ class CDRNN(Model):
                 self.error_params_fn_layers = error_params_fn_layers
                 self.error_params_fn = compose_lambdas(error_params_fn_layers)
 
-                # # ATTENTION FOR MULTI-INPUT MODELS
-                # if len(self.impulse_gather_indices) > 1:
-                #     n = len(self.impulse_gather_indices)
-                #     if n > 2:
-                #         self.y_attn = tf.nn.softmax(tf.Variable(
-                #             tf.zeros([n]), name='y_attn_logit'
-                #         ))
-                #         self.y_sd_delta_attn = tf.nn.softmax(tf.Variable(
-                #             tf.zeros([n]), name='y_sd_delta_attn_logit'
-                #         ))
-                #         if self.asymmetric_error:
-                #             self.y_skewness_delta_attn = tf.nn.softmax(tf.Variable(
-                #                 tf.zeros([n]), name='y_skewness_delta_attn_logit'
-                #             ))
-                #             self.y_tailweight_delta_attn = tf.nn.softmax(tf.Variable(
-                #                 tf.zeros([n]), name='y_tailweight_delta_attn_logit'
-                #             ))
-                #     else:
-                #         y_attn_logit = tf.Variable(
-                #             tf.zeros([]), name='y_attn_logit'
-                #         )
-                #         y_attn = tf.nn.sigmoid(y_attn_logit)
-                #
-                #         self.y_attn = tf.stack([y_attn, 1-y_attn], axis=0)
-                #         y_sd_delta_attn = tf.nn.sigmoid(tf.Variable(
-                #             tf.zeros([]), name='y_sd_delta_attn_logit'
-                #         ))
-                #         self.y_sd_delta_attn = tf.stack([y_sd_delta_attn, 1-y_sd_delta_attn], axis=0)
-                #         if self.asymmetric_error:
-                #             y_skewness_delta_attn = tf.nn.sigmoid(tf.Variable(
-                #                 tf.zeros([]), name='y_skewness_delta_attn_logit'
-                #             ))
-                #             self.y_skewness_delta_attn = tf.stack([y_skewness_delta_attn, 1 - y_skewness_delta_attn], axis=0)
-                #             y_tailweight_delta_attn = tf.nn.sigmoid(tf.Variable(
-                #                 tf.zeros([]), name='y_tailweight_delta_attn_logit'
-                #             ))
-                #             self.y_tailweight_delta_attn = tf.stack([y_tailweight_delta_attn, 1 - y_tailweight_delta_attn], axis=0)
-
-
     def _rnn_encoder(self, X, plot_mode=False, **kwargs):
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -860,16 +854,16 @@ class CDRNN(Model):
                     if plot_mode:
                         b = tf.shape(X)[0]
                         tile_dims = [b, 1]
+                        h_init = tf.tile(self.rnn_h_ema[l][None, ...], tile_dims)
+                        c_init = tf.tile(self.rnn_c_ema[l][None, ...], tile_dims)
+                    else:
+                        b = tf.shape(X)[0]
+                        tile_dims = [b, 1]
                         h_init = tf.tile(self.rnn_h_init[l][None, ...], tile_dims)
                         c_init = tf.tile(self.rnn_c_init[l][None, ...], tile_dims)
                         if self.use_rangf:
                             h_init += tf.add_n(self.rnn_h_ran[l])
                             c_init += tf.add_n(self.rnn_c_ran[l])
-                    else:
-                        b = tf.shape(X)[0]
-                        tile_dims = [b, 1]
-                        h_init = tf.tile(self.rnn_h_ema[l][None, ...], tile_dims)
-                        c_init = tf.tile(self.rnn_c_ema[l][None, ...], tile_dims)
 
                     t_init = tf.zeros([b, 1], dtype=self.FLOAT_TF)
                     initial_state = CDRNNStateTuple(c=c_init, h=h_init, t=t_init)
@@ -907,9 +901,11 @@ class CDRNN(Model):
 
                 if self.rescale_time:
                     t_delta /= self.t_delta_sd
-                    time_X_mean /= self.time_X_sd
+                    time_X /= self.time_X_sd
 
-                # if not plot_mode:# and len(self.impulse_gather_indices) > 1:
+                t_delta *= self.t_delta_gate
+                # t_delta = tf.Print(t_delta, [self.t_delta_gate])
+
                 if not plot_mode and len(self.impulse_gather_indices) > 1:
                     X_cdrnn = []
                     t_delta_cdrnn = []
@@ -1003,7 +999,8 @@ class CDRNN(Model):
                         lambda: time_X
                     )
 
-                X = tf.concat([X, time_X], axis=-1) * self.input_gates[0]
+                X = tf.concat([X, time_X], axis=-1)
+                X *= self.input_gates[0]
 
                 if self.predictor_dropout_rate:
                     X = tf.layers.dropout(
@@ -1165,11 +1162,14 @@ class CDRNN(Model):
 
                 for l in range(self.n_layers_rnn):
                     h_rnn_penalty = h_rnn[l] * mask
-                    self._regularize(h_rnn_penalty, type='context', var_name='context')
+                    denom = tf.reduce_sum(mask)
+
+                    h_rnn_penalty /= (denom + self.epsilon)
+
+                    self._regularize(h_rnn_penalty, type='context', var_name=reg_name('context'))
 
                     reduction_axes = list(range(len(rnn_hidden[l].shape)-1))
 
-                    denom = tf.reduce_sum(mask)
 
                     h_sum = tf.reduce_sum(rnn_hidden[l+1] * mask, axis=reduction_axes) # 0th layer is the input, so + 1
                     h_mean = h_sum / (denom + self.epsilon)
@@ -1236,7 +1236,7 @@ class CDRNN(Model):
                 s = self.plot_impulse_offset_expanded
 
                 X_rate = tf.tile(
-                    self.plot_impulse_base_expanded,
+                    b,
                     [t, 1, 1]
                 )
 
@@ -1245,9 +1245,13 @@ class CDRNN(Model):
                 self.irf_1d_rate_plot = irf_1d_rate_plot[None, ...]
 
                 X = tf.tile(
-                     x * (c + s) + b,
+                     # x * (c + s) + b,
+                     x * s + b,
                     [t, 1, 1]
                 )
+                # print(self.impulse_names)
+                # print(self.impulse_means)
+                # X = tf.Print(X, [ 'x', x, 'b', b, 'c', c, 's', x, 'all', x * (c + s) + b])
                 self.irf_1d_support = self.support
                 irf_1d_plot = self._apply_model(X, t_delta, plot_mode=True)['y']
                 self.irf_1d_plot = irf_1d_plot[None, ...] - self.irf_1d_rate_plot

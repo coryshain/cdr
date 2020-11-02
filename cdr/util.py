@@ -95,6 +95,31 @@ def sn(string):
     return re.sub('[^A-Za-z0-9_.\\-/]', '.', string)
 
 
+def reg_name(string):
+    """
+    Standardize a variable name for regularization
+
+    :param string: ``str``; input string
+    :return: ``str``; transformed string
+    """
+
+    name = string.split(':')[0]
+    name = name.replace('/', '_')
+    cap = True
+    var_name = ''
+    for c in name:
+        if c == '_':
+            cap = True
+        else:
+            if cap:
+                var_name += c.upper()
+            else:
+                var_name += c
+            cap = False
+
+    return var_name
+
+
 def pca(X, n_dim=None, dtype=np.float32):
     """
     Perform principal components analysis on a data table.

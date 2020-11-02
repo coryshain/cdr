@@ -1606,10 +1606,14 @@ class Model(object):
                 if len(self.regularizer_losses_names) == 0:
                     out +=  ' ' * indent + '  No regularized variables.\n\n'
                 else:
-                    for i, name in enumerate(self.regularizer_losses_varnames):
-                        out += ' ' * indent + '  %s:\n' %name
-                        out += ' ' * indent + '    Regularizer: %s\n' %self.regularizer_losses_names[i]
-                        out += ' ' * indent + '    Scale: %s\n' %self.regularizer_losses_scales[i]
+                    regs = sorted(
+                        list(zip(self.regularizer_losses_varnames, self.regularizer_losses_names, self.regularizer_losses_scales)),
+                        key=lambda x: x[0]
+                    )
+                    for name, reg_name, reg_scale in regs:
+                        out += ' ' * indent + '  %s:\n' % name
+                        out += ' ' * indent + '    Regularizer: %s\n' % reg_name
+                        out += ' ' * indent + '    Scale: %s\n' % reg_scale
 
                     out += '\n'
 
