@@ -45,7 +45,7 @@ Under this approach, the `cdrnn` environment must first be activated anytime you
 
 ## Basic usage
 
-Once CDR is installed system-wide as described above (and the `cdr` conda environment is activated via `conda activate cdr`, if relevant), the CDR package can be imported into Python as shown
+Once CDR is installed system-wide as described above (and the `cdr` conda environment is activated via `conda activate cdr` or `conda activate cdrnn`, see above), the CDR package can be imported into Python as shown
 
     import cdr
     

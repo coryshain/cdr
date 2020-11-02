@@ -276,6 +276,8 @@ class Config(object):
             out['generate_interaction_surface_plots'] = settings.getboolean('generate_interaction_surface_plots', False)
         if 'generate_curvature_plots' in settings or add_defaults:
             out['generate_curvature_plots'] = settings.getboolean('generate_curvature_plots', False)
+        if 'plot_interactions' in settings or add_defaults:
+            out['plot_interactions'] = settings.get('plot_interactions', None)
         if 'plot_x_inches' in settings or add_defaults:
             out['plot_x_inches'] = settings.getfloat('plot_x_inches', 6)
         if 'plot_y_inches' in settings or add_defaults:

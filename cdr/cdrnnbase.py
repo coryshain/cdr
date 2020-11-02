@@ -1304,7 +1304,7 @@ class CDRNN(Model):
                     irf_surface_plot[None, ...],
                     [self.n_surface_plot_points_per_side, self.n_surface_plot_points_per_side]
                 ) - self.irf_surface_rate_plot
-                self.irf_surface_meshgrid = tf.meshgrid(
+                self.irf_surface_support = tf.meshgrid(
                     time_support,
                     tf.reduce_prod(
                         u + x * b + (1 - x),  # Fill empty one-hot cols with ones so we only reduce_prod on valid cols
@@ -1370,7 +1370,10 @@ class CDRNN(Model):
 
                 X = X_1 + X_2 + b
                 interaction_surface_plot = self._apply_model(X, t_delta, plot_mode=True)['y']
-                self.interaction_surface_plot = interaction_surface_plot - rate_at_t
+                self.interaction_surface_plot = tf.reshape(
+                    interaction_surface_plot[None, ...],
+                    [self.n_surface_plot_points_per_side, self.n_surface_plot_points_per_side]
+                ) - rate_at_t
                 self.interaction_surface_support = tf.meshgrid(
                     tf.reduce_prod(
                         u_1 + x * b + (1 - x),  # Fill empty one-hot cols with ones so we only reduce_prod on valid cols
@@ -1428,15 +1431,25 @@ class CDRNN(Model):
 
                 self.sess.graph.finalize()
 
-    def get_plot_names(self, composite='composite', scaled='scaled', dirac='dirac', plot_type='irf_1d'):
+    def get_plot_names(self, composite='composite', scaled='scaled', dirac='dirac', plot_type='irf_1d', interactions=None):
         if plot_type.lower() in ['irf_1d', 'irf_surface']:
             out = ['rate'] + self.impulse_names[:]
         elif plot_type.lower() == 'curvature':
             out = self.impulse_names[:]
         elif plot_type.lower() == 'interaction_surface':
-            out = [x for x in itertools.chain.from_iterable(
-                itertools.combinations(self.impulse_names, 2)
-            )]
+            if not interactions:
+                out = [':'.join(x) for x in itertools.combinations(self.impulse_names, 2)]
+            else:
+                out = []
+                for x in interactions: # Make sure all requested inputs are present in the model, otherwise skip
+                    add = True
+                    for y in interactions.split(':'):
+                        if not y in self.impulse_names:
+                            add = False
+                            break
+                    if add:
+                        out.append(x)
+                out = interactions
         else:
             raise ValueError('Plot type "%s" not supported.' % plot_type)
 
@@ -1508,7 +1521,7 @@ class CDRNN(Model):
                 irf_surface_meshgrid = self.irf_surface_rate_meshgrid
                 irf_surface = self.irf_surface_rate_plot
             else:
-                irf_surface_meshgrid = self.irf_surface_meshgrid
+                irf_surface_meshgrid = self.irf_surface_support
                 irf_surface = self.irf_surface_plot
             out = self.sess.run([irf_surface_meshgrid, irf_surface], feed_dict=fd)
         elif plot_type.lower().startswith('curvature'):
@@ -1523,7 +1536,10 @@ class CDRNN(Model):
             fd[self.plot_impulse_1hot] = impulse_one_hot1
             fd[self.plot_impulse_1hot_2] = impulse_one_hot2
 
-            out = self.sess.run(self.interaction_surface_plot, feed_dict=fd)
+            out = self.sess.run(
+                [self.interaction_surface_support, self.interaction_surface_plot],
+                feed_dict=fd
+            )
         else:
             raise ValueError('Plot type "%s" not supported.' % plot_type)
 

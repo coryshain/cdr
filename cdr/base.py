@@ -2973,7 +2973,6 @@ class Model(object):
                         plot_y = []
                         plot_z = []
                         names = self.get_plot_names(plot_type='interaction_surface')
-                        print(names)
                         for name in names:
                             (x_cur, y_cur), z_cur = self.get_plot_data(
                                 name,
@@ -2986,8 +2985,8 @@ class Model(object):
                                 rangf_vals=rangf_vals
                             )
                             plot_x.append(x_cur)
-                            plot_x.append(y_cur)
-                            plot_x.append(z)
+                            plot_y.append(y_cur)
+                            plot_z.append(z_cur)
 
                         if self.standardize_response and not standardize_response:
                             plot_z = [x * self.y_train_sd for x in plot_z]
@@ -3003,6 +3002,7 @@ class Model(object):
                             irf_name_map=irf_name_map,
                             plot_x_inches=plot_x_inches,
                             plot_y_inches=plot_y_inches,
+                            xlab='infer',
                             ylim=ylim,
                             transparent_background=transparent_background,
                             dpi=dpi,
