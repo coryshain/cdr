@@ -12,5 +12,4 @@ dependencies:
   - pip:
     - scikit-learn
     - edward
-prefix: /home/shain.3/.conda/envs/cdr
 

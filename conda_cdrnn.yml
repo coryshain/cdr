@@ -1,4 +1,4 @@
-name: cdr
+name: cdrnn
 channels:
   - defaults
 dependencies:
@@ -11,5 +11,4 @@ dependencies:
   - tensorflow<2.0
   - pip:
     - scikit-learn
-prefix: /home/shain.3/.conda/envs/cdr
 
