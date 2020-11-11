@@ -3296,7 +3296,7 @@ class CDR(Model):
 
                 self.sess.graph.finalize()
 
-    def get_plot_names(self, composite='composite', scaled='scaled', dirac='dirac', plot_type='irf_1d'):
+    def get_plot_names(self, composite='composite', scaled='scaled', dirac='dirac', plot_type='irf_1d', interactions=None):
         if plot_type.lower() == 'irf_1d':
             return self.plots[composite][scaled][dirac]['names']
         else:

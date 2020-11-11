@@ -113,28 +113,35 @@ class Model(object):
         self.y_train_sd = float(y[dv].std())
 
         t_deltas = []
+        t_delta_maxes = []
         time_X = []
         first_obs, last_obs = get_first_last_obs_lists(y)
+        y_time = y.time.values
         for i, cols in enumerate(zip(first_obs, last_obs)):
             first_obs_cur, last_obs_cur = cols
-            time_X_cur = np.array(X[i].time, dtype=getattr(np, self.float_type))
+            first_obs_cur = np.array(first_obs_cur, dtype=getattr(np, self.int_type))
             last_obs_cur = np.array(last_obs_cur, dtype=getattr(np, self.int_type))
-            first_obs_cur = np.maximum(np.array(first_obs_cur, dtype=getattr(np, self.int_type)),
-                                       last_obs_cur - self.history_length + 1)
-            t_delta = (y.time - time_X_cur[first_obs_cur])
+            time_X_cur = np.array(X[i].time, dtype=getattr(np, self.float_type))
             time_X.append(time_X_cur)
-            t_deltas.append(t_delta)
+            for j, (s, e) in enumerate(zip(first_obs_cur, last_obs_cur)):
+                s = max(s, e - self.history_length)
+                time_X_slice = time_X_cur[s:e]
+                t_delta = y_time[j] - time_X_slice
+                t_deltas.append(t_delta)
+                t_delta_maxes.append(y_time[j] - time_X_cur[s])
 
         time_X = np.concatenate(time_X, axis=0)
         t_deltas = np.concatenate(t_deltas, axis=0)
+        t_delta_maxes = np.array(t_delta_maxes)
 
         self.t_delta_limit = np.percentile(t_deltas, 75)
-        self.max_tdelta = t_deltas.max()
+        self.t_delta_max = t_deltas.max()
+        self.t_delta_mean_max = t_delta_maxes.mean()
         self.t_delta_mean = t_deltas.mean()
         self.t_delta_sd = t_deltas.std()
 
         self.time_X_limit = np.percentile(time_X, 75)
-        self.max_time_X = time_X.max()
+        self.time_X_max = time_X.max()
         self.time_X_mean = time_X.mean()
         self.time_X_sd = time_X.std()
 
@@ -378,12 +385,13 @@ class Model(object):
             'n_train': self.n_train,
             'y_train_mean': self.y_train_mean,
             'y_train_sd': self.y_train_sd,
-            'max_tdelta': self.max_tdelta,
+            't_delta_max': self.t_delta_max,
+            't_delta_mean_max': self.t_delta_mean_max,
             't_delta_mean': self.t_delta_mean,
             't_delta_sd': self.t_delta_sd,
             't_delta_limit': self.t_delta_limit,
             'impulse_df_ix': self.impulse_df_ix,
-            'max_time_X': self.max_time_X,
+            'time_X_max': self.time_X_max,
             'time_X_mean': self.time_X_mean,
             'time_X_sd': self.time_X_sd,
             'time_X_limit': self.time_X_limit,
@@ -410,15 +418,16 @@ class Model(object):
         self.n_train = md.pop('n_train')
         self.y_train_mean = md.pop('y_train_mean')
         self.y_train_sd = md.pop('y_train_sd')
-        self.max_tdelta = md.pop('max_tdelta')
+        self.t_delta_max = md.pop('t_delta_max', md.pop('max_tdelta', None))
+        self.t_delta_mean_max = md.pop('t_delta_mean_max', self.t_delta_max)
         self.t_delta_sd = md.pop('t_delta_sd', 1.)
         self.t_delta_mean = md.pop('t_delta_mean', 1.)
-        self.t_delta_limit = md.pop('t_delta_limit', self.max_tdelta)
+        self.t_delta_limit = md.pop('t_delta_limit', self.t_delta_max)
         self.impulse_df_ix = md.pop('impulse_df_ix', None)
-        self.max_time_X = md.pop('max_time_X', None)
+        self.time_X_max = md.pop('time_X_max', md.pop('max_time_X', None))
         self.time_X_sd = md.pop('time_X_sd', 1.)
         self.time_X_mean = md.pop('time_X_mean', 1.)
-        self.time_X_limit = md.pop('time_X_limit', self.max_tdelta)
+        self.time_X_limit = md.pop('time_X_limit', self.t_delta_max)
         self.rangf_map_base = md.pop('rangf_map_base')
         self.rangf_n_levels = md.pop('rangf_n_levels')
         self.impulse_means = md.pop('impulse_means', {})
@@ -1873,6 +1882,8 @@ class Model(object):
             X_2d_predictors=None,
             force_training_evaluation=True,
             irf_name_map=None,
+            plot_interactions=None,
+            plot_t_interaction=0.,
             plot_n_time_units=2.5,
             plot_n_time_points=1000,
             surface_plot_n_time_points=1024,
@@ -1914,6 +1925,8 @@ class Model(object):
         :param n_iter: ``int``; the number of training iterations
         :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
             If ``None``, IRF tree node string ID's will be used.
+        :param plot_interactions: ``list`` of ``str``; List of all implicit interactions to plot (CDRNN only).
+        :param plot_t_interaction: ``float``; Time value at which to plot (CDRNN only).
         :param plot_n_time_units: ``float``; number if time units to use for plotting.
         :param plot_n_time_points: ``float``; number of points to use for plotting.
         :param surface_plot_n_time_points: ``float``; number of points to use in any surface plots (CDRNN only).
@@ -1991,6 +2004,8 @@ class Model(object):
 
         # self.make_plots(
         #     irf_name_map=irf_name_map,
+        #     plot_interactions=plot_interactions,
+        #     plot_t_interaction=plot_t_interaction,
         #     plot_n_time_units=plot_n_time_units,
         #     plot_n_time_points=plot_n_time_points,
         #     surface_plot_n_time_points=surface_plot_n_time_points,
@@ -2025,6 +2040,10 @@ class Model(object):
                             self.writer.flush()
                     else:
                         stderr('Resuming training from most recent checkpoint...\n\n')
+
+                    if self.global_step.eval(session=self.sess) == 0:
+                        stderr('Saving initial weights...\n')
+                        self.save()
 
                     while not self.has_converged() and self.global_step.eval(session=self.sess) < n_iter:
                         p, p_inv = get_random_permutation(n_train)
@@ -2080,6 +2099,8 @@ class Model(object):
                             #     self.save()
                             #     self.make_plots(
                             #         irf_name_map=irf_name_map,
+                            #         plot_interactions=plot_interactions,
+                            #         plot_t_interaction=plot_t_interaction,
                             #         plot_n_time_units=plot_n_time_units,
                             #         plot_n_time_points=plot_n_time_points,
                             #         surface_plot_n_time_points=surface_plot_n_time_points,
@@ -2121,6 +2142,8 @@ class Model(object):
                             self.save()
                             self.make_plots(
                                 irf_name_map=irf_name_map,
+                                plot_interactions=plot_interactions,
+                                plot_t_interaction=plot_t_interaction,
                                 plot_n_time_units=plot_n_time_units,
                                 plot_n_time_points=plot_n_time_points,
                                 surface_plot_n_time_points=surface_plot_n_time_points,
@@ -2146,6 +2169,8 @@ class Model(object):
 
                     self.make_plots(
                         irf_name_map=irf_name_map,
+                        plot_interactions=plot_interactions,
+                        plot_t_interaction=plot_t_interaction,
                         plot_n_time_units=plot_n_time_units,
                         plot_n_time_points=plot_n_time_points,
                         surface_plot_n_time_points=surface_plot_n_time_points,
@@ -2164,6 +2189,8 @@ class Model(object):
                         # Generate plots with 95% credible intervals
                         self.make_plots(
                             irf_name_map=irf_name_map,
+                            plot_interactions=plot_interactions,
+                            plot_t_interaction=plot_t_interaction,
                             plot_n_time_units=plot_n_time_units,
                             plot_n_time_points=plot_n_time_points,
                             surface_plot_n_time_points=surface_plot_n_time_points,
@@ -2691,7 +2718,7 @@ class Model(object):
 
                 return D, p_value
 
-    def get_plot_names(self, composite='composite', scaled='scaled', dirac='dirac', plot_type='irf_1d'):
+    def get_plot_names(self, composite='composite', scaled='scaled', dirac='dirac', plot_type='irf_1d', interactions=None):
         raise NotImplementedError
 
     def get_plot_data(
@@ -2722,8 +2749,8 @@ class Model(object):
             prop_cycle_length=None,
             prop_cycle_ix=None,
             plot_dirac=False,
-            plot_interactions=False,
-            t_interaction=0.,
+            plot_interactions=None,
+            plot_t_interaction=0.,
             plot_rangf=False,
             plot_n_time_units=2.5,
             plot_n_time_points=1000,
@@ -2771,8 +2798,8 @@ class Model(object):
         :param prop_cycle_length: ``int`` or ``None``; Length of plotting properties cycle (defines step size in the color map). If ``None``, inferred from **irf_names**.
         :param prop_cycle_ix: ``list`` of ``int``, or ``None``; Integer indices to use in the properties cycle for each entry in **irf_names**. If ``None``, indices are automatically assigned.
         :param plot_dirac: ``bool``; include any linear Dirac delta IRF's (stick functions at t=0) in plot.
-        :param plot_interactions: ``bool``; plot all predictor interactions (CDRNN only)
-        :param t_interaction: ``float``; timepoint at which to plot interactions (CDRNN only)
+        :param plot_interactions: ``list`` of ``str``; List of all implicit interactions to plot (CDRNN only).
+        :param plot_t_interaction: ``float``; timepoint at which to plot interactions (CDRNN only)
         :param plot_rangf: ``bool``; plot all (marginal) random effects.
         :param plot_n_time_units: ``float``; number if time units to use for plotting.
         :param plot_n_time_points: ``int``; number of points to use for plotting.
@@ -2807,6 +2834,9 @@ class Model(object):
             dirac = 'dirac'
         else:
             dirac = 'nodirac'
+
+        if not plot_interactions:
+            plot_interactions = []
 
         if prefix is None:
             prefix = ''
@@ -2891,7 +2921,7 @@ class Model(object):
                         plot_x = []
                         plot_y = []
                         plot_z = []
-                        names = self.get_plot_names(plot_type='irf_surface')
+                        names = self.get_plot_names(plot_type='irf_surface', interactions=plot_interactions)
                         for name in names:
                             (x_cur, y_cur), z_cur = self.get_plot_data(
                                 name,
@@ -2899,7 +2929,7 @@ class Model(object):
                                 support_start=0.,
                                 n_time_units=plot_n_time_units,
                                 n_time_points=plot_n_time_points,
-                                t_interaction=t_interaction,
+                                t_interaction=plot_t_interaction,
                                 plot_rangf=plot_rangf,
                                 rangf_vals=rangf_vals
                             )
@@ -2929,7 +2959,7 @@ class Model(object):
                         )
 
                     if generate_curvature_plots and hasattr(self, 'curvature_plot'):
-                        names = self.get_plot_names(plot_type='curvature')
+                        names = self.get_plot_names(plot_type='curvature', interactions=plot_interactions)
                         for name in names:
                             x_cur, y_cur = self.get_plot_data(
                                 name,
@@ -2937,13 +2967,13 @@ class Model(object):
                                 support_start=0.,
                                 n_time_units=plot_n_time_units,
                                 n_time_points=plot_n_time_points,
-                                t_interaction=t_interaction,
+                                t_interaction=plot_t_interaction,
                                 plot_rangf=plot_rangf,
                                 rangf_vals=rangf_vals
                             )
 
-                            xlab_cur = irf_name_map.get(name, name)
-                            filename = 'curvature_plot_t%s_%s.png' % (t_interaction, sn(name))
+                            xlab_cur = ':'.join([get_irf_name(x, irf_name_map) for x in name.split(':')])
+                            filename = 'curvature_plot_t%s_%s.png' % (plot_t_interaction, sn(xlab_cur))
 
                             if self.standardize_response and not standardize_response:
                                 y_cur *= self.y_train_sd
@@ -2972,7 +3002,7 @@ class Model(object):
                         plot_x = []
                         plot_y = []
                         plot_z = []
-                        names = self.get_plot_names(plot_type='interaction_surface')
+                        names = self.get_plot_names(plot_type='interaction_surface', interactions=plot_interactions)
                         for name in names:
                             (x_cur, y_cur), z_cur = self.get_plot_data(
                                 name,
@@ -2980,7 +3010,7 @@ class Model(object):
                                 support_start=0.,
                                 n_time_units=plot_n_time_units,
                                 n_time_points=plot_n_time_points,
-                                t_interaction=t_interaction,
+                                t_interaction=plot_t_interaction,
                                 plot_rangf=plot_rangf,
                                 rangf_vals=rangf_vals
                             )
@@ -3024,7 +3054,7 @@ class Model(object):
                                 plot_name = 'irf_%s_%s_summed_%d.png' %(a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'irf_%s_%s_summed.png' %(a, b)
                             else:
                                 plot_name = 'irf_%s_%s_%d.png' %(a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'irf_%s_%s.png' %(a, b)
-                            names = self.get_plot_names(composite=a, scaled=b, dirac=dirac, plot_type='irf_1d')
+                            names = self.get_plot_names(composite=a, scaled=b, dirac=dirac, plot_type='irf_1d', interactions=plot_interactions)
                             if irf_ids is not None and len(irf_ids) > 0:
                                 new_names = []
                                 for i, name in enumerate(names):

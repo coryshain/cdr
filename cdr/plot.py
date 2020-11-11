@@ -4,11 +4,12 @@ import pandas as pd
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib
 import matplotlib.colors
+from matplotlib import cm
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib import markers
 
-from .util import stderr
+from .util import stderr, get_irf_name
 
 
 class MidpointNormalize(matplotlib.colors.Normalize):
@@ -100,7 +101,7 @@ def plot_irf(
     irf_names_processed = irf_names[:]
     if irf_name_map is not None:
         for i in range(len(irf_names_processed)):
-            irf_names_processed[i] = ':'.join([irf_name_map.get(x, x) for x in irf_names_processed[i].split(':')])
+            irf_names_processed[i] = ':'.join([get_irf_name(x, irf_name_map) for x in irf_names_processed[i].split(':')])
     if sort_names:
         sort_ix = [i[0] for i in sorted(enumerate(irf_names_processed), key=lambda x:x[1])]
     else:
@@ -135,7 +136,7 @@ def plot_irf(
     if dump_source:
         csvname = '.'.join(filename.split('.')[:-1]) + '.csv'
         if irf_name_map is not None:
-            names_cur = [irf_name_map[x] for x in irf_names]
+            names_cur = [get_irf_name(x, irf_name_map) for x in irf_names]
         df = pd.DataFrame(np.concatenate([plot_x, plot_y], axis=1), columns=['time'] + names_cur)
         
         if lq is not None:
@@ -160,6 +161,7 @@ def plot_surface(
         plot_x_inches=6,
         plot_y_inches=4,
         ylim='infer',
+        plot_type='wireframe',
         cmap='coolwarm',
         xlab='Time',
         ylab='infer',
@@ -185,6 +187,7 @@ def plot_surface(
     :param plot_x_inches: ``float``; width of plot in inches.
     :param plot_y_inches: ``float``; height of plot in inches.
     :param ylim: 2-element ``tuple`` or ``list``; (lower_bound, upper_bound) to use for y axis. If ``None``, automatically inferred.
+    :param plot_type: ``str``; name of plot type to generate. One of ``["contour", "surf", "trisurf"]``.
     :param cmap: ``str``; name of ``matplotlib`` ``cmap`` object (determines colors of plotted IRF).
     :param legend: ``bool``; include a legend.
     :param xlab: ``str`` or ``None``; x-axis label. If ``None``, no label.
@@ -201,7 +204,7 @@ def plot_surface(
     fig = plt.figure()
     fig.set_size_inches(plot_x_inches, plot_y_inches)
     ax = fig.gca(projection='3d')
-    ax.view_init(40, 215)
+    ax.view_init(50, 215)
     ax.w_xaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))
     ax.w_yaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))
     ax.w_zaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))
@@ -209,48 +212,110 @@ def plot_surface(
     irf_names_processed = irf_names[:]
     if irf_name_map is not None:
         for i in range(len(irf_names_processed)):
-            irf_names_processed[i] = ':'.join([irf_name_map.get(x, x) for x in irf_names_processed[i].split(':')])
+            irf_names_processed[i] = ':'.join([get_irf_name(x, irf_name_map) for x in irf_names_processed[i].split(':')])
     if sort_names:
         sort_ix = [i[0] for i in sorted(enumerate(irf_names_processed), key=lambda x:x[1])]
     else:
         sort_ix = range(len(irf_names_processed))
     for i in range(len(sort_ix)):
-        ax.contour3D(
-            plot_x[sort_ix[i]],
-            plot_y[sort_ix[i]],
-            plot_z[sort_ix[i]],
-            50,
-            cmap=cmap,
-            norm=MidpointNormalize(0.)
-        )
-        fig.suptitle(irf_names_processed[sort_ix[i]])
-        if ylab is not None and ylab.lower() == 'infer' and xlab is not None and xlab.lower() == 'infer':
-            xlab_cur, ylab_cur = irf_names_processed[sort_ix[i]].split(':')
-        elif ylab is not None and ylab.lower() == 'infer':
-            xlab_cur = xlab
-            ylab_cur = irf_names_processed[sort_ix[i]]
-        else:
-            ylab_cur = ylab
-            xlab_cur = xlab
-        zlab_cur = zlab
-
-        if xlab_cur:
-            ax.set_xlabel(xlab_cur, weight='bold')
-        if ylab_cur:
-            ax.set_ylabel(ylab_cur, weight='bold')
-        if zlab_cur:
-            ax.set_zlabel(zlab_cur, weight='bold')
-
-        filename = (prefix + '_' + '%s_' %  irf_names_processed[sort_ix[i]] + suffix).replace(':', '_by_').replace(' ', '_')
-
+        filename = (prefix + '_' + '%s_' % irf_names_processed[sort_ix[i]] + suffix).replace(':', '_by_').replace(' ', '_')
         try:
+            rcount, ccount = plot_z[sort_ix[i]].shape
+            if plot_type.lower() == 'surf':
+                ax.plot_surface(
+                    plot_x[sort_ix[i]],
+                    plot_y[sort_ix[i]],
+                    plot_z[sort_ix[i]],
+                    rcount=rcount,
+                    ccount=ccount,
+                    cmap=cmap,
+                    linewidth=2,
+                    alpha=0.7,
+                    antialiased=False,
+                    norm=matplotlib.colors.TwoSlopeNorm(vcenter=0.)
+                )
+            elif plot_type.lower() == 'trisurf':
+                ax.plot_trisurf(
+                    plot_x[sort_ix[i]],
+                    plot_y[sort_ix[i]],
+                    plot_z[sort_ix[i]],
+                    rcount=rcount,
+                    ccount=ccount,
+                    cmap=cmap,
+                    linewidth=2,
+                    alpha=0.7,
+                    antialiased=False,
+                    norm=matplotlib.colors.TwoSlopeNorm(vcenter=0.)
+                )
+            elif plot_type.lower() == 'contour':
+                ax.contour3D(
+                    plot_x[sort_ix[i]],
+                    plot_y[sort_ix[i]],
+                    plot_z[sort_ix[i]],
+                    rcount=rcount,
+                    ccount=ccount,
+                    cmap=cmap,
+                    norm=matplotlib.colors.TwoSlopeNorm(vcenter=0.)
+                )
+            elif plot_type.lower() == 'wireframe':
+                vcenter = 0
+                vmin = plot_z[sort_ix[i]].min() - 1e-8
+                vmax = plot_z[sort_ix[i]].max() + 1e-8
+                if vmin < 0 and vmax > 0:
+                    bound = max(abs(vmin), vmax)
+                    vmin = -bound
+                    vmax = bound
+                elif vmin < 0.:
+                    vmax = 1e-8
+                else: # vmax > 0
+                    vmin = -1e-8
+                norm = matplotlib.colors.TwoSlopeNorm(
+                    vmin=vmin,
+                    vcenter=vcenter,
+                    vmax=vmax
+                )
+
+                facecolors = getattr(cm, cmap)(norm(plot_z[sort_ix[i]]))
+                surf = ax.plot_surface(
+                    plot_x[sort_ix[i]],
+                    plot_y[sort_ix[i]],
+                    plot_z[sort_ix[i]],
+                    rcount=rcount,
+                    ccount=ccount,
+                    facecolors=facecolors,
+                    linewidth=2,
+                    antialiased=False,
+                    shade=False
+                )
+                surf.set_facecolor((0, 0, 0, 0))
+            else:
+                raise ValueError('Unrecognized surface plot type: %s.' % plot_type)
+
+            fig.suptitle(irf_names_processed[sort_ix[i]])
+            if ylab is not None and ylab.lower() == 'infer' and xlab is not None and xlab.lower() == 'infer':
+                xlab_cur, ylab_cur = irf_names_processed[sort_ix[i]].split(':')
+            elif ylab is not None and ylab.lower() == 'infer':
+                xlab_cur = xlab
+                ylab_cur = irf_names_processed[sort_ix[i]]
+            else:
+                ylab_cur = ylab
+                xlab_cur = xlab
+            zlab_cur = zlab
+
+            if xlab_cur:
+                ax.set_xlabel(xlab_cur, weight='bold')
+            if ylab_cur:
+                ax.set_ylabel(ylab_cur, weight='bold')
+            if zlab_cur:
+                ax.set_zlabel(zlab_cur, weight='bold')
+
             fig.savefig(
                 dir + '/' + filename,
                 dpi=dpi,
                 transparent=transparent_background
             )
-        except:
-            stderr('Error saving plot to file %s. Skipping...\n' % (dir + '/' + filename))
+        except Exception as e:
+            stderr('Error saving plot to file %s. Description:\n%s\nSkipping...\n' % (dir + '/' + filename, e))
         ax.clear()
 
     plt.close('all')

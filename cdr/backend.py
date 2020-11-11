@@ -171,6 +171,7 @@ class CDRNNCell(LayerRNNCell):
             resnet_n_layers=1,
             prefinal_mode='max',
             forget_bias=1.0,
+            forget_gate_as_irf=False,
             activation=None,
             recurrent_activation='sigmoid',
             prefinal_activation='tanh',
@@ -210,6 +211,7 @@ class CDRNNCell(LayerRNNCell):
                 self._resnet_n_layers = resnet_n_layers
                 self._prefinal_mode = prefinal_mode
                 self._forget_bias = forget_bias
+                self._forget_gate_as_irf = forget_gate_as_irf
 
                 self._activation = get_activation(activation, session=self._session, training=self._training)
                 self._recurrent_activation = get_activation(recurrent_activation, session=self._session, training=self._training)
@@ -429,27 +431,28 @@ class CDRNNCell(LayerRNNCell):
                 )
                 self._weights += sum([x.weights for x in layers_cur], [])
 
-                self._t_delta_embedding_W = self.add_variable(
-                    't_delta_embedding_W',
-                    shape=[1, self._num_units],
-                    initializer=self._bottomup_initializer
-                )
-                self._t_delta_embedding_b = self.add_variable(
-                    't_delta_embedding_b',
-                    shape=[1, self._num_units],
-                    initializer=tf.zeros_initializer
-                )
-                self._weights += [self._t_delta_embedding_W, self._t_delta_embedding_b]
+                if self._forget_gate_as_irf:
+                    self._t_delta_embedding_W = self.add_variable(
+                        't_delta_embedding_W',
+                        shape=[1, self._num_units],
+                        initializer=self._bottomup_initializer
+                    )
+                    self._t_delta_embedding_b = self.add_variable(
+                        't_delta_embedding_b',
+                        shape=[1, self._num_units],
+                        initializer=tf.zeros_initializer
+                    )
+                    self._weights += [self._t_delta_embedding_W, self._t_delta_embedding_b]
 
-                self._kernel_time_projection, layers_cur = self.initialize_kernel(
-                    recurrent_dim,
-                    recurrent_dim,
-                    self._bottomup_initializer,
-                    depth=self._time_projection_depth,
-                    inner_activation=self._time_projection_inner_activation,
-                    name='time_projection'
-                )
-                self._weights += sum([x.weights for x in layers_cur], [])
+                    self._kernel_time_projection, layers_cur = self.initialize_kernel(
+                        recurrent_dim,
+                        recurrent_dim,
+                        self._bottomup_initializer,
+                        depth=self._time_projection_depth,
+                        inner_activation=self._time_projection_inner_activation,
+                        name='time_projection'
+                    )
+                    self._weights += sum([x.weights for x in layers_cur], [])
 
         self.built = True
 
@@ -457,10 +460,16 @@ class CDRNNCell(LayerRNNCell):
         with self._session.as_default():
             with self._session.graph.as_default():
                 assert isinstance(inputs, dict), 'Inputs to CDRNNCell must be a dict containing fields ``inputs`` and (optionally) ``times``, and ``mask``.'
+
+                units = self._num_units
+                c_prev = state.c
+                h_prev = state.h
+                t_prev = state.t
+
                 if 'times' in inputs:
-                    times = inputs['times']
+                    t_cur = inputs['times']
                 else:
-                    times = None
+                    t_cur = t_prev
 
                 if 'mask' in inputs:
                     mask = inputs['mask']
@@ -468,15 +477,8 @@ class CDRNNCell(LayerRNNCell):
                     mask = None
 
                 inputs = inputs['inputs']
+
                 inputs = self._bottomup_dropout(inputs)
-
-                units = self._num_units
-                c_prev = state.c
-                h_prev = state.h
-                t_prev = state.t
-
-                if times is None:
-                    times = t_prev
 
                 if self._forget_rate:
                     def train_fn_forget(h_prev=h_prev, c_prev=c_prev):
@@ -499,35 +501,37 @@ class CDRNNCell(LayerRNNCell):
                 if not self._layer_normalization and self._use_bias:
                     s += self._bias
 
-                # Forget gate
-                f_W = self._t_delta_embedding_W + s[:, :units]
-                f_b = self._t_delta_embedding_b + s[:, units:units * 2]
-                if self._layer_normalization:
-                    f_W = self.norm(f_W, 'f_W_ln')
-                    f_b = self.norm(f_b, 'f_b_ln')
-                t = times - t_prev
-                t_embedding = self._time_projection_inner_activation(f_W * t + f_b + self._forget_bias)
-                f = self._recurrent_activation(
-                    self._kernel_time_projection(t_embedding)
-                )
-
                 # Input gate
-                i = s[:, units * 2:units * 3]
+                i = s[:, :units]
                 if self._layer_normalization:
                     i = self.norm(i, 'i_ln')
                 i = self._recurrent_activation(i)
 
                 # Output gate
-                o = s[:, units * 3:units * 4]
+                o = s[:, units:units*2]
                 if self._layer_normalization:
                     o = self.norm(o, 'o_ln')
                 o = self._recurrent_activation(o)
 
                 # Cell proposal
-                g = s[:, units * 4:units * 5]
+                g = s[:, units*2:units*3]
                 if self._layer_normalization:
                     g = self.norm(g, 'g_ln')
                 g = self._activation(g)
+
+                # Forget gate
+                if self._forget_gate_as_irf:
+                    f_W = self._t_delta_embedding_W + s[:, units*3:units*4]
+                    f_b = self._t_delta_embedding_b + s[:, units*4:units*5]
+                    if self._layer_normalization:
+                        f_W = self.norm(f_W, 'f_W_ln')
+                        f_b = self.norm(f_b, 'f_b_ln')
+                    t = t_cur - t_prev
+                    t_embedding = self._time_projection_inner_activation(f_W * t + f_b + self._forget_bias)
+                    f = self._kernel_time_projection(t_embedding)
+                else:
+                    f = s[:, units*3:units*4]
+                f = self._recurrent_activation(f)
 
                 c = f * c_prev + i * g
                 h = o * self._activation(c)
@@ -542,7 +546,7 @@ class CDRNNCell(LayerRNNCell):
                     c = c * mask + c_prev * (1 - mask)
                     h = h * mask + h_prev * (1 - mask)
 
-                new_state = CDRNNStateTuple(c=c, h=h, t=times)
+                new_state = CDRNNStateTuple(c=c, h=h, t=t_cur)
 
                 return new_state, new_state
 
@@ -557,6 +561,7 @@ class CDRNNLayer(object):
             resnet_n_layers=1,
             prefinal_mode='max',
             forget_bias=1.0,
+            forget_gate_as_irf=False,
             activation=None,
             recurrent_activation='sigmoid',
             prefinal_activation='tanh',
@@ -593,6 +598,7 @@ class CDRNNLayer(object):
         self.resnet_n_layers = resnet_n_layers
         self.prefinal_mode = prefinal_mode
         self.forget_bias = forget_bias
+        self.forget_gate_as_irf = forget_gate_as_irf
         self.activation = activation
         self.recurrent_activation = recurrent_activation
         self.prefinal_activation = prefinal_activation
@@ -641,6 +647,7 @@ class CDRNNLayer(object):
                         resnet_n_layers=self.resnet_n_layers,
                         prefinal_mode=self.prefinal_mode,
                         forget_bias=self.forget_bias,
+                        forget_gate_as_irf=self.forget_gate_as_irf,
                         activation=self.activation,
                         recurrent_activation=self.recurrent_activation,
                         prefinal_activation=self.prefinal_activation,

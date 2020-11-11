@@ -254,6 +254,14 @@ def paths_from_partition_cliarg(partition, config):
     return X_paths, y_paths
 
 
+def get_irf_name(x, irf_name_map):
+    for y in sorted(list(irf_name_map.keys())):
+        if y in x:
+            return irf_name_map[y]
+    return x
+
+
+
 def load_cdr(dir_path):
     """
     Convenience method for reconstructing a saved CDR object. First loads in metadata from ``m.obj``, then uses

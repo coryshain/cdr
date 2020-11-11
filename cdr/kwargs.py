@@ -331,10 +331,16 @@ MODEL_INITIALIZATION_KWARGS = [
         "Scale of global regularizer; can be overridden by more regularizers for more specific parameters (ignored if ``regularizer_name==None``)."
     ),
     Kwarg(
+        'scale_loss_with_data',
+        False,
+        bool,
+        "Whether to multiply the scale of the LL loss by N, where N is num batches. This turns the loss into an expectation over training set likelihood."
+    ),
+    Kwarg(
         'scale_regularizer_with_data',
         False,
         bool,
-        "Whether to multiply the scale of all weight regularization by B * N, where batch size and N is num batches. Because the loss is based on the expected log likelihood of the full dataset, which scales linearly with data size, this approach ensures a stable regularization strength (relative to the loss) across datasets and batch sizes. If ``False``, the same regularization penalty is added to each batch regardless of batch or data size, and therefore different batch/data sizes will yield different implicit regularization strengths for the same regularization constant. If ``True``, this greatly increases the regularizer loss, so regularizer scales should be chosen accordingly."
+        "Whether to multiply the scale of all weight regularization by B * N, where B is batch size and N is num batches. If **scale_loss_with_data** is true, this approach ensures a stable regularization strength (relative to the loss) across datasets and batch sizes."
     ),
     Kwarg(
         'intercept_regularizer_name',
@@ -708,7 +714,7 @@ CDRNN_INITIALIZATION_KWARGS = [
         'n_units_rnn',
         32,
         [int, str, None],
-        "Number of units per RNN layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_rnn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no RNN encoding (i.e. use a stationary convolution kernel)."
+        "Number of units per RNN layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_rnn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no RNN encoding (i.e. use a context-independent convolution kernel)."
     ),
     Kwarg(
         'n_layers_rnn_projection',
@@ -874,64 +880,62 @@ CDRNN_INITIALIZATION_KWARGS = [
         'predictor_dropout_rate',
         None,
         [float, None],
-        "Rate at which to drop predictors.",
-        aliases=['input_dropout_rate']
+        "Rate at which to drop predictors."
     ),
     Kwarg(
         'event_dropout_rate',
         None,
         [float, None],
-        "Rate at which to drop events (input vectors).",
-        aliases=['input_dropout_rate']
-    ),
-    Kwarg(
-        'rangf_dropout_rate',
-        None,
-        [float, None],
-        "Rate at which to drop random grouping factors.",
-        aliases=['input_dropout_rate']
+        "Rate at which to drop events (input vectors)."
     ),
     Kwarg(
         'input_projection_dropout_rate',
         None,
         [float, None],
-        "Rate at which to drop neurons of input projection layers."
+        "Rate at which to drop neurons of input projection layers.",
+        aliases=['dropout_rate']
     ),
     Kwarg(
         'rnn_h_dropout_rate',
         None,
         [float, None],
-        "Rate at which to drop neurons of RNN hidden state."
+        "Rate at which to drop neurons of RNN hidden state.",
+        aliases=['dropout_rate']
     ),
     Kwarg(
         'rnn_c_dropout_rate',
         None,
         [float, None],
-        "Rate at which to drop neurons of RNN cell state."
+        "Rate at which to drop neurons of RNN cell state.",
+        aliases=['dropout_rate']
     ),
     Kwarg(
         'h_in_dropout_rate',
         None,
         [float, None],
-        "Rate at which to drop neurons of h_in."
+        "Rate at which to drop neurons of h_in.",
+        aliases=['dropout_rate']
     ),
     Kwarg(
         'h_rnn_dropout_rate',
         None,
         [float, None],
-        "Rate at which to drop neurons of h_rnn."
+        "Rate at which to drop neurons of h_rnn.",
+        aliases=['dropout_rate']
     ),
     Kwarg(
         'irf_dropout_rate',
         None,
         [float, None],
-        "Rate at which to drop neurons of IRF layers."
+        "Rate at which to drop neurons of IRF layers.",
+        aliases=['dropout_rate']
     ),
     Kwarg(
         'error_params_fn_dropout_rate',
         None,
         [float, None],
-        "Rate at which to drop neurons of error params function."
+        "Rate at which to drop neurons of error params function.",
+        aliases=['dropout_rate']
     ),
     Kwarg(
         'ranef_dropout_rate',

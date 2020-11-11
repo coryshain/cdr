@@ -277,7 +277,9 @@ class Config(object):
         if 'generate_curvature_plots' in settings or add_defaults:
             out['generate_curvature_plots'] = settings.getboolean('generate_curvature_plots', False)
         if 'plot_interactions' in settings or add_defaults:
-            out['plot_interactions'] = settings.get('plot_interactions', None)
+            out['plot_interactions'] = settings.get('plot_interactions', '').split()
+        if 'plot_t_interaction' in settings or add_defaults:
+            out['plot_t_interaction'] = settings.get('plot_t_interaction', 0.)
         if 'plot_x_inches' in settings or add_defaults:
             out['plot_x_inches'] = settings.getfloat('plot_x_inches', 6)
         if 'plot_y_inches' in settings or add_defaults:

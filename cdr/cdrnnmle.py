@@ -299,9 +299,10 @@ class CDRNNMLE(CDRNN):
                     self.loss_ema_op = tf.assign(self.loss_ema, loss_ema_update)
                     self.loss_sd_ema_op = tf.assign(self.loss_sd_ema, loss_sd_ema_update)
 
-                self.loss_func = tf.reduce_mean(loss_func)
-                # self.loss_func = tf.reduce_sum(loss_func) * self.minibatch_scale
-                # self.loss_func = tf.reduce_sum(loss_func)
+                if self.scale_loss_with_data:
+                    self.loss_func = tf.reduce_sum(loss_func) * self.minibatch_scale
+                else:
+                    self.loss_func = tf.reduce_mean(loss_func)
 
                 for l in self.regularizable_layers:
                     if hasattr(l, 'weights'):
