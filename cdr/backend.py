@@ -177,6 +177,7 @@ class CDRNNCell(LayerRNNCell):
             prefinal_activation='tanh',
             time_projection_inner_activation='tanh',
             bottomup_initializer='glorot_uniform_initializer',
+            # bottomup_initializer='random_normal_initializer_mean-0_stddev-0.0001',
             recurrent_initializer='orthogonal_initializer',
             bias_initializer='zeros_initializer',
             bottomup_regularizer=None,
@@ -242,10 +243,6 @@ class CDRNNCell(LayerRNNCell):
 
                 self._epsilon = epsilon
 
-                self._regularizer_map = {}
-                self._regularization_initialized = False
-                self._weights = []
-
                 self.built = False
 
     @property
@@ -255,35 +252,6 @@ class CDRNNCell(LayerRNNCell):
     @property
     def output_size(self):
         return CDRNNStateTuple(c=self._num_units, h=self._num_units, t=1)
-
-    def _add_regularization(self, var, regularizer):
-        if regularizer is not None:
-            with self._session.as_default():
-                with self._session.graph.as_default():
-                    self._regularizer_map[var] = regularizer
-
-    def initialize_regularization(self):
-        assert self.built, "Cannot initialize regularization before calling the LSTM layer because the weight matrices haven't been built."
-
-        if not self._regularization_initialized:
-            for var in tf.trainable_variables(scope=self.name):
-                n1, n2 = var.name.split('/')[-2:]
-                if 'bias' in n2:
-                    self._add_regularization(var, self._bias_regularizer)
-                if 'kernel' in n2:
-                    if 'bottomup' in n1 or 'revnet' in n1:
-                        self._add_regularization(var, self._bottomup_regularizer)
-                    elif 'recurrent' in n1:
-                        self._add_regularization(var, self._recurrent_regularizer)
-                    elif 'topdown' in n1:
-                        self._add_regularization(var, self._topdown_regularizer)
-                    elif 'boundary' in n1:
-                        self._add_regularization(var, self._boundary_regularizer)
-            self._regularization_initialized = True
-
-    def get_regularization(self):
-        self.initialize_regularization()
-        return self._regularizer_map.copy()
 
     def initialize_kernel(
             self,
@@ -390,7 +358,13 @@ class CDRNNCell(LayerRNNCell):
 
     @property
     def weights(self):
-        return self._weights[:]
+        weights = [self._bias]
+        weights += sum([x.weights for x in self._kernel_bottomup_layers], [])
+        weights += sum([x.weights for x in self._kernel_recurrent_layers], [])
+        if self._forget_gate_as_irf:
+            weights += sum([x.weights for x in self._kernel_time_projection_layers], [])
+
+        return weights[:]
 
     def build(self, inputs_shape):
         with self._session.as_default():
@@ -412,24 +386,21 @@ class CDRNNCell(LayerRNNCell):
                         shape=[1, output_dim],
                         initializer=self._bias_initializer
                     )
-                    self._weights.append(self._bias)
 
                 # Build LSTM kernels (bottomup and recurrent)
-                self._kernel_bottomup, layers_cur = self.initialize_kernel(
+                self._kernel_bottomup, self._kernel_bottomup_layers = self.initialize_kernel(
                     bottomup_dim,
                     output_dim,
                     self._bottomup_initializer,
                     name='bottomup'
                 )
-                self._weights += sum([x.weights for x in layers_cur], [])
 
-                self._kernel_recurrent, layers_cur = self.initialize_kernel(
+                self._kernel_recurrent, self._kernel_recurrent_layers = self.initialize_kernel(
                     recurrent_dim,
                     output_dim,
                     self._recurrent_initializer,
                     name='recurrent'
                 )
-                self._weights += sum([x.weights for x in layers_cur], [])
 
                 if self._forget_gate_as_irf:
                     self._t_delta_embedding_W = self.add_variable(
@@ -442,9 +413,8 @@ class CDRNNCell(LayerRNNCell):
                         shape=[1, self._num_units],
                         initializer=tf.zeros_initializer
                     )
-                    self._weights += [self._t_delta_embedding_W, self._t_delta_embedding_b]
 
-                    self._kernel_time_projection, layers_cur = self.initialize_kernel(
+                    self._kernel_time_projection, self._kernel_time_projection_layers = self.initialize_kernel(
                         recurrent_dim,
                         recurrent_dim,
                         self._bottomup_initializer,
@@ -452,7 +422,6 @@ class CDRNNCell(LayerRNNCell):
                         inner_activation=self._time_projection_inner_activation,
                         name='time_projection'
                     )
-                    self._weights += sum([x.weights for x in layers_cur], [])
 
         self.built = True
 
@@ -567,6 +536,7 @@ class CDRNNLayer(object):
             prefinal_activation='tanh',
             time_projection_inner_activation='tanh',
             bottomup_initializer='glorot_uniform_initializer',
+            # bottomup_initializer='random_normal_initializer_mean-0_stddev-0.0001',
             recurrent_initializer='orthogonal_initializer',
             bias_initializer='zeros_initializer',
             bottomup_regularizer=None,
@@ -793,7 +763,8 @@ class DenseLayer(object):
             units=None,
             use_bias=True,
             activation=None,
-            kernel_initializer='he_normal_initializer',
+            kernel_initializer='glorot_uniform',
+            # kernel_initializer='random_normal_initializer_mean-0_stddev-0.0001',
             bias_initializer='zeros_initializer',
             dropout=None,
             kernel_regularizer=None,

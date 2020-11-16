@@ -310,7 +310,8 @@ class CDRNNMLE(CDRNN):
                     else:
                         vars = [l]
                     for v in vars:
-                        self._regularize(v, type='nn', var_name=reg_name(v.name))
+                        if 'bias' not in v.name:
+                            self._regularize(v, type='nn', var_name=reg_name(v.name))
 
                 self.reg_loss = tf.constant(0., dtype=self.FLOAT_TF)
                 if len(self.regularizer_losses_varnames) > 0:

@@ -411,14 +411,17 @@ class CDRNN(Model):
                         units = self.n_units_input_projection[l]
                         activation = self.input_projection_inner_activation
                         dropout = self.input_projection_dropout_rate
+                        use_bias = True
                     else:
                         units = self.n_units_hidden_state
                         activation = self.input_projection_activation
                         dropout = None
+                        use_bias = False
+
                     projection = DenseLayer(
                         training=self.training,
                         units=units,
-                        use_bias=True,
+                        use_bias=use_bias,
                         activation=activation,
                         kernel_initializer=self.kernel_initializer,
                         bias_initializer='zeros_initializer',
@@ -498,14 +501,16 @@ class CDRNN(Model):
                     if l < self.n_layers_rnn_projection:
                         units = self.n_units_rnn_projection[l]
                         activation = self.rnn_projection_inner_activation
+                        use_bias = True
                     else:
                         units = self.n_units_hidden_state
                         activation = self.rnn_projection_activation
+                        use_bias = False
 
                     projection = DenseLayer(
                         training=self.training,
                         units=units,
-                        use_bias=True,
+                        use_bias=use_bias,
                         activation=activation,
                         kernel_initializer=self.kernel_initializer,
                         bias_initializer='zeros_initializer',
@@ -523,27 +528,35 @@ class CDRNN(Model):
                 self.rnn_projection_layers = rnn_projection_layers
                 self.rnn_projection_fn = rnn_projection_fn
 
-                # t_delta embedding (i.e. multidim transform of time in IRF)
-                t_delta_embedding_W = tf.get_variable(
-                    't_delta_embedding_W',
+                h_bias = tf.get_variable(
+                    'h_bias',
+                    shape=[1, 1, self.n_units_hidden_state],
+                    initializer=get_initializer(tf.zeros_initializer, self.sess)
+                )
+                # self.regularizable_layers.append(h_bias)
+
+                irf_l1_W_bias = tf.get_variable(
+                    'irf_l1_W_bias',
                     shape=[1, 1, self.n_units_t_delta_embedding],
                     initializer=get_initializer(self.kernel_initializer, self.sess)
                 )
-                t_delta_embedding_b = tf.get_variable(
-                    't_delta_embedding_b',
+                irf_l1_b_bias = tf.get_variable(
+                    'irf_l1_b_bias',
                     shape=[1, 1, self.n_units_t_delta_embedding],
                     initializer=tf.zeros_initializer
                 )
-                self.regularizable_layers += [t_delta_embedding_W, t_delta_embedding_b]
+                # self.regularizable_layers += [irf_l1_W_bias, irf_l1_b_bias]
+                # self.regularizable_layers.append(irf_l1_W_bias)
 
-                self.t_delta_embedding_W = t_delta_embedding_W
-                self.t_delta_embedding_b = t_delta_embedding_b
+                self.h_bias = h_bias
+                self.t_delta_embedding_W = irf_l1_W_bias
+                self.t_delta_embedding_b = irf_l1_b_bias
 
                 # Projection from hidden state to first layer (weights and biases) of IRF
                 hidden_state_to_irf_l1 = DenseLayer(
                     training=self.training,
                     units=self.n_units_t_delta_embedding * 2,
-                    use_bias=True,
+                    use_bias=False,
                     activation=None,
                     kernel_initializer=self.kernel_initializer,
                     bias_initializer='zeros_initializer',
@@ -647,7 +660,7 @@ class CDRNN(Model):
                             tf.zeros([len(levels_ix)]),
                             name='intercept_by_%s' % sn(gf)
                         )
-                        self.regularizable_layers.append(intercept_random)
+                        # self.regularizable_layers.append(intercept_random)
 
                         intercept_random_summary = intercept_random
 
@@ -694,7 +707,7 @@ class CDRNN(Model):
                                 tf.zeros([len(levels_ix), self.n_units_rnn[l]]),
                                 name='rnn_h_ran_l%d_by_%s' % (l+1, sn(gf))
                             )
-                            self.regularizable_layers.append(rnn_h_ran_matrix_cur)
+                            # self.regularizable_layers.append(rnn_h_ran_matrix_cur)
                             rnn_h_ran_matrix_cur -= tf.reduce_mean(rnn_h_ran_matrix_cur, axis=0, keepdims=True)
                             self._regularize(rnn_h_ran_matrix_cur, type='ranef', var_name=reg_name('rnn_h_ran_l%d_by_%s' % (l, sn(gf))))
 
@@ -719,7 +732,7 @@ class CDRNN(Model):
                                 tf.zeros([len(levels_ix), self.n_units_rnn[l]]),
                                 name='rnn_c_ran_l%d_by_%s' % (l+1, sn(gf))
                             )
-                            self.regularizable_layers.append(rnn_c_ran_matrix_cur)
+                            # self.regularizable_layers.append(rnn_c_ran_matrix_cur)
                             rnn_c_ran_matrix_cur -= tf.reduce_mean(rnn_c_ran_matrix_cur, axis=0, keepdims=True)
                             self._regularize(rnn_c_ran_matrix_cur, type='ranef', var_name=reg_name('rnn_c_ran_l%d_by_%s' % (l+1, sn(gf))))
 
@@ -745,7 +758,7 @@ class CDRNN(Model):
                             tf.zeros([len(levels_ix), self.n_units_hidden_state]),
                             name='h_ran_by_%s' % (sn(gf))
                         )
-                        self.regularizable_layers.append(h_ran_matrix_cur)
+                        # self.regularizable_layers.append(h_ran_matrix_cur)
                         h_ran_matrix_cur -= tf.reduce_mean(h_ran_matrix_cur, axis=0, keepdims=True)
                         self._regularize(h_ran_matrix_cur, type='ranef', var_name=reg_name('h_ran_by_%s' % (sn(gf))))
 
@@ -1014,6 +1027,7 @@ class CDRNN(Model):
                         time_X_mask = None
 
                 # Compute hidden state
+                h = self.h_bias
                 h_in = self.input_projection_fn(X)
                 if self.h_in_noise_sd:
                     def h_in_train_fn(h_in=h_in):
@@ -1023,7 +1037,7 @@ class CDRNN(Model):
                     h_in = tf.cond(self.training, h_in_train_fn, h_in_eval_fn)
                 if self.h_in_dropout_rate:
                     h_in = get_dropout(self.h_in_dropout_rate, training=self.training, session=self.sess)(h_in)
-                h = h_in
+                h += h_in
 
                 if self.n_layers_rnn:
                     rnn_hidden, rnn_cell = self._rnn_encoder(
