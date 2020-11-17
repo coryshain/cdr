@@ -869,7 +869,7 @@ class CDRNN(Model):
 
                 return h, c
 
-    def _apply_model(self, X, t_delta, time_X=None, time_X_mask=None, plot_mode=False, add_print=False):
+    def _apply_model(self, X, t_delta, time_X=None, time_X_mask=None, plot_mode=False):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if time_X is None:
@@ -913,8 +913,6 @@ class CDRNN(Model):
                             X_cur = tf.concat(X_cur, axis=-1)
                         else:
                             X_cur = X_cur[0]
-                        if add_print:
-                            X_cur = tf.Print(X_cur, ['X_cur_%d' % i, self.plot_impulse_1hot, X_cur], summarize=40)
 
                         if t_delta.shape[-1] > 1:
                             t_delta_cur = t_delta[..., ix[0]:ix[0]+1]
@@ -1299,7 +1297,7 @@ class CDRNN(Model):
                     ),
                     [-1, 1, len(self.impulse_names)]
                 )
-                irf_surface_plot = self._apply_model(X, t_delta_square, add_print=False, plot_mode=True)['y']
+                irf_surface_plot = self._apply_model(X, t_delta_square, plot_mode=True)['y']
                 self.irf_surface_plot = tf.reshape(
                     irf_surface_plot[None, ...],
                     [self.n_surface_plot_points_per_side, self.n_surface_plot_points_per_side]

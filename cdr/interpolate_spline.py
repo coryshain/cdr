@@ -1,8 +1,4 @@
 # This code is stolen from the TensorFlow 1.9 source code.
-# It is included here as a hack because Edward requires TF 1.6,
-# but spline interpolation was not available then.
-# It will be removed from future releases once Edward fixes
-# its TensorFlow compatibility
 
 # Copyright 2018 The TensorFlow Authors. All Rights Reserved.
 #

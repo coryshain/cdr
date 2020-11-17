@@ -243,14 +243,13 @@ MODEL_INITIALIZATION_KWARGS = [
             - ``'Adam'``
             - ``'FTRL'``
             - ``'RMSProp'``
-            - ``'Nadam'``
-            - ``None`` (CDRBayes only; uses the default optimizer defined by Edward, which currently includes steep learning rate decay and is therefore not recommended in the general case)"""
+            - ``'Nadam'``"""
     ),
     Kwarg(
         'use_jtps',
         False,
         bool,
-        "Whether to modify the base optimizer using JTPS. If ``False``, runs a baseline model. If ``True``, runs a test model."
+        "Whether to modify the base optimizer using JTPS."
     ),
     Kwarg(
         'max_global_gradient_norm',
