@@ -595,6 +595,10 @@ class Model(object):
                 self.training_loglik = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_loglik')
                 self.set_training_loglik = tf.assign(self.training_loglik, self.training_loglik_in)
 
+                self.training_rho_in = tf.placeholder(self.FLOAT_TF, shape=[], name='training_rho_in')
+                self.training_rho = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_rho')
+                self.set_training_rho = tf.assign(self.training_rho, self.training_rho_in)
+
                 if self.convergence_basis.lower() == 'loss':
                     self._add_convergence_tracker(self.loss_total, 'loss_total')
                 self.converged_in = tf.placeholder(tf.bool, shape=[], name='converged_in')
@@ -1704,6 +1708,7 @@ class Model(object):
             mae=None,
             corr=None,
             loglik=None,
+            rho=None,
             loss=None,
             percent_variance_explained=None,
             true_variance=None,
@@ -1717,6 +1722,7 @@ class Model(object):
         :param mae: ``float`` or ``None``; mean absolute error, skipped if ``None``.
         :param corr: ``float`` or ``None``; Pearson correlation of predictions with observed response, skipped if ``None``.
         :param loglik: ``float`` or ``None``; log likelihood, skipped if ``None``.
+        :param rho: ``float`` or ``None``; Pearson correlation of predictions with targets, skipped if ``None``.
         :param loss: ``float`` or ``None``; loss per training objective, skipped if ``None``.
         :param true_variance: ``float`` or ``None``; variance of targets, skipped if ``None``.
         :param percent_variance_explained: ``float`` or ``None``; percent variance explained, skipped if ``None``.
@@ -1734,6 +1740,8 @@ class Model(object):
             out += ' ' * (indent+2) + 'r(pred, true): %s\n' %corr
         if loglik is not None:
             out += ' ' * (indent+2) + 'Log likelihood: %s\n' %loglik
+        if rho is not None:
+            out += ' ' * (indent+2) + 'r(true, pred): %s\n' %rho
         if loss is not None:
             out += ' ' * (indent+2) + 'Loss per training objective: %s\n' %loss
         if true_variance is not None:
@@ -2235,6 +2243,8 @@ class Model(object):
                     training_ae = np.array(np.abs(y[self.dv] - preds))
                     training_mae = training_ae.mean()
 
+                    training_rho = np.corrcoef(y[self.dv], preds)[1]
+
                     # Extract and save log likelihoods
                     training_logliks = self.log_lik(
                         X,
@@ -2265,6 +2275,13 @@ class Model(object):
                         }
                     )
 
+                    self.sess.run(
+                        [self.set_training_rho],
+                        feed_dict={
+                            self.training_rho_in: training_rho
+                        }
+                    )
+
                     self.save()
 
                     with open(self.outdir + '/eval_train.txt', 'w') as e_file:
@@ -2276,6 +2293,7 @@ class Model(object):
                             mse=training_mse,
                             mae=training_mae,
                             loglik=training_loglik,
+                            rho=training_rho,
                             percent_variance_explained=training_percent_variance_explained,
                             indent=2
                         )
