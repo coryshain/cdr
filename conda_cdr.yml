@@ -8,8 +8,7 @@ dependencies:
   - pip
   - scipy
   - seaborn
-  - tensorflow=1.6
+  - tensorflow<2.0
   - pip:
     - scikit-learn
-    - edward
 

@@ -13,39 +13,19 @@ CDRNN eliminates many simplifying assumptions made by CDR and improves its abili
 
 ## Installation
 
-Unfortunately, because the TensorFlow API evolves quickly and support has been discontinued for the Edward library, two different installations are needed depending on whether you want to run variational Bayesian CDR on the one hand or CDRNN on the other.
-We are currently in the process of trying to upgrade our variational implementation to use Tensorflow Probability instead, but meanwhile, we strongly encourage the use of conda environments to manage installations.
-Installing into a [conda](https://www.anaconda.com/) environment avoids version clashes between CDR package requirements and your local software environment.
-Once you have installed Anaconda, use the relevant set of instructions below
-
-### CDR Installation
-
-Run the following commands from this repository root to install (variational Bayesian) CDR-oriented dependencies:
+Install [anaconda](https://www.anaconda.com/), then run the following commands from this repository root to create a new conda environment:
 
     conda env create -f conda_cdr.yml
     conda activate cdr
     python setup.py install
     
-Under this approach, the `cdr` environment must first be activated anytime you want to use the CDR codebase:
+The `cdr` environment must first be activated anytime you want to use the CDR codebase:
 
     conda activate cdr
 
-### CDRNN Installation
-
-Run the following commands from this repository root to install CDRNN-oriented dependencies:
-
-    conda env create -f conda_cdrnn.yml
-    conda activate cdrnn
-    python setup.py install
-    
-Under this approach, the `cdrnn` environment must first be activated anytime you want to use the CDR codebase:
-
-    conda activate cdrnn
-
-
 ## Basic usage
 
-Once CDR is installed system-wide as described above (and the `cdr` conda environment is activated via `conda activate cdr` or `conda activate cdrnn`, see above), the CDR package can be imported into Python as shown
+Once CDR is installed system-wide as described above (and the `cdr` conda environment is activated via `conda activate cdr`), the CDR package can be imported into Python as shown
 
     import cdr
     
