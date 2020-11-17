@@ -2,6 +2,7 @@ import pandas as pd
 pd.options.mode.chained_assignment = None
 
 import tensorflow as tf
+from tensorflow.contrib.distributions import MultivariateNormalTriL, Normal, SinhArcsinh
 
 tf_config = tf.ConfigProto()
 tf_config.gpu_options.allow_growth = True
@@ -9,10 +10,6 @@ tf_config.gpu_options.allow_growth = True
 from .util import *
 from .cdrbase import CDR
 from .kwargs import CDRBAYES_INITIALIZATION_KWARGS
-
-import edward as ed
-from edward.models import Empirical, Exponential, Gamma, MultivariateNormalTriL, Normal, SinhArcsinh
-
 
 
 
@@ -53,14 +50,6 @@ class CDRBayes(CDR):
         for kwarg in CDRBayes._INITIALIZATION_KWARGS:
             setattr(self, kwarg.key, kwargs.pop(kwarg.key, kwarg.default_value))
 
-        if not self.variational():
-            if self.n_samples is not None:
-                stderr('Parameter n_samples being overridden for sampling optimization\n')
-            self.n_samples = self.n_iter*self.n_train_minibatch
-
-        if not (self.declare_priors_fixef or self.declare_priors_ranef):
-            assert self.variational(), 'Only variational inference can be used to fit parameters without declaring priors'
-
         self._initialize_metadata()
 
         self.build()
@@ -70,8 +59,6 @@ class CDRBayes(CDR):
 
         self.parameter_table_columns = ['Mean', '2.5%', '97.5%']
 
-        self.inference_map = {}
-        self.MAP_map = {}
         if self.intercept_init is None:
             if self.standardize_response:
                 self.intercept_init = 0.
@@ -93,13 +80,7 @@ class CDRBayes(CDR):
             else:
                 self.y_sd_prior_sd = self.y_train_sd * self.y_sd_prior_sd_scaling_coefficient
 
-        if self.inference_name == 'MetropolisHastings':
-            self.proposal_map = {}
-            if self.mh_proposal_sd is None:
-                if self.standardize_response:
-                    self.mh_proposal_sd = self.prior_sd_scaling_coefficient
-                else:
-                    self.mh_proposal_sd = self.y_train_sd * self.prior_sd_scaling_coefficient
+        self.kl_penalties = []
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -216,153 +197,78 @@ class CDRBayes(CDR):
     #
     ######################################################
 
+    def _initialize_inputs(self, n_impulse):
+        super(CDRBayes, self)._initialize_inputs(n_impulse)
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                self.use_MAP_mode = tf.placeholder_with_default(tf.logical_not(self.training), shape=[], name='use_MAP_mode')
+
     def initialize_intercept(self, ran_gf=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if ran_gf is None:
-                    if self.variational():
-                        # Posterior distribution
-                        intercept_q_loc = tf.Variable(
-                            self.intercept_init_tf,
-                            name='intercept_q_loc'
-                        )
+                    # Posterior distribution
+                    intercept_q_loc = tf.Variable(
+                        self.intercept_init_tf,
+                        name='intercept_q_loc'
+                    )
 
-                        intercept_q_scale = tf.Variable(
-                            self.intercept_posterior_sd_init_unconstrained,
-                            name='intercept_q_scale'
-                        )
+                    intercept_q_scale = tf.Variable(
+                        self.intercept_posterior_sd_init_unconstrained,
+                        name='intercept_q_scale'
+                    )
 
-                        intercept_q = Normal(
-                            loc=intercept_q_loc,
-                            scale=self.constraint_fn(intercept_q_scale) + self.epsilon,
-                            name='intercept_q'
-                        )
+                    intercept_dist = Normal(
+                        loc=intercept_q_loc,
+                        scale=self.constraint_fn(intercept_q_scale) + self.epsilon,
+                        name='intercept_q'
+                    )
 
-                        intercept_summary = intercept_q.mean()
+                    intercept = tf.cond(self.use_MAP_mode, intercept_dist.mean, intercept_dist.sample)
 
-                        if self.declare_priors_fixef:
-                            # Prior distribution
-                            intercept = Normal(
-                                sample_shape=[],
-                                loc=self.intercept_init_tf,
-                                scale=self.intercept_prior_sd_tf,
-                                name='intercept'
-                            )
-                            self.inference_map[intercept] = intercept_q
-                        else:
-                            intercept = intercept_q
+                    intercept_summary = intercept_dist.mean()
 
-                    else:
+                    if self.declare_priors_fixef:
                         # Prior distribution
-                        intercept = Normal(
-                            sample_shape=[],
+                        intercept_prior = Normal(
                             loc=self.intercept_init_tf,
                             scale=self.intercept_prior_sd_tf,
                             name='intercept'
                         )
-
-                        # Posterior distribution
-                        intercept_q_samples = tf.Variable(
-                            tf.ones((self.n_samples), dtype=self.FLOAT_TF) * self.intercept_init_tf,
-                            name='intercept_q_samples'
-                        )
-
-                        intercept_q = Empirical(
-                            params=intercept_q_samples,
-                            name='intercept_q'
-                        )
-
-                        if self.inference_name == 'MetropolisHastings':
-                            # Proposal distribution
-                            intercept_proposal = Normal(
-                                loc=intercept,
-                                scale=self.mh_proposal_sd,
-                                name='intercept_proposal'
-                            )
-                            self.proposal_map[intercept] = intercept_proposal
-
-                        intercept_summary = intercept_q.params[self.global_batch_step - 1]
-
-                        self.inference_map[intercept] = intercept_q
+                        self.kl_penalties.append(intercept_dist.kl_divergence(intercept_prior))
 
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
-                    if self.variational():
-                        # Posterior distribution
-                        intercept_q_loc = tf.Variable(
-                            # tf.random_normal(
-                            #     [rangf_n_levels],
-                            #     stddev=self.init_sd,
-                            #     dtype=self.FLOAT_TF
-                            # ),
-                            tf.zeros([rangf_n_levels], dtype=self.FLOAT_TF),
-                            name='intercept_q_loc_by_%s' % sn(ran_gf)
-                        )
 
-                        intercept_q_scale = tf.Variable(
-                            # tf.random_normal(
-                            #     [rangf_n_levels],
-                            #     mean=self.intercept_posterior_sd_init_unconstrained,
-                            #     stddev=self.init_sd,
-                            #     dtype=self.FLOAT_TF
-                            # ),
-                            tf.ones([rangf_n_levels], dtype=self.FLOAT_TF) * self.intercept_ranef_posterior_sd_init_unconstrained,
-                            name='intercept_q_scale_by_%s' % sn(ran_gf)
-                        )
+                    # Posterior distribution
+                    intercept_q_loc = tf.Variable(
+                        tf.zeros([rangf_n_levels], dtype=self.FLOAT_TF),
+                        name='intercept_q_loc_by_%s' % sn(ran_gf)
+                    )
 
-                        intercept_q = Normal(
-                            loc=intercept_q_loc,
-                            scale=self.constraint_fn(intercept_q_scale) + self.epsilon,
-                            name='intercept_q_by_%s' % sn(ran_gf)
-                        )
+                    intercept_q_scale = tf.Variable(
+                        tf.ones([rangf_n_levels], dtype=self.FLOAT_TF) * self.intercept_ranef_posterior_sd_init_unconstrained,
+                        name='intercept_q_scale_by_%s' % sn(ran_gf)
+                    )
 
-                        intercept_summary = intercept_q.mean()
+                    intercept_dist = Normal(
+                        loc=intercept_q_loc,
+                        scale=self.constraint_fn(intercept_q_scale) + self.epsilon,
+                        name='intercept_q_by_%s' % sn(ran_gf)
+                    )
 
-                        if self.declare_priors_ranef:
-                            # Prior distribution
-                            intercept = Normal(
-                                sample_shape=[rangf_n_levels],
-                                loc=0.,
-                                scale=self.intercept_ranef_prior_sd_tf,
-                                name='intercept_by_%s' % sn(ran_gf)
-                            )
-                            self.inference_map[intercept] = intercept_q
-                        else:
-                            intercept = intercept_q
+                    intercept = tf.cond(self.use_MAP_mode, intercept_dist.mean, intercept_dist.sample)
 
-                    else:
+                    intercept_summary = intercept_dist.mean()
+
+                    if self.declare_priors_ranef:
                         # Prior distribution
-                        intercept = Normal(
-                            sample_shape=[rangf_n_levels],
+                        intercept_prior = Normal(
                             loc=0.,
                             scale=self.intercept_ranef_prior_sd_tf,
                             name='intercept_by_%s' % sn(ran_gf)
                         )
-
-                        # Posterior distribution
-                        intercept_q_ran_samples = tf.Variable(
-                            tf.zeros((self.n_samples, rangf_n_levels), dtype=self.FLOAT_TF),
-                            name='intercept_q_by_%s_samples' % sn(ran_gf)
-                        )
-                        intercept_q = Empirical(
-                            params=intercept_q_ran_samples,
-                            name='intercept_q_by_%s' % sn(ran_gf)
-                        )
-
-                        if self.inference_name == 'MetropolisHastings':
-                            # Proposal distribution
-                            intercept_proposal = Normal(
-                                loc=intercept,
-                                scale=self.mh_proposal_sd,
-                                name='intercept_proposal_by_%s' % sn(ran_gf)
-                            )
-                            self.proposal_map[intercept] = intercept_proposal
-
-                        intercept_summary = intercept_q.params[self.global_batch_step - 1]
-
-                        self.inference_map[intercept] = intercept_q
-
-                self.MAP_map[intercept] = intercept_summary
+                        self.kl_penalties.append(intercept_dist.kl_divergence(intercept_prior))
 
                 return intercept, intercept_summary
 
@@ -372,157 +278,68 @@ class CDRBayes(CDR):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if ran_gf is None:
-                    if self.variational():
-                        # Posterior distribution
-                        coefficient_q_loc = tf.Variable(
-                            # tf.random_normal(
-                            #     [len(coef_ids)],
-                            #     stddev=self.init_sd,
-                            #     dtype=self.FLOAT_TF
-                            # ),
-                            tf.zeros([len(coef_ids)], dtype=self.FLOAT_TF),
-                            name='coefficient_q_loc'
-                        )
+                    # Posterior distribution
+                    coefficient_q_loc = tf.Variable(
+                        tf.zeros([len(coef_ids)], dtype=self.FLOAT_TF),
+                        name='coefficient_q_loc'
+                    )
 
-                        coefficient_q_scale = tf.Variable(
-                            # tf.random_normal(
-                            #     [len(coef_ids)],
-                            #     mean=self.coef_posterior_sd_init_unconstrained,
-                            #     stddev=self.init_sd,
-                            #     dtype=self.FLOAT_TF
-                            # ),
-                            tf.ones([len(coef_ids)], dtype=self.FLOAT_TF) * self.coef_posterior_sd_init_unconstrained,
-                            name='coefficient_q_scale'
-                        )
+                    coefficient_q_scale = tf.Variable(
+                        tf.ones([len(coef_ids)], dtype=self.FLOAT_TF) * self.coef_posterior_sd_init_unconstrained,
+                        name='coefficient_q_scale'
+                    )
 
-                        coefficient_q = Normal(
-                            loc=coefficient_q_loc,
-                            scale=self.constraint_fn(coefficient_q_scale) + self.epsilon,
-                            name='coefficient_q'
-                        )
-                        coefficient_summary = coefficient_q.mean()
+                    coefficient_dist = Normal(
+                        loc=coefficient_q_loc,
+                        scale=self.constraint_fn(coefficient_q_scale) + self.epsilon,
+                        name='coefficient_q'
+                    )
 
-                        if self.declare_priors_fixef:
-                            # Prior distribution
-                            coefficient = Normal(
-                                sample_shape=[len(coef_ids)],
-                                loc=0.,
-                                scale=self.coef_prior_sd_tf,
-                                name='coefficient'
-                            )
-                            self.inference_map[coefficient] = coefficient_q
-                        else:
-                            coefficient = coefficient_q
-                    else:
+                    coefficient = tf.cond(self.use_MAP_mode, coefficient_dist.mean, coefficient_dist.sample)
+
+                    coefficient_summary = coefficient_dist.mean()
+
+                    if self.declare_priors_fixef:
                         # Prior distribution
-                        coefficient = Normal(
-                            sample_shape=[len(coef_ids)],
+                        coefficient_prior = Normal(
                             loc=0.,
                             scale=self.coef_prior_sd_tf,
                             name='coefficient'
                         )
+                        self.kl_penalties.append(coefficient_dist.kl_divergence(coefficient_prior))
 
-                        # Posterior distribution
-                        coefficient_q_samples = tf.Variable(
-                            tf.zeros((self.n_samples, len(coef_ids)), dtype=self.FLOAT_TF),
-                            name='coefficient_q_samples'
-                        )
-                        coefficient_q = Empirical(
-                            params=coefficient_q_samples,
-                            name='coefficient_q'
-                        )
-
-                        if self.inference_name == 'MetropolisHastings':
-                            # Proposal distribution
-                            coefficient_proposal = Normal(
-                                loc=coefficient,
-                                scale=self.mh_proposal_sd,
-                                name='coefficient_proposal'
-                            )
-                            self.proposal_map[coefficient] = coefficient_proposal
-
-                        coefficient_summary = coefficient_q.params[self.global_batch_step - 1]
-
-                        self.inference_map[coefficient] = coefficient_q
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
-                    if self.variational():
-                        # Posterior distribution
-                        coefficient_q_loc = tf.Variable(
-                            # tf.random_normal(
-                            #     [rangf_n_levels, len(coef_ids)],
-                            #     stddev=self.init_sd,
-                            #     dtype=self.FLOAT_TF
-                            # ),
-                            tf.zeros([rangf_n_levels, len(coef_ids)], dtype=self.FLOAT_TF),
-                            name='coefficient_q_loc_by_%s' % sn(ran_gf)
-                        )
 
-                        coefficient_q_scale = tf.Variable(
-                            # tf.random_normal(
-                            #     [rangf_n_levels, len(coef_ids)],
-                            #     mean=self.coef_posterior_sd_init_unconstrained,
-                            #     stddev=self.init_sd,
-                            #     dtype=self.FLOAT_TF
-                            # ),
-                            tf.ones([rangf_n_levels, len(coef_ids)], dtype=self.FLOAT_TF) * self.coef_ranef_posterior_sd_init_unconstrained,
-                            name='coefficient_q_scale_by_%s' % sn(ran_gf)
-                        )
+                    # Posterior distribution
+                    coefficient_q_loc = tf.Variable(
+                        tf.zeros([rangf_n_levels, len(coef_ids)], dtype=self.FLOAT_TF),
+                        name='coefficient_q_loc_by_%s' % sn(ran_gf)
+                    )
 
-                        coefficient_q = Normal(
-                            loc=coefficient_q_loc,
-                            scale=self.constraint_fn(coefficient_q_scale) + self.epsilon,
-                            name='coefficient_q_by_%s' % sn(ran_gf)
-                        )
-                        coefficient_summary = coefficient_q.mean()
+                    coefficient_q_scale = tf.Variable(
+                        tf.ones([rangf_n_levels, len(coef_ids)], dtype=self.FLOAT_TF) * self.coef_ranef_posterior_sd_init_unconstrained,
+                        name='coefficient_q_scale_by_%s' % sn(ran_gf)
+                    )
 
-                        if self.declare_priors_ranef:
-                            # Prior distribution
-                            coefficient = Normal(
-                                sample_shape=[rangf_n_levels, len(coef_ids)],
-                                loc=0.,
-                                scale=self.coef_ranef_prior_sd_tf,
-                                name='coefficient_by_%s' % sn(ran_gf)
-                            )
-                            self.inference_map[coefficient] = coefficient_q
-                        else:
-                            coefficient = coefficient_q
+                    coefficient_dist = Normal(
+                        loc=coefficient_q_loc,
+                        scale=self.constraint_fn(coefficient_q_scale) + self.epsilon,
+                        name='coefficient_q_by_%s' % sn(ran_gf)
+                    )
 
-                    else:
+                    coefficient = tf.cond(self.use_MAP_mode, coefficient_dist.mean, coefficient_dist.sample)
+
+                    coefficient_summary = coefficient_dist.mean()
+
+                    if self.declare_priors_ranef:
                         # Prior distribution
-                        coefficient = Normal(
-                            sample_shape=[rangf_n_levels, len(coef_ids)],
+                        coefficient_prior = Normal(
                             loc=0.,
                             scale=self.coef_ranef_prior_sd_tf,
                             name='coefficient_by_%s' % sn(ran_gf)
                         )
-
-                        # Posterior distribution
-                        coefficient_q = Empirical(
-                            params=tf.Variable(
-                                tf.zeros(
-                                    (self.n_samples, rangf_n_levels, len(coef_ids)),
-                                    dtype=self.FLOAT_TF
-                                ),
-                                name='coefficient_q_by_%s_samples' % sn(ran_gf)
-                            ),
-                            name='coefficient_q_by_%s' % sn(ran_gf)
-                        )
-
-                        if self.inference_name == 'MetropolisHastings':
-                            # Proposal distribution
-                            coefficient_proposal = Normal(
-                                loc=coefficient,
-                                scale=self.mh_proposal_sd,
-                                name='coefficient_proposal_by_%s' % sn(ran_gf)
-                            )
-                            self.proposal_map[coefficient] = coefficient_proposal
-
-                        coefficient_summary = coefficient_q.params[self.global_batch_step - 1]
-
-                        self.inference_map[coefficient] = coefficient_q
-
-                self.MAP_map[coefficient] = coefficient_summary
+                        self.kl_penalties.append(coefficient_dist.kl_divergence(coefficient_prior))
 
                 return coefficient, coefficient_summary
 
@@ -532,157 +349,66 @@ class CDRBayes(CDR):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if ran_gf is None:
-                    if self.variational():
-                        # Posterior distribution
-                        interaction_q_loc = tf.Variable(
-                            # tf.random_normal(
-                            #     [len(interaction_ids)],
-                            #     stddev=self.init_sd,
-                            #     dtype=self.FLOAT_TF
-                            # ),
-                            tf.zeros([len(interaction_ids)], dtype=self.FLOAT_TF),
-                            name='interaction_q_loc'
-                        )
+                    # Posterior distribution
+                    interaction_q_loc = tf.Variable(
+                        tf.zeros([len(interaction_ids)], dtype=self.FLOAT_TF),
+                        name='interaction_q_loc'
+                    )
 
-                        interaction_q_scale = tf.Variable(
-                            # tf.random_normal(
-                            #     [len(interaction_ids)],
-                            #     mean=self.coef_posterior_sd_init_unconstrained,
-                            #     stddev=self.init_sd,
-                            #     dtype=self.FLOAT_TF
-                            # ),
-                            tf.ones([len(interaction_ids)], dtype=self.FLOAT_TF) * self.coef_posterior_sd_init_unconstrained,
-                            name='interaction_q_scale'
-                        )
+                    interaction_q_scale = tf.Variable(
+                        tf.ones([len(interaction_ids)], dtype=self.FLOAT_TF) * self.coef_posterior_sd_init_unconstrained,
+                        name='interaction_q_scale'
+                    )
 
-                        interaction_q = Normal(
-                            loc=interaction_q_loc,
-                            scale=self.constraint_fn(interaction_q_scale) + self.epsilon,
-                            name='interaction_q'
-                        )
-                        interaction_summary = interaction_q.mean()
+                    interaction_dist = Normal(
+                        loc=interaction_q_loc,
+                        scale=self.constraint_fn(interaction_q_scale) + self.epsilon,
+                        name='interaction_q'
+                    )
 
-                        if self.declare_priors_fixef:
-                            # Prior distribution
-                            interaction = Normal(
-                                sample_shape=[len(interaction_ids)],
-                                loc=0.,
-                                scale=self.coef_prior_sd_tf,
-                                name='interaction'
-                            )
-                            self.inference_map[interaction] = interaction_q
-                        else:
-                            interaction = interaction_q
-                    else:
+                    interaction = tf.cond(self.use_MAP_mode, interaction_dist.mean, interaction_dist.sample)
+
+                    interaction_summary = interaction_dist.mean()
+
+                    if self.declare_priors_fixef:
                         # Prior distribution
-                        interaction = Normal(
-                            sample_shape=[len(interaction_ids)],
+                        interaction_prior = Normal(
                             loc=0.,
                             scale=self.coef_prior_sd_tf,
                             name='interaction'
                         )
-
-                        # Posterior distribution
-                        interaction_q_samples = tf.Variable(
-                            tf.zeros((self.n_samples, len(interaction_ids)), dtype=self.FLOAT_TF),
-                            name='interaction_q_samples'
-                        )
-                        interaction_q = Empirical(
-                            params=interaction_q_samples,
-                            name='interaction_q'
-                        )
-
-                        if self.inference_name == 'MetropolisHastings':
-                            # Proposal distribution
-                            interaction_proposal = Normal(
-                                loc=interaction,
-                                scale=self.mh_proposal_sd,
-                                name='interaction_proposal'
-                            )
-                            self.proposal_map[interaction] = interaction_proposal
-
-                        interaction_summary = interaction_q.params[self.global_batch_step - 1]
-
-                        self.inference_map[interaction] = interaction_q
+                        self.kl_penalties.append(interaction_dist.kl_divergence(interaction_prior))
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
-                    if self.variational():
-                        # Posterior distribution
-                        interaction_q_loc = tf.Variable(
-                            # tf.random_normal(
-                            #     [rangf_n_levels, len(interaction_ids)],
-                            #     stddev=self.init_sd,
-                            #     dtype=self.FLOAT_TF
-                            # ),
-                            tf.zeros([rangf_n_levels, len(interaction_ids)], dtype=self.FLOAT_TF),
-                            name='interaction_q_loc_by_%s' % sn(ran_gf)
-                        )
+                    # Posterior distribution
+                    interaction_q_loc = tf.Variable(
+                        tf.zeros([rangf_n_levels, len(interaction_ids)], dtype=self.FLOAT_TF),
+                        name='interaction_q_loc_by_%s' % sn(ran_gf)
+                    )
 
-                        interaction_q_scale = tf.Variable(
-                            # tf.random_normal(
-                            #     [rangf_n_levels, len(interaction_ids)],
-                            #     mean=self.coef_posterior_sd_init_unconstrained,
-                            #     stddev=self.init_sd,
-                            #     dtype=self.FLOAT_TF
-                            # ),
-                            tf.ones([rangf_n_levels, len(interaction_ids)], dtype=self.FLOAT_TF) * self.coef_ranef_posterior_sd_init_unconstrained,
-                            name='interaction_q_scale_by_%s' % sn(ran_gf)
-                        )
+                    interaction_q_scale = tf.Variable(
+                        tf.ones([rangf_n_levels, len(interaction_ids)], dtype=self.FLOAT_TF) * self.coef_ranef_posterior_sd_init_unconstrained,
+                        name='interaction_q_scale_by_%s' % sn(ran_gf)
+                    )
 
-                        interaction_q = Normal(
-                            loc=interaction_q_loc,
-                            scale=self.constraint_fn(interaction_q_scale) + self.epsilon,
-                            name='interaction_q_by_%s' % sn(ran_gf)
-                        )
-                        interaction_summary = interaction_q.mean()
+                    interaction_dist = Normal(
+                        loc=interaction_q_loc,
+                        scale=self.constraint_fn(interaction_q_scale) + self.epsilon,
+                        name='interaction_q_by_%s' % sn(ran_gf)
+                    )
 
-                        if self.declare_priors_ranef:
-                            # Prior distribution
-                            interaction = Normal(
-                                sample_shape=[rangf_n_levels, len(interaction_ids)],
-                                loc=0.,
-                                scale=self.coef_ranef_prior_sd_tf,
-                                name='interaction_by_%s' % sn(ran_gf)
-                            )
-                            self.inference_map[interaction] = interaction_q
-                        else:
-                            interaction = interaction_q
+                    interaction = tf.cond(self.use_MAP_mode, interaction_dist.mean, interaction_dist.sample)
 
-                    else:
+                    interaction_summary = interaction_dist.mean()
+
+                    if self.declare_priors_ranef:
                         # Prior distribution
-                        interaction = Normal(
-                            sample_shape=[rangf_n_levels, len(interaction_ids)],
+                        interaction_prior = Normal(
                             loc=0.,
                             scale=self.coef_ranef_prior_sd_tf,
                             name='interaction_by_%s' % sn(ran_gf)
                         )
-
-                        # Posterior distribution
-                        interaction_q = Empirical(
-                            params=tf.Variable(
-                                tf.zeros(
-                                    (self.n_samples, rangf_n_levels, len(interaction_ids)),
-                                    dtype=self.FLOAT_TF
-                                ),
-                                name='interaction_q_by_%s_samples' % sn(ran_gf)
-                            ),
-                            name='interaction_q_by_%s' % sn(ran_gf)
-                        )
-
-                        if self.inference_name == 'MetropolisHastings':
-                            # Proposal distribution
-                            interaction_proposal = Normal(
-                                loc=interaction,
-                                scale=self.mh_proposal_sd,
-                                name='interaction_proposal_by_%s' % sn(ran_gf)
-                            )
-                            self.proposal_map[interaction] = interaction_proposal
-
-                        interaction_summary = interaction_q.params[self.global_batch_step - 1]
-
-                        self.inference_map[interaction] = interaction_q
-
-                self.MAP_map[interaction] = interaction_summary
+                        self.kl_penalties.append(interaction_dist.kl_divergence(interaction_prior))
 
                 return interaction, interaction_summary
 
@@ -690,156 +416,68 @@ class CDRBayes(CDR):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if ran_gf is None:
-                    if self.variational():
-                        # Posterior distribution
-                        param_q_loc = tf.Variable(
-                            # tf.random_normal(
-                            #     [1, len(ids)],
-                            #     mean=mean,
-                            #     stddev=self.init_sd,
-                            #     dtype=self.FLOAT_TF
-                            # ),
-                            tf.ones([1, len(ids)], dtype=self.FLOAT_TF) * mean,
-                            name=sn('%s_q_loc_%s' % (param_name, '-'.join(ids)))
-                        )
+                    # Posterior distribution
+                    param_q_loc = tf.Variable(
+                        tf.ones([1, len(ids)], dtype=self.FLOAT_TF) * mean,
+                        name=sn('%s_q_loc_%s' % (param_name, '-'.join(ids)))
+                    )
 
-                        param_q_scale = tf.Variable(
-                            # tf.random_normal(
-                            #     [1, len(ids)],
-                            #     mean=self.irf_param_posterior_sd_init_unconstrained,
-                            #     stddev=self.init_sd,
-                            #     dtype=self.FLOAT_TF
-                            # ),
-                            tf.ones([1, len(ids)], dtype=self.FLOAT_TF) * self.irf_param_posterior_sd_init_unconstrained,
-                            name=sn('%s_q_scale_%s' % (param_name, '-'.join(ids)))
-                        )
+                    param_q_scale = tf.Variable(
+                        tf.ones([1, len(ids)], dtype=self.FLOAT_TF) * self.irf_param_posterior_sd_init_unconstrained,
+                        name=sn('%s_q_scale_%s' % (param_name, '-'.join(ids)))
+                    )
 
-                        param_q = Normal(
-                            loc=param_q_loc,
-                            scale=self.constraint_fn(param_q_scale) + self.epsilon,
-                            name=sn('%s_q_%s' % (param_name, '-'.join(ids)))
-                        )
+                    param_dist = Normal(
+                        loc=param_q_loc,
+                        scale=self.constraint_fn(param_q_scale) + self.epsilon,
+                        name=sn('%s_q_%s' % (param_name, '-'.join(ids)))
+                    )
 
-                        param_summary = param_q.mean()
+                    param = tf.cond(self.use_MAP_mode, param_dist.mean, param_dist.sample)
 
-                        if self.declare_priors_fixef:
-                            # Prior distribution
-                            param = Normal(
-                                loc=mean,
-                                scale=self.irf_param_prior_sd,
-                                name=sn('%s_%s' % (param_name, '-'.join(ids)))
-                            )
-                            self.inference_map[param] = param_q
-                        else:
-                            param = param_q
-                    else:
+                    param_summary = param_dist.mean()
+
+                    if self.declare_priors_fixef:
                         # Prior distribution
-                        param = Normal(
+                        param_prior = Normal(
                             loc=mean,
                             scale=self.irf_param_prior_sd,
                             name=sn('%s_%s' % (param_name, '-'.join(ids)))
                         )
+                        self.kl_penalties.append(param_dist.kl_divergence(param_prior))
 
-                        # Posterior distribution
-                        params_q_samples = tf.Variable(
-                            tf.zeros((self.n_samples, 1, len(ids)), dtype=self.FLOAT_TF),
-                            name=sn('%s_q_%s_samples' % (param_name, '-'.join(ids)))
-                        )
-                        param_q = Empirical(
-                            params=params_q_samples,
-                            name=sn('%s_q_%s_samples' % (param_name, '-'.join(ids)))
-                        )
-
-                        if self.inference_name == 'MetropolisHastings':
-                            # Proposal distribution
-                            L_proposal = Normal(
-                                loc=param,
-                                scale=self.mh_proposal_sd,
-                                name=sn('%s_proposal_%s' % (param_name, '-'.join(ids)))
-                            )
-                            self.proposal_map[param] = L_proposal
-
-                        param_summary = param_q.params[self.global_batch_step - 1]
-
-                        self.inference_map[param] = param_q
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
-                    if self.variational():
-                        # Posterior distribution
-                        param_q_loc = tf.Variable(
-                            tf.random_normal(
-                                [rangf_n_levels, len(ids)],
-                                mean=0.,
-                                stddev=self.epsilon,
-                                dtype=self.FLOAT_TF
-                            ),
-                            name=sn('%s_q_loc_%s_by_%s' % (param_name, '-'.join(ids), sn(ran_gf)))
-                        )
 
-                        param_q_scale = tf.Variable(
-                            # tf.random_normal(
-                            #     [rangf_n_levels, len(ids)],
-                            #     mean=self.irf_param_posterior_sd_init_unconstrained,
-                            #     stddev=self.init_sd,
-                            #     dtype=self.FLOAT_TF
-                            # ),
-                            tf.ones([rangf_n_levels, len(ids)], dtype=self.FLOAT_TF) * self.irf_param_ranef_posterior_sd_init_unconstrained,
-                            name=sn('%s_q_scale_%s_by_%s' % (param_name, '-'.join(ids), sn(ran_gf)))
-                        )
+                    # Posterior distribution
+                    param_q_loc = tf.Variable(
+                        tf.zeros([rangf_n_levels, len(ids)], dtype=self.FLOAT_TF),
+                        name=sn('%s_q_loc_%s_by_%s' % (param_name, '-'.join(ids), sn(ran_gf)))
+                    )
 
-                        param_q = Normal(
-                            loc=param_q_loc,
-                            scale=self.constraint_fn(param_q_scale) + self.epsilon,
-                            name=sn('%s_q_%s_by_%s' % (param_name, '-'.join(ids), sn(ran_gf)))
-                        )
+                    param_q_scale = tf.Variable(
+                        tf.ones([rangf_n_levels, len(ids)], dtype=self.FLOAT_TF) * self.irf_param_ranef_posterior_sd_init_unconstrained,
+                        name=sn('%s_q_scale_%s_by_%s' % (param_name, '-'.join(ids), sn(ran_gf)))
+                    )
 
-                        param_summary = param_q.mean()
+                    param_dist = Normal(
+                        loc=param_q_loc,
+                        scale=self.constraint_fn(param_q_scale) + self.epsilon,
+                        name=sn('%s_q_%s_by_%s' % (param_name, '-'.join(ids), sn(ran_gf)))
+                    )
 
-                        if self.declare_priors_ranef:
-                            # Prior distribution
-                            param = Normal(
-                                sample_shape=[rangf_n_levels, len(ids)],
-                                loc=0.,
-                                scale=self.irf_param_ranef_prior_sd_tf,
-                                name='%s_by_%s' % (param_name, sn(ran_gf))
-                            )
-                            self.inference_map[param] = param_q
-                        else:
-                            param = param_q
+                    param = tf.cond(self.use_MAP_mode, param_dist.mean, param_dist.sample)
 
-                    else:
+                    param_summary = param_dist.mean()
+
+                    if self.declare_priors_ranef:
                         # Prior distribution
-                        param = Normal(
-                            sample_shape=[rangf_n_levels, len(ids)],
+                        param_prior = Normal(
                             loc=0.,
                             scale=self.irf_param_ranef_prior_sd_tf,
                             name='%s_by_%s' % (param_name, sn(ran_gf))
                         )
-
-                        # Posterior distribution
-                        param_q_samples = tf.Variable(
-                            tf.zeros((self.n_samples, rangf_n_levels, len(ids)), dtype=self.FLOAT_TF),
-                            name=sn('%s_q_%s_by_%s_samples' % (param_name, '-'.join(ids), sn(ran_gf)))
-                        )
-                        param_q = Empirical(
-                            params=param_q_samples,
-                            name=sn('%s_q_%s_by_%s' % (param_name, '-'.join(ids), sn(ran_gf)))
-                        )
-
-                        param_summary = param_q.params[self.global_batch_step - 1]
-
-                        if self.inference_name == 'MetropolisHastings':
-                            # Proposal distribution
-                            param_proposal = Normal(
-                                loc=param,
-                                scale=self.mh_proposal_sd,
-                                name=sn('%s_proposal_%s_by_%s' % (param_name, '-'.join(ids), sn(ran_gf)))
-                            )
-                            self.proposal_map[param] = param_proposal
-
-                        self.inference_map[param] = param_q
-
-                self.MAP_map[param] = param_summary
+                        self.kl_penalties.append(param_dist.kl_divergence(param_prior))
 
                 return param, param_summary
 
@@ -848,104 +486,48 @@ class CDRBayes(CDR):
             with self.sess.graph.as_default():
                 dim = int(means.shape[0])
 
-                if self.variational():
-                    # Posterior distribution
-                    joint_q_loc = tf.Variable(
-                        # tf.random_normal(
-                        #     [dim],
-                        #     mean=means,
-                        #     stddev=self.init_sd,
-                        #     dtype=self.FLOAT_TF
-                        # ),
-                        tf.ones([dim], dtype=self.FLOAT_TF) * means,
-                        name='joint_q_loc' if ran_gf is None else 'joint_q_loc_by_%s' % sn(ran_gf)
-                    )
+                # Posterior distribution
+                joint_q_loc = tf.Variable(
+                    tf.ones([dim], dtype=self.FLOAT_TF) * means,
+                    name='joint_q_loc' if ran_gf is None else 'joint_q_loc_by_%s' % sn(ran_gf)
+                )
 
-                    # Construct cholesky decomposition of initial covariance using sds, then use for initialization
-                    n_scale = int(dim * (dim + 1) / 2)
-                    if ran_gf is not None:
-                        sds *= self.ranef_to_fixef_prior_sd_ratio
-                    cholesky = tf.diag(sds)
-                    tril_ix = np.ravel_multi_index(
-                        np.tril_indices(dim),
-                        (dim, dim)
-                    )
-                    scale_init = tf.gather(tf.reshape(cholesky, [dim * dim]), tril_ix)
+                # Construct cholesky decomposition of initial covariance using sds, then use for initialization
+                n_scale = int(dim * (dim + 1) / 2)
+                if ran_gf is not None:
+                    sds *= self.ranef_to_fixef_prior_sd_ratio
+                cholesky = tf.diag(sds)
+                tril_ix = np.ravel_multi_index(
+                    np.tril_indices(dim),
+                    (dim, dim)
+                )
+                scale_init = tf.gather(tf.reshape(cholesky, [dim * dim]), tril_ix)
 
-                    scale_posterior_init = scale_init * self.posterior_to_prior_sd_ratio
+                scale_posterior_init = scale_init * self.posterior_to_prior_sd_ratio
 
-                    joint_q_scale = tf.Variable(
-                        # tf.random_normal(
-                        #     [n_scale],
-                        #     mean=scale_posterior_init,
-                        #     stddev=self.init_sd,
-                        #     dtype=self.FLOAT_TF
-                        # ),
-                        tf.ones([n_scale], dtype=self.FLOAT_TF) * scale_posterior_init,
-                        name='joint_q_scale' if ran_gf is None else 'joint_q_scale_by_%s' % sn(ran_gf)
-                    )
+                joint_q_scale = tf.Variable(
+                    tf.ones([n_scale], dtype=self.FLOAT_TF) * scale_posterior_init,
+                    name='joint_q_scale' if ran_gf is None else 'joint_q_scale_by_%s' % sn(ran_gf)
+                )
 
-                    joint_q = MultivariateNormalTriL(
-                        loc=joint_q_loc,
-                        scale_tril=tf.contrib.distributions.fill_triangular(joint_q_scale),
-                        name='joint_q' if ran_gf is None else 'joint_q_by_%s' % sn(ran_gf)
-                    )
+                joint_dist = MultivariateNormalTriL(
+                    loc=joint_q_loc,
+                    scale_tril=tf.contrib.distributions.fill_triangular(joint_q_scale),
+                    name='joint_q' if ran_gf is None else 'joint_q_by_%s' % sn(ran_gf)
+                )
 
-                    joint_summary = joint_q.mean()
+                joint = tf.cond(self.use_MAP_mode, joint_dist.mean, joint_dist.sample)
 
-                    if (ran_gf is None and self.declare_priors_fixef) or (ran_gf is not None and self.declare_priors_ranef):
-                        # Prior distribution
-                        joint = MultivariateNormalTriL(
-                            loc=means,
-                            scale_tril=tf.contrib.distributions.fill_triangular(scale_init),
-                            name='joint' if ran_gf is None else 'joint_by_%s' % sn(ran_gf)
-                        )
+                joint_summary = joint_dist.mean()
 
-                        self.inference_map[joint] = joint_q
-                    else:
-                        joint = joint_q
-
-                else:
-                    # Construct cholesky decomposition of initial covariance using sds, then use for initialization
-                    cholesky = tf.diag(sds)
-                    tril_ix = np.ravel_multi_index(
-                        np.tril_indices(dim),
-                        (dim, dim)
-                    )
-                    scale_init = tf.gather(tf.reshape(cholesky, [dim * dim]), tril_ix)
-
+                if (ran_gf is None and self.declare_priors_fixef) or (ran_gf is not None and self.declare_priors_ranef):
                     # Prior distribution
-                    joint = MultivariateNormalTriL(
+                    joint_prior = MultivariateNormalTriL(
                         loc=means,
                         scale_tril=tf.contrib.distributions.fill_triangular(scale_init),
                         name='joint' if ran_gf is None else 'joint_by_%s' % sn(ran_gf)
                     )
-
-                    # Posterior distribution
-                    joint_q_samples = tf.Variable(
-                        tf.ones((self.n_samples), dtype=self.FLOAT_TF) * means,
-                        name='joint_q_samples'  if ran_gf is None else 'joint_q_samples_by_%s' % sn(ran_gf)
-                    )
-
-                    joint_q = Empirical(
-                        params=joint_q_samples,
-                        name='joint_q' if ran_gf is None else 'joint_q_by_%s' % sn(ran_gf)
-                    )
-
-                    if self.inference_name == 'MetropolisHastings':
-                        # Proposal distribution
-                        joint_proposal = Normal(
-                            loc=joint,
-                            scale=self.mh_proposal_sd,
-                            name='joint_proposal' if ran_gf is None else 'joint_q_proposal_by_%s' % sn(ran_gf)
-                        )
-                        self.proposal_map[joint] = joint_proposal
-
-                    joint_summary = joint_q.params[self.global_batch_step - 1]
-
-                    self.inference_map[joint] = joint_q
-
-                self.MAP_map[joint] = joint_summary
+                    self.kl_penalties.append(joint_dist.kl_divergence(joint_prior))
 
                 return joint, joint_summary
 
@@ -955,78 +537,33 @@ class CDRBayes(CDR):
                 if self.y_sd_trainable:
                     y_sd_init_unconstrained = self.y_sd_init_unconstrained
 
-                    if self.variational():
-                        # Posterior distribution
-                        y_sd_loc_q = tf.Variable(
-                            # tf.random_normal(
-                            #     [],
-                            #     mean=y_sd_init_unconstrained,
-                            #     stddev=self.init_sd,
-                            #     dtype=self.FLOAT_TF
-                            # ),
-                            y_sd_init_unconstrained,
-                            name='y_sd_loc_q'
-                        )
+                    # Posterior distribution
+                    y_sd_loc_q = tf.Variable(
+                        y_sd_init_unconstrained,
+                        name='y_sd_loc_q'
+                    )
+                    y_sd_scale_q = tf.Variable(
+                        self.y_sd_posterior_sd_init_unconstrained,
+                        name='y_sd_scale_q'
+                    )
+                    y_sd_dist = Normal(
+                        loc=y_sd_loc_q,
+                        scale=self.constraint_fn(y_sd_scale_q) + self.epsilon,
+                        name='y_sd_q'
+                    )
 
-                        y_sd_scale_q = tf.Variable(
-                            # tf.random_normal(
-                            #     [],
-                            #     mean=self.y_sd_posterior_sd_init_unconstrained,
-                            #     stddev=self.init_sd,
-                            #     dtype=self.FLOAT_TF
-                            # ),
-                            self.y_sd_posterior_sd_init_unconstrained,
-                            name='y_sd_scale_q'
-                        )
-                        y_sd_q = Normal(
-                            loc=y_sd_loc_q,
-                            scale=self.constraint_fn(y_sd_scale_q) + self.epsilon,
-                            name='y_sd_q'
-                        )
-                        y_sd_summary = y_sd_q.mean()
+                    y_sd = tf.cond(self.use_MAP_mode, y_sd_dist.mean, y_sd_dist.sample)
 
-                        if self.declare_priors_fixef:
-                            # Prior distribution
-                            y_sd = Normal(
-                                loc=y_sd_init_unconstrained,
-                                scale=self.y_sd_prior_sd_tf,
-                                name='y_sd'
-                            )
-                            self.inference_map[y_sd] = y_sd_q
-                        else:
-                            y_sd = y_sd_q
-                    else:
+                    y_sd_summary = y_sd_dist.mean()
+
+                    if self.declare_priors_fixef:
                         # Prior distribution
-                        y_sd = Normal(
+                        y_sd_prior = Normal(
                             loc=y_sd_init_unconstrained,
                             scale=self.y_sd_prior_sd_tf,
                             name='y_sd'
                         )
-
-                        # Posterior distribution
-                        y_sd_q_samples = tf.Variable(
-                            tf.zeros([self.n_samples], dtype=self.FLOAT_TF),
-                            name=sn('y_sd_q_samples')
-                        )
-                        y_sd_q = Empirical(
-                            params=y_sd_q_samples,
-                            name=sn('y_sd_q')
-                        )
-
-                        if self.inference_name == 'MetropolisHastings':
-                            # Proposal distribution
-                            y_sd_proposal = Normal(
-                                loc=y_sd,
-                                scale=self.mh_proposal_sd,
-                                name=sn('y_sd_proposal')
-                            )
-                            self.proposal_map[y_sd] = y_sd_proposal
-
-                        y_sd_summary = y_sd_q.params[self.global_batch_step - 1]
-
-                        self.inference_map[y_sd] = y_sd_q
-
-                    self.MAP_map[y_sd] = y_sd_summary
+                        self.kl_penalties.append(y_sd_dist.kl_divergence(y_sd_prior))
 
                     y_sd = self.constraint_fn(y_sd) + self.epsilon
                     y_sd_summary = self.constraint_fn(y_sd_summary) + self.epsilon
@@ -1046,167 +583,83 @@ class CDRBayes(CDR):
                 self.y_sd_summary = y_sd_summary
 
                 if self.asymmetric_error:
-                    if self.variational():
-                        # Posterior distributions
-                        y_skewness_loc_q = tf.Variable(
-                            # tf.random_normal(
-                            #     [],
-                            #     mean=0.,
-                            #     stddev=self.init_sd,
-                            #     dtype=self.FLOAT_TF
-                            # ),
-                            0.,
-                            name='y_skewness_q_loc'
-                        )
-                        y_skewness_scale_q = tf.Variable(
-                            # tf.random_normal(
-                            #     [],
-                            #     mean=self.y_skewness_posterior_sd_init_unconstrained,
-                            #     stddev=self.init_sd,
-                            #     dtype=self.FLOAT_TF
-                            # ),
-                            self.y_skewness_posterior_sd_init_unconstrained,
-                            name='y_skewness_q_loc'
-                        )
+                    # Posterior distributions
+                    y_skewness_loc_q = tf.Variable(
+                        0.,
+                        name='y_skewness_q_loc'
+                    )
+                    y_skewness_scale_q = tf.Variable(
+                        self.y_skewness_posterior_sd_init_unconstrained,
+                        name='y_skewness_q_loc'
+                    )
+                    self.y_skewness_dist = Normal(
+                        loc=y_skewness_loc_q,
+                        scale=self.constraint_fn(y_skewness_scale_q) + self.epsilon,
+                        name='y_skewness_q'
+                    )
 
-                        self.y_skewness_q = Normal(
-                            loc=y_skewness_loc_q,
-                            scale=self.constraint_fn(y_skewness_scale_q) + self.epsilon,
-                            name='y_skewness_q'
-                        )
-                        self.y_skewness_summary = self.y_skewness_q.mean()
-                        tf.summary.scalar(
-                            'error/y_skewness_summary',
-                            self.y_skewness_summary,
-                            collections=['params']
-                        )
+                    self.y_skewness = tf.cond(self.use_MAP_mode, self.y_skewness_dist.mean, self.y_skewness_dist.sample)
 
-                        y_tailweight_loc_q = tf.Variable(
-                            # tf.random_normal(
-                            #     [],
-                            #     mean=self.y_tailweight_posterior_loc_init_unconstrained,
-                            #     stddev=self.init_sd,
-                            #     dtype=self.FLOAT_TF
-                            # ),
-                            self.y_tailweight_posterior_loc_init_unconstrained,
-                            name='y_tailweight_q_loc'
-                        )
-                        y_tailweight_scale_q = tf.Variable(
-                            # tf.random_normal(
-                            #     [],
-                            #     mean=self.y_tailweight_posterior_sd_init_unconstrained,
-                            #     stddev=self.init_sd,
-                            #     dtype=self.FLOAT_TF
-                            # ),
-                            self.y_tailweight_posterior_sd_init_unconstrained,
-                            name='y_tailweight_q_scale'
-                        )
-                        self.y_tailweight_q = Normal(
-                            loc=y_tailweight_loc_q,
-                            scale=self.constraint_fn(y_tailweight_scale_q) + self.epsilon,
-                            name='y_tailweight_q'
-                        )
-                        self.y_tailweight_summary = self.y_tailweight_q.mean()
-                        tf.summary.scalar(
-                            'error/y_tailweight',
-                            self.constraint_fn(self.y_tailweight_summary) + self.epsilon,
-                            collections=['params']
-                        )
+                    self.y_skewness_summary = self.y_skewness_dist.mean()
 
-                        if self.declare_priors_fixef:
-                            # Prior distributions
-                            self.y_skewness = Normal(
-                                loc=0.,
-                                scale=self.y_skewness_prior_sd_tf,
-                                name='y_skewness'
-                            )
-                            self.y_tailweight = Normal(
-                                loc=self.y_tailweight_prior_loc_unconstrained,
-                                scale=self.y_tailweight_prior_sd_tf,
-                                name='y_tailweight'
-                            )
+                    tf.summary.scalar(
+                        'error/y_skewness_summary',
+                        self.y_skewness_summary,
+                        collections=['params']
+                    )
 
-                            self.inference_map[self.y_skewness] = self.y_skewness_q
-                            self.inference_map[self.y_tailweight] = self.y_tailweight_q
+                    y_tailweight_loc_q = tf.Variable(
+                        self.y_tailweight_posterior_loc_init_unconstrained,
+                        name='y_tailweight_q_loc'
+                    )
+                    y_tailweight_scale_q = tf.Variable(
+                        self.y_tailweight_posterior_sd_init_unconstrained,
+                        name='y_tailweight_q_scale'
+                    )
+                    self.y_tailweight_dist = Normal(
+                        loc=y_tailweight_loc_q,
+                        scale=self.constraint_fn(y_tailweight_scale_q) + self.epsilon,
+                        name='y_tailweight_q'
+                    )
 
-                        else:
-                            self.y_skewness = self.y_skewness_q
-                            self.y_tailweight = self.y_tailweight_q
-                    else:
+                    self.y_tailweight = tf.cond(self.use_MAP_mode, self.y_tailweight_dist.mean, self.y_tailweight_dist.sample)
+
+                    self.y_tailweight_summary = self.y_tailweight_dist.mean()
+                    tf.summary.scalar(
+                        'error/y_tailweight',
+                        self.constraint_fn(self.y_tailweight_summary) + self.epsilon,
+                        collections=['params']
+                    )
+
+                    if self.declare_priors_fixef:
                         # Prior distributions
-                        self.y_skewness = Normal(
+                        self.y_skewness_prior = Normal(
                             loc=0.,
                             scale=self.y_skewness_prior_sd_tf,
                             name='y_skewness'
                         )
-                        self.y_tailweight = Normal(
+                        self.y_tailweight_prior = Normal(
                             loc=self.y_tailweight_prior_loc_unconstrained,
                             scale=self.y_tailweight_prior_sd_tf,
                             name='y_tailweight'
                         )
-
-                        # Posterior distributions
-                        y_skewness_q_samples = tf.Variable(
-                            tf.zeros([self.n_samples], dtype=self.FLOAT_TF),
-                            name=sn('y_skewness_q_samples')
-                        )
-                        self.y_skewness_q = Empirical(
-                            params=y_skewness_q_samples,
-                            name=sn('y_skewness_q')
-                        )
-                        y_tailweight_q_samples = tf.Variable(
-                            tf.zeros([self.n_samples], dtype=self.FLOAT_TF),
-                            name=sn('y_tailweight_q_samples')
-                        )
-                        self.y_tailweight_q = Empirical(
-                            params=y_tailweight_q_samples,
-                            name=sn('y_tailweight_q')
-                        )
-
-                        if self.inference_name == 'MetropolisHastings':
-                            # Proposal distributions
-                            y_skewness_proposal = Normal(
-                                loc=self.y_skewness,
-                                scale=self.mh_proposal_sd,
-                                name=sn('y_skewness_proposal')
-                            )
-                            y_tailweight_proposal = Normal(
-                                loc=self.y_tailweight,
-                                scale=self.mh_proposal_sd,
-                                name=sn('y_tailweight_proposal')
-                            )
-                            self.proposal_map[self.y_skewness] = y_skewness_proposal
-                            self.proposal_map[self.y_tailweight] = y_tailweight_proposal
-
-                        self.y_skewness_summary = self.y_skewness_q.params[self.global_batch_step - 1]
-                        self.y_tailweight_summary = self.y_tailweight_q.params[self.global_batch_step - 1]
-
-                        tf.summary.scalar(
-                            'error/y_skewness',
-                            self.y_skewness_summary,
-                            collections=['params']
-                        )
-                        tf.summary.scalar(
-                            'error/y_tailweight',
-                            self.constraint_fn(self.y_tailweight_summary) + self.epsilon,
-                            collections=['params']
-                        )
-
-                        self.inference_map[self.y_skewness] = self.y_skewness_q
-                        self.inference_map[self.y_tailweight] = self.y_tailweight_q
-
-                    self.MAP_map[self.y_skewness] = self.y_skewness_summary
-                    self.MAP_map[self.y_tailweight] = self.y_tailweight_summary
+                        self.kl_penalties.append(self.y_skewness_dist.kl_divergence(self.y_skewness_prior))
+                        self.kl_penalties.append(self.y_tailweight_dist.kl_divergence(self.y_tailweight_prior))
 
                     if self.standardize_response:
-                        self.out_standardized = SinhArcsinh(
+                        self.out_standardized_dist = SinhArcsinh(
                             loc=self.out,
                             scale=y_sd,
                             skewness=self.y_skewness,
                             tailweight=self.constraint_fn(self.y_tailweight) + self.epsilon,
                             name='output_standardized'
                         )
-                        self.err_dist_standardized = SinhArcsinh(
+                        self.out_standardized = tf.cond(
+                            self.use_MAP_mode,
+                            self.out_standardized_dist.mean,
+                            self.out_standardized_dist.sample
+                        )
+                        self.err_dist_standardized_dist = SinhArcsinh(
                             loc=0.,
                             scale=y_sd,
                             skewness=self.y_skewness,
@@ -1220,21 +673,31 @@ class CDRBayes(CDR):
                             tailweight=self.constraint_fn(self.y_tailweight_summary) + self.epsilon,
                             name='err_dist_standardized_summary'
                         )
-                        self.MAP_map[self.out_standardized] = self.out_mean
 
-                        self.out = SinhArcsinh(
+                        self.out_dist = SinhArcsinh(
                             loc=self.out * self.y_train_sd + self.y_train_mean,
                             scale=y_sd * self.y_train_sd,
                             skewness=self.y_skewness,
                             tailweight=self.constraint_fn(self.y_tailweight) + self.epsilon,
-                            name='output'
+                            name='output_dist'
                         )
+                        self.out = tf.cond(
+                            self.use_MAP_mode,
+                            self.out_dist.mean,
+                            self.out_dist.sample
+                        )
+
                         self.err_dist = SinhArcsinh(
                             loc=0.,
                             scale=y_sd * self.y_train_sd,
                             skewness=self.y_skewness,
                             tailweight=self.constraint_fn(self.y_tailweight) + self.epsilon,
                             name='err_dist'
+                        )
+                        self.err = tf.cond(
+                            self.use_MAP_mode,
+                            self.err_dist.mean,
+                            self.err_dist.sample
                         )
                         self.err_dist_summary = SinhArcsinh(
                             loc=0.,
@@ -1243,21 +706,31 @@ class CDRBayes(CDR):
                             tailweight=self.constraint_fn(self.y_tailweight_summary) + self.epsilon,
                             name='err_dist_summary'
                         )
-                        self.MAP_map[self.out] = self.out_mean * self.y_train_sd + self.y_train_mean
                     else:
-                        self.out = SinhArcsinh(
+                        self.out_dist = SinhArcsinh(
                             loc=self.out,
                             scale=y_sd,
                             skewness=self.y_skewness,
                             tailweight=self.constraint_fn(self.y_tailweight) + self.epsilon,
-                            name='output'
+                            name='output_dist'
                         )
+                        self.out = tf.cond(
+                            self.use_MAP_mode,
+                            self.out_dist.mean,
+                            self.out_dist.sample
+                        )
+
                         self.err_dist = SinhArcsinh(
                             loc=0.,
                             scale=y_sd,
                             skewness=self.y_skewness,
                             tailweight=self.constraint_fn(self.y_tailweight) + self.epsilon,
                             name='err_dist'
+                        )
+                        self.err = tf.cond(
+                            self.use_MAP_mode,
+                            self.err_dist.mean,
+                            self.err_dist.sample
                         )
                         self.err_dist_summary = SinhArcsinh(
                             loc=0.,
@@ -1266,19 +739,29 @@ class CDRBayes(CDR):
                             tailweight=self.constraint_fn(self.y_tailweight_summary) + self.epsilon,
                             name='err_dist_summary'
                         )
-                        self.MAP_map[self.out] = self.out_mean
 
                 else:
                     if self.standardize_response:
-                        self.out_standardized = Normal(
+                        self.out_standardized_dist = Normal(
                             loc=self.out,
                             scale=self.y_sd,
                             name='output_standardized'
                         )
+                        self.out_standardized = tf.cond(
+                            self.use_MAP_mode,
+                            self.out_standardized_dist.mean,
+                            self.out_standardized_dist.sample
+                        )
+
                         self.err_dist_standardized = Normal(
                             loc=0.,
                             scale=self.y_sd,
                             name='err_dist_standardized'
+                        )
+                        self.err_standardized = tf.cond(
+                            self.use_MAP_mode,
+                            self.out_standardized_dist.mean,
+                            self.out_standardized_dist.sample
                         )
                         self.err_dist_standardized_summary = Normal(
                             loc=0.,
@@ -1286,41 +769,59 @@ class CDRBayes(CDR):
                             name='err_dist_standardized_summary'
                         )
 
-                        self.MAP_map[self.out_standardized] = self.out_mean
-
-                        self.out = Normal(
+                        self.out_dist = Normal(
                             loc=self.out * self.y_train_sd + self.y_train_mean,
                             scale=self.y_sd * self.y_train_sd,
                             name='output'
                         )
+                        self.out = tf.cond(
+                            self.use_MAP_mode,
+                            self.out_dist.mean,
+                            self.out_dist.sample
+                        )
+
                         self.err_dist = Normal(
                             loc=0.,
                             scale=self.y_sd * self.y_train_sd,
                             name='err_dist'
+                        )
+                        self.err = tf.cond(
+                            self.use_MAP_mode,
+                            self.err_dist.mean,
+                            self.err_dist.sample
                         )
                         self.err_dist_summary = Normal(
                             loc=0.,
                             scale=self.y_sd_summary * self.y_train_sd,
                             name='err_dist_summary'
                         )
-                        self.MAP_map[self.out] = self.out_mean * self.y_train_sd + self.y_train_mean
                     else:
-                        self.out = Normal(
+                        self.out_dist = Normal(
                             loc=self.out,
                             scale=self.y_sd,
                             name='output'
                         )
+                        self.out = tf.cond(
+                            self.use_MAP_mode,
+                            self.out_dist.mean,
+                            self.out_dist.sample
+                        )
+
                         self.err_dist = Normal(
                             loc=0.,
                             scale=self.y_sd,
                             name='err_dist'
+                        )
+                        self.err = tf.cond(
+                            self.use_MAP_mode,
+                            self.err_dist.mean,
+                            self.err_dist.sample
                         )
                         self.err_dist_summary = Normal(
                             loc=0.,
                             scale=self.y_sd_summary,
                             name='err_dist_summary'
                         )
-                        self.MAP_map[self.out] = self.out_mean
 
                 self.err_dist_plot = tf.exp(self.err_dist.log_prob(self.support[None,...]))
                 self.err_dist_plot_summary = tf.exp(self.err_dist_summary.log_prob(self.support[None,...]))
@@ -1338,101 +839,36 @@ class CDRBayes(CDR):
                 self.err_dist_summary_theoretical_quantiles = self.err_dist_summary.quantile(empirical_quantiles)
                 self.err_dist_summary_theoretical_cdf = self.err_dist_summary.cdf(self.errors)
 
+                if self.standardize_response:
+                    self.X_conv_standardized_scaled = self.X_conv_scaled
+                    self.X_conv_scaled *= self.y_train_sd
+
+                    y_standardized = (self.y - self.y_train_mean) / self.y_train_sd
+                    self.ll_standardized = self.out_standardized_dist.log_prob(y_standardized)
+
     def initialize_objective(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self._initialize_output_model()
 
-                if self.standardize_response:
-                    out_model = self.out_standardized
-                    y = (self.y - self.y_train_mean) / self.y_train_sd
-                else:
-                    out_model = self.out
-                    y = self.y
+                self.loss_func = 0.
 
-                self.optim = self._initialize_optimizer()
+                self.ll = self.out_dist.log_prob(self.y)
+                # self.loss_func += -tf.reduce_sum(self.ll)
+                self.loss_func += -tf.reduce_sum(self.ll) * self.minibatch_scale
+
                 self.reg_loss = 0.
                 if len(self.regularizer_losses_varnames) > 0:
                     self.reg_loss += tf.add_n(self.regularizer_losses)
-                if self.variational():
-                    self.inference = getattr(ed,self.inference_name)(self.inference_map, data={out_model: y})
-                    self.inference.initialize(
-                        n_samples=self.n_samples,
-                        n_iter=self.n_iter,
-                        n_print=self.n_train_minibatch * self.log_freq,
-                        logdir=self.outdir + '/tensorboard/edward',
-                        log_timestamp=False,
-                        scale={out_model: self.minibatch_scale},
-                        # scale={out_model: 1},
-                        optimizer=self.optim
-                    )
-                elif self.inference_name == 'MetropolisHastings':
-                    self.inference = getattr(ed, self.inference_name)(self.inference_map, self.proposal_map, data={out_model: y})
-                    self.inference.initialize(
-                        n_print=self.n_train_minibatch * self.log_freq,
-                        logdir=self.outdir + '/tensorboard/edward',
-                        log_timestamp=False,
-                        scale={out_model: self.minibatch_scale}
-                        # scale={out_model: 1}
-                    )
-                else:
-                    self.inference = getattr(ed,self.inference_name)(self.inference_map, data={out_model: y})
-                    self.inference.initialize(
-                        step_size=self.lr,
-                        n_print=self.n_train_minibatch * self.log_freq,
-                        logdir=self.outdir + '/tensorboard/edward',
-                        log_timestamp=False,
-                        scale={out_model: self.minibatch_scale}
-                        # scale={out_model: 1}
-                    )
 
-                ## Set up posteriors and MAP estimates
-                self.X_conv_prior = self.X_conv
-                self.X_conv_post = ed.copy(self.X_conv, self.inference_map)
-                self.X_conv_MAP = ed.copy(self.X_conv, self.MAP_map, scope='MAP')
+                self.loss_func += self.reg_loss
 
-                if self.standardize_response:
-                    y_standardized = (self.y - self.y_train_mean) / self.y_train_sd
-                    self.X_conv_standardized_scaled_prior = self.X_conv_scaled
-                    self.X_conv_standardized_scaled_post = ed.copy(self.X_conv_scaled, self.inference_map)
-                    self.X_conv_standardized_scaled_MAP = ed.copy(self.X_conv_scaled, self.MAP_map, scope='MAP')
-                    self.X_conv_scaled_prior = self.X_conv_scaled * self.y_train_sd
-                    self.X_conv_scaled_post = ed.copy(self.X_conv_scaled * self.y_train_sd, self.inference_map)
-                    self.X_conv_scaled_MAP = ed.copy(self.X_conv_scaled * self.y_train_sd, self.MAP_map, scope='MAP')
+                self.kl_loss = tf.reduce_sum([tf.reduce_sum(x) for x in self.kl_penalties])
+                self.loss_func += self.kl_loss
 
-                    self.out_standardized_prior = self.out_standardized
-                    self.out_standardized_post = ed.copy(self.out_standardized, self.inference_map)
-                    self.out_standardized_MAP = tf.identity(self.MAP_map[self.out_standardized])
-                    self.out_standardized_MAP = ed.copy(self.out_standardized_MAP, self.MAP_map, scope='MAP')
-                    self.ll_standardized_prior = self.out_standardized_prior.log_prob(y_standardized)
-                    self.ll_standardized_post = self.out_standardized_post.log_prob(y_standardized)
-                    self.ll_standardized_MAP = ed.copy(self.out_standardized.log_prob(y_standardized), self.MAP_map, scope='MAP')
-                else:
-                    self.X_conv_scaled_prior = self.X_conv_scaled
-                    self.X_conv_scaled_post = ed.copy(self.X_conv_scaled, self.inference_map)
-                    self.X_conv_scaled_MAP = ed.copy(self.X_conv_scaled, self.MAP_map, scope='MAP')
+                self.optim = self._initialize_optimizer()
 
-                self.out_prior = self.out
-                self.out_post = ed.copy(self.out, self.inference_map)
-                self.out_MAP = tf.identity(self.MAP_map[self.out])
-                self.out_MAP = ed.copy(self.out_MAP, self.MAP_map, scope='MAP')
-                self.ll_prior = self.out_prior.log_prob(self.y)
-                self.ll_post = self.out_post.log_prob(self.y)
-                self.ll_MAP = ed.copy(self.out.log_prob(self.y), self.MAP_map, scope='MAP')
-
-                for x in self.irf_mc:
-                    for a in self.irf_mc[x]:
-                        for b in self.irf_mc[x][a]:
-                            self.irf_mc[x][a][b] = ed.copy(self.irf_mc[x][a][b], self.inference_map)
-                for x in self.irf_integral_tensors:
-                    self.irf_integral_tensors[x] = ed.copy(self.irf_integral_tensors[x], self.inference_map)
-                if self.pc:
-                    for x in self.src_irf_mc:
-                        for a in self.src_irf_mc[x]:
-                            for b in self.src_irf_mc[x][a]:
-                                self.src_irf_mc[x][a][b] = ed.copy(self.src_irf_mc[x][a][b], self.inference_map)
-                    for x in self.src_irf_integral_tensors:
-                        self.src_irf_integral_tensors[x] = ed.copy(self.src_irf_integral_tensors[x], self.inference_map)
+                self.train_op = self.optim.minimize(self.loss_func, global_step=self.global_batch_step)
 
     # Overload this method to perform parameter sampling and compute credible intervals
     def _extract_parameter_values(self, fixed=True, level=95, n_samples=None):
@@ -1448,7 +884,7 @@ class CDRBayes(CDR):
                 else:
                     param_vector = self.parameter_table_random_values
 
-            samples = [param_vector.eval(session=self.sess) for _ in range(n_samples)]
+            samples = [self.sess.run(param_vector, feed_dict={self.use_MAP_mode: False}) for _ in range(n_samples)]
             samples = np.stack(samples, axis=1)
 
             mean = samples.mean(axis=1)
@@ -1475,7 +911,8 @@ class CDRBayes(CDR):
                     self.n_time_units: n_time_units,
                     self.n_time_points: n_time_points,
                     self.time_y: [n_time_units],
-                    self.time_X: np.zeros((1, self.history_length, n_impulse))
+                    self.time_X: np.zeros((1, self.history_length, n_impulse)),
+                    self.use_MAP_mode: False
                 }
 
                 if rangf is not None:
@@ -1503,10 +940,6 @@ class CDRBayes(CDR):
             with self.sess.graph.as_default():
                 super(CDRBayes, self)._initialize_parameter_tables()
 
-                self.parameter_table_fixed_values = ed.copy(self.parameter_table_fixed_values, self.inference_map)
-                if len(self.rangf) > 0:
-                    self.parameter_table_random_values = ed.copy(self.parameter_table_random_values, self.inference_map)
-
 
 
 
@@ -1515,26 +948,6 @@ class CDRBayes(CDR):
     #  Public methods
     #
     ######################################################
-
-    def variational(self):
-        """
-        Report whether the CDR model uses variational Bayes.
-
-        :return: ``bool``; ``True`` if the model is variational, ``False`` otherwise.
-        """
-        return self.inference_name in [
-            'KLpq',
-            'KLqp',
-            'ImplicitKLqp',
-            'ReparameterizationEntropyKLqp',
-            'ReparameterizationKLKLqp',
-            'ReparameterizationKLqp',
-            'ScoreEntropyKLqp',
-            'ScoreKLKLqp',
-            'ScoreKLqp',
-            'ScoreRBKLqp',
-            'WakeSleep'
-        ]
 
     def ci_curve(
             self,
@@ -1575,7 +988,8 @@ class CDRBayes(CDR):
                     self.n_time_units: n_time_units,
                     self.n_time_points: n_time_points,
                     self.time_y: np.ones((1,)) * n_time_units,
-                    self.time_X: np.zeros((1, self.history_length, n_impulse))
+                    self.time_X: np.zeros((1, self.history_length, n_impulse)),
+                    self.use_MAP_mode: False
                 }
                 
                 if rangf is not None:
@@ -1621,7 +1035,8 @@ class CDRBayes(CDR):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 fd = {
-                    self.errors: errors
+                    self.errors: errors,
+                    self.use_MAP_mode: False
                 }
 
                 alpha = 100-float(level)
@@ -1645,35 +1060,19 @@ class CDRBayes(CDR):
 
         return out
 
-    def run_train_step(self, feed_dict):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                info_dict = self.inference.update(feed_dict)
-                self.sess.run(self.incr_global_batch_step)
-
-                out_dict = {
-                    'loss': info_dict['loss'] if self.variational() else info_dict['accept_rate']
-                }
-
-                return out_dict
-
     def run_predict_op(self, feed_dict, standardize_response=False, n_samples=None, algorithm='MAP', verbose=True):
-        if algorithm in ['map', 'MAP'] and self.variational():
-            MAP = True
-        else:
-            MAP = False
+        use_MAP_mode =  algorithm in ['map', 'MAP']
+        feed_dict[self.use_MAP_mode] = use_MAP_mode
 
         if standardize_response and self.standardize_response:
-            out_post = self.out_standardized_post
-            out_MAP = self.out_standardized_MAP
+            out = self.out_standardized
         else:
-            out_post = self.out_post
-            out_MAP = self.out_MAP
+            out = self.out
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if MAP:
-                    preds = self.sess.run(out_MAP, feed_dict=feed_dict)
+                if use_MAP_mode:
+                    preds = self.sess.run(out, feed_dict=feed_dict)
                 else:
                     if n_samples is None:
                         n_samples = self.n_samples_eval
@@ -1684,7 +1083,7 @@ class CDRBayes(CDR):
                     preds = np.zeros((len(feed_dict[self.time_y]), n_samples))
 
                     for i in range(n_samples):
-                        preds[:, i] = self.sess.run(out_post, feed_dict=feed_dict)
+                        preds[:, i] = self.sess.run(out, feed_dict=feed_dict)
                         if verbose:
                             pb.update(i + 1, force=True)
 
@@ -1693,22 +1092,18 @@ class CDRBayes(CDR):
                 return preds
 
     def run_loglik_op(self, feed_dict, standardize_response=False, n_samples=None, algorithm='MAP', verbose=True):
-        if algorithm in ['map', 'MAP'] and self.variational():
-            MAP = True
-        else:
-            MAP = False
+        use_MAP_mode =  algorithm in ['map', 'MAP']
+        feed_dict[self.use_MAP_mode] = use_MAP_mode
 
         if standardize_response and self.standardize_response:
-            ll_post = self.ll_standardized_post
-            ll_MAP = self.ll_standardized_MAP
+            ll = self.ll_standardized
         else:
-            ll_post = self.ll_post
-            ll_MAP = self.ll_MAP
+            ll = self.ll
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if MAP:
-                    log_lik = self.sess.run(ll_MAP, feed_dict=feed_dict)
+                if use_MAP_mode:
+                    log_lik = self.sess.run(ll, feed_dict=feed_dict)
                 else:
                     if n_samples is None:
                         n_samples = self.n_samples_eval
@@ -1719,7 +1114,7 @@ class CDRBayes(CDR):
                     log_lik = np.zeros((len(feed_dict[self.time_y]), n_samples))
 
                     for i in range(n_samples):
-                        log_lik[:, i] = self.sess.run(ll_post, feed_dict=feed_dict)
+                        log_lik[:, i] = self.sess.run(ll, feed_dict=feed_dict)
                         if verbose:
                             pb.update(i + 1, force=True)
 
@@ -1728,15 +1123,13 @@ class CDRBayes(CDR):
                 return log_lik
 
     def run_loss_op(self, feed_dict, n_samples=None, algorithm='MAP', verbose=True):
-        if algorithm in ['map', 'MAP'] and self.variational():
-            MAP = True
-        else:
-            MAP = False
+        use_MAP_mode =  algorithm in ['map', 'MAP']
+        feed_dict[self.use_MAP_mode] = use_MAP_mode
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if MAP:
-                    loss = self.sess.run(self.inference.loss, feed_dict=feed_dict)
+                if use_MAP_mode:
+                    loss = self.sess.run(self.loss_func, feed_dict=feed_dict)
                 else:
                     if n_samples is None:
                         n_samples = self.n_samples_eval
@@ -1747,7 +1140,7 @@ class CDRBayes(CDR):
                     loss = np.zeros((len(feed_dict[self.time_y]), n_samples))
 
                     for i in range(n_samples):
-                        loss[:, i] = self.sess.run(self.inference.loss, feed_dict=feed_dict)
+                        loss[:, i] = self.sess.run(self.loss_func, feed_dict=feed_dict)
                         if verbose:
                             pb.update(i + 1, force=True)
 
@@ -1756,26 +1149,21 @@ class CDRBayes(CDR):
                 return loss
 
     def run_conv_op(self, feed_dict, scaled=False, standardize_response=False, n_samples=None, algorithm='MAP', verbose=True):
-        if algorithm in ['map', 'MAP'] and self.variational():
-            MAP = True
-        else:
-            MAP = False
+        use_MAP_mode =  algorithm in ['map', 'MAP']
+        feed_dict[self.use_MAP_mode] = use_MAP_mode
 
         if scaled:
             if standardize_response and self.standardize_response:
-                X_conv_post = self.X_conv_standardized_scaled_post
-                X_conv_MAP = self.X_conv_standardized_scaled_MAP
+                X_conv = self.X_conv_standardized
             else:
-                X_conv_post = self.X_conv_scaled_post
-                X_conv_MAP = self.X_conv_scaled_MAP
+                X_conv = self.X_conv_scaled
         else:
-            X_conv_post = self.X_conv_post
-            X_conv_MAP = self.X_conv_MAP
+            X_conv = self.X_conv
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if MAP:
-                    X_conv = self.sess.run(X_conv_MAP, feed_dict=feed_dict)
+                if use_MAP_mode:
+                    X_conv = self.sess.run(X_conv, feed_dict=feed_dict)
                 else:
                     if n_samples is None:
                         n_samples = self.n_samples_eval
@@ -1785,7 +1173,7 @@ class CDRBayes(CDR):
                     X_conv = np.zeros((len(feed_dict[self.X]), self.X_conv.shape[-1], n_samples))
 
                     for i in range(0, n_samples):
-                        X_conv[..., i] = self.sess.run(X_conv_post, feed_dict=feed_dict)
+                        X_conv[..., i] = self.sess.run(X_conv, feed_dict=feed_dict)
                         if verbose:
                             pb.update(i + 1, force=True)
 
@@ -1795,7 +1183,6 @@ class CDRBayes(CDR):
 
     def finalize(self):
         super(CDRBayes, self).finalize()
-        self.inference.finalize()
 
 
 

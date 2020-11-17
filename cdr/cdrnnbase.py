@@ -1047,6 +1047,29 @@ class CDRNN(Model):
                         plot_mode=plot_mode
                     )
                     h_rnn = self.rnn_projection_fn(rnn_hidden[-1])
+
+                    if self.rnn_dropout_rate:
+                        h_rnn_shape = tf.shape(h_rnn)
+                        noise_shape = []
+                        for j in range(len(h_rnn.shape) - 1):
+                            try:
+                                s = int(h_rnn.shape[j])
+                            except TypeError:
+                                s = h_rnn_shape[j]
+                            noise_shape.append(s)
+                        noise_shape.append(1)
+
+                        def h_rnn_train_fn(inputs=h_rnn, noise_shape=noise_shape):
+                            dropout_mask = tf.cast(tf.random_uniform(noise_shape) > self.rnn_dropout_rate, dtype=self.FLOAT_TF)
+                            inputs_out = inputs * dropout_mask
+
+                            return inputs_out
+
+                        def h_rnn_eval_fn(inputs=h_rnn):
+                            return inputs
+
+                        h_rnn = tf.cond(self.training, h_rnn_train_fn, h_rnn_eval_fn)
+
                     if self.h_rnn_noise_sd:
                         def h_rnn_train_fn(h_rnn=h_rnn):
                             return tf.random_normal(tf.shape(h_rnn), h_rnn, stddev=self.h_rnn_noise_sd)
@@ -1055,6 +1078,7 @@ class CDRNN(Model):
                         h_rnn = tf.cond(self.training, h_rnn_train_fn, h_rnn_eval_fn)
                     if self.h_rnn_dropout_rate:
                         h_rnn = get_dropout(self.h_rnn_dropout_rate, training=self.training, session=self.sess)(h_rnn)
+
                     h += h_rnn
                 else:
                     h_rnn = rnn_hidden = rnn_cell = None

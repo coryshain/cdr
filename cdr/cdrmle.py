@@ -433,20 +433,6 @@ class CDRMLE(CDR):
 
         return out
 
-    def run_train_step(self, feed_dict, verbose=True):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                _, _, loss = self.sess.run(
-                    [self.train_op, self.ema_op, self.loss_func],
-                    feed_dict=feed_dict
-                )
-
-                out_dict = {
-                    'loss': loss
-                }
-
-                return out_dict
-
     def run_predict_op(self, feed_dict, standardize_response=False, n_samples=None, algorithm='MAP', verbose=True):
         with self.sess.as_default():
             with self.sess.graph.as_default():

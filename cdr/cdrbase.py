@@ -823,7 +823,6 @@ class CDR(Model):
             * ``run_conv_op()``
             * ``run_loglik_op()``
             * ``run_predict_op()``
-            * ``run_train_step()``
             
         Additionally, if the subclass requires any keyword arguments beyond those provided by ``CDR``, it must also implement ``__init__()``, ``_pack_metadata()`` and ``_unpack_metadata()`` to support model initialization, saving, and resumption, respectively.
         
@@ -3629,6 +3628,21 @@ class CDR(Model):
     #  and plotting
     #
     ######################################################
+
+
+    def run_train_step(self, feed_dict, verbose=True):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                _, _, loss = self.sess.run(
+                    [self.train_op, self.ema_op, self.loss_func],
+                    feed_dict=feed_dict
+                )
+
+                out_dict = {
+                    'loss': loss
+                }
+
+                return out_dict
 
     def convolve_inputs(
             self,

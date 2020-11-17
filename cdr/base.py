@@ -93,6 +93,8 @@ class Model(object):
         for kwarg in Model._INITIALIZATION_KWARGS:
             setattr(self, kwarg.key, kwargs.pop(kwarg.key, kwarg.default_value))
 
+        assert self.n_samples == 1, 'n_samples is now deprecated and must be left at its default of 1'
+
         # Cross validation settings
         self.crossval_factor = kwargs['crossval_factor']
         del kwargs['crossval_factor']

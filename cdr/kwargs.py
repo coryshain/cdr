@@ -565,12 +565,6 @@ CDRMLE_INITIALIZATION_KWARGS = [
 
 CDRBAYES_INITIALIZATION_KWARGS = [
     Kwarg(
-        'inference_name',
-        'KLqp',
-        str,
-        "The Edward inference class to use for fitting."
-    ),
-    Kwarg(
         'declare_priors_fixef',
         True,
         bool,
@@ -922,6 +916,12 @@ CDRNN_INITIALIZATION_KWARGS = [
         [float, None],
         "Rate at which to drop neurons of h_rnn.",
         aliases=['dropout_rate']
+    ),
+    Kwarg(
+        'rnn_dropout_rate',
+        None,
+        [float, None],
+        "Rate at which to entirely drop the RNN."
     ),
     Kwarg(
         'irf_dropout_rate',
