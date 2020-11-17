@@ -46,7 +46,7 @@ if __name__ == '__main__':
                 f.write('#PBS -N %s\n' % basename)
                 f.write(base % time)
                 if args.fit:
-                    f.write('python3 -m cdr.bin.train %s -m %s\n' % (path, ' '.join(partitions), m))
+                    f.write('python3 -m cdr.bin.train %s -m %s\n' % (path, m))
                 if partitions:
                     f.write('python3 -m cdr.bin.predict %s -p %s -m %s\n' % (path, ' '.join(partitions), m))
     
