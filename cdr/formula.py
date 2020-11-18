@@ -1528,11 +1528,14 @@ class Formula(object):
             new_terms_str += ' + '.join(['C(%s, %s)' % (' + '.join([x.name() for x in y['impulses']]), y['irf']) for y in new_terms]) + interactions_str + ' | %s)' %rangf
             term_strings.append(new_terms_str)
 
-        out += ' + '.join(term_strings)
-
+        ran_intercepts = []
         for key in sorted(list(self.has_intercept.keys()), key=lambda x: (x is None, x)):
             if key is not None and not key in terms and self.has_intercept[key]:
-                out += ' + (1 | %s)' %key
+                ran_intercepts.append(key)
+        if ran_intercepts:
+            term_strings.append(' + '.join(['(1 | %s)' % key for key in ran_intercepts]))
+
+        out += ' + '.join(term_strings)
 
         return out
 
