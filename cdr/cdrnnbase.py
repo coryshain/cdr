@@ -98,7 +98,10 @@ class CDRNN(Model):
 
         if self.n_units_input_projection:
             if isinstance(self.n_units_input_projection, str):
-                self.n_units_input_projection = [int(x) for x in self.n_units_input_projection.split()]
+                if self.n_units_input_projection.lower() == 'infer':
+                    self.n_units_input_projection = [len(self.impulse_names) + 1]
+                else:
+                    self.n_units_input_projection = [int(x) for x in self.n_units_input_projection.split()]
             elif isinstance(self.n_units_input_projection, int):
                 if self.n_layers_input_projection is None:
                     self.n_units_input_projection = [self.n_units_input_projection]
@@ -116,7 +119,10 @@ class CDRNN(Model):
 
         if self.n_units_rnn:
             if isinstance(self.n_units_rnn, str):
-                self.n_units_rnn = [int(x) for x in self.n_units_rnn.split()]
+                if self.n_units_rnn.lower() == 'infer':
+                    self.n_units_rnn = [len(self.impulse_names) + 1]
+                else:
+                    self.n_units_rnn = [int(x) for x in self.n_units_rnn.split()]
             elif isinstance(self.n_units_rnn, int):
                 if self.n_layers_rnn is None:
                     self.n_units_rnn = [self.n_units_rnn]
@@ -199,6 +205,11 @@ class CDRNN(Model):
                 self.n_units_hidden_state = self.n_units_rnn[-1]
             else:
                 self.n_units_hidden_state = self.n_units_t_delta_embedding
+        elif isinstance(self.n_units_hidden_state, str):
+            if self.n_units_hidden_state.lower() == 'infer':
+                self.n_units_hidden_state = len(self.impulse_names) + 1
+            else:
+                self.n_units_hidden_state = int(self.n_units_hidden_state)
 
     def _pack_metadata(self):
         md = super(CDRNN, self)._pack_metadata()
@@ -779,22 +790,6 @@ class CDRNN(Model):
                         self.h_ran_matrix.append(h_ran_matrix_cur)
                         self.h_ran.append(tf.gather(h_ran_matrix_cur, gf_y))
 
-                # INPUT/ERROR WEIGHTS
-                self.input_weights = tf.Variable(
-                    tf.zeros([len(self.impulse_names)+1]),
-                    name='input_weights'
-                )[None, None, ...]
-                self.y_sd_delta_weight = tf.tanh(tf.Variable(
-                    0., name='y_sd_delta_weight'
-                ))
-                if self.asymmetric_error:
-                    self.y_skewness_delta_weight = tf.tanh(tf.Variable(
-                        0., name='y_skewness_delta_weight'
-                    ))
-                    self.y_tailweight_delta_weight = tf.tanh(tf.Variable(
-                        0., name='y_tailweight_delta_weight'
-                    ))
-
                 # ERROR PARAMS
                 error_params_fn_layers = []
                 for l in range(self.n_layers_error_params_fn + 1):
@@ -981,7 +976,6 @@ class CDRNN(Model):
                     )
 
                 X = tf.concat([X, time_X], axis=-1)
-                X *= self.input_weights
 
                 if self.predictor_dropout_rate:
                     X = tf.layers.dropout(
@@ -1110,12 +1104,9 @@ class CDRNN(Model):
                 error_params = self.error_params_fn(h[..., -1, :])
 
                 y_sd_delta = error_params[..., 0]
-                y_sd_delta *= self.y_sd_delta_weight
                 if self.asymmetric_error:
                     y_skewness_delta = error_params[..., 1]
-                    y_skewness_delta *= self.y_skewness_delta_weight
                     y_tailweight_delta = error_params[..., 2]
-                    y_tailweight_delta *= self.y_tailweight_delta_weight
                 else:
                     y_skewness_delta = y_tailweight_delta = None
 

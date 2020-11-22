@@ -1668,6 +1668,23 @@ class Model(object):
 
                 return out
 
+    def report_training_corr(self, indent=0):
+        """
+        Generate a string representation of the model's training prediction/response correlation.
+
+        :param indent: ``int``; indentation level
+        :return: ``str``; the training correlation report
+        """
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                training_rho = self.training_rho.eval(session=self.sess)
+
+                out = ' ' * indent + 'TRAINING R(TRUE, PRED):\n'
+                out += ' ' * (indent + 2) + str(training_rho)
+                out += '\n\n'
+
+                return out
+
     def report_training_loglik(self, indent=0):
         """
         Generate a string representation of the model's training log likelihood.
@@ -1708,7 +1725,6 @@ class Model(object):
             mae=None,
             corr=None,
             loglik=None,
-            rho=None,
             loss=None,
             percent_variance_explained=None,
             true_variance=None,
@@ -1722,7 +1738,6 @@ class Model(object):
         :param mae: ``float`` or ``None``; mean absolute error, skipped if ``None``.
         :param corr: ``float`` or ``None``; Pearson correlation of predictions with observed response, skipped if ``None``.
         :param loglik: ``float`` or ``None``; log likelihood, skipped if ``None``.
-        :param rho: ``float`` or ``None``; Pearson correlation of predictions with targets, skipped if ``None``.
         :param loss: ``float`` or ``None``; loss per training objective, skipped if ``None``.
         :param true_variance: ``float`` or ``None``; variance of targets, skipped if ``None``.
         :param percent_variance_explained: ``float`` or ``None``; percent variance explained, skipped if ``None``.
@@ -1737,11 +1752,9 @@ class Model(object):
         if mae is not None:
             out += ' ' * (indent+2) + 'MAE: %s\n' %mae
         if corr is not None:
-            out += ' ' * (indent+2) + 'r(pred, true): %s\n' %corr
+            out += ' ' * (indent+2) + 'r(true, pred): %s\n' %corr
         if loglik is not None:
             out += ' ' * (indent+2) + 'Log likelihood: %s\n' %loglik
-        if rho is not None:
-            out += ' ' * (indent+2) + 'r(true, pred): %s\n' %rho
         if loss is not None:
             out += ' ' * (indent+2) + 'Loss per training objective: %s\n' %loss
         if true_variance is not None:
@@ -1803,6 +1816,7 @@ class Model(object):
 
         out += self.report_training_mse(indent=indent+2)
         out += self.report_training_mae(indent=indent+2)
+        out += self.report_training_corr(indent=indent+2)
         out += self.report_training_loglik(indent=indent+2)
         out += self.report_training_percent_variance_explained(indent=indent+2)
 
@@ -2243,7 +2257,7 @@ class Model(object):
                     training_ae = np.array(np.abs(y[self.dv] - preds))
                     training_mae = training_ae.mean()
 
-                    training_rho = np.corrcoef(y[self.dv], preds)[1]
+                    training_rho = np.corrcoef(y[self.dv], preds)[0,1]
 
                     # Extract and save log likelihoods
                     training_logliks = self.log_lik(
@@ -2292,8 +2306,8 @@ class Model(object):
                         eval_train += self.report_evaluation(
                             mse=training_mse,
                             mae=training_mae,
+                            corr=training_rho,
                             loglik=training_loglik,
-                            rho=training_rho,
                             percent_variance_explained=training_percent_variance_explained,
                             indent=2
                         )

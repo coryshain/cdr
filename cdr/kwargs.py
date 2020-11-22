@@ -724,8 +724,8 @@ CDRNN_INITIALIZATION_KWARGS = [
     Kwarg(
         'n_units_hidden_state',
         32,
-        [int, None],
-        "Number of units in CDRNN hidden. Must be an ``int``. If ``None``, no RNN encoding (i.e. use a stationary convolution kernel)."
+        [int, str],
+        "Number of units in CDRNN hidden state. Must be an ``int``."
     ),
     Kwarg(
         'n_units_t_delta_embedding',
