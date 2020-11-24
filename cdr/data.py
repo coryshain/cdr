@@ -162,6 +162,12 @@ def build_CDR_impulses(
     if X_2d_predictor_names is None:
         X_2d_predictor_names = []
 
+    if not (impulse_names):  # Empty (intercept-only) model
+        intercept_only = True
+        impulse_names = ['time']
+    else:
+        intercept_only = False
+
     impulse_names_1d = sorted(list(set(impulse_names).difference(set(X_response_aligned_predictor_names)).difference(set(X_2d_predictor_names))))
     impulse_names_1d_todo = set(impulse_names_1d)
     impulse_names_1d_tmp = []
@@ -169,6 +175,7 @@ def build_CDR_impulses(
     X_2d_from_1d = []
     time_X_2d = []
     time_mask = []
+
     for i, X_cur in enumerate(X):
         impulse_names_1d_cur = impulse_names_1d_todo.intersection(set(X_cur.columns))
         if len(impulse_names_1d_cur) > 0:
@@ -220,6 +227,9 @@ def build_CDR_impulses(
     X_2d = X_2d[:,:,ix]
     time_X_2d = time_X_2d[:,:,ix]
     time_mask = time_mask[:,:,ix]
+
+    if intercept_only:
+        X_2d = X_2d[..., 0:0]
 
     return X_2d, time_X_2d, time_mask
 

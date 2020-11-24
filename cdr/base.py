@@ -468,14 +468,14 @@ class Model(object):
                 X_batch = tf.shape(self.X)[0]
                 self.X_batch = X_batch
                 self.time_X = tf.placeholder_with_default(
-                    tf.zeros([X_batch, self.history_length, n_impulse], dtype=self.FLOAT_TF),
-                    shape=[None, self.history_length, n_impulse],
+                    tf.zeros([X_batch, self.history_length,  max(n_impulse, 1)], dtype=self.FLOAT_TF),
+                    shape=[None, self.history_length, max(n_impulse, 1)],
                     name='time_X'
                 )
 
                 self.time_X_mask = tf.placeholder_with_default(
-                    tf.ones([X_batch, self.history_length, n_impulse], dtype=self.FLOAT_TF),
-                    shape=[None, self.history_length, n_impulse],
+                    tf.ones([X_batch, self.history_length, max(n_impulse, 1)], dtype=self.FLOAT_TF),
+                    shape=[None, self.history_length, max(n_impulse, 1)],
                     name='time_X_mask'
                 )
 
@@ -2860,9 +2860,6 @@ class Model(object):
         if mc and not hasattr(self, 'ci_curve'):
             stderr('Credible intervals are not supported for instances of %s. Re-run ``make_plots`` with ``mc=False``.\n' % type(self))
             mc = False
-
-        if len(self.terminal_names) == 0:
-            return
 
         if plot_dirac:
             dirac = 'dirac'

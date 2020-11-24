@@ -381,7 +381,7 @@ class CDRNN(Model):
                 elif self.context_regularizer_name == 'inherit':
                     self.context_regularizer = self.regularizer
                 else:
-                    scale = self.context_regularizer_scale / (self.history_length * len(self.impulse_gather_indices)) # Average over time
+                    scale = self.context_regularizer_scale / (self.history_length * max(1, len(self.impulse_gather_indices))) # Average over time
                     if self.scale_regularizer_with_data:
                          scale *= self.minibatch_scale # Sum over batch, multiply by n batches
                     else:

@@ -305,14 +305,18 @@ class Formula(object):
         self.dv_term = dv_term[0][0]
         self.dv = self.dv_term.name()
 
-        rhs = ast.parse(Formula.prep_formula_string(rhs))
+        self.has_intercept = {None: True}
+
+        rhs_parsed = ast.parse(Formula.prep_formula_string(rhs))
 
         self.t = IRFNode()
-        self.has_intercept = {None: True}
-        self.process_ast(
-            rhs.body[0].value,
-            has_intercept=self.has_intercept
-        )
+        if len(rhs_parsed.body):
+            self.process_ast(
+                rhs_parsed.body[0].value,
+                has_intercept=self.has_intercept
+            )
+        else:
+            self.has_intercept[None] = '0' not in [x.strip() for x in rhs.strip().split('+')]
 
         self.rangf = sorted([x for x in list(self.has_intercept.keys()) if x is not None])
 
@@ -1470,11 +1474,12 @@ class Formula(object):
             t = self.t
         out = ''
 
+        term_strings = []
+
         if not self.has_intercept[None]:
-            out += '0 + '
+            term_strings.append('0')
 
         terms = t.formula_terms()
-        term_strings = []
 
         if None in terms:
             fixed = terms.pop(None)
