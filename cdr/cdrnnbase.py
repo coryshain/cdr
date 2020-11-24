@@ -603,6 +603,15 @@ class CDRNN(Model):
                 self.error_params_fn_layers = error_params_fn_layers
                 self.error_params_fn = compose_lambdas(error_params_fn_layers)
 
+                if self.asymmetric_error:
+                    denom = self.n_units_hidden_state
+                    if self.n_units_error_params_fn:
+                        denom = max(denom, self.n_units_error_params_fn[-1])
+                    self.y_tailweight_coef = tf.Variable(
+                        1. / denom,
+                        name='tailweight_coef'
+                    )
+
                 # INTERCEPT
                 if self.has_intercept[None]:
                     self.intercept_fixed, self.intercept_fixed_summary = self.initialize_intercept(ran_gf=None)
@@ -1129,6 +1138,7 @@ class CDRNN(Model):
                         ema_rate * self.y_skewness_delta_ema + (1 - ema_rate) * tf.reduce_mean(y_skewness_delta)
                     )
 
+                    y_tailweight_delta *= self.y_tailweight_coef
                     self.y_tailweight_delta = y_tailweight_delta
                     self.y_tailweight_delta_ema = tf.Variable(0., trainable=False, name='y_tailweight_delta_ema')
                     self.y_tailweight_delta_ema_op = tf.assign(
@@ -1270,7 +1280,7 @@ class CDRNN(Model):
                 u_1 = x * (c + v)
                 X_1 = tf.reshape(
                     tf.tile(
-                        u_1 + b,
+                        u_1,
                         [self.n_surface_plot_points_per_side, 1, 1]
                     ),
                     [-1, 1, len(self.impulse_names)]
@@ -1279,7 +1289,7 @@ class CDRNN(Model):
                 u_2 = y * (c + v)
                 X_2 = tf.reshape(
                     tf.tile(
-                        u_2 + b,
+                        u_2,
                         [1, self.n_surface_plot_points_per_side, 1]
                     ),
                     [-1, 1, len(self.impulse_names)]
@@ -1525,8 +1535,6 @@ class CDRNN(Model):
         for kwarg in CDRNN_INITIALIZATION_KWARGS:
             val = getattr(self, kwarg.key)
             out += ' ' * indent + '  %s: %s\n' % (kwarg.key, "\"%s\"" % val if isinstance(val, str) else val)
-
-        out += '\n'
 
         return out
 
