@@ -1426,10 +1426,11 @@ class CDRNN(Model):
         interactions = interactions_tmp
         if plot_type.lower() in ['irf_1d', 'irf_surface']:
             out = ['rate'] + self.impulse_names[:]
-            if plot_type.lower() == 'irf_surface':
-                out += interactions
+            # if plot_type.lower() == 'irf_surface':
+            #     out += interactions
         elif plot_type.lower() == 'curvature':
-            out = self.impulse_names[:] + interactions
+            out = self.impulse_names[:]
+            # out = self.impulse_names[:] + interactions
         elif plot_type.lower() == 'interaction_surface':
             if not interactions:
                 out = [':'.join(x) for x in itertools.combinations(self.impulse_names, 2)]
