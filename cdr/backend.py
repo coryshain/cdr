@@ -937,7 +937,8 @@ class DenseLayer(object):
         with self.session.as_default():
             with self.session.graph.as_default():
 
-                H = tf.matmul(inputs, self.kernel)
+                print(inputs.shape)
+                H = tf.tensordot(inputs, self.kernel, 1)
                 bias = self.bias
                 while len(bias.shape) < len(H.shape):
                     bias = bias[None, ...]
