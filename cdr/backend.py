@@ -1,3 +1,4 @@
+import math
 import collections
 import tensorflow as tf
 from .util import *
@@ -176,13 +177,8 @@ class CDRNNCell(LayerRNNCell):
             recurrent_activation='sigmoid',
             prefinal_activation='tanh',
             time_projection_inner_activation='tanh',
-            bottomup_initializer='glorot_uniform_initializer',
-            # bottomup_initializer='random_normal_initializer_mean-0_stddev-0.0001',
-            recurrent_initializer='orthogonal_initializer',
-            bias_initializer='zeros_initializer',
-            bottomup_regularizer=None,
-            recurrent_regularizer=None,
-            bias_regularizer=None,
+            bottomup_kernel_sd_init='he',
+            recurrent_kernel_sd_init='he',
             bottomup_dropout=None,
             h_dropout=None,
             c_dropout=None,
@@ -219,13 +215,8 @@ class CDRNNCell(LayerRNNCell):
                 self._prefinal_activation = get_activation(prefinal_activation, session=self._session, training=self._training)
                 self._time_projection_inner_activation = get_activation(time_projection_inner_activation, session=self._session, training=self._training)
 
-                self._bottomup_initializer = get_initializer(bottomup_initializer, session=self._session)
-                self._recurrent_initializer = get_initializer(recurrent_initializer, session=self._session)
-                self._bias_initializer = get_initializer(bias_initializer, session=self._session)
-
-                self._bottomup_regularizer = get_regularizer(bottomup_regularizer, session=self._session)
-                self._recurrent_regularizer = get_regularizer(recurrent_regularizer, session=self._session)
-                self._bias_regularizer = get_regularizer(bias_regularizer, session=self._session)
+                self._bottomup_kernel_sd_init = bottomup_kernel_sd_init
+                self._recurrent_kernel_sd_init = recurrent_kernel_sd_init
 
                 self._bottomup_dropout = get_dropout(bottomup_dropout, training=self._training, session=self._session)
                 self._h_dropout = get_dropout(h_dropout, training=self._training, session=self._session)
@@ -257,7 +248,7 @@ class CDRNNCell(LayerRNNCell):
             self,
             in_dim,
             out_dim,
-            kernel_initializer,
+            kernel_sd_init,
             depth=None,
             inner_activation=None,
             prefinal_mode=None,
@@ -272,21 +263,15 @@ class CDRNNCell(LayerRNNCell):
                 if prefinal_mode is None:
                     prefinal_mode = self._prefinal_mode
 
-                resnet_kernel_initializer = 'glorot_uniform_initializer'
-
                 if prefinal_mode.lower() == 'max':
                     if out_dim > in_dim:
                         prefinal_dim = out_dim
-                        d_trans = 0
                     else:
                         prefinal_dim = in_dim
-                        d_trans = depth - 1
                 elif prefinal_mode.lower() == 'in':
                     prefinal_dim = in_dim
-                    d_trans = depth - 1
                 elif prefinal_mode.lower() == 'out':
                     prefinal_dim = out_dim
-                    d_trans = 0
                 else:
                     raise ValueError('Unrecognized value for prefinal_mode: %s.' % prefinal_mode)
 
@@ -304,10 +289,10 @@ class CDRNNCell(LayerRNNCell):
                             activation = inner_activation
                         units = prefinal_dim
                         use_bias = self._use_bias
-                    if d == d_trans:
-                        dense_kernel_initializer = kernel_initializer
-                    else:
-                        dense_kernel_initializer = 'identity_initializer'
+                    kernel_initializer = get_initializer(
+                        'random_normal_initializer_mean=0-stddev=%s' % kernel_sd_init,
+                        session=self._session
+                    )
                     if name:
                         name_cur = name + '_d%d' % d
                     else:
@@ -318,8 +303,8 @@ class CDRNNCell(LayerRNNCell):
                             training=self._training,
                             units=units,
                             use_bias=use_bias,
-                            kernel_initializer=resnet_kernel_initializer,
-                            bias_initializer=self._bias_initializer,
+                            kernel_initializer=kernel_initializer,
+                            bias_initializer='zeros_initializer',
                             layers_inner=self._resnet_n_layers,
                             activation_inner=self._prefinal_activation,
                             activation=activation,
@@ -336,11 +321,9 @@ class CDRNNCell(LayerRNNCell):
                             training=self._training,
                             units=units,
                             use_bias=use_bias,
-                            kernel_initializer=dense_kernel_initializer,
-                            bias_initializer=self._bias_initializer,
+                            kernel_sd_init=kernel_sd_init,
                             activation=activation,
                             batch_normalization_decay=self._batch_normalization_decay,
-                            normalize_weights=self._weight_normalization,
                             epsilon=self._epsilon,
                             session=self._session,
                             reuse=tf.AUTO_REUSE,
@@ -384,21 +367,21 @@ class CDRNNCell(LayerRNNCell):
                     self._bias = self.add_variable(
                         'bias',
                         shape=[1, output_dim],
-                        initializer=self._bias_initializer
+                        initializer=tf.zeros_initializer()
                     )
 
                 # Build LSTM kernels (bottomup and recurrent)
                 self._kernel_bottomup, self._kernel_bottomup_layers = self.initialize_kernel(
                     bottomup_dim,
                     output_dim,
-                    self._bottomup_initializer,
+                    self._bottomup_kernel_sd_init,
                     name='bottomup'
                 )
 
                 self._kernel_recurrent, self._kernel_recurrent_layers = self.initialize_kernel(
                     recurrent_dim,
                     output_dim,
-                    self._recurrent_initializer,
+                    self._recurrent_kernel_sd_init,
                     name='recurrent'
                 )
 
@@ -417,7 +400,7 @@ class CDRNNCell(LayerRNNCell):
                     self._kernel_time_projection, self._kernel_time_projection_layers = self.initialize_kernel(
                         recurrent_dim,
                         recurrent_dim,
-                        self._bottomup_initializer,
+                        self._bottomup_kernel_sd_init,
                         depth=self._time_projection_depth,
                         inner_activation=self._time_projection_inner_activation,
                         name='time_projection'
@@ -535,13 +518,8 @@ class CDRNNLayer(object):
             recurrent_activation='sigmoid',
             prefinal_activation='tanh',
             time_projection_inner_activation='tanh',
-            bottomup_initializer='glorot_uniform_initializer',
-            # bottomup_initializer='random_normal_initializer_mean-0_stddev-0.0001',
-            recurrent_initializer='orthogonal_initializer',
-            bias_initializer='zeros_initializer',
-            bottomup_regularizer=None,
-            recurrent_regularizer=None,
-            bias_regularizer=None,
+            bottomup_kernel_sd_init='he',
+            recurrent_kernel_sd_init='he',
             bottomup_dropout=None,
             h_dropout=None,
             c_dropout=None,
@@ -573,12 +551,8 @@ class CDRNNLayer(object):
         self.recurrent_activation = recurrent_activation
         self.prefinal_activation = prefinal_activation
         self.time_projection_inner_activation = time_projection_inner_activation
-        self.bottomup_initializer = bottomup_initializer
-        self.recurrent_initializer = recurrent_initializer
-        self.bias_initializer = bias_initializer
-        self.bottomup_regularizer = bottomup_regularizer
-        self.recurrent_regularizer = recurrent_regularizer
-        self.bias_regularizer = bias_regularizer
+        self.bottomup_kernel_sd_init = bottomup_kernel_sd_init
+        self.recurrent_kernel_sd_init = recurrent_kernel_sd_init
         self.bottomup_dropout = bottomup_dropout
         self.h_dropout = h_dropout
         self.c_dropout = c_dropout
@@ -622,12 +596,8 @@ class CDRNNLayer(object):
                         recurrent_activation=self.recurrent_activation,
                         prefinal_activation=self.prefinal_activation,
                         time_projection_inner_activation=self.time_projection_inner_activation,
-                        bottomup_initializer=self.bottomup_initializer,
-                        recurrent_initializer=self.recurrent_initializer,
-                        bias_initializer=self.bias_initializer,
-                        bottomup_regularizer=self.bottomup_regularizer,
-                        recurrent_regularizer=self.recurrent_regularizer,
-                        bias_regularizer=self.bias_regularizer,
+                        bottomup_kernel_sd_init=self.bottomup_kernel_sd_init,
+                        recurrent_kernel_sd_init=self.recurrent_kernel_sd_init,
                         bottomup_dropout=self.bottomup_dropout,
                         h_dropout=self.h_dropout,
                         c_dropout=self.c_dropout,
@@ -755,6 +725,127 @@ class LSTMCell(LayerRNNCell):
                 c_prev = state.c
 
 
+# class DenseLayer(object):
+#
+#     def __init__(
+#             self,
+#             training=True,
+#             units=None,
+#             use_bias=True,
+#             activation=None,
+#             kernel_initializer='glorot_uniform_initializer',
+#             bias_initializer='zeros_initializer',
+#             dropout=None,
+#             kernel_regularizer=None,
+#             bias_regularizer=None,
+#             batch_normalization_decay=None,
+#             batch_normalization_use_beta=True,
+#             batch_normalization_use_gamma=True,
+#             normalize_weights=False,
+#             reuse=tf.AUTO_REUSE,
+#             epsilon=1e-3,
+#             session=None,
+#             name=None
+#     ):
+#         self.session = get_session(session)
+#         with session.as_default():
+#             with session.graph.as_default():
+#                 self.training = training
+#                 self.units = units
+#                 self.use_bias = use_bias
+#                 self.activation = get_activation(activation, session=self.session, training=self.training)
+#                 self.kernel_initializer = get_initializer(kernel_initializer, session=self.session)
+#                 if bias_initializer is None:
+#                     bias_initializer = 'zeros_initializer'
+#                 self.bias_initializer = get_initializer(bias_initializer, session=self.session)
+#                 self.dropout = get_dropout(dropout, training=self.training, session=self.session)
+#                 self.kernel_regularizer = get_regularizer(kernel_regularizer, session=self.session)
+#                 self.bias_regularizer = get_regularizer(bias_regularizer, session=self.session)
+#                 self.batch_normalization_decay = batch_normalization_decay
+#                 self.batch_normalization_use_beta = batch_normalization_use_beta
+#                 self.batch_normalization_use_gamma = batch_normalization_use_gamma
+#                 self.normalize_weights = normalize_weights
+#                 self.reuse = reuse
+#                 self.epsilon = epsilon
+#                 self.name = name
+#
+#                 self.dense_layer = None
+#                 self.kernel_lambdas = []
+#                 self.projection = None
+#
+#                 self.initializer = get_initializer(kernel_initializer, self.session)
+#
+#                 self.built = False
+#
+#     @property
+#     def weights(self):
+#         if self.built:
+#             return self.dense_layer.weights
+#         return []
+#
+#     def build(self, inputs):
+#         if not self.built:
+#             if self.units is None:
+#                 out_dim = inputs.shape[-1]
+#             else:
+#                 out_dim = self.units
+#
+#             with self.session.as_default():
+#                 with self.session.graph.as_default():
+#                     self.dense_layer = tf.layers.Dense(
+#                         out_dim,
+#                         use_bias=self.use_bias,
+#                         kernel_initializer=self.kernel_initializer,
+#                         bias_initializer=self.bias_initializer,
+#                         kernel_regularizer=self.kernel_regularizer,
+#                         bias_regularizer=self.bias_regularizer,
+#                         _reuse=self.reuse,
+#                         name=self.name
+#                     )
+#
+#                     self.kernel_lambdas.append(self.dense_layer)
+#                     self.kernel_lambdas.append(make_lambda(self.dropout, use_kwargs=False, session=self.session))
+#                     self.kernel = compose_lambdas(self.kernel_lambdas)
+#
+#             self.built = True
+#
+#     def __call__(self, inputs):
+#         if not self.built:
+#             self.build(inputs)
+#
+#         with self.session.as_default():
+#             with self.session.graph.as_default():
+#
+#                 H = self.kernel(inputs)
+#
+#                 if self.normalize_weights:
+#                     self.w = self.dense_layer.kernel
+#                     self.g = tf.Variable(tf.ones(self.w.shape[1]), dtype=tf.float32)
+#                     self.v = tf.norm(self.w, axis=0)
+#                     self.dense_layer.kernel = self.v
+#
+#                 if self.batch_normalization_decay:
+#                     H = tf.contrib.layers.batch_norm(
+#                         H,
+#                         decay=self.batch_normalization_decay,
+#                         center=self.batch_normalization_use_beta,
+#                         scale=self.batch_normalization_use_gamma,
+#                         zero_debias_moving_mean=True,
+#                         epsilon=self.epsilon,
+#                         is_training=self.training,
+#                         updates_collections=None,
+#                         reuse=self.reuse,
+#                         scope=self.name
+#                     )
+#                 if self.activation is not None:
+#                     H = self.activation(H)
+#
+#                 return H
+#
+#     def call(self, *args, **kwargs):
+#         self.__call__(*args, **kwargs)
+#
+
 class DenseLayer(object):
 
     def __init__(
@@ -763,16 +854,11 @@ class DenseLayer(object):
             units=None,
             use_bias=True,
             activation=None,
-            kernel_initializer='glorot_uniform',
-            # kernel_initializer='random_normal_initializer_mean-0_stddev-0.0001',
-            bias_initializer='zeros_initializer',
+            kernel_sd_init='he',
             dropout=None,
-            kernel_regularizer=None,
-            bias_regularizer=None,
             batch_normalization_decay=None,
             batch_normalization_use_beta=True,
             batch_normalization_use_gamma=True,
-            normalize_weights=False,
             reuse=tf.AUTO_REUSE,
             epsilon=1e-3,
             session=None,
@@ -785,58 +871,62 @@ class DenseLayer(object):
                 self.units = units
                 self.use_bias = use_bias
                 self.activation = get_activation(activation, session=self.session, training=self.training)
-                self.kernel_initializer = get_initializer(kernel_initializer, session=self.session)
-                if bias_initializer is None:
-                    bias_initializer = 'zeros_initializer'
-                self.bias_initializer = get_initializer(bias_initializer, session=self.session)
+                self.kernel_sd_init = kernel_sd_init
                 self.dropout = get_dropout(dropout, training=self.training, session=self.session)
-                self.kernel_regularizer = get_regularizer(kernel_regularizer, session=self.session)
-                self.bias_regularizer = get_regularizer(bias_regularizer, session=self.session)
                 self.batch_normalization_decay = batch_normalization_decay
                 self.batch_normalization_use_beta = batch_normalization_use_beta
                 self.batch_normalization_use_gamma = batch_normalization_use_gamma
-                self.normalize_weights = normalize_weights
                 self.reuse = reuse
                 self.epsilon = epsilon
                 self.name = name
-
-                self.dense_layer = None
-                self.kernel_lambdas = []
-                self.projection = None
-
-                self.initializer = get_initializer(kernel_initializer, self.session)
 
                 self.built = False
 
     @property
     def weights(self):
         if self.built:
-            return self.dense_layer.weights
+            return [self.kernel]
         return []
 
     def build(self, inputs):
         if not self.built:
+            in_dim = inputs.shape[-1]
             if self.units is None:
-                out_dim = inputs.shape[-1]
+                out_dim = in_dim
             else:
                 out_dim = self.units
 
+            if not self.name:
+                name = ''
+            else:
+                name = self.name
+
             with self.session.as_default():
                 with self.session.graph.as_default():
-                    self.dense_layer = tf.layers.Dense(
-                        out_dim,
-                        use_bias=self.use_bias,
-                        kernel_initializer=self.kernel_initializer,
-                        bias_initializer=self.bias_initializer,
-                        kernel_regularizer=self.kernel_regularizer,
-                        bias_regularizer=self.bias_regularizer,
-                        _reuse=self.reuse,
-                        name=self.name
-                    )
+                    with tf.variable_scope(name, reuse=self.reuse):
+                        if isinstance(self.kernel_sd_init, str):
+                            if self.kernel_sd_init.lower() in ['xavier', 'glorot']:
+                                sd = math.sqrt(2 / (int(in_dim) + out_dim))
+                            elif self.kernel_sd_init.lower() == 'he':
+                                sd = math.sqrt(2 / int(in_dim))
+                        else:
+                            sd = self.kernel_sd_init
 
-                    self.kernel_lambdas.append(self.dense_layer)
-                    self.kernel_lambdas.append(make_lambda(self.dropout, use_kwargs=False, session=self.session))
-                    self.kernel = compose_lambdas(self.kernel_lambdas)
+                        kernel_init = get_initializer(
+                            'random_normal_initializer_mean=0-stddev=%s' % sd,
+                            session=self.session
+                        )
+                        self.kernel = tf.get_variable(
+                            name='kernel',
+                            initializer=kernel_init,
+                            shape=[in_dim, out_dim]
+                        )
+
+                        self.bias = tf.get_variable(
+                            name='bias',
+                            shape=[out_dim],
+                            initializer=tf.zeros_initializer(),
+                        )
 
             self.built = True
 
@@ -847,13 +937,11 @@ class DenseLayer(object):
         with self.session.as_default():
             with self.session.graph.as_default():
 
-                H = self.kernel(inputs)
-
-                if self.normalize_weights:
-                    self.w = self.dense_layer.kernel
-                    self.g = tf.Variable(tf.ones(self.w.shape[1]), dtype=tf.float32)
-                    self.v = tf.norm(self.w, axis=0)
-                    self.dense_layer.kernel = self.v
+                H = tf.matmul(inputs, self.kernel)
+                bias = self.bias
+                while len(bias.shape) < len(H.shape):
+                    bias = bias[None, ...]
+                H += bias
 
                 if self.batch_normalization_decay:
                     H = tf.contrib.layers.batch_norm(
@@ -871,10 +959,146 @@ class DenseLayer(object):
                 if self.activation is not None:
                     H = self.activation(H)
 
+                H = self.dropout(H)
+
                 return H
 
     def call(self, *args, **kwargs):
         self.__call__(*args, **kwargs)
+
+
+class DenseLayerBayes(DenseLayer):
+
+    def __init__(
+            self,
+            training=True,
+            units=None,
+            use_bias=True,
+            activation=None,
+            dropout=None,
+            batch_normalization_decay=None,
+            batch_normalization_use_beta=True,
+            batch_normalization_use_gamma=True,
+            use_MAP_mode=None,
+            kernel_prior_sd='he',
+            bias_prior_sd=1,
+            posterior_to_prior_sd_ratio=1,
+            reuse=tf.AUTO_REUSE,
+            epsilon=1e-3,
+            session=None,
+            name=None
+    ):
+        super(DenseLayerBayes, self).__init__(
+            training=training,
+            units=units,
+            use_bias=use_bias,
+            activation=activation,
+            kernel_sd_init=kernel_prior_sd,
+            dropout=dropout,
+            batch_normalization_decay=batch_normalization_decay,
+            batch_normalization_use_beta=batch_normalization_use_beta,
+            batch_normalization_use_gamma=batch_normalization_use_gamma,
+            reuse=reuse,
+            epsilon=epsilon,
+            session=session,
+            name=name
+        )
+        self.session = get_session(session)
+        with session.as_default():
+            with session.graph.as_default():
+                self.use_MAP_mode = use_MAP_mode
+                self.kernel_prior_sd = kernel_prior_sd
+                self.bias_prior_sd = bias_prior_sd
+                self.bias_sd_init = self.bias_prior_sd
+                self.posterior_to_prior_sd_ratio = posterior_to_prior_sd_ratio
+
+                self.built = False
+
+    @property
+    def weights(self):
+        if self.built:
+            return [self.kernel_mean]
+        return []
+
+    def build(self, inputs):
+        if not self.built:
+            in_dim = inputs.shape[-1]
+            if self.units is None:
+                out_dim = in_dim
+            else:
+                out_dim = self.units
+
+            if not self.name:
+                name = ''
+            else:
+                name = self.name
+
+            with self.session.as_default():
+                with self.session.graph.as_default():
+                    with tf.variable_scope(name):
+                        if isinstance(self.kernel_sd_init, str):
+                            if self.kernel_sd_init.lower() in ['xavier', 'glorot']:
+                                sd = math.sqrt(2 / (int(in_dim) + out_dim))
+                            elif self.kernel_sd_init.lower() == 'he':
+                                sd = math.sqrt(2 / int(in_dim))
+                        else:
+                            sd = self.kernel_sd_init
+
+                        if self.use_MAP_mode is None:
+                            self.use_MAP_mode = tf.logical_not(self.training)
+                        self.kernel_mean = tf.Variable(
+                            tf.zeros([in_dim, out_dim]),
+                            name='kernel_mean'
+                        )
+                        self.kernel_sd_unconstrained = tf.Variable(
+                            tf.ones([in_dim, out_dim]) * tf.contrib.distributions.softplus_inverse(sd),
+                            name='kernel_sd'
+                        )
+                        self.kernel_sd = tf.nn.softplus(self.kernel_sd_unconstrained)
+                        self.kernel_dist = tf.contrib.distributions.Normal(
+                            loc=self.kernel_mean,
+                            scale=self.kernel_sd + self.epsilon
+                        )
+                        self.kernel_prior_dist = tf.contrib.distributions.Normal(
+                            loc=0.,
+                            scale=self.kernel_prior_sd
+                        )
+                        self.kernel = tf.cond(
+                            self.use_MAP_mode,
+                            self.kernel_dist.mean,
+                            self.kernel_dist.sample
+                        )
+
+                        self.bias_mean = tf.Variable(
+                            tf.zeros([out_dim]),
+                            name='bias_mean'
+                        )
+                        self.bias_sd_unconstrained = tf.Variable(
+                            tf.ones([out_dim]) * tf.contrib.distributions.softplus_inverse(self.bias_sd_init),
+                            name='bias_sd'
+                        )
+                        self.bias_sd = tf.nn.softplus(self.bias_sd_unconstrained)
+                        self.bias_dist = tf.contrib.distributions.Normal(
+                            loc=self.bias_mean,
+                            scale=self.bias_sd + self.epsilon
+                        )
+                        self.bias_prior_dist = tf.contrib.distributions.Normal(
+                            loc=0.,
+                            scale=self.bias_prior_sd
+                        )
+                        self.bias = tf.cond(
+                            self.use_MAP_mode,
+                            self.bias_dist.mean,
+                            self.bias_dist.sample
+                        )
+
+            self.built = True
+
+    def kl_penalties(self):
+        return [
+            self.kernel_dist.kl_divergence(self.kernel_prior_dist),
+            self.bias_dist.kl_divergence(self.bias_prior_dist)
+        ]
 
 
 class DenseResidualLayer(object):

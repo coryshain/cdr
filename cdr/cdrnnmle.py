@@ -1,6 +1,8 @@
+import math
 import pandas as pd
 
 from .kwargs import CDRNNMLE_INITIALIZATION_KWARGS
+from .backend import get_initializer, DenseLayer, DenseLayer, CDRNNLayer
 from .cdrnnbase import CDRNN
 from .util import sn, reg_name, stderr
 
@@ -63,9 +65,10 @@ class CDRNNMLE(CDRNN):
 
 
 
+
     ######################################################
     #
-    #  MLE IMPLEMENTATION OF CDRNN
+    #  Network initialization
     #
     ######################################################
 
@@ -82,16 +85,137 @@ class CDRNNMLE(CDRNN):
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     intercept = tf.Variable(
-                        # tf.random_normal(
-                        #     shape=[rangf_n_levels],
-                        #     stddev=self.init_sd,
-                        #     dtype=self.FLOAT_TF
-                        # ),
                         tf.zeros([rangf_n_levels], dtype=self.FLOAT_TF),
                         name='intercept_by_%s' % sn(ran_gf)
                     )
                     intercept_summary = intercept
                 return intercept, intercept_summary
+
+    def initialize_feedforward(
+            self,
+            units,
+            use_bias=True,
+            activation=None,
+            dropout=None,
+            batch_normalization_decay=None,
+            name=None
+    ):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                projection = DenseLayer(
+                    training=self.training,
+                    units=units,
+                    use_bias=use_bias,
+                    activation=activation,
+                    dropout=dropout,
+                    batch_normalization_decay=batch_normalization_decay,
+                    kernel_sd_init=self.kernel_sd_init,
+                    epsilon=self.epsilon,
+                    session=self.sess,
+                    name=name
+                )
+
+                return projection
+
+    def initialize_rnn(self, l):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                units = self.n_units_rnn[l]
+                rnn = CDRNNLayer(
+                    training=self.training,
+                    units=units,
+                    time_projection_depth=self.n_layers_irf + 1,
+                    activation=self.rnn_activation,
+                    recurrent_activation=self.recurrent_activation,
+                    time_projection_inner_activation=self.irf_inner_activation,
+                    bottomup_kernel_sd_init=self.kernel_sd_init,
+                    recurrent_kernel_sd_init=self.kernel_sd_init,
+                    bottomup_dropout=self.input_projection_dropout_rate,
+                    h_dropout=self.rnn_h_dropout_rate,
+                    c_dropout=self.rnn_c_dropout_rate,
+                    forget_rate=self.forget_rate,
+                    return_sequences=True,
+                    batch_normalization_decay=None,
+                    name='rnn_l%d' % (l + 1),
+                    epsilon=self.epsilon,
+                    session=self.sess
+                )
+
+                return rnn
+
+    def initialize_rnn_h(self, l, ran_gf=None):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                units = self.n_units_rnn[l]
+                if ran_gf is None:
+                    rnn_h = tf.Variable(tf.zeros([1, units]), name='rnn_h_l%d' % (l+1))
+                else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+                    rnn_h = tf.Variable(
+                        tf.zeros([rangf_n_levels, self.n_units_rnn[l]]),
+                        name='rnn_h_ran_l%d_by_%s' % (l+1, sn(ran_gf))
+                    )
+
+                return rnn_h
+
+    def initialize_rnn_c(self, l, ran_gf=None):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                units = self.n_units_rnn[l]
+                if ran_gf is None:
+                    rnn_h = tf.Variable(tf.zeros([1, units]), name='rnn_c_l%d' % (l+1))
+                else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+                    rnn_h = tf.Variable(
+                        tf.zeros([rangf_n_levels, units]),
+                        name='rnn_c_ran_l%d_by_%s' % (l+1, sn(ran_gf))
+                    )
+
+                return rnn_h
+
+    def initialize_h_bias(self, ran_gf=None):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                units = self.n_units_hidden_state
+                if ran_gf is None:
+                    h_bias = tf.Variable(tf.zeros([1, 1, units]), name='h_bias')
+                else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+                    h_bias = tf.Variable(
+                        tf.zeros([rangf_n_levels, units]),
+                        name='h_bias_by_%s' % (sn(ran_gf))
+                    )
+
+                return h_bias
+
+    def initialize_irf_l1_biases(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if isinstance(self.kernel_sd_init, str):
+                    if self.kernel_sd_init.lower() in ['xavier', 'glorot']:
+                        sd = math.sqrt(2 / (1 + self.n_units_t_delta_embedding))
+                    elif self.kernel_sd_init.lower() == 'he':
+                        sd = math.sqrt(2)
+                else:
+                    sd = self.kernel_sd_init
+
+                kernel_init = get_initializer(
+                    'random_normal_initializer_mean=0-stddev=%s' % sd,
+                    session=self.sess
+                )
+
+                irf_l1_W_bias = tf.get_variable(
+                    name='irf_l1_W_bias',
+                    initializer=kernel_init,
+                    shape=[1, 1, self.n_units_t_delta_embedding]
+                )
+
+                irf_l1_b_bias = tf.Variable(
+                    tf.zeros([1, 1, self.n_units_t_delta_embedding]),
+                    'irf_l1_b_bias',
+                )
+
+                return irf_l1_W_bias, irf_l1_b_bias
 
     def initialize_objective(self):
         with self.sess.as_default():
@@ -324,13 +448,12 @@ class CDRNNMLE(CDRNN):
                 self.train_op = self.optim.minimize(self.loss_func, global_step=self.global_batch_step)
 
 
-
-
     ######################################################
     #
     #  Public methods
     #
     ######################################################
+
 
     def report_settings(self, indent=0):
         out = super(CDRNNMLE, self).report_settings(indent=indent)
