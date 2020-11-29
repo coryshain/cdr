@@ -99,7 +99,7 @@ class CDRNN(Model):
         if self.n_units_input_projection:
             if isinstance(self.n_units_input_projection, str):
                 if self.n_units_input_projection.lower() == 'infer':
-                    self.n_units_input_projection = [len(self.impulse_names) + 1]
+                    self.n_units_input_projection = [len(self.impulse_names) + len(self.ablated) + 1]
                 else:
                     self.n_units_input_projection = [int(x) for x in self.n_units_input_projection.split()]
             elif isinstance(self.n_units_input_projection, int):
@@ -120,7 +120,7 @@ class CDRNN(Model):
         if self.n_units_rnn:
             if isinstance(self.n_units_rnn, str):
                 if self.n_units_rnn.lower() == 'infer':
-                    self.n_units_rnn = [len(self.impulse_names) + 1]
+                    self.n_units_rnn = [len(self.impulse_names) + len(self.ablated) + 1]
                 else:
                     self.n_units_rnn = [int(x) for x in self.n_units_rnn.split()]
             elif isinstance(self.n_units_rnn, int):
@@ -207,7 +207,7 @@ class CDRNN(Model):
                 self.n_units_hidden_state = self.n_units_t_delta_embedding
         elif isinstance(self.n_units_hidden_state, str):
             if self.n_units_hidden_state.lower() == 'infer':
-                self.n_units_hidden_state = len(self.impulse_names) + 1
+                self.n_units_hidden_state = len(self.impulse_names) + len(self.ablated) + 1
             else:
                 self.n_units_hidden_state = int(self.n_units_hidden_state)
 
@@ -607,6 +607,10 @@ class CDRNN(Model):
                     denom = self.n_units_hidden_state
                     if self.n_units_error_params_fn:
                         denom = max(denom, self.n_units_error_params_fn[-1])
+                    self.y_skewness_coef = tf.Variable(
+                        1. / denom,
+                        name='skewness_coef'
+                    )
                     self.y_tailweight_coef = tf.Variable(
                         1. / denom,
                         name='tailweight_coef'
@@ -1131,6 +1135,7 @@ class CDRNN(Model):
                 )
 
                 if self.asymmetric_error:
+                    y_skewness_delta *= self.y_skewness_coef
                     self.y_skewness_delta = y_skewness_delta
                     self.y_skewness_delta_ema = tf.Variable(0., trainable=False, name='y_skewness_delta_ema')
                     self.y_skewness_delta_ema_op = tf.assign(

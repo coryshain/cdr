@@ -283,6 +283,7 @@ class Formula(object):
 
     def __init__(self, bform_str, standardize=True):
         self.build(bform_str, standardize=standardize)
+        self.ablated = set()
 
     def build(self, bform_str, standardize=True):
         """
@@ -1353,6 +1354,7 @@ class Formula(object):
         if not isinstance(impulse_ids, list):
             impulse_ids = [impulse_ids]
         self.t.ablate_impulses(impulse_ids)
+        self.ablated |= set(impulse_ids)
 
     def unablate_impulses(self, impulse_ids):
         """
@@ -1365,6 +1367,7 @@ class Formula(object):
         if not isinstance(impulse_ids, list):
             impulse_ids = [impulse_ids]
         self.t.unablate_impulses(impulse_ids)
+        self.ablated -= set(impulse_ids)
 
     def remove_impulses(self, impulse_ids):
         """

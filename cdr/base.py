@@ -86,10 +86,9 @@ class Model(object):
             raise TypeError("``Model`` is an abstract class and may not be instantiated")
         return object.__new__(cls)
 
-    def __init__(self, form_str, X, y, **kwargs):
+    def __init__(self, form, X, y, ablated=None, **kwargs):
 
         ## Store initialization settings
-        self.form_str = form_str
         for kwarg in Model._INITIALIZATION_KWARGS:
             setattr(self, kwarg.key, kwargs.pop(kwarg.key, kwarg.default_value))
 
@@ -102,12 +101,24 @@ class Model(object):
         del kwargs['crossval_fold']
 
         # Parse and store model data from formula
-        form = Formula(self.form_str)
+        if isinstance(form, str):
+            self.form_str = form
+            form = Formula(form)
+        else:
+            self.form_str = str(form)
         form = form.categorical_transform(X)
         form = form.categorical_transform(y)
         self.form = form
         dv = form.dv
         rangf = form.rangf
+
+        # Store ablation info
+        if ablated is None:
+            self.ablated = set()
+        elif isinstance(ablated, str):
+            self.ablated = {ablated}
+        else:
+            self.ablated = set(ablated)
 
         # Compute from training data
         self.n_train = len(y)
@@ -385,6 +396,7 @@ class Model(object):
             'form_str': self.form_str,
             'form': self.form,
             'n_train': self.n_train,
+            'ablated': self.ablated,
             'y_train_mean': self.y_train_mean,
             'y_train_sd': self.y_train_sd,
             't_delta_max': self.t_delta_max,
@@ -418,6 +430,7 @@ class Model(object):
         self.form_str = md.pop('form_str')
         self.form = md.pop('form', Formula(self.form_str))
         self.n_train = md.pop('n_train')
+        self.ablated = md.pop('ablated', set())
         self.y_train_mean = md.pop('y_train_mean')
         self.y_train_sd = md.pop('y_train_sd')
         self.t_delta_max = md.pop('t_delta_max', md.pop('max_tdelta', None))

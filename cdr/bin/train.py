@@ -269,6 +269,7 @@ if __name__ == '__main__':
                         formula,
                         X,
                         y_valid,
+                        ablated=p['ablated'],
                         outdir=p.outdir + '/' + m,
                         history_length=p.history_length,
                         **kwargs
@@ -283,6 +284,7 @@ if __name__ == '__main__':
                         formula,
                         X,
                         y_valid,
+                        ablated=p['ablated'],
                         outdir=p.outdir + '/' + m,
                         history_length=p.history_length,
                         **kwargs
@@ -303,6 +305,7 @@ if __name__ == '__main__':
                         formula,
                         X,
                         y_valid,
+                        ablated=p['ablated'],
                         outdir=p.outdir + '/' + m,
                         history_length=p.history_length,
                         **kwargs
@@ -317,6 +320,7 @@ if __name__ == '__main__':
                         formula,
                         X,
                         y_valid,
+                        ablated=p['ablated'],
                         outdir=p.outdir + '/' + m,
                         history_length=p.history_length,
                         **kwargs

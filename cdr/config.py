@@ -160,6 +160,7 @@ class Config(object):
                             )
                         else:
                             raise ValueError('Ablation with reg_type "%s" not currently supported.' % reg_type)
+                        new_model['ablated'] = set(ablated)
                         self.models[new_name] = new_model
                         self.model_list.append(new_name)
 
@@ -252,6 +253,8 @@ class Config(object):
         for kwarg in CDRNNBAYES_INITIALIZATION_KWARGS:
             if kwarg.in_settings(settings) or add_defaults:
                 out[kwarg.key] = kwarg.kwarg_from_config(settings)
+
+        out['ablated'] = set()
 
         # Cross validation settings
         if 'crossval_factor' in settings or add_defaults:
