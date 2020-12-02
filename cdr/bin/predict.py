@@ -237,9 +237,10 @@ if __name__ == '__main__':
         for m in models:
             formula = p.models[m]['formula']
             p.set_model(m)
-            if not os.path.exists(p.outdir + '/' + m):
-                os.makedirs(p.outdir + '/' + m)
-            with open(p.outdir + '/' + m + '/pred_inputs_%s.txt' % partition_str, 'w') as f:
+            m_path = m.replace(':', '+')
+            if not os.path.exists(p.outdir + '/' + m_path):
+                os.makedirs(p.outdir + '/' + m_path)
+            with open(p.outdir + '/' + m_path + '/pred_inputs_%s.txt' % partition_str, 'w') as f:
                 f.write('%s\n' % (' '.join(evaluation_set_paths[d][0])))
                 f.write('%s\n' % (' '.join(evaluation_set_paths[d][1])))
 
@@ -248,9 +249,9 @@ if __name__ == '__main__':
             else:
                 stderr('Retrieving saved model %s...\n' % m)
                 if (m.startswith('CDR') or m.startswith('DTSR')):
-                    model_cur = load_cdr(p.outdir + '/' + m)
+                    model_cur = load_cdr(p.outdir + '/' + m_path)
                 else:
-                    with open(p.outdir + '/' + m + '/m.obj', 'rb') as m_file:
+                    with open(p.outdir + '/' + m_path + '/m.obj', 'rb') as m_file:
                         model_cur = pickle.load(m_file)
                 model_cache[m] = model_cur
 
@@ -259,7 +260,7 @@ if __name__ == '__main__':
 
                 predict_LME(
                     model_cur,
-                    p.outdir + '/' + m,
+                    p.outdir + '/' + m_path,
                     X_baseline,
                     y,
                     dv,
@@ -271,7 +272,7 @@ if __name__ == '__main__':
 
                 predict_LM(
                     model_cur,
-                    p.outdir + '/' + m,
+                    p.outdir + '/' + m_path,
                     X_baseline,
                     y,
                     dv,
@@ -292,11 +293,11 @@ if __name__ == '__main__':
                 formula = ' '.join(formula)
 
                 gam_preds = model_cur.predict(X_baseline)
-                with open(p.outdir + '/' + m + '/preds_%s.txt' % partition_str, 'w') as p_file:
+                with open(p.outdir + '/' + m_path + '/preds_%s.txt' % partition_str, 'w') as p_file:
                     for i in range(len(gam_preds)):
                         p_file.write(str(gam_preds[i]) + '\n')
                 losses = np.array(y[dv] - gam_preds) ** 2
-                with open(p.outdir + '/' + m + '/losses_mse_%s.txt' % partition_str, 'w') as p_file:
+                with open(p.outdir + '/' + m_path + '/losses_mse_%s.txt' % partition_str, 'w') as p_file:
                     for i in range(len(losses)):
                         p_file.write(str(losses[i]) + '\n')
                 gam_mse = mse(y[dv], gam_preds)
@@ -311,7 +312,7 @@ if __name__ == '__main__':
                 summary += '  MSE: %.4f\n' % gam_mse
                 summary += '  MAE: %.4f\n' % gam_mae
                 summary += '=' * 50 + '\n'
-                with open(p.outdir + '/' + m + '/eval_%s.txt' % partition_str, 'w') as f_out:
+                with open(p.outdir + '/' + m_path + '/eval_%s.txt' % partition_str, 'w') as f_out:
                     f_out.write(summary)
                 stderr(summary)
 
@@ -340,9 +341,9 @@ if __name__ == '__main__':
                     from cdr.baselines import py2ri
 
                     if args.ablated_models:
-                        data_path = p.outdir + '/' + m + '/X_conv_' + partition_str + '.csv'
+                        data_path = p.outdir + '/' + m_path + '/X_conv_' + partition_str + '.csv'
                     else:
-                        data_path = p.outdir + '/' + m.split('!')[0] + '/X_conv_' + partition_str + '.csv'
+                        data_path = p.outdir + '/' + m_path.split('!')[0] + '/X_conv_' + partition_str + '.csv'
 
                     df = pd.read_csv(data_path, sep=' ', skipinitialspace=True)
                     for c in df.columns:
@@ -362,14 +363,14 @@ if __name__ == '__main__':
                         model_cur = model_cache_twostep[m]
                     else:
                         stderr('Retrieving saved model %s...\n' % m)
-                        with open(p.outdir + '/' + m + '/lm_train.obj', 'rb') as m_file:
+                        with open(p.outdir + '/' + m_path + '/lm_train.obj', 'rb') as m_file:
                             model_cur = pickle.load(m_file)
                         model_cache_twostep[m] = model_cur
 
                     if is_lme:
                         predict_LME(
                             model_cur,
-                            p.outdir + '/' + m,
+                            p.outdir + '/' + m_path,
                             df_r,
                             df,
                             dv,
@@ -379,7 +380,7 @@ if __name__ == '__main__':
                     else:
                         predict_LM(
                             model_cur,
-                            p.outdir + '/' + m,
+                            p.outdir + '/' + m_path,
                             df_r,
                             df,
                             dv,
@@ -432,9 +433,9 @@ if __name__ == '__main__':
                             )
                             df_out = pd.concat([y_valid.reset_index(drop=True), df_out.reset_index(drop=True)], axis=1)
                         else:
-                            preds_outfile = p.outdir + '/' + m + '/preds_%s.txt' % partition_str
-                            loss_outfile = p.outdir + '/' + m + '/losses_mse_%s.txt' % partition_str
-                            obs_outfile = p.outdir + '/' + m + '/obs_%s.txt' % partition_str
+                            preds_outfile = p.outdir + '/' + m_path + '/preds_%s.txt' % partition_str
+                            loss_outfile = p.outdir + '/' + m_path + '/losses_mse_%s.txt' % partition_str
+                            obs_outfile = p.outdir + '/' + m_path + '/obs_%s.txt' % partition_str
 
                             with open(preds_outfile, 'w') as p_file:
                                 for i in range(len(cdr_preds)):
@@ -487,7 +488,7 @@ if __name__ == '__main__':
                             df_ll = pd.DataFrame({'CDRloglik': cdr_loglik_vector})
                             df_out= pd.concat([df_out, df_ll], axis=1)
                         else:
-                            ll_outfile = p.outdir + '/' + m + '/loglik_%s.txt' % partition_str
+                            ll_outfile = p.outdir + '/' + m_path + '/loglik_%s.txt' % partition_str
                             with open(ll_outfile, 'w') as l_file:
                                 for i in range(len(cdr_loglik_vector)):
                                     l_file.write(str(cdr_loglik_vector[i]) + '\n')
@@ -511,7 +512,7 @@ if __name__ == '__main__':
                             terminal_names = model_cur.terminal_names
 
                     if args.extra_cols:
-                        preds_outfile = p.outdir + '/' + m + '/preds_table_%s.csv' % partition_str
+                        preds_outfile = p.outdir + '/' + m_path + '/preds_table_%s.csv' % partition_str
                         df_out.to_csv(preds_outfile, sep=' ', na_rep='NaN', index=False)
 
                     summary += 'Training iterations completed: %d\n\n' % model_cur.global_step.eval(session=model_cur.sess)
@@ -529,7 +530,7 @@ if __name__ == '__main__':
 
                     summary += '=' * 50 + '\n'
 
-                    with open(p.outdir + '/' + m + '/eval_%s.txt' % partition_str, 'w') as f_out:
+                    with open(p.outdir + '/' + m_path + '/eval_%s.txt' % partition_str, 'w') as f_out:
                         f_out.write(summary)
                     stderr(summary)
                     stderr('\n\n')

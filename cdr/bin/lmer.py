@@ -36,11 +36,12 @@ if __name__ == '__main__':
         partition_str = '-'.join(partitions)
 
         for m in models:
-            dir_path = p.outdir + '/' + m
+            m_path = m.replace(':', '+')
+            dir_path = p.outdir + '/' + m_path
             if args.ablated_models:
                 data_path = dir_path + '/X_conv_' + partition_str + '.csv'
             else:
-                data_path = p.outdir + '/' + m.split('!')[0] + '/X_conv_' + partition_str + '.csv'
+                data_path = p.outdir + '/' + m_path.split('!')[0] + '/X_conv_' + partition_str + '.csv'
 
             stderr('Two-step analysis using data file %s\n' %data_path)
 

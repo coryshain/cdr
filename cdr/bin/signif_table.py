@@ -104,7 +104,7 @@ if __name__ == '__main__':
     partition_str = '-'.join(partitions)
 
     suffix = '_2stepLRT_%s.txt' % partition_str if args.mode == '2step' else '_PT_%s.txt' % partition_str
-    paths = [p.outdir + '/' + x for x in os.listdir(p.outdir) if x.endswith(suffix)]
+    paths = [p.outdir + '/' + x.replace(':', '+') for x in os.listdir(p.outdir) if x.endswith(suffix)]
 
     models, comparisons, comparisons_converged = extract_comparisons(paths)
     comparison_keys = sorted(list(comparisons.keys()), key= lambda x: len(x[0]))
@@ -124,15 +124,16 @@ if __name__ == '__main__':
 
     data = [header]
     for m in models:
+        m_path = m.replace(':', '+')
         converged_str = ''
         row = {'model': m}
         for c in comparison_keys:
             c_str = comparison2str(c)
-            cur_signif = comparisons[c].get(m, np.nan)
+            cur_signif = comparisons[c].get(m_path, np.nan)
             cur_signif_str = str(cur_signif)
             if args.human_readable:
                 cur_signif_str += '' if cur_signif > 0.05 else '*' if cur_signif > 0.01 else '**' if cur_signif > 0.001 else '***'
-            converged_str += str(int(comparisons_converged[c].get(m, True)))
+            converged_str += str(int(comparisons_converged[c].get(m_path, True)))
             row[c_str] = cur_signif_str
         if args.mode == '2step':
             row['converged'] = converged_str

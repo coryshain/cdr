@@ -45,7 +45,7 @@ if __name__ == '__main__':
 
     paths = []
     for m in models:
-        path = p.outdir + '/' + m
+        path = p.outdir + '/' + m.replace(':', '+')
         if os.path.exists(path):
             paths.append(path)
 

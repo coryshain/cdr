@@ -62,10 +62,11 @@ if __name__ == '__main__':
 
     for i in range(len(models)):
         m = models[i]
+        m_path = m.replace(':', '+')
         name = names[i]
         beta_summaries[name] = {}
-        if os.path.exists(p.outdir + '/' + m + '/summary.txt'):
-            with open(p.outdir + '/' + m + '/summary.txt', 'r') as f:
+        if os.path.exists(p.outdir + '/' + m_path + '/summary.txt'):
+            with open(p.outdir + '/' + m_path + '/summary.txt', 'r') as f:
                 l = f.readline()
                 while l and not l.startswith('Posterior integral summaries by predictor'):
                     l = f.readline()

@@ -192,7 +192,7 @@ class CDRNNCell(LayerRNNCell):
             reuse=None,
             name=None,
             dtype=None,
-            epsilon=1e-8,
+            epsilon=1e-5,
             session=None
     ):
         self._session = get_session(session)
@@ -534,7 +534,7 @@ class CDRNNLayer(object):
             reuse=None,
             name=None,
             dtype=None,
-            epsilon=1e-8,
+            epsilon=1e-5,
             session=None
     ):
         self.session = get_session(session)
@@ -860,7 +860,7 @@ class DenseLayer(object):
             batch_normalization_use_beta=True,
             batch_normalization_use_gamma=True,
             reuse=tf.AUTO_REUSE,
-            epsilon=1e-3,
+            epsilon=1e-5,
             session=None,
             name=None
     ):
@@ -984,7 +984,7 @@ class DenseLayerBayes(DenseLayer):
             bias_prior_sd=1,
             posterior_to_prior_sd_ratio=1,
             reuse=tf.AUTO_REUSE,
-            epsilon=1e-3,
+            epsilon=1e-5,
             session=None,
             name=None
     ):
@@ -1120,7 +1120,7 @@ class DenseResidualLayer(object):
             project_inputs=False,
             normalize_weights=False,
             reuse=None,
-            epsilon=1e-3,
+            epsilon=1e-5,
             session=None,
             name=None
     ):
@@ -1300,7 +1300,7 @@ class RNNLayer(object):
             refeed_outputs=False,
             return_sequences=True,
             batch_normalization_decay=None,
-            epsilon=1e-3,
+            epsilon=1e-5,
             name=None,
             session=None
     ):

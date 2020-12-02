@@ -107,6 +107,7 @@ if __name__ == '__main__':
 
             for m in cdr_models:
                 formula = p.models[m]['formula']
+                m_path = m.replace(':', '+')
 
                 dv = formula.strip().split('~')[0].strip()
                 y_valid, select_y_valid = filter_invalid_responses(y, dv)
@@ -115,7 +116,7 @@ if __name__ == '__main__':
                     X_response_aligned_predictors_valid = X_response_aligned_predictors_valid[select_y_valid]
 
                 stderr('Retrieving saved model %s...\n' % m)
-                cdr_model = load_cdr(p.outdir + '/' + m)
+                cdr_model = load_cdr(p.outdir + '/' + m_path)
 
                 X_conv, X_conv_summary = cdr_model.convolve_inputs(
                     X,
@@ -130,10 +131,10 @@ if __name__ == '__main__':
                     standardize_response=args.standardize_response
                 )
 
-                X_conv.to_csv(p.outdir + '/' + m + '/X_conv_%s.csv' %partition_str, sep=' ', index=False, na_rep='nan')
+                X_conv.to_csv(p.outdir + '/' + m_path + '/X_conv_%s.csv' %partition_str, sep=' ', index=False, na_rep='nan')
 
                 stderr(X_conv_summary)
-                with open(p.outdir + '/' + m + '/X_conv_%s_summary.txt' %partition_str, 'w') as f:
+                with open(p.outdir + '/' + m_path + '/X_conv_%s_summary.txt' %partition_str, 'w') as f:
                     f.write(X_conv_summary)
 
                 cdr_model.finalize()

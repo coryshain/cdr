@@ -37,9 +37,10 @@ if __name__ == '__main__':
         for m in models:
             p.set_model(m)
             formula = p.models[m]['formula']
+            m_path = m.replace(':', '+')
 
             stderr('Retrieving saved model %s...\n' % m)
-            cdr_model = load_cdr(p.outdir + '/' + m)
+            cdr_model = load_cdr(p.outdir + '/' + m_path)
 
             stderr('Computing RMSD...\n')
 
@@ -66,7 +67,7 @@ if __name__ == '__main__':
             else:
                 out_name = 'synth_rmsd'
 
-            with open(p.outdir + '/' + m + '/' + out_name + '.txt', 'w') as f:
+            with open(p.outdir + '/' + m_path + '/' + out_name + '.txt', 'w') as f:
                 f.write(summary)
             sys.stdout.write(summary)
 

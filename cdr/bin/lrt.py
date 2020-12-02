@@ -62,18 +62,20 @@ if __name__ == '__main__':
                 stderr('Comparing models within ablation set "%s"...\n' %s)
             for i in range(len(model_set)):
                 model_name_1 = model_set[i]
-                lme_path_1 = p.outdir + '/' + model_name_1 + '/lm_%s.obj' % ('z_%s' % partition_str if args.zscore else partition_str)
+                model_name_1_path = model_name_1.replace(':', '+')
+                lme_path_1 = p.outdir + '/' + model_name_1_path + '/lm_%s.obj' % ('z_%s' % partition_str if args.zscore else partition_str)
                 with open(lme_path_1, 'rb') as m_file:
                     lme1 = pickle.load(m_file)
 
                 for j in range(i+1, len(model_set)):
                     model_name_2 = model_set[j]
+                    model_name_2_path = model_name_2.replace(':', '+')
                     if nested(model_name_1, model_name_2) or not args.ablation:
-                        lme_path_2 = p.outdir + '/' + model_name_2 + '/lm_%s.obj' % ('z_%s' % partition_str if args.zscore else partition_str)
+                        lme_path_2 = p.outdir + '/' + model_name_2_path + '/lm_%s.obj' % ('z_%s' % partition_str if args.zscore else partition_str)
                         with open(lme_path_2, 'rb') as m_file:
                             lme2 = pickle.load(m_file)
                         anova_summary = str(anova(lme1.m, lme2.m))
-                        name = '%s_v_%s' %(model_name_1, model_name_2)
+                        name = '%s_v_%s' %(model_name_1_path, model_name_2_path)
                         out_path = p.outdir + '/' + name + '_2stepLRT_%s.txt' % ('z_%s' % partition_str if args.zscore else partition_str)
                         with open(out_path, 'w') as f:
                             stderr('Saving output to %s...\n' %out_path)

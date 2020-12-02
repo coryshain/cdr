@@ -122,10 +122,11 @@ if __name__ == '__main__':
                 )
 
         for m in models:
+            m_path = m.replace(':', '+')
             p.set_model(m)
 
             stderr('Retrieving saved model %s...\n' % m)
-            cdr_model = load_cdr(p.outdir + '/' + m)
+            cdr_model = load_cdr(p.outdir + '/' + m_path)
 
             kwargs = {
                 'plot_n_time_units': p['plot_n_time_units'] if n_time_units is None else n_time_units,
@@ -140,8 +141,8 @@ if __name__ == '__main__':
             stderr('Plotting...\n')
 
             if args.qq:
-                obs_path = p.outdir + '/%s/obs_%s.txt' % (m, args.qq)
-                preds_path = p.outdir + '/%s/preds_%s.txt' % (m, args.qq)
+                obs_path = p.outdir + '/%s/obs_%s.txt' % (m_path, args.qq)
+                preds_path = p.outdir + '/%s/preds_%s.txt' % (m_path, args.qq)
                 has_obs = os.path.exists(obs_path)
                 has_preds = os.path.exists(preds_path)
                 if has_obs and has_preds:
@@ -183,7 +184,7 @@ if __name__ == '__main__':
                         err_theoretical_q,
                         err,
                         dir=cdr_model.outdir,
-                        filename=prefix + '%s_error_qq_plot_%s.png' % (m, args.qq),
+                        filename=prefix + '%s_error_qq_plot_%s.png' % (m_path, args.qq),
                         xlab=xlab,
                         ylab=ylab,
                         legend=not args.qq_nolegend,
@@ -205,7 +206,7 @@ if __name__ == '__main__':
                 plot_dirac=args.plot_dirac,
                 plot_rangf=args.plot_rangf,
                 ylim=args.ylim,
-                prefix=prefix + m,
+                prefix=prefix + m_path,
                 legend=legend,
                 xlab=args.xlab,
                 ylab=args.ylab,
@@ -230,7 +231,7 @@ if __name__ == '__main__':
                     plot_rangf=args.plot_rangf,
                     mc=True,
                     ylim=args.ylim,
-                    prefix=prefix + m,
+                    prefix=prefix + m_path,
                     legend=legend,
                     xlab=args.xlab,
                     ylab=args.ylab,

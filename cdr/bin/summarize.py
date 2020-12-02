@@ -28,9 +28,10 @@ if __name__ == '__main__':
         models = filter_models(p.model_list, args.models, cdr_only=True)
 
         for m in models:
+            m_path = m.replace(':', '+')
 
             stderr('Retrieving saved model %s...\n' % m)
-            cdr_model = load_cdr(p.outdir + '/' + m)
+            cdr_model = load_cdr(p.outdir + '/' + m_path)
 
             summary = cdr_model.summary(
                 random=args.random,
@@ -40,9 +41,9 @@ if __name__ == '__main__':
             )
 
             if args.prefix:
-                outname = p.outdir + '/' + m + '/' + args.prefix + '_summary.txt'
+                outname = p.outdir + '/' + m_path + '/' + args.prefix + '_summary.txt'
             else:
-                outname = p.outdir + '/' + m + '/summary.txt'
+                outname = p.outdir + '/' + m_path + '/summary.txt'
 
             stderr('Saving summary to %s' %outname)
             with open(outname, 'w') as f:
@@ -51,20 +52,17 @@ if __name__ == '__main__':
 
             if args.save_table:
                 if args.prefix:
-                    outname = p.outdir + '/' + m + '/' + args.prefix + '_cdr_parameters.csv'
+                    outname = p.outdir + '/' + m_path + '/' + args.prefix + '_cdr_parameters.csv'
                 else:
-                    outname = p.outdir + '/' + m + '/cdr_parameters.csv'
+                    outname = p.outdir + '/' + m_path + '/cdr_parameters.csv'
 
                 cdr_model.save_parameter_table(level=args.level, n_samples=args.nsamples, outfile=outname)
                 
                 if args.prefix:
-                    outname = p.outdir + '/' + m + '/' + args.prefix + '_cdr_irf_integrals.csv'
+                    outname = p.outdir + '/' + m_path + '/' + args.prefix + '_cdr_irf_integrals.csv'
                 else:
-                    outname = p.outdir + '/' + m + '/cdr_irf_integrals.csv'
+                    outname = p.outdir + '/' + m_path + '/cdr_irf_integrals.csv'
 
                 cdr_model.save_irf_integral_table(level=args.level, n_samples=args.nsamples, outfile=outname)
 
             cdr_model.finalize()
-
-
-

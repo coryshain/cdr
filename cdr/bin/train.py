@@ -123,21 +123,22 @@ if __name__ == '__main__':
     for m in models:
         p.set_model(m)
         formula = p['formula']
-        if not os.path.exists(p.outdir + '/' + m):
-            os.makedirs(p.outdir + '/' + m)
+        m_path = m.replace(':', '+')
+        if not os.path.exists(p.outdir + '/' + m_path):
+            os.makedirs(p.outdir + '/' + m_path)
         if m.startswith('LME'):
             from cdr.baselines import LME
 
             dv = formula.strip().split('~')[0].strip().replace('.','')
 
-            if os.path.exists(p.outdir + '/' + m + '/m.obj'):
+            if os.path.exists(p.outdir + '/' + m_path + '/m.obj'):
                 stderr('Retrieving saved model %s...\n' % m)
-                with open(p.outdir + '/' + m + '/m.obj', 'rb') as m_file:
+                with open(p.outdir + '/' + m_path + '/m.obj', 'rb') as m_file:
                     lme = pickle.load(m_file)
             else:
                 stderr('Fitting model %s...\n' % m)
                 lme = LME(formula, X_baseline)
-                with open(p.outdir + '/' + m + '/m.obj', 'wb') as m_file:
+                with open(p.outdir + '/' + m_path + '/m.obj', 'wb') as m_file:
                     pickle.dump(lme, m_file)
 
             lme_preds = lme.predict(X_baseline)
@@ -153,7 +154,7 @@ if __name__ == '__main__':
             summary += '  MSE: %.4f\n' % lme_mse
             summary += '  MAE: %.4f\n' % lme_mae
             summary += '=' * 50 + '\n'
-            with open(p.outdir + '/' + m + '/summary.txt', 'w') as f_out:
+            with open(p.outdir + '/' + m_path + '/summary.txt', 'w') as f_out:
                 f_out.write(summary)
             stderr(summary)
             stderr('\n\n')
@@ -163,14 +164,14 @@ if __name__ == '__main__':
 
             dv = formula.strip().split('~')[0].strip().replace('.','')
 
-            if os.path.exists(p.outdir + '/' + m + '/m.obj'):
+            if os.path.exists(p.outdir + '/' + m_path + '/m.obj'):
                 stderr('Retrieving saved model %s...\n' % m)
-                with open(p.outdir + '/' + m + '/m.obj', 'rb') as m_file:
+                with open(p.outdir + '/' + m_path + '/m.obj', 'rb') as m_file:
                     lm = pickle.load(m_file)
             else:
                 stderr('Fitting model %s...\n' % m)
                 lm = LM(formula, X_baseline)
-                with open(p.outdir + '/' + m + '/m.obj', 'wb') as m_file:
+                with open(p.outdir + '/' + m_path + '/m.obj', 'wb') as m_file:
                     pickle.dump(lm, m_file)
 
             lm_preds = lm.predict(X_baseline)
@@ -186,7 +187,7 @@ if __name__ == '__main__':
             summary += '  MSE: %.4f\n' % lm_mse
             summary += '  MAE: %.4f\n' % lm_mae
             summary += '=' * 50 + '\n'
-            with open(p.outdir + '/' + m + '/summary.txt', 'w') as f_out:
+            with open(p.outdir + '/' + m_path + '/summary.txt', 'w') as f_out:
                 f_out.write(summary)
             stderr(summary)
             stderr('\n\n')
@@ -207,14 +208,14 @@ if __name__ == '__main__':
                 formula[i] = c_term.sub(r'scale(\1, scale=FALSE)', formula[i])
             formula = ' '.join(formula)
 
-            if os.path.exists(p.outdir + '/' + m + '/m.obj'):
+            if os.path.exists(p.outdir + '/' + m_path + '/m.obj'):
                 stderr('Retrieving saved model %s...\n' % m)
-                with open(p.outdir + '/' + m + '/m.obj', 'rb') as m_file:
+                with open(p.outdir + '/' + m_path + '/m.obj', 'rb') as m_file:
                     gam = pickle.load(m_file)
             else:
                 stderr('Fitting model %s...\n' % m)
                 gam = GAM(formula, X_baseline, ran_gf=ran_gf)
-                with open(p.outdir + '/' + m + '/m.obj', 'wb') as m_file:
+                with open(p.outdir + '/' + m_path + '/m.obj', 'wb') as m_file:
                     pickle.dump(gam, m_file)
 
             gam_preds = gam.predict(X_baseline)
@@ -230,7 +231,7 @@ if __name__ == '__main__':
             summary += '  MSE: %.4f\n' % gam_mse
             summary += '  MAE: %.4f\n' % gam_mae
             summary += '=' * 50 + '\n'
-            with open(p.outdir + '/' + m + '/summary.txt', 'w') as f_out:
+            with open(p.outdir + '/' + m_path + '/summary.txt', 'w') as f_out:
                 f_out.write(summary)
             stderr(summary)
             stderr('\n\n')
@@ -270,7 +271,7 @@ if __name__ == '__main__':
                         X,
                         y_valid,
                         ablated=p['ablated'],
-                        outdir=p.outdir + '/' + m,
+                        outdir=p.outdir + '/' + m_path,
                         history_length=p.history_length,
                         **kwargs
                     )
@@ -285,7 +286,7 @@ if __name__ == '__main__':
                         X,
                         y_valid,
                         ablated=p['ablated'],
-                        outdir=p.outdir + '/' + m,
+                        outdir=p.outdir + '/' + m_path,
                         history_length=p.history_length,
                         **kwargs
                     )
@@ -306,7 +307,7 @@ if __name__ == '__main__':
                         X,
                         y_valid,
                         ablated=p['ablated'],
-                        outdir=p.outdir + '/' + m,
+                        outdir=p.outdir + '/' + m_path,
                         history_length=p.history_length,
                         **kwargs
                     )
@@ -321,7 +322,7 @@ if __name__ == '__main__':
                         X,
                         y_valid,
                         ablated=p['ablated'],
-                        outdir=p.outdir + '/' + m,
+                        outdir=p.outdir + '/' + m_path,
                         history_length=p.history_length,
                         **kwargs
                     )
@@ -361,7 +362,7 @@ if __name__ == '__main__':
 
             summary = cdr_model.summary()
 
-            with open(p.outdir + '/' + m + '/summary.txt', 'w') as f_out:
+            with open(p.outdir + '/' + m_path + '/summary.txt', 'w') as f_out:
                 f_out.write(summary)
             stderr(summary)
             stderr('\n\n')

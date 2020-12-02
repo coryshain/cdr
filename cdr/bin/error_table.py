@@ -112,8 +112,9 @@ if __name__ == '__main__':
         p = Config(path)
         for j, b in enumerate(baselines):
             if b in p.model_list:
+                b_path = b.replace(':', '+')
                 for partition in ['train', 'dev', 'test']:
-                    eval_path = p.outdir + '/' + b + '/' + 'eval_%s.txt' % partition
+                    eval_path = p.outdir + '/' + b_path + '/' + 'eval_%s.txt' % partition
                     if os.path.exists(eval_path):
                         converged = True
                         if b.startswith('LME'):
@@ -134,8 +135,9 @@ if __name__ == '__main__':
                                 line = f.readline()
         for j, s in enumerate(systems):
             if s in p.model_list:
+                s_path = s.replace(':', ':')
                 for partition in ['train', 'dev', 'test']:
-                    eval_path = p.outdir + '/' + s + '/' + 'eval_%s.txt' % partition
+                    eval_path = p.outdir + '/' + s_path + '/' + 'eval_%s.txt' % partition
                     if os.path.exists(eval_path):
                         converged = True
                         if s.startswith('LME'):

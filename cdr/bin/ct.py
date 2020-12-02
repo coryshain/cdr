@@ -126,22 +126,24 @@ if __name__ == '__main__':
                                 else:
                                     a_model = m1
                                     b_model = m2
-                                name = '%s_v_%s' %(a_model, b_model)
+                                a_model_path = a_model.replace(':', '+')
+                                b_model_path = b_model.replace(':', '+')
+                                name = '%s_v_%s' %(a_model_path, b_model_path)
                                 try:
-                                    if os.path.exists(p.outdir + '/' + a_model + '/' + pred_table_name):
-                                        df = pd.read_csv(p.outdir + '/' + a_model + '/' + pred_table_name, sep=' ', skipinitialspace=True)
+                                    if os.path.exists(p.outdir + '/' + a_model_path + '/' + pred_table_name):
+                                        df = pd.read_csv(p.outdir + '/' + a_model_path + '/' + pred_table_name, sep=' ', skipinitialspace=True)
                                         a = scale(df.CDRpreds)
                                         if 'y' in df.columns:
                                             y = scale(df.y)
                                         else:
                                             y = scale(df.yStandardized)
                                     else:
-                                        y = scale(pd.read_csv(p.outdir + '/' + a_model + '/' + obs_file_name, sep=' ', header=None, skipinitialspace=True)[0])
-                                        a = scale(pd.read_csv(p.outdir + '/' + a_model + '/' + pred_file_name, sep=' ', header=None, skipinitialspace=True)[0])
-                                    if os.path.exists(p.outdir + '/' + b_model + '/' + pred_table_name):
-                                        b = scale(pd.read_csv(p.outdir + '/' + b_model + '/' + pred_table_name, sep=' ', skipinitialspace=True).CDRpreds)
+                                        y = scale(pd.read_csv(p.outdir + '/' + a_model_path + '/' + obs_file_name, sep=' ', header=None, skipinitialspace=True)[0])
+                                        a = scale(pd.read_csv(p.outdir + '/' + a_model_path + '/' + pred_file_name, sep=' ', header=None, skipinitialspace=True)[0])
+                                    if os.path.exists(p.outdir + '/' + b_model_path + '/' + pred_table_name):
+                                        b = scale(pd.read_csv(p.outdir + '/' + b_model_path + '/' + pred_table_name, sep=' ', skipinitialspace=True).CDRpreds)
                                     else:
-                                        b = scale(pd.read_csv(p.outdir + '/' + b_model + '/' + pred_file_name, sep=' ', header=None, skipinitialspace=True)[0])
+                                        b = scale(pd.read_csv(p.outdir + '/' + b_model_path + '/' + pred_file_name, sep=' ', header=None, skipinitialspace=True)[0])
                                 except FileNotFoundError as e:
                                     sys.stderr.write(str(e) + '\n')
                                     continue
@@ -205,8 +207,9 @@ if __name__ == '__main__':
                 pooled_data[a][exp_outdir] = {}
                 for m in basenames_to_pool:
                     m_name = '!'.join([m] + list(a))
-                    if os.path.exists(exp_outdir + '/' + m_name + '/' + pred_table_name):
-                        df = pd.read_csv(exp_outdir + '/' + m_name + '/' + pred_table_name, sep=' ', skipinitialspace=True)
+                    m_name_path = m_name.replace(':', '+')
+                    if os.path.exists(exp_outdir + '/' + m_name_path + '/' + pred_table_name):
+                        df = pd.read_csv(exp_outdir + '/' + m_name_path + '/' + pred_table_name, sep=' ', skipinitialspace=True)
                         pooled_data[a][exp_outdir][m] = scale(df.CDRpreds)
                         if exp_outdir not in targets:
                             if 'y' in df.columns:
@@ -214,9 +217,9 @@ if __name__ == '__main__':
                             else:
                                 targets[exp_outdir] = scale(df.yStandardized)
                     else:
-                        pooled_data[a][exp_outdir][m] = scale(pd.read_csv(exp_outdir + '/' + m_name + '/' + pred_file_name, sep=' ', header=None, skipinitialspace=True)[0])
+                        pooled_data[a][exp_outdir][m] = scale(pd.read_csv(exp_outdir + '/' + m_name_path + '/' + pred_file_name, sep=' ', header=None, skipinitialspace=True)[0])
                         if exp_outdir not in targets:
-                            targets[exp_outdir] = scale(pd.read_csv(exp_outdir + '/' + m_name + '/' + obs_file_name, sep=' ', header=None, skipinitialspace=True)[0])
+                            targets[exp_outdir] = scale(pd.read_csv(exp_outdir + '/' + m_name_path + '/' + obs_file_name, sep=' ', header=None, skipinitialspace=True)[0])
 
         for i in range(len(ablations)):
             a1 = ablations[i]
@@ -238,6 +241,8 @@ if __name__ == '__main__':
                         b_model = a1
                         a_name = 'FULL' if m1 == '' else '!' + m1
                         b_name = 'FULL' if m2 == '' else '!' + m2
+                    a_name_path = a_name.replace(':', '+')
+                    b_name_path = b_name.replace(':', '+')
                     df1 = []
                     df2 = []
                     df_targ = []
@@ -259,7 +264,7 @@ if __name__ == '__main__':
                         df2.shape
                     )
                     stderr('\n')
-                    name = '%s_v_%s' % (a_name, b_name)
+                    name = '%s_v_%s' % (a_name_path, b_name_path)
                     out_path = p.outdir + '/' + name + '_CT_pooled_' + partition_str + '.txt'
                     with open(out_path, 'w') as f:
                         stderr('Saving output to %s...\n' % out_path)
