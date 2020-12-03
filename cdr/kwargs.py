@@ -228,7 +228,7 @@ MODEL_INITIALIZATION_KWARGS = [
         'constraint',
         'softplus',
         str,
-        "Constraint function to use for bounded variables. One of ``['abs', 'softplus']``."
+        "Constraint function to use for bounded variables. One of ``['abs', 'square', 'softplus']``."
     ),
     Kwarg(
         'optim_name',

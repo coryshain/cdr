@@ -3064,20 +3064,10 @@ class CDR(Model):
 
                 if lb is not None and ub is None:
                     # Lower-bounded support only
-                    if self.constraint.lower() == 'softplus':
-                        mean = tf.contrib.distributions.softplus_inverse(mean - lb - self.epsilon)
-                    elif self.constraint.lower() == 'abs':
-                        mean = mean - lb - self.epsilon
-                    else:
-                        raise ValueError('Unrecognized constraint function "%s"' % self.constraint)
+                    mean = self.constraint_fn_inv(mean - lb - self.epsilon)
                 elif lb is None and ub is not None:
                     # Upper-bounded support only
-                    if self.constraint.lower() == 'softplus':
-                        mean = tf.contrib.distributions.softplus_inverse(-(mean - ub + self.epsilon))
-                    elif self.constraint.lower() == 'abs':
-                        mean = -(mean - ub + self.epsilon)
-                    else:
-                        raise ValueError('Unrecognized constraint function "%s"' % self.constraint)
+                    mean = self.constraint_fn_inv(-(mean - ub + self.epsilon))
                 elif lb is not None and ub is not None:
                     # Finite-interval bounded support
                     mean = self._softplus_sigmoid_inverse(mean, lb, ub)

@@ -339,15 +339,19 @@ class Model(object):
 
                 self.y_sd_init_tf = tf.constant(float(self.y_sd_init))
                 if self.constraint.lower() == 'softplus':
-                    self.y_sd_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.y_sd_init_tf)
-                    if self.asymmetric_error:
-                        self.y_tailweight_init_unconstrained = tf.contrib.distributions.softplus_inverse(1.)
                     self.constraint_fn = tf.nn.softplus
-                else:
-                    self.y_sd_init_unconstrained = self.y_sd_init_tf
-                    if self.asymmetric_error:
-                        self.y_tailweight_init_unconstrained = 1.
+                    self.constraint_fn_inv = tf.contrib.distributions.softplus_inverse
+                elif self.constraint.lower() == 'square':
+                    self.constraint_fn = tf.square
+                    self.constraint_fn_inv = tf.sqrt
+                elif self.constraint.lower() == 'abs':
                     self.constraint_fn = self._safe_abs
+                    self.constraint_fn_inv = tf.identity
+                else:
+                    raise ValueError('Unrecognized constraint function %s' % self.constraint)
+                self.y_sd_init_unconstrained = self.constraint_fn_inv(self.y_sd_init_tf)
+                if self.asymmetric_error:
+                    self.y_tailweight_init_unconstrained = self.constraint_fn_inv(1.)
 
                 if self.convergence_n_iterates and self.convergence_alpha is not None:
                     self.d0 = []
