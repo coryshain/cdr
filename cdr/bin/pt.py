@@ -131,9 +131,11 @@ if __name__ == '__main__':
                                 else:
                                     a_model = m1
                                     b_model = m2
-                                name = '%s_v_%s' %(a_model, b_model)
-                                a = pd.read_csv(p.outdir + '/' + a_model + '/' + file_name, sep=' ', header=None, skipinitialspace=True)
-                                b = pd.read_csv(p.outdir + '/' + b_model + '/' + file_name, sep=' ', header=None, skipinitialspace=True)
+                                a_model_path = a_model.replace(':', '+')
+                                b_model_path = b_model.replace(':', '+')
+                                name = '%s_v_%s' %(a_model_path, b_model_path)
+                                a = pd.read_csv(p.outdir + '/' + a_model_path + '/' + file_name, sep=' ', header=None, skipinitialspace=True)
+                                b = pd.read_csv(p.outdir + '/' + b_model_path + '/' + file_name, sep=' ', header=None, skipinitialspace=True)
                                 select = np.logical_and(np.isfinite(np.array(a)), np.isfinite(np.array(b)))
                                 diff = float(len(a) - select.sum())
                                 p_value, base_diff, diffs = permutation_test(a[select], b[select], n_iter=10000, n_tails=args.tails, mode=args.metric, nested=is_nested)
@@ -166,7 +168,7 @@ if __name__ == '__main__':
             for exp_outdir in exps_outdirs:
                 pooled_data[a][exp_outdir] = {}
                 for m in basenames_to_pool:
-                    m_name = '!'.join([m] + list(a))
+                    m_name = '!'.join([m] + list(a)).replace(':', '+')
                     pooled_data[a][exp_outdir][m] = pd.read_csv(exp_outdir + '/' + m_name + '/' + file_name, sep=' ', header=None, skipinitialspace=True)
 
         for i in range(len(ablations)):
@@ -206,7 +208,7 @@ if __name__ == '__main__':
                     )
                     p_value, diff, diffs = permutation_test(df1, df2, n_iter=10000, n_tails=args.tails, mode=args.metric)
                     stderr('\n')
-                    name = '%s_v_%s' % (a_name, b_name)
+                    name = '%s_v_%s' % (a_name.replace(':', '+'), b_name.replace(':', '+'))
                     out_path = p.outdir + '/' + name + '_PT_pooled_' + partition_str + '.txt'
                     with open(out_path, 'w') as f:
                         stderr('Saving output to %s...\n' % out_path)

@@ -3313,7 +3313,8 @@ class CDR(Model):
             n_time_points=1000,
             t_interaction=0.,
             plot_rangf=False,
-            rangf_vals=None
+            rangf_vals=None,
+            plot_mean_as_reference=True
     ):
         if rangf_vals is None:
             rangf_keys = [None]

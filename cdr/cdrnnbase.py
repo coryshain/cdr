@@ -1466,7 +1466,8 @@ class CDRNN(Model):
             n_time_points=1000,
             t_interaction=0.,
             plot_rangf=False,
-            rangf_vals=None
+            rangf_vals=None,
+            plot_mean_as_reference=True
     ):
         if rangf_vals is None:
             rangf_keys = [None]
@@ -1495,6 +1496,7 @@ class CDRNN(Model):
             self.plot_impulse_1hot: impulse_one_hot,
             self.t_interaction: t_interaction,
             self.training: not self.predict_mode,
+            self.plot_mean_as_reference: plot_mean_as_reference
         }
 
         if plot_type.lower().startswith('irf_1d'):

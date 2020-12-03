@@ -2180,7 +2180,7 @@ class Model(object):
                             self.make_plots(
                                 irf_name_map=irf_name_map,
                                 plot_interactions=plot_interactions,
-                                plot_t_interaction=plot_t_interaction,
+                                reference_time=plot_t_interaction,
                                 plot_n_time_units=plot_n_time_units,
                                 plot_n_time_points=plot_n_time_points,
                                 surface_plot_n_time_points=surface_plot_n_time_points,
@@ -2207,7 +2207,7 @@ class Model(object):
                     self.make_plots(
                         irf_name_map=irf_name_map,
                         plot_interactions=plot_interactions,
-                        plot_t_interaction=plot_t_interaction,
+                        reference_time=plot_t_interaction,
                         plot_n_time_units=plot_n_time_units,
                         plot_n_time_points=plot_n_time_points,
                         surface_plot_n_time_points=surface_plot_n_time_points,
@@ -2227,7 +2227,7 @@ class Model(object):
                         self.make_plots(
                             irf_name_map=irf_name_map,
                             plot_interactions=plot_interactions,
-                            plot_t_interaction=plot_t_interaction,
+                            reference_time=plot_t_interaction,
                             plot_n_time_units=plot_n_time_units,
                             plot_n_time_points=plot_n_time_points,
                             surface_plot_n_time_points=surface_plot_n_time_points,
@@ -2797,11 +2797,12 @@ class Model(object):
             prop_cycle_ix=None,
             plot_dirac=False,
             plot_interactions=None,
-            plot_t_interaction=0.,
+            reference_time=0.,
             plot_rangf=False,
             plot_n_time_units=2.5,
             plot_n_time_points=1000,
             surface_plot_n_time_points=1024,
+            plot_mean_as_reference=True,
             generate_irf_surface_plots=False,
             generate_interaction_surface_plots=False,
             generate_curvature_plots=False,
@@ -2846,10 +2847,14 @@ class Model(object):
         :param prop_cycle_ix: ``list`` of ``int``, or ``None``; Integer indices to use in the properties cycle for each entry in **irf_names**. If ``None``, indices are automatically assigned.
         :param plot_dirac: ``bool``; include any linear Dirac delta IRF's (stick functions at t=0) in plot.
         :param plot_interactions: ``list`` of ``str``; List of all implicit interactions to plot (CDRNN only).
-        :param plot_t_interaction: ``float``; timepoint at which to plot interactions (CDRNN only)
+        :param reference_time: ``float``; timepoint at which to plot interactions (CDRNN only)
         :param plot_rangf: ``bool``; plot all (marginal) random effects.
         :param plot_n_time_units: ``float``; number if time units to use for plotting.
-        :param plot_n_time_points: ``int``; number of points to use for plotting.
+        :param plot_mean_as_reference: ``bool``; whether to use the predictor means as baseline reference (otherwise use zero). CDRNN only.
+        :param generate_irf_surface_plots: ``bool``; whether to plot IRF surfaces. CDRNN only.
+        :param generate_interaction_surface_plots: ``bool``; whether to plot IRF interaction surfaces. CDRNN only.
+        :param generate_curvature_plots: ``bool``; whether to plot IRF curvature at time **reference_time**. CDRNN only.
+        :param plot_composite: ``bool``; plot any composite IRFs. If ``False``, only plots terminal IRFs.
         :param plot_x_inches: ``int``; width of plot in inches.
         :param plot_y_inches: ``int``; height of plot in inches.
         :param ylim: 2-element ``tuple`` or ``list``; (lower_bound, upper_bound) to use for y axis. If ``None``, automatically inferred.
@@ -2973,9 +2978,10 @@ class Model(object):
                                 support_start=0.,
                                 n_time_units=plot_n_time_units,
                                 n_time_points=plot_n_time_points,
-                                t_interaction=plot_t_interaction,
+                                t_interaction=reference_time,
                                 plot_rangf=plot_rangf,
-                                rangf_vals=rangf_vals
+                                rangf_vals=rangf_vals,
+                                plot_mean_as_reference=plot_mean_as_reference
                             )
 
                             plot_x.append(x_cur)
@@ -3011,13 +3017,14 @@ class Model(object):
                                 support_start=0.,
                                 n_time_units=plot_n_time_units,
                                 n_time_points=plot_n_time_points,
-                                t_interaction=plot_t_interaction,
+                                t_interaction=reference_time,
                                 plot_rangf=plot_rangf,
-                                rangf_vals=rangf_vals
+                                rangf_vals=rangf_vals,
+                                plot_mean_as_reference=plot_mean_as_reference
                             )
 
                             xlab_cur = ':'.join([get_irf_name(x, irf_name_map) for x in name.split(':')])
-                            filename = 'curvature_plot_t%s_%s.png' % (plot_t_interaction, sn(xlab_cur))
+                            filename = 'curvature_plot_t%s_%s.png' % (reference_time, sn(xlab_cur))
 
                             if self.standardize_response and not standardize_response:
                                 y_cur *= self.y_train_sd
@@ -3054,9 +3061,10 @@ class Model(object):
                                 support_start=0.,
                                 n_time_units=plot_n_time_units,
                                 n_time_points=plot_n_time_points,
-                                t_interaction=plot_t_interaction,
+                                t_interaction=reference_time,
                                 plot_rangf=plot_rangf,
-                                rangf_vals=rangf_vals
+                                rangf_vals=rangf_vals,
+                                plot_mean_as_reference=plot_mean_as_reference
                             )
                             plot_x.append(x_cur)
                             plot_y.append(y_cur)
@@ -3072,7 +3080,7 @@ class Model(object):
                             names,
                             sort_names=True,
                             dir=self.outdir,
-                            prefix='interaction_surface_plot',
+                            prefix='interaction_surface_plot_t%s' % reference_time,
                             irf_name_map=irf_name_map,
                             plot_x_inches=plot_x_inches,
                             plot_y_inches=plot_y_inches,
@@ -3164,7 +3172,8 @@ class Model(object):
                                             n_time_units=plot_n_time_units,
                                             n_time_points=plot_n_time_points,
                                             plot_rangf=plot_rangf,
-                                            rangf_vals=rangf_vals
+                                            rangf_vals=rangf_vals,
+                                            plot_mean_as_reference=plot_mean_as_reference
                                         )
                                         plot_y.append(y_cur)
                                         names_cur.append(name)
