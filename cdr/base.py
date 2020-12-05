@@ -120,28 +120,87 @@ class Model(object):
         else:
             self.ablated = set(ablated)
 
-        # Compute from training data
+        # Collect stats for response variable
         self.n_train = len(y)
         self.y_train_mean = float(y[dv].mean())
         self.y_train_sd = float(y[dv].std())
 
+        # Collect stats for impulses
+        impulse_means = {}
+        impulse_sds = {}
+        impulse_medians = {}
+        impulse_lq = {}
+        impulse_uq = {}
+        impulse_min = {}
+        impulse_max = {}
+
+        impulse_df_ix = []
+        for impulse in self.form.t.impulses():
+            name = impulse.name()
+            is_interaction = type(impulse).__name__ == 'ImpulseInteraction'
+            found = False
+            i = 0
+            for i, df in enumerate(X + [y]):
+                if name in df.columns:
+                    impulse_means[name] = df[name].mean()
+                    impulse_sds[name] = df[name].std()
+                    impulse_medians[name] = df[name].quantile(0.5)
+                    impulse_lq[name] = df[name].quantile(0.1)
+                    impulse_uq[name] = df[name].quantile(0.9)
+                    impulse_min[name] = df[name].min()
+                    impulse_max[name] = df[name].max()
+                    found = True
+                    break
+                elif is_interaction:
+                    found = True
+                    for x in impulse.impulses():
+                        if not x.name() in df.columns:
+                            found = False
+                            break
+                    if found:
+                        column = df[[x.name() for x in impulse.impulses()]].product(axis=1)
+                        impulse_means[name] = column.mean()
+                        impulse_sds[name] = column.std()
+                        impulse_medians[name] = column.quantile(0.5)
+                        impulse_lq[name] = column.quantile(0.1)
+                        impulse_uq[name] = column.quantile(0.9)
+                        impulse_min[name] = column.min()
+                        impulse_max[name] = column.max()
+
+            if not found:
+                raise ValueError('Impulse %s was not found in an input file.' % name)
+
+            impulse_df_ix.append(i)
+        self.impulse_df_ix = impulse_df_ix
+        impulse_df_ix_unique = set(self.impulse_df_ix)
+
+        self.impulse_means = impulse_means
+        self.impulse_sds = impulse_sds
+        self.impulse_medians = impulse_medians
+        self.impulse_lq = impulse_lq
+        self.impulse_uq = impulse_uq
+        self.impulse_min = impulse_min
+        self.impulse_max = impulse_max
+
+        # Collect stats for temporal features
         t_deltas = []
         t_delta_maxes = []
         time_X = []
         first_obs, last_obs = get_first_last_obs_lists(y)
         y_time = y.time.values
         for i, cols in enumerate(zip(first_obs, last_obs)):
-            first_obs_cur, last_obs_cur = cols
-            first_obs_cur = np.array(first_obs_cur, dtype=getattr(np, self.int_type))
-            last_obs_cur = np.array(last_obs_cur, dtype=getattr(np, self.int_type))
-            time_X_cur = np.array(X[i].time, dtype=getattr(np, self.float_type))
-            time_X.append(time_X_cur)
-            for j, (s, e) in enumerate(zip(first_obs_cur, last_obs_cur)):
-                s = max(s, e - self.history_length)
-                time_X_slice = time_X_cur[s:e]
-                t_delta = y_time[j] - time_X_slice
-                t_deltas.append(t_delta)
-                t_delta_maxes.append(y_time[j] - time_X_cur[s])
+            if i in impulse_df_ix_unique:
+                first_obs_cur, last_obs_cur = cols
+                first_obs_cur = np.array(first_obs_cur, dtype=getattr(np, self.int_type))
+                last_obs_cur = np.array(last_obs_cur, dtype=getattr(np, self.int_type))
+                time_X_cur = np.array(X[i].time, dtype=getattr(np, self.float_type))
+                time_X.append(time_X_cur)
+                for j, (s, e) in enumerate(zip(first_obs_cur, last_obs_cur)):
+                    s = max(s, e - self.history_length)
+                    time_X_slice = time_X_cur[s:e]
+                    t_delta = y_time[j] - time_X_slice
+                    t_deltas.append(t_delta)
+                    t_delta_maxes.append(y_time[j] - time_X_cur[s])
 
         time_X = np.concatenate(time_X, axis=0)
         t_deltas = np.concatenate(t_deltas, axis=0)
@@ -184,82 +243,6 @@ class Model(object):
             rangf_map = pd.DataFrame({'id': vals}, index=keys).to_dict()['id']
             self.rangf_map_base.append(rangf_map)
             self.rangf_n_levels.append(len(keys) + 1)
-
-        # Collect stats for all impulses and all existing interactions of impulses
-        impulse_means = {}
-        impulse_sds = {}
-        impulse_medians = {}
-        impulse_lq = {}
-        impulse_uq = {}
-        impulse_min = {}
-        impulse_max = {}
-        impulse_names = self.form.t.impulse_names()
-        # impulse_names = [('time',)] + list(itertools.chain.from_iterable(
-        #     itertools.combinations(impulse_names, n) for n in range(1, len(impulse_names) + 1)
-        # ))
-
-        impulse_df_ix = []
-        for impulse in self.form.t.impulses():
-            name = impulse.name()
-            is_interaction = type(impulse).__name__ == 'ImpulseInteraction'
-            found = False
-            # varset = set(name)
-            # name = ':'.join(name)
-            i = 0
-            for i, df in enumerate(X + [y]):
-                # df_name = None
-                # for col in df.columns:
-                #     colset = set(col.split(':'))
-                #     if len(varset.symmetric_difference(colset)) == 0:
-                #         df_name = col
-                #         break
-                if name in df.columns:
-                    impulse_means[name] = df[name].mean()
-                    impulse_sds[name] = df[name].std()
-                    impulse_medians[name] = df[name].quantile(0.5)
-                    impulse_lq[name] = df[name].quantile(0.1)
-                    impulse_uq[name] = df[name].quantile(0.9)
-                    impulse_min[name] = df[name].min()
-                    impulse_max[name] = df[name].max()
-                    found = True
-                    break
-                elif is_interaction:
-                    found = True
-                    for x in impulse.impulses():
-                        if not x.name() in df.columns:
-                            found = False
-                            break
-                    if found:
-                        column = df[[x.name() for x in impulse.impulses()]].product(axis=1)
-                        impulse_means[name] = column.mean()
-                        impulse_sds[name] = column.std()
-                        impulse_medians[name] = column.quantile(0.5)
-                        impulse_lq[name] = column.quantile(0.1)
-                        impulse_uq[name] = column.quantile(0.9)
-                        impulse_min[name] = column.min()
-                        impulse_max[name] = column.max()
-                        
-            if not found:
-                raise ValueError('Impulse %s was not found in an input file.' % name)
-
-            impulse_df_ix.append(i)
-        self.impulse_df_ix = impulse_df_ix
-
-        self.impulse_means = impulse_means
-        self.impulse_sds = impulse_sds
-        self.impulse_medians = impulse_medians
-        self.impulse_lq = impulse_lq
-        self.impulse_uq = impulse_uq
-        self.impulse_min = impulse_min
-        self.impulse_max = impulse_max
-
-        # print(self.impulse_means)
-        # print(self.impulse_sds)
-        # print(self.impulse_medians)
-        # print(self.impulse_lq)
-        # print(self.impulse_uq)
-        # print(self.impulse_min)
-        # print(self.impulse_max)
 
         self._initialize_session()
         tf.keras.backend.set_session(self.sess)
