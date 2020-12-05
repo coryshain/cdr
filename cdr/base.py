@@ -308,11 +308,11 @@ class Model(object):
             self.impulse_df_ix = np.zeros(len(self.form.t.impulses()))
         self.impulse_df_ix = np.array(self.impulse_df_ix, dtype=self.INT_NP)
         self.impulse_df_ix_unique = sorted(list(set(self.impulse_df_ix)))
-        self.impulse_gather_indices = []
+        self.impulse_indices = []
         for i in range(len(self.impulse_df_ix_unique)):
             arange = np.arange(len(self.form.t.impulses()))
             ix = arange[np.where(self.impulse_df_ix == i)[0]]
-            self.impulse_gather_indices.append(ix)
+            self.impulse_indices.append(ix)
 
         self.use_crossval = bool(self.crossval_factor)
 
@@ -1907,7 +1907,7 @@ class Model(object):
             force_training_evaluation=True,
             irf_name_map=None,
             plot_interactions=None,
-            plot_t_interaction=0.,
+            reference_time=0.,
             plot_n_time_units=2.5,
             plot_n_time_points=1000,
             surface_plot_n_time_points=1024,
@@ -1950,7 +1950,7 @@ class Model(object):
         :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
             If ``None``, IRF tree node string ID's will be used.
         :param plot_interactions: ``list`` of ``str``; List of all implicit interactions to plot (CDRNN only).
-        :param plot_t_interaction: ``float``; Time value at which to plot (CDRNN only).
+        :param reference_time: ``float``; Time value at which to plot (CDRNN only).
         :param plot_n_time_units: ``float``; number if time units to use for plotting.
         :param plot_n_time_points: ``float``; number of points to use for plotting.
         :param surface_plot_n_time_points: ``float``; number of points to use in any surface plots (CDRNN only).
@@ -2026,23 +2026,23 @@ class Model(object):
         rho = corr_cdr(X_2d, impulse_names, impulse_names_2d, time_X_2d, time_X_mask)
         stderr(str(rho) + '\n\n')
 
-        # self.make_plots(
-        #     irf_name_map=irf_name_map,
-        #     plot_interactions=plot_interactions,
-        #     plot_t_interaction=plot_t_interaction,
-        #     plot_n_time_units=plot_n_time_units,
-        #     plot_n_time_points=plot_n_time_points,
-        #     surface_plot_n_time_points=surface_plot_n_time_points,
-        #     generate_irf_surface_plots=generate_irf_surface_plots,
-        #     generate_interaction_surface_plots=generate_interaction_surface_plots,
-        #     generate_curvature_plots=generate_curvature_plots,
-        #     plot_x_inches=plot_x_inches,
-        #     plot_y_inches=plot_y_inches,
-        #     legend=plot_legend,
-        #     cmap=cmap,
-        #     dpi=dpi,
-        #     keep_plot_history=self.keep_plot_history
-        # )
+        self.make_plots(
+            irf_name_map=irf_name_map,
+            plot_interactions=plot_interactions,
+            reference_time=reference_time,
+            plot_n_time_units=plot_n_time_units,
+            plot_n_time_points=plot_n_time_points,
+            surface_plot_n_time_points=surface_plot_n_time_points,
+            generate_irf_surface_plots=generate_irf_surface_plots,
+            generate_interaction_surface_plots=generate_interaction_surface_plots,
+            generate_curvature_plots=generate_curvature_plots,
+            plot_x_inches=plot_x_inches,
+            plot_y_inches=plot_y_inches,
+            legend=plot_legend,
+            cmap=cmap,
+            dpi=dpi,
+            keep_plot_history=self.keep_plot_history
+        )
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -2167,7 +2167,7 @@ class Model(object):
                             self.make_plots(
                                 irf_name_map=irf_name_map,
                                 plot_interactions=plot_interactions,
-                                reference_time=plot_t_interaction,
+                                reference_time=reference_time,
                                 plot_n_time_units=plot_n_time_units,
                                 plot_n_time_points=plot_n_time_points,
                                 surface_plot_n_time_points=surface_plot_n_time_points,
@@ -2194,7 +2194,7 @@ class Model(object):
                     self.make_plots(
                         irf_name_map=irf_name_map,
                         plot_interactions=plot_interactions,
-                        reference_time=plot_t_interaction,
+                        reference_time=reference_time,
                         plot_n_time_units=plot_n_time_units,
                         plot_n_time_points=plot_n_time_points,
                         surface_plot_n_time_points=surface_plot_n_time_points,
@@ -2214,7 +2214,7 @@ class Model(object):
                         self.make_plots(
                             irf_name_map=irf_name_map,
                             plot_interactions=plot_interactions,
-                            reference_time=plot_t_interaction,
+                            reference_time=reference_time,
                             plot_n_time_units=plot_n_time_units,
                             plot_n_time_points=plot_n_time_points,
                             surface_plot_n_time_points=surface_plot_n_time_points,

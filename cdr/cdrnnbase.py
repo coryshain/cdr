@@ -381,7 +381,7 @@ class CDRNN(Model):
                 elif self.context_regularizer_name == 'inherit':
                     self.context_regularizer = self.regularizer
                 else:
-                    scale = self.context_regularizer_scale / (self.history_length * max(1, len(self.impulse_gather_indices))) # Average over time
+                    scale = self.context_regularizer_scale / (self.history_length * max(1, len(self.impulse_indices))) # Average over time
                     if self.scale_regularizer_with_data:
                          scale *= self.minibatch_scale # Sum over batch, multiply by n batches
                     else:
@@ -576,7 +576,7 @@ class CDRNN(Model):
                         units = 1
                         if self.asymmetric_error:
                             units += 2
-                        n = len(self.impulse_gather_indices)
+                        n = len(self.impulse_indices)
                         if n > 1:
                             if n == 2:
                                 units += 1
@@ -830,7 +830,7 @@ class CDRNN(Model):
                     time_X /= self.time_X_sd
                     t_delta /= self.t_delta_sd
 
-                if not plot_mode and len(self.impulse_gather_indices) > 1:
+                if len(self.impulse_indices) > 1:
                     X_cdrnn = []
                     t_delta_cdrnn = []
                     time_X_cdrnn = []
@@ -840,18 +840,12 @@ class CDRNN(Model):
                     B = X_shape[0]
                     T = X_shape[1]
 
-                    for i, ix in enumerate(self.impulse_gather_indices):
-                        X_cur = [tf.gather(X, ix, axis=-1)]
-                        prec_dim = sum([len(self.impulse_gather_indices[j]) for j in range(i)])
-                        if prec_dim:
-                            X_cur.insert(0, tf.zeros([B, T, prec_dim], dtype=self.FLOAT_TF))
-                        fol_dim = sum([len(self.impulse_gather_indices[j]) for j in range(i+1, len(self.impulse_gather_indices))])
-                        if fol_dim:
-                            X_cur.append(tf.zeros([B, T, fol_dim], dtype=self.FLOAT_TF))
-                        if len(X_cur) > 1:
-                            X_cur = tf.concat(X_cur, axis=-1)
-                        else:
-                            X_cur = X_cur[0]
+                    for i, ix in enumerate(self.impulse_indices):
+                        dim_mask = np.zeros(len(self.impulse_names))
+                        dim_mask[ix] = 1
+                        while len(dim_mask.shape) < len(X.shape):
+                            dim_mask = dim_mask[None, ...]
+                        X_cur = X * dim_mask
 
                         if t_delta.shape[-1] > 1:
                             t_delta_cur = t_delta[..., ix[0]:ix[0]+1]
@@ -883,7 +877,7 @@ class CDRNN(Model):
                     sort_ix = tf.contrib.framework.argsort(tf.squeeze(time_X_cdrnn, axis=-1), axis=1)
                     B_ix = tf.tile(
                         tf.range(B)[..., None],
-                        [1, T * len(self.impulse_gather_indices)]
+                        [1, T * len(self.impulse_indices)]
                     )
                     gather_ix = tf.stack([B_ix, sort_ix], axis=-1)
 
@@ -892,9 +886,6 @@ class CDRNN(Model):
                     time_X = tf.gather_nd(time_X_cdrnn, gather_ix)
                     if time_X_mask is not None:
                         time_X_mask = tf.gather_nd(time_X_mask_cdrnn, gather_ix)
-                    sum_list = ['sort_ix', tf.shape(sort_ix), sort_ix, 'X', tf.shape(X), X, 't_delta', tf.shape(t_delta), t_delta, 'time_X', tf.shape(time_X), time_X]
-                    if time_X_mask is not None:
-                        sum_list += ['time_X_mask', tf.shape(time_X_mask), time_X_mask]
                 else:
                     t_delta = t_delta[..., :1]
                     time_X = time_X[..., :1]
@@ -1050,7 +1041,6 @@ class CDRNN(Model):
                     y_tailweight_delta = error_params[..., 2]
                 else:
                     y_skewness_delta = y_tailweight_delta = None
-
 
                 return {
                     'y': y,

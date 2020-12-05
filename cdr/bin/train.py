@@ -346,7 +346,7 @@ if __name__ == '__main__':
                 force_training_evaluation=args.force_training_evaluation,
                 irf_name_map=p.irf_name_map,
                 plot_interactions=p['plot_interactions'],
-                plot_t_interaction=p['plot_t_interaction'],
+                reference_time=p['plot_t_interaction'],
                 plot_n_time_units=p['plot_n_time_units'],
                 plot_n_time_points=p['plot_n_time_points'],
                 surface_plot_n_time_points=p['surface_plot_n_time_points'],
