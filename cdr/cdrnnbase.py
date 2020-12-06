@@ -761,7 +761,7 @@ class CDRNN(Model):
 
                         if self.log_random:
                             tf.summary.histogram(
-                                sn('by_%s/h_l%d' % (sn(gf), l+1)),
+                                sn('by_%s/h' % sn(gf)),
                                 h_bias_ran_matrix_cur,
                                 collections=['random']
                             )
