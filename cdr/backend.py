@@ -857,7 +857,6 @@ class DenseLayer(object):
             kernel_sd_init='he',
             dropout=None,
             batch_normalization_decay=None,
-            batch_normalization_use_beta=True,
             batch_normalization_use_gamma=True,
             reuse=tf.AUTO_REUSE,
             epsilon=1e-5,
@@ -874,7 +873,7 @@ class DenseLayer(object):
                 self.kernel_sd_init = kernel_sd_init
                 self.dropout = get_dropout(dropout, training=self.training, session=self.session)
                 self.batch_normalization_decay = batch_normalization_decay
-                self.batch_normalization_use_beta = batch_normalization_use_beta
+                self.use_batch_normalization = bool(self.batch_normalization_decay)
                 self.batch_normalization_use_gamma = batch_normalization_use_gamma
                 self.reuse = reuse
                 self.epsilon = epsilon
@@ -922,11 +921,12 @@ class DenseLayer(object):
                             shape=[in_dim, out_dim]
                         )
 
-                        self.bias = tf.get_variable(
-                            name='bias',
-                            shape=[out_dim],
-                            initializer=tf.zeros_initializer(),
-                        )
+                        if not self.use_batch_normalization and self.use_bias:
+                            self.bias = tf.get_variable(
+                                name='bias',
+                                shape=[out_dim],
+                                initializer=tf.zeros_initializer(),
+                            )
 
             self.built = True
 
@@ -936,18 +936,24 @@ class DenseLayer(object):
 
         with self.session.as_default():
             with self.session.graph.as_default():
-
                 H = tf.tensordot(inputs, self.kernel, 1)
-                bias = self.bias
-                while len(bias.shape) < len(H.shape):
-                    bias = bias[None, ...]
-                H += bias
+                if not self.use_batch_normalization and self.use_bias:
+                    bias = self.bias
+                    while len(bias.shape) < len(H.shape):
+                        bias = bias[None, ...]
+                    H += bias
 
                 if self.batch_normalization_decay:
+                    # with tf.variable_scope(self.name):
+                    #     H = tf.keras.layers.BatchNormalization(
+                    #         momentum=self.batch_normalization_decay,
+                    #         center=self.batch_normalization_use_beta,
+                    #         scale=self.batch_normalization_use_gamma
+                    #     )(H, self.training)
                     H = tf.contrib.layers.batch_norm(
                         H,
                         decay=self.batch_normalization_decay,
-                        center=self.batch_normalization_use_beta,
+                        center=self.use_bias,
                         scale=self.batch_normalization_use_gamma,
                         zero_debias_moving_mean=True,
                         epsilon=self.epsilon,

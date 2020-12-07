@@ -210,9 +210,10 @@ class CDRNNMLE(CDRNN):
                     shape=[1, 1, self.n_units_t_delta_embedding]
                 )
 
-                irf_l1_b_bias = tf.Variable(
-                    tf.zeros([1, 1, self.n_units_t_delta_embedding]),
-                    'irf_l1_b_bias',
+                irf_l1_b_bias = tf.get_variable(
+                    name='irf_l1_b_bias',
+                    initializer=tf.zeros_initializer(),
+                    shape=[1, 1, self.n_units_t_delta_embedding]
                 )
 
                 return irf_l1_W_bias, irf_l1_b_bias

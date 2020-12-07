@@ -927,20 +927,21 @@ CDRNN_INITIALIZATION_KWARGS = [
         None,
         [float, None],
         "Rate at which to drop neurons of IRF layers.",
-        # aliases=['dropout_rate']
+        aliases=['dropout_rate']
     ),
     Kwarg(
         'error_params_fn_dropout_rate',
         None,
         [float, None],
         "Rate at which to drop neurons of error params function.",
-        # aliases=['dropout_rate']
+        aliases=['dropout_rate']
     ),
     Kwarg(
         'ranef_dropout_rate',
         None,
         [float, None],
-        "Rate at which to drop random effects indicators."
+        "Rate at which to drop random effects indicators.",
+        aliases=['dropout_rate']
     ),
     Kwarg(
         'h_in_noise_sd',
