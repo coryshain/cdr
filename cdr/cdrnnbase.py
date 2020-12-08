@@ -479,33 +479,34 @@ class CDRNN(Model):
                 self.rnn_c_ema = rnn_c_ema
                 self.rnn_encoder = rnn_encoder
 
-                rnn_projection_layers = []
-                for l in range(self.n_layers_rnn_projection + 1):
-                    if l < self.n_layers_rnn_projection:
-                        units = self.n_units_rnn_projection[l]
-                        activation = self.rnn_projection_inner_activation
-                        use_bias = True
-                    else:
-                        units = self.n_units_hidden_state
-                        activation = self.rnn_projection_activation
-                        use_bias = False
+                if self.n_layers_rnn:
+                    rnn_projection_layers = []
+                    for l in range(self.n_layers_rnn_projection + 1):
+                        if l < self.n_layers_rnn_projection:
+                            units = self.n_units_rnn_projection[l]
+                            activation = self.rnn_projection_inner_activation
+                            use_bias = True
+                        else:
+                            units = self.n_units_hidden_state
+                            activation = self.rnn_projection_activation
+                            use_bias = False
 
-                    projection = self.initialize_feedforward(
-                        units=units,
-                        use_bias=use_bias,
-                        activation=activation,
-                        dropout=None,
-                        batch_normalization_decay=self.batch_normalization_decay,
-                        name='rnn_projection_l%s' % (l + 1)
-                    )
+                        projection = self.initialize_feedforward(
+                            units=units,
+                            use_bias=use_bias,
+                            activation=activation,
+                            dropout=None,
+                            batch_normalization_decay=self.batch_normalization_decay,
+                            name='rnn_projection_l%s' % (l + 1)
+                        )
 
-                    self.regularizable_layers.append(projection)
-                    rnn_projection_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
+                        self.regularizable_layers.append(projection)
+                        rnn_projection_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
 
-                rnn_projection_fn = compose_lambdas(rnn_projection_layers)
+                    rnn_projection_fn = compose_lambdas(rnn_projection_layers)
 
-                self.rnn_projection_layers = rnn_projection_layers
-                self.rnn_projection_fn = rnn_projection_fn
+                    self.rnn_projection_layers = rnn_projection_layers
+                    self.rnn_projection_fn = rnn_projection_fn
 
                 h_bias = self.initialize_h_bias()
 
@@ -565,27 +566,12 @@ class CDRNN(Model):
 
                 # ERROR PARAMS
                 error_params_fn_layers = []
-                for l in range(self.n_layers_error_params_fn + 1):
-                    if l < self.n_layers_error_params_fn:
-                        units = self.n_units_error_params_fn[l]
-                        activation = self.error_params_fn_inner_activation
-                        dropout = self.error_params_fn_dropout_rate
-                        bn = self.batch_normalization_decay
-                        use_bias = True
-                    else:
-                        units = 1
-                        if self.asymmetric_error:
-                            units += 2
-                        n = len(self.impulse_indices)
-                        if n > 1:
-                            if n == 2:
-                                units += 1
-                            else:
-                                units += n
-                        activation = self.error_params_fn_activation
-                        dropout = None
-                        bn = None
-                        use_bias = False
+                for l in range(self.n_layers_error_params_fn):
+                    units = self.n_units_error_params_fn[l]
+                    activation = self.error_params_fn_inner_activation
+                    dropout = self.error_params_fn_dropout_rate
+                    bn = self.batch_normalization_decay
+                    use_bias = True
 
                     projection = self.initialize_feedforward(
                         units=units,
@@ -596,12 +582,25 @@ class CDRNN(Model):
                         name='error_params_fn_l%s' % (l + 1)
                     )
 
-                    if l < self.n_layers_error_params_fn:
-                        self.regularizable_layers.append(projection)
+                    self.regularizable_layers.append(projection)
                     error_params_fn_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
 
                 self.error_params_fn_layers = error_params_fn_layers
                 self.error_params_fn = compose_lambdas(error_params_fn_layers)
+
+                units = 1
+                if self.asymmetric_error:
+                    units += 2
+                n = len(self.impulse_indices)
+                if n > 1:
+                    if n == 2:
+                        units += 1
+                    else:
+                        units += n
+                activation = self.error_params_fn_activation
+                dropout = None
+                bn = None
+                use_bias = False
 
                 if self.asymmetric_error:
                     denom = self.n_units_hidden_state
@@ -615,6 +614,17 @@ class CDRNN(Model):
                         1. / denom,
                         name='tailweight_coef'
                     )
+
+                projection = self.initialize_feedforward(
+                    units=units,
+                    use_bias=use_bias,
+                    activation=activation,
+                    dropout=dropout,
+                    batch_normalization_decay=bn,
+                    name='error_params_fn_l%s' % (self.n_layers_error_params_fn + 1)
+                )
+
+                self.error_params_final_fn = compose_lambdas([projection])
 
                 # INTERCEPT
                 if self.has_intercept[None]:
@@ -1033,7 +1043,10 @@ class CDRNN(Model):
                     y *= time_X_mask[..., None]
                 y = tf.reduce_sum(y, axis=1)
 
-                error_params = self.error_params_fn(h[..., -1, :])
+                error_params = self.error_params_fn(h)
+                # Max pooling over time
+                error_params = tf.reduce_max(error_params, axis=-2)
+                error_params = self.error_params_final_fn(error_params)
 
                 y_sd_delta = error_params[..., 0]
                 if self.asymmetric_error:

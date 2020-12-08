@@ -879,13 +879,23 @@ class DenseLayer(object):
                 self.epsilon = epsilon
                 self.name = name
 
+                self.batch_normalization_beta = None
+                self.batch_normalization_gamma = None
+
                 self.built = False
 
     @property
     def weights(self):
+        out = []
         if self.built:
-            return [self.kernel]
-        return []
+            out.append(self.kernel)
+        if self.use_batch_normalization:
+            with tf.variable_scope(self.name, reuse=True):
+                gamma = tf.get_variable(
+                    'gamma'
+                )
+                out.append(gamma)
+        return out
 
     def build(self, inputs):
         if not self.built:
@@ -947,7 +957,7 @@ class DenseLayer(object):
                     # with tf.variable_scope(self.name):
                     #     H = tf.keras.layers.BatchNormalization(
                     #         momentum=self.batch_normalization_decay,
-                    #         center=self.batch_normalization_use_beta,
+                    #         center=self.use_bias,
                     #         scale=self.batch_normalization_use_gamma
                     #     )(H, self.training)
                     H = tf.contrib.layers.batch_norm(
@@ -962,6 +972,7 @@ class DenseLayer(object):
                         reuse=self.reuse,
                         scope=self.name
                     )
+
                 if self.activation is not None:
                     H = self.activation(H)
 
