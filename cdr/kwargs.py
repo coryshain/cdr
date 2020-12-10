@@ -188,6 +188,12 @@ MODEL_INITIALIZATION_KWARGS = [
         "Length of the history window to use."
     ),
     Kwarg(
+        'n_iter',
+        100000,
+        int,
+        "Number of training iterations. If using variational inference, this becomes the `expected` number of training iterations and is used only for Tensorboard logging, with no impact on training behavior."
+    ),
+    Kwarg(
         'n_samples',
         1,
         int,
