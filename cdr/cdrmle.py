@@ -106,11 +106,6 @@ class CDRMLE(CDR):
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     intercept = tf.Variable(
-                        # tf.random_normal(
-                        #     shape=[rangf_n_levels],
-                        #     stddev=self.init_sd,
-                        #     dtype=self.FLOAT_TF
-                        # ),
                         tf.zeros([rangf_n_levels], dtype=self.FLOAT_TF),
                         name='intercept_by_%s' % sn(ran_gf)
                     )

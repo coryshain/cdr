@@ -1,22 +1,22 @@
 import math
 import pandas as pd
 
-from .kwargs import CDRNNMLE_INITIALIZATION_KWARGS
-from .backend import get_initializer, DenseLayer, DenseLayer, CDRNNLayer
+from .kwargs import CDRNNBAYES_INITIALIZATION_KWARGS
+from .backend import get_initializer, DenseLayerBayes, CDRNNLayer
 from .cdrnnbase import CDRNN
 from .util import sn, reg_name, stderr
 
 import tensorflow as tf
-from tensorflow.contrib.distributions import Normal, SinhArcsinh
+from tensorflow.contrib.distributions import MultivariateNormalTriL, Normal, SinhArcsinh
 
 pd.options.mode.chained_assignment = None
 
 
-class CDRNNMLE(CDRNN):
-    _INITIALIZATION_KWARGS = CDRNNMLE_INITIALIZATION_KWARGS
+class CDRNNBayes(CDRNN):
+    _INITIALIZATION_KWARGS = CDRNNBAYES_INITIALIZATION_KWARGS
 
     _doc_header = """
-        A CDRRNN implementation fitted using maximum likelihood estimation.
+        A CDRRNN implementation fitted using black box variational Bayes.
     """
     _doc_args = CDRNN._doc_args
     _doc_kwargs = CDRNN._doc_kwargs
@@ -30,14 +30,14 @@ class CDRNNMLE(CDRNN):
     ######################################################
 
     def __init__(self, form_str, X, y, **kwargs):
-        super(CDRNNMLE, self).__init__(
+        super(CDRNNBayes, self).__init__(
             form_str,
             X,
             y,
             **kwargs
         )
 
-        for kwarg in CDRNNMLE._INITIALIZATION_KWARGS:
+        for kwarg in CDRNNBayes._INITIALIZATION_KWARGS:
             setattr(self, kwarg.key, kwargs.pop(kwarg.key, kwarg.default_value))
 
         self._initialize_metadata()
@@ -45,19 +45,151 @@ class CDRNNMLE(CDRNN):
         self.build()
 
     def _initialize_metadata(self):
-        super(CDRNNMLE, self)._initialize_metadata()
+        super(CDRNNBayes, self)._initialize_metadata()
+
+        self.is_bayesian = True
+
+        self.parameter_table_columns = ['Mean', '2.5%', '97.5%']
+
+        if self.intercept_init is None:
+            if self.standardize_response:
+                self.intercept_init = 0.
+            else:
+                self.intercept_init = self.y_train_mean
+        if self.intercept_prior_sd is None:
+            if self.standardize_response:
+                self.intercept_prior_sd = self.prior_sd_scaling_coefficient
+            else:
+                self.intercept_prior_sd = self.y_train_sd * self.prior_sd_scaling_coefficient
+        if self.y_sd_prior_sd is None:
+            if self.standardize_response:
+                self.y_sd_prior_sd = self.y_sd_prior_sd_scaling_coefficient
+            else:
+                self.y_sd_prior_sd = self.y_train_sd * self.y_sd_prior_sd_scaling_coefficient
+
+        self.kl_penalties = []
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                # Define initialization constants
+                self.intercept_prior_sd_tf = tf.constant(float(self.intercept_prior_sd), dtype=self.FLOAT_TF)
+                self.intercept_posterior_sd_init = self.intercept_prior_sd_tf * self.posterior_to_prior_sd_ratio
+                self.intercept_ranef_prior_sd_tf = self.intercept_prior_sd_tf * self.ranef_to_fixef_prior_sd_ratio
+                self.intercept_ranef_posterior_sd_init = self.intercept_posterior_sd_init * self.ranef_to_fixef_prior_sd_ratio
+
+                self.y_sd_prior_sd_tf = tf.constant(float(self.y_sd_prior_sd), dtype=self.FLOAT_TF)
+                self.y_sd_posterior_sd_init = self.y_sd_prior_sd_tf * self.posterior_to_prior_sd_ratio
+
+                self.y_skewness_prior_sd_tf = tf.constant(float(self.y_skewness_prior_sd), dtype=self.FLOAT_TF)
+                self.y_skewness_posterior_sd_init = self.y_skewness_prior_sd_tf * self.posterior_to_prior_sd_ratio
+
+                self.y_tailweight_prior_loc_tf = tf.constant(1., dtype=self.FLOAT_TF)
+                self.y_tailweight_posterior_loc_init = tf.constant(1., dtype=self.FLOAT_TF)
+                self.y_tailweight_prior_sd_tf = tf.constant(float(self.y_tailweight_prior_sd), dtype=self.FLOAT_TF)
+                self.y_tailweight_posterior_sd_init = self.y_tailweight_prior_sd_tf * self.posterior_to_prior_sd_ratio
+
+                if isinstance(self.weight_prior_sd, str) and self.weight_prior_sd.lower() in ['glorot', 'he']:
+                    self.weight_prior_sd_tf = self.weight_prior_sd
+                    self.weight_posterior_sd_init = self.weight_posterior_sd_init
+                    self.weight_ranef_prior_sd_tf = self.weight_ranef_prior_sd_tf
+                    self.weight_ranef_posterior_sd_init = self.weight_ranef_posterior_sd_init
+                    self.weight_prior_sd_unconstrained = self.weight_prior_sd
+                    self.weight_posterior_sd_init_unconstrained = self.weight_prior_sd
+                    self.weight_ranef_prior_sd_unconstrained = self.weight_prior_sd
+                    self.weight_ranef_posterior_sd_init_unconstrained = self.weight_prior_sd
+                else:
+                    self.weight_prior_sd_tf = tf.constant(float(self.weight_prior_sd), dtype=self.FLOAT_TF)
+                    self.weight_posterior_sd_init = self.weight_prior_sd_tf * self.posterior_to_prior_sd_ratio
+                    self.weight_ranef_prior_sd_tf = self.weight_prior_sd_tf * self.ranef_to_fixef_prior_sd_ratio
+                    self.weight_ranef_posterior_sd_init = self.weight_posterior_sd_init * self.ranef_to_fixef_prior_sd_ratio
+
+                if isinstance(self.bias_prior_sd, str) and self.bias_prior_sd.lower() in ['glorot', 'he']:
+                    self.bias_prior_sd_tf = self.bias_prior_sd
+                    self.bias_posterior_sd_init = self.bias_prior_sd
+                    self.bias_ranef_prior_sd_tf = self.bias_prior_sd
+                    self.bias_ranef_posterior_sd_init = self.bias_prior_sd
+                    self.bias_prior_sd_unconstrained = self.bias_prior_sd
+                    self.bias_posterior_sd_init_unconstrained = self.bias_prior_sd
+                    self.bias_ranef_prior_sd_unconstrained = self.bias_prior_sd
+                    self.bias_ranef_posterior_sd_init_unconstrained = self.bias_prior_sd
+                else:
+                    self.bias_prior_sd_tf = tf.constant(float(self.bias_prior_sd), dtype=self.FLOAT_TF)
+                    self.bias_posterior_sd_init = self.bias_prior_sd_tf * self.posterior_to_prior_sd_ratio
+                    self.bias_ranef_prior_sd_tf = self.bias_prior_sd_tf * self.ranef_to_fixef_prior_sd_ratios
+                    self.bias_ranef_posterior_sd_init = self.bias_posterior_sd_init * self.ranef_to_fixef_prior_sd_ratio
+
+                if self.constraint.lower() == 'softplus':
+                    self.intercept_prior_sd_unconstrained = tf.contrib.distributions.softplus_inverse(self.intercept_prior_sd_tf)
+                    self.intercept_posterior_sd_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.intercept_posterior_sd_init)
+                    self.intercept_ranef_prior_sd_unconstrained = tf.contrib.distributions.softplus_inverse(self.intercept_ranef_prior_sd_tf)
+                    self.intercept_ranef_posterior_sd_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.intercept_ranef_posterior_sd_init)
+
+                    if not isinstance(self.weight_prior_sd, str) or self.weight_prior_sd.lower() not in ['glorot', 'he']:
+                        self.weight_prior_sd_unconstrained = tf.contrib.distributions.softplus_inverse(self.weight_prior_sd_tf)
+                        self.weight_posterior_sd_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.weight_posterior_sd_init)
+                        self.weight_ranef_prior_sd_unconstrained = tf.contrib.distributions.softplus_inverse(self.weight_ranef_prior_sd_tf)
+                        self.weight_ranef_posterior_sd_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.weight_ranef_posterior_sd_init)
+
+                    if not isinstance(self.bias_prior_sd, str) or self.bias_prior_sd.lower() not in ['glorot', 'he']:
+                        self.bias_prior_sd_unconstrained = tf.contrib.distributions.softplus_inverse(self.bias_prior_sd_tf)
+                        self.bias_posterior_sd_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.bias_posterior_sd_init)
+                        self.bias_ranef_prior_sd_unconstrained = tf.contrib.distributions.softplus_inverse(self.bias_ranef_prior_sd_tf)
+                        self.bias_ranef_posterior_sd_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.bias_ranef_posterior_sd_init)
+
+                    self.y_sd_prior_sd_unconstrained = tf.contrib.distributions.softplus_inverse(self.y_sd_prior_sd_tf)
+                    self.y_sd_posterior_sd_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.y_sd_posterior_sd_init)
+
+                    self.y_skewness_prior_sd_unconstrained = tf.contrib.distributions.softplus_inverse(self.y_skewness_prior_sd_tf)
+                    self.y_skewness_posterior_sd_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.y_skewness_posterior_sd_init)
+
+                    self.y_tailweight_prior_loc_unconstrained = tf.contrib.distributions.softplus_inverse(self.y_tailweight_prior_loc_tf)
+                    self.y_tailweight_posterior_loc_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.y_tailweight_posterior_loc_init)
+                    self.y_tailweight_prior_sd_unconstrained = tf.contrib.distributions.softplus_inverse(self.y_tailweight_prior_sd_tf)
+                    self.y_tailweight_posterior_sd_init_unconstrained = tf.contrib.distributions.softplus_inverse(self.y_tailweight_posterior_sd_init)
+
+                elif self.constraint.lower() == 'abs':
+                    self.intercept_prior_sd_unconstrained = self.intercept_prior_sd_tf
+                    self.intercept_posterior_sd_init_unconstrained = self.intercept_posterior_sd_init
+                    self.intercept_ranef_prior_sd_unconstrained = self.intercept_ranef_prior_sd_tf
+                    self.intercept_ranef_posterior_sd_init_unconstrained = self.intercept_ranef_posterior_sd_init
+
+                    if not isinstance(self.weight_prior_sd, str) or self.weight_prior_sd.lower() not in ['glorot', 'he']:
+                        self.weight_prior_sd_unconstrained = self.weight_prior_sd_tf
+                        self.weight_posterior_sd_init_unconstrained = self.weight_posterior_sd_init
+                        self.weight_ranef_prior_sd_unconstrained = self.weight_ranef_prior_sd_tf
+                        self.weight_ranef_posterior_sd_init_unconstrained = self.weight_ranef_posterior_sd_init
+
+                    if not isinstance(self.bias_prior_sd, str) or self.bias_prior_sd.lower() not in ['glorot', 'he']:
+                        self.bias_prior_sd_unconstrained = self.bias_prior_sd_tf
+                        self.bias_posterior_sd_init_unconstrained = self.bias_posterior_sd_init
+                        self.bias_ranef_prior_sd_unconstrained = self.bias_ranef_prior_sd_tf
+                        self.bias_ranef_posterior_sd_init_unconstrained = self.bias_ranef_posterior_sd_init
+
+                    self.y_sd_prior_sd_unconstrained = self.y_sd_prior_sd_tf
+                    self.y_sd_posterior_sd_init_unconstrained = self.y_sd_posterior_sd_init
+
+                    self.y_skewness_prior_sd_unconstrained = self.y_skewness_prior_sd_tf
+                    self.y_skewness_posterior_sd_init_unconstrained = self.y_skewness_posterior_sd_init
+
+                    self.y_tailweight_prior_loc_unconstrained = self.y_tailweight_prior_loc_tf
+                    self.y_tailweight_posterior_loc_init_unconstrained = self.y_tailweight_posterior_loc_init
+                    self.y_tailweight_prior_sd_unconstrained = self.y_tailweight_prior_sd_tf
+                    self.y_tailweight_posterior_sd_init_unconstrained = self.y_tailweight_posterior_sd_init
+
+                else:
+                    raise ValueError('Unrecognized constraint function "%s"' % self.constraint)
 
     def _pack_metadata(self):
-        md = super(CDRNNMLE, self)._pack_metadata()
-        for kwarg in CDRNNMLE._INITIALIZATION_KWARGS:
+        md = super(CDRNNBayes, self)._pack_metadata()
+        for kwarg in CDRNNBayes._INITIALIZATION_KWARGS:
             md[kwarg.key] = getattr(self, kwarg.key)
 
         return md
 
     def _unpack_metadata(self, md):
-        super(CDRNNMLE, self)._unpack_metadata(md)
+        super(CDRNNBayes, self)._unpack_metadata(md)
 
-        for kwarg in CDRNNMLE._INITIALIZATION_KWARGS:
+        for kwarg in CDRNNBayes._INITIALIZATION_KWARGS:
             setattr(self, kwarg.key, md.pop(kwarg.key, kwarg.default_value))
 
         if len(md) > 0:
@@ -73,23 +205,80 @@ class CDRNNMLE(CDRNN):
     #
     ######################################################
 
+
+    def _initialize_inputs(self, n_impulse):
+        super(CDRNNBayes, self)._initialize_inputs(n_impulse)
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                self.use_MAP_mode = tf.placeholder_with_default(tf.logical_not(self.training), shape=[], name='use_MAP_mode')
+
     def initialize_intercept(self, ran_gf=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if ran_gf is None:
-                    intercept = tf.Variable(
+                    # Posterior distribution
+                    intercept_q_loc = tf.Variable(
                         self.intercept_init_tf,
-                        dtype=self.FLOAT_TF,
-                        name='intercept'
+                        name='intercept_q_loc'
                     )
-                    intercept_summary = intercept
+
+                    intercept_q_scale = tf.Variable(
+                        self.intercept_posterior_sd_init_unconstrained,
+                        name='intercept_q_scale'
+                    )
+
+                    intercept_dist = Normal(
+                        loc=intercept_q_loc,
+                        scale=self.constraint_fn(intercept_q_scale) + self.epsilon,
+                        name='intercept_q'
+                    )
+
+                    intercept = tf.cond(self.use_MAP_mode, intercept_dist.mean, intercept_dist.sample)
+
+                    intercept_summary = intercept_dist.mean()
+
+                    if self.declare_priors_fixef:
+                        # Prior distribution
+                        intercept_prior = Normal(
+                            loc=self.intercept_init_tf,
+                            scale=self.intercept_prior_sd_tf,
+                            name='intercept'
+                        )
+                        self.kl_penalties.append(intercept_dist.kl_divergence(intercept_prior))
+
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
-                    intercept = tf.Variable(
+
+                    # Posterior distribution
+                    intercept_q_loc = tf.Variable(
                         tf.zeros([rangf_n_levels], dtype=self.FLOAT_TF),
-                        name='intercept_by_%s' % sn(ran_gf)
+                        name='intercept_q_loc_by_%s' % sn(ran_gf)
                     )
-                    intercept_summary = intercept
+
+                    intercept_q_scale = tf.Variable(
+                        tf.ones([rangf_n_levels], dtype=self.FLOAT_TF) * self.intercept_ranef_posterior_sd_init_unconstrained,
+                        name='intercept_q_scale_by_%s' % sn(ran_gf)
+                    )
+
+                    intercept_dist = Normal(
+                        loc=intercept_q_loc,
+                        scale=self.constraint_fn(intercept_q_scale) + self.epsilon,
+                        name='intercept_q_by_%s' % sn(ran_gf)
+                    )
+
+                    intercept = tf.cond(self.use_MAP_mode, intercept_dist.mean, intercept_dist.sample)
+
+                    intercept_summary = intercept_dist.mean()
+
+                    if self.declare_priors_ranef:
+                        # Prior distribution
+                        intercept_prior = Normal(
+                            loc=0.,
+                            scale=self.intercept_ranef_prior_sd_tf,
+                            name='intercept_by_%s' % sn(ran_gf)
+                        )
+                        self.kl_penalties.append(intercept_dist.kl_divergence(intercept_prior))
+
                 return intercept, intercept_summary
 
     def initialize_feedforward(
@@ -103,14 +292,17 @@ class CDRNNMLE(CDRNN):
     ):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                projection = DenseLayer(
+                projection = DenseLayerBayes(
                     training=self.training,
                     units=units,
                     use_bias=use_bias,
                     activation=activation,
                     dropout=dropout,
                     batch_normalization_decay=batch_normalization_decay,
-                    kernel_sd_init=self.kernel_sd_init,
+                    use_MAP_mode=self.use_MAP_mode,
+                    kernel_prior_sd=self.weight_prior_sd_tf,
+                    bias_prior_sd=self.bias_prior_sd_tf,
+                    posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
                     epsilon=self.epsilon,
                     session=self.sess,
                     name=name
@@ -266,68 +458,68 @@ class CDRNNMLE(CDRNN):
                     y_standardized = (self.y - self.y_train_mean) / self.y_train_sd
 
                     if self.asymmetric_error:
-                        y_dist_standardized = SinhArcsinh(
+                        y_dist_standardized = tf.contrib.distributions.SinhArcsinh(
                             loc=self.out,
                             scale=self.y_sd,
                             skewness=self.y_skewness,
                             tailweight=self.y_tailweight
                         )
-                        y_dist = SinhArcsinh(
+                        y_dist = tf.contrib.distributions.SinhArcsinh(
                             loc=self.out * self.y_train_sd + self.y_train_mean,
                             scale=self.y_sd * self.y_train_sd,
                             skewness=self.y_skewness,
                             tailweight=self.y_tailweight
                         )
 
-                        self.err_dist_standardized = SinhArcsinh(
+                        self.err_dist_standardized = tf.contrib.distributions.SinhArcsinh(
                             loc=0.,
                             scale=self.y_sd,
                             skewness=self.y_skewness,
                             tailweight=self.y_tailweight
                         )
-                        self.err_dist = SinhArcsinh(
+                        self.err_dist = tf.contrib.distributions.SinhArcsinh(
                             loc=0.,
                             scale=self.y_sd * self.y_train_sd,
                             skewness=self.y_skewness,
                             tailweight=self.y_tailweight
                         )
 
-                        self.err_dist_summary_standardized = SinhArcsinh(
+                        self.err_dist_summary_standardized = tf.contrib.distributions.SinhArcsinh(
                             loc=0.,
                             scale=self.y_sd_summary,
                             skewness=self.y_skewness_summary,
                             tailweight=self.y_tailweight_summary
                         )
-                        self.err_dist_summary = SinhArcsinh(
+                        self.err_dist_summary = tf.contrib.distributions.SinhArcsinh(
                             loc=0.,
                             scale=self.y_sd_summary * self.y_train_sd,
                             skewness=self.y_skewness_summary,
                             tailweight=self.y_tailweight_summary
                         )
                     else:
-                        y_dist_standardized = Normal(
+                        y_dist_standardized = tf.distributions.Normal(
                             loc=self.out,
                             scale=self.y_sd
                         )
-                        y_dist = Normal(
+                        y_dist = tf.distributions.Normal(
                             loc=self.out * self.y_train_sd + self.y_train_mean,
                             scale=self.y_sd * self.y_train_sd
                         )
 
-                        self.err_dist_standardized = Normal(
+                        self.err_dist_standardized = tf.distributions.Normal(
                             loc=0.,
                             scale=self.y_sd
                         )
-                        self.err_dist = Normal(
+                        self.err_dist = tf.distributions.Normal(
                             loc=0.,
                             scale=self.y_sd * self.y_train_sd
                         )
 
-                        self.err_dist_summary_standardized = Normal(
+                        self.err_dist_summary_standardized = tf.distributions.Normal(
                             loc=0.,
                             scale=self.y_sd_summary
                         )
-                        self.err_dist_summary = Normal(
+                        self.err_dist_summary = tf.distributions.Normal(
                             loc=0.,
                             scale=self.y_sd_summary * self.y_train_sd
                         )
@@ -338,34 +530,34 @@ class CDRNNMLE(CDRNN):
                     # ll_objective = tf.Print(ll_objective, [self.y_sd, ll_objective], summarize=10)
                 else:
                     if self.asymmetric_error:
-                        y_dist = SinhArcsinh(
+                        y_dist = tf.contrib.distributions.SinhArcsinh(
                             loc=self.out,
                             scale=self.y_sd,
                             skewness=self.y_skewness,
                             tailweight=self.y_tailweight
                         )
-                        self.err_dist = SinhArcsinh(
+                        self.err_dist = tf.contrib.distributions.SinhArcsinh(
                             loc=0.,
                             scale=self.y_sd,
                             skewness=self.y_skewness,
                             tailweight=self.y_tailweight
                         )
-                        self.err_dist_summary = SinhArcsinh(
+                        self.err_dist_summary = tf.contrib.distributions.SinhArcsinh(
                             loc=0.,
                             scale=self.y_sd_summary,
                             skewness=self.y_skewness_summary,
                             tailweight=self.y_tailweight_summary
                         )
                     else:
-                        y_dist = Normal(
+                        y_dist = tf.distributions.Normal(
                             loc=self.out,
                             scale=self.y_sd
                         )
-                        self.err_dist = Normal(
+                        self.err_dist = tf.distributions.Normal(
                             loc=0.,
                             scale=self.y_sd
                         )
-                        self.err_dist_summary = Normal(
+                        self.err_dist_summary = tf.distributions.Normal(
                             loc=0.,
                             scale=self.y_sd_summary
                         )
@@ -458,8 +650,8 @@ class CDRNNMLE(CDRNN):
 
 
     def report_settings(self, indent=0):
-        out = super(CDRNNMLE, self).report_settings(indent=indent)
-        for kwarg in CDRNNMLE_INITIALIZATION_KWARGS:
+        out = super(CDRNNBayes, self).report_settings(indent=indent)
+        for kwarg in CDRNNBayes_INITIALIZATION_KWARGS:
             val = getattr(self, kwarg.key)
             out += ' ' * indent + '  %s: %s\n' %(kwarg.key, "\"%s\"" %val if isinstance(val, str) else val)
 

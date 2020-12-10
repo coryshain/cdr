@@ -252,6 +252,8 @@ class Model(object):
         self.sess = tf.Session(graph=self.g, config=tf_config)
 
     def _initialize_metadata(self):
+        self.is_bayesian = False
+
         ## Compute secondary data from intialization settings
         self.FLOAT_TF = getattr(tf, self.float_type)
         self.FLOAT_NP = getattr(np, self.float_type)

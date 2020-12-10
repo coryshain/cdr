@@ -248,12 +248,16 @@ class CDRNNCell(LayerRNNCell):
             self,
             in_dim,
             out_dim,
-            kernel_sd_init,
+            kernel_type='bottomup',
             depth=None,
             inner_activation=None,
             prefinal_mode=None,
             name=None
     ):
+        if kernel_type.lower() == 'recurrent':
+            kernel_sd_init = self._recurrent_kernel_sd_init
+        else:
+            kernel_sd_init = self._bottomup_kernel_sd_init
         with self._session.as_default():
             with self._session.graph.as_default():
                 units_below = in_dim
@@ -374,14 +378,14 @@ class CDRNNCell(LayerRNNCell):
                 self._kernel_bottomup, self._kernel_bottomup_layers = self.initialize_kernel(
                     bottomup_dim,
                     output_dim,
-                    self._bottomup_kernel_sd_init,
+                    kernel_type='bottomup',
                     name='bottomup'
                 )
 
                 self._kernel_recurrent, self._kernel_recurrent_layers = self.initialize_kernel(
                     recurrent_dim,
                     output_dim,
-                    self._recurrent_kernel_sd_init,
+                    kernel_type='recurrent',
                     name='recurrent'
                 )
 
@@ -400,7 +404,7 @@ class CDRNNCell(LayerRNNCell):
                     self._kernel_time_projection, self._kernel_time_projection_layers = self.initialize_kernel(
                         recurrent_dim,
                         recurrent_dim,
-                        self._bottomup_kernel_sd_init,
+                        kernel_type='time_projection',
                         depth=self._time_projection_depth,
                         inner_activation=self._time_projection_inner_activation,
                         name='time_projection'
@@ -661,6 +665,291 @@ class CDRNNLayer(object):
                     out = H
 
                 return out
+
+
+class CDRNNCellBayes(CDRNNCell):
+    def __init__(
+            self,
+            units,
+            training=False,
+            kernel_depth=1,
+            time_projection_depth=1,
+            resnet_n_layers=1,
+            prefinal_mode='max',
+            forget_bias=1.0,
+            forget_gate_as_irf=False,
+            activation=None,
+            recurrent_activation='sigmoid',
+            prefinal_activation='tanh',
+            time_projection_inner_activation='tanh',
+            use_MAP_mode=None,
+            kernel_prior_sd='he',
+            bias_prior_sd=None,
+            posterior_to_prior_sd_ratio=1,
+            bottomup_dropout=None,
+            h_dropout=None,
+            c_dropout=None,
+            forget_rate=None,
+            weight_normalization=False,
+            layer_normalization=False,
+            use_bias=True,
+            global_step=None,
+            batch_normalization_decay=None,
+            l2_normalize_states=False,
+            reuse=None,
+            name=None,
+            dtype=None,
+            epsilon=1e-5,
+            session=None
+    ):
+        super(CDRNNCellBayes, self).__init__(
+            units=units,
+            training=training,
+            kernel_depth=kernel_depth,
+            time_projection_depth=time_projection_depth,
+            resnet_n_layers=resnet_n_layers,
+            prefinal_mode=prefinal_mode,
+            forget_bias=forget_bias,
+            forget_gate_as_irf=forget_gate_as_irf,
+            activation=activation,
+            recurrent_activation=recurrent_activation,
+            prefinal_activation=prefinal_activation,
+            time_projection_inner_activation=time_projection_inner_activation,
+            bottomup_dropout=bottomup_dropout,
+            h_dropout=h_dropout,
+            c_dropout=c_dropout,
+            forget_rate=forget_rate,
+            weight_normalization=weight_normalization,
+            layer_normalization=layer_normalization,
+            use_bias=use_bias,
+            global_step=global_step,
+            batch_normalization_decay=batch_normalization_decay,
+            l2_normalize_states=l2_normalize_states,
+            reuse=reuse,
+            name=name,
+            dtype=dtype,
+            epsilon=epsilon,
+            session=session
+        )
+
+        self.use_MAP_mode = use_MAP_mode
+        self.kernel_prior_sd = kernel_prior_sd
+        self.bias_prior_sd = bias_prior_sd
+        self.posterior_to_prior_sd_ratio = posterior_to_prior_sd_ratio
+
+    def initialize_kernel(
+            self,
+            in_dim,
+            out_dim,
+            kernel_type='bottomup',
+            depth=None,
+            inner_activation=None,
+            prefinal_mode=None,
+            name=None
+    ):
+        with self._session.as_default():
+            with self._session.graph.as_default():
+                units_below = in_dim
+                kernel_lambdas = []
+                if depth is None:
+                    depth = self._kernel_depth
+                if prefinal_mode is None:
+                    prefinal_mode = self._prefinal_mode
+
+                if prefinal_mode.lower() == 'max':
+                    if out_dim > in_dim:
+                        prefinal_dim = out_dim
+                    else:
+                        prefinal_dim = in_dim
+                elif prefinal_mode.lower() == 'in':
+                    prefinal_dim = in_dim
+                elif prefinal_mode.lower() == 'out':
+                    prefinal_dim = out_dim
+                else:
+                    raise ValueError('Unrecognized value for prefinal_mode: %s.' % prefinal_mode)
+
+                layers = []
+
+                for d in range(depth):
+                    if d == depth - 1:
+                        activation = None
+                        units = out_dim
+                        use_bias = False
+                    else:
+                        if inner_activation is None:
+                            activation = self._prefinal_activation
+                        else:
+                            activation = inner_activation
+                        units = prefinal_dim
+                        use_bias = self._use_bias
+                    kernel_initializer = get_initializer(
+                        'random_normal_initializer_mean=0-stddev=%s' % kernel_sd_init,
+                        session=self._session
+                    )
+                    if name:
+                        name_cur = name + '_d%d' % d
+                    else:
+                        name_cur = 'd%d' % d
+
+                    if self._resnet_n_layers and self._resnet_n_layers > 1 and units == units_below:
+                        kernel_layer = DenseResidualLayer(
+                            training=self._training,
+                            units=units,
+                            use_bias=use_bias,
+                            kernel_initializer=kernel_initializer,
+                            bias_initializer='zeros_initializer',
+                            layers_inner=self._resnet_n_layers,
+                            activation_inner=self._prefinal_activation,
+                            activation=activation,
+                            batch_normalization_decay=self._batch_normalization_decay,
+                            project_inputs=False,
+                            normalize_weights=self._weight_normalization,
+                            reuse=tf.AUTO_REUSE,
+                            epsilon=self._epsilon,
+                            session=self._session,
+                            name=name_cur
+                        )
+                    else:
+                        kernel_layer = DenseLayer(
+                            training=self._training,
+                            units=units,
+                            use_bias=use_bias,
+                            kernel_sd_init=kernel_sd_init,
+                            activation=activation,
+                            batch_normalization_decay=self._batch_normalization_decay,
+                            epsilon=self._epsilon,
+                            session=self._session,
+                            reuse=tf.AUTO_REUSE,
+                            name=name_cur
+                        )
+
+                    layers.append(kernel_layer)
+                    kernel_lambdas.append(make_lambda(kernel_layer, session=self._session))
+
+                    units_below = units
+
+                kernel = compose_lambdas(kernel_lambdas)
+
+                return kernel, layers
+
+class CDRNNLayerBayes(CDRNNLayer):
+    def __init__(
+            self,
+            units=None,
+            training=False,
+            kernel_depth=1,
+            time_projection_depth=1,
+            resnet_n_layers=1,
+            prefinal_mode='max',
+            forget_bias=1.0,
+            forget_gate_as_irf=False,
+            activation=None,
+            recurrent_activation='sigmoid',
+            prefinal_activation='tanh',
+            time_projection_inner_activation='tanh',
+            use_MAP_mode=None,
+            kernel_prior_sd='he',
+            bias_prior_sd=None,
+            posterior_to_prior_sd_ratio=1,
+            bottomup_dropout=None,
+            h_dropout=None,
+            c_dropout=None,
+            forget_rate=None,
+            weight_normalization=False,
+            layer_normalization=False,
+            use_bias=True,
+            global_step=None,
+            batch_normalization_decay=None,
+            l2_normalize_states=False,
+            return_sequences=True,
+            reuse=None,
+            name=None,
+            dtype=None,
+            epsilon=1e-5,
+            session=None
+    ):
+        super(CDRNNLayer, self).__init__(
+            units=units,
+            training=training,
+            kernel_depth=kernel_depth,
+            time_projection_depth=time_projection_depth,
+            resnet_n_layers=resnet_n_layers,
+            prefinal_mode=prefinal_mode,
+            forget_bias=forget_bias,
+            forget_gate_as_irf=forget_gate_as_irf,
+            activation=activation,
+            recurrent_activation=recurrent_activation,
+            prefinal_activation=prefinal_activation,
+            time_projection_inner_activation=time_projection_inner_activation,
+            bottomup_dropout=bottomup_dropout,
+            h_dropout=h_dropout,
+            c_dropout=c_dropout,
+            forget_rate=forget_rate,
+            weight_normalization=weight_normalization,
+            layer_normalization=layer_normalization,
+            use_bias=use_bias,
+            global_step=global_step,
+            batch_normalization_decay=batch_normalization_decay,
+            l2_normalize_states=l2_normalize_states,
+            return_sequences=return_sequences,
+            reuse=reuse,
+            name=name,
+            dtype=dtype,
+            epsilon=epsilon,
+            session=session
+        )
+
+        self.use_MAP_mode = use_MAP_mode
+        self.kernel_prior_sd = kernel_prior_sd
+        self.bias_prior_sd = bias_prior_sd
+        self.posterior_to_prior_sd_ratio = posterior_to_prior_sd_ratio
+
+    def build(self, inputs):
+        if not self.built:
+            with self.session.as_default():
+                with self.session.graph.as_default():
+
+                    if self.units is None:
+                        units = inputs.shape[-1]
+                    else:
+                        units = self.units
+
+                    self.cell = CDRNNCellBayes(
+                        units,
+                        training=self.training,
+                        kernel_depth=self.kernel_depth,
+                        time_projection_depth=self.time_projection_depth,
+                        resnet_n_layers=self.resnet_n_layers,
+                        prefinal_mode=self.prefinal_mode,
+                        forget_bias=self.forget_bias,
+                        forget_gate_as_irf=self.forget_gate_as_irf,
+                        activation=self.activation,
+                        recurrent_activation=self.recurrent_activation,
+                        prefinal_activation=self.prefinal_activation,
+                        time_projection_inner_activation=self.time_projection_inner_activation,
+                        bottomup_dropout=self.bottomup_dropout,
+                        h_dropout=self.h_dropout,
+                        c_dropout=self.c_dropout,
+                        forget_rate=self.forget_rate,
+                        use_MAP_mode=self.use_MAP_mode,
+                        kernel_prior_sd=self.kernel_prior_sd,
+                        bias_prior_sd=self.bias_prior_sd,
+                        posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
+                        weight_normalization=self.weight_normalization,
+                        layer_normalization=self.layer_normalization,
+                        use_bias=self.use_bias,
+                        global_step=self.global_step,
+                        batch_normalization_decay=self.batch_normalization_decay,
+                        l2_normalize_states=self.l2_normalize_states,
+                        reuse=self.reuse,
+                        name=self.name,
+                        dtype=self.dtype,
+                        epsilon=self.epsilon,
+                    )
+
+                    self.cell.build(inputs.shape[1:])
+
+            self.built = True
 
 
 class LSTMCell(LayerRNNCell):
@@ -954,12 +1243,6 @@ class DenseLayer(object):
                     H += bias
 
                 if self.batch_normalization_decay:
-                    # with tf.variable_scope(self.name):
-                    #     H = tf.keras.layers.BatchNormalization(
-                    #         momentum=self.batch_normalization_decay,
-                    #         center=self.use_bias,
-                    #         scale=self.batch_normalization_use_gamma
-                    #     )(H, self.training)
                     H = tf.contrib.layers.batch_norm(
                         H,
                         decay=self.batch_normalization_decay,
@@ -994,11 +1277,10 @@ class DenseLayerBayes(DenseLayer):
             activation=None,
             dropout=None,
             batch_normalization_decay=None,
-            batch_normalization_use_beta=True,
             batch_normalization_use_gamma=True,
             use_MAP_mode=None,
             kernel_prior_sd='he',
-            bias_prior_sd=1,
+            bias_prior_sd=None,
             posterior_to_prior_sd_ratio=1,
             reuse=tf.AUTO_REUSE,
             epsilon=1e-5,
@@ -1013,7 +1295,6 @@ class DenseLayerBayes(DenseLayer):
             kernel_sd_init=kernel_prior_sd,
             dropout=dropout,
             batch_normalization_decay=batch_normalization_decay,
-            batch_normalization_use_beta=batch_normalization_use_beta,
             batch_normalization_use_gamma=batch_normalization_use_gamma,
             reuse=reuse,
             epsilon=epsilon,
@@ -1026,7 +1307,6 @@ class DenseLayerBayes(DenseLayer):
                 self.use_MAP_mode = use_MAP_mode
                 self.kernel_prior_sd = kernel_prior_sd
                 self.bias_prior_sd = bias_prior_sd
-                self.bias_sd_init = self.bias_prior_sd
                 self.posterior_to_prior_sd_ratio = posterior_to_prior_sd_ratio
 
                 self.built = False
@@ -1055,20 +1335,22 @@ class DenseLayerBayes(DenseLayer):
                     with tf.variable_scope(name):
                         if isinstance(self.kernel_sd_init, str):
                             if self.kernel_sd_init.lower() in ['xavier', 'glorot']:
-                                sd = math.sqrt(2 / (int(in_dim) + out_dim))
+                                kernel_sd_prior = math.sqrt(2 / (int(in_dim) + out_dim))
                             elif self.kernel_sd_init.lower() == 'he':
-                                sd = math.sqrt(2 / int(in_dim))
+                                kernel_sd_prior = math.sqrt(2 / int(in_dim))
                         else:
-                            sd = self.kernel_sd_init
+                            kernel_sd_prior = self.kernel_sd_init
+                        kernel_sd_posterior = kernel_sd_prior * self.posterior_to_prior_sd_ratio
 
                         if self.use_MAP_mode is None:
                             self.use_MAP_mode = tf.logical_not(self.training)
+
                         self.kernel_mean = tf.Variable(
                             tf.zeros([in_dim, out_dim]),
                             name='kernel_mean'
                         )
                         self.kernel_sd_unconstrained = tf.Variable(
-                            tf.ones([in_dim, out_dim]) * tf.contrib.distributions.softplus_inverse(sd),
+                            tf.ones([in_dim, out_dim]) * tf.contrib.distributions.softplus_inverse(kernel_sd_posterior),
                             name='kernel_sd'
                         )
                         self.kernel_sd = tf.nn.softplus(self.kernel_sd_unconstrained)
@@ -1078,7 +1360,7 @@ class DenseLayerBayes(DenseLayer):
                         )
                         self.kernel_prior_dist = tf.contrib.distributions.Normal(
                             loc=0.,
-                            scale=self.kernel_prior_sd
+                            scale=kernel_sd_prior
                         )
                         self.kernel = tf.cond(
                             self.use_MAP_mode,
@@ -1086,36 +1368,52 @@ class DenseLayerBayes(DenseLayer):
                             self.kernel_dist.sample
                         )
 
-                        self.bias_mean = tf.Variable(
-                            tf.zeros([out_dim]),
-                            name='bias_mean'
-                        )
-                        self.bias_sd_unconstrained = tf.Variable(
-                            tf.ones([out_dim]) * tf.contrib.distributions.softplus_inverse(self.bias_sd_init),
-                            name='bias_sd'
-                        )
-                        self.bias_sd = tf.nn.softplus(self.bias_sd_unconstrained)
-                        self.bias_dist = tf.contrib.distributions.Normal(
-                            loc=self.bias_mean,
-                            scale=self.bias_sd + self.epsilon
-                        )
-                        self.bias_prior_dist = tf.contrib.distributions.Normal(
-                            loc=0.,
-                            scale=self.bias_prior_sd
-                        )
-                        self.bias = tf.cond(
-                            self.use_MAP_mode,
-                            self.bias_dist.mean,
-                            self.bias_dist.sample
-                        )
+                        if not self.use_batch_normalization and self.use_bias:
+                            if self.bias_prior_sd:
+                                if isinstance(self.bias_prior_sd, str):
+                                    if self.bias_prior_sd.lower() in ['xavier', 'glorot']:
+                                        bias_sd_prior = math.sqrt(2 / (int(in_dim) + out_dim))
+                                    elif self.bias_prior_sd.lower() == 'he':
+                                        bias_sd_prior = math.sqrt(2 / int(in_dim))
+                                else:
+                                    bias_sd_prior = self.bias_prior_sd
+                                bias_sd_posterior = bias_sd_prior * self.posterior_to_prior_sd_ratio
+                        
+                                self.bias_mean = tf.Variable(
+                                    tf.zeros([out_dim]),
+                                    name='bias_mean'
+                                )
+                                self.bias_sd_unconstrained = tf.Variable(
+                                    tf.ones([out_dim]) * tf.contrib.distributions.softplus_inverse(bias_sd_posterior),
+                                    name='bias_sd'
+                                )
+                                self.bias_sd = tf.nn.softplus(self.bias_sd_unconstrained)
+                                self.bias_dist = tf.contrib.distributions.Normal(
+                                    loc=self.bias_mean,
+                                    scale=self.bias_sd + self.epsilon
+                                )
+                                self.bias_prior_dist = tf.contrib.distributions.Normal(
+                                    loc=0.,
+                                    scale=bias_sd_prior
+                                )
+                                self.bias = tf.cond(
+                                    self.use_MAP_mode,
+                                    self.bias_dist.mean,
+                                    self.bias_dist.sample
+                                )
+                            else:
+                                self.bias = tf.get_variable(
+                                    name='bias',
+                                    shape=[out_dim],
+                                    initializer=tf.zeros_initializer(),
+                                )
 
             self.built = True
 
     def kl_penalties(self):
-        return [
-            self.kernel_dist.kl_divergence(self.kernel_prior_dist),
-            self.bias_dist.kl_divergence(self.bias_prior_dist)
-        ]
+        out = [self.kernel_dist.kl_divergence(self.kernel_prior_dist)]
+        if not self.use_batch_normalization and self.use_bias and self.bias_prior_sd:
+            out.append(self.bias_dist.kl_divergence(self.bias_prior_dist))
 
 
 class DenseResidualLayer(object):

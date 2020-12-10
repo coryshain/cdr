@@ -25,7 +25,7 @@ class CDRBayes(CDR):
     _INITIALIZATION_KWARGS = CDRBAYES_INITIALIZATION_KWARGS
 
     _doc_header = """
-        A CDR implementation fitted using Bayesian inference.
+        A CDR implementation fitted using black box variational Bayes.
     """
     _doc_args = CDR._doc_args
     _doc_kwargs = CDR._doc_kwargs
@@ -56,6 +56,8 @@ class CDRBayes(CDR):
 
     def _initialize_metadata(self):
         super(CDRBayes, self)._initialize_metadata()
+
+        self.is_bayesian = True
 
         self.parameter_table_columns = ['Mean', '2.5%', '97.5%']
 

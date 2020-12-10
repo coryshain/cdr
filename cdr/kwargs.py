@@ -578,12 +578,6 @@ CDRBAYES_INITIALIZATION_KWARGS = [
         aliases=['declare_priors']
     ),
     Kwarg(
-        'n_iter',
-        100000,
-        int,
-        "Number of training iterations. If using variational inference, this becomes the `expected` number of training iterations and is used only for Tensorboard logging, with no impact on training behavior."
-    ),
-    Kwarg(
         'n_samples_eval',
         1024,
         int,
@@ -637,12 +631,6 @@ CDRBAYES_INITIALIZATION_KWARGS = [
         float,
         "Standard deviation of prior on tailweight parameter of output model. Only used if ``asymmetric_error == True``, otherwise ignored.",
         aliases=['prior_sd']
-    ),
-    Kwarg(
-        'mh_proposal_sd',
-        None,
-        [float, None],
-        "Standard deviation of proposal distribution. If ``None``, inferred as standard deviation of corresponding prior. Only used if ``inference_name == 'MetropolisHastings'``, otherwise ignored."
     ),
     Kwarg(
         'prior_sd_scaling_coefficient',
@@ -980,11 +968,99 @@ CDRNNMLE_INITIALIZATION_KWARGS = [
 
 CDRNNBAYES_INITIALIZATION_KWARGS = [
     Kwarg(
+        'declare_priors_fixef',
+        True,
+        bool,
+        "Specify Gaussian priors for all fixed model parameters (if ``False``, use implicit improper uniform priors).",
+        aliases=['declare_priors']
+    ),
+    Kwarg(
+        'declare_priors_ranef',
+        True,
+        bool,
+        "Specify Gaussian priors for all random model parameters (if ``False``, use implicit improper uniform priors).",
+        aliases=['declare_priors']
+    ),
+    Kwarg(
         'n_samples_eval',
         1024,
         int,
         "Number of posterior predictive samples to draw for prediction/evaluation."
     ),
+    Kwarg(
+        'intercept_prior_sd',
+        None,
+        [float, None],
+        "Standard deviation of prior on fixed intercept. If ``None``, inferred as **prior_sd_scaling_coefficient** times the empirical variance of the response on the training set.",
+        aliases=['prior_sd']
+    ),
+    Kwarg(
+        'weight_prior_sd',
+        'glorot',
+        [float, str],
+        "Standard deviation of prior on CDRNN hidden weights. A ``float``, ``'glorot'``, or ``'he'``.",
+        aliases=['conv_prior_sd', 'prior_sd']
+    ),
+    Kwarg(
+        'bias_prior_sd',
+        None,
+        [float, str],
+        "Standard deviation of prior on CDRNN hidden biases. A ``float``, ``'glorot'``, or ``'he'``.",
+        aliases=['conv_prior_sd', 'prior_sd']
+    ),
+    Kwarg(
+        'y_sd_trainable',
+        True,
+        bool,
+        "Tune the standard deviation of the output model during training. If ``False``, remains fixed at ``y_sd_init``.",
+        aliases=['y_scale_trainable']
+    ),
+    Kwarg(
+        'y_sd_prior_sd',
+        None,
+        [float, None],
+        "Standard deviation of prior on standard deviation of output model. If ``None``, inferred as **y_sd_prior_sd_scaling_coefficient** times the empirical variance of the response on the training set.",
+        aliases=['y_scale_prior_sd', 'prior_sd']
+    ),
+    Kwarg(
+        'y_skewness_prior_sd',
+        1,
+        float,
+        "Standard deviation of prior on skewness parameter of output model. Only used if ``asymmetric_error == True``, otherwise ignored.",
+        aliases=['prior_sd']
+    ),
+    Kwarg(
+        'y_tailweight_prior_sd',
+        1,
+        float,
+        "Standard deviation of prior on tailweight parameter of output model. Only used if ``asymmetric_error == True``, otherwise ignored.",
+        aliases=['prior_sd']
+    ),
+    Kwarg(
+        'prior_sd_scaling_coefficient',
+        1,
+        float,
+        "Factor by which to multiply priors on intercepts and coefficients if inferred from the empirical variance of the data (i.e. if **intercept_prior_sd** or **coef_prior_sd** is ``None``). Ignored for any prior widths that are explicitly specified."
+    ),
+    Kwarg(
+        'y_sd_prior_sd_scaling_coefficient',
+        1,
+        float,
+        "Factor by which to multiply prior on output model variance if inferred from the empirical variance of the data (i.e. if **y_sd_prior_sd** is ``None``). Ignored if prior width is explicitly specified.",
+        aliases=['y_scale_prior_sd_scaling_coefficient', 'prior_sd_scaling_coefficient']
+    ),
+    Kwarg(
+        'ranef_to_fixef_prior_sd_ratio',
+        0.1,
+        float,
+        "Ratio of widths of random to fixed effects priors. I.e. if less than 1, random effects have tighter priors."
+    ),
+    Kwarg(
+        'posterior_to_prior_sd_ratio',
+        0.01,
+        float,
+        "Ratio of posterior initialization SD to prior SD. Low values are often beneficial to stability, convergence speed, and quality of final fit by avoiding erratic sampling and divergent behavior early in training."
+    )
 ]
 
 

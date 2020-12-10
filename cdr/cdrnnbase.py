@@ -654,20 +654,23 @@ class CDRNN(Model):
                 self.h_bias_ran_matrix = []
                 self.h_bias_ran = []
 
+                gf_y_src = self.gf_y
+
+                if self.ranef_dropout_rate:
+                    def gf_train_fn(gf_y_cur=gf_y_src):
+                        dropout_mask = tf.cast(tf.random_uniform(tf.shape(gf_y_cur)) > self.ranef_dropout_rate, tf.bool)
+                        alt = tf.zeros_like(gf_y_cur)
+                        return tf.where(dropout_mask, gf_y_cur, alt)
+
+                    def gf_eval_fn(gf_y_cur=gf_y_src):
+                        return gf_y_cur
+
+                    gf_y_src = tf.cond(self.training, gf_train_fn, gf_eval_fn)
+
                 for j in range(len(self.rangf)):
                     gf = self.rangf[j]
                     levels_ix = np.arange(self.rangf_n_levels[j] - 1)
-                    gf_y = self.gf_y[:, j]
-                    if self.ranef_dropout_rate:
-                        def gf_train_fn(gf_y_cur=gf_y):
-                            dropout_mask = tf.cast(tf.random_uniform(tf.shape(gf_y_cur)) > self.ranef_dropout_rate, tf.bool)
-                            alt = tf.zeros_like(gf_y_cur)
-                            return tf.where(dropout_mask, gf_y_cur, alt)
-
-                        def gf_eval_fn(gf_y_cur=gf_y):
-                            return gf_y_cur
-
-                        gf_y = tf.cond(self.training, gf_train_fn, gf_eval_fn)
+                    gf_y = gf_y_src[:, j]
 
                     if self.has_intercept[gf]:
                         # Random intercepts
@@ -832,6 +835,7 @@ class CDRNN(Model):
                             s = X_shape[j]
                         time_X_shape.append(s)
                     time_X_shape.append(1)
+                    # time_X = tf.zeros(time_X_shape, dtype=self.FLOAT_TF)
                     time_X = tf.ones(time_X_shape, dtype=self.FLOAT_TF)
                     time_X_mean = self.time_X_mean
                     time_X *= time_X_mean
