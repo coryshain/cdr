@@ -189,7 +189,7 @@ class Model(object):
         first_obs, last_obs = get_first_last_obs_lists(y)
         y_time = y.time.values
         for i, cols in enumerate(zip(first_obs, last_obs)):
-            if i in impulse_df_ix_unique:
+            if i in impulse_df_ix_unique or (not impulse_df_ix_unique and i == 0):
                 first_obs_cur, last_obs_cur = cols
                 first_obs_cur = np.array(first_obs_cur, dtype=getattr(np, self.int_type))
                 last_obs_cur = np.array(last_obs_cur, dtype=getattr(np, self.int_type))
@@ -201,7 +201,6 @@ class Model(object):
                     t_delta = y_time[j] - time_X_slice
                     t_deltas.append(t_delta)
                     t_delta_maxes.append(y_time[j] - time_X_cur[s])
-
         time_X = np.concatenate(time_X, axis=0)
         t_deltas = np.concatenate(t_deltas, axis=0)
         t_delta_maxes = np.array(t_delta_maxes)
@@ -486,16 +485,15 @@ class Model(object):
                     dtype=self.FLOAT_TF,
                     name=sn('y')
                 )
-                y_batch = tf.shape(self.y)[0]
+                self.y_batch = tf.shape(self.y)[0]
                 self.time_y = tf.placeholder_with_default(
-                    tf.ones([y_batch], dtype=self.FLOAT_TF),
+                    tf.ones([self.y_batch], dtype=self.FLOAT_TF),
                     shape=[None],
                     name=sn('time_y')
                 )
 
                 # Tensor of temporal offsets with shape (?, history_length, 1)
                 self.t_delta = self.time_y[..., None, None] - self.time_X
-                # self.gf_y = tf.placeholder(shape=[None, len(self.rangf)], dtype=self.INT_TF)
                 self.gf_defaults = np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1
                 self.gf_y = tf.placeholder_with_default(
                     tf.cast(self.gf_defaults, dtype=self.INT_TF),
@@ -1046,6 +1044,19 @@ class Model(object):
         :param ran_gf: ``str`` or ``None``; Name of random grouping factor for random intercept (if ``None``, constructs a fixed intercept)
         :return: 2-tuple of ``Tensor`` ``(intercept, intercept_summary)``; ``intercept`` is the intercept for use by the model. ``intercept_summary`` is an identically-shaped representation of the current intercept value for logging and plotting (can be identical to ``intercept``). For fixed intercepts, should return a trainable scalar. For random intercepts, should return batch-length vector of trainable weights. Weights should be initialized around 0.
         """
+        raise NotImplementedError
+
+    def initialize_coefficient(self, coef_ids=None, ran_gf=None):
+        """
+        Add coefficients.
+        This method must be implemented by subclasses of ``CDR`` and should only be called at model initialization.
+        Correct model behavior is not guaranteed if called at any other time.
+
+        :param coef_ids: ``list`` of ``str``: List of coefficient IDs
+        :param ran_gf: ``str`` or ``None``: Name of random grouping factor for random coefficient (if ``None``, constructs a fixed coefficient)
+        :return: 2-tuple of ``Tensor`` ``(coefficient, coefficient_summary)``; ``coefficient`` is the coefficient for use by the model. ``coefficient_summary`` is an identically-shaped representation of the current coefficient values for logging and plotting (can be identical to ``coefficient``). For fixed coefficients, should return a vector of ``len(coef_ids)`` trainable weights. For random coefficients, should return batch-length matrix of trainable weights with ``len(coef_ids)`` columns for each input in the batch. Weights should be initialized around 0.
+        """
+
         raise NotImplementedError
 
     def initialize_objective(self):

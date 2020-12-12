@@ -12,7 +12,7 @@ from cdr.plot import plot_irf, plot_qq
 if __name__ == '__main__':
 
     argparser = argparse.ArgumentParser('''
-        Generates predictions from data given saved model(s)
+        Plot estimates from saved model(s)
     ''')
     argparser.add_argument('paths', nargs='+', help='Path(s) to config file(s) defining experiments')
     argparser.add_argument('-m', '--models', nargs='*', default = [], help='Model names to plot. Regex permitted. If unspecified, plots all CDR models.')

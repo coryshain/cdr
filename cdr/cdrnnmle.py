@@ -82,15 +82,32 @@ class CDRNNMLE(CDRNN):
                         dtype=self.FLOAT_TF,
                         name='intercept'
                     )
-                    intercept_summary = intercept
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     intercept = tf.Variable(
                         tf.zeros([rangf_n_levels], dtype=self.FLOAT_TF),
                         name='intercept_by_%s' % sn(ran_gf)
                     )
-                    intercept_summary = intercept
+                intercept_summary = intercept
+
                 return intercept, intercept_summary
+
+    def initialize_coefficient(self, coef_ids=None, ran_gf=None):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                units = len(self.impulse_names) + 1
+                if ran_gf is None:
+                    coefficient = 1.
+                    # coefficient = tf.Variable(tf.ones([1, 1, units]), name='coefficient')
+                else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+                    coefficient = tf.Variable(
+                        tf.zeros([rangf_n_levels, units]),
+                        name='coefficient_by_%s' % (sn(ran_gf))
+                    )
+                coefficient_summary = coefficient
+
+                return coefficient, coefficient_summary
 
     def initialize_feedforward(
             self,
@@ -156,23 +173,25 @@ class CDRNNMLE(CDRNN):
                         tf.zeros([rangf_n_levels, self.n_units_rnn[l]]),
                         name='rnn_h_ran_l%d_by_%s' % (l+1, sn(ran_gf))
                     )
+                rnn_h_summary = rnn_h
 
-                return rnn_h
+                return rnn_h, rnn_h_summary
 
     def initialize_rnn_c(self, l, ran_gf=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 units = self.n_units_rnn[l]
                 if ran_gf is None:
-                    rnn_h = tf.Variable(tf.zeros([1, units]), name='rnn_c_l%d' % (l+1))
+                    rnn_c = tf.Variable(tf.zeros([1, units]), name='rnn_c_l%d' % (l+1))
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
-                    rnn_h = tf.Variable(
+                    rnn_c = tf.Variable(
                         tf.zeros([rangf_n_levels, units]),
                         name='rnn_c_ran_l%d_by_%s' % (l+1, sn(ran_gf))
                     )
+                rnn_c_summary = rnn_c
 
-                return rnn_h
+                return rnn_c, rnn_c_summary
 
     def initialize_h_bias(self, ran_gf=None):
         with self.sess.as_default():
@@ -186,8 +205,9 @@ class CDRNNMLE(CDRNN):
                         tf.zeros([rangf_n_levels, units]),
                         name='h_bias_by_%s' % (sn(ran_gf))
                     )
+                h_bias_summary = h_bias
 
-                return h_bias
+                return h_bias, h_bias_summary
 
     def initialize_irf_l1_biases(self):
         with self.sess.as_default():
@@ -210,14 +230,16 @@ class CDRNNMLE(CDRNN):
                     initializer=kernel_init,
                     shape=[1, 1, self.n_units_t_delta_embedding]
                 )
+                irf_l1_W_bias_summary = irf_l1_W_bias
 
                 irf_l1_b_bias = tf.get_variable(
                     name='irf_l1_b_bias',
                     initializer=tf.zeros_initializer(),
                     shape=[1, 1, self.n_units_t_delta_embedding]
                 )
+                irf_l1_b_bias_summary = irf_l1_b_bias
 
-                return irf_l1_W_bias, irf_l1_b_bias
+                return irf_l1_W_bias, irf_l1_W_bias_summary, irf_l1_b_bias, irf_l1_b_bias_summary
 
     def initialize_objective(self):
         with self.sess.as_default():

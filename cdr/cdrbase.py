@@ -2916,19 +2916,6 @@ class CDR(Model):
     #
     ######################################################
 
-    def initialize_coefficient(self, coef_ids=None, ran_gf=None):
-        """
-        Add coefficients.
-        This method must be implemented by subclasses of ``CDR`` and should only be called at model initialization.
-        Correct model behavior is not guaranteed if called at any other time.
-
-        :param coef_ids: ``list`` of ``str``: List of coefficient IDs
-        :param ran_gf: ``str`` or ``None``: Name of random grouping factor for random coefficient (if ``None``, constructs a fixed coefficient)
-        :return: 2-tuple of ``Tensor`` ``(coefficient, coefficient_summary)``; ``coefficient`` is the coefficient for use by the model. ``coefficient_summary`` is an identically-shaped representation of the current coefficient values for logging and plotting (can be identical to ``coefficient``). For fixed coefficients, should return a vector of ``len(coef_ids)`` trainable weights. For random coefficients, should return batch-length matrix of trainable weights with ``len(coef_ids)`` columns for each input in the batch. Weights should be initialized around 0.
-        """
-
-        raise NotImplementedError
-
     def initialize_interaction(self, interaction_ids=None, ran_gf=None):
         """
         Add (response-level) interactions.

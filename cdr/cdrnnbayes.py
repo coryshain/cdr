@@ -7,7 +7,7 @@ from .cdrnnbase import CDRNN
 from .util import sn, reg_name, stderr
 
 import tensorflow as tf
-from tensorflow.contrib.distributions import MultivariateNormalTriL, Normal, SinhArcsinh
+from tensorflow.contrib.distributions import softplus_inverse, MultivariateNormalTriL, Normal, SinhArcsinh
 
 pd.options.mode.chained_assignment = None
 
@@ -227,24 +227,24 @@ class CDRNNBayes(CDRNN):
                         name='intercept_q_scale'
                     )
 
-                    intercept_dist = Normal(
+                    intercept_q_dist = Normal(
                         loc=intercept_q_loc,
                         scale=self.constraint_fn(intercept_q_scale) + self.epsilon,
                         name='intercept_q'
                     )
 
-                    intercept = tf.cond(self.use_MAP_mode, intercept_dist.mean, intercept_dist.sample)
+                    intercept = tf.cond(self.use_MAP_mode, intercept_q_dist.mean, intercept_q_dist.sample)
 
-                    intercept_summary = intercept_dist.mean()
+                    intercept_summary = intercept_q_dist.mean()
 
                     if self.declare_priors_fixef:
                         # Prior distribution
-                        intercept_prior = Normal(
+                        intercept_prior_dist = Normal(
                             loc=self.intercept_init_tf,
                             scale=self.intercept_prior_sd_tf,
                             name='intercept'
                         )
-                        self.kl_penalties.append(intercept_dist.kl_divergence(intercept_prior))
+                        self.kl_penalties.append(intercept_q_dist.kl_divergence(intercept_prior_dist))
 
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
@@ -260,24 +260,24 @@ class CDRNNBayes(CDRNN):
                         name='intercept_q_scale_by_%s' % sn(ran_gf)
                     )
 
-                    intercept_dist = Normal(
+                    intercept_q_dist = Normal(
                         loc=intercept_q_loc,
                         scale=self.constraint_fn(intercept_q_scale) + self.epsilon,
                         name='intercept_q_by_%s' % sn(ran_gf)
                     )
 
-                    intercept = tf.cond(self.use_MAP_mode, intercept_dist.mean, intercept_dist.sample)
+                    intercept = tf.cond(self.use_MAP_mode, intercept_q_dist.mean, intercept_q_dist.sample)
 
-                    intercept_summary = intercept_dist.mean()
+                    intercept_summary = intercept_q_dist.mean()
 
                     if self.declare_priors_ranef:
                         # Prior distribution
-                        intercept_prior = Normal(
+                        intercept_prior_dist = Normal(
                             loc=0.,
                             scale=self.intercept_ranef_prior_sd_tf,
                             name='intercept_by_%s' % sn(ran_gf)
                         )
-                        self.kl_penalties.append(intercept_dist.kl_divergence(intercept_prior))
+                        self.kl_penalties.append(intercept_q_dist.kl_divergence(intercept_prior_dist))
 
                 return intercept, intercept_summary
 
@@ -348,6 +348,82 @@ class CDRNNBayes(CDRNN):
                         tf.zeros([rangf_n_levels, self.n_units_rnn[l]]),
                         name='rnn_h_ran_l%d_by_%s' % (l+1, sn(ran_gf))
                     )
+
+                rnn_h_sd_prior = self.bias_prior_sd
+                if isinstance(rnn_h_sd_prior, str):
+                    if rnn_h_sd_prior.lower() in ['xavier', 'glorot']:
+                        rnn_h_sd_prior = math.sqrt(2 / (units + 1))
+                    elif rnn_h_sd_prior.lower() == 'he':
+                        rnn_h_sd_prior = math.sqrt(2 / units)
+                else:
+                    rnn_h_sd_prior = rnn_h_sd_prior
+                rnn_h_sd_posterior = rnn_h_sd_prior * self.posterior_to_prior_sd_ratio
+
+                if ran_gf is None:
+                    # Posterior distribution
+                    rnn_h_q_loc = tf.Variable(
+                        tf.zeros([1, units]),
+                        name='rnn_h_q_loc'
+                    )
+
+                    rnn_h_q_scale = tf.Variable(
+                        softplus_inverse(rnn_h_sd_posterior),
+                        name='rnn_h_q_scale'
+                    )
+
+                    rnn_h_q_dist = Normal(
+                        loc=rnn_h_q_loc,
+                        scale=self.constraint_fn(rnn_h_q_scale) + self.epsilon,
+                        name='rnn_h_q'
+                    )
+
+                    rnn_h = tf.cond(self.use_MAP_mode, rnn_h_q_dist.mean, rnn_h_q_dist.sample)
+
+                    rnn_h_summary = rnn_h_q_dist.mean()
+
+                    if self.declare_priors_fixef:
+                        # Prior distribution
+                        rnn_h_prior_dist = Normal(
+                            loc=self.rnn_h_init_tf,
+                            scale=self.rnn_h_prior_sd_tf,
+                            name='rnn_h'
+                        )
+                        self.kl_penalties.append(rnn_h_q_dist.kl_divergence(rnn_h_prior_dist))
+
+                else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+
+                    # Posterior distribution
+                    rnn_h_q_loc = tf.Variable(
+                        tf.zeros([rangf_n_levels], dtype=self.FLOAT_TF),
+                        name='rnn_h_q_loc_by_%s' % sn(ran_gf)
+                    )
+
+                    rnn_h_q_scale = tf.Variable(
+                        tf.ones([rangf_n_levels], dtype=self.FLOAT_TF) * self.rnn_h_ranef_posterior_sd_init_unconstrained,
+                        name='rnn_h_q_scale_by_%s' % sn(ran_gf)
+                    )
+
+                    rnn_h_q_dist = Normal(
+                        loc=rnn_h_q_loc,
+                        scale=self.constraint_fn(rnn_h_q_scale) + self.epsilon,
+                        name='rnn_h_q_by_%s' % sn(ran_gf)
+                    )
+
+                    rnn_h = tf.cond(self.use_MAP_mode, rnn_h_q_dist.mean, rnn_h_q_dist.sample)
+
+                    rnn_h_summary = rnn_h_q_dist.mean()
+
+                    if self.declare_priors_ranef:
+                        # Prior distribution
+                        rnn_h_prior_dist = Normal(
+                            loc=0.,
+                            scale=self.rnn_h_ranef_prior_sd_tf,
+                            name='rnn_h_by_%s' % sn(ran_gf)
+                        )
+                        self.kl_penalties.append(rnn_h_q_dist.kl_divergence(rnn_h_prior_dist))
+
+                return rnn_h, rnn_h_summary
 
                 return rnn_h
 

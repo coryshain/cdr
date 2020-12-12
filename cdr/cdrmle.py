@@ -120,11 +120,6 @@ class CDRMLE(CDR):
             with self.sess.graph.as_default():
                 if ran_gf is None:
                     coefficient = tf.Variable(
-                        # tf.random_normal(
-                        #     shape=[len(coef_ids)],
-                        #     stddev=self.init_sd,
-                        #     dtype=self.FLOAT_TF
-                        # ),
                         tf.zeros([len(coef_ids)], dtype=self.FLOAT_TF),
                         name='coefficient'
                     )
@@ -132,11 +127,6 @@ class CDRMLE(CDR):
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     coefficient = tf.Variable(
-                        # tf.random_normal(
-                        #     shape=[rangf_n_levels, len(coef_ids)],
-                        #     stddev=self.init_sd,
-                        #     dtype=self.FLOAT_TF
-                        # ),
                         tf.zeros([rangf_n_levels, len(coef_ids)], dtype=self.FLOAT_TF),
                         name='coefficient_by_%s' % sn(ran_gf)
                     )
@@ -151,11 +141,6 @@ class CDRMLE(CDR):
             with self.sess.graph.as_default():
                 if ran_gf is None:
                     interaction = tf.Variable(
-                        # tf.random_normal(
-                        #     shape=[len(interaction_ids)],
-                        #     stddev=self.init_sd,
-                        #     dtype=self.FLOAT_TF
-                        # ),
                         tf.zeros([len(interaction_ids)], dtype=self.FLOAT_TF),
                         name='interaction'
                     )
@@ -163,11 +148,6 @@ class CDRMLE(CDR):
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     interaction = tf.Variable(
-                        # tf.random_normal(
-                        #     shape=[rangf_n_levels, len(interaction_ids)],
-                        #     stddev=self.init_sd,
-                        #     dtype=self.FLOAT_TF
-                        # ),
                         tf.zeros([rangf_n_levels, len(interaction_ids)], dtype=self.FLOAT_TF),
                         name='coefficient_by_%s' % sn(ran_gf)
                     )
@@ -179,12 +159,6 @@ class CDRMLE(CDR):
             with self.sess.graph.as_default():
                 if ran_gf is None:
                     param = tf.Variable(
-                        # tf.random_normal(
-                        #     shape=[1, len(ids)],
-                        #     mean=mean,
-                        #     stddev=self.init_sd,
-                        #     dtype=self.FLOAT_TF
-                        # ),
                         tf.ones([1, len(ids)], dtype=self.FLOAT_TF) * mean,
                         name=sn('%s_%s' % (param_name, '-'.join(ids)))
                     )
@@ -192,19 +166,12 @@ class CDRMLE(CDR):
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     param = tf.Variable(
-                        # tf.random_normal(
-                        #     shape=[rangf_n_levels, len(ids)],
-                        #     mean=0.,
-                        #     stddev=self.init_sd,
-                        #     dtype=self.FLOAT_TF
-                        # ),
                         tf.random_normal(
                             shape=[rangf_n_levels, len(ids)],
                             mean=0.,
                             stddev=self.epsilon,
                             dtype=self.FLOAT_TF
                         ),
-                        # tf.zeros([rangf_n_levels, len(ids)], dtype=self.FLOAT_TF),
                         name=sn('%s_%s_by_%s' % (param_name, '-'.join(ids), sn(ran_gf)))
                     )
                     param_summary = param
@@ -217,12 +184,6 @@ class CDRMLE(CDR):
                 dim = int(means.shape[0])
 
                 joint_loc = tf.Variable(
-                    # tf.random_normal(
-                    #     [dim],
-                    #     mean=means,
-                    #     stddev=self.init_sd,
-                    #     dtype=self.FLOAT_TF
-                    # ),
                     tf.ones([dim], dtype=self.FLOAT_TF) * means,
                     name='joint_loc' if ran_gf is None else 'joint_loc_by_%s' % sn(ran_gf)
                 )
@@ -239,12 +200,6 @@ class CDRMLE(CDR):
                 scale_init = tf.gather(tf.reshape(cholesky, [dim * dim]), tril_ix)
 
                 joint_scale = tf.Variable(
-                    # tf.random_normal(
-                    #     [n_scale],
-                    #     mean=scale_init,
-                    #     stddev=self.init_sd,
-                    #     dtype=self.FLOAT_TF
-                    # ),
                     tf.ones([n_scale], dtype=self.FLOAT_TF) * scale_init,
                     name='joint_scale' if ran_gf is None else 'joint_scale_by_%s' % sn(ran_gf)
                 )

@@ -1009,7 +1009,7 @@ CDRNNBAYES_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'bias_prior_sd',
-        None,
+        1.,
         [float, str],
         "Standard deviation of prior on CDRNN hidden biases. A ``float``, ``'glorot'``, or ``'he'``.",
         aliases=['conv_prior_sd', 'prior_sd']

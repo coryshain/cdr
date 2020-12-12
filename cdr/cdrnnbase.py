@@ -508,9 +508,9 @@ class CDRNN(Model):
                     self.rnn_projection_layers = rnn_projection_layers
                     self.rnn_projection_fn = rnn_projection_fn
 
-                h_bias = self.initialize_h_bias()
+                h_bias, h_bias_summary = self.initialize_h_bias()
 
-                irf_l1_W_bias, irf_l1_b_bias = self.initialize_irf_l1_biases()
+                irf_l1_W_bias, irf_l1_W_bias_summary, irf_l1_b_bias, irf_l1_b_bias_summary = self.initialize_irf_l1_biases()
 
                 self.h_bias = h_bias
                 self.t_delta_embedding_W = irf_l1_W_bias
@@ -643,10 +643,14 @@ class CDRNN(Model):
                 self.intercept = self.intercept_fixed
                 self.intercept_summary = self.intercept_fixed_summary
 
+                self.coefficient, _ = self.initialize_coefficient()
+
                 # RANDOM EFFECTS
                 self.intercept_random = {}
                 self.intercept_random_summary = {}
                 self.intercept_random_means = {}
+                self.coefficient_ran_matrix = []
+                self.coefficient_ran = []
                 self.rnn_h_ran_matrix = [[] for l in range(self.n_layers_rnn)]
                 self.rnn_h_ran = [[] for l in range(self.n_layers_rnn)]
                 self.rnn_c_ran_matrix = [[] for l in range(self.n_layers_rnn)]
@@ -715,16 +719,44 @@ class CDRNN(Model):
                                 collections=['random']
                             )
 
+                        # Random coefficients
+                        coefficient_ran_matrix_cur, _ = self.initialize_coefficient(ran_gf=gf)
+                        coefficient_ran_matrix_cur -= tf.reduce_mean(coefficient_ran_matrix_cur, axis=0, keepdims=True)
+                        self._regularize(coefficient_ran_matrix_cur, type='ranef', var_name=reg_name('coefficient_by_%s' % (sn(gf))))
+
+                        if self.log_random:
+                            tf.summary.histogram(
+                                sn('by_%s/coefficient' % sn(gf)),
+                                coefficient_ran_matrix_cur,
+                                collections=['random']
+                            )
+
+                        coefficient_ran_matrix_cur = tf.concat(
+                            [
+                                coefficient_ran_matrix_cur,
+                                tf.zeros([1, len(self.impulse_names)+1])
+                            ],
+                            axis=0
+                        )
+
+                        coefficient_ran = tf.gather(coefficient_ran_matrix_cur, gf_y)
+
+                        self.coefficient_ran_matrix.append(coefficient_ran_matrix_cur)
+                        self.coefficient_ran.append(coefficient_ran)
+
+                        self.coefficient += tf.expand_dims(coefficient_ran, axis=-2)
+
                         # Random rnn initialization offsets
                         for l in range(self.n_layers_rnn):
-                            rnn_h_ran_matrix_cur = self.initialize_rnn_h(l, ran_gf=gf)
+                            rnn_h_ran_matrix_cur, rnn_h_ran_matrix_cur_summary = self.initialize_rnn_h(l, ran_gf=gf)
                             rnn_h_ran_matrix_cur -= tf.reduce_mean(rnn_h_ran_matrix_cur, axis=0, keepdims=True)
+                            rnn_h_ran_matrix_cur_summary -= tf.reduce_mean(rnn_h_ran_matrix_cur_summary, axis=0, keepdims=True)
                             self._regularize(rnn_h_ran_matrix_cur, type='ranef', var_name=reg_name('rnn_h_ran_l%d_by_%s' % (l, sn(gf))))
 
                             if self.log_random:
                                 tf.summary.histogram(
                                     sn('by_%s/rnn_h_l%d' % (sn(gf), l+1)),
-                                    rnn_h_ran_matrix_cur,
+                                    rnn_h_ran_matrix_cur_summary,
                                     collections=['random']
                                 )
 
@@ -742,14 +774,15 @@ class CDRNN(Model):
 
                             self.rnn_h_init[l] += rnn_h_ran
 
-                            rnn_c_ran_matrix_cur = self.initialize_rnn_c(l, ran_gf=gf)
+                            rnn_c_ran_matrix_cur, rnn_c_ran_matrix_cur_summary = self.initialize_rnn_c(l, ran_gf=gf)
                             rnn_c_ran_matrix_cur -= tf.reduce_mean(rnn_c_ran_matrix_cur, axis=0, keepdims=True)
+                            rnn_c_ran_matrix_cur_summary -= tf.reduce_mean(rnn_c_ran_matrix_cur_summary, axis=0, keepdims=True)
                             self._regularize(rnn_c_ran_matrix_cur, type='ranef', var_name=reg_name('rnn_c_ran_l%d_by_%s' % (l+1, sn(gf))))
 
                             if self.log_random:
                                 tf.summary.histogram(
                                     sn('by_%s/rnn_c_l%d' % (sn(gf), l+1)),
-                                    rnn_c_ran_matrix_cur,
+                                    rnn_c_ran_matrix_cur_summary,
                                     collections=['random']
                                 )
 
@@ -768,14 +801,15 @@ class CDRNN(Model):
                             self.rnn_c_init[l] += rnn_c_ran
 
                         # Random hidden state offsets
-                        h_bias_ran_matrix_cur = self.initialize_h_bias(ran_gf=gf)
+                        h_bias_ran_matrix_cur, h_bias_ran_matrix_cur_summary = self.initialize_h_bias(ran_gf=gf)
                         h_bias_ran_matrix_cur -= tf.reduce_mean(h_bias_ran_matrix_cur, axis=0, keepdims=True)
+                        h_bias_ran_matrix_cur_summary -= tf.reduce_mean(h_bias_ran_matrix_cur_summary, axis=0, keepdims=True)
                         self._regularize(h_bias_ran_matrix_cur, type='ranef', var_name=reg_name('h_ran_by_%s' % (sn(gf))))
 
                         if self.log_random:
                             tf.summary.histogram(
                                 sn('by_%s/h' % sn(gf)),
-                                h_bias_ran_matrix_cur,
+                                h_bias_ran_matrix_cur_summary,
                                 collections=['random']
                             )
 
@@ -969,6 +1003,23 @@ class CDRNN(Model):
 
                 # Compute hidden state
                 h = self.h_bias
+                coef = self.coefficient
+
+                # If plotting, tile out random effects
+                if plot_mode:
+                    R = tf.shape(self.gf_y)[0]
+                    B = tf.shape(X)[0]
+                    tile_ix = tf.tile(tf.range(R)[..., None], [1, B])
+                    tile_ix = tf.reshape(tile_ix, [-1])
+                    # tile_ix = tf.Print(tile_ix, [tile_ix], summarize=10000)
+                    h = tf.gather(h, tile_ix, axis=0)
+                    coef = tf.gather(coef, tile_ix, axis=0)
+                    X = tf.tile(X, [R, 1 ,1])
+                    t_delta = tf.tile(t_delta, [R, 1 ,1])
+
+                # coef = tf.Print(coef, [coef], summarize=1000)
+                X *= coef
+
                 h_in = self.input_projection_fn(X)
                 if self.h_in_noise_sd:
                     def h_in_train_fn(h_in=h_in):
@@ -1172,8 +1223,6 @@ class CDRNN(Model):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 # IRF 1D PLOTS
-                T = tf.shape(self.support)[0]
-
                 t_delta = self.support[..., None]
 
                 x = self.plot_impulse_1hot_expanded
@@ -1182,6 +1231,9 @@ class CDRNN(Model):
                 c = self.plot_impulse_center_expanded
                 s = self.plot_impulse_offset_expanded
 
+                R = tf.shape(self.gf_y)[0]
+                T = tf.shape(self.support)[0]
+
                 X_rate = tf.tile(
                     b,
                     [T, 1, 1]
@@ -1189,7 +1241,7 @@ class CDRNN(Model):
 
                 self.irf_1d_rate_support = self.support
                 irf_1d_rate_plot = self._apply_model(X_rate, t_delta, plot_mode=True)['y']
-                self.irf_1d_rate_plot = irf_1d_rate_plot[None, ...]
+                self.irf_1d_rate_plot = tf.reshape(irf_1d_rate_plot, [R, T, 1])
 
                 X = tf.tile(
                      x * s + b,
@@ -1197,7 +1249,7 @@ class CDRNN(Model):
                 )
                 self.irf_1d_support = self.support
                 irf_1d_plot = self._apply_model(X, t_delta, plot_mode=True)['y']
-                self.irf_1d_plot = irf_1d_plot[None, ...] - self.irf_1d_rate_plot
+                self.irf_1d_plot = tf.reshape(irf_1d_plot, [R, T, 1]) - self.irf_1d_rate_plot
 
                 # IRF SURFACE PLOTS
                 time_support = tf.linspace(
