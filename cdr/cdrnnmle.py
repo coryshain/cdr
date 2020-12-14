@@ -98,7 +98,6 @@ class CDRNNMLE(CDRNN):
                 units = len(self.impulse_names) + 1
                 if ran_gf is None:
                     coefficient = 1.
-                    # coefficient = tf.Variable(tf.ones([1, 1, units]), name='coefficient')
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     coefficient = tf.Variable(
@@ -127,7 +126,7 @@ class CDRNNMLE(CDRNN):
                     activation=activation,
                     dropout=dropout,
                     batch_normalization_decay=batch_normalization_decay,
-                    kernel_sd_init=self.kernel_sd_init,
+                    kernel_sd_init=self.weight_sd_init,
                     epsilon=self.epsilon,
                     session=self.sess,
                     name=name
@@ -146,8 +145,8 @@ class CDRNNMLE(CDRNN):
                     activation=self.rnn_activation,
                     recurrent_activation=self.recurrent_activation,
                     time_projection_inner_activation=self.irf_inner_activation,
-                    bottomup_kernel_sd_init=self.kernel_sd_init,
-                    recurrent_kernel_sd_init=self.kernel_sd_init,
+                    bottomup_kernel_sd_init=self.weight_sd_init,
+                    recurrent_kernel_sd_init=self.weight_sd_init,
                     bottomup_dropout=self.input_projection_dropout_rate,
                     h_dropout=self.rnn_h_dropout_rate,
                     c_dropout=self.rnn_c_dropout_rate,
@@ -209,35 +208,48 @@ class CDRNNMLE(CDRNN):
 
                 return h_bias, h_bias_summary
 
-    def initialize_irf_l1_biases(self):
+    def initialize_irf_l1_biases(self, ran_gf=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if isinstance(self.kernel_sd_init, str):
-                    if self.kernel_sd_init.lower() in ['xavier', 'glorot']:
-                        sd = math.sqrt(2 / (1 + self.n_units_t_delta_embedding))
-                    elif self.kernel_sd_init.lower() == 'he':
-                        sd = math.sqrt(2)
+                units = self.n_units_t_delta_embedding
+                if ran_gf is None:
+                    if isinstance(self.weight_sd_init, str):
+                        if self.weight_sd_init.lower() in ['xavier', 'glorot']:
+                            sd = math.sqrt(2 / (1 + self.n_units_t_delta_embedding))
+                        elif self.weight_sd_init.lower() == 'he':
+                            sd = math.sqrt(2)
+                    else:
+                        sd = self.weight_sd_init
+
+                    kernel_init = get_initializer(
+                        'random_normal_initializer_mean=0-stddev=%s' % sd,
+                        session=self.sess
+                    )
+                    irf_l1_W_bias = tf.get_variable(
+                        name='irf_l1_W_bias',
+                        initializer=kernel_init,
+                        shape=[1, 1, units]
+                    )
+                    irf_l1_b_bias = tf.get_variable(
+                        name='irf_l1_b_bias',
+                        initializer=tf.zeros_initializer(),
+                        shape=[1, 1, units]
+                    )
                 else:
-                    sd = self.kernel_sd_init
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+                    irf_l1_W_bias = tf.get_variable(
+                        name='irf_l1_W_by_%s' % (sn(ran_gf)),
+                        initializer=tf.zeros_initializer(),
+                        shape=[rangf_n_levels, units],
+                    )
+                    irf_l1_b_bias = tf.get_variable(
+                        name='irf_l1_b_by_%s' % (sn(ran_gf)),
+                        initializer=tf.zeros_initializer(),
+                        shape=[rangf_n_levels, units],
+                    )
 
-                kernel_init = get_initializer(
-                    'random_normal_initializer_mean=0-stddev=%s' % sd,
-                    session=self.sess
-                )
-
-                irf_l1_W_bias = tf.get_variable(
-                    name='irf_l1_W_bias',
-                    initializer=kernel_init,
-                    shape=[1, 1, self.n_units_t_delta_embedding]
-                )
-                irf_l1_W_bias_summary = irf_l1_W_bias
-
-                irf_l1_b_bias = tf.get_variable(
-                    name='irf_l1_b_bias',
-                    initializer=tf.zeros_initializer(),
-                    shape=[1, 1, self.n_units_t_delta_embedding]
-                )
                 irf_l1_b_bias_summary = irf_l1_b_bias
+                irf_l1_W_bias_summary = irf_l1_W_bias
 
                 return irf_l1_W_bias, irf_l1_W_bias_summary, irf_l1_b_bias, irf_l1_b_bias_summary
 

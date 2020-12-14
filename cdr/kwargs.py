@@ -965,7 +965,7 @@ CDRNN_INITIALIZATION_KWARGS = [
 
 CDRNNMLE_INITIALIZATION_KWARGS = [
     Kwarg(
-        'kernel_sd_init',
+        'weight_sd_init',
         'he',
         [float, str],
         "Standard deviation of kernel initialization distribution (Normal, mean=0). Can also be ``'glorot'``, which uses the SD of the Glorot normal initializer."

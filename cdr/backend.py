@@ -4,7 +4,7 @@ import tensorflow as tf
 from .util import *
 
 from tensorflow.python.ops import rnn_cell_impl
-from tensorflow.contrib.distributions import softplus_inverse, Normal
+from tensorflow.contrib.distributions import Normal
 
 if hasattr(rnn_cell_impl, 'LayerRNNCell'):
     LayerRNNCell = rnn_cell_impl.LayerRNNCell
@@ -390,7 +390,7 @@ class CDRNNCell(LayerRNNCell):
                 self.t_delta_embedding_b = self.add_variable(
                     't_delta_embedding_b',
                     shape=[1, self._num_units],
-                    initializer=tf.zeros_initializer
+                    initializer=tf.zeros_initializer()
                 )
 
     def call(self, inputs, state):
@@ -664,6 +664,7 @@ class CDRNNCellBayes(CDRNNCell):
             kernel_prior_sd='he',
             bias_prior_sd=1,
             posterior_to_prior_sd_ratio=1,
+            constraint='softplus',
             bottomup_dropout=None,
             h_dropout=None,
             c_dropout=None,
@@ -714,6 +715,21 @@ class CDRNNCellBayes(CDRNNCell):
         self.kernel_prior_sd = kernel_prior_sd
         self.bias_prior_sd = bias_prior_sd
         self.posterior_to_prior_sd_ratio = posterior_to_prior_sd_ratio
+
+        self.constraint = constraint
+        if self.constraint.lower() == 'softplus':
+            self.constraint_fn = tf.nn.softplus
+            self.constraint_fn_inv = tf.contrib.distributions.softplus_inverse
+        elif self.constraint.lower() == 'square':
+            self.constraint_fn = tf.square
+            self.constraint_fn_inv = tf.sqrt
+        elif self.constraint.lower() == 'abs':
+            self.constraint_fn = self._safe_abs
+            self.constraint_fn_inv = tf.identity
+        else:
+            raise ValueError('Unrecognized constraint function %s' % self.constraint)
+
+        self.kl_penalties = []
 
     def initialize_kernel(
             self,
@@ -774,12 +790,16 @@ class CDRNNCellBayes(CDRNNCell):
                         kernel_prior_sd=self.kernel_prior_sd,
                         bias_prior_sd=self.bias_prior_sd,
                         posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
+                        constraint=self.constraint,
                         batch_normalization_decay=self._batch_normalization_decay,
                         epsilon=self._epsilon,
                         session=self._session,
                         reuse=tf.AUTO_REUSE,
                         name=name_cur
                     )
+
+                    if self.declare_priors:
+                        self.kl_penalties += kernel_layer.kl_penalties
 
                     layers.append(kernel_layer)
                     kernel_lambdas.append(make_lambda(kernel_layer, session=self._session))
@@ -794,13 +814,14 @@ class CDRNNCellBayes(CDRNNCell):
                 out_dim = self._num_units
                 if isinstance(self.kernel_prior_sd, str):
                     if self.kernel_prior_sd.lower() in ['xavier', 'glorot']:
-                        kernel_sd_prior = math.sqrt(2 / (1+ out_dim))
+                        kernel_sd_prior = math.sqrt(2 / (1+out_dim))
                     elif self.kernel_sd_init.lower() == 'he':
-                        kernel_sd_prior = math.sqrt(2)
+                        kernel_sd_prior = math.sqrt(2 / out_dim)
                 else:
                     kernel_sd_prior = self.kernel_sd_init
                 kernel_sd_posterior = kernel_sd_prior * self.posterior_to_prior_sd_ratio
 
+                # Posterior distribution
                 t_delta_embedding_W_q_loc = self.add_variable(
                     name='t_delta_embedding_W_q_loc',
                     initializer=tf.zeros_initializer(),
@@ -808,7 +829,7 @@ class CDRNNCellBayes(CDRNNCell):
                 )
                 t_delta_embedding_W_q_scale = self.add_variable(
                     name='t_delta_embedding_W_q_scale',
-                    initializer=tf.constant_initializer(softplus_inverse(kernel_sd_posterior)),
+                    initializer=self.constraint_fn_inv(kernel_sd_posterior),
                     shape=[1, self._num_units]
                 )
                 self.t_delta_embedding_W_q_dist = Normal(
@@ -817,10 +838,12 @@ class CDRNNCellBayes(CDRNNCell):
                     name='t_delta_embedding_W_q'
                 )
                 if self.declare_priors:
+                    # Prior distribution
                     self.t_delta_embedding_W_prior_dist = Normal(
                         loc=0.,
                         scale=kernel_sd_prior
                     )
+                    self.kl_penalties.append(self.t_delta_embedding_W_q_dist.kl_divergence(self.t_delta_embedding_W_prior_dist))
                 self.t_delta_embedding_W = tf.cond(
                     self.use_MAP_mode,
                     self.t_delta_embedding_W_q_dist.mean,
@@ -831,11 +854,12 @@ class CDRNNCellBayes(CDRNNCell):
                     if self.bias_prior_sd.lower() in ['xavier', 'glorot']:
                         bias_sd_prior = math.sqrt(2 / (1+ out_dim))
                     elif self.bias_sd_init.lower() == 'he':
-                        bias_sd_prior = math.sqrt(2)
+                        bias_sd_prior = math.sqrt(2 / out_dim)
                 else:
                     bias_sd_prior = self.bias_sd_init
                 bias_sd_posterior = bias_sd_prior * self.posterior_to_prior_sd_ratio
 
+                # Posterior distribution
                 t_delta_embedding_b_q_loc = self.add_variable(
                     name='t_delta_embedding_b_q_loc',
                     initializer=tf.zeros_initializer(),
@@ -843,7 +867,7 @@ class CDRNNCellBayes(CDRNNCell):
                 )
                 t_delta_embedding_b_q_scale = self.add_variable(
                     name='t_delta_embedding_b_q_scale',
-                    initializer=tf.constant_initializer(softplus_inverse(bias_sd_posterior)),
+                    initializer=self.constraint_fn_inv(bias_sd_posterior),
                     shape=[1, self._num_units]
                 )
                 t_delta_embedding_b_q_dist = Normal(
@@ -852,29 +876,17 @@ class CDRNNCellBayes(CDRNNCell):
                     name='t_delta_embedding_b_q'
                 )
                 if self.declare_priors:
+                    # Prior distribution
                     self.t_delta_embedding_b_prior_dist = Normal(
                         loc=0.,
                         scale=bias_sd_prior
                     )
+                    self.kl_penalties.append(self.t_delta_embedding_b_q_dist.kl_divergence(self.t_delta_embedding_b_prior_dist))
                 self.t_delta_embedding_b = tf.cond(
                     self.use_MAP_mode,
                     t_delta_embedding_b_q_dist.mean,
                     t_delta_embedding_b_q_dist.sample
                 )
-
-    def kl_penalties(self):
-        out = []
-        if self.declare_priors:
-            for x in self._kernel_bottomup_layers + self._kernel_recurrent_layers:
-                out += x.kl_penalties()
-            if self._forget_gate_as_irf:
-                for x in self._kernel_time_projection_layers:
-                    out += x.kl_penalties()
-                out += [
-                    self.t_delta_embedding_b_dist.kl_divergence(self.t_delta_embedding_b_prior_dist),
-                ]
-
-        return out
 
 class CDRNNLayerBayes(CDRNNLayer):
     def __init__(
@@ -895,6 +907,7 @@ class CDRNNLayerBayes(CDRNNLayer):
             kernel_prior_sd='he',
             bias_prior_sd=1,
             posterior_to_prior_sd_ratio=1,
+            constraint='softplus',
             bottomup_dropout=None,
             h_dropout=None,
             c_dropout=None,
@@ -947,6 +960,7 @@ class CDRNNLayerBayes(CDRNNLayer):
         self.kernel_prior_sd = kernel_prior_sd
         self.bias_prior_sd = bias_prior_sd
         self.posterior_to_prior_sd_ratio = posterior_to_prior_sd_ratio
+        self.constraint = constraint
 
     def build(self, inputs):
         if not self.built:
@@ -979,6 +993,7 @@ class CDRNNLayerBayes(CDRNNLayer):
                         kernel_prior_sd=self.kernel_prior_sd,
                         bias_prior_sd=self.bias_prior_sd,
                         posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
+                        constraint=self.constraint,
                         weight_normalization=self.weight_normalization,
                         layer_normalization=self.layer_normalization,
                         use_bias=self.use_bias,
@@ -1144,6 +1159,7 @@ class DenseLayerBayes(DenseLayer):
             kernel_prior_sd='he',
             bias_prior_sd=1.,
             posterior_to_prior_sd_ratio=1,
+            constraint='softplus',
             reuse=tf.AUTO_REUSE,
             epsilon=1e-5,
             session=None,
@@ -1172,6 +1188,20 @@ class DenseLayerBayes(DenseLayer):
                 self.bias_prior_sd = bias_prior_sd
                 self.posterior_to_prior_sd_ratio = posterior_to_prior_sd_ratio
 
+                self.constraint = constraint
+                if self.constraint.lower() == 'softplus':
+                    self.constraint_fn = tf.nn.softplus
+                    self.constraint_fn_inv = tf.contrib.distributions.softplus_inverse
+                elif self.constraint.lower() == 'square':
+                    self.constraint_fn = tf.square
+                    self.constraint_fn_inv = tf.sqrt
+                elif self.constraint.lower() == 'abs':
+                    self.constraint_fn = self._safe_abs
+                    self.constraint_fn_inv = tf.identity
+                else:
+                    raise ValueError('Unrecognized constraint function %s' % self.constraint)
+
+                self.kl_penalties = []
                 self.built = False
 
     def build(self, inputs):
@@ -1202,6 +1232,7 @@ class DenseLayerBayes(DenseLayer):
                         if self.use_MAP_mode is None:
                             self.use_MAP_mode = tf.logical_not(self.training)
 
+                        # Posterior distribution
                         self.kernel_q_loc = tf.get_variable(
                             name='kernel_q_loc',
                             initializer=tf.zeros_initializer(),
@@ -1209,17 +1240,19 @@ class DenseLayerBayes(DenseLayer):
                         )
                         self.kernel_q_scale = tf.get_variable(
                             name='kernel_q_scale',
-                            initializer=tf.constant_initializer(softplus_inverse(kernel_sd_posterior)),
+                            initializer=tf.ones([in_dim, out_dim]) * self.constraint_fn_inv(kernel_sd_posterior)
                         )
                         self.kernel_q_dist = Normal(
                             loc=self.kernel_q_loc,
-                            scale=tf.nn.softplus(self.kernel_q_scale) + self.epsilon
+                            scale=self.constraint_fn(self.kernel_q_scale) + self.epsilon
                         )
                         if self.declare_priors:
+                            # Prior distribution
                             self.kernel_prior_dist = Normal(
                                 loc=0.,
                                 scale=kernel_sd_prior
                             )
+                            self.kl_penalties.append(self.kernel_q_dist.kl_divergence(self.kernel_prior_dist))
                         self.kernel = tf.cond(
                             self.use_MAP_mode,
                             self.kernel_q_dist.mean,
@@ -1236,25 +1269,28 @@ class DenseLayerBayes(DenseLayer):
                                 bias_sd_prior = self.bias_prior_sd
                             bias_sd_posterior = bias_sd_prior * self.posterior_to_prior_sd_ratio
 
+                            # Posterior distribution
                             self.bias_q_loc = tf.get_variable(
                                 name='bias_q_loc',
                                 initializer=tf.zeros_initializer(),
-                                shape=[in_dim, out_dim]
+                                shape=[out_dim]
                             )
                             self.bias_q_scale = tf.get_variable(
                                 name='bias_q_scale',
-                                initializer=tf.constant_initializer(softplus_inverse(bias_sd_posterior)),
+                                initializer=tf.ones([out_dim]) * self.constraint_fn_inv(bias_sd_posterior)
                             )
 
                             self.bias_q_dist = Normal(
                                 loc=self.bias_q_loc,
-                                scale=tf.nn.softplus(self.bias_q_scale) + self.epsilon
+                                scale=self.constraint_fn(self.bias_q_scale) + self.epsilon
                             )
                             if self.declare_priors:
+                                # Prior distribution
                                 self.bias_prior_dist = Normal(
                                     loc=0.,
                                     scale=bias_sd_prior
                                 )
+                                self.kl_penalties.append(self.bias_q_dist.kl_divergence(self.bias_prior_dist))
                             self.bias = tf.cond(
                                 self.use_MAP_mode,
                                 self.bias_q_dist.mean,
@@ -1262,13 +1298,6 @@ class DenseLayerBayes(DenseLayer):
                             )
 
             self.built = True
-
-    def kl_penalties(self):
-        out = []
-        if self.declare_priors:
-            out.append(self.kernel_q_dist.kl_divergence(self.kernel_prior_dist))
-            if not self.use_batch_normalization and self.use_bias:
-                out.append(self.bias_q_dist.kl_divergence(self.bias_prior_dist))
 
 
 class RNNLayer(object):

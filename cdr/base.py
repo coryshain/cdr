@@ -577,6 +577,8 @@ class Model(object):
 
                 self.loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='loss_total')
                 self.reg_loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='reg_loss_total')
+                if self.is_bayesian:
+                    self.reg_loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='kl_loss_total')
                 self.proportion_dropped = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='proportion_dropped')
 
                 self.training_mse_in = tf.placeholder(self.FLOAT_TF, shape=[], name='training_mse_in')
@@ -736,6 +738,8 @@ class Model(object):
             with self.sess.graph.as_default():
                 tf.summary.scalar('opt/loss_by_iter', self.loss_total, collections=['opt'])
                 tf.summary.scalar('opt/reg_loss_by_iter', self.reg_loss_total, collections=['opt'])
+                # if self.is_bayesian:
+                #     tf.summary.scalar('opt/kl_loss_by_iter', self.kl_loss_total, collections=['opt'])
                 if self.loss_filter_n_sds:
                     tf.summary.scalar('opt/proportion_dropped', self.proportion_dropped, collections=['opt'])
                 if self.log_graph:

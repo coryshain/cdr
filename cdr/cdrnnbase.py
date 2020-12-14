@@ -513,8 +513,8 @@ class CDRNN(Model):
                 irf_l1_W_bias, irf_l1_W_bias_summary, irf_l1_b_bias, irf_l1_b_bias_summary = self.initialize_irf_l1_biases()
 
                 self.h_bias = h_bias
-                self.t_delta_embedding_W = irf_l1_W_bias
-                self.t_delta_embedding_b = irf_l1_b_bias
+                self.irf_l1_W_bias = irf_l1_W_bias
+                self.irf_l1_b_bias = irf_l1_b_bias
 
                 # Projection from hidden state to first layer (weights and biases) of IRF
                 hidden_state_to_irf_l1 = self.initialize_feedforward(
@@ -643,20 +643,24 @@ class CDRNN(Model):
                 self.intercept = self.intercept_fixed
                 self.intercept_summary = self.intercept_fixed_summary
 
-                self.coefficient, _ = self.initialize_coefficient()
+                # self.coefficient, _ = self.initialize_coefficient()
 
                 # RANDOM EFFECTS
                 self.intercept_random = {}
                 self.intercept_random_summary = {}
                 self.intercept_random_means = {}
-                self.coefficient_ran_matrix = []
-                self.coefficient_ran = []
+                # self.coefficient_ran_matrix = []
+                # self.coefficient_ran = []
                 self.rnn_h_ran_matrix = [[] for l in range(self.n_layers_rnn)]
                 self.rnn_h_ran = [[] for l in range(self.n_layers_rnn)]
                 self.rnn_c_ran_matrix = [[] for l in range(self.n_layers_rnn)]
                 self.rnn_c_ran = [[] for l in range(self.n_layers_rnn)]
                 self.h_bias_ran_matrix = []
                 self.h_bias_ran = []
+                self.irf_l1_W_bias_ran_matrix = []
+                self.irf_l1_W_bias_ran = []
+                self.irf_l1_b_bias_ran_matrix = []
+                self.irf_l1_b_bias_ran = []
 
                 gf_y_src = self.gf_y
 
@@ -719,32 +723,32 @@ class CDRNN(Model):
                                 collections=['random']
                             )
 
-                        # Random coefficients
-                        coefficient_ran_matrix_cur, _ = self.initialize_coefficient(ran_gf=gf)
-                        coefficient_ran_matrix_cur -= tf.reduce_mean(coefficient_ran_matrix_cur, axis=0, keepdims=True)
-                        self._regularize(coefficient_ran_matrix_cur, type='ranef', var_name=reg_name('coefficient_by_%s' % (sn(gf))))
-
-                        if self.log_random:
-                            tf.summary.histogram(
-                                sn('by_%s/coefficient' % sn(gf)),
-                                coefficient_ran_matrix_cur,
-                                collections=['random']
-                            )
-
-                        coefficient_ran_matrix_cur = tf.concat(
-                            [
-                                coefficient_ran_matrix_cur,
-                                tf.zeros([1, len(self.impulse_names)+1])
-                            ],
-                            axis=0
-                        )
-
-                        coefficient_ran = tf.gather(coefficient_ran_matrix_cur, gf_y)
-
-                        self.coefficient_ran_matrix.append(coefficient_ran_matrix_cur)
-                        self.coefficient_ran.append(coefficient_ran)
-
-                        self.coefficient += tf.expand_dims(coefficient_ran, axis=-2)
+                        # # Random coefficients
+                        # coefficient_ran_matrix_cur, _ = self.initialize_coefficient(ran_gf=gf)
+                        # coefficient_ran_matrix_cur -= tf.reduce_mean(coefficient_ran_matrix_cur, axis=0, keepdims=True)
+                        # self._regularize(coefficient_ran_matrix_cur, type='ranef', var_name=reg_name('coefficient_by_%s' % (sn(gf))))
+                        #
+                        # if self.log_random:
+                        #     tf.summary.histogram(
+                        #         sn('by_%s/coefficient' % sn(gf)),
+                        #         coefficient_ran_matrix_cur,
+                        #         collections=['random']
+                        #     )
+                        #
+                        # coefficient_ran_matrix_cur = tf.concat(
+                        #     [
+                        #         coefficient_ran_matrix_cur,
+                        #         tf.zeros([1, len(self.impulse_names)+1])
+                        #     ],
+                        #     axis=0
+                        # )
+                        #
+                        # coefficient_ran = tf.gather(coefficient_ran_matrix_cur, gf_y)
+                        #
+                        # self.coefficient_ran_matrix.append(coefficient_ran_matrix_cur)
+                        # self.coefficient_ran.append(coefficient_ran)
+                        #
+                        # self.coefficient += tf.expand_dims(coefficient_ran, axis=-2)
 
                         # Random rnn initialization offsets
                         for l in range(self.n_layers_rnn):
@@ -804,7 +808,7 @@ class CDRNN(Model):
                         h_bias_ran_matrix_cur, h_bias_ran_matrix_cur_summary = self.initialize_h_bias(ran_gf=gf)
                         h_bias_ran_matrix_cur -= tf.reduce_mean(h_bias_ran_matrix_cur, axis=0, keepdims=True)
                         h_bias_ran_matrix_cur_summary -= tf.reduce_mean(h_bias_ran_matrix_cur_summary, axis=0, keepdims=True)
-                        self._regularize(h_bias_ran_matrix_cur, type='ranef', var_name=reg_name('h_ran_by_%s' % (sn(gf))))
+                        self._regularize(h_bias_ran_matrix_cur, type='ranef', var_name=reg_name('h_bias_by_%s' % (sn(gf))))
 
                         if self.log_random:
                             tf.summary.histogram(
@@ -827,6 +831,61 @@ class CDRNN(Model):
                         self.h_bias_ran.append(h_bias_ran)
 
                         self.h_bias += tf.expand_dims(h_bias_ran, axis=-2)
+
+                        # Random IRF L1 offsets
+                        irf_l1_W_bias_ran_matrix_cur, irf_l1_W_bias_ran_matrix_cur_summary, irf_l1_b_bias_ran_matrix_cur, irf_l1_b_bias_ran_matrix_cur_summary = self.initialize_irf_l1_biases(ran_gf=gf)
+                        
+                        irf_l1_W_bias_ran_matrix_cur -= tf.reduce_mean(irf_l1_W_bias_ran_matrix_cur, axis=0, keepdims=True)
+                        irf_l1_W_bias_ran_matrix_cur_summary -= tf.reduce_mean(irf_l1_W_bias_ran_matrix_cur_summary, axis=0, keepdims=True)
+                        self._regularize(irf_l1_W_bias_ran_matrix_cur, type='ranef', var_name=reg_name('irf_l1_W_bias_by_%s' % (sn(gf))))
+
+                        if self.log_random:
+                            tf.summary.histogram(
+                                sn('by_%s/irf_l1_W_bias' % sn(gf)),
+                                irf_l1_W_bias_ran_matrix_cur_summary,
+                                collections=['random']
+                            )
+
+                        irf_l1_W_bias_ran_matrix_cur = tf.concat(
+                            [
+                                irf_l1_W_bias_ran_matrix_cur,
+                                tf.zeros([1, self.n_units_hidden_state])
+                            ],
+                            axis=0
+                        )
+
+                        irf_l1_W_bias_ran = tf.gather(irf_l1_W_bias_ran_matrix_cur, gf_y)
+
+                        self.irf_l1_W_bias_ran_matrix.append(irf_l1_W_bias_ran_matrix_cur)
+                        self.irf_l1_W_bias_ran.append(irf_l1_W_bias_ran)
+
+                        self.irf_l1_W_bias += tf.expand_dims(irf_l1_W_bias_ran, axis=-2)
+
+                        irf_l1_b_bias_ran_matrix_cur -= tf.reduce_mean(irf_l1_b_bias_ran_matrix_cur, axis=0, keepdims=True)
+                        irf_l1_b_bias_ran_matrix_cur_summary -= tf.reduce_mean(irf_l1_b_bias_ran_matrix_cur_summary, axis=0, keepdims=True)
+                        self._regularize(irf_l1_b_bias_ran_matrix_cur, type='ranef', var_name=reg_name('irf_l1_b_bias_by_%s' % (sn(gf))))
+
+                        if self.log_random:
+                            tf.summary.histogram(
+                                sn('by_%s/irf_l1_b_bias' % sn(gf)),
+                                irf_l1_b_bias_ran_matrix_cur_summary,
+                                collections=['random']
+                            )
+
+                        irf_l1_b_bias_ran_matrix_cur = tf.concat(
+                            [
+                                irf_l1_b_bias_ran_matrix_cur,
+                                tf.zeros([1, self.n_units_hidden_state])
+                            ],
+                            axis=0
+                        )
+
+                        irf_l1_b_bias_ran = tf.gather(irf_l1_b_bias_ran_matrix_cur, gf_y)
+
+                        self.irf_l1_b_bias_ran_matrix.append(irf_l1_b_bias_ran_matrix_cur)
+                        self.irf_l1_b_bias_ran.append(irf_l1_b_bias_ran)
+
+                        self.irf_l1_b_bias += tf.expand_dims(irf_l1_b_bias_ran, axis=-2)
 
     def _rnn_encoder(self, X, plot_mode=False, **kwargs):
         with self.sess.as_default():
@@ -1003,7 +1062,10 @@ class CDRNN(Model):
 
                 # Compute hidden state
                 h = self.h_bias
-                coef = self.coefficient
+                # coef = self.coefficient
+                W = self.irf_l1_W_bias
+                b = self.irf_l1_b_bias
+
 
                 # If plotting, tile out random effects
                 if plot_mode:
@@ -1013,12 +1075,14 @@ class CDRNN(Model):
                     tile_ix = tf.reshape(tile_ix, [-1])
                     # tile_ix = tf.Print(tile_ix, [tile_ix], summarize=10000)
                     h = tf.gather(h, tile_ix, axis=0)
-                    coef = tf.gather(coef, tile_ix, axis=0)
+                    W = tf.gather(W, tile_ix, axis=0)
+                    b = tf.gather(b, tile_ix, axis=0)
+                    # coef = tf.gather(coef, tile_ix, axis=0)
                     X = tf.tile(X, [R, 1 ,1])
                     t_delta = tf.tile(t_delta, [R, 1 ,1])
 
                 # coef = tf.Print(coef, [coef], summarize=1000)
-                X *= coef
+                # X *= coef
 
                 h_in = self.input_projection_fn(X)
                 if self.h_in_noise_sd:
@@ -1078,9 +1142,6 @@ class CDRNN(Model):
                 h = get_activation(self.hidden_state_activation, session=self.sess)(h)
 
                 # Compute response
-                W = self.t_delta_embedding_W
-                b = self.t_delta_embedding_b
-
                 Wb_proj = self.hidden_state_to_irf_l1(h)
                 W_proj = Wb_proj[..., :self.n_units_t_delta_embedding]
                 b_proj = Wb_proj[..., self.n_units_t_delta_embedding:]
@@ -1424,7 +1485,8 @@ class CDRNN(Model):
         raise NotImplementedError
 
     def initialize_irf_l1_biases(
-            self
+            self,
+            ran_gf=None
     ):
         raise NotImplementedError
 
@@ -1520,6 +1582,8 @@ class CDRNN(Model):
             scaled='scaled',
             dirac='dirac',
             plot_type='irf_1d',
+            level=95,
+            n_samples=None,
             support_start=0.,
             n_time_units=2.5,
             n_time_points=1000,
@@ -1533,12 +1597,10 @@ class CDRNN(Model):
             rangf_vals = [self.gf_defaults[0]]
             if plot_rangf:
                 for i in range(len(self.rangf)):
-                    if type(self).__name__.startswith('CDRNN') or self.t.has_coefficient(
-                            self.rangf[i]) or self.t.has_irf(self.rangf[i]):
-                        for k in self.rangf_map[i].keys():
-                            rangf_keys.append(str(k))
-                            rangf_vals.append(np.concatenate(
-                                [self.gf_defaults[0, :i], [self.rangf_map[i][k]], self.gf_defaults[0, i + 1:]], axis=0))
+                    for k in self.rangf_map[i].keys():
+                        rangf_keys.append(str(k))
+                        rangf_vals.append(np.concatenate(
+                            [self.gf_defaults[0, :i], [self.rangf_map[i][k]], self.gf_defaults[0, i + 1:]], axis=0))
             rangf_vals = np.stack(rangf_vals, axis=0)
 
         if name == 'rate':
@@ -1565,9 +1627,7 @@ class CDRNN(Model):
             else:
                 irf_1d_support = self.irf_1d_support
                 irf_1d = self.irf_1d_plot
-            out = self.sess.run([irf_1d_support, irf_1d], feed_dict=fd)
-
-            return out
+            to_run = [irf_1d_support, irf_1d]
         elif plot_type.lower().startswith('irf_surface'):
             if name == 'rate':
                 irf_surface_meshgrid = self.irf_surface_rate_meshgrid
@@ -1575,10 +1635,10 @@ class CDRNN(Model):
             else:
                 irf_surface_meshgrid = self.irf_surface_support
                 irf_surface = self.irf_surface_plot
-            out = self.sess.run([irf_surface_meshgrid, irf_surface], feed_dict=fd)
+            to_run = [irf_surface_meshgrid, irf_surface]
         elif plot_type.lower().startswith('curvature'):
             assert not name == 'rate', 'Curvature plots are not available for "rate" (deconvolutional intercept).'
-            out = self.sess.run([self.curvature_support, self.curvature_plot], feed_dict=fd)
+            to_run = [self.curvature_support, self.curvature_plot]
         elif plot_type.lower().startswith('interaction_surface'):
             names = name.split(':')
             assert len(names) == 2, 'Interaction surface plots require interactions of order 2'
@@ -1588,12 +1648,29 @@ class CDRNN(Model):
             fd[self.plot_impulse_1hot] = impulse_one_hot1
             fd[self.plot_impulse_1hot_2] = impulse_one_hot2
 
-            out = self.sess.run(
-                [self.interaction_surface_support, self.interaction_surface_plot],
-                feed_dict=fd
-            )
+            to_run = [self.interaction_surface_support, self.interaction_surface_plot]
         else:
             raise ValueError('Plot type "%s" not supported.' % plot_type)
+
+        if n_samples and self.is_bayesian:
+            alpha = 100-float(level)
+            out = []
+            for _ in range(len(to_run)):
+                out.append([])
+            for _ in range(n_samples):
+                sample = self.sess.run(to_run, feed_dict=fd)
+                for i in range(len(sample)):
+                    out[i].append(sample[i])
+            for i in range(len(out)):
+                samples = out[i]
+                samples = np.concatenate(samples, axis=2)
+                mean = samples.mean(axis=2)
+                lower = np.percentile(samples, alpha / 2, axis=2)
+                upper = np.percentile(samples, 100 - (alpha / 2), axis=2)
+                out[i] = (mean, lower, upper, samples)
+
+        else:
+            out = self.sess.run(to_run, feed_dict=fd)
 
         return out
 
