@@ -2,7 +2,7 @@ import math
 import pandas as pd
 
 from .kwargs import CDRNNMLE_INITIALIZATION_KWARGS
-from .backend import get_initializer, DenseLayer, DenseLayer, CDRNNLayer
+from .backend import get_initializer, DenseLayer, CDRNNLayer, BatchNormLayer
 from .cdrnnbase import CDRNN
 from .util import sn, reg_name, stderr
 
@@ -115,7 +115,8 @@ class CDRNNMLE(CDRNN):
             activation=None,
             dropout=None,
             batch_normalization_decay=None,
-            name=None
+            name=None,
+            final=False
     ):
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -152,7 +153,6 @@ class CDRNNMLE(CDRNN):
                     c_dropout=self.rnn_c_dropout_rate,
                     forget_rate=self.forget_rate,
                     return_sequences=True,
-                    batch_normalization_decay=None,
                     name='rnn_l%d' % (l + 1),
                     epsilon=self.epsilon,
                     session=self.sess
@@ -207,8 +207,8 @@ class CDRNNMLE(CDRNN):
                 h_bias_summary = h_bias
 
                 return h_bias, h_bias_summary
-
-    def initialize_irf_l1_biases(self, ran_gf=None):
+            
+    def initialize_irf_l1_weights(self, ran_gf=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 units = self.n_units_t_delta_embedding
@@ -225,33 +225,60 @@ class CDRNNMLE(CDRNN):
                         'random_normal_initializer_mean=0-stddev=%s' % sd,
                         session=self.sess
                     )
-                    irf_l1_W_bias = tf.get_variable(
-                        name='irf_l1_W_bias',
+                    irf_l1_W = tf.get_variable(
+                        name='irf_l1_W',
                         initializer=kernel_init,
                         shape=[1, 1, units]
                     )
-                    irf_l1_b_bias = tf.get_variable(
-                        name='irf_l1_b_bias',
+                else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+                    irf_l1_W = tf.get_variable(
+                        name='irf_l1_W_by_%s' % (sn(ran_gf)),
+                        initializer=tf.zeros_initializer(),
+                        shape=[rangf_n_levels, units],
+                    )
+
+                irf_l1_W_summary = irf_l1_W
+
+                return irf_l1_W, irf_l1_W_summary
+
+    def initialize_irf_l1_biases(self, ran_gf=None):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                units = self.n_units_t_delta_embedding
+                if ran_gf is None:
+                    irf_l1_b = tf.get_variable(
+                        name='irf_l1_b',
                         initializer=tf.zeros_initializer(),
                         shape=[1, 1, units]
                     )
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
-                    irf_l1_W_bias = tf.get_variable(
-                        name='irf_l1_W_by_%s' % (sn(ran_gf)),
-                        initializer=tf.zeros_initializer(),
-                        shape=[rangf_n_levels, units],
-                    )
-                    irf_l1_b_bias = tf.get_variable(
+                    irf_l1_b = tf.get_variable(
                         name='irf_l1_b_by_%s' % (sn(ran_gf)),
                         initializer=tf.zeros_initializer(),
                         shape=[rangf_n_levels, units],
                     )
 
-                irf_l1_b_bias_summary = irf_l1_b_bias
-                irf_l1_W_bias_summary = irf_l1_W_bias
+                irf_l1_b_summary = irf_l1_b
 
-                return irf_l1_W_bias, irf_l1_W_bias_summary, irf_l1_b_bias, irf_l1_b_bias_summary
+                return irf_l1_b, irf_l1_b_summary
+
+    def initialize_irf_l1_batch_norm(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                batch_norm_layer = BatchNormLayer(
+                    decay=self.batch_normalization_decay,
+                    center=True,
+                    scale=True,
+                    axis=-1,
+                    training=self.training,
+                    epsilon=self.epsilon,
+                    session=self.sess,
+                    name='irf_l1'
+                )
+
+                return batch_norm_layer
 
     def initialize_objective(self):
         with self.sess.as_default():
@@ -422,9 +449,6 @@ class CDRNNMLE(CDRNN):
                 self.err_dist_summary_theoretical_quantiles = self.err_dist_summary.quantile(empirical_quantiles)
                 self.err_dist_summary_theoretical_cdf = self.err_dist_summary.cdf(self.errors)
 
-                self.mae_loss = tf.losses.absolute_difference(self.y, self.out)
-                self.mse_loss = tf.losses.mean_squared_error(self.y, self.out)
-
                 loss_func = - ll_objective
 
                 if self.loss_filter_n_sds and self.ema_decay:
@@ -500,26 +524,6 @@ class CDRNNMLE(CDRNN):
         out += '\n'
 
         return out
-
-    def run_train_step(self, feed_dict, verbose=True):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                to_run_names = []
-                to_run = [self.train_op, self.ema_op, self.y_sd_delta_ema_op]
-                if self.n_layers_rnn:
-                    to_run += self.rnn_h_ema_ops + self.rnn_c_ema_ops
-                if self.asymmetric_error:
-                    to_run += [self.y_skewness_delta_ema_op, self.y_tailweight_delta_ema_op]
-                if self.loss_filter_n_sds:
-                    to_run_names.append('n_dropped')
-                    to_run += [self.loss_ema_op, self.loss_sd_ema_op, self.n_dropped]
-                to_run_names += ['loss', 'reg_loss']
-                to_run += [self.loss_func, self.reg_loss]
-                out = self.sess.run(to_run, feed_dict=feed_dict)
-
-                out_dict = {x: y for x, y in zip(to_run_names, out[-len(to_run_names):])}
-
-                return out_dict
 
     def run_predict_op(self, feed_dict, standardize_response=False, n_samples=None, algorithm='MAP', verbose=True):
         with self.sess.as_default():

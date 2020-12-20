@@ -917,7 +917,6 @@ class CDR(Model):
 
         if self.pc:
             # Initialize source tree metadata
-            self.t_src = self.form.t
             t_src = self.t_src
             self.src_node_table = t_src.node_table()
             self.src_coef_names = t_src.coef_names()
@@ -926,8 +925,6 @@ class CDR(Model):
             self.src_interaction_list = t_src.interactions()
             self.src_interaction_names = t_src.interaction_names()
             self.src_fixed_interaction_names = t_src.fixed_interaction_names()
-            self.src_impulse_names = t_src.impulse_names(include_interactions=True)
-            self.src_terminal_names = t_src.terminal_names()
             self.src_atomic_irf_names_by_family = t_src.atomic_irf_by_family()
             self.src_atomic_irf_family_by_name = {}
             for family in self.src_atomic_irf_names_by_family:
@@ -949,14 +946,6 @@ class CDR(Model):
             self.src_interactions_list = t_src.interactions()
 
             # Initialize PC tree metadata
-            self.n_pc = len(self.src_impulse_names)
-            self.has_rate = 'rate' in self.src_impulse_names
-            if self.has_rate:
-                self.n_pc -= 1
-            pointers = {}
-            self.form_pc = self.form.pc_transform(self.n_pc, pointers)
-            self.t = self.form_pc.t
-            self.fw_pointers, self.bw_pointers = IRFNode.pointers2namemmaps(pointers)
             t = self.t
             self.node_table = t.node_table()
             self.coef_names = t.coef_names()
@@ -965,8 +954,6 @@ class CDR(Model):
             self.interaction_list = t.interactions()
             self.interaction_names = t.interaction_names()
             self.fixed_interaction_names = t.fixed_interaction_names()
-            self.impulse_names = t.impulse_names(include_interactions=True)
-            self.terminal_names = t.terminal_names()
             self.atomic_irf_names_by_family = t.atomic_irf_by_family()
             self.atomic_irf_family_by_name = {}
             for family in self.atomic_irf_names_by_family:
@@ -1056,8 +1043,6 @@ class CDR(Model):
             self.irf_by_rangf = t.irf_by_rangf()
             self.interactions_list = t.interactions()
 
-        self.parameter_table_columns = ['Estimate']
-
     def __getstate__(self):
         md = self._pack_metadata()
         return md
@@ -1094,6 +1079,8 @@ class CDR(Model):
 
     def _initialize_cdr_inputs(self):
         with self.sess.as_default():
+                X = self.X_processed
+
                 self.is_response_aligned = tf.cast(
                     tf.logical_not(
                         tf.cast(self.t_delta[:, -1, :], dtype=tf.bool)
@@ -1104,7 +1091,7 @@ class CDR(Model):
                 if self.pc:
                     self.e = tf.constant(self.eigenvec, dtype=self.FLOAT_TF)
                     rate_ix = names2ix('rate', self.src_impulse_names)
-                    self.X_rate = tf.gather(self.X, rate_ix, axis=-1)
+                    self.X_rate = tf.gather(X, rate_ix, axis=-1)
 
                 # Initialize regularizers
                 if self.coefficient_regularizer_name is None:
@@ -2360,13 +2347,9 @@ class CDR(Model):
     def _initialize_parameter_tables(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                super(CDR, self)._initialize_parameter_tables()
                 parameter_table_fixed_keys = []
                 parameter_table_fixed_values = []
-                if self.has_intercept[None]:
-                    parameter_table_fixed_keys.append('intercept')
-                    parameter_table_fixed_values.append(
-                        tf.expand_dims(self.intercept_fixed, axis=0)
-                    )
                 for coef_name in self.fixed_coef_names:
                     coef_name_str = 'coefficient_' + coef_name
                     parameter_table_fixed_keys.append(coef_name_str)
@@ -2392,8 +2375,8 @@ class CDR(Model):
                             )
                         )
 
-                self.parameter_table_fixed_keys = parameter_table_fixed_keys
-                self.parameter_table_fixed_values = tf.concat(parameter_table_fixed_values, 0)
+                self.parameter_table_fixed_keys += parameter_table_fixed_keys
+                self.parameter_table_fixed_values += tf.concat(parameter_table_fixed_values, 0)
 
                 parameter_table_random_keys = []
                 parameter_table_random_rangf = []
@@ -2405,14 +2388,6 @@ class CDR(Model):
                         gf = self.rangf[i]
                         levels = sorted(self.rangf_map_ix_2_levelname[i][:-1])
                         levels_ix = names2ix([self.rangf_map[i][level] for level in levels], range(self.rangf_n_levels[i]))
-                        if self.has_intercept[gf]:
-                            for level in levels:
-                                parameter_table_random_keys.append('intercept')
-                                parameter_table_random_rangf.append(gf)
-                                parameter_table_random_rangf_levels.append(level)
-                            parameter_table_random_values.append(
-                                tf.gather(self.intercept_random[gf], levels_ix)
-                            )
                         if gf in self.coefficient_random:
                             coef_names = self.coef_by_rangf.get(gf, [])
                             for coef_name in coef_names:
@@ -2466,10 +2441,10 @@ class CDR(Model):
                                         )
                                     )
 
-                    self.parameter_table_random_keys = parameter_table_random_keys
-                    self.parameter_table_random_rangf = parameter_table_random_rangf
-                    self.parameter_table_random_rangf_levels = parameter_table_random_rangf_levels
-                    self.parameter_table_random_values = tf.concat(parameter_table_random_values, 0)
+                    self.parameter_table_random_keys += parameter_table_random_keys
+                    self.parameter_table_random_rangf += parameter_table_random_rangf
+                    self.parameter_table_random_rangf_levels += parameter_table_random_rangf_levels
+                    self.parameter_table_random_values += tf.concat(parameter_table_random_values, 0)
 
     def _initialize_random_mean_vector(self):
         with self.sess.as_default():
@@ -2732,10 +2707,10 @@ class CDR(Model):
                                     src_impulse_names.add(self.src_node_table[x].impulse.name())
                                 src_impulse_names = list(src_impulse_names)
                                 src_impulse_ix = names2ix(src_impulse_names, self.src_impulse_names)
-                                X = self.X[:, -1, :]
+                                X = self.X_processed[:, -1, :]
                                 impulse = self._apply_pc(X, src_ix=src_impulse_ix, pc_ix=impulse_ix)
                         else:
-                            impulse = tf.gather(self.X, impulse_ix, axis=2)[:, -1, :]
+                            impulse = tf.gather(self.X_processed, impulse_ix, axis=2)[:, -1, :]
 
                         # Zero-out impulses to DiracDelta that are not response-aligned
                         impulse *= self.is_response_aligned[:, impulse_ix[0]:impulse_ix[0]+1]
@@ -2750,10 +2725,10 @@ class CDR(Model):
                                     src_impulse_names.add(self.src_node_table[x].impulse.name())
                                 src_impulse_names = list(src_impulse_names)
                                 src_impulse_ix = names2ix(src_impulse_names, self.src_impulse_names)
-                                X = self.X
+                                X = self.X_processed
                                 impulse = self._apply_pc(X, src_ix=src_impulse_ix, pc_ix=impulse_ix)
                         else:
-                            impulse = tf.gather(self.X, impulse_ix, axis=2)
+                            impulse = tf.gather(self.X_processed, impulse_ix, axis=2)
 
                     self.irf_impulses[name] = impulse
 
@@ -2820,7 +2795,7 @@ class CDR(Model):
                         non_irf_input_names = [x.name() for x in interaction.non_irf_responses()]
                         if len(non_irf_input_names):
                             non_irf_input_ix = names2ix(non_irf_input_names, self.impulse_names)
-                            non_irf_inputs = tf.gather(self.X[:,-1,:], non_irf_input_ix, axis=1)
+                            non_irf_inputs = tf.gather(self.X_processed[:,-1,:], non_irf_input_ix, axis=1)
                             non_irf_inputs = tf.reduce_prod(non_irf_inputs, axis=1)
                             if inputs_cur is not None:
                                 inputs_cur *= non_irf_inputs
@@ -3090,7 +3065,6 @@ class CDR(Model):
                 irf_names_terminal = [x for x in self.node_table if x in self.irf_plot and self.node_table[x].terminal()]
                 irf_names_terminal_nodirac = [x for x in irf_names_terminal if not x.startswith('DiracDelta')]
 
-
                 for a in switches[0]:
                     if a not in self.plots:
                         self.plots[a] = {}
@@ -3150,16 +3124,6 @@ class CDR(Model):
                                     'plot': plot_y
                                 }
 
-    def _extract_parameter_values(self, fixed=True, level=95, n_samples=None):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                if fixed:
-                    out = self.parameter_table_fixed_values.eval(session=self.sess)
-                else:
-                    out = self.parameter_table_random_values.eval(session=self.sess)
-
-            return out
-
 
 
 
@@ -3184,20 +3148,6 @@ class CDR(Model):
         :return: ``numpy`` array; The convolved inputs
         """
 
-        raise NotImplementedError
-
-    def extract_irf_integral(self, terminal_name, rangf=None, level=95, n_samples=None, n_time_units=None, n_time_points=1000):
-        """
-        Extract integrals of IRF defined at **terminal_name**.
-
-        :param terminal_name: ``str``; ID of terminal IRF to extract
-        :param rangf: ``numpy`` array or ``None``; random grouping factor values for which to compute IRF integral. If ``None``, only use fixed effects.
-        :param level: ``float``; level of credible interval (used for ``CDRBayes`` only)
-        :param n_samples: ``int`` or ``None``; number of posterior samples to draw (used for ``CDRBayes`` only). If ``None``, use model defaults.
-        :param n_time_units: ``float``; number of time units over which to take the integral.
-        :param n_time_points: ``float``; number of points to use in the discrete approximation of the integral.
-        :return: ``float`` or 3-element ``numpy`` vector; either integral or mean, upper quantile, and lower quantile of integral (depending on whether model is instance of ``CDRBayes``).
-        """
         raise NotImplementedError
 
 
@@ -3285,6 +3235,8 @@ class CDR(Model):
             scaled='scaled',
             dirac='dirac',
             plot_type='irf_1d',
+            level=95,
+            n_samples=None,
             support_start=0.,
             n_time_units=2.5,
             n_time_points=1000,
@@ -3313,104 +3265,26 @@ class CDR(Model):
                 self.gf_y: rangf_vals,
                 self.training: not self.predict_mode
             }
+            if n_samples and self.is_bayesian:
+                fd[self.use_MAP_mode] = False
             ix = self.plots[composite][scaled][dirac]['names'].index(name)
-            return self.sess.run([self.support, self.plots[composite][scaled][dirac]['plot'][ix]], feed_dict=fd)
+            to_run = [self.support, self.plots[composite][scaled][dirac]['plot'][ix]]
         else:
             raise ValueError('Plot type "%s" not supported.' % plot_type)
 
-    def irf_integrals(self, level=95, random=False, n_samples=None, n_time_units=None, n_time_points=1000):
-        """
-        Generate effect size estimates by computing the area under each IRF curve in the model via discrete approximation.
-
-        :param random: ``bool``; whether to compute IRF integrals for random effects estimates
-        :param level: ``float``; level of the credible interval if Bayesian, ignored otherwise.
-        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
-        :param n_time_units: ``float``; number of time units over which to take the integral.
-        :param n_time_points: ``float``; number of points to use in the discrete approximation of the integral.
-        :return: ``pandas`` DataFrame; IRF integrals, one IRF per row. If Bayesian, array also contains credible interval bounds.
-        """
-        if self.pc:
-            terminal_names = self.src_terminal_names
+        if n_samples and self.is_bayesian:
+            alpha = 100-float(level)
+            support = self.sess.run(to_run[0], feed_dict=fd)
+            samples = [self.sess.run(to_run[1], feed_dict=fd) for _ in range(n_samples)]
+            samples = np.concatenate(samples, axis=-1)
+            mean = samples.mean(axis=-1)
+            lower = np.percentile(samples, alpha / 2, axis=-1)
+            upper = np.percentile(samples, 100 - (alpha / 2), axis=-1)
+            out = (support, mean, lower, upper, samples)
         else:
-            terminal_names = self.terminal_names
-        irf_integrals = []
-        
-        rangf_keys = ['']
-        rangf_groups = ['']
-        rangf_vals = [self.gf_defaults[0]]
-        if random:
-            for i in range(len(self.rangf)):
-                if self.t.has_coefficient(self.rangf[i]) or self.t.has_irf(self.rangf[i]):
-                    for k in self.rangf_map[i].keys():
-                        rangf_keys.append(str(k))
-                        rangf_groups.append(self.rangf[i])
-                        rangf_vals.append(np.concatenate([self.gf_defaults[0, :i], [self.rangf_map[i][k]], self.gf_defaults[0, i + 1:]], axis=0))
-        rangf_vals = np.stack(rangf_vals, axis=0)
-        
-        for i in range(len(terminal_names)):
-            terminal = terminal_names[i]
-            integral = np.stack(
-                self.irf_integral(
-                    terminal,
-                    rangf=rangf_vals,
-                    level=level,
-                    n_samples=n_samples,
-                    n_time_units=n_time_units,
-                    n_time_points=n_time_points
-                ),
-                axis=0
-            )
-            irf_integrals.append(integral)
-        irf_integrals = np.stack(irf_integrals, axis=0)
-        if self.standardize_response:
-            irf_integrals *= self.y_train_sd
-        irf_integrals = np.split(irf_integrals, irf_integrals.shape[2], axis=2)
-        
-        if self.pc:
-            terminal_names = self.src_terminal_names
-        else:
-            terminal_names = self.terminal_names
-        for i, x in enumerate(irf_integrals):
-            if rangf_keys[i]:
-                terminal_names_cur = [y + '_' + rangf_keys[i] for y in terminal_names]
-            else:
-                terminal_names_cur = terminal_names
-            x = pd.DataFrame(x[..., 0], columns=self.parameter_table_columns)
-            x['IRF'] = terminal_names
-            cols = ['IRF']
-            if random:
-                x['Group'] = rangf_groups[i]
-                x['Level'] = rangf_keys[i]
-                cols += ['Group', 'Level']
-            cols += self.parameter_table_columns
-            x = x[cols]
-            irf_integrals[i] = x
-        irf_integrals = pd.concat(irf_integrals, axis=0)
+            out = self.sess.run(to_run, feed_dict=fd)
 
-        return irf_integrals
-
-    def irf_integral(self, terminal_name, rangf=None, level=95, n_samples=None, n_time_units=None, n_time_points=1000):
-        """
-        Generate effect size estimates by computing the area under a specific IRF curve via discrete approximation.
-
-        :param terminal_name: ``str``; string ID of IRF to extract.
-        :param rangf: ``numpy`` array or ``None``; random grouping factor values for which to compute IRF integral. If ``None``, only use fixed effects.
-        :param level: ``float``; level of the credible interval if Bayesian, ignored otherwise.
-        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
-        :param n_time_units: ``float``; number of time units over which to take the integral.
-        :param n_time_points: ``float``; number of points to use in the discrete approximation of the integral.
-        :return: ``numpy`` array; IRF integral (scalar), or (if Bayesian) IRF 3x1 vector with mean, lower bound, and upper bound of credible interval.
-        """
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                return self.extract_irf_integral(
-                    terminal_name,
-                    rangf=rangf,
-                    level=level,
-                    n_samples=n_samples,
-                    n_time_units=n_time_units,
-                    n_time_points=n_time_points
-                )
+        return out
 
     def report_settings(self, indent=0):
         out = super(CDR, self).report_settings(indent=indent)
@@ -3420,184 +3294,6 @@ class CDR(Model):
 
         return out
 
-    def report_parameter_values(self, random=False, level=95, n_samples=None, indent=0):
-        """
-        Generate a string representation of the model's parameter table.
-
-        :param random: ``bool``; report random effects estimates.
-        :param level: ``float``; significance level for credible intervals if Bayesian, otherwise ignored.
-        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
-        :param indent: ``int``; indentation level.
-        :return: ``str``; the parameter table report
-        """
-        left_justified_formatter = lambda df, col: '{{:<{}s}}'.format(df[col].str.len().max()).format
-
-        pd.set_option("display.max_colwidth", 10000)
-        out = ' ' * indent + 'FITTED PARAMETER VALUES:\n'
-        parameter_table = self.parameter_table(
-            fixed=True,
-            level=level,
-            n_samples=n_samples
-        )
-        formatters = {
-            'Parameter': left_justified_formatter(parameter_table, 'Parameter')
-        }
-        parameter_table_str = parameter_table.to_string(
-            index=False,
-            justify='left',
-            formatters = formatters
-        )
-
-        out += ' ' * (indent + 2) + 'Fixed:\n'
-        for line in parameter_table_str.splitlines():
-            out += ' ' * (indent + 4) + line + '\n'
-        out += '\n'
-
-        if random:
-            parameter_table = self.parameter_table(
-                fixed=False,
-                level=level,
-                n_samples=n_samples
-            )
-            parameter_table = pd.concat(
-                [
-                    pd.DataFrame({'Parameter': parameter_table['Parameter'] + ' | ' + parameter_table['Group'] + ' | ' + parameter_table['Level']}),
-                    parameter_table[self.parameter_table_columns]
-                ],
-                axis=1
-            )
-            formatters = {
-                'Parameter': left_justified_formatter(parameter_table, 'Parameter')
-            }
-            parameter_table_str = parameter_table.to_string(
-                index=False,
-                justify='left',
-                formatters = formatters
-            )
-
-            out += ' ' * (indent + 2) + 'Random:\n'
-            for line in parameter_table_str.splitlines():
-                out += ' ' * (indent + 4) + line + '\n'
-            out += '\n'
-
-        pd.set_option("display.max_colwidth", 50)
-
-        return out
-
-    def report_irf_integrals(self, random=False, level=95, n_samples=None, integral_n_time_units=None, indent=0):
-        """
-        Generate a string representation of the model's IRF integrals (effect sizes)
-
-        :param random: ``bool``; whether to compute IRF integrals for random effects estimates
-        :param level: ``float``; significance level for credible intervals if Bayesian, otherwise ignored.
-        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
-        :param integral_n_time_units: ``float``; number if time units over which to take the integral.
-        :param indent: ``int``; indentation level.
-        :return: ``str``; the IRF integrals report
-        """
-        
-        pd.set_option("display.max_colwidth", 10000)
-        left_justified_formatter = lambda df, col: '{{:<{}s}}'.format(df[col].str.len().max()).format
-
-        if integral_n_time_units is None:
-            integral_n_time_units = self.t_delta_limit
-
-        irf_integrals = self.irf_integrals(
-            random=random,
-            level=level,
-            n_samples=n_samples,
-            n_time_units=integral_n_time_units,
-            n_time_points=1000
-        )
-
-        formatters = {
-            'IRF': left_justified_formatter(irf_integrals, 'IRF')
-        }
-
-        out = ' ' * indent + 'IRF INTEGRALS (EFFECT SIZES):\n'
-        out += ' ' * (indent + 2) + 'Integral upper bound (time): %s\n\n' % integral_n_time_units
-
-        ci_str = irf_integrals.to_string(
-            index=False,
-            justify='left',
-            formatters=formatters
-        )
-
-        for line in ci_str.splitlines():
-            out += ' ' * (indent + 2) + line + '\n'
-
-        out += '\n'
-
-        return out
-
-    def parameter_summary(self, random=False, level=95, n_samples=None, integral_n_time_units=None, indent=0):
-        """
-        Generate a string representation of the model's effect sizes and parameter values.
-
-        :param random: ``bool``; report random effects estimates
-        :param level: ``float``; significance level for credible intervals if Bayesian, otherwise ignored.
-        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
-        :param integral_n_time_units: ``float``; number if time units over which to take the integral.
-        :param indent: ``int``; indentation level.
-        :return: ``str``; the parameter summary
-        """
-
-        out = ' ' * indent + '-----------------\n'
-        out += ' ' * indent + 'PARAMETER SUMMARY\n'
-        out += ' ' * indent + '-----------------\n\n'
-
-        out += self.report_irf_integrals(
-            random=random,
-            level=level,
-            n_samples=n_samples,
-            integral_n_time_units=integral_n_time_units,
-            indent=indent+2
-        )
-
-        out += self.report_parameter_values(
-            random=random,
-            level=level,
-            n_samples=n_samples,
-            indent=indent+2
-        )
-
-        return out
-
-    def summary(self, random=False, level=95, n_samples=None, integral_n_time_units=None, indent=0):
-        """
-        Generate a summary of the fitted model.
-
-        :param random: ``bool``; report random effects estimates
-        :param level: ``float``; significance level for credible intervals if Bayesian, otherwise ignored.
-        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
-        :param integral_n_time_units: ``float``; number if time units over which to take the integral.
-        :return: ``str``; the model summary
-        """
-
-        out = '  ' * indent + '*' * 100 + '\n\n'
-        out += ' ' * indent + '############################\n'
-        out += ' ' * indent + '#                          #\n'
-        out += ' ' * indent + '#    CDR MODEL SUMMARY    #\n'
-        out += ' ' * indent + '#                          #\n'
-        out += ' ' * indent + '############################\n\n\n'
-
-        out += self.initialization_summary(indent=indent + 2)
-        out += '\n'
-        out += self.training_evaluation_summary(indent=indent + 2)
-        out += '\n'
-        out += self.convergence_summary(indent=indent + 2)
-        out += '\n'
-        out += self.parameter_summary(
-            random=random,
-            level=level,
-            n_samples=n_samples,
-            integral_n_time_units=integral_n_time_units,
-            indent=indent + 2
-        )
-        out += '\n'
-        out += '  ' * indent + '*' * 100 + '\n\n'
-
-        return out
 
 
     ######################################################
@@ -3611,14 +3307,20 @@ class CDR(Model):
     def run_train_step(self, feed_dict, verbose=True):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                _, _, loss = self.sess.run(
-                    [self.train_op, self.ema_op, self.loss_func],
+                to_run = [self.train_op, self.ema_op]
+
+                to_run += [self.loss_func, self.reg_loss]
+                to_run_names = ['loss', 'reg_loss']
+                if self.is_bayesian:
+                    to_run.append(self.kl_loss)
+                    to_run_names.append('kl_loss')
+
+                out = self.sess.run(
+                    to_run,
                     feed_dict=feed_dict
                 )
 
-                out_dict = {
-                    'loss': loss
-                }
+                out_dict = {x: y for x, y in zip(to_run_names, out[-len(to_run_names):])}
 
                 return out_dict
 
@@ -3867,117 +3569,4 @@ class CDR(Model):
         """
         plot_heatmap(self.eigenvec, self.src_impulse_names_norate, self.impulse_names_norate, dir=self.outdir)
 
-    def parameter_table(self, fixed=True, level=95, n_samples=None):
-        """
-        Generate a pandas table of parameter names and values.
-
-        :param fixed: ``bool``; Return a table of fixed parameters (otherwise returns a table of random parameters).
-        :param level: ``float``; significance level for credible intervals if model is Bayesian, ignored otherwise.
-        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
-        :return: ``pandas`` ``DataFrame``; The parameter table.
-        """
-
-        assert fixed or len(self.rangf) > 0, 'Attempted to generate a random effects parameter table in a fixed-effects-only model'
-
-        if n_samples is None and getattr(self, 'n_samples_eval', None) is not None:
-            n_samples = self.n_samples_eval
-
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                self.set_predict_mode(True)
-
-                if fixed:
-                    keys = self.parameter_table_fixed_keys
-                    values = self._extract_parameter_values(
-                        fixed=True,
-                        level=level,
-                        n_samples=n_samples
-                    )
-
-                    out = pd.DataFrame({'Parameter': keys})
-
-                else:
-                    keys = self.parameter_table_random_keys
-                    rangf = self.parameter_table_random_rangf
-                    rangf_levels = self.parameter_table_random_rangf_levels
-                    values = self._extract_parameter_values(
-                        fixed=False,
-                        level=level,
-                        n_samples=n_samples
-                    )
-
-                    out = pd.DataFrame({'Parameter': keys, 'Group': rangf, 'Level': rangf_levels}, columns=['Parameter', 'Group', 'Level'])
-
-                columns = self.parameter_table_columns
-                out = pd.concat([out, pd.DataFrame(values, columns=columns)], axis=1)
-
-                self.set_predict_mode(False)
-
-                return out
-
-    def save_parameter_table(self, random=True, level=95, n_samples=None, outfile=None):
-        """
-        Save space-delimited parameter table to the model's output directory.
-
-        :param random: Include random parameters.
-        :param level: ``float``; significance level for credible intervals if model is Bayesian, ignored otherwise.
-        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
-        :param outfile: ``str``; Path to output file. If ``None``, use model defaults.
-        :return: ``None``
-        """
-
-        parameter_table = self.parameter_table(
-            fixed=True,
-            level=level,
-            n_samples=n_samples
-        )
-        if random and len(self.rangf) > 0:
-            parameter_table = pd.concat(
-                [
-                    parameter_table,
-                    self.parameter_table(
-                        fixed=False,
-                        level=level,
-                        n_samples=n_samples
-                    )
-                ],
-            axis=0
-            )
-
-        if outfile:
-            outname = self.outdir + '/cdr_parameters.csv'
-        else:
-            outname = outfile
-
-        parameter_table.to_csv(outname, index=False)
-
-    def save_integral_table(self, random=True, level=95, n_samples=None, integral_n_time_units=None, outfile=None):
-        """
-        Save space-delimited table of IRF integrals (effect sizes) to the model's output directory
-
-        :param random: ``bool``; whether to compute IRF integrals for random effects estimates
-        :param level: ``float``; significance level for credible intervals if Bayesian, otherwise ignored.
-        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
-        :param integral_n_time_units: ``float``; number if time units over which to take the integral.
-        :param outfile: ``str``; Path to output file. If ``None``, use model defaults.
-        :return: ``str``; the IRF integrals report
-        """
-
-        if integral_n_time_units is None:
-            integral_n_time_units = self.t_delta_limit
-
-        irf_integrals = self.irf_integrals(
-            random=random,
-            level=level,
-            n_samples=n_samples,
-            n_time_units=integral_n_time_units,
-            n_time_points=1000
-        )
-
-        if outfile:
-            outname = self.outdir + '/cdr_irf_integrals.csv'
-        else:
-            outname = outfile
-
-        irf_integrals.to_csv(outname, index=False)
 

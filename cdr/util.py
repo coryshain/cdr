@@ -1,6 +1,7 @@
 from __future__ import print_function
 import sys
 import re
+import math
 import pickle
 import numpy as np
 from scipy import linalg
@@ -260,6 +261,34 @@ def get_irf_name(x, irf_name_map):
             return irf_name_map[y]
     return x
 
+
+def get_numerical_sd(sd, in_dim=1, out_dim=1):
+    in_dim = float(int(in_dim))
+    out_dim = float(int(out_dim))
+    if isinstance(sd, str):
+        if sd.lower().startswith('xavier') or sd.lower().startswith('glorot'):
+            factor = sd[6:]
+            if factor:
+                factor = int(factor)
+            else:
+                factor = 1
+            out = math.sqrt(2. / (in_dim + out_dim))
+        elif sd.lower().startswith('he'):
+            factor = sd[2:]
+            if factor:
+                factor = int(factor)
+            else:
+                factor = 1
+            out = math.sqrt(2. / in_dim)
+        else:
+            raise ValueError('Unrecognized variance initializer: %s' % sd)
+    else:
+        factor = 1
+        out = sd
+
+    out *= factor
+
+    return out
 
 
 def load_cdr(dir_path):

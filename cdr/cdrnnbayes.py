@@ -1,10 +1,11 @@
 import math
+import numpy as np
 import pandas as pd
 
 from .kwargs import CDRNNBAYES_INITIALIZATION_KWARGS
-from .backend import get_initializer, DenseLayerBayes, CDRNNLayer, CDRNNLayerBayes
+from .backend import DenseLayerBayes, CDRNNLayerBayes, BatchNormLayerBayes
 from .cdrnnbase import CDRNN
-from .util import sn, reg_name, stderr
+from .util import get_numerical_sd, sn, reg_name, stderr
 
 import tensorflow as tf
 from tensorflow.contrib.distributions import Normal, SinhArcsinh
@@ -67,7 +68,7 @@ class CDRNNBayes(CDRNN):
             else:
                 self.y_sd_prior_sd = self.y_train_sd * self.y_sd_prior_sd_scaling_coefficient
 
-        self.kl_penalties = []
+        self.kl_penalties_base = {}
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -153,7 +154,11 @@ class CDRNNBayes(CDRNN):
                             scale=self.intercept_prior_sd_tf,
                             name='intercept'
                         )
-                        self.kl_penalties.append(intercept_q_dist.kl_divergence(intercept_prior_dist))
+                        self.kl_penalties_base['intercept'] = {
+                            'loc': self.intercept_init,
+                            'scale': self.intercept_prior_sd,
+                            'val': intercept_q_dist.kl_divergence(intercept_prior_dist)
+                        }
 
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
@@ -186,7 +191,11 @@ class CDRNNBayes(CDRNN):
                             scale=self.intercept_prior_sd_tf * self.ranef_to_fixef_prior_sd_ratio,
                             name='intercept_by_%s' % sn(ran_gf)
                         )
-                        self.kl_penalties.append(intercept_q_dist.kl_divergence(intercept_prior_dist))
+                        self.kl_penalties_base['intercept_by_%s' % sn(ran_gf)] = {
+                            'loc': 0.,
+                            'scale': self.intercept_prior_sd * self.ranef_to_fixef_prior_sd_ratio,
+                            'val': intercept_q_dist.kl_divergence(intercept_prior_dist)
+                        }
 
                 return intercept, intercept_summary
 
@@ -195,14 +204,7 @@ class CDRNNBayes(CDRNN):
             with self.sess.graph.as_default():
                 units = len(self.impulse_names) + 1
 
-                coefficient_sd_prior = self.weight_prior_sd
-                if isinstance(coefficient_sd_prior, str):
-                    if coefficient_sd_prior.lower() in ['xavier', 'glorot']:
-                        coefficient_sd_prior = math.sqrt(2 / (units + 1))
-                    elif coefficient_sd_prior.lower() == 'he':
-                        coefficient_sd_prior = math.sqrt(2 / units)
-                else:
-                    coefficient_sd_prior = coefficient_sd_prior
+                coefficient_sd_prior = get_numerical_sd(self.weight_prior_sd, in_dim=1, out_dim=1)
                 coefficient_sd_posterior = coefficient_sd_prior * self.posterior_to_prior_sd_ratio
 
                 if ran_gf is None:
@@ -234,7 +236,11 @@ class CDRNNBayes(CDRNN):
                             scale=coefficient_sd_prior,
                             name='coefficient'
                         )
-                        self.kl_penalties.append(coefficient_q_dist.kl_divergence(coefficient_prior_dist))
+                        self.kl_penalties_base['coefficient'] = {
+                            'loc': 0.,
+                            'scale': coefficient_sd_prior,
+                            'val': coefficient_q_dist.kl_divergence(coefficient_prior_dist)
+                        }
 
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
@@ -267,7 +273,11 @@ class CDRNNBayes(CDRNN):
                             scale=coefficient_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
                             name='coefficient_by_%s' % sn(ran_gf)
                         )
-                        self.kl_penalties.append(coefficient_q_dist.kl_divergence(coefficient_prior_dist))
+                        self.kl_penalties_base['coefficient_by_%s' % sn(ran_gf)] = {
+                            'loc': 0.,
+                            'scale': coefficient_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
+                            'val': coefficient_q_dist.kl_divergence(coefficient_prior_dist)
+                        }
 
                 return coefficient, coefficient_summary
 
@@ -278,10 +288,17 @@ class CDRNNBayes(CDRNN):
             activation=None,
             dropout=None,
             batch_normalization_decay=None,
-            name=None
+            name=None,
+            final=False
     ):
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                if final and False:
+                    weight_prior_sd = 1.
+                    bias_prior_sd = 1.
+                else:
+                    weight_prior_sd = self.weight_prior_sd
+                    bias_prior_sd = self.bias_prior_sd
                 projection = DenseLayerBayes(
                     training=self.training,
                     units=units,
@@ -290,15 +307,16 @@ class CDRNNBayes(CDRNN):
                     dropout=dropout,
                     batch_normalization_decay=batch_normalization_decay,
                     use_MAP_mode=self.use_MAP_mode,
-                    kernel_prior_sd=self.weight_prior_sd,
-                    bias_prior_sd=self.bias_prior_sd,
+                    declare_priors_weights=self.declare_priors_weights,
+                    declare_priors_biases=self.declare_priors_biases,
+                    kernel_prior_sd=weight_prior_sd,
+                    bias_prior_sd=bias_prior_sd,
                     posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
                     constraint=self.constraint,
                     epsilon=self.epsilon,
                     session=self.sess,
                     name=name
                 )
-                self.kl_penalties += projection.kl_penalties
 
                 return projection
 
@@ -318,8 +336,9 @@ class CDRNNBayes(CDRNN):
                     c_dropout=self.rnn_c_dropout_rate,
                     forget_rate=self.forget_rate,
                     return_sequences=True,
-                    batch_normalization_decay=None,
                     use_MAP_mode=self.use_MAP_mode,
+                    declare_priors_weights=self.declare_priors_weights,
+                    declare_priors_biases=self.declare_priors_biases,
                     kernel_prior_sd=self.weight_prior_sd,
                     bias_prior_sd=self.bias_prior_sd,
                     posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
@@ -328,7 +347,6 @@ class CDRNNBayes(CDRNN):
                     epsilon=self.epsilon,
                     session=self.sess
                 )
-                self.kl_penalties += rnn.kl_penalties
 
                 return rnn
 
@@ -337,14 +355,7 @@ class CDRNNBayes(CDRNN):
             with self.sess.graph.as_default():
                 units = self.n_units_rnn[l]
                 
-                rnn_h_sd_prior = self.bias_prior_sd
-                if isinstance(rnn_h_sd_prior, str):
-                    if rnn_h_sd_prior.lower() in ['xavier', 'glorot']:
-                        rnn_h_sd_prior = math.sqrt(2 / (units + 1))
-                    elif rnn_h_sd_prior.lower() == 'he':
-                        rnn_h_sd_prior = math.sqrt(2 / units)
-                else:
-                    rnn_h_sd_prior = rnn_h_sd_prior
+                rnn_h_sd_prior = get_numerical_sd(self.bias_prior_sd, in_dim=1, out_dim=1)
                 rnn_h_sd_posterior = rnn_h_sd_prior * self.posterior_to_prior_sd_ratio
 
                 if ran_gf is None:
@@ -369,14 +380,18 @@ class CDRNNBayes(CDRNN):
 
                     rnn_h_summary = rnn_h_q_dist.mean()
 
-                    if self.declare_priors_fixef:
+                    if self.declare_priors_biases:
                         # Prior distribution
                         rnn_h_prior_dist = Normal(
                             loc=0.,
                             scale=rnn_h_sd_prior,
                             name='rnn_h'
                         )
-                        self.kl_penalties.append(rnn_h_q_dist.kl_divergence(rnn_h_prior_dist))
+                        self.kl_penalties_base['rnn_h'] = {
+                            'loc': 0.,
+                            'scale': rnn_h_sd_prior,
+                            'val': rnn_h_q_dist.kl_divergence(rnn_h_prior_dist)
+                        }
 
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
@@ -409,7 +424,11 @@ class CDRNNBayes(CDRNN):
                             scale=rnn_h_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
                             name='rnn_h_by_%s' % sn(ran_gf)
                         )
-                        self.kl_penalties.append(rnn_h_q_dist.kl_divergence(rnn_h_prior_dist))
+                        self.kl_penalties_base['rnn_h_by_%s' % sn(ran_gf)] = {
+                            'loc': 0.,
+                            'scale': rnn_h_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
+                            'val': rnn_h_q_dist.kl_divergence(rnn_h_prior_dist)
+                        }
 
                 return rnn_h, rnn_h_summary
 
@@ -418,14 +437,7 @@ class CDRNNBayes(CDRNN):
             with self.sess.graph.as_default():
                 units = self.n_units_rnn[l]
                 
-                rnn_c_sd_prior = self.bias_prior_sd
-                if isinstance(rnn_c_sd_prior, str):
-                    if rnn_c_sd_prior.lower() in ['xavier', 'glorot']:
-                        rnn_c_sd_prior = math.sqrt(2 / (units + 1))
-                    elif rnn_c_sd_prior.lower() == 'he':
-                        rnn_c_sd_prior = math.sqrt(2 / units)
-                else:
-                    rnn_c_sd_prior = rnn_c_sd_prior
+                rnn_c_sd_prior = get_numerical_sd(self.bias_prior_sd, in_dim=1, out_dim=1)
                 rnn_c_sd_posterior = rnn_c_sd_prior * self.posterior_to_prior_sd_ratio
 
                 if ran_gf is None:
@@ -450,14 +462,18 @@ class CDRNNBayes(CDRNN):
 
                     rnn_c_summary = rnn_c_q_dist.mean()
 
-                    if self.declare_priors_fixef:
+                    if self.declare_priors_biases:
                         # Prior distribution
                         rnn_c_prior_dist = Normal(
                             loc=0.,
                             scale=rnn_c_sd_prior,
                             name='rnn_c'
                         )
-                        self.kl_penalties.append(rnn_c_q_dist.kl_divergence(rnn_c_prior_dist))
+                        self.kl_penalties_base['rnn_c'] = {
+                            'loc': 0.,
+                            'scale': rnn_c_sd_prior,
+                            'val': rnn_c_q_dist.kl_divergence(rnn_c_prior_dist)
+                        }
 
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
@@ -490,7 +506,11 @@ class CDRNNBayes(CDRNN):
                             scale=rnn_c_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
                             name='rnn_c_by_%s' % sn(ran_gf)
                         )
-                        self.kl_penalties.append(rnn_c_q_dist.kl_divergence(rnn_c_prior_dist))
+                        self.kl_penalties_base['rnn_c_by_%s' % sn(ran_gf)] = {
+                            'loc': 0.,
+                            'scale': rnn_c_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
+                            'val': rnn_c_q_dist.kl_divergence(rnn_c_prior_dist)
+                        }
 
                 return rnn_c, rnn_c_summary
 
@@ -499,14 +519,7 @@ class CDRNNBayes(CDRNN):
             with self.sess.graph.as_default():
                 units = self.n_units_hidden_state
 
-                h_bias_sd_prior = self.bias_prior_sd
-                if isinstance(h_bias_sd_prior, str):
-                    if h_bias_sd_prior.lower() in ['xavier', 'glorot']:
-                        h_bias_sd_prior = math.sqrt(2 / (units + 1))
-                    elif h_bias_sd_prior.lower() == 'he':
-                        h_bias_sd_prior = math.sqrt(2 / units)
-                else:
-                    h_bias_sd_prior = h_bias_sd_prior
+                h_bias_sd_prior = get_numerical_sd(self.bias_prior_sd, in_dim=1, out_dim=1)
                 h_bias_sd_posterior = h_bias_sd_prior * self.posterior_to_prior_sd_ratio
 
                 if ran_gf is None:
@@ -531,14 +544,18 @@ class CDRNNBayes(CDRNN):
 
                     h_bias_summary = h_bias_q_dist.mean()
 
-                    if self.declare_priors_fixef:
+                    if self.declare_priors_biases:
                         # Prior distribution
                         h_bias_prior_dist = Normal(
                             loc=0.,
                             scale=h_bias_sd_prior,
                             name='h_bias'
                         )
-                        self.kl_penalties.append(h_bias_q_dist.kl_divergence(h_bias_prior_dist))
+                        self.kl_penalties_base['h_bias'] = {
+                            'loc': 0.,
+                            'scale': h_bias_sd_prior,
+                            'val': h_bias_q_dist.kl_divergence(h_bias_prior_dist)
+                        }
 
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
@@ -571,164 +588,200 @@ class CDRNNBayes(CDRNN):
                             scale=h_bias_sd_prior * h_bias_sd_prior,
                             name='h_bias_by_%s' % sn(ran_gf)
                         )
-                        self.kl_penalties.append(h_bias_q_dist.kl_divergence(h_bias_prior_dist))
+                        self.kl_penalties_base['h_bias_by_%s' % sn(ran_gf)] = {
+                            'loc': 0.,
+                            'scale': h_bias_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
+                            'val': h_bias_q_dist.kl_divergence(h_bias_prior_dist)
+                        }
 
                 return h_bias, h_bias_summary
 
+
+    def initialize_irf_l1_weights(self, ran_gf=None):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                units = self.n_units_t_delta_embedding
+                
+                irf_l1_W_sd_prior = get_numerical_sd(self.weight_prior_sd, in_dim=1, out_dim=units)
+                irf_l1_W_sd_posterior = irf_l1_W_sd_prior * self.posterior_to_prior_sd_ratio
+
+                if ran_gf is None:
+                    # Posterior distribution
+                    irf_l1_W_q_loc = tf.Variable(
+                        tf.zeros([1, 1, units]),
+                        name='irf_l1_W_q_loc'
+                    )
+
+                    irf_l1_W_q_scale = tf.Variable(
+                        tf.zeros([1, 1, units]) * self.constraint_fn_inv(irf_l1_W_sd_posterior),
+                        name='irf_l1_W_q_scale'
+                    )
+
+                    irf_l1_W_q_dist = Normal(
+                        loc=irf_l1_W_q_loc,
+                        scale=self.constraint_fn(irf_l1_W_q_scale) + self.epsilon,
+                        name='irf_l1_W_q'
+                    )
+
+                    irf_l1_W = tf.cond(self.use_MAP_mode, irf_l1_W_q_dist.mean, irf_l1_W_q_dist.sample)
+
+                    irf_l1_W_summary = irf_l1_W_q_dist.mean()
+
+                    if self.declare_priors_weights:
+                        # Prior distribution
+                        irf_l1_W_prior_dist = Normal(
+                            loc=0.,
+                            scale=irf_l1_W_sd_prior,
+                            name='irf_l1_W'
+                        )
+                        self.kl_penalties_base['irf_l1_W'] = {
+                            'loc': 0.,
+                            'scale': irf_l1_W_sd_prior,
+                            'val': irf_l1_W_q_dist.kl_divergence(irf_l1_W_prior_dist)
+                        }
+
+                else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+
+                    # Posterior distribution
+                    irf_l1_W_q_loc = tf.Variable(
+                        tf.zeros([rangf_n_levels, units], dtype=self.FLOAT_TF),
+                        name='irf_l1_W_q_loc_by_%s' % sn(ran_gf)
+                    )
+
+                    irf_l1_W_q_scale = tf.Variable(
+                        tf.ones([rangf_n_levels, units], dtype=self.FLOAT_TF) * self.constraint_fn_inv(irf_l1_W_sd_posterior * self.ranef_to_fixef_prior_sd_ratio),
+                        name='irf_l1_W_q_scale_by_%s' % sn(ran_gf)
+                    )
+
+                    irf_l1_W_q_dist = Normal(
+                        loc=irf_l1_W_q_loc,
+                        scale=self.constraint_fn(irf_l1_W_q_scale) + self.epsilon,
+                        name='irf_l1_W_q_by_%s' % sn(ran_gf)
+                    )
+
+                    irf_l1_W = tf.cond(self.use_MAP_mode, irf_l1_W_q_dist.mean, irf_l1_W_q_dist.sample)
+
+                    irf_l1_W_summary = irf_l1_W_q_dist.mean()
+
+                    if self.declare_priors_ranef:
+                        # Prior distribution
+                        irf_l1_W_prior_dist = Normal(
+                            loc=0.,
+                            scale=irf_l1_W_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
+                            name='irf_l1_W_by_%s' % sn(ran_gf)
+                        )
+                        self.kl_penalties_base['irf_l1_W_by_%s' % sn(ran_gf)] = {
+                            'loc': 0.,
+                            'scale': irf_l1_W_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
+                            'val': irf_l1_W_q_dist.kl_divergence(irf_l1_W_prior_dist)
+                        }
+
+                return irf_l1_W, irf_l1_W_summary
+            
     def initialize_irf_l1_biases(self, ran_gf=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 units = self.n_units_t_delta_embedding
-
-                irf_l1_W_bias_sd_prior = self.weight_prior_sd
-                if isinstance(irf_l1_W_bias_sd_prior, str):
-                    if irf_l1_W_bias_sd_prior.lower() in ['xavier', 'glorot']:
-                        irf_l1_W_bias_sd_prior = math.sqrt(2 / (units + 1))
-                    elif irf_l1_W_bias_sd_prior.lower() == 'he':
-                        irf_l1_W_bias_sd_prior = math.sqrt(2 / units)
-                else:
-                    irf_l1_W_bias_sd_prior = irf_l1_W_bias_sd_prior
-                irf_l1_W_bias_sd_posterior = irf_l1_W_bias_sd_prior * self.posterior_to_prior_sd_ratio
+                irf_l1_b_sd_prior = get_numerical_sd(self.bias_prior_sd, in_dim=1, out_dim=1)
+                irf_l1_b_sd_posterior = irf_l1_b_sd_prior * self.posterior_to_prior_sd_ratio
 
                 if ran_gf is None:
                     # Posterior distribution
-                    irf_l1_W_bias_q_loc = tf.Variable(
+                    irf_l1_b_q_loc = tf.Variable(
                         tf.zeros([1, 1, units]),
-                        name='irf_l1_W_bias_q_loc'
+                        name='irf_l1_b_q_loc'
                     )
 
-                    irf_l1_W_bias_q_scale = tf.Variable(
-                        tf.zeros([1, 1, units]) * self.constraint_fn_inv(irf_l1_W_bias_sd_posterior),
-                        name='irf_l1_W_bias_q_scale'
+                    irf_l1_b_q_scale = tf.Variable(
+                        tf.zeros([1, 1, units]) * self.constraint_fn_inv(irf_l1_b_sd_posterior),
+                        name='irf_l1_b_q_scale'
                     )
 
-                    irf_l1_W_bias_q_dist = Normal(
-                        loc=irf_l1_W_bias_q_loc,
-                        scale=self.constraint_fn(irf_l1_W_bias_q_scale) + self.epsilon,
-                        name='irf_l1_W_bias_q'
+                    irf_l1_b_q_dist = Normal(
+                        loc=irf_l1_b_q_loc,
+                        scale=self.constraint_fn(irf_l1_b_q_scale) + self.epsilon,
+                        name='irf_l1_b_q'
                     )
 
-                    irf_l1_W_bias = tf.cond(self.use_MAP_mode, irf_l1_W_bias_q_dist.mean, irf_l1_W_bias_q_dist.sample)
+                    irf_l1_b = tf.cond(self.use_MAP_mode, irf_l1_b_q_dist.mean, irf_l1_b_q_dist.sample)
 
-                    irf_l1_W_bias_summary = irf_l1_W_bias_q_dist.mean()
+                    irf_l1_b_summary = irf_l1_b_q_dist.mean()
 
-                    if self.declare_priors_fixef:
+                    if self.declare_priors_biases:
                         # Prior distribution
-                        irf_l1_W_bias_prior_dist = Normal(
+                        irf_l1_b_prior_dist = Normal(
                             loc=0.,
-                            scale=irf_l1_W_bias_sd_prior,
-                            name='irf_l1_W_bias'
+                            scale=irf_l1_b_sd_prior,
+                            name='irf_l1_b'
                         )
-                        self.kl_penalties.append(irf_l1_W_bias_q_dist.kl_divergence(irf_l1_W_bias_prior_dist))
+                        self.kl_penalties_base['irf_l1_b'] = {
+                            'loc': 0.,
+                            'scale': irf_l1_b_sd_prior,
+                            'val': irf_l1_b_q_dist.kl_divergence(irf_l1_b_prior_dist)
+                        }
 
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
 
                     # Posterior distribution
-                    irf_l1_W_bias_q_loc = tf.Variable(
+                    irf_l1_b_q_loc = tf.Variable(
                         tf.zeros([rangf_n_levels, units], dtype=self.FLOAT_TF),
-                        name='irf_l1_W_bias_q_loc_by_%s' % sn(ran_gf)
+                        name='irf_l1_b_q_loc_by_%s' % sn(ran_gf)
                     )
 
-                    irf_l1_W_bias_q_scale = tf.Variable(
-                        tf.ones([rangf_n_levels, units], dtype=self.FLOAT_TF) * self.constraint_fn_inv(irf_l1_W_bias_sd_posterior * self.ranef_to_fixef_prior_sd_ratio),
-                        name='irf_l1_W_bias_q_scale_by_%s' % sn(ran_gf)
+                    irf_l1_b_q_scale = tf.Variable(
+                        tf.ones([rangf_n_levels, units], dtype=self.FLOAT_TF) * self.constraint_fn_inv(irf_l1_b_sd_posterior * self.ranef_to_fixef_prior_sd_ratio),
+                        name='irf_l1_b_q_scale_by_%s' % sn(ran_gf)
                     )
 
-                    irf_l1_W_bias_q_dist = Normal(
-                        loc=irf_l1_W_bias_q_loc,
-                        scale=self.constraint_fn(irf_l1_W_bias_q_scale) + self.epsilon,
-                        name='irf_l1_W_bias_q_by_%s' % sn(ran_gf)
+                    irf_l1_b_q_dist = Normal(
+                        loc=irf_l1_b_q_loc,
+                        scale=self.constraint_fn(irf_l1_b_q_scale) + self.epsilon,
+                        name='irf_l1_b_q_by_%s' % sn(ran_gf)
                     )
 
-                    irf_l1_W_bias = tf.cond(self.use_MAP_mode, irf_l1_W_bias_q_dist.mean, irf_l1_W_bias_q_dist.sample)
+                    irf_l1_b = tf.cond(self.use_MAP_mode, irf_l1_b_q_dist.mean, irf_l1_b_q_dist.sample)
 
-                    irf_l1_W_bias_summary = irf_l1_W_bias_q_dist.mean()
+                    irf_l1_b_summary = irf_l1_b_q_dist.mean()
 
                     if self.declare_priors_ranef:
                         # Prior distribution
-                        irf_l1_W_bias_prior_dist = Normal(
+                        irf_l1_b_prior_dist = Normal(
                             loc=0.,
-                            scale=irf_l1_W_bias_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
-                            name='irf_l1_W_bias_by_%s' % sn(ran_gf)
+                            scale=irf_l1_b_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
+                            name='irf_l1_b_by_%s' % sn(ran_gf)
                         )
-                        self.kl_penalties.append(irf_l1_W_bias_q_dist.kl_divergence(irf_l1_W_bias_prior_dist))
+                        self.kl_penalties_base['irf_l1_b_by_%s' % sn(ran_gf)] = {
+                            'loc': 0.,
+                            'scale': irf_l1_b_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
+                            'val': irf_l1_b_q_dist.kl_divergence(irf_l1_b_prior_dist)
+                        }
 
-                irf_l1_b_bias_sd_prior = self.bias_prior_sd
-                if isinstance(irf_l1_b_bias_sd_prior, str):
-                    if irf_l1_b_bias_sd_prior.lower() in ['xavier', 'glorot']:
-                        irf_l1_b_bias_sd_prior = math.sqrt(2 / (units + 1))
-                    elif irf_l1_b_bias_sd_prior.lower() == 'he':
-                        irf_l1_b_bias_sd_prior = math.sqrt(2 / units)
-                else:
-                    irf_l1_b_bias_sd_prior = irf_l1_b_bias_sd_prior
-                irf_l1_b_bias_sd_posterior = irf_l1_b_bias_sd_prior * self.posterior_to_prior_sd_ratio
+                return irf_l1_b, irf_l1_b_summary
 
-                if ran_gf is None:
-                    # Posterior distribution
-                    irf_l1_b_bias_q_loc = tf.Variable(
-                        tf.zeros([1, 1, units]),
-                        name='irf_l1_b_bias_q_loc'
-                    )
+    def initialize_irf_l1_batch_norm(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                batch_norm_layer = BatchNormLayerBayes(
+                    decay=self.batch_normalization_decay,
+                    center=True,
+                    scale=True,
+                    axis=-1,
+                    use_MAP_mode=self.use_MAP_mode,
+                    declare_priors_weights=self.declare_priors_weights,
+                    declare_priors_biases=self.declare_priors_biases,
+                    weight_prior_sd=self.weight_prior_sd,
+                    bias_prior_sd=self.bias_prior_sd,
+                    posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
+                    constraint=self.constraint,
+                    training=self.training,
+                    epsilon=self.epsilon,
+                    session=self.sess,
+                    name='irf_l1'
+                )
 
-                    irf_l1_b_bias_q_scale = tf.Variable(
-                        tf.zeros([1, 1, units]) * self.constraint_fn_inv(irf_l1_b_bias_sd_posterior),
-                        name='irf_l1_b_bias_q_scale'
-                    )
-
-                    irf_l1_b_bias_q_dist = Normal(
-                        loc=irf_l1_b_bias_q_loc,
-                        scale=self.constraint_fn(irf_l1_b_bias_q_scale) + self.epsilon,
-                        name='irf_l1_b_bias_q'
-                    )
-
-                    irf_l1_b_bias = tf.cond(self.use_MAP_mode, irf_l1_b_bias_q_dist.mean, irf_l1_b_bias_q_dist.sample)
-
-                    irf_l1_b_bias_summary = irf_l1_b_bias_q_dist.mean()
-
-                    if self.declare_priors_fixef:
-                        # Prior distribution
-                        irf_l1_b_bias_prior_dist = Normal(
-                            loc=0.,
-                            scale=irf_l1_b_bias_sd_prior,
-                            name='irf_l1_b_bias'
-                        )
-                        self.kl_penalties.append(irf_l1_b_bias_q_dist.kl_divergence(irf_l1_b_bias_prior_dist))
-
-                else:
-                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
-
-                    # Posterior distribution
-                    irf_l1_b_bias_q_loc = tf.Variable(
-                        tf.zeros([rangf_n_levels, units], dtype=self.FLOAT_TF),
-                        name='irf_l1_b_bias_q_loc_by_%s' % sn(ran_gf)
-                    )
-
-                    irf_l1_b_bias_q_scale = tf.Variable(
-                        tf.ones([rangf_n_levels, units], dtype=self.FLOAT_TF) * self.constraint_fn_inv(irf_l1_b_bias_sd_posterior * self.ranef_to_fixef_prior_sd_ratio),
-                        name='irf_l1_b_bias_q_scale_by_%s' % sn(ran_gf)
-                    )
-
-                    irf_l1_b_bias_q_dist = Normal(
-                        loc=irf_l1_b_bias_q_loc,
-                        scale=self.constraint_fn(irf_l1_b_bias_q_scale) + self.epsilon,
-                        name='irf_l1_b_bias_q_by_%s' % sn(ran_gf)
-                    )
-
-                    irf_l1_b_bias = tf.cond(self.use_MAP_mode, irf_l1_b_bias_q_dist.mean, irf_l1_b_bias_q_dist.sample)
-
-                    irf_l1_b_bias_summary = irf_l1_b_bias_q_dist.mean()
-
-                    if self.declare_priors_ranef:
-                        # Prior distribution
-                        irf_l1_b_bias_prior_dist = Normal(
-                            loc=0.,
-                            scale=irf_l1_b_bias_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
-                            name='irf_l1_b_bias_by_%s' % sn(ran_gf)
-                        )
-                        self.kl_penalties.append(irf_l1_b_bias_q_dist.kl_divergence(irf_l1_b_bias_prior_dist))
-
-                return irf_l1_W_bias, irf_l1_W_bias_summary, irf_l1_b_bias, irf_l1_b_bias_summary
+                return batch_norm_layer
 
     def _initialize_output_model(self):
         with self.sess.as_default():
@@ -762,7 +815,11 @@ class CDRNNBayes(CDRNN):
                             scale=self.y_sd_prior_sd_tf,
                             name='y_sd'
                         )
-                        self.kl_penalties.append(y_sd_dist.kl_divergence(y_sd_prior))
+                        self.kl_penalties_base['y_sd'] = {
+                            'loc': self.y_sd_init,
+                            'scale': self.y_sd_prior_sd,
+                            'val': y_sd_dist.kl_divergence(y_sd_prior)
+                        }
 
                     y_sd = self.constraint_fn(y_sd) + self.epsilon
                     y_sd_summary = self.constraint_fn(y_sd_summary) + self.epsilon
@@ -841,8 +898,16 @@ class CDRNNBayes(CDRNN):
                             scale=self.y_tailweight_prior_sd_tf,
                             name='y_tailweight'
                         )
-                        self.kl_penalties.append(self.y_skewness_dist.kl_divergence(self.y_skewness_prior))
-                        self.kl_penalties.append(self.y_tailweight_dist.kl_divergence(self.y_tailweight_prior))
+                        self.kl_penalties_base['y_skewness'] = {
+                            'loc': 0.,
+                            'scale': self.y_skewness_prior,
+                            'val': self.y_skewness_dist.kl_divergence(self.y_skewness_prior)
+                        }
+                        self.kl_penalties_base['y_tailweight'] = {
+                            'loc': self.y_tailweight_prior_loc,
+                            'scale': self.y_tailweight_prior,
+                            'val': self.y_tailweight_dist.kl_divergence(self.y_tailweight_prior)
+                        }
 
                     if self.standardize_response:
                         self.out_standardized_dist = SinhArcsinh(
@@ -1037,6 +1102,7 @@ class CDRNNBayes(CDRNN):
                 self.err_dist_summary_theoretical_quantiles = self.err_dist_summary.quantile(empirical_quantiles)
                 self.err_dist_summary_theoretical_cdf = self.err_dist_summary.cdf(self.errors)
 
+                self.ll = self.out_dist.log_prob(self.y)
                 if self.standardize_response:
                     y_standardized = (self.y - self.y_train_mean) / self.y_train_sd
                     self.ll_standardized = self.out_standardized_dist.log_prob(y_standardized)
@@ -1046,14 +1112,10 @@ class CDRNNBayes(CDRNN):
             with self.sess.graph.as_default():
                 self._initialize_output_model()
 
-                self.loss_func = 0.
-
-                self.ll = self.out_dist.log_prob(self.y)
-
-                self.mae_loss = tf.losses.absolute_difference(self.y, self.out)
-                self.mse_loss = tf.losses.mean_squared_error(self.y, self.out)
-
-                loss_func = - self.ll
+                if self.standardize_response:
+                    loss_func = - self.ll_standardized
+                else:
+                    loss_func = - self.ll
 
                 if self.loss_filter_n_sds and self.ema_decay:
                     beta = self.ema_decay
@@ -1107,16 +1169,50 @@ class CDRNNBayes(CDRNN):
                     self.loss_func += self.reg_loss
 
                 self.kl_loss = tf.constant(0., dtype=self.FLOAT_TF)
+
+                kl_penalties = self.kl_penalties_base
+                for layer in self.layers:
+                    kl_penalties.update(layer.kl_penalties())
+                self.kl_penalties = kl_penalties
+
                 if len(self.kl_penalties):
-                    self.kl_loss += tf.reduce_sum([tf.reduce_sum(x) for x in self.kl_penalties])
+                    self.kl_loss += [tf.reduce_sum(self.kl_penalties[k]['val']) for k in self.kl_penalties]
+                    self.kl_loss = tf.reduce_sum(self.kl_loss)
                     self.loss_func += self.kl_loss
-                    self.reg_loss += self.kl_loss
 
                 assert self.optim_name is not None, 'An optimizer name must be supplied'
                 self.optim = self._initialize_optimizer()
 
                 self.train_op = self.optim.minimize(self.loss_func, global_step=self.global_batch_step)
 
+    # Overload this method to perform parameter sampling and compute credible intervals
+    def _extract_parameter_values(self, fixed=True, level=95, n_samples=None):
+        if n_samples is None:
+            n_samples = self.n_samples_eval
+
+        alpha = 100 - float(level)
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                self.set_predict_mode(True)
+
+                if fixed:
+                    param_vector = self.parameter_table_fixed_values
+                else:
+                    param_vector = self.parameter_table_random_values
+
+                samples = [self.sess.run(param_vector, feed_dict={self.use_MAP_mode: False}) for _ in range(n_samples)]
+                samples = np.stack(samples, axis=1)
+
+                mean = samples.mean(axis=1)
+                lower = np.percentile(samples, alpha / 2, axis=1)
+                upper = np.percentile(samples, 100 - (alpha / 2), axis=1)
+
+                out = np.stack([mean, lower, upper], axis=1)
+
+                self.set_predict_mode(False)
+
+                return out
 
 
 
@@ -1137,48 +1233,120 @@ class CDRNNBayes(CDRNN):
 
         return out
 
-    def run_train_step(self, feed_dict, verbose=True):
+    def report_regularized_variables(self, indent=0):
+        """
+        Generate a string representation of the model's regularization structure.
+
+        :param indent: ``int``; indentation level
+        :return: ``str``; the regularization report
+        """
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                to_run_names = []
-                to_run = [self.train_op, self.ema_op, self.y_sd_delta_ema_op]
-                if self.n_layers_rnn:
-                    to_run += self.rnn_h_ema_ops + self.rnn_c_ema_ops
-                if self.asymmetric_error:
-                    to_run += [self.y_skewness_delta_ema_op, self.y_tailweight_delta_ema_op]
-                if self.loss_filter_n_sds:
-                    to_run_names.append('n_dropped')
-                    to_run += [self.loss_ema_op, self.loss_sd_ema_op, self.n_dropped]
-                to_run_names += ['loss', 'reg_loss']
-                to_run += [self.loss_func, self.reg_loss]
-                out = self.sess.run(to_run, feed_dict=feed_dict)
+                out = super(CDRNNBayes, self).report_regularized_variables(indent)
 
-                out_dict = {x: y for x, y in zip(to_run_names, out[-len(to_run_names):])}
+                out += ' ' * indent + 'VARIATIONAL PRIORS:\n'
 
-                return out_dict
+                kl_penalties = self.kl_penalties
+
+                if len(kl_penalties) == 0:
+                    out +=  ' ' * indent + '  No variational priors.\n\n'
+                else:
+                    for name in sorted(list(kl_penalties.keys())):
+                        out += ' ' * indent + '  %s:\n' % name
+                        for k in sorted(list(kl_penalties[name].keys())):
+                            if not k == 'val':
+                                out += ' ' * indent + '    %s: %s\n' % (k, kl_penalties[name][k])
+
+                    out += '\n'
+
+                return out
+
 
     def run_predict_op(self, feed_dict, standardize_response=False, n_samples=None, algorithm='MAP', verbose=True):
+        use_MAP_mode =  algorithm in ['map', 'MAP']
+        feed_dict[self.use_MAP_mode] = use_MAP_mode
+
+        if standardize_response and self.standardize_response:
+            out = self.out_standardized
+        else:
+            out = self.out
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                preds = self.sess.run(self.out, feed_dict=feed_dict)
-                if self.standardize_response and not standardize_response:
-                    preds = preds * self.y_train_sd + self.y_train_mean
+                if use_MAP_mode:
+                    preds = self.sess.run(out, feed_dict=feed_dict)
+                else:
+                    if n_samples is None:
+                        n_samples = self.n_samples_eval
+
+                    if verbose:
+                        pb = tf.contrib.keras.utils.Progbar(n_samples)
+
+                    preds = np.zeros((len(feed_dict[self.time_y]), n_samples))
+
+                    for i in range(n_samples):
+                        preds[:, i] = self.sess.run(out, feed_dict=feed_dict)
+                        if verbose:
+                            pb.update(i + 1, force=True)
+
+                    preds = preds.mean(axis=1)
+
                 return preds
 
     def run_loglik_op(self, feed_dict, standardize_response=False, n_samples=None, algorithm='MAP', verbose=True):
+        use_MAP_mode =  algorithm in ['map', 'MAP']
+        feed_dict[self.use_MAP_mode] = use_MAP_mode
+
+        if standardize_response and self.standardize_response:
+            ll = self.ll_standardized
+        else:
+            ll = self.ll
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if self.standardize_response and standardize_response:
-                    ll = self.ll_standardized
+                if use_MAP_mode:
+                    log_lik = self.sess.run(ll, feed_dict=feed_dict)
                 else:
-                    ll = self.ll
-                log_lik = self.sess.run(ll, feed_dict=feed_dict)
+                    if n_samples is None:
+                        n_samples = self.n_samples_eval
+
+                    if verbose:
+                        pb = tf.contrib.keras.utils.Progbar(n_samples)
+
+                    log_lik = np.zeros((len(feed_dict[self.time_y]), n_samples))
+
+                    for i in range(n_samples):
+                        log_lik[:, i] = self.sess.run(ll, feed_dict=feed_dict)
+                        if verbose:
+                            pb.update(i + 1, force=True)
+
+                    log_lik = log_lik.mean(axis=1)
+
                 return log_lik
 
     def run_loss_op(self, feed_dict, n_samples=None, algorithm='MAP', verbose=True):
+        use_MAP_mode =  algorithm in ['map', 'MAP']
+        feed_dict[self.use_MAP_mode] = use_MAP_mode
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                loss = self.sess.run(self.loss_func, feed_dict=feed_dict)
+                if use_MAP_mode:
+                    loss = self.sess.run(self.loss_func, feed_dict=feed_dict)
+                else:
+                    if n_samples is None:
+                        n_samples = self.n_samples_eval
+
+                    if verbose:
+                        pb = tf.contrib.keras.utils.Progbar(n_samples)
+
+                    loss = np.zeros((len(feed_dict[self.time_y]), n_samples))
+
+                    for i in range(n_samples):
+                        loss[:, i] = self.sess.run(self.loss_func, feed_dict=feed_dict)
+                        if verbose:
+                            pb.update(i + 1, force=True)
+
+                    loss = loss.mean()
 
                 return loss
 

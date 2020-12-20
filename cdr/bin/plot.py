@@ -25,6 +25,7 @@ if __name__ == '__main__':
     argparser.add_argument('-P', '--prop_cycle_length', type=int, default=None, help='Length of plotting properties cycle (defines step size in the color map). If unspecified, inferred from **irf_names**.')
     argparser.add_argument('-I', '--prop_cycle_ix', nargs='*', type=int, default=None, help='Integer indices to use in the properties cycle for each entry in **irf_names**. If unspecified, indices are automatically assigned.')
     argparser.add_argument('-s', '--plot_true_synthetic', action='store_true', help='If the models are fit to synthetic data, also generate plots of the true IRF')
+    argparser.add_argument('-t', '--reference_time', type=float, default=0., help='Reference time to use for CDRNN plots.')
     argparser.add_argument('-p', '--prefix', type=str, default=None, help='Filename prefix to use for outputs. If unspecified, creates prefix based on output path.')
     argparser.add_argument('-u', '--ntimeunits', type=float, default=None, help='Number of time units on x-axis')
     argparser.add_argument('-r', '--resolution', type=float, default=None, help='Number of points on x-axis')
@@ -41,9 +42,9 @@ if __name__ == '__main__':
     argparser.add_argument('-T', '--qq_noticks', action='store_true', help='Remove ticks from Q-Q plots.')
     argparser.add_argument('-L', '--qq_nolegend', action='store_true', help='Omit legend from Q-Q plots')
     argparser.add_argument('-M', '--markers', action='store_true', help='Add markers to IRF lines')
-    argparser.add_argument('-t', '--transparent_background', action='store_true', help='Use transparent background (otherwise white background)')
+    argparser.add_argument('-B', '--transparent_background', action='store_true', help='Use transparent background (otherwise white background)')
     argparser.add_argument('-C', '--dump_source', action='store_true', help='Dump plot source arrays to CSV')
-    args, unknown = argparser.parse_known_args()
+    args = argparser.parse_args()
 
     for path in args.paths:
         p = Config(path)
@@ -59,6 +60,7 @@ if __name__ == '__main__':
         if prefix != '':
             prefix += '_'
         n_time_units = args.ntimeunits
+        reference_time = args.reference_time
         resolution = args.resolution
         x_inches = args.x
         y_inches = args.y
@@ -132,10 +134,14 @@ if __name__ == '__main__':
                 'plot_n_time_units': p['plot_n_time_units'] if n_time_units is None else n_time_units,
                 'plot_n_time_points': p['plot_n_time_points'] if resolution is None else resolution,
                 'surface_plot_n_time_points': p['surface_plot_n_time_points'] if resolution is None else resolution,
+                'reference_time': p['reference_time'] if reference_time is None else reference_time,
                 'plot_x_inches': p['plot_x_inches'] if x_inches is None else x_inches,
                 'plot_y_inches': p['plot_y_inches'] if y_inches is None else y_inches,
                 'cmap': p['cmap'] if cmap is None else cmap,
-                'dpi': p['dpi'] if args.dpi is None else args.dpi
+                'dpi': p['dpi'] if args.dpi is None else args.dpi,
+                'generate_irf_surface_plots': p['generate_irf_surface_plots'],
+                'generate_interaction_surface_plots': p['generate_interaction_surface_plots'],
+                'generate_curvature_plots': p['generate_curvature_plots'],
             }
 
             stderr('Plotting...\n')
@@ -217,7 +223,7 @@ if __name__ == '__main__':
             )
             
 
-            if hasattr(cdr_model, 'inference_name'):
+            if cdr_model.is_bayesian:
                 cdr_model.make_plots(
                     standardize_response=args.standardize_response,
                     summed=args.summed,

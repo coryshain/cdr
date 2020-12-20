@@ -63,6 +63,6 @@ if __name__ == '__main__':
                 else:
                     outname = p.outdir + '/' + m_path + '/cdr_irf_integrals.csv'
 
-                cdr_model.save_irf_integral_table(level=args.level, n_samples=args.nsamples, outfile=outname)
+                cdr_model.save_integral_table(level=args.level, n_samples=args.nsamples, outfile=outname)
 
             cdr_model.finalize()

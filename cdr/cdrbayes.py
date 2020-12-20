@@ -841,6 +841,7 @@ class CDRBayes(CDR):
                 self.err_dist_summary_theoretical_quantiles = self.err_dist_summary.quantile(empirical_quantiles)
                 self.err_dist_summary_theoretical_cdf = self.err_dist_summary.cdf(self.errors)
 
+                self.ll = self.out_dist.log_prob(self.y)
                 if self.standardize_response:
                     self.X_conv_standardized_scaled = self.X_conv_scaled
                     self.X_conv_scaled *= self.y_train_sd
@@ -855,9 +856,10 @@ class CDRBayes(CDR):
 
                 self.loss_func = 0.
 
-                self.ll = self.out_dist.log_prob(self.y)
-                # self.loss_func += -tf.reduce_sum(self.ll)
-                self.loss_func += -tf.reduce_sum(self.ll) * self.minibatch_scale
+                if self.standardize_response:
+                    self.loss_func += -tf.reduce_sum(self.ll_standardized) * self.minibatch_scale
+                else:
+                    self.loss_func += -tf.reduce_sum(self.ll) * self.minibatch_scale
 
                 self.reg_loss = 0.
                 if len(self.regularizer_losses_varnames) > 0:
@@ -896,51 +898,6 @@ class CDRBayes(CDR):
             out = np.stack([mean, lower, upper], axis=1)
 
             return out
-
-    def extract_irf_integral(self, terminal_name, rangf=None, level=95, n_samples=None, n_time_units=None, n_time_points=1000):
-        if n_samples is None:
-            n_samples = self.n_samples_eval
-        if n_time_units is None:
-            n_time_units = self.t_delta_limit
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                if self.pc:
-                    n_impulse = len(self.src_impulse_names)
-                else:
-                    n_impulse = len(self.impulse_names)
-                fd = {
-                    self.support_start: 0.,
-                    self.n_time_units: n_time_units,
-                    self.n_time_points: n_time_points,
-                    self.time_y: [n_time_units],
-                    self.time_X: np.zeros((1, self.history_length, n_impulse)),
-                    self.use_MAP_mode: False
-                }
-
-                if rangf is not None:
-                    fd[self.gf_y] = rangf
-
-                alpha = 100 - float(level)
-
-                if terminal_name in self.irf_integral_tensors:
-                    posterior = self.irf_integral_tensors[terminal_name]
-                else:
-                    posterior = self.src_irf_integral_tensors[terminal_name]
-
-                samples = [self.sess.run(posterior, feed_dict=fd) for _ in range(n_samples)]
-                samples = np.stack(samples, axis=1)
-
-                mean = samples.mean(axis=1)
-                lower = np.percentile(samples, alpha / 2, axis=1)
-                upper = np.percentile(samples, 100 - (alpha / 2), axis=1)
-
-                return (mean, lower, upper)
-
-    # Overload this method to use posterior distribution
-    def _initialize_parameter_tables(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                super(CDRBayes, self)._initialize_parameter_tables()
 
 
 

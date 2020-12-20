@@ -132,7 +132,7 @@ class Kwarg(object):
                             val = x(from_settings)
                             parsed = True
                             break
-                        except TypeError:
+                        except ValueError:
                             pass
 
                 assert parsed, 'Invalid value "%s" received for %s' %(from_settings, self.key)
@@ -170,10 +170,22 @@ MODEL_INITIALIZATION_KWARGS = [
         "Path to output directory, where logs and model parameters are saved."
     ),
     Kwarg(
+        'center_inputs',
+        False,
+        bool,
+        "DISCOURAGED UNLESS YOU HAVE A GOOD REASON, since this can distort rate estimates. Center inputs by subtracting training set means. Can improve convergence speed and reduce vulnerability to local optima. Only affects fitting -- prediction, likelihood computation, and plotting are reported on the source values."
+    ),
+    Kwarg(
+        'scale_inputs',
+        True,
+        bool,
+        "Rescale input features by dividing by training set standard deviation. Can improve convergence speed and reduce vulnerability to local optima. Only affects fitting -- prediction, likelihood computation, and plotting are reported on the source values."
+    ),
+    Kwarg(
         'standardize_response',
         True,
         bool,
-        "Standardize (Z-transform) the response variable. Can improve convergence speed and reduce vulnerability to local optima. Only affects fitting -- the original response scale is still used for prediction, likelihood computation, and plotting."
+        "Standardize (Z-transform) the response variable using training set mean and variance. Can improve convergence speed and reduce vulnerability to local optima. Only affects fitting -- prediction, likelihood computation, and plotting are reported on the source values."
     ),
     Kwarg(
         'asymmetric_error',
@@ -460,17 +472,17 @@ MODEL_INITIALIZATION_KWARGS = [
         False,
         bool,
         "Keep IRF plots from each checkpoint of a run, which can help visualize learning trajectories but can also consume a lot of disk space. If ``False``, only the most recent plot of each type is kept."
+    ),
+    Kwarg(
+        'pc',
+        False,
+        bool,
+        "Transform input variables using principal components analysis. BROKEN, DO NOT USE."
     )
 ]
 
 
 CDR_INITIALIZATION_KWARGS = [
-    Kwarg(
-        'pc',
-        False,
-        bool,
-        "Transform input variables using principal components analysis. Experimental, not thoroughly tested."
-    ),
     Kwarg(
         'covarying_fixef',
         False,
@@ -726,7 +738,7 @@ CDRNN_INITIALIZATION_KWARGS = [
         32,
         [int, None],
         "Number of units in the embedding of the temporal offset t_delta. If ``None``, inferred automatically.",
-        aliases=['n_units_decoder', 'n_units_embedding']
+        aliases=['n_units_embedding']
     ),
     Kwarg(
         'n_layers_irf',
@@ -981,6 +993,19 @@ CDRNNBAYES_INITIALIZATION_KWARGS = [
         aliases=['declare_priors']
     ),
     Kwarg(
+        'declare_priors_weights',
+        True,
+        bool,
+        "Specify Gaussian priors for all fixed model parameters (if ``False``, use implicit improper uniform priors).",
+        aliases=['declare_priors']
+    ),
+    Kwarg(
+        'declare_priors_biases',
+        False,
+        bool,
+        "Specify Gaussian priors for model biases (if ``False``, use implicit improper uniform priors)."
+    ),
+    Kwarg(
         'declare_priors_ranef',
         True,
         bool,
@@ -1003,14 +1028,14 @@ CDRNNBAYES_INITIALIZATION_KWARGS = [
     Kwarg(
         'weight_prior_sd',
         'glorot',
-        [float, str],
+        [str, float],
         "Standard deviation of prior on CDRNN hidden weights. A ``float``, ``'glorot'``, or ``'he'``.",
         aliases=['conv_prior_sd', 'prior_sd']
     ),
     Kwarg(
         'bias_prior_sd',
         1.,
-        [float, str],
+        [str, float],
         "Standard deviation of prior on CDRNN hidden biases. A ``float``, ``'glorot'``, or ``'he'``.",
         aliases=['conv_prior_sd', 'prior_sd']
     ),

@@ -28,8 +28,8 @@ def plot_irf(
         plot_x,
         plot_y,
         irf_names,
-        uq=None,
         lq=None,
+        uq=None,
         sort_names=True,
         prop_cycle_length=None,
         prop_cycle_ix=None,
@@ -54,8 +54,8 @@ def plot_irf(
     :param plot_x: ``numpy`` array with shape (T,1); time points for which to plot the response. For example, if the plots contain 1000 points from 0s to 10s, **plot_x** could be generated as ``np.linspace(0, 10, 1000)``.
     :param plot_y: ``numpy`` array with shape (T, N); response of each IRF at each time point.
     :param irf_names: ``list`` of ``str``; CDR ID's of IRFs in the same order as they appear in axis 1 of **plot_y**.
-    :param uq: ``numpy`` array with shape (T, N), or ``None``; upper bound of credible interval for each time point. If ``None``, no credible interval will be plotted.
     :param lq: ``numpy`` array with shape (T, N), or ``None``; lower bound of credible interval for each time point. If ``None``, no credible interval will be plotted.
+    :param uq: ``numpy`` array with shape (T, N), or ``None``; upper bound of credible interval for each time point. If ``None``, no credible interval will be plotted.
     :param sort_names: ``bool``; alphabetically sort IRF names.
     :param prop_cycle_length: ``int`` or ``None``; Length of plotting properties cycle (defines step size in the color map). If ``None``, inferred from **irf_names**.
     :param prop_cycle_ix: ``list`` of ``int``, or ``None``; Integer indices to use in the properties cycle for each entry in **irf_names**. If ``None``, indices are automatically assigned.
@@ -153,6 +153,9 @@ def plot_surface(
         plot_y,
         plot_z,
         irf_names,
+        lq=None,
+        uq=None,
+        bounds_as_surface=False,
         sort_names=True,
         dir='.',
         prefix='surface_plot',
@@ -173,11 +176,13 @@ def plot_surface(
     """
     Plot an IRF or interaction surface.
 
-    :param plot_x: ``numpy`` array with shape (T,1); time points for which to plot the response. For example, if the plots contain 1000 points from 0s to 10s, **plot_x** could be generated as ``np.linspace(0, 10, 1000)``.
-    :param plot_y: ``numpy`` array with shape (T, N); response of each IRF at each time point.
+    :param plot_x: ``numpy`` array with shape (M,N); x locations for each plot point, copied N times.
+    :param plot_y: ``numpy`` array with shape (M,N); y locations for each plot point, copied M times.
+    :param plot_z: ``numpy`` array with shape (M,N); z locations for each plot point.
     :param irf_names: ``list`` of ``str``; CDR ID's of IRFs in the same order as they appear in axis 1 of **plot_y**.
-    :param uq: ``numpy`` array with shape (T, N), or ``None``; upper bound of credible interval for each time point. If ``None``, no credible interval will be plotted.
-    :param lq: ``numpy`` array with shape (T, N), or ``None``; lower bound of credible interval for each time point. If ``None``, no credible interval will be plotted.
+    :param lq: ``numpy`` array with shape (M,N), or ``None``; lower bound of credible interval for each plot point. If ``None``, no credible interval will be plotted.
+    :param uq: ``numpy`` array with shape (M,N), or ``None``; upper bound of credible interval for each plot point. If ``None``, no credible interval will be plotted.
+    :param bounds_as_surface: ``bool``; whether to plot interval bounds using additional surfaces. If ``False``, bounds are plotted with vertical error bars instead. Ignored if lq, uq are ``None``.
     :param sort_names: ``bool``; alphabetically sort IRF names.
     :param prop_cycle_length: ``int`` or ``None``; Length of plotting properties cycle (defines step size in the color map). If ``None``, inferred from **irf_names**.
     :param prop_cycle_ix: ``list`` of ``int``, or ``None``; Integer indices to use in the properties cycle for each entry in **irf_names**. If ``None``, indices are automatically assigned.
@@ -219,13 +224,37 @@ def plot_surface(
         sort_ix = range(len(irf_names_processed))
     for i in range(len(sort_ix)):
         filename = (prefix + '_' + '%s_' % irf_names_processed[sort_ix[i]] + suffix).replace(':', '_by_').replace(' ', '_')
+        x = plot_x[..., sort_ix[i]]
+        y = plot_y[..., sort_ix[i]]
+        z = plot_z[..., sort_ix[i]]
+        if lq is None:
+            lq_cur = None
+        else:
+            lq_cur = lq[..., sort_ix[i]]
+        if uq is None:
+            uq_cur = None
+        else:
+            uq_cur = uq[..., sort_ix[i]]
         try:
-            rcount, ccount = plot_z[sort_ix[i]].shape
+            rcount, ccount = z.shape
             if plot_type.lower() == 'surf':
+                if bounds_as_surface and lq_cur is not None:
+                    ax.plot_surface(
+                        x,
+                        y,
+                        lq_cur,
+                        rcount=rcount,
+                        ccount=ccount,
+                        color=(0.5, 0.5, 0.5, 0.5),
+                        linewidth=2,
+                        alpha=0.1,
+                        antialiased=False,
+                        zorder=1
+                    )
                 ax.plot_surface(
-                    plot_x[sort_ix[i]],
-                    plot_y[sort_ix[i]],
-                    plot_z[sort_ix[i]],
+                    x,
+                    y,
+                    z,
                     rcount=rcount,
                     ccount=ccount,
                     cmap=cmap,
@@ -234,11 +263,37 @@ def plot_surface(
                     antialiased=False,
                     norm=matplotlib.colors.TwoSlopeNorm(vcenter=0.)
                 )
+                if bounds_as_surface and uq_cur is not None:
+                    ax.plot_surface(
+                        x,
+                        y,
+                        uq_cur,
+                        rcount=rcount,
+                        ccount=ccount,
+                        color=(0.5, 0.5, 0.5, 0.5),
+                        linewidth=2,
+                        alpha=0.1,
+                        antialiased=False,
+                        zorder=3
+                    )
             elif plot_type.lower() == 'trisurf':
+                if bounds_as_surface and lq_cur is not None:
+                    ax.plot_trisurf(
+                        x,
+                        y,
+                        lq_cur,
+                        rcount=rcount,
+                        ccount=ccount,
+                        color=(0.5, 0.5, 0.5, 0.5),
+                        linewidth=2,
+                        alpha=0.1,
+                        antialiased=False,
+                        zorder=1
+                    )
                 ax.plot_trisurf(
-                    plot_x[sort_ix[i]],
-                    plot_y[sort_ix[i]],
-                    plot_z[sort_ix[i]],
+                    x,
+                    y,
+                    z,
                     rcount=rcount,
                     ccount=ccount,
                     cmap=cmap,
@@ -247,20 +302,55 @@ def plot_surface(
                     antialiased=False,
                     norm=matplotlib.colors.TwoSlopeNorm(vcenter=0.)
                 )
+                if bounds_as_surface and uq_cur is not None:
+                    ax.plot_trisurf(
+                        x,
+                        y,
+                        uq_cur,
+                        rcount=rcount,
+                        ccount=ccount,
+                        color=(0.5, 0.5, 0.5, 0.5),
+                        linewidth=2,
+                        alpha=0.1,
+                        antialiased=False,
+                        zorder=3
+                    )
             elif plot_type.lower() == 'contour':
+                if bounds_as_surface and lq_cur is not None:
+                    ax.contour3D(
+                        x,
+                        y,
+                        lq_cur,
+                        rcount=rcount,
+                        ccount=ccount,
+                        color=(0.5, 0.5, 0.5, 0.5),
+                        alpha=0.1,
+                        zorder=1
+                    )
                 ax.contour3D(
-                    plot_x[sort_ix[i]],
-                    plot_y[sort_ix[i]],
-                    plot_z[sort_ix[i]],
+                    x,
+                    y,
+                    z,
                     rcount=rcount,
                     ccount=ccount,
                     cmap=cmap,
                     norm=matplotlib.colors.TwoSlopeNorm(vcenter=0.)
                 )
+                if bounds_as_surface and uq_cur is not None:
+                    ax.contour3D(
+                        x,
+                        y,
+                        uq_cur,
+                        rcount=rcount,
+                        ccount=ccount,
+                        color=(0.5, 0.5, 0.5, 0.5),
+                        alpha=0.1,
+                        zorder=3
+                    )
             elif plot_type.lower() == 'wireframe':
                 vcenter = 0
-                vmin = plot_z[sort_ix[i]].min() - 1e-8
-                vmax = plot_z[sort_ix[i]].max() + 1e-8
+                vmin = z.min() - 1e-8
+                vmax = z.max() + 1e-8
                 if vmin < 0 and vmax > 0:
                     bound = max(abs(vmin), vmax)
                     vmin = -bound
@@ -275,11 +365,27 @@ def plot_surface(
                     vmax=vmax
                 )
 
-                facecolors = getattr(cm, cmap)(norm(plot_z[sort_ix[i]]))
+                facecolors = getattr(cm, cmap)(norm(z))
+                facecolors_bounds = np.ones(z.shape + (4,)) * 0.5
+                if bounds_as_surface and lq_cur is not None:
+                    surf = ax.plot_surface(
+                        x,
+                        y,
+                        lq_cur,
+                        rcount=rcount,
+                        ccount=ccount,
+                        facecolors=facecolors_bounds,
+                        alpha=0.1,
+                        linewidth=2,
+                        antialiased=False,
+                        shade=False,
+                        zorder=1
+                    )
+                    surf.set_facecolor((0, 0, 0, 0))
                 surf = ax.plot_surface(
-                    plot_x[sort_ix[i]],
-                    plot_y[sort_ix[i]],
-                    plot_z[sort_ix[i]],
+                    x,
+                    y,
+                    z,
                     rcount=rcount,
                     ccount=ccount,
                     facecolors=facecolors,
@@ -288,8 +394,31 @@ def plot_surface(
                     shade=False
                 )
                 surf.set_facecolor((0, 0, 0, 0))
+                if bounds_as_surface and uq_cur is not None:
+                    surf = ax.plot_surface(
+                        x,
+                        y,
+                        uq_cur,
+                        rcount=rcount,
+                        ccount=ccount,
+                        facecolors=facecolors_bounds,
+                        alpha=0.1,
+                        linewidth=2,
+                        antialiased=False,
+                        shade=False,
+                        zorder=3
+                    )
+                    surf.set_facecolor((0, 0, 0, 0))
+
             else:
                 raise ValueError('Unrecognized surface plot type: %s.' % plot_type)
+
+            if not bounds_as_surface and lq_cur is not None:
+                for _x, _y, _z, _lq, in zip(*[arr.flatten() for arr in (x, y, z, lq_cur)]):
+                    ax.plot([_x, _x], [_y, _y], [_lq, _z], c='black', alpha=0.2, zorder=1)
+            if not bounds_as_surface and uq_cur is not None:
+                for _x, _y, _z, _uq in zip(*[arr.flatten() for arr in (x, y, z, uq_cur)]):
+                    ax.plot([_x, _x], [_y, _y], [_z, _uq], c='black', alpha=0.2, zorder=3)
 
             fig.suptitle(irf_names_processed[sort_ix[i]])
             if ylab is not None and ylab.lower() == 'infer' and xlab is not None and xlab.lower() == 'infer':
@@ -314,7 +443,7 @@ def plot_surface(
                 dpi=dpi,
                 transparent=transparent_background
             )
-        except Exception as e:
+        except TypeError as e:
             stderr('Error saving plot to file %s. Description:\n%s\nSkipping...\n' % (dir + '/' + filename, e))
         ax.clear()
 
@@ -385,8 +514,8 @@ def plot_qq(
     plt.tight_layout()
     try:
         plt.savefig(dir+'/'+filename, dpi=dpi, transparent=transparent_background)
-    except:
-        stderr('Error saving plot to file %s. Skipping...\n' %(dir+'/'+filename))
+    except e:
+        stderr('Error saving plot to file %s\n. \s\nSkipping...\n' %(dir+'/'+filename, e))
     plt.close('all')
 
 

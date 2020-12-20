@@ -82,6 +82,8 @@ class CDRNN(Model):
     def _initialize_metadata(self):
         super(CDRNN, self)._initialize_metadata()
 
+        self.is_cdrnn = True
+
         # Initialize tree metadata
         self.t = self.form.t
         t = self.t
@@ -211,6 +213,8 @@ class CDRNN(Model):
             else:
                 self.n_units_hidden_state = int(self.n_units_hidden_state)
 
+        self.layers = []
+
     def _pack_metadata(self):
         md = super(CDRNN, self)._pack_metadata()
         for kwarg in CDRNN._INITIALIZATION_KWARGS:
@@ -294,10 +298,16 @@ class CDRNN(Model):
                 )
 
                 def get_plot_reference_mean():
-                    plot_impulse_base_default = tf.convert_to_tensor(
-                        [self.impulse_means[x] for x in self.impulse_names],
-                        dtype=self.FLOAT_TF
-                    )
+                    if self.center_inputs:
+                        plot_impulse_base_default = tf.zeros(
+                            [len(self.impulse_names)],
+                            dtype=self.FLOAT_TF
+                        )
+                    else:
+                        plot_impulse_base_default = tf.convert_to_tensor(
+                            [self.impulse_means[x] for x in self.impulse_names],
+                            dtype=self.FLOAT_TF
+                        )
                     plot_impulse_center_default = tf.zeros(
                         [len(self.impulse_names)],
                         dtype=self.FLOAT_TF
@@ -310,10 +320,16 @@ class CDRNN(Model):
                         [len(self.impulse_names)],
                         dtype=self.FLOAT_TF
                     )
-                    plot_impulse_center_default = tf.convert_to_tensor(
-                        [self.impulse_means[x] for x in self.impulse_names],
-                        dtype=self.FLOAT_TF
-                    )
+                    if self.center_inputs:
+                        plot_impulse_center_default = tf.zeros(
+                            [len(self.impulse_names)],
+                            dtype=self.FLOAT_TF
+                        )
+                    else:
+                        plot_impulse_center_default = tf.convert_to_tensor(
+                            [self.impulse_means[x] for x in self.impulse_names],
+                            dtype=self.FLOAT_TF
+                        )
 
                     return plot_impulse_base_default, plot_impulse_center_default
 
@@ -327,6 +343,8 @@ class CDRNN(Model):
                     [len(self.impulse_names)],
                     dtype=self.FLOAT_TF
                 )
+                if not self.scale_inputs:
+                    plot_impulse_offset_default *= self.impulse_sds
 
                 self.plot_impulse_base = tf.placeholder_with_default(
                     plot_impulse_base_default,
@@ -436,6 +454,7 @@ class CDRNN(Model):
                         batch_normalization_decay=self.batch_normalization_decay,
                         name='input_projection_l%s' % (l + 1)
                     )
+                    self.layers.append(projection)
 
                     self.regularizable_layers.append(projection)
                     input_projection_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
@@ -467,6 +486,7 @@ class CDRNN(Model):
                     rnn_c_ema.append(c_ema_init)
 
                     layer = self.initialize_rnn(l)
+                    self.layers.append(layer)
                     self.regularizable_layers.append(layer)
                     rnn_layers.append(make_lambda(layer, session=self.sess, use_kwargs=True))
 
@@ -499,6 +519,7 @@ class CDRNN(Model):
                             batch_normalization_decay=self.batch_normalization_decay,
                             name='rnn_projection_l%s' % (l + 1)
                         )
+                        self.layers.append(projection)
 
                         self.regularizable_layers.append(projection)
                         rnn_projection_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
@@ -509,12 +530,20 @@ class CDRNN(Model):
                     self.rnn_projection_fn = rnn_projection_fn
 
                 h_bias, h_bias_summary = self.initialize_h_bias()
-
-                irf_l1_W_bias, irf_l1_W_bias_summary, irf_l1_b_bias, irf_l1_b_bias_summary = self.initialize_irf_l1_biases()
-
                 self.h_bias = h_bias
-                self.irf_l1_W_bias = irf_l1_W_bias
-                self.irf_l1_b_bias = irf_l1_b_bias
+
+                irf_l1_W, irf_l1_W_summary = self.initialize_irf_l1_weights()
+
+                if self.batch_normalization_decay and False:
+                    self.irf_l1_batch_norm_layer = self.initialize_irf_l1_batch_norm()
+                    self.layers.append(self.irf_l1_batch_norm_layer)
+                    irf_l1_b = tf.zeros_like(irf_l1_W)
+                    irf_l1_b_bias = tf.zeros_like(irf_l1_W)
+                else:
+                    irf_l1_b, irf_l1_b_bias = self.initialize_irf_l1_biases()
+
+                self.irf_l1_W = irf_l1_W
+                self.irf_l1_b = irf_l1_b
 
                 # Projection from hidden state to first layer (weights and biases) of IRF
                 hidden_state_to_irf_l1 = self.initialize_feedforward(
@@ -525,6 +554,7 @@ class CDRNN(Model):
                     batch_normalization_decay=self.batch_normalization_decay,
                     name='hidden_state_to_irf_l1'
                 )
+                self.layers.append(hidden_state_to_irf_l1)
 
                 self.regularizable_layers.append(hidden_state_to_irf_l1)
 
@@ -532,19 +562,21 @@ class CDRNN(Model):
 
                 # IRF
                 irf_layers = []
-                for l in range(self.n_layers_irf + 1):
+                for l in range(1, self.n_layers_irf + 1):
                     if l < self.n_layers_irf:
                         units = self.n_units_irf[l]
                         activation = self.irf_inner_activation
                         dropout = self.irf_dropout_rate
                         bn = self.batch_normalization_decay
                         use_bias = True
+                        final = False
                     else:
                         units = 1
                         activation = self.irf_activation
                         dropout = None
                         bn = None
                         use_bias = False
+                        final = True
 
                     projection = self.initialize_feedforward(
                         units=units,
@@ -552,8 +584,10 @@ class CDRNN(Model):
                         activation=activation,
                         dropout=dropout,
                         batch_normalization_decay=bn,
-                        name='irf_l%s' % (l + 1)
+                        name='irf_l%s' % (l + 1),
+                        final=final
                     )
+                    self.layers.append(projection)
 
                     if l < self.n_layers_irf:
                         self.regularizable_layers.append(projection)
@@ -581,6 +615,7 @@ class CDRNN(Model):
                         batch_normalization_decay=bn,
                         name='error_params_fn_l%s' % (l + 1)
                     )
+                    self.layers.append(projection)
 
                     self.regularizable_layers.append(projection)
                     error_params_fn_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
@@ -621,8 +656,10 @@ class CDRNN(Model):
                     activation=activation,
                     dropout=dropout,
                     batch_normalization_decay=bn,
-                    name='error_params_fn_l%s' % (self.n_layers_error_params_fn + 1)
+                    name='error_params_fn_l%s' % (self.n_layers_error_params_fn + 1),
+                    final=final
                 )
+                self.layers.append(projection)
 
                 self.error_params_final_fn = compose_lambdas([projection])
 
@@ -643,24 +680,20 @@ class CDRNN(Model):
                 self.intercept = self.intercept_fixed
                 self.intercept_summary = self.intercept_fixed_summary
 
-                # self.coefficient, _ = self.initialize_coefficient()
-
                 # RANDOM EFFECTS
                 self.intercept_random = {}
                 self.intercept_random_summary = {}
                 self.intercept_random_means = {}
-                # self.coefficient_ran_matrix = []
-                # self.coefficient_ran = []
                 self.rnn_h_ran_matrix = [[] for l in range(self.n_layers_rnn)]
                 self.rnn_h_ran = [[] for l in range(self.n_layers_rnn)]
                 self.rnn_c_ran_matrix = [[] for l in range(self.n_layers_rnn)]
                 self.rnn_c_ran = [[] for l in range(self.n_layers_rnn)]
                 self.h_bias_ran_matrix = []
                 self.h_bias_ran = []
-                self.irf_l1_W_bias_ran_matrix = []
-                self.irf_l1_W_bias_ran = []
-                self.irf_l1_b_bias_ran_matrix = []
-                self.irf_l1_b_bias_ran = []
+                self.irf_l1_W_ran_matrix = []
+                self.irf_l1_W_ran = []
+                self.irf_l1_b_ran_matrix = []
+                self.irf_l1_b_ran = []
 
                 gf_y_src = self.gf_y
 
@@ -722,33 +755,6 @@ class CDRNN(Model):
                                 intercept_random_summary,
                                 collections=['random']
                             )
-
-                        # # Random coefficients
-                        # coefficient_ran_matrix_cur, _ = self.initialize_coefficient(ran_gf=gf)
-                        # coefficient_ran_matrix_cur -= tf.reduce_mean(coefficient_ran_matrix_cur, axis=0, keepdims=True)
-                        # self._regularize(coefficient_ran_matrix_cur, type='ranef', var_name=reg_name('coefficient_by_%s' % (sn(gf))))
-                        #
-                        # if self.log_random:
-                        #     tf.summary.histogram(
-                        #         sn('by_%s/coefficient' % sn(gf)),
-                        #         coefficient_ran_matrix_cur,
-                        #         collections=['random']
-                        #     )
-                        #
-                        # coefficient_ran_matrix_cur = tf.concat(
-                        #     [
-                        #         coefficient_ran_matrix_cur,
-                        #         tf.zeros([1, len(self.impulse_names)+1])
-                        #     ],
-                        #     axis=0
-                        # )
-                        #
-                        # coefficient_ran = tf.gather(coefficient_ran_matrix_cur, gf_y)
-                        #
-                        # self.coefficient_ran_matrix.append(coefficient_ran_matrix_cur)
-                        # self.coefficient_ran.append(coefficient_ran)
-                        #
-                        # self.coefficient += tf.expand_dims(coefficient_ran, axis=-2)
 
                         # Random rnn initialization offsets
                         for l in range(self.n_layers_rnn):
@@ -832,60 +838,61 @@ class CDRNN(Model):
 
                         self.h_bias += tf.expand_dims(h_bias_ran, axis=-2)
 
-                        # Random IRF L1 offsets
-                        irf_l1_W_bias_ran_matrix_cur, irf_l1_W_bias_ran_matrix_cur_summary, irf_l1_b_bias_ran_matrix_cur, irf_l1_b_bias_ran_matrix_cur_summary = self.initialize_irf_l1_biases(ran_gf=gf)
-                        
-                        irf_l1_W_bias_ran_matrix_cur -= tf.reduce_mean(irf_l1_W_bias_ran_matrix_cur, axis=0, keepdims=True)
-                        irf_l1_W_bias_ran_matrix_cur_summary -= tf.reduce_mean(irf_l1_W_bias_ran_matrix_cur_summary, axis=0, keepdims=True)
-                        self._regularize(irf_l1_W_bias_ran_matrix_cur, type='ranef', var_name=reg_name('irf_l1_W_bias_by_%s' % (sn(gf))))
+                        # Random IRF L1 weights
+                        irf_l1_W_ran_matrix_cur, irf_l1_W_ran_matrix_cur_summary, = self.initialize_irf_l1_weights(ran_gf=gf)
+                        irf_l1_W_ran_matrix_cur -= tf.reduce_mean(irf_l1_W_ran_matrix_cur, axis=0, keepdims=True)
+                        irf_l1_W_ran_matrix_cur_summary -= tf.reduce_mean(irf_l1_W_ran_matrix_cur_summary, axis=0, keepdims=True)
+                        self._regularize(irf_l1_W_ran_matrix_cur, type='ranef', var_name=reg_name('irf_l1_W_bias_by_%s' % (sn(gf))))
 
                         if self.log_random:
                             tf.summary.histogram(
-                                sn('by_%s/irf_l1_W_bias' % sn(gf)),
-                                irf_l1_W_bias_ran_matrix_cur_summary,
+                                sn('by_%s/irf_l1_W' % sn(gf)),
+                                irf_l1_W_ran_matrix_cur_summary,
                                 collections=['random']
                             )
 
-                        irf_l1_W_bias_ran_matrix_cur = tf.concat(
+                        irf_l1_W_ran_matrix_cur = tf.concat(
                             [
-                                irf_l1_W_bias_ran_matrix_cur,
+                                irf_l1_W_ran_matrix_cur,
                                 tf.zeros([1, self.n_units_hidden_state])
                             ],
                             axis=0
                         )
 
-                        irf_l1_W_bias_ran = tf.gather(irf_l1_W_bias_ran_matrix_cur, gf_y)
+                        irf_l1_W_bias_ran = tf.gather(irf_l1_W_ran_matrix_cur, gf_y)
 
-                        self.irf_l1_W_bias_ran_matrix.append(irf_l1_W_bias_ran_matrix_cur)
-                        self.irf_l1_W_bias_ran.append(irf_l1_W_bias_ran)
+                        self.irf_l1_W_ran_matrix.append(irf_l1_W_ran_matrix_cur)
+                        self.irf_l1_W_ran.append(irf_l1_W_bias_ran)
 
-                        self.irf_l1_W_bias += tf.expand_dims(irf_l1_W_bias_ran, axis=-2)
+                        self.irf_l1_W += tf.expand_dims(irf_l1_W_bias_ran, axis=-2)
 
-                        irf_l1_b_bias_ran_matrix_cur -= tf.reduce_mean(irf_l1_b_bias_ran_matrix_cur, axis=0, keepdims=True)
-                        irf_l1_b_bias_ran_matrix_cur_summary -= tf.reduce_mean(irf_l1_b_bias_ran_matrix_cur_summary, axis=0, keepdims=True)
-                        self._regularize(irf_l1_b_bias_ran_matrix_cur, type='ranef', var_name=reg_name('irf_l1_b_bias_by_%s' % (sn(gf))))
+                        # Random IRF L1 biases
+                        irf_l1_b_ran_matrix_cur, irf_l1_b_ran_matrix_cur_summary = self.initialize_irf_l1_biases(ran_gf=gf)
+                        irf_l1_b_ran_matrix_cur -= tf.reduce_mean(irf_l1_b_ran_matrix_cur, axis=0, keepdims=True)
+                        irf_l1_b_ran_matrix_cur_summary -= tf.reduce_mean(irf_l1_b_ran_matrix_cur_summary, axis=0, keepdims=True)
+                        self._regularize(irf_l1_b_ran_matrix_cur, type='ranef', var_name=reg_name('irf_l1_b_bias_by_%s' % (sn(gf))))
 
                         if self.log_random:
                             tf.summary.histogram(
-                                sn('by_%s/irf_l1_b_bias' % sn(gf)),
-                                irf_l1_b_bias_ran_matrix_cur_summary,
+                                sn('by_%s/irf_l1_b' % sn(gf)),
+                                irf_l1_b_ran_matrix_cur_summary,
                                 collections=['random']
                             )
 
-                        irf_l1_b_bias_ran_matrix_cur = tf.concat(
+                        irf_l1_b_ran_matrix_cur = tf.concat(
                             [
-                                irf_l1_b_bias_ran_matrix_cur,
+                                irf_l1_b_ran_matrix_cur,
                                 tf.zeros([1, self.n_units_hidden_state])
                             ],
                             axis=0
                         )
 
-                        irf_l1_b_bias_ran = tf.gather(irf_l1_b_bias_ran_matrix_cur, gf_y)
+                        irf_l1_b_bias_ran = tf.gather(irf_l1_b_ran_matrix_cur, gf_y)
 
-                        self.irf_l1_b_bias_ran_matrix.append(irf_l1_b_bias_ran_matrix_cur)
-                        self.irf_l1_b_bias_ran.append(irf_l1_b_bias_ran)
+                        self.irf_l1_b_ran_matrix.append(irf_l1_b_ran_matrix_cur)
+                        self.irf_l1_b_ran.append(irf_l1_b_bias_ran)
 
-                        self.irf_l1_b_bias += tf.expand_dims(irf_l1_b_bias_ran, axis=-2)
+                        self.irf_l1_b += tf.expand_dims(irf_l1_b_bias_ran, axis=-2)
 
     def _rnn_encoder(self, X, plot_mode=False, **kwargs):
         with self.sess.as_default():
@@ -1062,9 +1069,8 @@ class CDRNN(Model):
 
                 # Compute hidden state
                 h = self.h_bias
-                # coef = self.coefficient
-                W = self.irf_l1_W_bias
-                b = self.irf_l1_b_bias
+                W = self.irf_l1_W
+                b = self.irf_l1_b
 
 
                 # If plotting, tile out random effects
@@ -1073,16 +1079,11 @@ class CDRNN(Model):
                     B = tf.shape(X)[0]
                     tile_ix = tf.tile(tf.range(R)[..., None], [1, B])
                     tile_ix = tf.reshape(tile_ix, [-1])
-                    # tile_ix = tf.Print(tile_ix, [tile_ix], summarize=10000)
                     h = tf.gather(h, tile_ix, axis=0)
                     W = tf.gather(W, tile_ix, axis=0)
                     b = tf.gather(b, tile_ix, axis=0)
-                    # coef = tf.gather(coef, tile_ix, axis=0)
                     X = tf.tile(X, [R, 1 ,1])
                     t_delta = tf.tile(t_delta, [R, 1 ,1])
-
-                # coef = tf.Print(coef, [coef], summarize=1000)
-                # X *= coef
 
                 h_in = self.input_projection_fn(X)
                 if self.h_in_noise_sd:
@@ -1151,10 +1152,12 @@ class CDRNN(Model):
 
                 activation = get_activation(self.irf_inner_activation, session=self.sess)
 
-                t_delta_embedding_preactivations = W * t_delta + b
-                t_delta_embeddings = activation(t_delta_embedding_preactivations)
+                irf_l1 = W * t_delta + b
+                if self.batch_normalization_decay and False:
+                    irf_l1 = self.irf_l1_batch_norm_layer(irf_l1)
+                irf_l1 = activation(irf_l1)
 
-                y = self.irf(t_delta_embeddings)
+                y = self.irf(irf_l1)
                 if time_X_mask is not None:
                     y *= time_X_mask[..., None]
                 y = tf.reduce_sum(y, axis=1)
@@ -1188,7 +1191,7 @@ class CDRNN(Model):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 model_dict = self._apply_model(
-                    self.X,
+                    self.X_processed,
                     self.t_delta,
                     time_X=self.time_X,
                     time_X_mask=self.time_X_mask,
@@ -1270,6 +1273,10 @@ class CDRNN(Model):
                         ema_rate * self.y_tailweight_delta_ema + (1 - ema_rate) * tf.reduce_mean(y_tailweight_delta)
                     )
 
+                self.batch_norm_ema_ops = []
+                for x in self.layers:
+                    self.batch_norm_ema_ops += x.ema_ops()
+
 
 
 
@@ -1291,6 +1298,9 @@ class CDRNN(Model):
                 b = self.plot_impulse_base_expanded
                 c = self.plot_impulse_center_expanded
                 s = self.plot_impulse_offset_expanded
+
+                means = self.impulse_means_arr_expanded
+                sds = self.impulse_sds_arr_expanded
 
                 R = tf.shape(self.gf_y)[0]
                 T = tf.shape(self.support)[0]
@@ -1338,12 +1348,12 @@ class CDRNN(Model):
                 )
                 irf_surface_rate_plot = self._apply_model(X_rate, t_delta_square, plot_mode=True)['y']
                 self.irf_surface_rate_plot = tf.reshape(
-                    irf_surface_rate_plot[None, ...],
-                    [self.n_surface_plot_points_per_side, self.n_surface_plot_points_per_side]
+                    irf_surface_rate_plot,
+                    [R, self.n_surface_plot_points_per_side, self.n_surface_plot_points_per_side, 1]
                 )
                 self.irf_surface_rate_meshgrid = tf.meshgrid(time_support, u_rate)
 
-                u = x * (c + u)
+                u = x * (c + u * s)
                 X = tf.reshape(
                     tf.tile(
                         u + b,
@@ -1353,15 +1363,24 @@ class CDRNN(Model):
                 )
                 irf_surface_plot = self._apply_model(X, t_delta_square, plot_mode=True)['y']
                 self.irf_surface_plot = tf.reshape(
-                    irf_surface_plot[None, ...],
-                    [self.n_surface_plot_points_per_side, self.n_surface_plot_points_per_side]
+                    irf_surface_plot,
+                    [R, self.n_surface_plot_points_per_side, self.n_surface_plot_points_per_side, 1]
                 ) - self.irf_surface_rate_plot
+                if self.center_inputs:
+                    b_plot = b + means
+                else:
+                    b_plot = b
+                if self.scale_inputs:
+                    u_plot = u * sds
+                else:
+                    u_plot = u
+                irf_surface_support_impulse = tf.reduce_prod(
+                    u_plot + x * b_plot + (1 - x),  # Fill empty one-hot cols with ones so we only reduce_prod on valid cols
+                    axis=[1,2]
+                )
                 self.irf_surface_support = tf.meshgrid(
                     time_support,
-                    tf.reduce_prod(
-                        u + x * b + (1 - x),  # Fill empty one-hot cols with ones so we only reduce_prod on valid cols
-                        axis=[1,2]
-                    )
+                    irf_surface_support_impulse
                 )
 
                 # CURVATURE PLOTS
@@ -1381,14 +1400,24 @@ class CDRNN(Model):
                     tf.cast(self.plot_n_sds, dtype=self.FLOAT_TF),
                     T,
                 )[..., None, None]
-                u = x * (c + u)
+                u = x * (c + u * s)
                 X = u + b
                 curvature_plot = self._apply_model(X, t_delta, plot_mode=True)['y']
-                self.curvature_plot = curvature_plot - rate_at_t
+                self.curvature_plot = tf.reshape(curvature_plot, [R, T, 1]) - rate_at_t
+
+                if self.center_inputs:
+                    b_plot = b + means
+                else:
+                    b_plot = b
+                if self.scale_inputs:
+                    u_plot = u * sds
+                else:
+                    u_plot = u
+                curvature_support = u_plot + x * b_plot + (1 - x)  # Fill empty one-hot cols with ones so we only reduce_prod on valid cols
                 self.curvature_support = tf.reduce_prod(
-                    u + x * b + (1 - x),  # Fill empty one-hot cols with ones so we only reduce_prod on valid cols
+                    curvature_support,
                     axis=[1,2]
-                )
+                )[..., None]
 
                 # INTERACTION PLOTS
                 t_delta = tf.ones(
@@ -1402,7 +1431,7 @@ class CDRNN(Model):
                     self.n_surface_plot_points_per_side,
                 )[..., None, None]
 
-                u_1 = x * (c + v)
+                u_1 = x * (c + v * s)
                 X_1 = tf.reshape(
                     tf.tile(
                         u_1,
@@ -1411,7 +1440,7 @@ class CDRNN(Model):
                     [-1, 1, len(self.impulse_names)]
                 )
 
-                u_2 = y * (c + v)
+                u_2 = y * (c + v * s)
                 X_2 = tf.reshape(
                     tf.tile(
                         u_2,
@@ -1424,17 +1453,32 @@ class CDRNN(Model):
                 interaction_surface_plot = self._apply_model(X, t_delta, plot_mode=True)['y']
                 self.interaction_surface_plot = tf.reshape(
                     interaction_surface_plot[None, ...],
-                    [self.n_surface_plot_points_per_side, self.n_surface_plot_points_per_side]
+                    [R, self.n_surface_plot_points_per_side, self.n_surface_plot_points_per_side, 1]
                 ) - rate_at_t
+
+
+                if self.center_inputs:
+                    b_plot = b + means
+                else:
+                    b_plot = b
+                if self.scale_inputs:
+                    u_1_plot = u_1 * sds
+                    u_2_plot = u_2 * sds
+                else:
+                    u_1_plot = u_1
+                    u_2_plot = u_2
+                pred1_support = tf.reduce_prod(
+                    u_1_plot + x * b_plot + (1 - x),  # Fill empty one-hot cols with ones so we only reduce_prod on valid cols
+                    axis=[1, 2]
+                )
+                pred2_support = tf.reduce_prod(
+                    u_2_plot + y * b_plot + (1 - y),  # Fill empty one-hot cols with ones so we only reduce_prod on valid cols
+                    axis=[1, 2]
+                )
+
                 self.interaction_surface_support = tf.meshgrid(
-                    tf.reduce_prod(
-                        u_1 + x * b + (1 - x),  # Fill empty one-hot cols with ones so we only reduce_prod on valid cols
-                        axis=[1,2]
-                    ),
-                    tf.reduce_prod(
-                        u_2 + y * b +  (1 - y),  # Fill empty one-hot cols with ones so we only reduce_prod on valid cols
-                        axis=[1,2]
-                    )
+                    pred1_support,
+                    pred2_support
                 )
 
 
@@ -1454,6 +1498,7 @@ class CDRNN(Model):
             activation=None,
             dropout=None,
             batch_normalization_decay=None,
+            final=False,
             name=None
     ):
         raise NotImplementedError
@@ -1484,10 +1529,19 @@ class CDRNN(Model):
     ):
         raise NotImplementedError
 
+    def initialize_irf_l1_weights(
+            self,
+            ran_gf=None
+    ):
+        raise NotImplementedError
+
     def initialize_irf_l1_biases(
             self,
             ran_gf=None
     ):
+        raise NotImplementedError
+
+    def initialize_irf_l1_batch_norm(self):
         raise NotImplementedError
 
 
@@ -1523,6 +1577,7 @@ class CDRNN(Model):
                 self._initialize_encoder()
                 self._construct_network()
                 self.initialize_objective()
+                self._initialize_parameter_tables()
                 self._initialize_logging()
                 self._initialize_ema()
 
@@ -1544,22 +1599,22 @@ class CDRNN(Model):
         for x in interactions:  # Make sure all requested inputs are present in the model, otherwise skip
             add = True
             for y in x.split(':'):
-                if not y in self.impulse_names:
+                if not y in self.terminal_names:
                     add = False
                     break
             if add:
                 interactions_tmp.append(x)
         interactions = interactions_tmp
         if plot_type.lower() in ['irf_1d', 'irf_surface']:
-            out = ['rate'] + self.impulse_names[:]
+            out = ['rate'] + self.terminal_names[:]
             # if plot_type.lower() == 'irf_surface':
             #     out += interactions
         elif plot_type.lower() == 'curvature':
-            out = self.impulse_names[:]
+            out = self.terminal_names[:]
             # out = self.impulse_names[:] + interactions
         elif plot_type.lower() == 'interaction_surface':
             if not interactions:
-                out = [':'.join(x) for x in itertools.combinations(self.impulse_names, 2)]
+                out = [':'.join(x) for x in itertools.combinations(self.terminal_names, 2)]
             else:
                 out = interactions
         else:
@@ -1569,8 +1624,8 @@ class CDRNN(Model):
 
     def plot_impulse_name_to_1hot(self, name):
         names = name.split(':')
-        ix = names2ix(names, self.impulse_names)
-        one_hot = np.zeros(len(self.impulse_names), self.FLOAT_NP)
+        ix = names2ix(names, self.terminal_names)
+        one_hot = np.zeros(len(self.terminal_names), self.FLOAT_NP)
         one_hot[ix] = 1
 
         return one_hot
@@ -1592,87 +1647,83 @@ class CDRNN(Model):
             rangf_vals=None,
             plot_mean_as_reference=True
     ):
-        if rangf_vals is None:
-            rangf_keys = [None]
-            rangf_vals = [self.gf_defaults[0]]
-            if plot_rangf:
-                for i in range(len(self.rangf)):
-                    for k in self.rangf_map[i].keys():
-                        rangf_keys.append(str(k))
-                        rangf_vals.append(np.concatenate(
-                            [self.gf_defaults[0, :i], [self.rangf_map[i][k]], self.gf_defaults[0, i + 1:]], axis=0))
-            rangf_vals = np.stack(rangf_vals, axis=0)
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if rangf_vals is None:
+                    rangf_keys = [None]
+                    rangf_vals = [self.gf_defaults[0]]
+                    if plot_rangf:
+                        for i in range(len(self.rangf)):
+                            for k in self.rangf_map[i].keys():
+                                rangf_keys.append(str(k))
+                                rangf_vals.append(np.concatenate(
+                                    [self.gf_defaults[0, :i], [self.rangf_map[i][k]], self.gf_defaults[0, i + 1:]], axis=0))
+                    rangf_vals = np.stack(rangf_vals, axis=0)
 
-        if name == 'rate':
-            impulse_one_hot = np.zeros(len(self.impulse_names))
-        else:
-            impulse_one_hot = self.plot_impulse_name_to_1hot(name)
+                if name == 'rate':
+                    impulse_one_hot = np.zeros(len(self.impulse_names))
+                else:
+                    impulse_one_hot = self.plot_impulse_name_to_1hot(name)
 
-        fd = {
-            self.support_start: 0.,
-            self.n_time_units: n_time_units,
-            self.n_time_points: n_time_points,
-            self.max_tdelta_batch: n_time_points,
-            self.gf_y: rangf_vals,
-            self.plot_impulse_1hot: impulse_one_hot,
-            self.t_interaction: t_interaction,
-            self.training: not self.predict_mode,
-            self.plot_mean_as_reference: plot_mean_as_reference
-        }
+                fd = {
+                    self.support_start: 0.,
+                    self.n_time_units: n_time_units,
+                    self.n_time_points: n_time_points,
+                    self.max_tdelta_batch: n_time_points,
+                    self.gf_y: rangf_vals,
+                    self.plot_impulse_1hot: impulse_one_hot,
+                    self.t_interaction: t_interaction,
+                    self.training: not self.predict_mode,
+                    self.plot_mean_as_reference: plot_mean_as_reference
+                }
+                if n_samples and self.is_bayesian:
+                    fd[self.use_MAP_mode] = False
 
-        if plot_type.lower().startswith('irf_1d'):
-            if name == 'rate':
-                irf_1d_support = self.irf_1d_rate_support
-                irf_1d = self.irf_1d_rate_plot
-            else:
-                irf_1d_support = self.irf_1d_support
-                irf_1d = self.irf_1d_plot
-            to_run = [irf_1d_support, irf_1d]
-        elif plot_type.lower().startswith('irf_surface'):
-            if name == 'rate':
-                irf_surface_meshgrid = self.irf_surface_rate_meshgrid
-                irf_surface = self.irf_surface_rate_plot
-            else:
-                irf_surface_meshgrid = self.irf_surface_support
-                irf_surface = self.irf_surface_plot
-            to_run = [irf_surface_meshgrid, irf_surface]
-        elif plot_type.lower().startswith('curvature'):
-            assert not name == 'rate', 'Curvature plots are not available for "rate" (deconvolutional intercept).'
-            to_run = [self.curvature_support, self.curvature_plot]
-        elif plot_type.lower().startswith('interaction_surface'):
-            names = name.split(':')
-            assert len(names) == 2, 'Interaction surface plots require interactions of order 2'
-            impulse_one_hot1 = self.plot_impulse_name_to_1hot(names[0])
-            impulse_one_hot2 = self.plot_impulse_name_to_1hot(names[1])
+                if plot_type.lower().startswith('irf_1d'):
+                    if name == 'rate':
+                        irf_1d_support = self.irf_1d_rate_support
+                        irf_1d = self.irf_1d_rate_plot
+                    else:
+                        irf_1d_support = self.irf_1d_support
+                        irf_1d = self.irf_1d_plot
+                    to_run = [irf_1d_support, irf_1d]
+                elif plot_type.lower().startswith('irf_surface'):
+                    if name == 'rate':
+                        irf_surface_meshgrid = self.irf_surface_rate_meshgrid
+                        irf_surface = self.irf_surface_rate_plot
+                    else:
+                        irf_surface_meshgrid = self.irf_surface_support
+                        irf_surface = self.irf_surface_plot
+                    to_run = [irf_surface_meshgrid, irf_surface]
+                elif plot_type.lower().startswith('curvature'):
+                    assert not name == 'rate', 'Curvature plots are not available for "rate" (deconvolutional intercept).'
+                    to_run = [self.curvature_support, self.curvature_plot]
+                elif plot_type.lower().startswith('interaction_surface'):
+                    names = name.split(':')
+                    assert len(names) == 2, 'Interaction surface plots require interactions of order 2'
+                    impulse_one_hot1 = self.plot_impulse_name_to_1hot(names[0])
+                    impulse_one_hot2 = self.plot_impulse_name_to_1hot(names[1])
 
-            fd[self.plot_impulse_1hot] = impulse_one_hot1
-            fd[self.plot_impulse_1hot_2] = impulse_one_hot2
+                    fd[self.plot_impulse_1hot] = impulse_one_hot1
+                    fd[self.plot_impulse_1hot_2] = impulse_one_hot2
 
-            to_run = [self.interaction_surface_support, self.interaction_surface_plot]
-        else:
-            raise ValueError('Plot type "%s" not supported.' % plot_type)
+                    to_run = [self.interaction_surface_support, self.interaction_surface_plot]
+                else:
+                    raise ValueError('Plot type "%s" not supported.' % plot_type)
 
-        if n_samples and self.is_bayesian:
-            alpha = 100-float(level)
-            out = []
-            for _ in range(len(to_run)):
-                out.append([])
-            for _ in range(n_samples):
-                sample = self.sess.run(to_run, feed_dict=fd)
-                for i in range(len(sample)):
-                    out[i].append(sample[i])
-            for i in range(len(out)):
-                samples = out[i]
-                samples = np.concatenate(samples, axis=2)
-                mean = samples.mean(axis=2)
-                lower = np.percentile(samples, alpha / 2, axis=2)
-                upper = np.percentile(samples, 100 - (alpha / 2), axis=2)
-                out[i] = (mean, lower, upper, samples)
+                if n_samples and self.is_bayesian:
+                    alpha = 100-float(level)
+                    support = self.sess.run(to_run[0], feed_dict=fd)
+                    samples = [self.sess.run(to_run[1], feed_dict=fd) for _ in range(n_samples)]
+                    samples = np.concatenate(samples, axis=-1)
+                    mean = samples.mean(axis=-1)
+                    lower = np.percentile(samples, alpha / 2, axis=-1)
+                    upper = np.percentile(samples, 100 - (alpha / 2), axis=-1)
+                    out = (support, mean, lower, upper, samples)
+                else:
+                    out = self.sess.run(to_run, feed_dict=fd)
 
-        else:
-            out = self.sess.run(to_run, feed_dict=fd)
-
-        return out
+                return out
 
     def report_settings(self, indent=0):
         out = super(CDRNN, self).report_settings(indent=indent)
@@ -1682,30 +1733,26 @@ class CDRNN(Model):
 
         return out
 
-    def summary(self, random=False, level=95, n_samples=None, integral_n_time_units=None, indent=0):
-        """
-        Generate a summary of the fitted model.
+    def run_train_step(self, feed_dict, verbose=True):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                to_run_names = []
+                to_run = [self.train_op, self.ema_op, self.y_sd_delta_ema_op] + self.batch_norm_ema_ops
+                if self.n_layers_rnn:
+                    to_run += self.rnn_h_ema_ops + self.rnn_c_ema_ops
+                if self.asymmetric_error:
+                    to_run += [self.y_skewness_delta_ema_op, self.y_tailweight_delta_ema_op]
+                if self.loss_filter_n_sds:
+                    to_run_names.append('n_dropped')
+                    to_run += [self.loss_ema_op, self.loss_sd_ema_op, self.n_dropped]
+                to_run_names += ['loss', 'reg_loss']
+                to_run += [self.loss_func, self.reg_loss]
+                if self.is_bayesian:
+                    to_run.append(self.kl_loss)
+                    to_run_names.append('kl_loss')
+                out = self.sess.run(to_run, feed_dict=feed_dict)
 
-        :param random: ``bool``; report random effects estimates
-        :param level: ``float``; ignored in CDRNN models.
-        :param n_samples: ``int`` or ``None``; ignored in CDRNN models.
-        :param integral_n_time_units: ``float``; ignored in CDRNN models.
-        :return: ``str``; the model summary
-        """
+                out_dict = {x: y for x, y in zip(to_run_names, out[-len(to_run_names):])}
 
-        out = '  ' * indent + '*' * 100 + '\n\n'
-        out += ' ' * indent + '############################\n'
-        out += ' ' * indent + '#                          #\n'
-        out += ' ' * indent + '#    CDRNN MODEL SUMMARY   #\n'
-        out += ' ' * indent + '#                          #\n'
-        out += ' ' * indent + '############################\n\n\n'
+                return out_dict
 
-        out += self.initialization_summary(indent=indent + 2)
-        out += '\n'
-        out += self.training_evaluation_summary(indent=indent + 2)
-        out += '\n'
-        out += self.convergence_summary(indent=indent + 2)
-        out += '\n'
-        out += '  ' * indent + '*' * 100 + '\n\n'
-
-        return out
