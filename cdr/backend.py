@@ -1439,7 +1439,7 @@ class BatchNormLayer(object):
                 decay = self.decay
 
                 def train_fn(inputs=inputs):
-                    return tf.nn.moments(inputs, self.reduction_axes, keepdims=True)
+                    return tf.nn.moments(inputs, self.reduction_axes, keep_dims=True)
 
                 def eval_fn():
                     return self.moving_mean, self.moving_variance
