@@ -84,8 +84,6 @@ class CDRNNBayes(CDRNN):
                 self.y_skewness_prior_sd_tf = tf.constant(float(self.y_skewness_prior_sd), dtype=self.FLOAT_TF)
                 self.y_skewness_posterior_sd_init = self.y_skewness_prior_sd_tf * self.posterior_to_prior_sd_ratio
 
-                self.y_tailweight_prior_loc_tf = tf.constant(1., dtype=self.FLOAT_TF)
-                self.y_tailweight_posterior_loc_init = tf.constant(1., dtype=self.FLOAT_TF)
                 self.y_tailweight_prior_sd_tf = tf.constant(float(self.y_tailweight_prior_sd), dtype=self.FLOAT_TF)
                 self.y_tailweight_posterior_sd_init = self.y_tailweight_prior_sd_tf * self.posterior_to_prior_sd_ratio
 
@@ -864,7 +862,7 @@ class CDRNNBayes(CDRNN):
                     )
 
                     y_tailweight_loc_q = tf.Variable(
-                        self.constraint_fn_inv(self.y_tailweight_posterior_loc_init),
+                        self.constraint_fn_inv(1.),
                         name='y_tailweight_q_loc'
                     )
                     y_tailweight_scale_q = tf.Variable(
@@ -894,7 +892,7 @@ class CDRNNBayes(CDRNN):
                             name='y_skewness'
                         )
                         self.y_tailweight_prior = Normal(
-                            loc=self.constraint_fn_inv(self.y_tailweight_prior_loc),
+                            loc=self.constraint_fn_inv(1.),
                             scale=self.y_tailweight_prior_sd_tf,
                             name='y_tailweight'
                         )
@@ -904,7 +902,7 @@ class CDRNNBayes(CDRNN):
                             'val': self.y_skewness_dist.kl_divergence(self.y_skewness_prior)
                         }
                         self.kl_penalties_base['y_tailweight'] = {
-                            'loc': self.y_tailweight_prior_loc,
+                            'loc': 1.,
                             'scale': self.y_tailweight_prior,
                             'val': self.y_tailweight_dist.kl_divergence(self.y_tailweight_prior)
                         }
