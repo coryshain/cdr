@@ -734,17 +734,17 @@ CDRNN_INITIALIZATION_KWARGS = [
         "Number of units in CDRNN hidden state. Must be an ``int``."
     ),
     Kwarg(
-        'n_units_t_delta_embedding',
+        'n_units_irf_l1',
         32,
         [int, None],
         "Number of units in the embedding of the temporal offset t_delta. If ``None``, inferred automatically.",
-        aliases=['n_units_embedding']
+        aliases=['n_units_embedding', 'n_units_t_delta_embedding']
     ),
     Kwarg(
         'n_layers_irf',
         None,
         [int, None],
-        "Number of IRF layers. If ``None``, inferred from length of **n_units_irf**.",
+        "Number of IRF hidden layers. If ``None``, inferred from length of **n_units_irf**.",
         aliases=['n_layers_decoder']
     ),
     Kwarg(

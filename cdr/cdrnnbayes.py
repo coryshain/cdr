@@ -598,7 +598,7 @@ class CDRNNBayes(CDRNN):
     def initialize_irf_l1_weights(self, ran_gf=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                units = self.n_units_t_delta_embedding
+                units = self.n_units_irf_l1
                 
                 irf_l1_W_sd_prior = get_numerical_sd(self.weight_prior_sd, in_dim=1, out_dim=units)
                 irf_l1_W_sd_posterior = irf_l1_W_sd_prior * self.posterior_to_prior_sd_ratio
@@ -680,7 +680,7 @@ class CDRNNBayes(CDRNN):
     def initialize_irf_l1_biases(self, ran_gf=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                units = self.n_units_t_delta_embedding
+                units = self.n_units_irf_l1
                 irf_l1_b_sd_prior = get_numerical_sd(self.bias_prior_sd, in_dim=1, out_dim=1)
                 irf_l1_b_sd_posterior = irf_l1_b_sd_prior * self.posterior_to_prior_sd_ratio
 
@@ -917,7 +917,7 @@ class CDRNNBayes(CDRNN):
                         )
                         self.out_standardized = tf.cond(
                             self.use_MAP_mode,
-                            self.out_standardized_dist.mean,
+                            lambda: self.out_standardized_dist.loc,
                             self.out_standardized_dist.sample
                         )
                         self.err_dist_standardized_dist = SinhArcsinh(
@@ -944,7 +944,7 @@ class CDRNNBayes(CDRNN):
                         )
                         self.out = tf.cond(
                             self.use_MAP_mode,
-                            self.out_dist.mean,
+                            lambda: self.out_dist.loc,
                             self.out_dist.sample
                         )
 
@@ -957,7 +957,7 @@ class CDRNNBayes(CDRNN):
                         )
                         self.err = tf.cond(
                             self.use_MAP_mode,
-                            self.err_dist.mean,
+                            lambda: self.err_dist.loc,
                             self.err_dist.sample
                         )
                         self.err_dist_summary = SinhArcsinh(
@@ -977,7 +977,7 @@ class CDRNNBayes(CDRNN):
                         )
                         self.out = tf.cond(
                             self.use_MAP_mode,
-                            self.out_dist.mean,
+                            lambda: self.out_dist.loc,
                             self.out_dist.sample
                         )
 
@@ -990,7 +990,7 @@ class CDRNNBayes(CDRNN):
                         )
                         self.err = tf.cond(
                             self.use_MAP_mode,
-                            self.err_dist.mean,
+                            lambda: self.err_dist.loc,
                             self.err_dist.sample
                         )
                         self.err_dist_summary = SinhArcsinh(

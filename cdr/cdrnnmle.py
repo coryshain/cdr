@@ -211,11 +211,11 @@ class CDRNNMLE(CDRNN):
     def initialize_irf_l1_weights(self, ran_gf=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                units = self.n_units_t_delta_embedding
+                units = self.n_units_irf_l1
                 if ran_gf is None:
                     if isinstance(self.weight_sd_init, str):
                         if self.weight_sd_init.lower() in ['xavier', 'glorot']:
-                            sd = math.sqrt(2 / (1 + self.n_units_t_delta_embedding))
+                            sd = math.sqrt(2 / (1 + self.n_units_irf_l1))
                         elif self.weight_sd_init.lower() == 'he':
                             sd = math.sqrt(2)
                     else:
@@ -245,7 +245,7 @@ class CDRNNMLE(CDRNN):
     def initialize_irf_l1_biases(self, ran_gf=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                units = self.n_units_t_delta_embedding
+                units = self.n_units_irf_l1
                 if ran_gf is None:
                     irf_l1_b = tf.get_variable(
                         name='irf_l1_b',

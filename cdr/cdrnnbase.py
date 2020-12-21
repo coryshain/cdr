@@ -176,6 +176,13 @@ class CDRNN(Model):
             self.n_layers_irf = 0
         assert self.n_layers_irf == len(self.n_units_irf), 'Inferred n_layers_irf and n_units_irf must have the same number of layers. Saw %d and %d, respectively.' % (self.n_layers_irf, len(self.n_units_irf))
 
+        if self.n_units_irf:
+            self.n_units_irf_l1 = self.n_units_irf[0]
+            self.irf_l1_use_bias = True
+        else:
+            self.n_units_irf_l1 = 1
+            self.irf_l1_use_bias = False
+
         if self.n_units_error_params_fn:
             if isinstance(self.n_units_error_params_fn, str):
                 self.n_units_error_params_fn = [int(x) for x in self.n_units_error_params_fn.split()]
@@ -194,19 +201,15 @@ class CDRNN(Model):
             self.n_layers_error_params_fn = 0
         assert self.n_layers_error_params_fn == len(self.n_units_error_params_fn), 'Inferred n_layers_error_params_fn and n_units_error_params_fn must have the same number of layers. Saw %d and %d, respectively.' % (self.n_layers_error_params_fn, len(self.n_units_error_params_fn))
 
-        if self.n_units_t_delta_embedding is None:
-            if self.n_units_irf and self.n_units_irf[0]:
-                self.n_units_t_delta_embedding = self.n_units_irf[0]
-            elif self.n_units_rnn and self.n_units_rnn[-1]:
-                self.n_units_t_delta_embedding = self.n_units_rnn[-1]
-            else:
-                raise ValueError('At least one of n_units_rnn, n_units_irf, or n_units_t_delta_embedding must be specified.')
-
         if self.n_units_hidden_state is None:
-            if self.n_units_rnn:
+            if self.n_units_irf:
+                self.n_units_hidden_state = self.n_units_irf[0]
+            elif self.n_units_input_projection:
+                self.n_units_hidden_state = self.n_units_input_projection[-1]
+            elif self.n_units_rnn:
                 self.n_units_hidden_state = self.n_units_rnn[-1]
             else:
-                self.n_units_hidden_state = self.n_units_t_delta_embedding
+                raise ValueError("Cannot infer size of hidden state. Units are not specified for hidden state, IRF, input projection, or RNN projection.")
         elif isinstance(self.n_units_hidden_state, str):
             if self.n_units_hidden_state.lower() == 'infer':
                 self.n_units_hidden_state = len(self.impulse_names) + len(self.ablated) + 1
@@ -534,20 +537,25 @@ class CDRNN(Model):
 
                 irf_l1_W, irf_l1_W_summary = self.initialize_irf_l1_weights()
 
-                if self.batch_normalization_decay and False:
-                    self.irf_l1_batch_norm_layer = self.initialize_irf_l1_batch_norm()
-                    self.layers.append(self.irf_l1_batch_norm_layer)
-                    irf_l1_b = tf.zeros_like(irf_l1_W)
-                    irf_l1_b_bias = tf.zeros_like(irf_l1_W)
+                if self.irf_l1_use_bias:
+                    if self.batch_normalization_decay and False:
+                    # if self.batch_normalization_decay:
+                        self.irf_l1_batch_norm_layer = self.initialize_irf_l1_batch_norm()
+                        self.layers.append(self.irf_l1_batch_norm_layer)
+                        irf_l1_b = tf.zeros_like(irf_l1_W)
+                        irf_l1_b_summary = tf.zeros_like(irf_l1_W)
+                    else:
+                        irf_l1_b, irf_l1_b_bias = self.initialize_irf_l1_biases()
                 else:
-                    irf_l1_b, irf_l1_b_bias = self.initialize_irf_l1_biases()
+                    irf_l1_b = tf.zeros_like(irf_l1_W)
+                    irf_l1_b_summary = tf.zeros_like(irf_l1_W)
 
                 self.irf_l1_W = irf_l1_W
                 self.irf_l1_b = irf_l1_b
 
                 # Projection from hidden state to first layer (weights and biases) of IRF
                 hidden_state_to_irf_l1 = self.initialize_feedforward(
-                    units=self.n_units_t_delta_embedding * 2,
+                    units=self.n_units_irf_l1 * 2,
                     use_bias=False,
                     activation=None,
                     dropout=self.irf_dropout_rate,
@@ -867,32 +875,33 @@ class CDRNN(Model):
                         self.irf_l1_W += tf.expand_dims(irf_l1_W_bias_ran, axis=-2)
 
                         # Random IRF L1 biases
-                        irf_l1_b_ran_matrix_cur, irf_l1_b_ran_matrix_cur_summary = self.initialize_irf_l1_biases(ran_gf=gf)
-                        irf_l1_b_ran_matrix_cur -= tf.reduce_mean(irf_l1_b_ran_matrix_cur, axis=0, keepdims=True)
-                        irf_l1_b_ran_matrix_cur_summary -= tf.reduce_mean(irf_l1_b_ran_matrix_cur_summary, axis=0, keepdims=True)
-                        self._regularize(irf_l1_b_ran_matrix_cur, type='ranef', var_name=reg_name('irf_l1_b_bias_by_%s' % (sn(gf))))
+                        if self.irf_l1_use_bias:
+                            irf_l1_b_ran_matrix_cur, irf_l1_b_ran_matrix_cur_summary = self.initialize_irf_l1_biases(ran_gf=gf)
+                            irf_l1_b_ran_matrix_cur -= tf.reduce_mean(irf_l1_b_ran_matrix_cur, axis=0, keepdims=True)
+                            irf_l1_b_ran_matrix_cur_summary -= tf.reduce_mean(irf_l1_b_ran_matrix_cur_summary, axis=0, keepdims=True)
+                            self._regularize(irf_l1_b_ran_matrix_cur, type='ranef', var_name=reg_name('irf_l1_b_bias_by_%s' % (sn(gf))))
 
-                        if self.log_random:
-                            tf.summary.histogram(
-                                sn('by_%s/irf_l1_b' % sn(gf)),
-                                irf_l1_b_ran_matrix_cur_summary,
-                                collections=['random']
+                            if self.log_random:
+                                tf.summary.histogram(
+                                    sn('by_%s/irf_l1_b' % sn(gf)),
+                                    irf_l1_b_ran_matrix_cur_summary,
+                                    collections=['random']
+                                )
+
+                            irf_l1_b_ran_matrix_cur = tf.concat(
+                                [
+                                    irf_l1_b_ran_matrix_cur,
+                                    tf.zeros([1, self.n_units_hidden_state])
+                                ],
+                                axis=0
                             )
 
-                        irf_l1_b_ran_matrix_cur = tf.concat(
-                            [
-                                irf_l1_b_ran_matrix_cur,
-                                tf.zeros([1, self.n_units_hidden_state])
-                            ],
-                            axis=0
-                        )
+                            irf_l1_b_bias_ran = tf.gather(irf_l1_b_ran_matrix_cur, gf_y)
 
-                        irf_l1_b_bias_ran = tf.gather(irf_l1_b_ran_matrix_cur, gf_y)
+                            self.irf_l1_b_ran_matrix.append(irf_l1_b_ran_matrix_cur)
+                            self.irf_l1_b_ran.append(irf_l1_b_bias_ran)
 
-                        self.irf_l1_b_ran_matrix.append(irf_l1_b_ran_matrix_cur)
-                        self.irf_l1_b_ran.append(irf_l1_b_bias_ran)
-
-                        self.irf_l1_b += tf.expand_dims(irf_l1_b_bias_ran, axis=-2)
+                            self.irf_l1_b += tf.expand_dims(irf_l1_b_bias_ran, axis=-2)
 
     def _rnn_encoder(self, X, plot_mode=False, **kwargs):
         with self.sess.as_default():
@@ -1144,8 +1153,8 @@ class CDRNN(Model):
 
                 # Compute response
                 Wb_proj = self.hidden_state_to_irf_l1(h)
-                W_proj = Wb_proj[..., :self.n_units_t_delta_embedding]
-                b_proj = Wb_proj[..., self.n_units_t_delta_embedding:]
+                W_proj = Wb_proj[..., :self.n_units_irf_l1]
+                b_proj = Wb_proj[..., self.n_units_irf_l1:]
 
                 W += W_proj
                 b += b_proj
@@ -1153,7 +1162,7 @@ class CDRNN(Model):
                 activation = get_activation(self.irf_inner_activation, session=self.sess)
 
                 irf_l1 = W * t_delta + b
-                if self.batch_normalization_decay and False:
+                if self.irf_l1_use_bias and self.batch_normalization_decay and False:
                     irf_l1 = self.irf_l1_batch_norm_layer(irf_l1)
                 irf_l1 = activation(irf_l1)
 
