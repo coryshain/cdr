@@ -54,7 +54,7 @@ class CDRNNBayes(CDRNN):
 
         if self.intercept_init is None:
             if self.standardize_response:
-                self.intercept_init = 0.
+                self.intercept_init = tf.constant(0., dtype=self.FLOAT_TF)
             else:
                 self.intercept_init = self.y_train_mean
         if self.intercept_prior_sd is None:

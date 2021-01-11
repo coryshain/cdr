@@ -355,7 +355,7 @@ class CDRMLE(CDR):
 
                 self.loss_func = -(tf.reduce_sum(ll_objective) * self.minibatch_scale)
                 # self.loss_func = -tf.reduce_sum(ll_objective)
-                self.reg_loss = 0.
+                self.reg_loss = tf.constant(0., self.FLOAT_TF)
                 if len(self.regularizer_losses_varnames) > 0:
                     self.reg_loss += tf.add_n(self.regularizer_losses)
                     self.loss_func += self.reg_loss
