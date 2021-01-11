@@ -292,11 +292,16 @@ class CDRNNBayes(CDRNN):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if final and False:
-                    weight_prior_sd = 1.
-                    bias_prior_sd = 1.
+                    weight_sd_prior = 1.
+                    weight_sd_init = self.weight_sd_init
+                    bias_sd_prior = 1.
+                    bias_sd_init = self.bias_sd_init
                 else:
-                    weight_prior_sd = self.weight_prior_sd
-                    bias_prior_sd = self.bias_prior_sd
+                    weight_sd_prior = self.weight_prior_sd
+                    weight_sd_init = self.weight_sd_init
+                    bias_sd_prior = self.bias_prior_sd
+                    bias_sd_init = self.bias_sd_init
+
                 projection = DenseLayerBayes(
                     training=self.training,
                     units=units,
@@ -307,8 +312,10 @@ class CDRNNBayes(CDRNN):
                     use_MAP_mode=self.use_MAP_mode,
                     declare_priors_weights=self.declare_priors_weights,
                     declare_priors_biases=self.declare_priors_biases,
-                    kernel_prior_sd=weight_prior_sd,
-                    bias_prior_sd=bias_prior_sd,
+                    kernel_sd_prior=weight_sd_prior,
+                    kernel_sd_init=weight_sd_init,
+                    bias_sd_prior=bias_sd_prior,
+                    bias_sd_init=bias_sd_init,
                     posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
                     constraint=self.constraint,
                     epsilon=self.epsilon,
@@ -337,8 +344,11 @@ class CDRNNBayes(CDRNN):
                     use_MAP_mode=self.use_MAP_mode,
                     declare_priors_weights=self.declare_priors_weights,
                     declare_priors_biases=self.declare_priors_biases,
-                    kernel_prior_sd=self.weight_prior_sd,
-                    bias_prior_sd=self.bias_prior_sd,
+                    kernel_sd_prior=self.weight_prior_sd,
+                    bottomup_kernel_sd_init=self.weight_sd_init,
+                    recurrent_kernel_sd_init=self.weight_sd_init,
+                    bias_sd_prior=self.bias_prior_sd,
+                    bias_sd_init=self.bias_sd_init,
                     posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
                     constraint=self.constraint,
                     name='rnn_l%d' % (l + 1),
@@ -594,6 +604,30 @@ class CDRNNBayes(CDRNN):
 
                 return h_bias, h_bias_summary
 
+    def initialize_h_batch_norm(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                batch_norm_layer = BatchNormLayerBayes(
+                    decay=self.batch_normalization_decay,
+                    center=True,
+                    scale=True,
+                    axis=-1,
+                    use_MAP_mode=self.use_MAP_mode,
+                    declare_priors_scale=self.declare_priors_biases,
+                    declare_priors_shift=self.declare_priors_biases,
+                    scale_sd_prior=self.bias_prior_sd,
+                    scale_sd_init=self.bias_sd_init,
+                    shift_sd_prior=self.bias_prior_sd,
+                    shift_sd_init=self.bias_prior_sd,
+                    posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
+                    constraint=self.constraint,
+                    training=self.training,
+                    epsilon=self.epsilon,
+                    session=self.sess,
+                    name='h'
+                )
+
+                return batch_norm_layer
 
     def initialize_irf_l1_weights(self, ran_gf=None):
         with self.sess.as_default():
@@ -767,10 +801,12 @@ class CDRNNBayes(CDRNN):
                     scale=True,
                     axis=-1,
                     use_MAP_mode=self.use_MAP_mode,
-                    declare_priors_weights=self.declare_priors_weights,
-                    declare_priors_biases=self.declare_priors_biases,
-                    weight_prior_sd=self.weight_prior_sd,
-                    bias_prior_sd=self.bias_prior_sd,
+                    declare_priors_scale=self.declare_priors_biases,
+                    declare_priors_shift=self.declare_priors_biases,
+                    scale_sd_prior=self.bias_prior_sd,
+                    scale_sd_init=self.bias_sd_init,
+                    shift_sd_prior=self.bias_prior_sd,
+                    shift_sd_init=self.bias_prior_sd,
                     posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
                     constraint=self.constraint,
                     training=self.training,
@@ -920,7 +956,7 @@ class CDRNNBayes(CDRNN):
                             lambda: self.out_standardized_dist.loc,
                             self.out_standardized_dist.sample
                         )
-                        self.err_dist_standardized_dist = SinhArcsinh(
+                        self.err_dist_standardized = SinhArcsinh(
                             loc=0.,
                             scale=y_sd,
                             skewness=self.y_skewness,

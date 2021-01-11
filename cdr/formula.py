@@ -774,7 +774,7 @@ class Formula(object):
                 )
                 terms += subterms
 
-        elif type(t).__name__ in ['Name', 'NameConstant', 'Num']:
+        elif type(t).__name__ in ['Constant', 'Name', 'NameConstant', 'Num']:
             # Basic impulse term
 
             if type(t).__name__ == 'Name':

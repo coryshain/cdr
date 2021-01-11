@@ -84,6 +84,9 @@ class CDRNN(Model):
 
         self.is_cdrnn = True
 
+        self.BATCH_NORM_H = True
+        self.BATCH_NORM_IRF_L1 = False
+
         # Initialize tree metadata
         self.t = self.form.t
         t = self.t
@@ -346,8 +349,8 @@ class CDRNN(Model):
                     [len(self.impulse_names)],
                     dtype=self.FLOAT_TF
                 )
-                if not self.scale_inputs:
-                    plot_impulse_offset_default *= self.impulse_sds
+                if not self.rescale_inputs:
+                    plot_impulse_offset_default *= self.impulse_sds_arr
 
                 self.plot_impulse_base = tf.placeholder_with_default(
                     plot_impulse_base_default,
@@ -442,11 +445,13 @@ class CDRNN(Model):
                         units = self.n_units_input_projection[l]
                         activation = self.input_projection_inner_activation
                         dropout = self.input_projection_dropout_rate
+                        bn = self.batch_normalization_decay
                         use_bias = True
                     else:
                         units = self.n_units_hidden_state
                         activation = self.input_projection_activation
                         dropout = None
+                        bn = None
                         use_bias = False
 
                     projection = self.initialize_feedforward(
@@ -454,7 +459,7 @@ class CDRNN(Model):
                         use_bias=use_bias,
                         activation=activation,
                         dropout=dropout,
-                        batch_normalization_decay=self.batch_normalization_decay,
+                        batch_normalization_decay=bn,
                         name='input_projection_l%s' % (l + 1)
                     )
                     self.layers.append(projection)
@@ -508,10 +513,12 @@ class CDRNN(Model):
                         if l < self.n_layers_rnn_projection:
                             units = self.n_units_rnn_projection[l]
                             activation = self.rnn_projection_inner_activation
+                            bn = self.batch_normalization_decay
                             use_bias = True
                         else:
                             units = self.n_units_hidden_state
                             activation = self.rnn_projection_activation
+                            bn = None
                             use_bias = False
 
                         projection = self.initialize_feedforward(
@@ -519,7 +526,7 @@ class CDRNN(Model):
                             use_bias=use_bias,
                             activation=activation,
                             dropout=None,
-                            batch_normalization_decay=self.batch_normalization_decay,
+                            batch_normalization_decay=bn,
                             name='rnn_projection_l%s' % (l + 1)
                         )
                         self.layers.append(projection)
@@ -532,20 +539,25 @@ class CDRNN(Model):
                     self.rnn_projection_layers = rnn_projection_layers
                     self.rnn_projection_fn = rnn_projection_fn
 
-                h_bias, h_bias_summary = self.initialize_h_bias()
+                if self.BATCH_NORM_H and self.batch_normalization_decay:
+                    self.h_batch_norm_layer = self.initialize_h_batch_norm()
+                    self.layers.append(self.h_batch_norm_layer)
+                    h_bias = tf.zeros([1, 1, self.n_units_hidden_state])
+                    h_bias_summary = tf.zeros_like([1, 1, self.n_units_hidden_state])
+                else:
+                    h_bias, h_bias_summary = self.initialize_h_bias()
                 self.h_bias = h_bias
 
                 irf_l1_W, irf_l1_W_summary = self.initialize_irf_l1_weights()
 
                 if self.irf_l1_use_bias:
-                    if self.batch_normalization_decay and False:
-                    # if self.batch_normalization_decay:
+                    if self.BATCH_NORM_IRF_L1 and self.batch_normalization_decay:
                         self.irf_l1_batch_norm_layer = self.initialize_irf_l1_batch_norm()
                         self.layers.append(self.irf_l1_batch_norm_layer)
                         irf_l1_b = tf.zeros_like(irf_l1_W)
                         irf_l1_b_summary = tf.zeros_like(irf_l1_W)
                     else:
-                        irf_l1_b, irf_l1_b_bias = self.initialize_irf_l1_biases()
+                        irf_l1_b, irf_l1_b_summary = self.initialize_irf_l1_biases()
                 else:
                     irf_l1_b = tf.zeros_like(irf_l1_W)
                     irf_l1_b_summary = tf.zeros_like(irf_l1_W)
@@ -559,7 +571,6 @@ class CDRNN(Model):
                     use_bias=False,
                     activation=None,
                     dropout=self.irf_dropout_rate,
-                    batch_normalization_decay=self.batch_normalization_decay,
                     name='hidden_state_to_irf_l1'
                 )
                 self.layers.append(hidden_state_to_irf_l1)
@@ -640,10 +651,6 @@ class CDRNN(Model):
                         units += 1
                     else:
                         units += n
-                activation = self.error_params_fn_activation
-                dropout = None
-                bn = None
-                use_bias = False
 
                 if self.asymmetric_error:
                     denom = self.n_units_hidden_state
@@ -660,10 +667,8 @@ class CDRNN(Model):
 
                 projection = self.initialize_feedforward(
                     units=units,
-                    use_bias=use_bias,
-                    activation=activation,
-                    dropout=dropout,
-                    batch_normalization_decay=bn,
+                    use_bias=False,
+                    activation=self.error_params_fn_activation,
                     name='error_params_fn_l%s' % (self.n_layers_error_params_fn + 1),
                     final=final
                 )
@@ -1081,7 +1086,6 @@ class CDRNN(Model):
                 W = self.irf_l1_W
                 b = self.irf_l1_b
 
-
                 # If plotting, tile out random effects
                 if plot_mode:
                     R = tf.shape(self.gf_y)[0]
@@ -1149,6 +1153,8 @@ class CDRNN(Model):
                 else:
                     h_rnn = rnn_hidden = rnn_cell = None
 
+                if self.BATCH_NORM_H and self.batch_normalization_decay:
+                    h = self.h_batch_norm_layer(h)
                 h = get_activation(self.hidden_state_activation, session=self.sess)(h)
 
                 # Compute response
@@ -1159,12 +1165,10 @@ class CDRNN(Model):
                 W += W_proj
                 b += b_proj
 
-                activation = get_activation(self.irf_inner_activation, session=self.sess)
-
                 irf_l1 = W * t_delta + b
-                if self.irf_l1_use_bias and self.batch_normalization_decay and False:
+                if self.BATCH_NORM_IRF_L1 and self.irf_l1_use_bias and self.batch_normalization_decay:
                     irf_l1 = self.irf_l1_batch_norm_layer(irf_l1)
-                irf_l1 = activation(irf_l1)
+                irf_l1 = get_activation(self.irf_inner_activation, session=self.sess)(irf_l1)
 
                 y = self.irf(irf_l1)
                 if time_X_mask is not None:
@@ -1379,7 +1383,7 @@ class CDRNN(Model):
                     b_plot = b + means
                 else:
                     b_plot = b
-                if self.scale_inputs:
+                if self.rescale_inputs:
                     u_plot = u * sds
                 else:
                     u_plot = u
@@ -1418,7 +1422,7 @@ class CDRNN(Model):
                     b_plot = b + means
                 else:
                     b_plot = b
-                if self.scale_inputs:
+                if self.rescale_inputs:
                     u_plot = u * sds
                 else:
                     u_plot = u
@@ -1470,7 +1474,7 @@ class CDRNN(Model):
                     b_plot = b + means
                 else:
                     b_plot = b
-                if self.scale_inputs:
+                if self.rescale_inputs:
                     u_1_plot = u_1 * sds
                     u_2_plot = u_2 * sds
                 else:
@@ -1548,6 +1552,9 @@ class CDRNN(Model):
             self,
             ran_gf=None
     ):
+        raise
+
+    def initialize_h_batch_norm(self):
         raise NotImplementedError
 
     def initialize_irf_l1_batch_norm(self):

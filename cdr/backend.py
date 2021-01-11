@@ -67,8 +67,6 @@ def get_initializer(initializer, session=None):
                             pass
                         kwargs[key] = val
 
-                tf.keras.initializers.he_normal()
-
                 if 'identity' in initializer_name:
                     return tf.keras.initializers.Identity
                 elif 'he_' in initializer_name:
@@ -177,8 +175,8 @@ class CDRNNCell(LayerRNNCell):
             recurrent_activation='sigmoid',
             prefinal_activation='tanh',
             time_projection_inner_activation='tanh',
-            bottomup_kernel_sd_init='he',
-            recurrent_kernel_sd_init='he',
+            bottomup_kernel_sd_init='glorot_normal',
+            recurrent_kernel_sd_init='glorot_normal',
             bottomup_dropout=None,
             h_dropout=None,
             c_dropout=None,
@@ -502,8 +500,8 @@ class CDRNNLayer(object):
             recurrent_activation='sigmoid',
             prefinal_activation='tanh',
             time_projection_inner_activation='tanh',
-            bottomup_kernel_sd_init='he',
-            recurrent_kernel_sd_init='he',
+            bottomup_kernel_sd_init='glorot_normal',
+            recurrent_kernel_sd_init='glorot_normal',
             bottomup_dropout=None,
             h_dropout=None,
             c_dropout=None,
@@ -656,11 +654,14 @@ class CDRNNCellBayes(CDRNNCell):
             recurrent_activation='sigmoid',
             prefinal_activation='tanh',
             time_projection_inner_activation='tanh',
+            bottomup_kernel_sd_init=None,
+            recurrent_kernel_sd_init=None,
             declare_priors_weights=True,
             declare_priors_biases=False,
             use_MAP_mode=None,
-            kernel_prior_sd='he',
-            bias_prior_sd=1,
+            kernel_sd_prior=1,
+            bias_sd_prior=1,
+            bias_sd_init=None,
             posterior_to_prior_sd_ratio=1,
             constraint='softplus',
             bottomup_dropout=None,
@@ -690,6 +691,8 @@ class CDRNNCellBayes(CDRNNCell):
             recurrent_activation=recurrent_activation,
             prefinal_activation=prefinal_activation,
             time_projection_inner_activation=time_projection_inner_activation,
+            bottomup_kernel_sd_init=bottomup_kernel_sd_init,
+            recurrent_kernel_sd_init=recurrent_kernel_sd_init,
             bottomup_dropout=bottomup_dropout,
             h_dropout=h_dropout,
             c_dropout=c_dropout,
@@ -706,25 +709,26 @@ class CDRNNCellBayes(CDRNNCell):
             session=session
         )
 
-        self.declare_priors_weights = declare_priors_weights
-        self.declare_priors_biases = declare_priors_biases
+        self._declare_priors_weights = declare_priors_weights
+        self._declare_priors_biases = declare_priors_biases
         self.use_MAP_mode = use_MAP_mode
-        self.kernel_prior_sd = kernel_prior_sd
-        self.bias_prior_sd = bias_prior_sd
-        self.posterior_to_prior_sd_ratio = posterior_to_prior_sd_ratio
+        self._kernel_sd_prior = kernel_sd_prior
+        self._bias_sd_prior = bias_sd_prior
+        self._bias_sd_init = bias_sd_init
+        self._posterior_to_prior_sd_ratio = posterior_to_prior_sd_ratio
 
-        self.constraint = constraint
-        if self.constraint.lower() == 'softplus':
-            self.constraint_fn = tf.nn.softplus
-            self.constraint_fn_inv = tf.contrib.distributions.softplus_inverse
-        elif self.constraint.lower() == 'square':
-            self.constraint_fn = tf.square
-            self.constraint_fn_inv = tf.sqrt
-        elif self.constraint.lower() == 'abs':
-            self.constraint_fn = self._safe_abs
-            self.constraint_fn_inv = tf.identity
+        self._constraint = constraint
+        if self._constraint.lower() == 'softplus':
+            self._constraint_fn = tf.nn.softplus
+            self._constraint_fn_inv = tf.contrib.distributions.softplus_inverse
+        elif self._constraint.lower() == 'square':
+            self._constraint_fn = tf.square
+            self._constraint_fn_inv = tf.sqrt
+        elif self._constraint.lower() == 'abs':
+            self._constraint_fn = self._safe_abs
+            self._constraint_fn_inv = tf.identity
         else:
-            raise ValueError('Unrecognized constraint function %s' % self.constraint)
+            raise ValueError('Unrecognized constraint function %s' % self._constraint)
 
         self.kl_penalties_base = {}
 
@@ -760,6 +764,13 @@ class CDRNNCellBayes(CDRNNCell):
 
                 layers = []
 
+                if kernel_type == 'bottomup':
+                    kernel_sd_init = self._bottomup_kernel_sd_init
+                elif kernel_type == 'recurrent':
+                    kernel_sd_init == self._recurrent_kernel_sd_init
+                else:
+                    raise ValueError('Unrecognized kernel type: %s.' % kernel_type)
+
                 for d in range(depth):
                     if d == depth - 1:
                         activation = None
@@ -782,13 +793,15 @@ class CDRNNCellBayes(CDRNNCell):
                         units=units,
                         use_bias=use_bias,
                         activation=activation,
-                        declare_priors_weights=self.declare_priors_weights,
-                        declare_priors_biases=self.declare_priors_biases,
+                        declare_priors_weights=self._declare_priors_weights,
+                        declare_priors_biases=self._declare_priors_biases,
                         use_MAP_mode=self.use_map_mode,
-                        kernel_prior_sd=self.kernel_prior_sd,
-                        bias_prior_sd=self.bias_prior_sd,
-                        posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
-                        constraint=self.constraint,
+                        kernel_sd_prior=self._kernel_sd_prior,
+                        kernel_sd_init=self.kernel_sd_init,
+                        bias_sd_prior=self._bias_sd_prior,
+                        bias_sd_init=self._bias_sd_init,
+                        posterior_to_prior_sd_ratio=self._posterior_to_prior_sd_ratio,
+                        constraint=self._constraint,
                         epsilon=self._epsilon,
                         session=self._session,
                         reuse=tf.AUTO_REUSE,
@@ -806,8 +819,8 @@ class CDRNNCellBayes(CDRNNCell):
         with self._session.as_default():
             with self._session.graph.as_default():
                 out_dim = self._num_units
-                kernel_sd_prior = get_numerical_sd(self.kernel_prior_sd, in_dim=1, out_dim=out_dim)
-                kernel_sd_posterior = kernel_sd_prior * self.posterior_to_prior_sd_ratio
+                kernel_sd_prior = get_numerical_sd(self._kernel_sd_prior, in_dim=1, out_dim=out_dim)
+                kernel_sd_posterior = kernel_sd_prior * self._posterior_to_prior_sd_ratio
 
                 # Posterior distribution
                 t_delta_embedding_W_q_loc = self.add_variable(
@@ -817,15 +830,15 @@ class CDRNNCellBayes(CDRNNCell):
                 )
                 t_delta_embedding_W_q_scale = self.add_variable(
                     name='t_delta_embedding_W_q_scale',
-                    initializer=self.constraint_fn_inv(kernel_sd_posterior),
+                    initializer=self._constraint_fn_inv(kernel_sd_posterior),
                     shape=[1, self._num_units]
                 )
                 self.t_delta_embedding_W_q_dist = Normal(
                     loc=t_delta_embedding_W_q_loc,
-                    scale=self.constraint_fn(t_delta_embedding_W_q_scale) + self.epsilon,
+                    scale=self._constraint_fn(t_delta_embedding_W_q_scale) + self.epsilon,
                     name='t_delta_embedding_W_q'
                 )
-                if self.declare_priors_weights:
+                if self._declare_priors_weights:
                     # Prior distribution
                     self.t_delta_embedding_W_prior_dist = Normal(
                         loc=0.,
@@ -843,8 +856,8 @@ class CDRNNCellBayes(CDRNNCell):
                     self.t_delta_embedding_W_q_dist.sample
                 )
 
-                bias_sd_prior = get_numerical_sd(self.kernel_prior_sd, in_dim=1, out_dim=1)
-                bias_sd_posterior = bias_sd_prior * self.posterior_to_prior_sd_ratio
+                bias_sd_prior = get_numerical_sd(self._kernel_sd_prior, in_dim=1, out_dim=1)
+                bias_sd_posterior = bias_sd_prior * self._posterior_to_prior_sd_ratio
 
                 # Posterior distribution
                 t_delta_embedding_b_q_loc = self.add_variable(
@@ -854,15 +867,15 @@ class CDRNNCellBayes(CDRNNCell):
                 )
                 t_delta_embedding_b_q_scale = self.add_variable(
                     name='t_delta_embedding_b_q_scale',
-                    initializer=self.constraint_fn_inv(bias_sd_posterior),
+                    initializer=self._constraint_fn_inv(bias_sd_posterior),
                     shape=[1, self._num_units]
                 )
                 t_delta_embedding_b_q_dist = Normal(
                     loc=t_delta_embedding_b_q_loc,
-                    scale=self.constraint_fn(t_delta_embedding_b_q_scale) + self.epsilon,
+                    scale=self._constraint_fn(t_delta_embedding_b_q_scale) + self.epsilon,
                     name='t_delta_embedding_b_q'
                 )
-                if self.declare_priors_biases:
+                if self._declare_priors_biases:
                     # Prior distribution
                     self.t_delta_embedding_b_prior_dist = Normal(
                         loc=0.,
@@ -905,11 +918,14 @@ class CDRNNLayerBayes(CDRNNLayer):
             recurrent_activation='sigmoid',
             prefinal_activation='tanh',
             time_projection_inner_activation='tanh',
+            bottomup_kernel_sd_init=None,
+            recurrent_kernel_sd_init=None,
             declare_priors_weights=True,
             declare_priors_biases=False,
             use_MAP_mode=None,
-            kernel_prior_sd='he',
-            bias_prior_sd=1,
+            kernel_sd_prior=1,
+            bias_sd_prior=1,
+            bias_sd_init=None,
             posterior_to_prior_sd_ratio=1,
             constraint='softplus',
             bottomup_dropout=None,
@@ -940,6 +956,8 @@ class CDRNNLayerBayes(CDRNNLayer):
             recurrent_activation=recurrent_activation,
             prefinal_activation=prefinal_activation,
             time_projection_inner_activation=time_projection_inner_activation,
+            bottomup_kernel_sd_init=bottomup_kernel_sd_init,
+            recurrent_kernel_sd_init=recurrent_kernel_sd_init,
             bottomup_dropout=bottomup_dropout,
             h_dropout=h_dropout,
             c_dropout=c_dropout,
@@ -960,8 +978,9 @@ class CDRNNLayerBayes(CDRNNLayer):
         self.declare_priors_weights = declare_priors_weights
         self.declare_priors_biases = declare_priors_biases
         self.use_MAP_mode = use_MAP_mode
-        self.kernel_prior_sd = kernel_prior_sd
-        self.bias_prior_sd = bias_prior_sd
+        self.kernel_sd_prior = kernel_sd_prior
+        self.bias_sd_prior = bias_sd_prior
+        self.bias_sd_init = bias_sd_init
         self.posterior_to_prior_sd_ratio = posterior_to_prior_sd_ratio
         self.constraint = constraint
 
@@ -987,6 +1006,8 @@ class CDRNNLayerBayes(CDRNNLayer):
                         recurrent_activation=self.recurrent_activation,
                         prefinal_activation=self.prefinal_activation,
                         time_projection_inner_activation=self.time_projection_inner_activation,
+                        bottomup_kernel_sd_init=self.bottomup_kernel_sd_init,
+                        recurrent_kernel_sd_init=self.recurrent_kernel_sd_init,
                         bottomup_dropout=self.bottomup_dropout,
                         h_dropout=self.h_dropout,
                         c_dropout=self.c_dropout,
@@ -994,8 +1015,9 @@ class CDRNNLayerBayes(CDRNNLayer):
                         declare_priors_weights=self.declare_priors_weights,
                         declare_priors_biases=self.declare_priors_biases,
                         use_MAP_mode=self.use_MAP_mode,
-                        kernel_prior_sd=self.kernel_prior_sd,
-                        bias_prior_sd=self.bias_prior_sd,
+                        kernel_sd_prior=self.kernel_sd_prior,
+                        bias_sd_prior=self.bias_sd_prior,
+                        bias_sd_init=self.bias_sd_init,
                         posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
                         constraint=self.constraint,
                         weight_normalization=self.weight_normalization,
@@ -1173,8 +1195,10 @@ class DenseLayerBayes(DenseLayer):
             use_MAP_mode=None,
             declare_priors_weights=True,
             declare_priors_biases=False,
-            kernel_prior_sd='he',
-            bias_prior_sd=1.,
+            kernel_sd_prior=1,
+            kernel_sd_init=None,
+            bias_sd_prior=1.,
+            bias_sd_init=None,
             posterior_to_prior_sd_ratio=1,
             constraint='softplus',
             reuse=tf.AUTO_REUSE,
@@ -1187,7 +1211,7 @@ class DenseLayerBayes(DenseLayer):
             units=units,
             use_bias=use_bias,
             activation=activation,
-            kernel_sd_init=kernel_prior_sd,
+            kernel_sd_init=kernel_sd_init,
             dropout=dropout,
             batch_normalization_decay=batch_normalization_decay,
             batch_normalization_use_gamma=batch_normalization_use_gamma,
@@ -1196,14 +1220,15 @@ class DenseLayerBayes(DenseLayer):
             session=session,
             name=name
         )
+        self.bias_sd_init = bias_sd_init
         self.session = get_session(session)
         with session.as_default():
             with session.graph.as_default():
                 self.declare_priors_weights = declare_priors_weights
                 self.declare_priors_biases = declare_priors_biases
                 self.use_MAP_mode = use_MAP_mode
-                self.kernel_prior_sd = kernel_prior_sd
-                self.bias_prior_sd = bias_prior_sd
+                self.kernel_sd_prior = kernel_sd_prior
+                self.bias_sd_prior = bias_sd_prior
                 self.posterior_to_prior_sd_ratio = posterior_to_prior_sd_ratio
 
                 self.constraint = constraint
@@ -1237,8 +1262,11 @@ class DenseLayerBayes(DenseLayer):
             with self.session.as_default():
                 with self.session.graph.as_default():
                     with tf.variable_scope(name):
-                        kernel_sd_prior = get_numerical_sd(self.kernel_prior_sd, in_dim=in_dim, out_dim=out_dim)
-                        kernel_sd_posterior = kernel_sd_prior * self.posterior_to_prior_sd_ratio
+                        kernel_sd_prior = get_numerical_sd(self.kernel_sd_prior, in_dim=in_dim, out_dim=out_dim)
+                        if self.kernel_sd_init:
+                            kernel_sd_posterior = get_numerical_sd(self.kernel_sd_init, in_dim=in_dim, out_dim=out_dim)
+                        else:
+                            kernel_sd_posterior = kernel_sd_prior * self.posterior_to_prior_sd_ratio
 
                         if self.use_MAP_mode is None:
                             self.use_MAP_mode = tf.logical_not(self.training)
@@ -1283,10 +1311,12 @@ class DenseLayerBayes(DenseLayer):
                                 scale=self.batch_normalization_use_gamma,
                                 axis=-1,
                                 use_MAP_mode=self.use_MAP_mode,
-                                declare_priors_weights=self.declare_priors_weights,
-                                declare_priors_biases=self.declare_priors_biases,
-                                weight_prior_sd=self.kernel_prior_sd,
-                                bias_prior_sd=self.bias_prior_sd,
+                                declare_priors_scale=self.declare_priors_weights,
+                                declare_priors_shift=self.declare_priors_biases,
+                                scale_sd_prior=self.bias_sd_prior,
+                                scale_sd_init=self.bias_sd_init,
+                                shift_sd_prior=self.bias_sd_prior,
+                                shift_sd_init=self.bias_sd_init,
                                 posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
                                 constraint=self.constraint,
                                 training=self.training,
@@ -1296,8 +1326,11 @@ class DenseLayerBayes(DenseLayer):
                                 name=self.name
                             )
                         elif self.use_bias:
-                            bias_sd_prior = get_numerical_sd(self.bias_prior_sd, in_dim=1, out_dim=1)
-                            bias_sd_posterior = bias_sd_prior * self.posterior_to_prior_sd_ratio
+                            bias_sd_prior = get_numerical_sd(self.bias_sd_prior, in_dim=1, out_dim=1)
+                            if self.bias_sd_init:
+                                bias_sd_posterior = get_numerical_sd(self.bias_sd_init, in_dim=1, out_dim=1)
+                            else:
+                                bias_sd_posterior = bias_sd_prior * self.posterior_to_prior_sd_ratio
 
                             # Posterior distribution
                             self.bias_q_loc = tf.get_variable(
@@ -1436,6 +1469,9 @@ class BatchNormLayer(object):
 
         with self.session.as_default():
             with self.session.graph.as_default():
+                name = self.name
+                if not name:
+                    name = ''
                 decay = self.decay
 
                 def train_fn(inputs=inputs):
@@ -1452,12 +1488,14 @@ class BatchNormLayer(object):
                 if self.moving_mean_op is None:
                     self.moving_mean_op = tf.assign(
                         self.moving_mean,
-                        self.moving_mean * decay + mean * (1 - decay)
+                        self.moving_mean * decay + mean * (1 - decay),
+                        name=name + '_moving_mean_update'
                     )
                 if self.moving_variance_op is None:
                     self.moving_variance_op = tf.assign(
                         self.moving_variance,
-                        self.moving_variance * decay + variance * (1 - decay)
+                        self.moving_variance * decay + variance * (1 - decay),
+                        name=name + '_moving_variance_update'
                     )
 
                 return out
@@ -1475,10 +1513,12 @@ class BatchNormLayerBayes(BatchNormLayer):
             axis=-1,
             training=True,
             use_MAP_mode=None,
-            declare_priors_weights=True,
-            declare_priors_biases=False,
-            weight_prior_sd=1.,
-            bias_prior_sd=1.,
+            declare_priors_scale=True,
+            declare_priors_shift=False,
+            scale_sd_prior=1.,
+            scale_sd_init=None,
+            shift_sd_prior=1.,
+            shift_sd_init=None,
             posterior_to_prior_sd_ratio=1.,
             constraint='softplus',
             epsilon=1e-5,
@@ -1499,10 +1539,12 @@ class BatchNormLayerBayes(BatchNormLayer):
         )
 
         self.use_MAP_mode = use_MAP_mode
-        self.declare_priors_weights = declare_priors_weights
-        self.declare_priors_biases = declare_priors_biases
-        self.weight_prior_sd = weight_prior_sd
-        self.bias_prior_sd = bias_prior_sd
+        self.declare_priors_scale = declare_priors_scale
+        self.declare_priors_shift = declare_priors_shift
+        self.scale_sd_prior = scale_sd_prior
+        self.scale_sd_init = scale_sd_init
+        self.shift_sd_prior = shift_sd_prior
+        self.shift_sd_init = shift_sd_init
         self.posterior_to_prior_sd_ratio = posterior_to_prior_sd_ratio
         self.constraint = constraint
 
@@ -1547,9 +1589,6 @@ class BatchNormLayerBayes(BatchNormLayer):
             with self.session.as_default():
                 with self.session.graph.as_default():
                     with tf.variable_scope(name, reuse=self.reuse):
-                        weights_sd_prior = get_numerical_sd(self.weight_prior_sd, in_dim=1, out_dim=1)
-                        weights_sd_posterior = weights_sd_prior * self.posterior_to_prior_sd_ratio
-
                         self.moving_mean = tf.get_variable(
                             name='moving_mean',
                             initializer=tf.zeros_initializer(),
@@ -1567,8 +1606,11 @@ class BatchNormLayerBayes(BatchNormLayer):
                         self.moving_variance_op = None
                         
                         if self.center:
-                            bias_sd_prior = get_numerical_sd(self.bias_prior_sd, in_dim=1, out_dim=1)
-                            bias_sd_posterior = bias_sd_prior * self.posterior_to_prior_sd_ratio
+                            shift_sd_prior = get_numerical_sd(self.shift_sd_prior, in_dim=1, out_dim=1)
+                            if self.shift_sd_init:
+                                shift_sd_posterior = get_numerical_sd(self.shift_sd_init, in_dim=1, out_dim=1)
+                            else:
+                                shift_sd_posterior = shift_sd_prior * self.posterior_to_prior_sd_ratio
 
                             # Posterior distribution
                             self.beta_q_loc = tf.get_variable(
@@ -1578,7 +1620,7 @@ class BatchNormLayerBayes(BatchNormLayer):
                             )
                             self.beta_q_scale = tf.get_variable(
                                 name='beta_q_scale',
-                                initializer=tf.ones(shape) * self.constraint_fn_inv(bias_sd_posterior)
+                                initializer=tf.ones(shape) * self.constraint_fn_inv(shift_sd_posterior)
                             )
 
                             self.beta_q_dist = Normal(
@@ -1586,16 +1628,16 @@ class BatchNormLayerBayes(BatchNormLayer):
                                 scale=self.constraint_fn(self.beta_q_scale) + self.epsilon,
                                 name='beta_q'
                             )
-                            if self.declare_priors_biases:
+                            if self.declare_priors_shift:
                                 # Prior distribution
                                 self.beta_prior_dist = Normal(
                                     loc=0.,
-                                    scale=bias_sd_prior,
+                                    scale=shift_sd_prior,
                                     name='beta'
                                 )
                                 self.kl_penalties_base[self.name + '/beta'] = {
                                     'loc': 0.,
-                                    'scale': bias_sd_prior,
+                                    'scale': shift_sd_prior,
                                     'val': self.beta_q_dist.kl_divergence(self.beta_prior_dist)
                                 }
                             self.beta = tf.cond(
@@ -1607,6 +1649,12 @@ class BatchNormLayerBayes(BatchNormLayer):
                             self.beta = 0.
 
                         if self.scale:
+                            scale_sd_prior = get_numerical_sd(self.scale_sd_prior, in_dim=1, out_dim=1)
+                            if self.scale_sd_init:
+                                scale_sd_posterior = get_numerical_sd(self.scale_sd_init, in_dim=1, out_dim=1)
+                            else:
+                                scale_sd_posterior = scale_sd_prior * self.posterior_to_prior_sd_ratio
+
                             # Posterior distribution
                             self.gamma_q_loc = tf.get_variable(
                                 name='gamma_q_loc',
@@ -1615,7 +1663,7 @@ class BatchNormLayerBayes(BatchNormLayer):
                             )
                             self.gamma_q_scale = tf.get_variable(
                                 name='gamma_q_scale',
-                                initializer=tf.ones(shape) * self.constraint_fn_inv(weights_sd_posterior)
+                                initializer=tf.ones(shape) * self.constraint_fn_inv(scale_sd_posterior)
                             )
 
                             self.gamma_q_dist = Normal(
@@ -1623,16 +1671,16 @@ class BatchNormLayerBayes(BatchNormLayer):
                                 scale=self.constraint_fn(self.gamma_q_scale) + self.epsilon,
                                 name='gamma_q'
                             )
-                            if self.declare_priors_biases:
+                            if self.declare_priors_shift:
                                 # Prior distribution
                                 self.gamma_prior_dist = Normal(
                                     loc=1.,
-                                    scale=weights_sd_prior,
+                                    scale=scale_sd_prior,
                                     name='gamma'
                                 )
                                 self.kl_penalties_base[self.name + '/gamma'] = {
                                     'loc': 1.,
-                                    'scale': weights_sd_prior,
+                                    'scale': scale_sd_prior,
                                     'val': self.gamma_q_dist.kl_divergence(self.gamma_prior_dist)
                                 }
                             self.gamma = tf.cond(

@@ -519,8 +519,10 @@ class Model(object):
 
                 if self.center_inputs:
                     X_processed -= self.impulse_means_arr_expanded
-                if self.scale_inputs:
-                    X_processed /= self.impulse_sds_arr_expanded
+                if self.rescale_inputs:
+                    scale = self.impulse_sds_arr_expanded
+                    scale = np.where(np.logical_not(np.isclose(scale, 0.)), scale, 1.)
+                    X_processed /= scale
                 self.X_processed = X_processed
 
                 self.X_batch = X_batch

@@ -176,10 +176,11 @@ MODEL_INITIALIZATION_KWARGS = [
         "DISCOURAGED UNLESS YOU HAVE A GOOD REASON, since this can distort rate estimates. Center inputs by subtracting training set means. Can improve convergence speed and reduce vulnerability to local optima. Only affects fitting -- prediction, likelihood computation, and plotting are reported on the source values."
     ),
     Kwarg(
-        'scale_inputs',
+        'rescale_inputs',
         True,
         bool,
-        "Rescale input features by dividing by training set standard deviation. Can improve convergence speed and reduce vulnerability to local optima. Only affects fitting -- prediction, likelihood computation, and plotting are reported on the source values."
+        "Rescale input features by dividing by training set standard deviation. Can improve convergence speed and reduce vulnerability to local optima. Only affects fitting -- prediction, likelihood computation, and plotting are reported on the source values.",
+        aliases=['scale_inputs']
     ),
     Kwarg(
         'standardize_response',
@@ -1033,11 +1034,23 @@ CDRNNBAYES_INITIALIZATION_KWARGS = [
         aliases=['conv_prior_sd', 'prior_sd']
     ),
     Kwarg(
+        'weight_sd_init',
+        None,
+        [str, float, None],
+        "Initial standard deviation of variational posterior over weights. If ``None``, inferred from other hyperparams."
+    ),
+    Kwarg(
         'bias_prior_sd',
         1.,
         [str, float],
         "Standard deviation of prior on CDRNN hidden biases. A ``float``, ``'glorot'``, or ``'he'``.",
         aliases=['conv_prior_sd', 'prior_sd']
+    ),
+    Kwarg(
+        'bias_sd_init',
+        None,
+        [str, float, None],
+        "Initial standard deviation of variational posterior over biases. If ``None``, inferred from other hyperparams."
     ),
     Kwarg(
         'y_sd_trainable',

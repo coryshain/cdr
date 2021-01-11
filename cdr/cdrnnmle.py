@@ -207,6 +207,22 @@ class CDRNNMLE(CDRNN):
                 h_bias_summary = h_bias
 
                 return h_bias, h_bias_summary
+
+    def initialize_h_batch_norm(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                batch_norm_layer = BatchNormLayer(
+                    decay=self.batch_normalization_decay,
+                    center=True,
+                    scale=True,
+                    axis=-1,
+                    training=self.training,
+                    epsilon=self.epsilon,
+                    session=self.sess,
+                    name='h'
+                )
+
+                return batch_norm_layer
             
     def initialize_irf_l1_weights(self, ran_gf=None):
         with self.sess.as_default():
@@ -218,6 +234,8 @@ class CDRNNMLE(CDRNN):
                             sd = math.sqrt(2 / (1 + self.n_units_irf_l1))
                         elif self.weight_sd_init.lower() == 'he':
                             sd = math.sqrt(2)
+                        else:
+                            sd = float(self.weight_sd_init)
                     else:
                         sd = self.weight_sd_init
 

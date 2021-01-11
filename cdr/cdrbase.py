@@ -876,7 +876,7 @@ class CDR(Model):
             self.src_impulse_names_norate = list(filter(lambda x: x != 'rate', self.form.t.impulse_names(include_interactions=True)))
             _, self.eigenvec, self.eigenval, self.impulse_means, self.impulse_sds = pca(X[self.src_impulse_names_norate])
         else:
-            self.eigenvec = self.eigenval = self.impulse_means = self.impulse_sds = None
+            self.eigenvec = self.eigenval = None
 
     def _initialize_metadata(self):
         super(CDR, self)._initialize_metadata()
@@ -2376,7 +2376,10 @@ class CDR(Model):
                         )
 
                 self.parameter_table_fixed_keys += parameter_table_fixed_keys
-                self.parameter_table_fixed_values += tf.concat(parameter_table_fixed_values, 0)
+                self.parameter_table_fixed_values = tf.concat(
+                    [self.parameter_table_fixed_values, tf.concat(parameter_table_fixed_values, 0)],
+                    0
+                )
 
                 parameter_table_random_keys = []
                 parameter_table_random_rangf = []
@@ -2444,7 +2447,10 @@ class CDR(Model):
                     self.parameter_table_random_keys += parameter_table_random_keys
                     self.parameter_table_random_rangf += parameter_table_random_rangf
                     self.parameter_table_random_rangf_levels += parameter_table_random_rangf_levels
-                    self.parameter_table_random_values += tf.concat(parameter_table_random_values, 0)
+                    self.parameter_table_random_values = tf.concat(
+                        [self.parameter_table_random_values, tf.concat(parameter_table_random_values, 0)],
+                        0,
+                    )
 
     def _initialize_random_mean_vector(self):
         with self.sess.as_default():
