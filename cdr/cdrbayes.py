@@ -854,14 +854,14 @@ class CDRBayes(CDR):
             with self.sess.graph.as_default():
                 self._initialize_output_model()
 
-                self.loss_func = 0.
+                self.loss_func = tf.constant(0., dtype=self.FLOAT_TF)
 
                 if self.standardize_response:
                     self.loss_func += -tf.reduce_sum(self.ll_standardized) * self.minibatch_scale
                 else:
                     self.loss_func += -tf.reduce_sum(self.ll) * self.minibatch_scale
 
-                self.reg_loss = 0.
+                self.reg_loss = tf.constant(0., dtype=self.FLOAT_TF)
                 if len(self.regularizer_losses_varnames) > 0:
                     self.reg_loss += tf.add_n(self.regularizer_losses)
 
