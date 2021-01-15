@@ -291,16 +291,20 @@ class CDRNNBayes(CDRNN):
     ):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if final and False:
+                if final:
                     weight_sd_prior = 1.
                     weight_sd_init = self.weight_sd_init
                     bias_sd_prior = 1.
                     bias_sd_init = self.bias_sd_init
+                    gamma_sd_prior = 1.
+                    gamma_sd_init = self.gamma_sd_init
                 else:
                     weight_sd_prior = self.weight_prior_sd
                     weight_sd_init = self.weight_sd_init
                     bias_sd_prior = self.bias_prior_sd
                     bias_sd_init = self.bias_sd_init
+                    gamma_sd_prior = self.gamma_prior_sd
+                    gamma_sd_init = self.gamma_sd_init
 
                 projection = DenseLayerBayes(
                     training=self.training,
@@ -316,6 +320,8 @@ class CDRNNBayes(CDRNN):
                     kernel_sd_init=weight_sd_init,
                     bias_sd_prior=bias_sd_prior,
                     bias_sd_init=bias_sd_init,
+                    gamma_sd_prior=gamma_sd_prior,
+                    gamma_sd_init=gamma_sd_init,
                     posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
                     constraint=self.constraint,
                     epsilon=self.epsilon,

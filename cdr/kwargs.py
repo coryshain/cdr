@@ -1053,6 +1053,19 @@ CDRNNBAYES_INITIALIZATION_KWARGS = [
         "Initial standard deviation of variational posterior over biases. If ``None``, inferred from other hyperparams."
     ),
     Kwarg(
+        'gamma_prior_sd',
+        'glorot',
+        [str, float],
+        "Standard deviation of prior on batch norm gammas. A ``float``, ``'glorot'``, or ``'he'``. Ignored unless batch normalization is used",
+        aliases=['conv_prior_sd', 'prior_sd']
+    ),
+    Kwarg(
+        'gamma_sd_init',
+        None,
+        [str, float, None],
+        "Initial standard deviation of variational posterior over batch norm gammas. If ``None``, inferred from other hyperparams. Ignored unless batch normalization is used."
+    ),
+    Kwarg(
         'y_sd_trainable',
         True,
         bool,

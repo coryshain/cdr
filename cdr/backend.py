@@ -1199,6 +1199,8 @@ class DenseLayerBayes(DenseLayer):
             kernel_sd_init=None,
             bias_sd_prior=1.,
             bias_sd_init=None,
+            gamma_sd_prior=1.,
+            gamma_sd_init=None,
             posterior_to_prior_sd_ratio=1,
             constraint='softplus',
             reuse=tf.AUTO_REUSE,
@@ -1220,7 +1222,6 @@ class DenseLayerBayes(DenseLayer):
             session=session,
             name=name
         )
-        self.bias_sd_init = bias_sd_init
         self.session = get_session(session)
         with session.as_default():
             with session.graph.as_default():
@@ -1229,6 +1230,9 @@ class DenseLayerBayes(DenseLayer):
                 self.use_MAP_mode = use_MAP_mode
                 self.kernel_sd_prior = kernel_sd_prior
                 self.bias_sd_prior = bias_sd_prior
+                self.bias_sd_init = bias_sd_init
+                self.gamma_sd_prior = gamma_sd_prior
+                self.gamma_sd_init = gamma_sd_init
                 self.posterior_to_prior_sd_ratio = posterior_to_prior_sd_ratio
 
                 self.constraint = constraint
@@ -1313,8 +1317,8 @@ class DenseLayerBayes(DenseLayer):
                                 use_MAP_mode=self.use_MAP_mode,
                                 declare_priors_scale=self.declare_priors_weights,
                                 declare_priors_shift=self.declare_priors_biases,
-                                scale_sd_prior=self.bias_sd_prior,
-                                scale_sd_init=self.bias_sd_init,
+                                scale_sd_prior=self.gamma_sd_prior,
+                                scale_sd_init=self.gamma_sd_init,
                                 shift_sd_prior=self.bias_sd_prior,
                                 shift_sd_init=self.bias_sd_init,
                                 posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,

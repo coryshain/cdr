@@ -33,7 +33,7 @@ if __name__ == '__main__':
     argparser.add_argument('-d', '--search_dir', nargs='+', default=['./'], help='Directory/directories to search (default: "./").')
     argparser.add_argument('-e', '--exclude', nargs='*', default=[], help='Exclude data from paths containing any of the strings in ``exclude``.')
     argparser.add_argument('-n', '--names', nargs='*', help='Names of elements in ``paths``.')
-    argparser.add_argument('-o', '--outpath', default='lme_coefs.png', help='Filename to use for saving plot.')
+    argparser.add_argument('-o', '--outpath', default='lme_coefs_real2.png', help='Filename to use for saving plot.')
     args = argparser.parse_args()
 
     paths = [x.split(';') for x in args.paths]
