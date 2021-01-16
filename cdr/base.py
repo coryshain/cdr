@@ -3487,89 +3487,90 @@ class Model(object):
                             lq = None
                             uq = None
                         names = self.get_plot_names(plot_type=plot_type, interactions=plot_interactions)
-                        for name in names:
-                            plot_name = plot_type
-                            if plot_name.startswith('interaction'):
-                                plot_name += '_t%s' % reference_time
-                            if mc:
-                                plot_name = 'mc_' + plot_name
-                                (x_cur, y_cur), z_cur, lq_cur, uq_cur, _ = self.get_plot_data(
-                                    name,
-                                    plot_type=plot_type,
-                                    support_start=0.,
-                                    level=level,
-                                    n_samples=n_samples,
-                                    n_time_units=plot_n_time_units,
-                                    n_time_points=plot_n_time_points,
-                                    t_interaction=reference_time,
-                                    plot_rangf=plot_rangf,
-                                    rangf_vals=rangf_vals,
-                                    plot_mean_as_reference=plot_mean_as_reference
-                                )
+                        if names:
+                            for name in names:
+                                plot_name = plot_type
+                                if plot_name.startswith('interaction'):
+                                    plot_name += '_t%s' % reference_time
+                                if mc:
+                                    plot_name = 'mc_' + plot_name
+                                    (x_cur, y_cur), z_cur, lq_cur, uq_cur, _ = self.get_plot_data(
+                                        name,
+                                        plot_type=plot_type,
+                                        support_start=0.,
+                                        level=level,
+                                        n_samples=n_samples,
+                                        n_time_units=plot_n_time_units,
+                                        n_time_points=plot_n_time_points,
+                                        t_interaction=reference_time,
+                                        plot_rangf=plot_rangf,
+                                        rangf_vals=rangf_vals,
+                                        plot_mean_as_reference=plot_mean_as_reference
+                                    )
 
-                                z_cur = z_cur[..., None]
-                                lq_cur = lq_cur[..., None]
-                                uq_cur = uq_cur[..., None]
+                                    z_cur = z_cur[..., None]
+                                    lq_cur = lq_cur[..., None]
+                                    uq_cur = uq_cur[..., None]
 
-                                lq.append(lq_cur)
-                                uq.append(uq_cur)
-                            else:
-                                (x_cur, y_cur), z_cur = self.get_plot_data(
-                                    name,
-                                    plot_type=plot_type,
-                                    support_start=0.,
-                                    n_time_units=plot_n_time_units,
-                                    n_time_points=plot_n_time_points,
-                                    t_interaction=reference_time,
-                                    plot_rangf=plot_rangf,
-                                    rangf_vals=rangf_vals,
-                                    plot_mean_as_reference=plot_mean_as_reference
-                                )
+                                    lq.append(lq_cur)
+                                    uq.append(uq_cur)
+                                else:
+                                    (x_cur, y_cur), z_cur = self.get_plot_data(
+                                        name,
+                                        plot_type=plot_type,
+                                        support_start=0.,
+                                        n_time_units=plot_n_time_units,
+                                        n_time_points=plot_n_time_points,
+                                        t_interaction=reference_time,
+                                        plot_rangf=plot_rangf,
+                                        rangf_vals=rangf_vals,
+                                        plot_mean_as_reference=plot_mean_as_reference
+                                    )
 
-                            plot_x.append(x_cur)
-                            plot_y.append(y_cur)
-                            plot_z.append(z_cur)
+                                plot_x.append(x_cur)
+                                plot_y.append(y_cur)
+                                plot_z.append(z_cur)
 
-                        plot_x = np.stack(plot_x, axis=-1)
-                        plot_y = np.stack(plot_y, axis=-1)
-                        plot_z = np.concatenate(plot_z, axis=-1)
-                        if lq is not None:
-                            lq = np.concatenate(lq, axis=-1)
-                        if uq is not None:
-                            uq = np.concatenate(uq, axis=-1)
-
-                        if self.standardize_response and not standardize_response:
-                            plot_z *= self.y_train_sd
+                            plot_x = np.stack(plot_x, axis=-1)
+                            plot_y = np.stack(plot_y, axis=-1)
+                            plot_z = np.concatenate(plot_z, axis=-1)
                             if lq is not None:
-                                lq *= self.y_train_sd
+                                lq = np.concatenate(lq, axis=-1)
                             if uq is not None:
-                                uq *= self.y_train_sd
+                                uq = np.concatenate(uq, axis=-1)
 
-                        for g in range(len(rangf_keys)):
-                            if rangf_keys[g]:
-                                filename = prefix + rangf_keys[g] + '_' + plot_name
-                            else:
-                                filename = prefix + plot_name
+                            if self.standardize_response and not standardize_response:
+                                plot_z *= self.y_train_sd
+                                if lq is not None:
+                                    lq *= self.y_train_sd
+                                if uq is not None:
+                                    uq *= self.y_train_sd
 
-                            plot_surface(
-                                plot_x,
-                                plot_y,
-                                plot_z[g],
-                                names,
-                                lq=None if lq is None else lq[g],
-                                uq=None if uq is None else uq[g],
-                                sort_names=True,
-                                dir=self.outdir,
-                                prefix=filename,
-                                irf_name_map=irf_name_map,
-                                plot_x_inches=plot_x_inches,
-                                plot_y_inches=plot_y_inches,
-                                xlab=xlab_cur,
-                                ylim=ylim,
-                                transparent_background=transparent_background,
-                                dpi=dpi,
-                                dump_source=dump_source
-                            )
+                            for g in range(len(rangf_keys)):
+                                if rangf_keys[g]:
+                                    filename = prefix + rangf_keys[g] + '_' + plot_name
+                                else:
+                                    filename = prefix + plot_name
+
+                                plot_surface(
+                                    plot_x,
+                                    plot_y,
+                                    plot_z[g],
+                                    names,
+                                    lq=None if lq is None else lq[g],
+                                    uq=None if uq is None else uq[g],
+                                    sort_names=True,
+                                    dir=self.outdir,
+                                    prefix=filename,
+                                    irf_name_map=irf_name_map,
+                                    plot_x_inches=plot_x_inches,
+                                    plot_y_inches=plot_y_inches,
+                                    xlab=xlab_cur,
+                                    ylim=ylim,
+                                    transparent_background=transparent_background,
+                                    dpi=dpi,
+                                    dump_source=dump_source
+                                )
 
                 # 1D IRF plots
                 plot_x = self.sess.run(self.support, fd)
