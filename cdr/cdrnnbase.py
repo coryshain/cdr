@@ -85,7 +85,9 @@ class CDRNN(Model):
         self.is_cdrnn = True
 
         self.BATCH_NORM_H = True
-        self.BATCH_NORM_IRF_L1 = False
+        self.BATCH_NORM_IRF_L1 = True
+        self.BATCH_NORM_IRF = True
+        self.BATCH_NORM_ERROR = True
 
         # Initialize tree metadata
         self.t = self.form.t
@@ -586,7 +588,10 @@ class CDRNN(Model):
                         units = self.n_units_irf[l]
                         activation = self.irf_inner_activation
                         dropout = self.irf_dropout_rate
-                        bn = self.batch_normalization_decay
+                        if self.BATCH_NORM_IRF:
+                            bn = self.batch_normalization_decay
+                        else:
+                            bn = None
                         use_bias = True
                         final = False
                     else:
@@ -623,7 +628,10 @@ class CDRNN(Model):
                     units = self.n_units_error_params_fn[l]
                     activation = self.error_params_fn_inner_activation
                     dropout = self.error_params_fn_dropout_rate
-                    bn = self.batch_normalization_decay
+                    if self.BATCH_NORM_ERROR:
+                        bn = self.batch_normalization_decay
+                    else:
+                        bn = None
                     use_bias = True
 
                     projection = self.initialize_feedforward(
@@ -1153,9 +1161,9 @@ class CDRNN(Model):
                 else:
                     h_rnn = rnn_hidden = rnn_cell = None
 
+                h = get_activation(self.hidden_state_activation, session=self.sess)(h)
                 if self.BATCH_NORM_H and self.batch_normalization_decay:
                     h = self.h_batch_norm_layer(h)
-                h = get_activation(self.hidden_state_activation, session=self.sess)(h)
 
                 # Compute response
                 Wb_proj = self.hidden_state_to_irf_l1(h)
@@ -1166,9 +1174,9 @@ class CDRNN(Model):
                 b += b_proj
 
                 irf_l1 = W * t_delta + b
+                irf_l1 = get_activation(self.irf_inner_activation, session=self.sess)(irf_l1)
                 if self.BATCH_NORM_IRF_L1 and self.irf_l1_use_bias and self.batch_normalization_decay:
                     irf_l1 = self.irf_l1_batch_norm_layer(irf_l1)
-                irf_l1 = get_activation(self.irf_inner_activation, session=self.sess)(irf_l1)
 
                 y = self.irf(irf_l1)
                 if time_X_mask is not None:
@@ -1623,8 +1631,7 @@ class CDRNN(Model):
         interactions = interactions_tmp
         if plot_type.lower() in ['irf_1d', 'irf_surface']:
             out = ['rate'] + self.terminal_names[:]
-            # if plot_type.lower() == 'irf_surface':
-            #     out += interactions
+            # out += interactions
         elif plot_type.lower() == 'curvature':
             out = self.terminal_names[:]
             # out = self.impulse_names[:] + interactions

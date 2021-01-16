@@ -2,6 +2,7 @@ import os
 import textwrap
 import time as pytime
 import scipy.stats
+import scipy.signal
 import pandas as pd
 from collections import defaultdict
 
@@ -2333,6 +2334,8 @@ class Model(object):
             n_train = len(y)
 
         stderr('*' * 100 + '\n' + self.initialization_summary() + '*' * 100 + '\n\n')
+        with open(self.outdir + '/initialization_summary.txt', 'w') as i_file:
+            i_file.write(self.initialization_summary())
 
         usingGPU = tf.test.is_gpu_available()
         stderr('Using GPU: %s\nNumber of training samples: %d\n\n' % (usingGPU, n_train))

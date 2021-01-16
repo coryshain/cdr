@@ -1075,6 +1075,9 @@ class DenseLayer(object):
                 self.batch_normalization_beta = None
                 self.batch_normalization_gamma = None
 
+                if batch_normalization_decay and dropout:
+                    stderr('WARNING: Batch normalization and dropout are being applied simultaneously in layer %s.\n         This is usually not a good idea.')
+
                 self.built = False
 
     @property
@@ -1148,6 +1151,9 @@ class DenseLayer(object):
                         bias = bias[None, ...]
                     H += bias
 
+                if self.activation is not None:
+                    H = self.activation(H)
+
                 if self.batch_normalization_decay:
                     # H = tf.contrib.layers.batch_norm(
                     #     H,
@@ -1162,9 +1168,6 @@ class DenseLayer(object):
                     #     scope=self.name
                     # )
                     H = self.batch_norm_layer(H)
-
-                if self.activation is not None:
-                    H = self.activation(H)
 
                 H = self.dropout(H)
 
