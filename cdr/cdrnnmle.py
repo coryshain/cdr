@@ -127,6 +127,7 @@ class CDRNNMLE(CDRNN):
                     activation=activation,
                     dropout=dropout,
                     batch_normalization_decay=batch_normalization_decay,
+                    batch_normalization_use_gamma=self.batch_normalization_use_gamma,
                     kernel_sd_init=self.weight_sd_init,
                     epsilon=self.epsilon,
                     session=self.sess,
@@ -213,8 +214,8 @@ class CDRNNMLE(CDRNN):
             with self.sess.graph.as_default():
                 batch_norm_layer = BatchNormLayer(
                     decay=self.batch_normalization_decay,
-                    center=True,
-                    scale=True,
+                    shift_activations=True,
+                    rescale_activations=self.batch_normalization_use_gamma,
                     axis=-1,
                     training=self.training,
                     epsilon=self.epsilon,
@@ -287,8 +288,8 @@ class CDRNNMLE(CDRNN):
             with self.sess.graph.as_default():
                 batch_norm_layer = BatchNormLayer(
                     decay=self.batch_normalization_decay,
-                    center=True,
-                    scale=True,
+                    shift_activations=True,
+                    rescale_activations=self.batch_normalization_use_gamma,
                     axis=-1,
                     training=self.training,
                     epsilon=self.epsilon,

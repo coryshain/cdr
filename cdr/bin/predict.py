@@ -197,7 +197,7 @@ if __name__ == '__main__':
                             n = int(sp.group(3))
                             x_id_sp = x_id + 'S' + str(n)
                             if x_id_sp not in X_baseline.columns:
-                                X_baseline[x_id_sp] = X_baseline.groupby(p.series_ids)[x_id].shift(n, fill_value=0.)
+                                X_baseline[x_id_sp] = X_baseline.groupby(p.series_ids)[x_id].shift_activations(n, fill_value=0.)
 
             if partitions is not None:
                 part = compute_partition(X_cur, p.modulus, 3)

@@ -397,6 +397,12 @@ MODEL_INITIALIZATION_KWARGS = [
         "Decay rate to use for batch normalization in internal layers. If ``None``, no batch normalization.",
     ),
     Kwarg(
+        'batch_normalization_use_gamma',
+        True,
+        bool,
+        "Whether to use trainable scale in batch normalization layers. If ``False``, activations will just be standardized.",
+    ),
+    Kwarg(
         'convergence_n_iterates',
         500,
         [int, None],

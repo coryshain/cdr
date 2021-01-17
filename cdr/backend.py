@@ -1120,8 +1120,8 @@ class DenseLayer(object):
                         if self.use_batch_normalization:
                             self.batch_norm_layer = BatchNormLayer(
                                 decay=self.batch_normalization_decay,
-                                center=self.use_bias,
-                                scale=self.batch_normalization_use_gamma,
+                                shift_activations=self.use_bias,
+                                rescale_activations=self.batch_normalization_use_gamma,
                                 axis=-1,
                                 training=self.training,
                                 epsilon=self.epsilon,
@@ -1314,8 +1314,8 @@ class DenseLayerBayes(DenseLayer):
                         if self.use_batch_normalization:
                             self.batch_norm_layer = BatchNormLayerBayes(
                                 decay=self.batch_normalization_decay,
-                                center=self.use_bias,
-                                scale=self.batch_normalization_use_gamma,
+                                shift_activations=self.use_bias,
+                                rescale_activations=self.batch_normalization_use_gamma,
                                 axis=-1,
                                 use_MAP_mode=self.use_MAP_mode,
                                 declare_priors_scale=self.declare_priors_weights,
@@ -1389,8 +1389,8 @@ class BatchNormLayer(object):
     def __init__(
             self,
             decay=0.999,
-            center=True,
-            scale=True,
+            shift_activations=True,
+            rescale_activations=True,
             axis=-1,
             training=True,
             epsilon=1e-5,
@@ -1400,8 +1400,8 @@ class BatchNormLayer(object):
     ):
         self.session = get_session(session)
         self.decay = decay
-        self.center = center
-        self.scale = scale
+        self.shift_activations = shift_activations
+        self.rescale_activations = rescale_activations
         self.axis = axis
         self.epsilon = epsilon
         self.training = training
@@ -1450,23 +1450,23 @@ class BatchNormLayer(object):
                         )
                         self.moving_variance_op = None
 
-                        if self.center:
+                        if self.shift_activations:
                             self.beta = tf.get_variable(
                                 name='beta',
                                 initializer=tf.zeros_initializer(),
                                 shape=shape
                             )
                         else:
-                            self.beta = 0.
+                            self.beta = tf.Variable(0., name='beta', trainable=False)
 
-                        if self.scale:
+                        if self.rescale_activations:
                             self.gamma = tf.get_variable(
                                 name='gamma',
                                 initializer=tf.ones_initializer(),
                                 shape=shape
                             )
                         else:
-                            self.gamma = 1.
+                            self.gamma = tf.Variable(1., name='beta', trainable=False)
 
         self.built = True
 
@@ -1515,8 +1515,8 @@ class BatchNormLayerBayes(BatchNormLayer):
     def __init__(
             self,
             decay=0.999,
-            center=True,
-            scale=True,
+            shift_activations=True,
+            rescale_activations=True,
             axis=-1,
             training=True,
             use_MAP_mode=None,
@@ -1535,8 +1535,8 @@ class BatchNormLayerBayes(BatchNormLayer):
     ):
         super(BatchNormLayerBayes, self).__init__(
             decay=decay,
-            center=center,
-            scale=scale,
+            shift_activations=shift_activations,
+            rescale_activations=rescale_activations,
             axis=axis,
             training=training,
             epsilon=epsilon,
@@ -1612,7 +1612,7 @@ class BatchNormLayerBayes(BatchNormLayer):
                         )
                         self.moving_variance_op = None
                         
-                        if self.center:
+                        if self.shift_activations:
                             shift_sd_prior = get_numerical_sd(self.shift_sd_prior, in_dim=1, out_dim=1)
                             if self.shift_sd_init:
                                 shift_sd_posterior = get_numerical_sd(self.shift_sd_init, in_dim=1, out_dim=1)
@@ -1653,9 +1653,9 @@ class BatchNormLayerBayes(BatchNormLayer):
                                 self.beta_q_dist.sample
                             )
                         else:
-                            self.beta = 0.
+                            self.beta = tf.Variable(0., name='beta', trainable=False)
 
-                        if self.scale:
+                        if self.rescale_activations:
                             scale_sd_prior = get_numerical_sd(self.scale_sd_prior, in_dim=1, out_dim=1)
                             if self.scale_sd_init:
                                 scale_sd_posterior = get_numerical_sd(self.scale_sd_init, in_dim=1, out_dim=1)
@@ -1696,7 +1696,7 @@ class BatchNormLayerBayes(BatchNormLayer):
                                 self.gamma_q_dist.sample
                             )
                         else:
-                            self.gamma = 1.
+                            self.gamma = tf.Variable(1., name='beta', trainable=False)
 
         self.built = True
 

@@ -313,6 +313,7 @@ class CDRNNBayes(CDRNN):
                     activation=activation,
                     dropout=dropout,
                     batch_normalization_decay=batch_normalization_decay,
+                    batch_normalization_use_gamma=self.batch_normalization_use_gamma,
                     use_MAP_mode=self.use_MAP_mode,
                     declare_priors_weights=self.declare_priors_weights,
                     declare_priors_biases=self.declare_priors_biases,
@@ -615,8 +616,8 @@ class CDRNNBayes(CDRNN):
             with self.sess.graph.as_default():
                 batch_norm_layer = BatchNormLayerBayes(
                     decay=self.batch_normalization_decay,
-                    center=True,
-                    scale=True,
+                    shift_activations=True,
+                    rescale_activations=self.batch_normalization_use_gamma,
                     axis=-1,
                     use_MAP_mode=self.use_MAP_mode,
                     declare_priors_scale=self.declare_priors_biases,
@@ -803,8 +804,8 @@ class CDRNNBayes(CDRNN):
             with self.sess.graph.as_default():
                 batch_norm_layer = BatchNormLayerBayes(
                     decay=self.batch_normalization_decay,
-                    center=True,
-                    scale=True,
+                    shift_activations=True,
+                    rescale_activations=self.batch_normalization_use_gamma,
                     axis=-1,
                     use_MAP_mode=self.use_MAP_mode,
                     declare_priors_scale=self.declare_priors_biases,

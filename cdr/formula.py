@@ -1282,7 +1282,7 @@ class Formula(object):
                         for i in range(len(X)):
                             X_cur = X[i]
                             if x_id in X_cur.columns:
-                                X_cur[x_id] = X_cur.groupby(series_ids)[x_id].shift(n, fill_value=0.)
+                                X_cur[x_id] = X_cur.groupby(series_ids)[x_id].shift_activations(n, fill_value=0.)
                                 X_cur = self.apply_ops(x, X_cur)
                                 X[i] = X_cur
                                 break
