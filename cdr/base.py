@@ -2345,23 +2345,24 @@ class Model(object):
         rho = corr_cdr(X_2d, impulse_names, impulse_names_2d, time_X_2d, time_X_mask)
         stderr(str(rho) + '\n\n')
 
-        # self.make_plots(
-        #     irf_name_map=irf_name_map,
-        #     plot_interactions=plot_interactions,
-        #     reference_time=reference_time,
-        #     plot_n_time_units=plot_n_time_units,
-        #     plot_n_time_points=plot_n_time_points,
-        #     surface_plot_n_time_points=surface_plot_n_time_points,
-        #     generate_irf_surface_plots=generate_irf_surface_plots,
-        #     generate_interaction_surface_plots=generate_interaction_surface_plots,
-        #     generate_curvature_plots=generate_curvature_plots,
-        #     plot_x_inches=plot_x_inches,
-        #     plot_y_inches=plot_y_inches,
-        #     legend=plot_legend,
-        #     cmap=cmap,
-        #     dpi=dpi,
-        #     keep_plot_history=self.keep_plot_history
-        # )
+        if False:
+            self.make_plots(
+                irf_name_map=irf_name_map,
+                plot_interactions=plot_interactions,
+                reference_time=reference_time,
+                plot_n_time_units=plot_n_time_units,
+                plot_n_time_points=plot_n_time_points,
+                surface_plot_n_time_points=surface_plot_n_time_points,
+                generate_irf_surface_plots=generate_irf_surface_plots,
+                generate_interaction_surface_plots=generate_interaction_surface_plots,
+                generate_curvature_plots=generate_curvature_plots,
+                plot_x_inches=plot_x_inches,
+                plot_y_inches=plot_y_inches,
+                legend=plot_legend,
+                cmap=cmap,
+                dpi=dpi,
+                keep_plot_history=self.keep_plot_history
+            )
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -3234,6 +3235,7 @@ class Model(object):
             plot_rangf=False,
             plot_n_time_units=2.5,
             plot_n_time_points=1000,
+            plot_support_start=0.,
             surface_plot_n_time_points=1024,
             plot_mean_as_reference=True,
             generate_irf_surface_plots=False,
@@ -3283,6 +3285,7 @@ class Model(object):
         :param reference_time: ``float``; timepoint at which to plot interactions (CDRNN only)
         :param plot_rangf: ``bool``; plot all (marginal) random effects.
         :param plot_n_time_units: ``float``; number if time units to use for plotting.
+        :param plot_support_start: ``float``; start time for IRF plots.
         :param plot_mean_as_reference: ``bool``; whether to use the predictor means as baseline reference (otherwise use zero). CDRNN only.
         :param generate_irf_surface_plots: ``bool``; whether to plot IRF surfaces. CDRNN only.
         :param generate_interaction_surface_plots: ``bool``; whether to plot IRF interaction surfaces. CDRNN only.
@@ -3386,7 +3389,7 @@ class Model(object):
                     )
 
                 fd = {
-                    self.support_start: 0.,
+                    self.support_start: plot_support_start,
                     self.n_time_units: plot_n_time_units,
                     self.n_time_points: plot_n_time_points,
                     self.max_tdelta_batch: plot_n_time_units,
@@ -3409,7 +3412,7 @@ class Model(object):
                                 plot_type='curvature',
                                 level=level,
                                 n_samples=n_samples,
-                                support_start=0.,
+                                support_start=plot_support_start,
                                 n_time_units=plot_n_time_units,
                                 n_time_points=plot_n_time_points,
                                 t_interaction=reference_time,
@@ -3424,7 +3427,7 @@ class Model(object):
                             plot_x, plot_y = self.get_plot_data(
                                 name,
                                 plot_type='curvature',
-                                support_start=0.,
+                                support_start=plot_support_start,
                                 n_time_units=plot_n_time_units,
                                 n_time_points=plot_n_time_points,
                                 t_interaction=reference_time,
@@ -3497,7 +3500,7 @@ class Model(object):
                                     (x_cur, y_cur), z_cur, lq_cur, uq_cur, _ = self.get_plot_data(
                                         name,
                                         plot_type=plot_type,
-                                        support_start=0.,
+                                        support_start=plot_support_start,
                                         level=level,
                                         n_samples=n_samples,
                                         n_time_units=plot_n_time_units,
@@ -3518,7 +3521,7 @@ class Model(object):
                                     (x_cur, y_cur), z_cur = self.get_plot_data(
                                         name,
                                         plot_type=plot_type,
-                                        support_start=0.,
+                                        support_start=plot_support_start,
                                         n_time_units=plot_n_time_units,
                                         n_time_points=plot_n_time_points,
                                         t_interaction=reference_time,
@@ -3615,7 +3618,7 @@ class Model(object):
                                             plot_type='irf_1d',
                                             level=level,
                                             n_samples=n_samples,
-                                            support_start=0.,
+                                            support_start=plot_support_start,
                                             n_time_units=plot_n_time_units,
                                             n_time_points=plot_n_time_points,
                                             plot_rangf=plot_rangf,
@@ -3658,7 +3661,7 @@ class Model(object):
                                             scaled=b,
                                             dirac=dirac,
                                             plot_type='irf_1d',
-                                            support_start=0.,
+                                            support_start=plot_support_start,
                                             n_time_units=plot_n_time_units,
                                             n_time_points=plot_n_time_points,
                                             plot_rangf=plot_rangf,
@@ -3712,6 +3715,43 @@ class Model(object):
                                         transparent_background=transparent_background,
                                         dump_source=dump_source
                                     )
+
+                                    # print(names_cur[0])
+                                    # print(names_cur[2])
+                                    # rate_vec = plot_y[g][..., 0]
+                                    # surp_vec = plot_y[g][..., 2]
+                                    # surp_vec_in = np.concatenate([surp_vec, np.zeros(len(surp_vec)-1)], axis=0)
+                                    # surp_neuronal, _ = scipy.signal.deconvolve(surp_vec_in, rate_vec)
+                                    # print(surp_neuronal.shape)
+                                    # plot_y = np.stack(
+                                    #     [
+                                    #         rate_vec,
+                                    #         surp_vec,
+                                    #         surp_neuronal
+                                    #     ],
+                                    #     axis=-1
+                                    # )
+                                    # names_fft = [names_cur[0], names_cur[2], '5-gram surprisal (neuronal)']
+                                    #
+                                    # plot_irf(
+                                    #     plot_x,
+                                    #     plot_y,
+                                    #     names_fft,
+                                    #     dir=self.outdir,
+                                    #     filename='surp_fft.png',
+                                    #     irf_name_map=irf_name_map,
+                                    #     plot_x_inches=plot_x_inches,
+                                    #     plot_y_inches=plot_y_inches,
+                                    #     ylim=ylim,
+                                    #     cmap=cmap,
+                                    #     dpi=dpi,
+                                    #     legend=legend,
+                                    #     xlab=xlab,
+                                    #     ylab=ylab,
+                                    #     use_line_markers=use_line_markers,
+                                    #     transparent_background=transparent_background,
+                                    #     dump_source=dump_source
+                                    # )
 
                 if hasattr(self, 'pc') and self.pc:
                     for a in switches[0]:

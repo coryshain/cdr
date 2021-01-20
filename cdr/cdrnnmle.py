@@ -2,7 +2,7 @@ import math
 import pandas as pd
 
 from .kwargs import CDRNNMLE_INITIALIZATION_KWARGS
-from .backend import get_initializer, DenseLayer, CDRNNLayer, BatchNormLayer
+from .backend import get_initializer, DenseLayer, CDRNNLayer, BatchNormLayer, LayerNormLayer
 from .cdrnnbase import CDRNN
 from .util import sn, reg_name, stderr
 
@@ -115,6 +115,7 @@ class CDRNNMLE(CDRNN):
             activation=None,
             dropout=None,
             batch_normalization_decay=None,
+            layer_normalization_type=None,
             name=None,
             final=False
     ):
@@ -127,7 +128,9 @@ class CDRNNMLE(CDRNN):
                     activation=activation,
                     dropout=dropout,
                     batch_normalization_decay=batch_normalization_decay,
-                    batch_normalization_use_gamma=self.batch_normalization_use_gamma,
+                    layer_normalization_type=layer_normalization_type,
+                    normalize_after_activation=self.normalize_after_activation,
+                    normalization_use_gamma=self.normalization_use_gamma,
                     kernel_sd_init=self.weight_sd_init,
                     epsilon=self.epsilon,
                     session=self.sess,
@@ -209,21 +212,34 @@ class CDRNNMLE(CDRNN):
 
                 return h_bias, h_bias_summary
 
-    def initialize_h_batch_norm(self):
+    def initialize_h_normalization(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                batch_norm_layer = BatchNormLayer(
-                    decay=self.batch_normalization_decay,
-                    shift_activations=True,
-                    rescale_activations=self.batch_normalization_use_gamma,
-                    axis=-1,
-                    training=self.training,
-                    epsilon=self.epsilon,
-                    session=self.sess,
-                    name='h'
-                )
+                if self.use_batch_normalization:
+                    normalization_layer = BatchNormLayer(
+                        decay=self.batch_normalization_decay,
+                        shift_activations=True,
+                        rescale_activations=self.normalization_use_gamma,
+                        axis=-1,
+                        training=self.training,
+                        epsilon=self.epsilon,
+                        session=self.sess,
+                        name='h'
+                    )
+                elif self.use_layer_normalization:
+                    normalization_layer = LayerNormLayer(
+                        normalization_type=self.layer_normalization_type,
+                        shift_activations=True,
+                        rescale_activations=self.normalization_use_gamma,
+                        axis=-1,
+                        epsilon=self.epsilon,
+                        session=self.sess,
+                        name='h'
+                    )
+                else:
+                    normalization_layer = lambda x: x
 
-                return batch_norm_layer
+                return normalization_layer
             
     def initialize_irf_l1_weights(self, ran_gf=None):
         with self.sess.as_default():
@@ -283,21 +299,34 @@ class CDRNNMLE(CDRNN):
 
                 return irf_l1_b, irf_l1_b_summary
 
-    def initialize_irf_l1_batch_norm(self):
+    def initialize_irf_l1_normalization(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                batch_norm_layer = BatchNormLayer(
-                    decay=self.batch_normalization_decay,
-                    shift_activations=True,
-                    rescale_activations=self.batch_normalization_use_gamma,
-                    axis=-1,
-                    training=self.training,
-                    epsilon=self.epsilon,
-                    session=self.sess,
-                    name='irf_l1'
-                )
+                if self.use_batch_normalization:
+                    normalization_layer = BatchNormLayer(
+                        decay=self.batch_normalization_decay,
+                        shift_activations=True,
+                        rescale_activations=self.normalization_use_gamma,
+                        axis=-1,
+                        training=self.training,
+                        epsilon=self.epsilon,
+                        session=self.sess,
+                        name='irf_l1'
+                    )
+                elif self.use_layer_normalization:
+                    normalization_layer = LayerNormLayer(
+                        normalization_type=self.layer_normalization_type,
+                        shift_activations=True,
+                        rescale_activations=self.normalization_use_gamma,
+                        axis=-1,
+                        epsilon=self.epsilon,
+                        session=self.sess,
+                        name='irf_l1'
+                    )
+                else:
+                    normalization_layer = lambda x: x
 
-                return batch_norm_layer
+                return normalization_layer
 
     def initialize_objective(self):
         with self.sess.as_default():

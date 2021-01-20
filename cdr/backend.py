@@ -35,6 +35,10 @@ def get_activation(activation, session=None, training=True, from_logits=True, sa
                         out = hard_sigmoid
                     elif activation.lower() == 'gelu':
                         out = lambda x: x * tf.nn.sigmoid(1.702*x)
+                    elif activation.lower() == 'gelu1p':
+                        out = lambda x: (x + 1) * tf.nn.sigmoid(1.702*(x+1))
+                    elif activation.lower() == 'l2norm':
+                        out = lambda x: tf.nn.l2_normalize(x, axis=-1)
                     elif activation.lower() == 'swish':
                         out = lambda x: x * tf.nn.sigmoid(x)
                     elif activation.lower() == 'shifted_softplus':
@@ -1050,7 +1054,9 @@ class DenseLayer(object):
             kernel_sd_init='he',
             dropout=None,
             batch_normalization_decay=None,
-            batch_normalization_use_gamma=True,
+            layer_normalization_type=None,
+            normalize_after_activation=False,
+            normalization_use_gamma=True,
             reuse=tf.AUTO_REUSE,
             epsilon=1e-5,
             session=None,
@@ -1065,15 +1071,32 @@ class DenseLayer(object):
                 self.activation = get_activation(activation, session=self.session, training=self.training)
                 self.kernel_sd_init = kernel_sd_init
                 self.dropout = get_dropout(dropout, training=self.training, session=self.session)
+
                 self.batch_normalization_decay = batch_normalization_decay
                 self.use_batch_normalization = bool(self.batch_normalization_decay)
-                self.batch_normalization_use_gamma = batch_normalization_use_gamma
+
+                self.layer_normalization_type = layer_normalization_type
+                if layer_normalization_type is None:
+                    self.layer_normalization_type = layer_normalization_type
+                elif layer_normalization_type.lower() == 'z':
+                    self.layer_normalization_type = 'z'
+                elif layer_normalization_type.lower() == 'length':
+                    self.layer_normalization_type = 'length'
+                else:
+                    raise ValueError('Unrecognized layer normalization type: %s' % layer_normalization_type)
+                self.use_layer_normalization = bool(self.layer_normalization_type)
+
+                assert not (self.use_batch_normalization and self.use_layer_normalization), 'Cannot batch normalize and layer normalize the same layer.'
+                self.normalize_activations = self.use_batch_normalization or self.use_layer_normalization
+
+                self.normalize_after_activation = normalize_after_activation
+                self.normalization_use_gamma = normalization_use_gamma
                 self.reuse = reuse
                 self.epsilon = epsilon
                 self.name = name
 
-                self.batch_normalization_beta = None
-                self.batch_normalization_gamma = None
+                self.normalization_beta = None
+                self.normalization_gamma = None
 
                 if batch_normalization_decay and dropout:
                     stderr('WARNING: Batch normalization and dropout are being applied simultaneously in layer %s.\n         This is usually not a good idea.')
@@ -1085,8 +1108,8 @@ class DenseLayer(object):
         out = []
         if self.built:
             out.append(self.kernel)
-        if self.use_batch_normalization and self.built:
-            out.append(self.batch_norm_layer.gamma)
+        if self.normalize_activations and self.built:
+            out.append(self.normalization_layer.gamma)
         return out
 
     def build(self, inputs):
@@ -1117,11 +1140,18 @@ class DenseLayer(object):
                             shape=[in_dim, out_dim]
                         )
 
+                        if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
+                            self.bias = tf.get_variable(
+                                name='bias',
+                                shape=[out_dim],
+                                initializer=tf.zeros_initializer(),
+                            )
+
                         if self.use_batch_normalization:
-                            self.batch_norm_layer = BatchNormLayer(
+                            self.normalization_layer = BatchNormLayer(
                                 decay=self.batch_normalization_decay,
                                 shift_activations=self.use_bias,
-                                rescale_activations=self.batch_normalization_use_gamma,
+                                rescale_activations=self.normalization_use_gamma,
                                 axis=-1,
                                 training=self.training,
                                 epsilon=self.epsilon,
@@ -1129,11 +1159,16 @@ class DenseLayer(object):
                                 reuse=self.reuse,
                                 name=self.name
                             )
-                        elif self.use_bias:
-                            self.bias = tf.get_variable(
-                                name='bias',
-                                shape=[out_dim],
-                                initializer=tf.zeros_initializer(),
+                        elif self.use_batch_normalization:
+                            self.normalization_layer = LayerNormLayer(
+                                normalization_type=self.layer_normalization_type,
+                                shift_activations=self.use_bias,
+                                rescale_activations=self.normalization_use_gamma,
+                                axis=-1,
+                                epsilon=self.epsilon,
+                                session=self.session,
+                                reuse=self.reuse,
+                                name=self.name
                             )
 
             self.built = True
@@ -1145,16 +1180,16 @@ class DenseLayer(object):
         with self.session.as_default():
             with self.session.graph.as_default():
                 H = tf.tensordot(inputs, self.kernel, 1)
-                if not self.use_batch_normalization and self.use_bias:
+                if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
                     bias = self.bias
                     while len(bias.shape) < len(H.shape):
                         bias = bias[None, ...]
                     H += bias
 
-                if self.activation is not None:
+                if self.activation is not None and self.normalize_after_activation:
                     H = self.activation(H)
 
-                if self.batch_normalization_decay:
+                if self.normalize_activations:
                     # H = tf.contrib.layers.batch_norm(
                     #     H,
                     #     decay=self.batch_normalization_decay,
@@ -1167,7 +1202,10 @@ class DenseLayer(object):
                     #     reuse=self.reuse,
                     #     scope=self.name
                     # )
-                    H = self.batch_norm_layer(H)
+                    H = self.normalization_layer(H)
+
+                if self.activation is not None and not self.normalize_after_activation:
+                    H = self.activation(H)
 
                 H = self.dropout(H)
 
@@ -1178,8 +1216,8 @@ class DenseLayer(object):
 
     def ema_ops(self):
         out = []
-        if self.batch_normalization_decay and self.built:
-            out += self.batch_norm_layer.ema_ops()
+        if self.use_batch_normalization and self.built:
+            out += self.normalization_layer.ema_ops()
 
         return out
 
@@ -1194,10 +1232,13 @@ class DenseLayerBayes(DenseLayer):
             activation=None,
             dropout=None,
             batch_normalization_decay=None,
-            batch_normalization_use_gamma=True,
+            layer_normalization_type=None,
+            normalize_after_activation=False,
+            normalization_use_gamma=True,
             use_MAP_mode=None,
             declare_priors_weights=True,
             declare_priors_biases=False,
+            declare_priors_gamma=False,
             kernel_sd_prior=1,
             kernel_sd_init=None,
             bias_sd_prior=1.,
@@ -1219,7 +1260,9 @@ class DenseLayerBayes(DenseLayer):
             kernel_sd_init=kernel_sd_init,
             dropout=dropout,
             batch_normalization_decay=batch_normalization_decay,
-            batch_normalization_use_gamma=batch_normalization_use_gamma,
+            layer_normalization_type=layer_normalization_type,
+            normalize_after_activation=normalize_after_activation,
+            normalization_use_gamma=normalization_use_gamma,
             reuse=reuse,
             epsilon=epsilon,
             session=session,
@@ -1230,6 +1273,7 @@ class DenseLayerBayes(DenseLayer):
             with session.graph.as_default():
                 self.declare_priors_weights = declare_priors_weights
                 self.declare_priors_biases = declare_priors_biases
+                self.declare_priors_gamma = declare_priors_gamma
                 self.use_MAP_mode = use_MAP_mode
                 self.kernel_sd_prior = kernel_sd_prior
                 self.bias_sd_prior = bias_sd_prior
@@ -1311,28 +1355,7 @@ class DenseLayerBayes(DenseLayer):
                             self.kernel_q_dist.sample
                         )
 
-                        if self.use_batch_normalization:
-                            self.batch_norm_layer = BatchNormLayerBayes(
-                                decay=self.batch_normalization_decay,
-                                shift_activations=self.use_bias,
-                                rescale_activations=self.batch_normalization_use_gamma,
-                                axis=-1,
-                                use_MAP_mode=self.use_MAP_mode,
-                                declare_priors_scale=self.declare_priors_weights,
-                                declare_priors_shift=self.declare_priors_biases,
-                                scale_sd_prior=self.gamma_sd_prior,
-                                scale_sd_init=self.gamma_sd_init,
-                                shift_sd_prior=self.bias_sd_prior,
-                                shift_sd_init=self.bias_sd_init,
-                                posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
-                                constraint=self.constraint,
-                                training=self.training,
-                                epsilon=self.epsilon,
-                                session=self.session,
-                                reuse=self.reuse,
-                                name=self.name
-                            )
-                        elif self.use_bias:
+                        if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
                             bias_sd_prior = get_numerical_sd(self.bias_sd_prior, in_dim=1, out_dim=1)
                             if self.bias_sd_init:
                                 bias_sd_posterior = get_numerical_sd(self.bias_sd_init, in_dim=1, out_dim=1)
@@ -1373,6 +1396,49 @@ class DenseLayerBayes(DenseLayer):
                                 self.bias_q_dist.sample
                             )
 
+                        if self.use_batch_normalization:
+                            self.normalization_layer = BatchNormLayerBayes(
+                                decay=self.batch_normalization_decay,
+                                shift_activations=self.use_bias,
+                                rescale_activations=self.normalization_use_gamma,
+                                axis=-1,
+                                use_MAP_mode=self.use_MAP_mode,
+                                declare_priors_scale=self.declare_priors_gamma,
+                                declare_priors_shift=self.declare_priors_biases,
+                                scale_sd_prior=self.gamma_sd_prior,
+                                scale_sd_init=self.gamma_sd_init,
+                                shift_sd_prior=self.bias_sd_prior,
+                                shift_sd_init=self.bias_sd_init,
+                                posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
+                                constraint=self.constraint,
+                                training=self.training,
+                                epsilon=self.epsilon,
+                                session=self.session,
+                                reuse=self.reuse,
+                                name=self.name
+                            )
+                        elif self.use_layer_normalization:
+                            self.normalization_layer = LayerNormLayerBayes(
+                                normalization_type=self.layer_normalization_type,
+                                shift_activations=self.use_bias,
+                                rescale_activations=self.normalization_use_gamma,
+                                axis=-1,
+                                use_MAP_mode=self.use_MAP_mode,
+                                declare_priors_scale=self.declare_priors_gamma,
+                                declare_priors_shift=self.declare_priors_biases,
+                                scale_sd_prior=self.gamma_sd_prior,
+                                scale_sd_init=self.gamma_sd_init,
+                                shift_sd_prior=self.bias_sd_prior,
+                                shift_sd_init=self.bias_sd_init,
+                                posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
+                                constraint=self.constraint,
+                                epsilon=self.epsilon,
+                                session=self.session,
+                                reuse=self.reuse,
+                                name=self.name
+                            )
+
+
             self.built = True
 
     def kl_penalties(self):
@@ -1380,7 +1446,7 @@ class DenseLayerBayes(DenseLayer):
             with self.session.graph.as_default():
                 out = self.kl_penalties_base.copy()
                 if self.batch_normalization_decay:
-                    out.update(self.batch_norm_layer.kl_penalties())
+                    out.update(self.normalization_layer.kl_penalties())
 
                 return out
 
@@ -1704,3 +1770,290 @@ class BatchNormLayerBayes(BatchNormLayer):
         with self.session.as_default():
             with self.session.graph.as_default():
                 return self.kl_penalties_base.copy()
+
+
+class LayerNormLayer(object):
+    def __init__(
+            self,
+            normalization_type='z',
+            shift_activations=True,
+            rescale_activations=True,
+            axis=-1,
+            epsilon=1e-5,
+            session=None,
+            reuse=tf.AUTO_REUSE,
+            name=None
+    ):
+        self.session = get_session(session)
+        self.normalization_type = normalization_type
+        assert self.normalization_type in ['z', 'length'], 'Unrecognized normalization type: %s' % self.normalization_type
+        self.shift_activations = shift_activations
+        self.rescale_activations = rescale_activations
+        self.axis = axis
+        self.epsilon = epsilon
+        self.reuse = reuse
+        self.name = name
+
+        self.built = False
+
+    def build(self, inputs):
+        if not self.built:
+            if self.axis is None or self.axis == -1:
+                axis = [len(inputs.shape) - 1]
+            else:
+                axis = [self.axis]
+            if isinstance(axis, int):
+                axis = [axis]
+
+            self.reduction_axes = axis
+
+            shape = []
+            for i in range(len(inputs.shape)):
+                if i in self.reduction_axes:
+                    shape.append(1)
+                else:
+                    shape.append(inputs.shape[i])
+
+            if not self.name:
+                name = ''
+            else:
+                name = self.name
+
+            with self.session.as_default():
+                with self.session.graph.as_default():
+                    with tf.variable_scope(name, reuse=self.reuse):
+                        if self.shift_activations:
+                            self.beta = tf.get_variable(
+                                name='beta',
+                                initializer=tf.zeros_initializer(),
+                                shape=shape
+                            )
+                        else:
+                            self.beta = tf.Variable(0., name='beta', trainable=False)
+
+                        if self.rescale_activations:
+                            self.gamma = tf.get_variable(
+                                name='gamma',
+                                initializer=tf.ones_initializer(),
+                                shape=shape
+                            )
+                        else:
+                            self.gamma = tf.Variable(1., name='beta', trainable=False)
+
+        self.built = True
+
+    def __call__(self, inputs):
+        if not self.built:
+            self.build(inputs)
+
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                if self.normalization_type == 'z':
+                    mean, variance = tf.nn.moments(inputs, self.reduction_axes, keep_dims=True)
+                    sd = tf.sqrt(variance)
+                    out = ((inputs - mean) / (sd + self.epsilon))
+                else: # length normalization
+                    out = tf.nn.l2_normalize(inputs, axis=self.reduction_axes, epsilon=self.epsilon)
+
+                out = out * self.gamma + self.beta
+
+                return out
+
+    def ema_ops(self):
+        return []
+
+
+class LayerNormLayerBayes(LayerNormLayer):
+    def __init__(
+            self,
+            normalization_type='z',
+            shift_activations=True,
+            rescale_activations=True,
+            axis=-1,
+            use_MAP_mode=None,
+            declare_priors_scale=True,
+            declare_priors_shift=False,
+            scale_sd_prior=1.,
+            scale_sd_init=None,
+            shift_sd_prior=1.,
+            shift_sd_init=None,
+            posterior_to_prior_sd_ratio=1.,
+            constraint='softplus',
+            epsilon=1e-5,
+            session=None,
+            reuse=tf.AUTO_REUSE,
+            name=None
+    ):
+        super(LayerNormLayerBayes, self).__init__(
+            normalization_type=normalization_type,
+            shift_activations=shift_activations,
+            rescale_activations=rescale_activations,
+            axis=axis,
+            epsilon=epsilon,
+            session=session,
+            reuse=reuse,
+            name=name
+        )
+
+        self.use_MAP_mode = use_MAP_mode
+        self.declare_priors_scale = declare_priors_scale
+        self.declare_priors_shift = declare_priors_shift
+        self.scale_sd_prior = scale_sd_prior
+        self.scale_sd_init = scale_sd_init
+        self.shift_sd_prior = shift_sd_prior
+        self.shift_sd_init = shift_sd_init
+        self.posterior_to_prior_sd_ratio = posterior_to_prior_sd_ratio
+        self.constraint = constraint
+
+        if self.constraint.lower() == 'softplus':
+            self.constraint_fn = tf.nn.softplus
+            self.constraint_fn_inv = tf.contrib.distributions.softplus_inverse
+        elif self.constraint.lower() == 'square':
+            self.constraint_fn = tf.square
+            self.constraint_fn_inv = tf.sqrt
+        elif self.constraint.lower() == 'abs':
+            self.constraint_fn = self._safe_abs
+            self.constraint_fn_inv = tf.identity
+        else:
+            raise ValueError('Unrecognized constraint function %s' % self.constraint)
+
+        self.kl_penalties_base = {}
+
+    def build(self, inputs):
+        if not self.built:
+            if self.axis is None or self.axis == -1:
+                axis = [len(inputs.shape) - 1]
+            else:
+                axis = [self.axis]
+            if isinstance(axis, int):
+                axis = [axis]
+
+            self.reduction_axes = axis
+
+            shape = []
+            for i in range(len(inputs.shape)):
+                if i in self.reduction_axes:
+                    shape.append(inputs.shape[i])
+                else:
+                    shape.append(1)
+
+            if not self.name:
+                name = ''
+            else:
+                name = self.name
+
+            if self.use_MAP_mode is None:
+                self.use_MAP_mode = tf.logical_not(self.training)
+
+            with self.session.as_default():
+                with self.session.graph.as_default():
+                    with tf.variable_scope(name, reuse=self.reuse):
+                        self.moving_mean = tf.get_variable(
+                            name='moving_mean',
+                            initializer=tf.zeros_initializer(),
+                            shape=shape,
+                            trainable=False
+                        )
+                        self.moving_mean_op = None
+
+                        self.moving_variance = tf.get_variable(
+                            name='moving_variance',
+                            initializer=tf.ones_initializer(),
+                            shape=shape,
+                            trainable=False
+                        )
+                        self.moving_variance_op = None
+
+                        if self.shift_activations:
+                            shift_sd_prior = get_numerical_sd(self.shift_sd_prior, in_dim=1, out_dim=1)
+                            if self.shift_sd_init:
+                                shift_sd_posterior = get_numerical_sd(self.shift_sd_init, in_dim=1, out_dim=1)
+                            else:
+                                shift_sd_posterior = shift_sd_prior * self.posterior_to_prior_sd_ratio
+
+                            # Posterior distribution
+                            self.beta_q_loc = tf.get_variable(
+                                name='beta_q_loc',
+                                initializer=tf.zeros_initializer(),
+                                shape=shape
+                            )
+                            self.beta_q_scale = tf.get_variable(
+                                name='beta_q_scale',
+                                initializer=tf.ones(shape) * self.constraint_fn_inv(shift_sd_posterior)
+                            )
+
+                            self.beta_q_dist = Normal(
+                                loc=self.beta_q_loc,
+                                scale=self.constraint_fn(self.beta_q_scale) + self.epsilon,
+                                name='beta_q'
+                            )
+                            if self.declare_priors_shift:
+                                # Prior distribution
+                                self.beta_prior_dist = Normal(
+                                    loc=0.,
+                                    scale=shift_sd_prior,
+                                    name='beta'
+                                )
+                                self.kl_penalties_base[self.name + '/beta'] = {
+                                    'loc': 0.,
+                                    'scale': shift_sd_prior,
+                                    'val': self.beta_q_dist.kl_divergence(self.beta_prior_dist)
+                                }
+                            self.beta = tf.cond(
+                                self.use_MAP_mode,
+                                self.beta_q_dist.mean,
+                                self.beta_q_dist.sample
+                            )
+                        else:
+                            self.beta = tf.Variable(0., name='beta', trainable=False)
+
+                        if self.rescale_activations:
+                            scale_sd_prior = get_numerical_sd(self.scale_sd_prior, in_dim=1, out_dim=1)
+                            if self.scale_sd_init:
+                                scale_sd_posterior = get_numerical_sd(self.scale_sd_init, in_dim=1, out_dim=1)
+                            else:
+                                scale_sd_posterior = scale_sd_prior * self.posterior_to_prior_sd_ratio
+
+                            # Posterior distribution
+                            self.gamma_q_loc = tf.get_variable(
+                                name='gamma_q_loc',
+                                initializer=tf.ones_initializer(),
+                                shape=shape
+                            )
+                            self.gamma_q_scale = tf.get_variable(
+                                name='gamma_q_scale',
+                                initializer=tf.ones(shape) * self.constraint_fn_inv(scale_sd_posterior)
+                            )
+
+                            self.gamma_q_dist = Normal(
+                                loc=self.gamma_q_loc,
+                                scale=self.constraint_fn(self.gamma_q_scale) + self.epsilon,
+                                name='gamma_q'
+                            )
+                            if self.declare_priors_shift:
+                                # Prior distribution
+                                self.gamma_prior_dist = Normal(
+                                    loc=1.,
+                                    scale=scale_sd_prior,
+                                    name='gamma'
+                                )
+                                self.kl_penalties_base[self.name + '/gamma'] = {
+                                    'loc': 1.,
+                                    'scale': scale_sd_prior,
+                                    'val': self.gamma_q_dist.kl_divergence(self.gamma_prior_dist)
+                                }
+                            self.gamma = tf.cond(
+                                self.use_MAP_mode,
+                                self.gamma_q_dist.mean,
+                                self.gamma_q_dist.sample
+                            )
+                        else:
+                            self.gamma = tf.Variable(1., name='beta', trainable=False)
+
+        self.built = True
+
+    def kl_penalties(self):
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                return self.kl_penalties_base.copy()
+

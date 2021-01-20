@@ -3264,7 +3264,7 @@ class CDR(Model):
             rangf_vals = np.stack(rangf_vals, axis=0)
         if plot_type.lower() == 'irf_1d':
             fd = {
-                self.support_start: 0.,
+                self.support_start: support_start,
                 self.n_time_units: n_time_units,
                 self.n_time_points: n_time_points,
                 self.max_tdelta_batch: n_time_points,

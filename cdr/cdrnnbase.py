@@ -84,10 +84,16 @@ class CDRNN(Model):
 
         self.is_cdrnn = True
 
-        self.BATCH_NORM_H = True
-        self.BATCH_NORM_IRF_L1 = True
-        self.BATCH_NORM_IRF = True
-        self.BATCH_NORM_ERROR = True
+        self.NORM_H = True
+        self.NORM_IRF_L1 = True
+        self.NORM_IRF = True
+        self.NORM_ERROR = True
+        self.use_batch_normalization = bool(self.batch_normalization_decay)
+        self.use_layer_normalization = bool(self.layer_normalization_type)
+
+        assert not (self.use_batch_normalization and self.use_layer_normalization), 'Cannot batch normalize and layer normalize the same model.'
+
+        self.normalize_activations = self.use_batch_normalization or self.use_layer_normalization
 
         # Initialize tree metadata
         self.t = self.form.t
@@ -448,12 +454,14 @@ class CDRNN(Model):
                         activation = self.input_projection_inner_activation
                         dropout = self.input_projection_dropout_rate
                         bn = self.batch_normalization_decay
+                        ln = self.layer_normalization_type
                         use_bias = True
                     else:
                         units = self.n_units_hidden_state
                         activation = self.input_projection_activation
                         dropout = None
                         bn = None
+                        ln = None
                         use_bias = False
 
                     projection = self.initialize_feedforward(
@@ -462,6 +470,7 @@ class CDRNN(Model):
                         activation=activation,
                         dropout=dropout,
                         batch_normalization_decay=bn,
+                        layer_normalization_type=ln,
                         name='input_projection_l%s' % (l + 1)
                     )
                     self.layers.append(projection)
@@ -516,11 +525,13 @@ class CDRNN(Model):
                             units = self.n_units_rnn_projection[l]
                             activation = self.rnn_projection_inner_activation
                             bn = self.batch_normalization_decay
+                            ln = self.layer_normalization_type
                             use_bias = True
                         else:
                             units = self.n_units_hidden_state
                             activation = self.rnn_projection_activation
                             bn = None
+                            ln = None
                             use_bias = False
 
                         projection = self.initialize_feedforward(
@@ -529,6 +540,7 @@ class CDRNN(Model):
                             activation=activation,
                             dropout=None,
                             batch_normalization_decay=bn,
+                            layer_normalization_type=ln,
                             name='rnn_projection_l%s' % (l + 1)
                         )
                         self.layers.append(projection)
@@ -541,30 +553,31 @@ class CDRNN(Model):
                     self.rnn_projection_layers = rnn_projection_layers
                     self.rnn_projection_fn = rnn_projection_fn
 
-                if self.BATCH_NORM_H and self.batch_normalization_decay:
-                    self.h_batch_norm_layer = self.initialize_h_batch_norm()
-                    self.layers.append(self.h_batch_norm_layer)
-                    h_bias = tf.zeros([1, 1, self.n_units_hidden_state])
-                    h_bias_summary = tf.zeros_like([1, 1, self.n_units_hidden_state])
+                if self.NORM_H and self.normalize_activations:
+                    self.h_normalization_layer = self.initialize_h_normalization()
+                    self.layers.append(self.h_normalization_layer)
+                    if self.normalize_after_activation:
+                        h_bias, h_bias_summary = self.initialize_h_bias()
+                    else:
+                        h_bias = tf.zeros([1, 1, units])
+                        h_bias_summary = tf.zeros([1, 1, units])
                 else:
                     h_bias, h_bias_summary = self.initialize_h_bias()
                 self.h_bias = h_bias
 
                 irf_l1_W, irf_l1_W_summary = self.initialize_irf_l1_weights()
-
+                self.irf_l1_W = irf_l1_W
                 if self.irf_l1_use_bias:
-                    if self.BATCH_NORM_IRF_L1 and self.batch_normalization_decay:
-                        self.irf_l1_batch_norm_layer = self.initialize_irf_l1_batch_norm()
-                        self.layers.append(self.irf_l1_batch_norm_layer)
-                        irf_l1_b = tf.zeros_like(irf_l1_W)
-                        irf_l1_b_summary = tf.zeros_like(irf_l1_W)
+                    if self.NORM_IRF_L1 and self.normalize_activations:
+                        self.irf_l1_normalization_layer = self.initialize_irf_l1_normalization()
+                        self.layers.append(self.irf_l1_normalization_layer)
+                        if self.normalize_after_activation:
+                            irf_l1_b, irf_l1_b_summary = self.initialize_irf_l1_biases()
+                        else:
+                            irf_l1_b = tf.zeros_like(self.irf_l1_W)
+                            irf_l1_b_summary = tf.zeros_like(self.irf_l1_W)
                     else:
                         irf_l1_b, irf_l1_b_summary = self.initialize_irf_l1_biases()
-                else:
-                    irf_l1_b = tf.zeros_like(irf_l1_W)
-                    irf_l1_b_summary = tf.zeros_like(irf_l1_W)
-
-                self.irf_l1_W = irf_l1_W
                 self.irf_l1_b = irf_l1_b
 
                 # Projection from hidden state to first layer (weights and biases) of IRF
@@ -588,10 +601,12 @@ class CDRNN(Model):
                         units = self.n_units_irf[l]
                         activation = self.irf_inner_activation
                         dropout = self.irf_dropout_rate
-                        if self.BATCH_NORM_IRF:
+                        if self.NORM_IRF:
                             bn = self.batch_normalization_decay
+                            ln = self.layer_normalization_type
                         else:
                             bn = None
+                            ln = None
                         use_bias = True
                         final = False
                     else:
@@ -599,6 +614,7 @@ class CDRNN(Model):
                         activation = self.irf_activation
                         dropout = None
                         bn = None
+                        ln = None
                         use_bias = False
                         final = True
 
@@ -608,6 +624,7 @@ class CDRNN(Model):
                         activation=activation,
                         dropout=dropout,
                         batch_normalization_decay=bn,
+                        layer_normalization_type=ln,
                         name='irf_l%s' % (l + 1),
                         final=final
                     )
@@ -628,10 +645,12 @@ class CDRNN(Model):
                     units = self.n_units_error_params_fn[l]
                     activation = self.error_params_fn_inner_activation
                     dropout = self.error_params_fn_dropout_rate
-                    if self.BATCH_NORM_ERROR:
+                    if self.NORM_ERROR:
                         bn = self.batch_normalization_decay
+                        ln = self.layer_normalization_type
                     else:
                         bn = None
+                        ln = None
                     use_bias = True
 
                     projection = self.initialize_feedforward(
@@ -640,6 +659,7 @@ class CDRNN(Model):
                         activation=activation,
                         dropout=dropout,
                         batch_normalization_decay=bn,
+                        layer_normalization_type=ln,
                         name='error_params_fn_l%s' % (l + 1)
                     )
                     self.layers.append(projection)
@@ -1161,9 +1181,12 @@ class CDRNN(Model):
                 else:
                     h_rnn = rnn_hidden = rnn_cell = None
 
-                h = get_activation(self.hidden_state_activation, session=self.sess)(h)
-                if self.BATCH_NORM_H and self.batch_normalization_decay:
-                    h = self.h_batch_norm_layer(h)
+                if self.normalize_after_activation:
+                    h = get_activation(self.hidden_state_activation, session=self.sess)(h)
+                if self.NORM_H and self.normalize_activations:
+                    h = self.h_normalization_layer(h)
+                if not self.normalize_after_activation:
+                    h = get_activation(self.hidden_state_activation, session=self.sess)(h)
 
                 # Compute response
                 Wb_proj = self.hidden_state_to_irf_l1(h)
@@ -1174,9 +1197,12 @@ class CDRNN(Model):
                 b += b_proj
 
                 irf_l1 = W * t_delta + b
-                irf_l1 = get_activation(self.irf_inner_activation, session=self.sess)(irf_l1)
-                if self.BATCH_NORM_IRF_L1 and self.irf_l1_use_bias and self.batch_normalization_decay:
-                    irf_l1 = self.irf_l1_batch_norm_layer(irf_l1)
+                if self.normalize_after_activation:
+                    irf_l1 = get_activation(self.irf_inner_activation, session=self.sess)(irf_l1)
+                if self.NORM_IRF_L1 and self.irf_l1_use_bias and self.normalize_activations:
+                    irf_l1 = self.irf_l1_normalization_layer(irf_l1)
+                if not self.normalize_after_activation:
+                    irf_l1 = get_activation(self.irf_inner_activation, session=self.sess)(irf_l1)
 
                 y = self.irf(irf_l1)
                 if time_X_mask is not None:
@@ -1519,6 +1545,7 @@ class CDRNN(Model):
             activation=None,
             dropout=None,
             batch_normalization_decay=None,
+            layer_normalization_type=None,
             final=False,
             name=None
     ):
@@ -1562,10 +1589,10 @@ class CDRNN(Model):
     ):
         raise
 
-    def initialize_h_batch_norm(self):
+    def initialize_h_normalization(self):
         raise NotImplementedError
 
-    def initialize_irf_l1_batch_norm(self):
+    def initialize_irf_l1_normalization(self):
         raise NotImplementedError
 
 
@@ -1689,7 +1716,7 @@ class CDRNN(Model):
                     impulse_one_hot = self.plot_impulse_name_to_1hot(name)
 
                 fd = {
-                    self.support_start: 0.,
+                    self.support_start: support_start,
                     self.n_time_units: n_time_units,
                     self.n_time_points: n_time_points,
                     self.max_tdelta_batch: n_time_points,

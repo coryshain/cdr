@@ -397,10 +397,23 @@ MODEL_INITIALIZATION_KWARGS = [
         "Decay rate to use for batch normalization in internal layers. If ``None``, no batch normalization.",
     ),
     Kwarg(
-        'batch_normalization_use_gamma',
+        'normalize_after_activation',
         True,
         bool,
-        "Whether to use trainable scale in batch normalization layers. If ``False``, activations will just be standardized.",
+        "Whether to apply normalization (if applicable) after the non-linearity (otherwise, applied before).",
+    ),
+    Kwarg(
+        'normalization_use_gamma',
+        True,
+        bool,
+        "Whether to use trainable scale in batch/layer normalization layers.",
+        aliases=['batch_normalization_use_gamma', 'layer_normalization_use_gamma']
+    ),
+    Kwarg(
+        'layer_normalization_type',
+        None,
+        [str, None],
+        "Type of layer normalization, one of ``['z', 'length', None]``. If ``'z'``, classical z-transform-based normalization. If ``'length'``, normalize by the norm of the activation vector. If ``None``, no layer normalization. Incompatible with batch normalization.",
     ),
     Kwarg(
         'convergence_n_iterates',
@@ -1011,6 +1024,13 @@ CDRNNBAYES_INITIALIZATION_KWARGS = [
         False,
         bool,
         "Specify Gaussian priors for model biases (if ``False``, use implicit improper uniform priors)."
+    ),
+    Kwarg(
+        'declare_priors_gamma',
+        False,
+        bool,
+        "Specify Gaussian priors for all fixed model parameters (if ``False``, use implicit improper uniform priors).",
+        aliases=['declare_priors']
     ),
     Kwarg(
         'declare_priors_ranef',

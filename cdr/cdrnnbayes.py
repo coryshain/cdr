@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 
 from .kwargs import CDRNNBAYES_INITIALIZATION_KWARGS
-from .backend import DenseLayerBayes, CDRNNLayerBayes, BatchNormLayerBayes
+from .backend import DenseLayerBayes, CDRNNLayerBayes, BatchNormLayerBayes, LayerNormLayerBayes
 from .cdrnnbase import CDRNN
 from .util import get_numerical_sd, sn, reg_name, stderr
 
@@ -286,6 +286,7 @@ class CDRNNBayes(CDRNN):
             activation=None,
             dropout=None,
             batch_normalization_decay=None,
+            layer_normalization_type=None,
             name=None,
             final=False
     ):
@@ -298,6 +299,7 @@ class CDRNNBayes(CDRNN):
                     bias_sd_init = self.bias_sd_init
                     gamma_sd_prior = 1.
                     gamma_sd_init = self.gamma_sd_init
+                    declare_priors_weights = self.declare_priors_fixef
                 else:
                     weight_sd_prior = self.weight_prior_sd
                     weight_sd_init = self.weight_sd_init
@@ -305,6 +307,7 @@ class CDRNNBayes(CDRNN):
                     bias_sd_init = self.bias_sd_init
                     gamma_sd_prior = self.gamma_prior_sd
                     gamma_sd_init = self.gamma_sd_init
+                    declare_priors_weights = self.declare_priors_weights
 
                 projection = DenseLayerBayes(
                     training=self.training,
@@ -313,9 +316,11 @@ class CDRNNBayes(CDRNN):
                     activation=activation,
                     dropout=dropout,
                     batch_normalization_decay=batch_normalization_decay,
-                    batch_normalization_use_gamma=self.batch_normalization_use_gamma,
+                    layer_normalization_type=layer_normalization_type,
+                    normalize_after_activation=self.normalize_after_activation,
+                    normalization_use_gamma=self.normalization_use_gamma,
                     use_MAP_mode=self.use_MAP_mode,
-                    declare_priors_weights=self.declare_priors_weights,
+                    declare_priors_weights=declare_priors_weights,
                     declare_priors_biases=self.declare_priors_biases,
                     kernel_sd_prior=weight_sd_prior,
                     kernel_sd_init=weight_sd_init,
@@ -611,30 +616,52 @@ class CDRNNBayes(CDRNN):
 
                 return h_bias, h_bias_summary
 
-    def initialize_h_batch_norm(self):
+    def initialize_h_normalization(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                batch_norm_layer = BatchNormLayerBayes(
-                    decay=self.batch_normalization_decay,
-                    shift_activations=True,
-                    rescale_activations=self.batch_normalization_use_gamma,
-                    axis=-1,
-                    use_MAP_mode=self.use_MAP_mode,
-                    declare_priors_scale=self.declare_priors_biases,
-                    declare_priors_shift=self.declare_priors_biases,
-                    scale_sd_prior=self.bias_prior_sd,
-                    scale_sd_init=self.bias_sd_init,
-                    shift_sd_prior=self.bias_prior_sd,
-                    shift_sd_init=self.bias_prior_sd,
-                    posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
-                    constraint=self.constraint,
-                    training=self.training,
-                    epsilon=self.epsilon,
-                    session=self.sess,
-                    name='h'
-                )
+                if self.use_batch_normalization:
+                    normalization_layer = BatchNormLayerBayes(
+                        decay=self.batch_normalization_decay,
+                        shift_activations=True,
+                        rescale_activations=self.normalization_use_gamma,
+                        axis=-1,
+                        use_MAP_mode=self.use_MAP_mode,
+                        declare_priors_scale=self.declare_priors_gamma,
+                        declare_priors_shift=self.declare_priors_biases,
+                        scale_sd_prior=self.bias_prior_sd,
+                        scale_sd_init=self.bias_sd_init,
+                        shift_sd_prior=self.bias_prior_sd,
+                        shift_sd_init=self.bias_prior_sd,
+                        posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
+                        constraint=self.constraint,
+                        training=self.training,
+                        epsilon=self.epsilon,
+                        session=self.sess,
+                        name='h'
+                    )
+                elif self.use_layer_normalization:
+                    normalization_layer = LayerNormLayerBayes(
+                        normalization_type=self.layer_normalization_type,
+                        shift_activations=True,
+                        rescale_activations=self.normalization_use_gamma,
+                        axis=-1,
+                        use_MAP_mode=self.use_MAP_mode,
+                        declare_priors_scale=self.declare_priors_gamma,
+                        declare_priors_shift=self.declare_priors_biases,
+                        scale_sd_prior=self.bias_prior_sd,
+                        scale_sd_init=self.bias_sd_init,
+                        shift_sd_prior=self.bias_prior_sd,
+                        shift_sd_init=self.bias_prior_sd,
+                        posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
+                        constraint=self.constraint,
+                        epsilon=self.epsilon,
+                        session=self.sess,
+                        name='h'
+                    )
+                else:
+                    normalization_layer = lambda x: x
 
-                return batch_norm_layer
+                return normalization_layer
 
     def initialize_irf_l1_weights(self, ran_gf=None):
         with self.sess.as_default():
@@ -799,30 +826,52 @@ class CDRNNBayes(CDRNN):
 
                 return irf_l1_b, irf_l1_b_summary
 
-    def initialize_irf_l1_batch_norm(self):
+    def initialize_irf_l1_normalization(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                batch_norm_layer = BatchNormLayerBayes(
-                    decay=self.batch_normalization_decay,
-                    shift_activations=True,
-                    rescale_activations=self.batch_normalization_use_gamma,
-                    axis=-1,
-                    use_MAP_mode=self.use_MAP_mode,
-                    declare_priors_scale=self.declare_priors_biases,
-                    declare_priors_shift=self.declare_priors_biases,
-                    scale_sd_prior=self.bias_prior_sd,
-                    scale_sd_init=self.bias_sd_init,
-                    shift_sd_prior=self.bias_prior_sd,
-                    shift_sd_init=self.bias_prior_sd,
-                    posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
-                    constraint=self.constraint,
-                    training=self.training,
-                    epsilon=self.epsilon,
-                    session=self.sess,
-                    name='irf_l1'
-                )
+                if self.use_batch_normalization:
+                    normalization_layer = BatchNormLayerBayes(
+                        decay=self.batch_normalization_decay,
+                        shift_activations=True,
+                        rescale_activations=self.normalization_use_gamma,
+                        axis=-1,
+                        use_MAP_mode=self.use_MAP_mode,
+                        declare_priors_scale=self.declare_priors_gamma,
+                        declare_priors_shift=self.declare_priors_biases,
+                        scale_sd_prior=self.bias_prior_sd,
+                        scale_sd_init=self.bias_sd_init,
+                        shift_sd_prior=self.bias_prior_sd,
+                        shift_sd_init=self.bias_prior_sd,
+                        posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
+                        constraint=self.constraint,
+                        training=self.training,
+                        epsilon=self.epsilon,
+                        session=self.sess,
+                        name='irf_l1'
+                    )
+                elif self.use_layer_normalization:
+                    normalization_layer = LayerNormLayerBayes(
+                        normalization_type=self.layer_normalization_type,
+                        shift_activations=True,
+                        rescale_activations=self.normalization_use_gamma,
+                        axis=-1,
+                        use_MAP_mode=self.use_MAP_mode,
+                        declare_priors_scale=self.declare_priors_gamma,
+                        declare_priors_shift=self.declare_priors_biases,
+                        scale_sd_prior=self.bias_prior_sd,
+                        scale_sd_init=self.bias_sd_init,
+                        shift_sd_prior=self.bias_prior_sd,
+                        shift_sd_init=self.bias_prior_sd,
+                        posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
+                        constraint=self.constraint,
+                        epsilon=self.epsilon,
+                        session=self.sess,
+                        name='irf_l1'
+                    )
+                else:
+                    normalization_layer = lambda x: x
 
-                return batch_norm_layer
+                return normalization_layer
 
     def _initialize_output_model(self):
         with self.sess.as_default():
