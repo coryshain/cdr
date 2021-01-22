@@ -217,6 +217,9 @@ class Model(object):
         self.time_X_mean = time_X.mean()
         self.time_X_sd = time_X.std()
 
+        self.time_y_mean = y_time.mean()
+        self.time_y_sd = y_time.std()
+
         ## Set up hash table for random effects lookup
         self.rangf_map_base = []
         self.rangf_n_levels = []
@@ -432,6 +435,8 @@ class Model(object):
             'time_X_mean': self.time_X_mean,
             'time_X_sd': self.time_X_sd,
             'time_X_limit': self.time_X_limit,
+            'time_y_mean': self.time_y_mean,
+            'time_y_sd': self.time_y_sd,
             'rangf_map_base': self.rangf_map_base,
             'rangf_n_levels': self.rangf_n_levels,
             'impulse_means': self.impulse_means,
@@ -466,6 +471,8 @@ class Model(object):
         self.time_X_sd = md.pop('time_X_sd', 1.)
         self.time_X_mean = md.pop('time_X_mean', 1.)
         self.time_X_limit = md.pop('time_X_limit', self.t_delta_max)
+        self.time_y_mean = md.pop('time_y_mean', 0.)
+        self.time_y_sd = md.pop('time_y_sd', 1.)
         self.rangf_map_base = md.pop('rangf_map_base')
         self.rangf_n_levels = md.pop('rangf_n_levels')
         self.impulse_means = md.pop('impulse_means', {})

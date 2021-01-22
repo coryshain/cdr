@@ -397,6 +397,24 @@ MODEL_INITIALIZATION_KWARGS = [
         "Decay rate to use for batch normalization in internal layers. If ``None``, no batch normalization.",
     ),
     Kwarg(
+        'normalize_h',
+        True,
+        bool,
+        "Whether to apply normalization (if applicable) to the hidden state.",
+    ),
+    Kwarg(
+        'normalize_irf',
+        False,
+        bool,
+        "Whether to apply normalization (if applicable) to internal IRF layers.",
+    ),
+    Kwarg(
+        'normalize_error_params_fn',
+        False,
+        bool,
+        "Whether to apply normalization (if applicable) to internal layers of the error parameter function.",
+    ),
+    Kwarg(
         'normalize_after_activation',
         True,
         bool,
@@ -705,6 +723,12 @@ CDRNN_INITIALIZATION_KWARGS = [
         "Type of RNN unit to use. One of ``['LSTM', 'GRU', 'SimpleRNN']."
     ),
     Kwarg(
+        'center_time',
+        False,
+        bool,
+        "Whether to center time values by their mean under the hood, which can help with convergence. Times are automatically reconverted back to the source location for plotting and model criticism."
+    ),
+    Kwarg(
         'rescale_time',
         False,
         bool,
@@ -773,6 +797,12 @@ CDRNN_INITIALIZATION_KWARGS = [
         [int, str, None],
         "Number of units per hidden layer in IRF. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_units_irf** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers.",
         aliases=['n_units_decoder']
+    ),
+    Kwarg(
+        'nonstationary_intercept',
+        False,
+        bool,
+        "Whether to implement a time-varying intercept term, using a feedforward network architecturally matched to the IRF."
     ),
     Kwarg(
         'n_layers_error_params_fn',

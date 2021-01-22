@@ -190,7 +190,7 @@ class CDRNNCell(LayerRNNCell):
             use_bias=True,
             global_step=None,
             l2_normalize_states=False,
-            reuse=None,
+            reuse=tf.AUTO_REUSE,
             name=None,
             dtype=None,
             epsilon=1e-5,
@@ -290,10 +290,16 @@ class CDRNNCell(LayerRNNCell):
                             activation = inner_activation
                         units = prefinal_dim
                         use_bias = self._use_bias
-                    if name:
-                        name_cur = name + '_d%d' % d
+
+                    if self.name:
+                        name_cur = self.name + '/'
                     else:
-                        name_cur = 'd%d' % d
+                        name_cur = ''
+
+                    if name:
+                        name_cur += name + '_d%d' % d
+                    else:
+                        name_cur += 'd%d' % d
 
                     kernel_layer = DenseLayer(
                         training=self._training,
@@ -303,9 +309,11 @@ class CDRNNCell(LayerRNNCell):
                         activation=activation,
                         epsilon=self._epsilon,
                         session=self._session,
-                        reuse=tf.AUTO_REUSE,
+                        reuse=self._reuse,
                         name=name_cur
                     )
+
+                    kernel_layer.build([None, in_dim])
 
                     layers.append(kernel_layer)
                     kernel_lambdas.append(make_lambda(kernel_layer, session=self._session))
@@ -489,6 +497,9 @@ class CDRNNCell(LayerRNNCell):
 
                 return new_state, new_state
 
+    def ema_ops(self):
+        return []
+
 
 class CDRNNLayer(object):
     def __init__(
@@ -516,7 +527,7 @@ class CDRNNLayer(object):
             global_step=None,
             l2_normalize_states=False,
             return_sequences=True,
-            reuse=None,
+            reuse=tf.AUTO_REUSE,
             name=None,
             dtype=None,
             epsilon=1e-5,
@@ -556,13 +567,13 @@ class CDRNNLayer(object):
 
         self.built = False
 
-    def build(self, inputs):
+    def build(self, inputs_shape):
         if not self.built:
             with self.session.as_default():
                 with self.session.graph.as_default():
 
                     if self.units is None:
-                        units = inputs.shape[-1]
+                        units = inputs_shape[-1]
                     else:
                         units = self.units
 
@@ -595,7 +606,7 @@ class CDRNNLayer(object):
                         epsilon=self.epsilon,
                     )
 
-                    self.cell.build(inputs.shape[1:])
+                    self.cell.build(inputs_shape[1:])
 
             self.built = True
 
@@ -605,7 +616,7 @@ class CDRNNLayer(object):
 
     def __call__(self, inputs, times=None, mask=None, return_state=False, initial_state=None):
         if not self.built:
-            self.build(inputs)
+            self.build(inputs.shape)
 
         with self.session.as_default():
             with self.session.graph.as_default():
@@ -643,6 +654,9 @@ class CDRNNLayer(object):
 
                 return out
 
+    def ema_ops(self):
+        return self.cell.ema_ops()
+
 
 class CDRNNCellBayes(CDRNNCell):
     def __init__(
@@ -677,7 +691,7 @@ class CDRNNCellBayes(CDRNNCell):
             use_bias=True,
             global_step=None,
             l2_normalize_states=False,
-            reuse=None,
+            reuse=tf.AUTO_REUSE,
             name=None,
             dtype=None,
             epsilon=1e-5,
@@ -771,7 +785,7 @@ class CDRNNCellBayes(CDRNNCell):
                 if kernel_type == 'bottomup':
                     kernel_sd_init = self._bottomup_kernel_sd_init
                 elif kernel_type == 'recurrent':
-                    kernel_sd_init == self._recurrent_kernel_sd_init
+                    kernel_sd_init = self._recurrent_kernel_sd_init
                 else:
                     raise ValueError('Unrecognized kernel type: %s.' % kernel_type)
 
@@ -787,10 +801,16 @@ class CDRNNCellBayes(CDRNNCell):
                             activation = inner_activation
                         units = prefinal_dim
                         use_bias = self._use_bia
-                    if name:
-                        name_cur = name + '_d%d' % d
+
+                    if self.name:
+                        name_cur = self.name + '/'
                     else:
-                        name_cur = 'd%d' % d
+                        name_cur = ''
+
+                    if name:
+                        name_cur += name + '_d%d' % d
+                    else:
+                        name_cur += 'd%d' % d
 
                     kernel_layer = DenseLayerBayes(
                         training=self._training,
@@ -799,18 +819,20 @@ class CDRNNCellBayes(CDRNNCell):
                         activation=activation,
                         declare_priors_weights=self._declare_priors_weights,
                         declare_priors_biases=self._declare_priors_biases,
-                        use_MAP_mode=self.use_map_mode,
+                        use_MAP_mode=self.use_MAP_mode,
                         kernel_sd_prior=self._kernel_sd_prior,
-                        kernel_sd_init=self.kernel_sd_init,
+                        kernel_sd_init=kernel_sd_init,
                         bias_sd_prior=self._bias_sd_prior,
                         bias_sd_init=self._bias_sd_init,
                         posterior_to_prior_sd_ratio=self._posterior_to_prior_sd_ratio,
                         constraint=self._constraint,
                         epsilon=self._epsilon,
                         session=self._session,
-                        reuse=tf.AUTO_REUSE,
+                        reuse=self._reuse,
                         name=name_cur
                     )
+
+                    kernel_layer.build([None, in_dim])
 
                     layers.append(kernel_layer)
                     kernel_lambdas.append(make_lambda(kernel_layer, session=self._session))
@@ -900,7 +922,7 @@ class CDRNNCellBayes(CDRNNCell):
     def kl_penalties(self):
         out = self.kl_penalties_base
         for layer in self.layers:
-            out.update(layer.kl_penalties_base())
+            out.update(layer.kl_penalties())
 
         return out
 
@@ -942,13 +964,13 @@ class CDRNNLayerBayes(CDRNNLayer):
             global_step=None,
             l2_normalize_states=False,
             return_sequences=True,
-            reuse=None,
+            reuse=tf.AUTO_REUSE,
             name=None,
             dtype=None,
             epsilon=1e-5,
             session=None
     ):
-        super(CDRNNLayer, self).__init__(
+        super(CDRNNLayerBayes, self).__init__(
             units=units,
             training=training,
             kernel_depth=kernel_depth,
@@ -988,13 +1010,13 @@ class CDRNNLayerBayes(CDRNNLayer):
         self.posterior_to_prior_sd_ratio = posterior_to_prior_sd_ratio
         self.constraint = constraint
 
-    def build(self, inputs):
+    def build(self, inputs_shape):
         if not self.built:
             with self.session.as_default():
                 with self.session.graph.as_default():
 
                     if self.units is None:
-                        units = inputs.shape[-1]
+                        units = inputs_shape[-1]
                     else:
                         units = self.units
 
@@ -1035,12 +1057,15 @@ class CDRNNLayerBayes(CDRNNLayer):
                         epsilon=self.epsilon,
                     )
 
-                    self.cell.build(inputs.shape[1:])
+                    self.cell.build(inputs_shape[1:])
 
             self.built = True
 
     def kl_penalties(self):
         return self.cell.kl_penalties()
+
+    def ema_ops(self):
+        return self.cell.ema_ops()
 
 
 class DenseLayer(object):
@@ -1112,9 +1137,9 @@ class DenseLayer(object):
             out.append(self.normalization_layer.gamma)
         return out
 
-    def build(self, inputs):
+    def build(self, inputs_shape):
         if not self.built:
-            in_dim = inputs.shape[-1]
+            in_dim = inputs_shape[-1]
             if self.units is None:
                 out_dim = in_dim
             else:
@@ -1141,6 +1166,7 @@ class DenseLayer(object):
                         )
 
                         if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
+                        # if self.use_bias and not self.normalize_activations:
                             self.bias = tf.get_variable(
                                 name='bias',
                                 shape=[out_dim],
@@ -1175,12 +1201,13 @@ class DenseLayer(object):
 
     def __call__(self, inputs):
         if not self.built:
-            self.build(inputs)
+            self.build(inputs.shape)
 
         with self.session.as_default():
             with self.session.graph.as_default():
                 H = tf.tensordot(inputs, self.kernel, 1)
                 if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
+                # if self.use_bias and not self.normalize_activations:
                     bias = self.bias
                     while len(bias.shape) < len(H.shape):
                         bias = bias[None, ...]
@@ -1297,9 +1324,9 @@ class DenseLayerBayes(DenseLayer):
 
                 self.kl_penalties_base = {}
 
-    def build(self, inputs):
+    def build(self, inputs_shape):
         if not self.built:
-            in_dim = inputs.shape[-1]
+            in_dim = inputs_shape[-1]
             if self.units is None:
                 out_dim = in_dim
             else:
@@ -1312,7 +1339,7 @@ class DenseLayerBayes(DenseLayer):
 
             with self.session.as_default():
                 with self.session.graph.as_default():
-                    with tf.variable_scope(name):
+                    with tf.variable_scope(name, reuse=self.reuse):
                         kernel_sd_prior = get_numerical_sd(self.kernel_sd_prior, in_dim=in_dim, out_dim=out_dim)
                         if self.kernel_sd_init:
                             kernel_sd_posterior = get_numerical_sd(self.kernel_sd_init, in_dim=in_dim, out_dim=out_dim)
@@ -1330,7 +1357,7 @@ class DenseLayerBayes(DenseLayer):
                         )
                         self.kernel_q_scale = tf.get_variable(
                             name='kernel_q_scale',
-                            initializer=tf.ones([in_dim, out_dim]) * self.constraint_fn_inv(kernel_sd_posterior)
+                            initializer=lambda: tf.ones([in_dim, out_dim]) * self.constraint_fn_inv(kernel_sd_posterior)
                         )
                         self.kernel_q_dist = Normal(
                             loc=self.kernel_q_loc,
@@ -1356,6 +1383,7 @@ class DenseLayerBayes(DenseLayer):
                         )
 
                         if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
+                        # if self.use_bias and not self.normalize_activations:
                             bias_sd_prior = get_numerical_sd(self.bias_sd_prior, in_dim=1, out_dim=1)
                             if self.bias_sd_init:
                                 bias_sd_posterior = get_numerical_sd(self.bias_sd_init, in_dim=1, out_dim=1)
@@ -1370,7 +1398,7 @@ class DenseLayerBayes(DenseLayer):
                             )
                             self.bias_q_scale = tf.get_variable(
                                 name='bias_q_scale',
-                                initializer=tf.ones([out_dim]) * self.constraint_fn_inv(bias_sd_posterior)
+                                initializer=lambda: tf.ones([out_dim]) * self.constraint_fn_inv(bias_sd_posterior)
                             )
 
                             self.bias_q_dist = Normal(
@@ -1476,21 +1504,21 @@ class BatchNormLayer(object):
 
         self.built = False
 
-    def build(self, inputs):
+    def build(self, inputs_shape):
         if not self.built:
             if self.axis is None or self.axis == -1:
-                axis = len(inputs.shape) - 1
+                axis = len(inputs_shape) - 1
             else:
                 axis = self.axis
 
-            self.reduction_axes = sorted(list(set(range(len(inputs.shape))) - {axis}))
+            self.reduction_axes = sorted(list(set(range(len(inputs_shape))) - {axis}))
 
             shape = []
-            for i in range(len(inputs.shape)):
+            for i in range(len(inputs_shape)):
                 if i in self.reduction_axes:
                     shape.append(1)
                 else:
-                    shape.append(inputs.shape[i])
+                    shape.append(inputs_shape[i])
 
             if not self.name:
                 name = ''
@@ -1538,7 +1566,7 @@ class BatchNormLayer(object):
 
     def __call__(self, inputs):
         if not self.built:
-            self.build(inputs)
+            self.build(inputs.shape)
 
         with self.session.as_default():
             with self.session.graph.as_default():
@@ -1635,21 +1663,21 @@ class BatchNormLayerBayes(BatchNormLayer):
 
         self.kl_penalties_base = {}
 
-    def build(self, inputs):
+    def build(self, inputs_shape):
         if not self.built:
             if self.axis is None or self.axis == -1:
-                axis = len(inputs.shape) - 1
+                axis = len(inputs_shape) - 1
             else:
                 axis = self.axis
 
-            self.reduction_axes = sorted(list(set(range(len(inputs.shape))) - {axis}))
+            self.reduction_axes = sorted(list(set(range(len(inputs_shape))) - {axis}))
 
             shape = []
-            for i in range(len(inputs.shape)):
+            for i in range(len(inputs_shape)):
                 if i in self.reduction_axes:
                     shape.append(1)
                 else:
-                    shape.append(inputs.shape[i])
+                    shape.append(inputs_shape[i])
 
             if not self.name:
                 name = ''
@@ -1693,7 +1721,7 @@ class BatchNormLayerBayes(BatchNormLayer):
                             )
                             self.beta_q_scale = tf.get_variable(
                                 name='beta_q_scale',
-                                initializer=tf.ones(shape) * self.constraint_fn_inv(shift_sd_posterior)
+                                initializer=lambda: tf.ones(shape) * self.constraint_fn_inv(shift_sd_posterior)
                             )
 
                             self.beta_q_dist = Normal(
@@ -1736,7 +1764,7 @@ class BatchNormLayerBayes(BatchNormLayer):
                             )
                             self.gamma_q_scale = tf.get_variable(
                                 name='gamma_q_scale',
-                                initializer=tf.ones(shape) * self.constraint_fn_inv(scale_sd_posterior)
+                                initializer=lambda: tf.ones(shape) * self.constraint_fn_inv(scale_sd_posterior)
                             )
 
                             self.gamma_q_dist = Normal(
@@ -1796,10 +1824,10 @@ class LayerNormLayer(object):
 
         self.built = False
 
-    def build(self, inputs):
+    def build(self, inputs_shape):
         if not self.built:
             if self.axis is None or self.axis == -1:
-                axis = [len(inputs.shape) - 1]
+                axis = [len(inputs_shape) - 1]
             else:
                 axis = [self.axis]
             if isinstance(axis, int):
@@ -1808,11 +1836,11 @@ class LayerNormLayer(object):
             self.reduction_axes = axis
 
             shape = []
-            for i in range(len(inputs.shape)):
+            for i in range(len(inputs_shape)):
                 if i in self.reduction_axes:
                     shape.append(1)
                 else:
-                    shape.append(inputs.shape[i])
+                    shape.append(inputs_shape[i])
 
             if not self.name:
                 name = ''
@@ -1844,7 +1872,7 @@ class LayerNormLayer(object):
 
     def __call__(self, inputs):
         if not self.built:
-            self.build(inputs)
+            self.build(inputs.shape)
 
         with self.session.as_default():
             with self.session.graph.as_default():
@@ -1919,10 +1947,10 @@ class LayerNormLayerBayes(LayerNormLayer):
 
         self.kl_penalties_base = {}
 
-    def build(self, inputs):
+    def build(self, inputs_shape):
         if not self.built:
             if self.axis is None or self.axis == -1:
-                axis = [len(inputs.shape) - 1]
+                axis = [len(inputs_shape) - 1]
             else:
                 axis = [self.axis]
             if isinstance(axis, int):
@@ -1931,9 +1959,9 @@ class LayerNormLayerBayes(LayerNormLayer):
             self.reduction_axes = axis
 
             shape = []
-            for i in range(len(inputs.shape)):
+            for i in range(len(inputs_shape)):
                 if i in self.reduction_axes:
-                    shape.append(inputs.shape[i])
+                    shape.append(inputs_shape[i])
                 else:
                     shape.append(1)
 
@@ -1979,7 +2007,7 @@ class LayerNormLayerBayes(LayerNormLayer):
                             )
                             self.beta_q_scale = tf.get_variable(
                                 name='beta_q_scale',
-                                initializer=tf.ones(shape) * self.constraint_fn_inv(shift_sd_posterior)
+                                initializer=lambda: tf.ones(shape) * self.constraint_fn_inv(shift_sd_posterior)
                             )
 
                             self.beta_q_dist = Normal(
@@ -2022,7 +2050,7 @@ class LayerNormLayerBayes(LayerNormLayer):
                             )
                             self.gamma_q_scale = tf.get_variable(
                                 name='gamma_q_scale',
-                                initializer=tf.ones(shape) * self.constraint_fn_inv(scale_sd_posterior)
+                                initializer=lambda: tf.ones(shape) * self.constraint_fn_inv(scale_sd_posterior)
                             )
 
                             self.gamma_q_dist = Normal(
