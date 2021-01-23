@@ -403,10 +403,16 @@ MODEL_INITIALIZATION_KWARGS = [
         "Whether to apply normalization (if applicable) to the hidden state.",
     ),
     Kwarg(
+        'normalize_irf_l1',
+        False,
+        bool,
+        "Whether to apply normalization (if applicable) to the first IRF layer.",
+    ),
+    Kwarg(
         'normalize_irf',
         False,
         bool,
-        "Whether to apply normalization (if applicable) to internal IRF layers.",
+        "Whether to apply normalization (if applicable) to non-initial internal IRF layers.",
     ),
     Kwarg(
         'normalize_error_params_fn',
@@ -776,13 +782,6 @@ CDRNN_INITIALIZATION_KWARGS = [
         32,
         [int, str],
         "Number of units in CDRNN hidden state. Must be an ``int``."
-    ),
-    Kwarg(
-        'n_units_irf_l1',
-        32,
-        [int, None],
-        "Number of units in the embedding of the temporal offset t_delta. If ``None``, inferred automatically.",
-        aliases=['n_units_embedding', 'n_units_t_delta_embedding']
     ),
     Kwarg(
         'n_layers_irf',

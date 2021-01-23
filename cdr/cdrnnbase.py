@@ -447,7 +447,7 @@ class CDRNN(Model):
                     intercept_l1_W, intercept_l1_W_summary = self.initialize_intercept_l1_weights()
                     self.intercept_l1_W = intercept_l1_W
                     if self.irf_l1_use_bias:
-                        if self.normalize_irf and self.normalize_activations:
+                        if self.normalize_irf_l1 and self.normalize_activations:
                             self.intercept_l1_normalization_layer = self.initialize_intercept_l1_normalization()
                             self.layers.append(self.intercept_l1_normalization_layer)
                             # if self.normalize_after_activation and False:
@@ -627,7 +627,7 @@ class CDRNN(Model):
                 irf_l1_W, irf_l1_W_summary = self.initialize_irf_l1_weights()
                 self.irf_l1_W = irf_l1_W
                 if self.irf_l1_use_bias:
-                    if self.normalize_irf and self.normalize_activations:
+                    if self.normalize_irf_l1 and self.normalize_activations:
                         self.irf_l1_normalization_layer = self.initialize_irf_l1_normalization()
                         self.layers.append(self.irf_l1_normalization_layer)
                         # if self.normalize_after_activation and False:
@@ -1276,7 +1276,7 @@ class CDRNN(Model):
                     intercept_delta_l1 = W_int * time_y + b_int
                     if self.normalize_after_activation:
                         intercept_delta_l1 = get_activation(self.irf_inner_activation, session=self.sess)(intercept_delta_l1)
-                    if self.normalize_irf and self.irf_l1_use_bias and self.normalize_activations:
+                    if self.normalize_irf_l1 and self.irf_l1_use_bias and self.normalize_activations:
                         intercept_delta_l1 = self.intercept_l1_normalization_layer(intercept_delta_l1)
                     if not self.normalize_after_activation:
                         intercept_delta_l1 = get_activation(self.irf_inner_activation, session=self.sess)(intercept_delta_l1)
@@ -1355,7 +1355,7 @@ class CDRNN(Model):
                 irf_l1 = W * t_delta + b
                 if self.normalize_after_activation:
                     irf_l1 = get_activation(self.irf_inner_activation, session=self.sess)(irf_l1)
-                if self.normalize_irf and self.irf_l1_use_bias and self.normalize_activations:
+                if self.normalize_irf_l1 and self.irf_l1_use_bias and self.normalize_activations:
                     irf_l1 = self.irf_l1_normalization_layer(irf_l1)
                 if not self.normalize_after_activation:
                     irf_l1 = get_activation(self.irf_inner_activation, session=self.sess)(irf_l1)
