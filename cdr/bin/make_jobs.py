@@ -24,7 +24,7 @@ if __name__ == '__main__':
     argparser.add_argument('-P', '--python_module', type=str, default='python/3.7-conda4.5', help='Python module to load')
     argparser.add_argument('-c', '--conda', type=str, default='cdr', help='Name of conda environment to load')
     argparser.add_argument('-t', '--time', type=int, default=48, help='Number of hours to train non-synth models.')
-    argparser.add_argument('-t', '--time_synth', type=int, default=12, help='Number of hours to train synth models.')
+    argparser.add_argument('-T', '--time_synth', type=int, default=12, help='Number of hours to train synth models.')
     argparser.add_argument('-m', '--memory', type=int, default=64, help='Number of GB of memory to request')
     args = argparser.parse_args()
 
