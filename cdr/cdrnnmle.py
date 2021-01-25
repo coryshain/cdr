@@ -299,6 +299,31 @@ class CDRNNMLE(CDRNN):
 
                 return irf_l1_b, irf_l1_b_summary
 
+    def initialize_error_params_biases(self, ran_gf=None):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if self.asymmetric_error:
+                    units = 3
+                else:
+                    units = 1
+                if ran_gf is None:
+                    error_params_b = tf.get_variable(
+                        name='error_params_b',
+                        initializer=tf.zeros_initializer(),
+                        shape=[1, 1, units]
+                    )
+                else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+                    error_params_b = tf.get_variable(
+                        name='error_params_b_by_%s' % (sn(ran_gf)),
+                        initializer=tf.zeros_initializer(),
+                        shape=[rangf_n_levels, units],
+                    )
+
+                error_params_b_summary = error_params_b
+
+                return error_params_b, error_params_b_summary
+
     def initialize_irf_l1_normalization(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():

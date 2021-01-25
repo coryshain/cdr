@@ -1083,6 +1083,92 @@ class CDRNNBayes(CDRNN):
 
                 return normalization_layer
 
+    def initialize_error_params_biases(self, ran_gf=None):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if self.asymmetric_error:
+                    units = 3
+                else:
+                    units = 1
+                units = self.n_units_irf_l1
+                error_params_b_sd_prior = get_numerical_sd(self.bias_prior_sd, in_dim=1, out_dim=1)
+                error_params_b_sd_posterior = error_params_b_sd_prior * self.posterior_to_prior_sd_ratio
+
+                if ran_gf is None:
+                    # Posterior distribution
+                    error_params_b_q_loc = tf.Variable(
+                        tf.zeros([1, 1, units]),
+                        name='error_params_b_q_loc'
+                    )
+
+                    error_params_b_q_scale = tf.Variable(
+                        tf.zeros([1, 1, units]) * self.constraint_fn_inv(error_params_b_sd_posterior),
+                        name='error_params_b_q_scale'
+                    )
+
+                    error_params_b_q_dist = Normal(
+                        loc=error_params_b_q_loc,
+                        scale=self.constraint_fn(error_params_b_q_scale) + self.epsilon,
+                        name='error_params_fn_b_q'
+                    )
+
+                    error_params_b = tf.cond(self.use_MAP_mode, error_params_b_q_dist.mean, error_params_b_q_dist.sample)
+
+                    error_params_b_summary = error_params_b_q_dist.mean()
+
+                    if self.declare_priors_biases:
+                        # Prior distribution
+                        error_params_b_prior_dist = Normal(
+                            loc=0.,
+                            scale=error_params_b_sd_prior,
+                            name='error_params_b'
+                        )
+                        self.kl_penalties_base['error_params_b'] = {
+                            'loc': 0.,
+                            'scale': error_params_b_sd_prior,
+                            'val': error_params_b_q_dist.kl_divergence(error_params_b_prior_dist)
+                        }
+
+                else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+
+                    # Posterior distribution
+                    error_params_b_q_loc = tf.Variable(
+                        tf.zeros([rangf_n_levels, units], dtype=self.FLOAT_TF),
+                        name='error_params_q_loc_by_%s' % sn(ran_gf)
+                    )
+
+                    error_params_b_q_scale = tf.Variable(
+                        tf.ones([rangf_n_levels, units], dtype=self.FLOAT_TF) * self.constraint_fn_inv(
+                            error_params_b_sd_posterior * self.ranef_to_fixef_prior_sd_ratio),
+                        name='error_params_b_q_scale_by_%s' % sn(ran_gf)
+                    )
+
+                    error_params_b_q_dist = Normal(
+                        loc=error_params_b_q_loc,
+                        scale=self.constraint_fn(error_params_b_q_scale) + self.epsilon,
+                        name='error_params_b_q_by_%s' % sn(ran_gf)
+                    )
+
+                    error_params_b = tf.cond(self.use_MAP_mode, error_params_b_q_dist.mean, error_params_b_q_dist.sample)
+
+                    error_params_b_summary = error_params_b_q_dist.mean()
+
+                    if self.declare_priors_ranef:
+                        # Prior distribution
+                        error_params_b_prior_dist = Normal(
+                            loc=0.,
+                            scale=error_params_b_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
+                            name='error_params_b_by_%s' % sn(ran_gf)
+                        )
+                        self.kl_penalties_base['error_params_b_by_%s' % sn(ran_gf)] = {
+                            'loc': 0.,
+                            'scale': error_params_b_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
+                            'val': error_params_b_q_dist.kl_divergence(error_params_b_prior_dist)
+                        }
+
+                return error_params_b, error_params_b_summary
+
     def _initialize_output_model(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():

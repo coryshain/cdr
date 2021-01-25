@@ -442,68 +442,6 @@ class CDRNN(Model):
             with self.sess.graph.as_default():
                 # CDRNN MODEL
 
-                # INTERCEPT DELTA
-                if self.nonstationary_intercept:
-                    intercept_l1_W, intercept_l1_W_summary = self.initialize_intercept_l1_weights()
-                    self.intercept_l1_W = intercept_l1_W
-                    if self.irf_l1_use_bias:
-                        if self.normalize_irf_l1 and self.normalize_activations:
-                            self.intercept_l1_normalization_layer = self.initialize_intercept_l1_normalization()
-                            self.layers.append(self.intercept_l1_normalization_layer)
-                            # if self.normalize_after_activation and False:
-                            if self.normalize_after_activation:
-                                intercept_l1_b, intercept_l1_b_summary = self.initialize_intercept_l1_biases()
-                            else:
-                                intercept_l1_b = tf.zeros_like(self.intercept_l1_W)
-                                intercept_l1_b_summary = tf.zeros_like(self.intercept_l1_W)
-                        else:
-                            intercept_l1_b, intercept_l1_b_summary = self.initialize_intercept_l1_biases()
-                    self.intercept_l1_b = intercept_l1_b
-
-                    intercept_delta_layers = []
-                    for l in range(1, self.n_layers_irf + 1):
-                        if l < self.n_layers_irf:
-                            units = self.n_units_irf[l]
-                            activation = self.irf_inner_activation
-                            dropout = self.irf_dropout_rate
-                            if self.normalize_irf:
-                                bn = self.batch_normalization_decay
-                                ln = self.layer_normalization_type
-                            else:
-                                bn = None
-                                ln = None
-                            use_bias = True
-                            final = False
-                        else:
-                            units = 1
-                            activation = self.irf_activation
-                            dropout = None
-                            bn = None
-                            ln = None
-                            use_bias = False
-                            final = True
-
-                        projection = self.initialize_feedforward(
-                            units=units,
-                            use_bias=use_bias,
-                            activation=activation,
-                            dropout=dropout,
-                            batch_normalization_decay=bn,
-                            layer_normalization_type=ln,
-                            name='intercept_l%s' % (l + 1),
-                            final=final
-                        )
-                        self.layers.append(projection)
-
-                        if l < self.n_layers_irf:
-                            self.regularizable_layers.append(projection)
-                        intercept_delta_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
-
-                    intercept_delta = compose_lambdas(intercept_delta_layers)
-
-                    self.intercept_delta_layers = intercept_delta_layers
-                    self.intercept_delta_fn = intercept_delta
-
                 # FEEDFORWARD ENCODER
                 input_projection_layers = []
                 for l in range(self.n_layers_input_projection + 1):
@@ -699,7 +637,7 @@ class CDRNN(Model):
                 self.irf_layers = irf_layers
                 self.irf = irf
 
-                # ERROR PARAMS
+                # ERROR PARAMS FN
                 error_params_fn_layers = []
                 for l in range(self.n_layers_error_params_fn):
                     units = self.n_units_error_params_fn[l]
@@ -764,6 +702,9 @@ class CDRNN(Model):
 
                 self.error_params_final_fn = compose_lambdas([projection])
 
+                # # ERROR PARAM BIASES
+                # self.error_params_b, self.error_params_b_summary = self.initialize_error_params_biases(ran_gf=None)
+
                 # INTERCEPT
                 if self.has_intercept[None]:
                     self.intercept_fixed, self.intercept_fixed_summary = self.initialize_intercept(ran_gf=None)
@@ -781,24 +722,89 @@ class CDRNN(Model):
                 self.intercept = self.intercept_fixed
                 self.intercept_summary = self.intercept_fixed_summary
 
+                # INTERCEPT DELTA
+                if self.nonstationary_intercept:
+                    intercept_l1_W, intercept_l1_W_summary = self.initialize_intercept_l1_weights()
+                    self.intercept_l1_W = intercept_l1_W
+                    if self.irf_l1_use_bias:
+                        if self.normalize_irf_l1 and self.normalize_activations:
+                            self.intercept_l1_normalization_layer = self.initialize_intercept_l1_normalization()
+                            self.layers.append(self.intercept_l1_normalization_layer)
+                            # if self.normalize_after_activation and False:
+                            if self.normalize_after_activation:
+                                intercept_l1_b, intercept_l1_b_summary = self.initialize_intercept_l1_biases()
+                            else:
+                                intercept_l1_b = tf.zeros_like(self.intercept_l1_W)
+                                intercept_l1_b_summary = tf.zeros_like(self.intercept_l1_W)
+                        else:
+                            intercept_l1_b, intercept_l1_b_summary = self.initialize_intercept_l1_biases()
+                    self.intercept_l1_b = intercept_l1_b
+
+                    intercept_delta_layers = []
+                    for l in range(1, self.n_layers_irf + 1):
+                        if l < self.n_layers_irf:
+                            units = self.n_units_irf[l]
+                            activation = self.irf_inner_activation
+                            dropout = self.irf_dropout_rate
+                            if self.normalize_irf:
+                                bn = self.batch_normalization_decay
+                                ln = self.layer_normalization_type
+                            else:
+                                bn = None
+                                ln = None
+                            use_bias = True
+                            final = False
+                        else:
+                            units = 1
+                            activation = self.irf_activation
+                            dropout = None
+                            bn = None
+                            ln = None
+                            use_bias = False
+                            final = True
+
+                        projection = self.initialize_feedforward(
+                            units=units,
+                            use_bias=use_bias,
+                            activation=activation,
+                            dropout=dropout,
+                            batch_normalization_decay=bn,
+                            layer_normalization_type=ln,
+                            name='intercept_l%s' % (l + 1),
+                            final=final
+                        )
+                        self.layers.append(projection)
+
+                        if l < self.n_layers_irf:
+                            self.regularizable_layers.append(projection)
+                        intercept_delta_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
+
+                    intercept_delta = compose_lambdas(intercept_delta_layers)
+
+                    self.intercept_delta_layers = intercept_delta_layers
+                    self.intercept_delta_fn = intercept_delta
+
                 # RANDOM EFFECTS
                 self.intercept_random = {}
                 self.intercept_random_summary = {}
                 self.intercept_random_means = {}
+                # self.error_params_b_ran = []
+                # self.error_params_b_ran_matrix = []
                 self.rnn_h_ran_matrix = [[] for l in range(self.n_layers_rnn)]
                 self.rnn_h_ran = [[] for l in range(self.n_layers_rnn)]
                 self.rnn_c_ran_matrix = [[] for l in range(self.n_layers_rnn)]
                 self.rnn_c_ran = [[] for l in range(self.n_layers_rnn)]
                 self.h_bias_ran_matrix = []
                 self.h_bias_ran = []
-                self.intercept_l1_W_ran_matrix = []
-                self.intercept_l1_W_ran = []
-                self.intercept_l1_b_ran_matrix = []
-                self.intercept_l1_b_ran = []
-                self.irf_l1_W_ran_matrix = []
-                self.irf_l1_W_ran = []
-                self.irf_l1_b_ran_matrix = []
-                self.irf_l1_b_ran = []
+                # self.irf_l1_W_ran_matrix = []
+                # self.irf_l1_W_ran = []
+                # self.irf_l1_b_ran_matrix = []
+                # self.irf_l1_b_ran = []
+                # if self.nonstationary_intercept:
+                #     self.intercept_l1_W_ran_matrix = []
+                #     self.intercept_l1_W_ran = []
+                #     self.intercept_l1_b_ran_matrix = []
+                #     self.intercept_l1_b_ran = []
 
                 gf_y_src = self.gf_y
 
@@ -860,6 +866,36 @@ class CDRNN(Model):
                                 intercept_random_summary,
                                 collections=['random']
                             )
+                            
+                        # # Random error bias offsets
+                        # error_params_b_ran_matrix_cur, error_params_b_ran_matrix_cur_summary = self.initialize_error_params_biases(ran_gf=gf)
+                        # error_params_b_ran_matrix_cur -= tf.reduce_mean(error_params_b_ran_matrix_cur, axis=0, keepdims=True)
+                        # error_params_b_ran_matrix_cur_summary -= tf.reduce_mean(error_params_b_ran_matrix_cur_summary, axis=0,
+                        #                                                 keepdims=True)
+                        # self._regularize(error_params_b_ran_matrix_cur, type='ranef',
+                        #                  var_name=reg_name('error_params_b_by_%s' % (sn(gf))))
+                        #
+                        # if self.log_random:
+                        #     tf.summary.histogram(
+                        #         sn('by_%s/h' % sn(gf)),
+                        #         error_params_b_ran_matrix_cur_summary,
+                        #         collections=['random']
+                        #     )
+                        #
+                        # error_params_b_ran_matrix_cur = tf.concat(
+                        #     [
+                        #         error_params_b_ran_matrix_cur,
+                        #         tf.zeros([1, self.n_units_hidden_state])
+                        #     ],
+                        #     axis=0
+                        # )
+                        #
+                        # error_params_b_ran = tf.gather(error_params_b_ran_matrix_cur, gf_y)
+                        #
+                        # self.error_params_b_ran_matrix.append(error_params_b_ran_matrix_cur)
+                        # self.error_params_b_ran.append(error_params_b_ran)
+                        #
+                        # self.error_params_b += tf.expand_dims(error_params_b_ran, axis=-2)
 
                         # Random rnn initialization offsets
                         for l in range(self.n_layers_rnn):
@@ -1753,7 +1789,7 @@ class CDRNN(Model):
             self,
             ran_gf=None
     ):
-        raise
+        raise NotImplementedError
 
     def initialize_intercept_l1_normalization(self):
         raise NotImplementedError
@@ -1768,9 +1804,16 @@ class CDRNN(Model):
             self,
             ran_gf=None
     ):
-        raise
+        raise NotImplementedError
 
     def initialize_irf_l1_normalization(self):
+        raise NotImplementedError
+
+
+    def initialize_error_params_biases(
+            self,
+            ran_gf=None
+    ):
         raise NotImplementedError
 
 
