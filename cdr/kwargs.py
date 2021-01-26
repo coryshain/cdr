@@ -397,6 +397,12 @@ MODEL_INITIALIZATION_KWARGS = [
         "Decay rate to use for batch normalization in internal layers. If ``None``, no batch normalization.",
     ),
     Kwarg(
+        'normalize_input_projection',
+        True,
+        bool,
+        "Whether to apply normalization (if applicable) to hidden layers of the input projection.",
+    ),
+    Kwarg(
         'normalize_h',
         True,
         bool,

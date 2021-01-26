@@ -449,7 +449,10 @@ class CDRNN(Model):
                         units = self.n_units_input_projection[l]
                         activation = self.input_projection_inner_activation
                         dropout = self.input_projection_dropout_rate
-                        bn = self.batch_normalization_decay
+                        if self.normalize_input_projection:
+                            bn = self.batch_normalization_decay
+                        else:
+                            bn = None
                         ln = self.layer_normalization_type
                         use_bias = True
                     else:
