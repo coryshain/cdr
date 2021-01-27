@@ -18,7 +18,7 @@ if __name__ == '__main__':
     Generate PBS batch jobs to run CDR models specified in one or more config files.
     ''')
     argparser.add_argument('paths', nargs='+', help='Path(s) to CDR config file(s).')
-    argparser.add_argument('-t', '--job_type', default='fit', help='Type of job to run. One of ``["fit", "predict", "plot"]``')
+    argparser.add_argument('-j', '--job_type', default='fit', help='Type of job to run. One of ``["fit", "predict", "plot"]``')
     argparser.add_argument('-p', '--partition', nargs='+', help='Partition(s) over which to predict/evaluate')
     argparser.add_argument('-d', '--working_dir', type=str, default='/fs/project/schuler.77/shain.3/cdrnn', help='CDR working directory.')
     argparser.add_argument('-M', '--python_module', type=str, default='python/3.7-conda4.5', help='Python module to load')
