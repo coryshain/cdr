@@ -83,6 +83,15 @@ class CDRNN(Model):
         super(CDRNN, self)._initialize_metadata()
 
         self.is_cdrnn = True
+        self.has_dropout = self.input_projection_dropout_rate or \
+                           self.rnn_h_dropout_rate or \
+                           self.rnn_c_dropout_rate or \
+                           self.h_in_dropout_rate or \
+                           self.h_rnn_dropout_rate or \
+                           self.rnn_dropout_rate or \
+                           self.irf_dropout_rate or \
+                           self.error_params_fn_dropout_rate or \
+                           self.ranef_dropout_rate
 
         self.use_batch_normalization = bool(self.batch_normalization_decay)
         self.use_layer_normalization = bool(self.layer_normalization_type)
@@ -244,6 +253,12 @@ class CDRNN(Model):
     #  Network Initialization
     #
     ######################################################
+
+    def _initialize_inputs(self, n_impulse):
+        super(CDRNN, self)._initialize_inputs(n_impulse)
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                self.use_MAP_mode = tf.placeholder_with_default(tf.logical_not(self.training), shape=[], name='use_MAP_mode')
 
     def _initialize_cdrnn_inputs(self):
         with self.sess.as_default():
@@ -999,7 +1014,7 @@ class CDRNN(Model):
                             intercept_l1_W_ran_matrix_cur = tf.concat(
                                 [
                                     intercept_l1_W_ran_matrix_cur,
-                                    tf.zeros([1, self.n_units_hidden_state])
+                                    tf.zeros([1, self.n_units_irf[0]])
                                 ],
                                 axis=0
                             )
@@ -1009,7 +1024,7 @@ class CDRNN(Model):
                             self.intercept_l1_W_ran_matrix.append(intercept_l1_W_ran_matrix_cur)
                             self.intercept_l1_W_ran.append(intercept_l1_W_bias_ran)
 
-                            self.intercept_l1_W += tf.expand_dims(intercept_l1_W_bias_ran, axis=-2)
+                            self.intercept_l1_W += intercept_l1_W_bias_ran
 
                             # Random intercept L1 biases
                             if self.irf_l1_use_bias:
@@ -1028,7 +1043,7 @@ class CDRNN(Model):
                                 intercept_l1_b_ran_matrix_cur = tf.concat(
                                     [
                                         intercept_l1_b_ran_matrix_cur,
-                                        tf.zeros([1, self.n_units_hidden_state])
+                                        tf.zeros([1, self.n_units_irf[0]])
                                     ],
                                     axis=0
                                 )
@@ -1038,7 +1053,7 @@ class CDRNN(Model):
                                 self.intercept_l1_b_ran_matrix.append(intercept_l1_b_ran_matrix_cur)
                                 self.intercept_l1_b_ran.append(intercept_l1_b_bias_ran)
 
-                                self.intercept_l1_b += tf.expand_dims(intercept_l1_b_bias_ran, axis=-2)
+                                self.intercept_l1_b += intercept_l1_b_bias_ran
 
                         # # Random IRF L1 weights
                         # irf_l1_W_ran_matrix_cur, irf_l1_W_ran_matrix_cur_summary, = self.initialize_irf_l1_weights(ran_gf=gf)
@@ -1056,7 +1071,7 @@ class CDRNN(Model):
                         # irf_l1_W_ran_matrix_cur = tf.concat(
                         #     [
                         #         irf_l1_W_ran_matrix_cur,
-                        #         tf.zeros([1, self.n_units_hidden_state])
+                        #         tf.zeros([1, self.n_units_irf[0]])
                         #     ],
                         #     axis=0
                         # )
@@ -1085,7 +1100,7 @@ class CDRNN(Model):
                         #     irf_l1_b_ran_matrix_cur = tf.concat(
                         #         [
                         #             irf_l1_b_ran_matrix_cur,
-                        #             tf.zeros([1, self.n_units_hidden_state])
+                        #             tf.zeros([1, self.n_units_irf[0]])
                         #         ],
                         #         axis=0
                         #     )
@@ -1244,47 +1259,6 @@ class CDRNN(Model):
                     )
 
                 X = tf.concat([X, time_X], axis=-1)
-
-                if self.predictor_dropout_rate:
-                    X = tf.layers.dropout(
-                        X,
-                        rate=self.predictor_dropout_rate,
-                        training=self.training
-                    )
-
-                if self.event_dropout_rate:
-                    X_shape = tf.shape(X)
-                    noise_shape = []
-                    for j in range(len(X.shape) - 1):
-                        try:
-                            s = int(X.shape[j])
-                        except TypeError:
-                            s = X_shape[j]
-                        noise_shape.append(s)
-                    noise_shape.append(1)
-
-                    mask_is_none = time_X_mask is None
-
-                    def train_fn(inputs=X, noise_shape=noise_shape, mask=time_X_mask):
-                        dropout_mask = tf.cast(tf.random_uniform(noise_shape) > self.event_dropout_rate,
-                                               dtype=self.FLOAT_TF)
-                        inputs_out = inputs * dropout_mask
-                        if mask is not None:
-                            mask_out = mask * dropout_mask[..., 0]
-                        else:
-                            mask_out = tf.zeros(tf.shape(inputs)[:-1])
-
-                        return inputs_out, mask_out
-
-                    def eval_fn(inputs=X, mask=time_X_mask):
-                        if mask is None:
-                            mask = tf.zeros(tf.shape(inputs)[:-1])
-                        return inputs, mask
-
-                    X, time_X_mask = tf.cond(self.training, train_fn, eval_fn)
-
-                    if mask_is_none:
-                        time_X_mask = None
 
                 # Compute hidden state
                 h = self.h_bias
@@ -1953,8 +1927,11 @@ class CDRNN(Model):
                     self.training: not self.predict_mode,
                     self.plot_mean_as_reference: plot_mean_as_reference
                 }
-                if n_samples and self.is_bayesian:
-                    fd[self.use_MAP_mode] = False
+                if n_samples:
+                    if self.is_bayesian:
+                        fd[self.use_MAP_mode] = False
+                    elif self.has_dropout:
+                        fd[self.training] = True
 
                 if plot_type.lower().startswith('irf_1d'):
                     if name == 'rate':
@@ -1988,7 +1965,7 @@ class CDRNN(Model):
                 else:
                     raise ValueError('Plot type "%s" not supported.' % plot_type)
 
-                if n_samples and self.is_bayesian:
+                if n_samples and (self.is_bayesian or self.has_dropout):
                     alpha = 100-float(level)
                     support = self.sess.run(to_run[0], feed_dict=fd)
                     samples = [self.sess.run(to_run[1], feed_dict=fd) for _ in range(n_samples)]

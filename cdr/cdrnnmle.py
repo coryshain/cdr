@@ -1,4 +1,5 @@
 import math
+import numpy as np
 import pandas as pd
 
 from .kwargs import CDRNNMLE_INITIALIZATION_KWARGS
@@ -46,6 +47,8 @@ class CDRNNMLE(CDRNN):
 
     def _initialize_metadata(self):
         super(CDRNNMLE, self)._initialize_metadata()
+
+        self.parameter_table_columns = ['Mean', '2.5%', '97.5%']
 
     def _pack_metadata(self):
         md = super(CDRNNMLE, self)._pack_metadata()
@@ -580,6 +583,22 @@ class CDRNNMLE(CDRNN):
 
                 self.train_op = self.optim.minimize(self.loss_func, global_step=self.global_batch_step)
 
+
+    def _extract_parameter_values(self, fixed=True, level=95, n_samples=None):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                self.set_predict_mode(True)
+
+                if fixed:
+                    out = self.parameter_table_fixed_values.eval(session=self.sess)
+                else:
+                    out = self.parameter_table_random_values.eval(session=self.sess)
+
+                self.set_predict_mode(False)
+
+            out = np.stack([out, out, out], axis=1)
+
+            return out
 
     ######################################################
     #

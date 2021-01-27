@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from cdr.config import Config
 from cdr.util import load_cdr, filter_models, stderr
-from cdr.plot import plot_irf, plot_qq
+from cdr.plot import plot_irf, plot_qq, get_plot_config
 
 if __name__ == '__main__':
 
@@ -44,6 +44,7 @@ if __name__ == '__main__':
     argparser.add_argument('-M', '--markers', action='store_true', help='Add markers to IRF lines')
     argparser.add_argument('-B', '--transparent_background', action='store_true', help='Use transparent background (otherwise white background)')
     argparser.add_argument('-C', '--dump_source', action='store_true', help='Dump plot source arrays to CSV')
+    argparser.add_argument('-g', '--config_path', type=str, help='Path to config file specifying plot arguments')
     args = argparser.parse_args()
 
     for path in args.paths:
@@ -223,7 +224,7 @@ if __name__ == '__main__':
             )
             
 
-            if cdr_model.is_bayesian:
+            if cdr_model.is_bayesian or cdr_model.has_dropout:
                 cdr_model.make_plots(
                     standardize_response=args.standardize_response,
                     summed=args.summed,

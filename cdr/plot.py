@@ -8,6 +8,11 @@ from matplotlib import cm
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib import markers
+import os
+if sys.version_info[0] == 2:
+    import ConfigParser as configparser
+else:
+    import configparser
 
 from .util import stderr, get_irf_name
 
@@ -22,6 +27,15 @@ class MidpointNormalize(matplotlib.colors.Normalize):
         # simple example...
         x, y = [self.vmin, self.vcenter, self.vmax], [0, 0.5, 1]
         return np.ma.masked_array(np.interp(value, x, y))
+
+
+def get_plot_config(path):
+    config = configparser.ConfigParser()
+    config.optionxform = str
+    assert os.path.exists(path), 'Config file %s does not exist' % path
+    config.read(path)
+
+    return config
 
 
 def plot_irf(

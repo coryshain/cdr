@@ -735,6 +735,12 @@ CDRNN_INITIALIZATION_KWARGS = [
         "Type of RNN unit to use. One of ``['LSTM', 'GRU', 'SimpleRNN']."
     ),
     Kwarg(
+        'n_samples_eval',
+        1024,
+        int,
+        "Number of posterior predictive samples to draw for prediction/evaluation."
+    ),
+    Kwarg(
         'center_time',
         False,
         bool,
@@ -931,18 +937,6 @@ CDRNN_INITIALIZATION_KWARGS = [
         "Scale of weight regularizer (ignored if ``context_regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
     Kwarg(
-        'predictor_dropout_rate',
-        None,
-        [float, None],
-        "Rate at which to drop predictors."
-    ),
-    Kwarg(
-        'event_dropout_rate',
-        None,
-        [float, None],
-        "Rate at which to drop events (input vectors)."
-    ),
-    Kwarg(
         'input_projection_dropout_rate',
         None,
         [float, None],
@@ -1073,12 +1067,6 @@ CDRNNBAYES_INITIALIZATION_KWARGS = [
         bool,
         "Specify Gaussian priors for all random model parameters (if ``False``, use implicit improper uniform priors).",
         aliases=['declare_priors']
-    ),
-    Kwarg(
-        'n_samples_eval',
-        1024,
-        int,
-        "Number of posterior predictive samples to draw for prediction/evaluation."
     ),
     Kwarg(
         'intercept_prior_sd',

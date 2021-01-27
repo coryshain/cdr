@@ -3316,7 +3316,7 @@ class Model(object):
         :return: ``None``
         """
 
-        assert not mc or self.is_bayesian, 'Monte Carlo estimation of credible intervals (mc=True) is only supported for Bayesian models.'
+        assert not mc or self.is_bayesian or self.has_dropout, 'Monte Carlo estimation of credible intervals (mc=True) is only supported for Bayesian models or models trained using dropout.'
 
         if plot_dirac:
             dirac = 'dirac'
@@ -3326,7 +3326,7 @@ class Model(object):
         if not plot_interactions:
             plot_interactions = []
 
-        if n_samples is None and self.is_bayesian:
+        if n_samples is None and (self.is_bayesian or self.has_dropout):
             n_samples = self.n_samples_eval
 
         if prefix is None:

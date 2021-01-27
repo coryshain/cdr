@@ -50,8 +50,6 @@ class CDRNNBayes(CDRNN):
 
         self.is_bayesian = True
 
-        self.parameter_table_columns = ['Mean', '2.5%', '97.5%']
-
         if self.intercept_init is None:
             if self.standardize_response:
                 self.intercept_init = tf.constant(0., dtype=self.FLOAT_TF)
@@ -112,13 +110,6 @@ class CDRNNBayes(CDRNN):
     #  Network initialization
     #
     ######################################################
-
-
-    def _initialize_inputs(self, n_impulse):
-        super(CDRNNBayes, self)._initialize_inputs(n_impulse)
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                self.use_MAP_mode = tf.placeholder_with_default(tf.logical_not(self.training), shape=[], name='use_MAP_mode')
 
     def initialize_intercept(self, ran_gf=None):
         with self.sess.as_default():
