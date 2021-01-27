@@ -972,6 +972,13 @@ CDRNN_INITIALIZATION_KWARGS = [
         # aliases=['dropout_rate']
     ),
     Kwarg(
+        'h_dropout_rate',
+        None,
+        [float, None],
+        "Rate at which to drop neurons of h.",
+        aliases=['dropout_rate']
+    ),
+    Kwarg(
         'rnn_dropout_rate',
         None,
         [float, None],

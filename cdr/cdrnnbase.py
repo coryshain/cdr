@@ -1350,6 +1350,9 @@ class CDRNN(Model):
                 else:
                     h_rnn = rnn_hidden = rnn_cell = None
 
+                if self.h_dropout_rate:
+                    h = get_dropout(self.h_dropout_rate, training=self.training, session=self.sess)(h)
+
                 if self.normalize_after_activation:
                     h = get_activation(self.hidden_state_activation, session=self.sess)(h)
                 if self.normalize_h and self.normalize_activations:
