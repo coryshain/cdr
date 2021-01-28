@@ -57,7 +57,7 @@ if __name__ == '__main__':
 
         prefix = args.prefix
         if prefix is None:
-            prefix = '_'.join(p.outdir.split('/'))
+            prefix = '_'.join([x for x in p.outdir.split('/') if x not in ['.', '..']])
         if prefix != '':
             prefix += '_'
         n_time_units = args.ntimeunits
