@@ -114,7 +114,7 @@ def get_regularizer(init, scale=None, session=None):
             return out
 
 
-def get_dropout(rate, training=True, use_MAP_mode=True, noise_shape=None, session=None):
+def get_dropout(rate, training=True, use_MAP_mode=True, noise_shape=None, name=None, reuse=tf.AUTO_REUSE, session=None):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
@@ -124,6 +124,8 @@ def get_dropout(rate, training=True, use_MAP_mode=True, noise_shape=None, sessio
                     noise_shape=noise_shape,
                     training=training,
                     use_MAP_mode=use_MAP_mode,
+                    name=name,
+                    reuse=reuse,
                     session=session
                 )
             else:
@@ -230,6 +232,8 @@ class RNNCell(LayerRNNCell):
                     bottomup_dropout,
                     training=self._training,
                     use_MAP_mode=self.use_MAP_mode,
+                    name=self.name + '/bottomup_dropout',
+                    reuse=self._reuse,
                     session=self._session
                 )
                 self._h_dropout_rate = h_dropout
@@ -237,6 +241,8 @@ class RNNCell(LayerRNNCell):
                     h_dropout,
                     training=self._training,
                     use_MAP_mode=self.use_MAP_mode,
+                    name=self.name + '/h_dropout',
+                    reuse=self._reuse,
                     session=self._session
                 )
                 self._c_dropout_rate = c_dropout
@@ -244,6 +250,8 @@ class RNNCell(LayerRNNCell):
                     c_dropout,
                     training=self._training,
                     use_MAP_mode=self.use_MAP_mode,
+                    name=self.name + '/c_dropout',
+                    reuse=self._reuse,
                     session=self._session
                 )
                 self._forget_rate = forget_rate
@@ -1133,6 +1141,10 @@ class DenseLayer(object):
             name=None
     ):
         self.session = get_session(session)
+        self.reuse = reuse
+        self.epsilon = epsilon
+        self.name = name
+
         with session.as_default():
             with session.graph.as_default():
                 self.training = training
@@ -1146,6 +1158,8 @@ class DenseLayer(object):
                     dropout,
                     training=self.training,
                     use_MAP_mode=self.use_MAP_mode,
+                    name='dropout',
+                    reuse=self.reuse,
                     session=self.session
                 )
 
@@ -1168,9 +1182,6 @@ class DenseLayer(object):
 
                 self.normalize_after_activation = normalize_after_activation
                 self.normalization_use_gamma = normalization_use_gamma
-                self.reuse = reuse
-                self.epsilon = epsilon
-                self.name = name
 
                 self.normalization_beta = None
                 self.normalization_gamma = None
@@ -2161,12 +2172,16 @@ class DropoutLayer(object):
             noise_shape=None,
             training=False,
             use_MAP_mode=True,
+            name=None,
+            reuse=tf.AUTO_REUSE,
             session=None
     ):
         self.rate = rate
         self.noise_shape = noise_shape
         self.training = training
         self.use_MAP_mode = use_MAP_mode
+        self.name = name
+        self.reuse = reuse
         self.session = get_session(session)
 
         self.built = False
@@ -2191,10 +2206,22 @@ class DropoutLayer(object):
                     else:
                         final_shape = inputs_shape[-1]
 
-                    self.noise_shape_eval = [1 for _ in range(len(inputs_shape) - 1)] + [int(final_shape)]
-                    self.dropout_mask_eval_sample = tf.random_uniform(self.noise_shape_eval) > self.rate
-                    self.dropout_mask_eval = tf.Variable(tf.ones_like(self.dropout_mask_eval_sample), trainable=False)
-                    self.dropout_mask_eval_resample = tf.assign(self.dropout_mask_eval, self.dropout_mask_eval_sample)
+                    if not self.name:
+                        name = ''
+                    else:
+                        name = self.name
+
+                    with tf.variable_scope(name, reuse=self.reuse):
+                        self.noise_shape_eval = [1 for _ in range(len(inputs_shape) - 1)] + [int(final_shape)]
+                        self.dropout_mask_eval_sample = tf.random_uniform(self.noise_shape_eval) > self.rate
+                        self.dropout_mask_eval = tf.get_variable(
+                            name='mask',
+                            initializer=tf.ones_initializer(),
+                            shape=self.noise_shape_eval,
+                            dtype=tf.bool,
+                            trainable=False
+                        )
+                        self.dropout_mask_eval_resample = tf.assign(self.dropout_mask_eval, self.dropout_mask_eval_sample)
 
                     self.built = True
 

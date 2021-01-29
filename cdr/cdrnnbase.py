@@ -500,6 +500,7 @@ class CDRNN(Model):
                     self.h_in_dropout_rate,
                     training=self.training,
                     use_MAP_mode=self.use_MAP_mode,
+                    name='h_in_dropout',
                     session=self.sess
                 )
 
@@ -577,6 +578,7 @@ class CDRNN(Model):
                     self.h_rnn_dropout_rate,
                     training=self.training,
                     use_MAP_mode=self.use_MAP_mode,
+                    name='h_rnn_dropout',
                     session=self.sess
                 )
                 self.rnn_dropout_layer = get_dropout(
@@ -584,6 +586,7 @@ class CDRNN(Model):
                     noise_shape=[None, None, 1],
                     training=self.training,
                     use_MAP_mode=self.use_MAP_mode,
+                    name='rnn_dropout',
                     session=self.sess
                 )
 
@@ -604,6 +607,7 @@ class CDRNN(Model):
                     self.h_dropout_rate,
                     training=self.training,
                     use_MAP_mode=self.use_MAP_mode,
+                    name='h_dropout',
                     session=self.sess
                 )
 
@@ -858,6 +862,7 @@ class CDRNN(Model):
                         self.ranef_dropout_rate,
                         training=self.training,
                         use_MAP_mode=tf.constant(True, dtype=tf.bool),
+                        name='ranef_dropout',
                         session=self.sess
                     )
 
