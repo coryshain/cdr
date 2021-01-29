@@ -2175,7 +2175,7 @@ class DropoutLayer(object):
                     else:
                         final_shape = inputs_shape[-1]
 
-                    self.noise_shape_eval = [1 for _ in range(len(inputs_shape) - 1)] + [final_shape]
+                    self.noise_shape_eval = [1 for _ in range(len(inputs_shape) - 1)] + [int(final_shape)]
 
                     self.dropout_mask_eval_sample = tf.cast(tf.random_uniform(self.noise_shape_eval) > self.rate, dtype)
                     self.dropout_mask_eval = tf.Variable(tf.ones_like(self.dropout_mask_eval_sample), trainable=False)
