@@ -126,6 +126,7 @@ class CDRNNMLE(CDRNN):
             with self.sess.graph.as_default():
                 projection = DenseLayer(
                     training=self.training,
+                    use_MAP_mode=self.use_MAP_mode,
                     units=units,
                     use_bias=use_bias,
                     activation=activation,
@@ -148,6 +149,7 @@ class CDRNNMLE(CDRNN):
                 units = self.n_units_rnn[l]
                 rnn = CDRNNLayer(
                     training=self.training,
+                    use_MAP_mode=self.use_MAP_mode,
                     units=units,
                     time_projection_depth=self.n_layers_irf + 1,
                     activation=self.rnn_activation,

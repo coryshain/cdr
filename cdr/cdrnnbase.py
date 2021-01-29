@@ -496,6 +496,12 @@ class CDRNN(Model):
 
                 self.input_projection_layers = input_projection_layers
                 self.input_projection_fn = input_projection_fn
+                self.h_in_dropout_layer = get_dropout(
+                    self.h_in_dropout_rate,
+                    training=self.training,
+                    use_MAP_mode=self.use_MAP_mode,
+                    session=self.sess
+                )
 
                 # RNN ENCODER
                 rnn_layers = []
@@ -567,6 +573,20 @@ class CDRNN(Model):
                     self.rnn_projection_layers = rnn_projection_layers
                     self.rnn_projection_fn = rnn_projection_fn
 
+                self.h_rnn_dropout_layer = get_dropout(
+                    self.h_rnn_dropout_rate,
+                    training=self.training,
+                    use_MAP_mode=self.use_MAP_mode,
+                    session=self.sess
+                )
+                self.rnn_dropout_layer = get_dropout(
+                    self.rnn_dropout_rate,
+                    noise_shape=[None, None, 1],
+                    training=self.training,
+                    use_MAP_mode=self.use_MAP_mode,
+                    session=self.sess
+                )
+
                 if self.normalize_h and self.normalize_activations:
                     self.h_normalization_layer = self.initialize_h_normalization()
                     self.layers.append(self.h_normalization_layer)
@@ -579,6 +599,13 @@ class CDRNN(Model):
                 else:
                     h_bias, h_bias_summary = self.initialize_h_bias()
                 self.h_bias = h_bias
+
+                self.h_dropout_layer = get_dropout(
+                    self.h_dropout_rate,
+                    training=self.training,
+                    use_MAP_mode=self.use_MAP_mode,
+                    session=self.sess
+                )
 
                 irf_l1_W, irf_l1_W_summary = self.initialize_irf_l1_weights()
                 self.irf_l1_W = irf_l1_W
@@ -827,15 +854,14 @@ class CDRNN(Model):
                 gf_y_src = self.gf_y
 
                 if self.ranef_dropout_rate:
-                    def gf_train_fn(gf_y_cur=gf_y_src):
-                        dropout_mask = tf.cast(tf.random_uniform(tf.shape(gf_y_cur)) > self.ranef_dropout_rate, tf.bool)
-                        alt = tf.zeros_like(gf_y_cur)
-                        return tf.where(dropout_mask, gf_y_cur, alt)
+                    self.ranef_dropout_layer = get_dropout(
+                        self.ranef_dropout_rate,
+                        training=self.training,
+                        use_MAP_mode=tf.constant(True, dtype=tf.bool),
+                        session=self.sess
+                    )
 
-                    def gf_eval_fn(gf_y_cur=gf_y_src):
-                        return gf_y_cur
-
-                    gf_y_src = tf.cond(self.training, gf_train_fn, gf_eval_fn)
+                    gf_y_src = self.ranef_dropout_layer(gf_y_src)
 
                 for j in range(len(self.rangf)):
                     gf = self.rangf[j]
@@ -1303,7 +1329,7 @@ class CDRNN(Model):
                         return h_in
                     h_in = tf.cond(self.training, h_in_train_fn, h_in_eval_fn)
                 if self.h_in_dropout_rate:
-                    h_in = get_dropout(self.h_in_dropout_rate, training=self.training, session=self.sess)(h_in)
+                    h_in = self.h_in_dropout_layer(h_in)
                 h += h_in
 
                 if self.n_layers_rnn:
@@ -1316,26 +1342,7 @@ class CDRNN(Model):
                     h_rnn = self.rnn_projection_fn(rnn_hidden[-1])
 
                     if self.rnn_dropout_rate:
-                        h_rnn_shape = tf.shape(h_rnn)
-                        noise_shape = []
-                        for j in range(len(h_rnn.shape) - 1):
-                            try:
-                                s = int(h_rnn.shape[j])
-                            except TypeError:
-                                s = h_rnn_shape[j]
-                            noise_shape.append(s)
-                        noise_shape.append(1)
-
-                        def h_rnn_train_fn(inputs=h_rnn, noise_shape=noise_shape):
-                            dropout_mask = tf.cast(tf.random_uniform(noise_shape) > self.rnn_dropout_rate, dtype=self.FLOAT_TF)
-                            inputs_out = inputs * dropout_mask
-
-                            return inputs_out
-
-                        def h_rnn_eval_fn(inputs=h_rnn):
-                            return inputs
-
-                        h_rnn = tf.cond(self.training, h_rnn_train_fn, h_rnn_eval_fn)
+                        h_rnn = self.rnn_dropout_layer(h_rnn)
 
                     if self.h_rnn_noise_sd:
                         def h_rnn_train_fn(h_rnn=h_rnn):
@@ -1344,14 +1351,14 @@ class CDRNN(Model):
                             return h_rnn
                         h_rnn = tf.cond(self.training, h_rnn_train_fn, h_rnn_eval_fn)
                     if self.h_rnn_dropout_rate:
-                        h_rnn = get_dropout(self.h_rnn_dropout_rate, training=self.training, session=self.sess)(h_rnn)
+                        h_rnn = self.h_rnn_dropout_layer(h_rnn)
 
                     h += h_rnn
                 else:
                     h_rnn = rnn_hidden = rnn_cell = None
 
                 if self.h_dropout_rate:
-                    h = get_dropout(self.h_dropout_rate, training=self.training, session=self.sess)(h)
+                    h = self.h_dropout_layer(h)
 
                 if self.normalize_after_activation:
                     h = get_activation(self.hidden_state_activation, session=self.sess)(h)
@@ -1502,8 +1509,14 @@ class CDRNN(Model):
                     )
 
                 self.batch_norm_ema_ops = []
+                self.dropout_resample_ops = []
+                if self.ranef_dropout_rate:
+                    self.dropout_resample_ops += self.ranef_dropout_layer.dropout_resample_ops()
+                if self.rnn_dropout_rate:
+                    self.dropout_resample_ops += self.rnn_dropout_layer.dropout_resample_ops()
                 for x in self.layers:
                     self.batch_norm_ema_ops += x.ema_ops()
+                    self.dropout_resample_ops += x.dropout_resample_ops()
 
 
 
@@ -1931,10 +1944,7 @@ class CDRNN(Model):
                     self.plot_mean_as_reference: plot_mean_as_reference
                 }
                 if n_samples:
-                    if self.is_bayesian:
-                        fd[self.use_MAP_mode] = False
-                    elif self.has_dropout:
-                        fd[self.training] = True
+                    fd[self.use_MAP_mode] = False
 
                 if plot_type.lower().startswith('irf_1d'):
                     if name == 'rate':
@@ -1971,7 +1981,10 @@ class CDRNN(Model):
                 if n_samples and (self.is_bayesian or self.has_dropout):
                     alpha = 100-float(level)
                     support = self.sess.run(to_run[0], feed_dict=fd)
-                    samples = [self.sess.run(to_run[1], feed_dict=fd) for _ in range(n_samples)]
+                    samples = []
+                    for i in range(n_samples):
+                        self.sess.run(self.dropout_resample_ops)
+                        samples.append(self.sess.run(to_run[1], feed_dict=fd))
                     samples = np.concatenate(samples, axis=-1)
                     mean = samples.mean(axis=-1)
                     lower = np.percentile(samples, alpha / 2, axis=-1)

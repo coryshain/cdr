@@ -302,6 +302,7 @@ class CDRNNBayes(CDRNN):
 
                 projection = DenseLayerBayes(
                     training=self.training,
+                    use_MAP_mode=self.use_MAP_mode,
                     units=units,
                     use_bias=use_bias,
                     activation=activation,
@@ -310,7 +311,6 @@ class CDRNNBayes(CDRNN):
                     layer_normalization_type=layer_normalization_type,
                     normalize_after_activation=self.normalize_after_activation,
                     normalization_use_gamma=self.normalization_use_gamma,
-                    use_MAP_mode=self.use_MAP_mode,
                     declare_priors_weights=declare_priors_weights,
                     declare_priors_biases=self.declare_priors_biases,
                     kernel_sd_prior=weight_sd_prior,
@@ -334,6 +334,7 @@ class CDRNNBayes(CDRNN):
                 units = self.n_units_rnn[l]
                 rnn = CDRNNLayerBayes(
                     training=self.training,
+                    use_MAP_mode=self.use_MAP_mode,
                     units=units,
                     time_projection_depth=self.n_layers_irf + 1,
                     activation=self.rnn_activation,
@@ -344,7 +345,6 @@ class CDRNNBayes(CDRNN):
                     c_dropout=self.rnn_c_dropout_rate,
                     forget_rate=self.forget_rate,
                     return_sequences=True,
-                    use_MAP_mode=self.use_MAP_mode,
                     declare_priors_weights=self.declare_priors_weights,
                     declare_priors_biases=self.declare_priors_biases,
                     kernel_sd_prior=self.weight_prior_sd,

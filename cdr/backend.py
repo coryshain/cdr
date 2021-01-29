@@ -114,14 +114,18 @@ def get_regularizer(init, scale=None, session=None):
             return out
 
 
-def get_dropout(rate, training=True, noise_shape=None, session=None):
+def get_dropout(rate, training=True, use_MAP_mode=True, noise_shape=None, session=None):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
             if rate:
-                def make_dropout(rate):
-                    return lambda x: tf.layers.dropout(x, rate=rate, noise_shape=noise_shape, training=training)
-                out = make_dropout(rate)
+                out = DropoutLayer(
+                    rate,
+                    noise_shape=noise_shape,
+                    training=training,
+                    use_MAP_mode=use_MAP_mode,
+                    session=session
+                )
             else:
                 out = lambda x: x
 
@@ -170,6 +174,7 @@ class CDRNNCell(LayerRNNCell):
             self,
             units,
             training=False,
+            use_MAP_mode=False,
             kernel_depth=1,
             time_projection_depth=1,
             prefinal_mode='max',
@@ -203,6 +208,7 @@ class CDRNNCell(LayerRNNCell):
 
                 self._num_units = units
                 self._training = training
+                self.use_MAP_mode = use_MAP_mode
 
                 self._kernel_depth = kernel_depth
                 self._time_projection_depth = time_projection_depth
@@ -218,9 +224,24 @@ class CDRNNCell(LayerRNNCell):
                 self._bottomup_kernel_sd_init = bottomup_kernel_sd_init
                 self._recurrent_kernel_sd_init = recurrent_kernel_sd_init
 
-                self._bottomup_dropout = get_dropout(bottomup_dropout, training=self._training, session=self._session)
-                self._h_dropout = get_dropout(h_dropout, training=self._training, session=self._session)
-                self._c_dropout = get_dropout(c_dropout, training=self._training, session=self._session)
+                self._bottomup_dropout_layer = get_dropout(
+                    bottomup_dropout,
+                    training=self._training,
+                    use_MAP_mode=self.use_MAP_mode,
+                    session=self._session
+                )
+                self._h_dropout_layer = get_dropout(
+                    h_dropout,
+                    training=self._training,
+                    use_MAP_mode=self.use_MAP_mode,
+                    session=self._session
+                )
+                self._c_dropout_layer = get_dropout(
+                    c_dropout,
+                    training=self._training,
+                    use_MAP_mode=self.use_MAP_mode,
+                    session=self._session
+                )
                 self._forget_rate = forget_rate
 
                 self._weight_normalization = weight_normalization
@@ -425,7 +446,7 @@ class CDRNNCell(LayerRNNCell):
 
                 inputs = inputs['inputs']
 
-                inputs = self._bottomup_dropout(inputs)
+                inputs = self._bottomup_dropout_layer(inputs)
 
                 if self._forget_rate:
                     def train_fn_forget(h_prev=h_prev, c_prev=c_prev):
@@ -486,8 +507,8 @@ class CDRNNCell(LayerRNNCell):
                 if self._l2_normalize_states:
                     h = tf.nn.l2_normalize(h, epsilon=self._epsilon, axis=-1)
 
-                c = self._c_dropout(c)
-                h = self._h_dropout(h)
+                c = self._c_dropout_layer(c)
+                h = self._h_dropout_layer(h)
 
                 if mask is not None:
                     c = c * mask + c_prev * (1 - mask)
@@ -500,12 +521,21 @@ class CDRNNCell(LayerRNNCell):
     def ema_ops(self):
         return []
 
+    def dropout_resample_ops(self):
+        out = []
+        if self.built:
+            for layer in self._kernel_bottomup_layers + self._kernel_recurrent_layers + self._kernel_time_projection_layers:
+                out.append(layer.dropout_resample_ops())
+
+        return out
+
 
 class CDRNNLayer(object):
     def __init__(
             self,
             units=None,
             training=False,
+            use_MAP_mode=True,
             kernel_depth=1,
             time_projection_depth=1,
             prefinal_mode='max',
@@ -536,6 +566,7 @@ class CDRNNLayer(object):
         self.session = get_session(session)
 
         self.training = training
+        self.use_MAP_mode = use_MAP_mode
         self.units = units
         self.kernel_depth = kernel_depth
         self.time_projection_depth = time_projection_depth
@@ -580,6 +611,7 @@ class CDRNNLayer(object):
                     self.cell = CDRNNCell(
                         units,
                         training=self.training,
+                        use_MAP_mode=self.use_MAP_mode,
                         kernel_depth=self.kernel_depth,
                         time_projection_depth=self.time_projection_depth,
                         prefinal_mode=self.prefinal_mode,
@@ -663,6 +695,7 @@ class CDRNNCellBayes(CDRNNCell):
             self,
             units,
             training=False,
+            use_MAP_mode=True,
             kernel_depth=1,
             time_projection_depth=1,
             prefinal_mode='max',
@@ -676,7 +709,6 @@ class CDRNNCellBayes(CDRNNCell):
             recurrent_kernel_sd_init=None,
             declare_priors_weights=True,
             declare_priors_biases=False,
-            use_MAP_mode=None,
             kernel_sd_prior=1,
             bias_sd_prior=1,
             bias_sd_init=None,
@@ -700,6 +732,7 @@ class CDRNNCellBayes(CDRNNCell):
         super(CDRNNCellBayes, self).__init__(
             units=units,
             training=training,
+            use_MAP_mode=use_MAP_mode,
             kernel_depth=kernel_depth,
             time_projection_depth=time_projection_depth,
             prefinal_mode=prefinal_mode,
@@ -729,7 +762,6 @@ class CDRNNCellBayes(CDRNNCell):
 
         self._declare_priors_weights = declare_priors_weights
         self._declare_priors_biases = declare_priors_biases
-        self.use_MAP_mode = use_MAP_mode
         self._kernel_sd_prior = kernel_sd_prior
         self._bias_sd_prior = bias_sd_prior
         self._bias_sd_init = bias_sd_init
@@ -935,6 +967,7 @@ class CDRNNLayerBayes(CDRNNLayer):
             self,
             units=None,
             training=False,
+            use_MAP_mode=True,
             kernel_depth=1,
             time_projection_depth=1,
             prefinal_mode='max',
@@ -948,7 +981,6 @@ class CDRNNLayerBayes(CDRNNLayer):
             recurrent_kernel_sd_init=None,
             declare_priors_weights=True,
             declare_priors_biases=False,
-            use_MAP_mode=None,
             kernel_sd_prior=1,
             bias_sd_prior=1,
             bias_sd_init=None,
@@ -973,6 +1005,7 @@ class CDRNNLayerBayes(CDRNNLayer):
         super(CDRNNLayerBayes, self).__init__(
             units=units,
             training=training,
+            use_MAP_mode=use_MAP_mode,
             kernel_depth=kernel_depth,
             time_projection_depth=time_projection_depth,
             prefinal_mode=prefinal_mode,
@@ -1003,7 +1036,6 @@ class CDRNNLayerBayes(CDRNNLayer):
 
         self.declare_priors_weights = declare_priors_weights
         self.declare_priors_biases = declare_priors_biases
-        self.use_MAP_mode = use_MAP_mode
         self.kernel_sd_prior = kernel_sd_prior
         self.bias_sd_prior = bias_sd_prior
         self.bias_sd_init = bias_sd_init
@@ -1023,6 +1055,7 @@ class CDRNNLayerBayes(CDRNNLayer):
                     self.cell = CDRNNCellBayes(
                         units,
                         training=self.training,
+                        use_MAP_mode=self.use_MAP_mode,
                         kernel_depth=self.kernel_depth,
                         time_projection_depth=self.time_projection_depth,
                         prefinal_mode=self.prefinal_mode,
@@ -1040,7 +1073,6 @@ class CDRNNLayerBayes(CDRNNLayer):
                         forget_rate=self.forget_rate,
                         declare_priors_weights=self.declare_priors_weights,
                         declare_priors_biases=self.declare_priors_biases,
-                        use_MAP_mode=self.use_MAP_mode,
                         kernel_sd_prior=self.kernel_sd_prior,
                         bias_sd_prior=self.bias_sd_prior,
                         bias_sd_init=self.bias_sd_init,
@@ -1069,10 +1101,10 @@ class CDRNNLayerBayes(CDRNNLayer):
 
 
 class DenseLayer(object):
-
     def __init__(
             self,
-            training=True,
+            training=False,
+            use_MAP_mode=True,
             units=None,
             use_bias=True,
             activation=None,
@@ -1091,11 +1123,18 @@ class DenseLayer(object):
         with session.as_default():
             with session.graph.as_default():
                 self.training = training
+                self.use_MAP_mode = use_MAP_mode
                 self.units = units
                 self.use_bias = use_bias
                 self.activation = get_activation(activation, session=self.session, training=self.training)
                 self.kernel_sd_init = kernel_sd_init
-                self.dropout = get_dropout(dropout, training=self.training, session=self.session)
+                self.use_dropout = bool(dropout)
+                self.dropout_layer = get_dropout(
+                    dropout,
+                    training=self.training,
+                    use_MAP_mode=self.use_MAP_mode,
+                    session=self.session
+                )
 
                 self.batch_normalization_decay = batch_normalization_decay
                 self.use_batch_normalization = bool(self.batch_normalization_decay)
@@ -1234,7 +1273,7 @@ class DenseLayer(object):
                 if self.activation is not None and not self.normalize_after_activation:
                     H = self.activation(H)
 
-                H = self.dropout(H)
+                H = self.dropout_layer(H)
 
                 return H
 
@@ -1248,12 +1287,20 @@ class DenseLayer(object):
 
         return out
 
+    def dropout_resample_ops(self):
+        out = []
+        if self.use_dropout and self.built:
+            out.append(self.dropout_layer.dropout_resample_ops())
+
+        return out
+
 
 class DenseLayerBayes(DenseLayer):
 
     def __init__(
             self,
-            training=True,
+            training=False,
+            use_MAP_mode=True,
             units=None,
             use_bias=True,
             activation=None,
@@ -1262,7 +1309,6 @@ class DenseLayerBayes(DenseLayer):
             layer_normalization_type=None,
             normalize_after_activation=False,
             normalization_use_gamma=True,
-            use_MAP_mode=None,
             declare_priors_weights=True,
             declare_priors_biases=False,
             declare_priors_gamma=False,
@@ -1281,6 +1327,7 @@ class DenseLayerBayes(DenseLayer):
     ):
         super(DenseLayerBayes, self).__init__(
             training=training,
+            use_MAP_mode=use_MAP_mode,
             units=units,
             use_bias=use_bias,
             activation=activation,
@@ -1301,7 +1348,6 @@ class DenseLayerBayes(DenseLayer):
                 self.declare_priors_weights = declare_priors_weights
                 self.declare_priors_biases = declare_priors_biases
                 self.declare_priors_gamma = declare_priors_gamma
-                self.use_MAP_mode = use_MAP_mode
                 self.kernel_sd_prior = kernel_sd_prior
                 self.bias_sd_prior = bias_sd_prior
                 self.bias_sd_init = bias_sd_init
@@ -1604,6 +1650,9 @@ class BatchNormLayer(object):
     def ema_ops(self):
         return [self.moving_mean_op, self.moving_variance_op]
 
+    def dropout_resample_ops(self):
+        return []
+
 
 class BatchNormLayerBayes(BatchNormLayer):
     def __init__(
@@ -1890,6 +1939,9 @@ class LayerNormLayer(object):
     def ema_ops(self):
         return []
 
+    def dropout_resample_ops(self):
+        return []
+
 
 class LayerNormLayerBayes(LayerNormLayer):
     def __init__(
@@ -2085,3 +2137,84 @@ class LayerNormLayerBayes(LayerNormLayer):
             with self.session.graph.as_default():
                 return self.kl_penalties_base.copy()
 
+
+class DropoutLayer(object):
+    def __init__(
+            self,
+            rate,
+            noise_shape=None,
+            training=False,
+            use_MAP_mode=True,
+            session=None
+    ):
+        self.rate = rate
+        self.noise_shape = noise_shape
+        self.training = training
+        self.use_MAP_mode = use_MAP_mode
+        self.session = get_session(session)
+
+        self.built = False
+
+    def build(self, inputs_shape, dtype=tf.float32):
+        if not self.built:
+            with self.session.as_default():
+                with self.session.graph.as_default():
+                    if self.noise_shape:
+                        noise_shape = [inputs_shape[i] if self.noise_shape[i] is None else self.noise_shape[i] for i in
+                                       range(len(self.noise_shape))]
+                    else:
+                        noise_shape = inputs_shape
+
+                    self.noise_shape = noise_shape
+
+                    if self.noise_shape:
+                        if self.noise_shape[-1] is None:
+                            final_shape = inputs_shape[-1]
+                        else:
+                            final_shape = self.noise_shape[-1]
+                    else:
+                        final_shape = inputs_shape[-1]
+
+                    self.noise_shape_eval = [1 for _ in range(len(inputs_shape) - 1)] + [final_shape]
+
+                    self.dropout_mask_eval_sample = tf.cast(tf.random_uniform(self.noise_shape_eval) > self.rate, dtype)
+                    self.dropout_mask_eval = tf.Variable(tf.ones_like(self.dropout_mask_eval_sample), trainable=False)
+                    self.dropout_mask_eval_resample = tf.assign(self.dropout_mask_eval, self.dropout_mask_eval_sample)
+
+                    self.built = True
+
+    def __call__(self, inputs, seed=None):
+        if not self.built:
+            self.build(inputs.shape, dtype=inputs.dtype)
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                def train_fn(inputs=inputs):
+                    inputs_shape = tf.shape(inputs)
+                    noise_shape = []
+                    for i, x in enumerate(self.noise_shape):
+                        try:
+                            noise_shape.append(int(x))
+                        except TypeError:
+                            noise_shape.append(inputs_shape[i])
+
+                    dropout_mask = tf.cast(tf.random_uniform(noise_shape) > self.rate, inputs.dtype)
+
+                    return inputs * dropout_mask
+
+                def eval_fn(inputs=inputs):
+                    def map_fn(inputs=inputs):
+                        return inputs
+
+                    def sample_fn(inputs=inputs):
+                        return inputs * self.dropout_mask_eval
+
+                    return tf.cond(self.use_MAP_mode, map_fn, sample_fn)
+
+                return tf.cond(self.training, train_fn, eval_fn)
+
+    def dropout_resample_ops(self):
+        out = []
+        if self.built:
+            out.append(self.dropout_mask_eval_resample)
+
+        return out
