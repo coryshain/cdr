@@ -1212,6 +1212,9 @@ class DenseLayer(object):
                                 initializer=tf.zeros_initializer(),
                             )
 
+                        if self.use_dropout:
+                            self.dropout_layer.build(inputs_shape)
+
                         if self.use_batch_normalization:
                             self.normalization_layer = BatchNormLayer(
                                 decay=self.batch_normalization_decay,
@@ -2155,7 +2158,7 @@ class DropoutLayer(object):
 
         self.built = False
 
-    def build(self, inputs_shape, dtype=tf.float32):
+    def build(self, inputs_shape):
         if not self.built:
             with self.session.as_default():
                 with self.session.graph.as_default():
@@ -2176,8 +2179,7 @@ class DropoutLayer(object):
                         final_shape = inputs_shape[-1]
 
                     self.noise_shape_eval = [1 for _ in range(len(inputs_shape) - 1)] + [int(final_shape)]
-
-                    self.dropout_mask_eval_sample = tf.cast(tf.random_uniform(self.noise_shape_eval) > self.rate, dtype)
+                    self.dropout_mask_eval_sample = tf.random_uniform(self.noise_shape_eval) > self.rate
                     self.dropout_mask_eval = tf.Variable(tf.ones_like(self.dropout_mask_eval_sample), trainable=False)
                     self.dropout_mask_eval_resample = tf.assign(self.dropout_mask_eval, self.dropout_mask_eval_sample)
 
@@ -2206,7 +2208,8 @@ class DropoutLayer(object):
                         return inputs
 
                     def sample_fn(inputs=inputs):
-                        return inputs * self.dropout_mask_eval
+                        dropout_mask_eval = tf.cast(self.dropout_mask_eval, dtype=inputs.dtype)
+                        return inputs * dropout_mask_eval
 
                     return tf.cond(self.use_MAP_mode, map_fn, sample_fn)
 
