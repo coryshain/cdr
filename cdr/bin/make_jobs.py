@@ -18,7 +18,7 @@ if __name__ == '__main__':
     Generate PBS batch jobs to run CDR models specified in one or more config files.
     ''')
     argparser.add_argument('paths', nargs='+', help='Path(s) to CDR config file(s).')
-    argparser.add_argument('-j', '--job_type', default='fit', help='Type of job to run. One of ``["fit", "predict", "plot"]``')
+    argparser.add_argument('-j', '--job_type', default='fit', help='Type of job to run. One of ``["fit", "predict", "plot", "save_and_exit"]``')
     argparser.add_argument('-p', '--partition', nargs='+', help='Partition(s) over which to predict/evaluate')
     argparser.add_argument('-d', '--working_dir', type=str, default='/fs/project/schuler.77/shain.3/cdrnn', help='CDR working directory.')
     argparser.add_argument('-M', '--python_module', type=str, default='python/3.7-conda4.5', help='Python module to load')
@@ -55,6 +55,8 @@ if __name__ == '__main__':
             with open(filename, 'w') as f:
                 f.write('#PBS -N %s\n' % job_name)
                 f.write(base % (time, memory, python_module, conda, working_dir))
+                if job_type.lower() == 'save_and_exit':
+                    f.write('python3 -m cdr.bin.train %s -m %s -s\n' % (path, m))
                 if job_type.lower() == 'fit':
                     f.write('python3 -m cdr.bin.train %s -m %s\n' % (path, m))
                 if partitions and job_type.lower() in ['fit', 'predict']:
