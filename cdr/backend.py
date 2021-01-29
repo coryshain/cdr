@@ -398,9 +398,9 @@ class RNNCell(LayerRNNCell):
                 )
                 self.layers += self._kernel_recurrent_layers
                 if self._h_dropout_rate:
-                    self._h_dropout_layer.build(inputs_shape[:-1] + [output_dim])
+                    self._h_dropout_layer.build([x for x in inputs_shape[:-1]] + [output_dim])
                 if self._c_dropout_rate:
-                    self._c_dropout_layer.build(inputs_shape[:-1] + [output_dim])
+                    self._c_dropout_layer.build([x for x in inputs_shape[:-1]] + [output_dim])
 
                 if self._forget_gate_as_irf:
                     self.initialize_irf_biases()
@@ -1102,7 +1102,7 @@ class RNNLayerBayes(RNNLayer):
                         epsilon=self.epsilon,
                     )
 
-                    self.cell.build(inputs_shape[1:])
+                    self.cell.build((inputs_shape[0], inputs_shape[2]))
 
             self.built = True
 
@@ -1226,7 +1226,7 @@ class DenseLayer(object):
                             )
 
                         if self.use_dropout:
-                            self.dropout_layer.build(inputs_shape[:-1] + [out_dim])
+                            self.dropout_layer.build([x for x in inputs_shape[:-1]] + [out_dim])
 
                         if self.use_batch_normalization:
                             self.normalization_layer = BatchNormLayer(
