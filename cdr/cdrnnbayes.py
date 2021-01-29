@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 
 from .kwargs import CDRNNBAYES_INITIALIZATION_KWARGS
-from .backend import DenseLayerBayes, CDRNNLayerBayes, BatchNormLayerBayes, LayerNormLayerBayes
+from .backend import DenseLayerBayes, RNNLayerBayes, BatchNormLayerBayes, LayerNormLayerBayes
 from .cdrnnbase import CDRNN
 from .util import get_numerical_sd, sn, reg_name, stderr
 
@@ -332,7 +332,7 @@ class CDRNNBayes(CDRNN):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 units = self.n_units_rnn[l]
-                rnn = CDRNNLayerBayes(
+                rnn = RNNLayerBayes(
                     training=self.training,
                     use_MAP_mode=self.use_MAP_mode,
                     units=units,

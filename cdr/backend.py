@@ -169,7 +169,7 @@ CDRNNStateTuple = collections.namedtuple(
 )
 
 
-class CDRNNCell(LayerRNNCell):
+class RNNCell(LayerRNNCell):
     def __init__(
             self,
             units,
@@ -204,7 +204,7 @@ class CDRNNCell(LayerRNNCell):
         self._session = get_session(session)
         with self._session.as_default():
             with self._session.graph.as_default():
-                super(CDRNNCell, self).__init__(_reuse=reuse, name=name, dtype=dtype)
+                super(RNNCell, self).__init__(_reuse=reuse, name=name, dtype=dtype)
 
                 self._num_units = units
                 self._training = training
@@ -224,18 +224,22 @@ class CDRNNCell(LayerRNNCell):
                 self._bottomup_kernel_sd_init = bottomup_kernel_sd_init
                 self._recurrent_kernel_sd_init = recurrent_kernel_sd_init
 
+                self.use_dropout = bool(bottomup_dropout or h_dropout or c_dropout)
+                self._bottomup_dropout_rate = bottomup_dropout
                 self._bottomup_dropout_layer = get_dropout(
                     bottomup_dropout,
                     training=self._training,
                     use_MAP_mode=self.use_MAP_mode,
                     session=self._session
                 )
+                self._h_dropout_rate = h_dropout
                 self._h_dropout_layer = get_dropout(
                     h_dropout,
                     training=self._training,
                     use_MAP_mode=self.use_MAP_mode,
                     session=self._session
                 )
+                self._c_dropout_rate = c_dropout
                 self._c_dropout_layer = get_dropout(
                     c_dropout,
                     training=self._training,
@@ -383,6 +387,8 @@ class CDRNNCell(LayerRNNCell):
                     name='bottomup'
                 )
                 self.layers += self._kernel_bottomup_layers
+                if self._bottomup_dropout_rate:
+                    self._bottomup_dropout_layer.build(inputs_shape)
 
                 self._kernel_recurrent, self._kernel_recurrent_layers = self.initialize_kernel(
                     recurrent_dim,
@@ -391,6 +397,10 @@ class CDRNNCell(LayerRNNCell):
                     name='recurrent'
                 )
                 self.layers += self._kernel_recurrent_layers
+                if self._h_dropout_rate:
+                    self._h_dropout_layer.build(inputs_shape[:-1] + [output_dim])
+                if self._c_dropout_rate:
+                    self._c_dropout_layer.build(inputs_shape[:-1] + [output_dim])
 
                 if self._forget_gate_as_irf:
                     self.initialize_irf_biases()
@@ -530,7 +540,7 @@ class CDRNNCell(LayerRNNCell):
         return out
 
 
-class CDRNNLayer(object):
+class RNNLayer(object):
     def __init__(
             self,
             units=None,
@@ -608,7 +618,7 @@ class CDRNNLayer(object):
                     else:
                         units = self.units
 
-                    self.cell = CDRNNCell(
+                    self.cell = RNNCell(
                         units,
                         training=self.training,
                         use_MAP_mode=self.use_MAP_mode,
@@ -638,7 +648,7 @@ class CDRNNLayer(object):
                         epsilon=self.epsilon,
                     )
 
-                    self.cell.build(inputs_shape[1:])
+                    self.cell.build((inputs_shape[0], inputs_shape[2]))
 
             self.built = True
 
@@ -689,8 +699,11 @@ class CDRNNLayer(object):
     def ema_ops(self):
         return self.cell.ema_ops()
 
+    def dropout_resample_ops(self):
+        return self.cell.dropout_resample_ops()
 
-class CDRNNCellBayes(CDRNNCell):
+
+class RNNCellBayes(RNNCell):
     def __init__(
             self,
             units,
@@ -729,7 +742,7 @@ class CDRNNCellBayes(CDRNNCell):
             epsilon=1e-5,
             session=None
     ):
-        super(CDRNNCellBayes, self).__init__(
+        super(RNNCellBayes, self).__init__(
             units=units,
             training=training,
             use_MAP_mode=use_MAP_mode,
@@ -962,7 +975,7 @@ class CDRNNCellBayes(CDRNNCell):
         return []
 
 
-class CDRNNLayerBayes(CDRNNLayer):
+class RNNLayerBayes(RNNLayer):
     def __init__(
             self,
             units=None,
@@ -1002,7 +1015,7 @@ class CDRNNLayerBayes(CDRNNLayer):
             epsilon=1e-5,
             session=None
     ):
-        super(CDRNNLayerBayes, self).__init__(
+        super(RNNLayerBayes, self).__init__(
             units=units,
             training=training,
             use_MAP_mode=use_MAP_mode,
@@ -1052,7 +1065,7 @@ class CDRNNLayerBayes(CDRNNLayer):
                     else:
                         units = self.units
 
-                    self.cell = CDRNNCellBayes(
+                    self.cell = RNNCellBayes(
                         units,
                         training=self.training,
                         use_MAP_mode=self.use_MAP_mode,
@@ -1213,7 +1226,7 @@ class DenseLayer(object):
                             )
 
                         if self.use_dropout:
-                            self.dropout_layer.build(inputs_shape)
+                            self.dropout_layer.build(inputs_shape[:-1] + [out_dim])
 
                         if self.use_batch_normalization:
                             self.normalization_layer = BatchNormLayer(
@@ -2187,7 +2200,7 @@ class DropoutLayer(object):
 
     def __call__(self, inputs, seed=None):
         if not self.built:
-            self.build(inputs.shape, dtype=inputs.dtype)
+            self.build(inputs.shape)
         with self.session.as_default():
             with self.session.graph.as_default():
                 def train_fn(inputs=inputs):
