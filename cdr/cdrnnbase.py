@@ -733,10 +733,10 @@ class CDRNN(Model):
                             units += n
 
                     if self.heteroskedastic:
-                        self.y_sd_coef = tf.sigmoid(tf.Variable(
-                            -1.,
-                            name='y_sd_coef'
-                        ))
+                        # self.y_sd_coef = tf.sigmoid(tf.Variable(
+                        #     -1.,
+                        #     name='y_sd_coef'
+                        # ))
                         if self.asymmetric_error:
                             self.y_skewness_coef = tf.sigmoid(tf.Variable(
                                 -1.,
