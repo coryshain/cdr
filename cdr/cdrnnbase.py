@@ -472,6 +472,8 @@ class CDRNN(Model):
                         use_bias = True
                     else:
                         units = self.n_units_hidden_state
+                        if self.split_h:
+                            units *= 2
                         activation = self.input_projection_activation
                         dropout = None
                         bn = None
@@ -550,6 +552,8 @@ class CDRNN(Model):
                             use_bias = True
                         else:
                             units = self.n_units_hidden_state
+                            if self.split_h:
+                                units *= 2
                             activation = self.rnn_projection_activation
                             bn = None
                             ln = None
@@ -687,72 +691,75 @@ class CDRNN(Model):
                 self.irf = irf
 
                 # ERROR PARAMS FN
-                error_params_fn_layers = []
-                for l in range(self.n_layers_error_params_fn):
-                    units = self.n_units_error_params_fn[l]
-                    activation = self.error_params_fn_inner_activation
-                    dropout = self.error_params_fn_dropout_rate
-                    if self.normalize_error_params_fn:
-                        bn = self.batch_normalization_decay
-                        ln = self.layer_normalization_type
-                    else:
-                        bn = None
-                        ln = None
-                    use_bias = True
+                if self.heteroskedastic:
+                    error_params_fn_layers = []
+                    for l in range(self.n_layers_error_params_fn):
+                        units = self.n_units_error_params_fn[l]
+                        activation = self.error_params_fn_inner_activation
+                        dropout = self.error_params_fn_dropout_rate
+                        if self.normalize_error_params_fn:
+                            bn = self.batch_normalization_decay
+                            ln = self.layer_normalization_type
+                        else:
+                            bn = None
+                            ln = None
+                        use_bias = True
+
+                        projection = self.initialize_feedforward(
+                            units=units,
+                            use_bias=use_bias,
+                            activation=activation,
+                            dropout=dropout,
+                            batch_normalization_decay=bn,
+                            layer_normalization_type=ln,
+                            name='error_params_fn_l%s' % (l + 1)
+                        )
+                        self.layers.append(projection)
+
+                        self.regularizable_layers.append(projection)
+                        error_params_fn_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
+
+                    self.error_params_fn_layers = error_params_fn_layers
+                    self.error_params_fn = compose_lambdas(error_params_fn_layers)
+
+                    units = 1
+                    if self.asymmetric_error:
+                        units += 2
+                    n = len(self.impulse_indices)
+                    if n > 1:
+                        if n == 2:
+                            units += 1
+                        else:
+                            units += n
+
+                    if self.heteroskedastic:
+                        self.y_sd_coef = tf.sigmoid(tf.Variable(
+                            -1.,
+                            name='y_sd_coef'
+                        ))
+                        if self.asymmetric_error:
+                            self.y_skewness_coef = tf.sigmoid(tf.Variable(
+                                -1.,
+                                name='y_skewness_coef'
+                            ))
+                            self.y_tailweight_coef = tf.sigmoid(tf.Variable(
+                                -1.,
+                                name='y_tailweight_coef'
+                            ))
 
                     projection = self.initialize_feedforward(
                         units=units,
-                        use_bias=use_bias,
-                        activation=activation,
-                        dropout=dropout,
-                        batch_normalization_decay=bn,
-                        layer_normalization_type=ln,
-                        name='error_params_fn_l%s' % (l + 1)
+                        use_bias=False,
+                        activation=self.error_params_fn_activation,
+                        name='error_params_fn_l%s' % (self.n_layers_error_params_fn + 1),
+                        final=final
                     )
                     self.layers.append(projection)
 
-                    self.regularizable_layers.append(projection)
-                    error_params_fn_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
+                    self.error_params_final_fn = compose_lambdas([projection])
 
-                self.error_params_fn_layers = error_params_fn_layers
-                self.error_params_fn = compose_lambdas(error_params_fn_layers)
-
-                units = 1
-                if self.asymmetric_error:
-                    units += 2
-                n = len(self.impulse_indices)
-                if n > 1:
-                    if n == 2:
-                        units += 1
-                    else:
-                        units += n
-
-                if self.asymmetric_error:
-                    denom = self.n_units_hidden_state
-                    if self.n_units_error_params_fn:
-                        denom = max(denom, self.n_units_error_params_fn[-1])
-                    self.y_skewness_coef = tf.Variable(
-                        1. / denom,
-                        name='skewness_coef'
-                    )
-                    self.y_tailweight_coef = tf.Variable(
-                        1. / denom,
-                        name='tailweight_coef'
-                    )
-
-                projection = self.initialize_feedforward(
-                    units=units,
-                    use_bias=False,
-                    activation=self.error_params_fn_activation,
-                    name='error_params_fn_l%s' % (self.n_layers_error_params_fn + 1),
-                    final=final
-                )
-                self.layers.append(projection)
-
-                self.error_params_final_fn = compose_lambdas([projection])
-
-                # # ERROR PARAM BIASES
-                # self.error_params_b, self.error_params_b_summary = self.initialize_error_params_biases(ran_gf=None)
+                    # # ERROR PARAM BIASES
+                    # self.error_params_b, self.error_params_b_summary = self.initialize_error_params_biases(ran_gf=None)
 
                 # INTERCEPT
                 if self.has_intercept[None]:
@@ -1013,10 +1020,13 @@ class CDRNN(Model):
                                 collections=['random']
                             )
 
+                        n_units_hidden_state = self.n_units_hidden_state
+                        if self.split_h:
+                            n_units_hidden_state *= 2
                         h_bias_ran_matrix_cur = tf.concat(
                             [
                                 h_bias_ran_matrix_cur,
-                                tf.zeros([1, self.n_units_hidden_state])
+                                tf.zeros([1, n_units_hidden_state])
                             ],
                             axis=0
                         )
@@ -1372,8 +1382,15 @@ class CDRNN(Model):
                 if not self.normalize_after_activation:
                     h = get_activation(self.hidden_state_activation, session=self.sess)(h)
 
+                if self.split_h and self.heteroskedastic:
+                    h_irf_in = h[..., :self.n_units_hidden_state]
+                    h_error_params_fn_in = h[..., -self.n_units_hidden_state:]
+                else:
+                    h_irf_in = h
+                    h_error_params_fn_in = h
+
                 # Compute response
-                Wb_proj = self.hidden_state_to_irf_l1(h)
+                Wb_proj = self.hidden_state_to_irf_l1(h_irf_in)
                 W_proj = Wb_proj[..., :self.n_units_irf_l1]
                 b_proj = Wb_proj[..., self.n_units_irf_l1:]
 
@@ -1393,17 +1410,25 @@ class CDRNN(Model):
                     y *= time_X_mask[..., None]
                 y = tf.reduce_sum(y, axis=1)
 
-                error_params = self.error_params_fn(h)
-                # Max pooling over time
-                error_params = tf.reduce_max(error_params, axis=-2)
-                error_params = self.error_params_final_fn(error_params)
+                if self.heteroskedastic:
+                    error_params = self.error_params_fn(h_error_params_fn_in)
+                    # Max pooling over time
+                    error_params = tf.reduce_max(error_params, axis=-2)
+                    error_params = self.error_params_final_fn(error_params)
 
-                y_sd_delta = error_params[..., 0]
-                if self.asymmetric_error:
-                    y_skewness_delta = error_params[..., 1]
-                    y_tailweight_delta = error_params[..., 2]
+                    y_sd_delta = error_params[..., 0]
+                    if self.asymmetric_error:
+                        y_skewness_delta = error_params[..., 1]
+                        y_tailweight_delta = error_params[..., 2]
+                    else:
+                        y_skewness_delta = y_tailweight_delta = None
                 else:
-                    y_skewness_delta = y_tailweight_delta = None
+                    y_sd_delta = tf.constant(0.)
+                    if self.asymmetric_error:
+                        y_skewness_delta = tf.constant(0.)
+                        y_tailweight_delta = tf.constant(0.)
+                    else:
+                        y_skewness_delta = y_tailweight_delta = None
 
                 out = {
                     'y': y,
@@ -1489,6 +1514,12 @@ class CDRNN(Model):
                     )
                     self.rnn_c_ema_ops.append(c_ema_op)
 
+                # if self.heteroskedastic:
+                #     y_sd_delta *= self.y_sd_coef
+                #     if self.asymmetric_error:
+                #         y_skewness_delta *= self.y_skewness_coef
+                #         y_tailweight_delta *= self.y_tailweight_coef
+
                 self.y_sd_delta = y_sd_delta
                 self.y_sd_delta_ema = tf.Variable(0., trainable=False, name='y_sd_delta_ema')
                 self.y_sd_delta_ema_op = tf.assign(
@@ -1497,7 +1528,6 @@ class CDRNN(Model):
                 )
 
                 if self.asymmetric_error:
-                    y_skewness_delta *= self.y_skewness_coef
                     self.y_skewness_delta = y_skewness_delta
                     self.y_skewness_delta_ema = tf.Variable(0., trainable=False, name='y_skewness_delta_ema')
                     self.y_skewness_delta_ema_op = tf.assign(
@@ -1505,7 +1535,6 @@ class CDRNN(Model):
                         ema_rate * self.y_skewness_delta_ema + (1 - ema_rate) * tf.reduce_mean(y_skewness_delta)
                     )
 
-                    y_tailweight_delta *= self.y_tailweight_coef
                     self.y_tailweight_delta = y_tailweight_delta
                     self.y_tailweight_delta_ema = tf.Variable(0., trainable=False, name='y_tailweight_delta_ema')
                     self.y_tailweight_delta_ema_op = tf.assign(

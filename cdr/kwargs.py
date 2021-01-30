@@ -741,6 +741,18 @@ CDRNN_INITIALIZATION_KWARGS = [
         "Number of posterior predictive samples to draw for prediction/evaluation."
     ),
     Kwarg(
+        'heteroskedastic',
+        True,
+        bool,
+        "Whether to parameterize the error distribution using a neural net. Otherwise, constant error parameters are used."
+    ),
+    Kwarg(
+        'split_h',
+        False,
+        bool,
+        "Whether to split the hidden state between IRF and error params fn. Ignored unless **heteroskedastic** is ``True``."
+    ),
+    Kwarg(
         'center_time',
         False,
         bool,
