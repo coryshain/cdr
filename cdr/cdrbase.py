@@ -1094,16 +1094,6 @@ class CDR(Model):
                     self.X_rate = tf.gather(X, rate_ix, axis=-1)
 
                 # Initialize regularizers
-                if self.coefficient_regularizer_name is None:
-                    self.coefficient_regularizer = None
-                elif self.coefficient_regularizer_name == 'inherit':
-                    self.coefficient_regularizer = self.regularizer
-                else:
-                    scale = self.coefficient_regularizer_scale
-                    if self.scale_regularizer_with_data:
-                        scale *= self.minibatch_size * self.minibatch_scale
-                    self.coefficient_regularizer = getattr(tf.contrib.layers, self.coefficient_regularizer_name)(scale)
-                    
                 if self.irf_regularizer_name is None:
                     self.irf_regularizer = None
                 elif self.irf_regularizer_name == 'inherit':

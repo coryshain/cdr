@@ -100,7 +100,12 @@ class CDRNNMLE(CDRNN):
             with self.sess.graph.as_default():
                 units = len(self.impulse_names) + 1
                 if ran_gf is None:
-                    coefficient = 1.
+                    # coefficient = tf.Variable(
+                    #     tf.zeros([1, 1, units]),
+                    #     dtype=self.FLOAT_TF,
+                    #     name='coefficient'
+                    # )
+                    coefficient = 1
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     coefficient = tf.Variable(
@@ -620,29 +625,3 @@ class CDRNNMLE(CDRNN):
         out += '\n'
 
         return out
-
-    def run_predict_op(self, feed_dict, standardize_response=False, n_samples=None, algorithm='MAP', verbose=True):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                preds = self.sess.run(self.out, feed_dict=feed_dict)
-                if self.standardize_response and not standardize_response:
-                    preds = preds * self.y_train_sd + self.y_train_mean
-                return preds
-
-    def run_loglik_op(self, feed_dict, standardize_response=False, n_samples=None, algorithm='MAP', verbose=True):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                if self.standardize_response and standardize_response:
-                    ll = self.ll_standardized
-                else:
-                    ll = self.ll
-                log_lik = self.sess.run(ll, feed_dict=feed_dict)
-                return log_lik
-
-    def run_loss_op(self, feed_dict, n_samples=None, algorithm='MAP', verbose=True):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                loss = self.sess.run(self.loss_func, feed_dict=feed_dict)
-
-                return loss
-

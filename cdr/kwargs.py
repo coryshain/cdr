@@ -349,6 +349,18 @@ MODEL_INITIALIZATION_KWARGS = [
         "Scale of global regularizer; can be overridden by more regularizers for more specific parameters (ignored if ``regularizer_name==None``)."
     ),
     Kwarg(
+        'coefficient_regularizer_name',
+        'inherit',
+        [str, 'inherit', None],
+        "Name of coefficient regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
+    ),
+    Kwarg(
+        'coefficient_regularizer_scale',
+        'inherit',
+        [float, 'inherit'],
+        "Scale of coefficient regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
+    ),
+    Kwarg(
         'scale_loss_with_data',
         False,
         bool,
@@ -546,18 +558,6 @@ CDR_INITIALIZATION_KWARGS = [
         bool,
         "Use multivariate model that fits covariances between random parameters within a random grouping factor. Experimental, not thoroughly tested. If ``False``, random parameter distributions are treated as independent.",
         aliases=['mv_ran']
-    ),
-    Kwarg(
-        'coefficient_regularizer_name',
-        'inherit',
-        [str, 'inherit', None],
-        "Name of coefficient regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
-    ),
-    Kwarg(
-        'coefficient_regularizer_scale',
-        'inherit',
-        [float, 'inherit'],
-        "Scale of coefficient regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
     Kwarg(
         'irf_regularizer_name',
@@ -764,6 +764,12 @@ CDRNN_INITIALIZATION_KWARGS = [
         bool,
         "Whether to rescale time values by their training SD under the hood, which can help with convergence. Times are automatically reconverted back to the source scale for plotting and model criticism.",
         aliases=['rescale_t_delta']
+    ),
+    Kwarg(
+        'ranef_at_input',
+        False,
+        bool,
+        "Whether to random effects as coefficients on the input features. Otherwise, they will be applied as biases on the hidden state."
     ),
     Kwarg(
         'n_layers_input_projection',

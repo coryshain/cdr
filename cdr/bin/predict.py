@@ -94,6 +94,7 @@ if __name__ == '__main__':
     argparser.add_argument('-M', '--mode', nargs='+', default=None, help='Predict mode(s) (set of "response", "loglik", and/or "loss") or default ``None``, which does both "response" and "loglik". Modes "loglik" and "loss" are only valid for CDR.')
     argparser.add_argument('-a', '--algorithm', type=str, default='MAP', help='Algorithm ("sampling" or "MAP") to use for extracting predictions from CDRBayes. Ignored for CDRMLE.')
     argparser.add_argument('-t', '--twostep', action='store_true', help='For CDR models, predict from fitted LME model from two-step hypothesis test.')
+    argparser.add_argument('-T', '--training_mode', action='store_true', help='Use training mode for prediction.')
     argparser.add_argument('-A', '--ablated_models', action='store_true', help='For two-step prediction from CDR models, predict from data convolved using the ablated model. Otherwise predict from data convolved using the full model.')
     argparser.add_argument('-e', '--extra_cols', action='store_true', help='For prediction from CDR models, dump prediction outputs and response metadata to a single csv.')
     args, unknown = argparser.parse_known_args()
@@ -481,7 +482,8 @@ if __name__ == '__main__':
                             X_2d_predictors=X_2d_predictors,
                             n_samples=args.nsamples,
                             algorithm=args.algorithm,
-                            standardize_response=args.standardize_response
+                            standardize_response=args.standardize_response,
+                            training=args.training_mode
                         )
 
                         if args.extra_cols:
@@ -502,7 +504,8 @@ if __name__ == '__main__':
                             X_2d_predictor_names=X_2d_predictor_names,
                             X_2d_predictors=X_2d_predictors,
                             n_samples=args.nsamples,
-                            algorithm=args.algorithm
+                            algorithm=args.algorithm,
+                            training=args.training_mode
                         )
 
                     if bayes:

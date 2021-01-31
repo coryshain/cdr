@@ -641,6 +641,16 @@ class Model(object):
                         scale *= self.minibatch_size * self.minibatch_scale
                     self.regularizer = getattr(tf.contrib.layers, self.regularizer_name)(scale)
 
+                if self.coefficient_regularizer_name is None:
+                    self.coefficient_regularizer = None
+                elif self.coefficient_regularizer_name == 'inherit':
+                    self.coefficient_regularizer = self.regularizer
+                else:
+                    scale = self.coefficient_regularizer_scale
+                    if self.scale_regularizer_with_data:
+                        scale *= self.minibatch_size * self.minibatch_scale
+                    self.coefficient_regularizer = getattr(tf.contrib.layers, self.coefficient_regularizer_name)(scale)
+
                 self.loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='loss_total')
                 self.reg_loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='reg_loss_total')
                 if self.is_bayesian:
@@ -2796,6 +2806,7 @@ class Model(object):
             n_samples=None,
             algorithm='MAP',
             standardize_response=False,
+            training=None,
             verbose=True
     ):
         """
@@ -2864,6 +2875,9 @@ class Model(object):
             float_type=self.float_type,
         )
 
+        if training is None:
+            training = not self.predict_mode
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.set_predict_mode(True)
@@ -2876,7 +2890,7 @@ class Model(object):
                         self.time_y: time_y,
                         self.gf_y: gf_y,
                         self.y: y_dv,
-                        self.training: not self.predict_mode
+                        self.training: training
                     }
                     log_lik = self.run_loglik_op(
                         fd,
@@ -2898,7 +2912,7 @@ class Model(object):
                             self.time_y: time_y[i:i + self.eval_minibatch_size],
                             self.gf_y: gf_y[i:i + self.eval_minibatch_size] if len(gf_y) > 0 else gf_y,
                             self.y: y_dv[i:i+self.eval_minibatch_size],
-                            self.training: not self.predict_mode
+                            self.training: training
                         }
                         log_lik[i:i+self.eval_minibatch_size] = self.run_loglik_op(
                             fd_minibatch,
@@ -2925,6 +2939,7 @@ class Model(object):
             X_2d_predictors=None,
             n_samples=None,
             algorithm='MAP',
+            training=None,
             verbose=True
     ):
         """
@@ -2993,6 +3008,9 @@ class Model(object):
             float_type=self.float_type,
         )
 
+        if training is None:
+            training = not self.predict_mode
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.set_predict_mode(True)
@@ -3005,7 +3023,7 @@ class Model(object):
                         self.time_y: time_y,
                         self.gf_y: gf_y,
                         self.y: y_dv,
-                        self.training: not self.predict_mode
+                        self.training: training
                     }
                     loss = self.run_loss_op(
                         fd,
@@ -3026,7 +3044,7 @@ class Model(object):
                             self.time_y: time_y[i:i + self.minibatch_size],
                             self.gf_y: gf_y[i:i + self.minibatch_size] if len(gf_y) > 0 else gf_y,
                             self.y: y_dv[i:i+self.minibatch_size],
-                            self.training: not self.predict_mode
+                            self.training: training
                         }
                         loss[i] = self.run_loss_op(
                             fd_minibatch,
