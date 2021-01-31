@@ -3473,7 +3473,6 @@ class Model(object):
                                 irf_name_map=irf_name_map,
                                 plot_x_inches=plot_x_inches,
                                 plot_y_inches=plot_y_inches,
-                                ylim=ylim,
                                 cmap=cmap,
                                 dpi=dpi,
                                 legend=legend,
