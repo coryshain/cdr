@@ -105,7 +105,7 @@ class CDRNNMLE(CDRNN):
                     #     dtype=self.FLOAT_TF,
                     #     name='coefficient'
                     # )
-                    coefficient = tf.constant(1.)
+                    coefficient = tf.ones([1, 1, units])
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     coefficient = tf.Variable(
