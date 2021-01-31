@@ -951,7 +951,7 @@ class CDRNN(Model):
                             coefficient_ran_matrix_cur = tf.concat(
                                 [
                                     coefficient_ran_matrix_cur,
-                                    tf.zeros([1, len(self.impulse_names) + 1])
+                                    tf.zeros([1, len(self.impulse_names) + 2])
                                 ],
                                 axis=0
                             )
@@ -1357,11 +1357,12 @@ class CDRNN(Model):
                     B = tf.shape(X)[0]
                     tile_ix = tf.tile(tf.range(R)[..., None], [1, B])
                     tile_ix = tf.reshape(tile_ix, [-1])
-                    h = tf.gather(h, tile_ix, axis=0)
                     # W = tf.gather(W, tile_ix, axis=0)
                     # b = tf.gather(b, tile_ix, axis=0)
                     if self.ranef_at_input:
                         coef = tf.gather(coef, tile_ix, axis=0)
+                    else:
+                        h = tf.gather(h, tile_ix, axis=0)
                     X = tf.tile(X, [R, 1 ,1])
                     time_X = tf.tile(time_X, [R, 1 ,1])
                     t_delta = tf.tile(t_delta, [R, 1 ,1])
@@ -1372,7 +1373,8 @@ class CDRNN(Model):
 
                 if self.ranef_at_input:
                     # coef = tf.Print(coef, [tf.shape(coef)])
-                    X *= coef
+                    X *= coef[..., :-1]
+                    t_delta *= coef[..., -1:]
 
                 if self.nonstationary_intercept:
                     intercept_delta_l1 = W_int * time_y + b_int
@@ -1715,7 +1717,6 @@ class CDRNN(Model):
                     tf.ones([1, 1, 1], dtype=self.FLOAT_TF) * t_interaction,
                     plot_mode=True
                 )['y']
-                rate_at_t = tf.squeeze(rate_at_t)
 
                 t_delta = tf.ones([T, 1, 1], dtype=self.FLOAT_TF) * t_interaction
 
@@ -1727,7 +1728,7 @@ class CDRNN(Model):
                 u = x * (c + u * s)
                 X = u + b
                 curvature_plot = self._apply_model(X, t_delta, plot_mode=True)['y']
-                self.curvature_plot = tf.reshape(curvature_plot, [R, T, 1]) - rate_at_t
+                self.curvature_plot = tf.reshape(curvature_plot, [R, T, 1]) - rate_at_t[..., None]
 
                 if self.center_inputs:
                     b_plot = b + means
@@ -1778,7 +1779,7 @@ class CDRNN(Model):
                 self.interaction_surface_plot = tf.reshape(
                     interaction_surface_plot[None, ...],
                     [R, self.n_surface_plot_points_per_side, self.n_surface_plot_points_per_side, 1]
-                ) - rate_at_t
+                ) - rate_at_t[..., None, None]
 
 
                 if self.center_inputs:

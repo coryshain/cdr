@@ -98,14 +98,14 @@ class CDRNNMLE(CDRNN):
     def initialize_coefficient(self, coef_ids=None, ran_gf=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                units = len(self.impulse_names) + 1
+                units = len(self.impulse_names) + 2
                 if ran_gf is None:
                     # coefficient = tf.Variable(
                     #     tf.zeros([1, 1, units]),
                     #     dtype=self.FLOAT_TF,
                     #     name='coefficient'
                     # )
-                    coefficient = 1
+                    coefficient = tf.constant(1.)
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     coefficient = tf.Variable(
