@@ -1359,7 +1359,7 @@ class CDRNN(Model):
                     tile_ix = tf.reshape(tile_ix, [-1])
                     # W = tf.gather(W, tile_ix, axis=0)
                     # b = tf.gather(b, tile_ix, axis=0)
-                    if self.ranef_at_input and len(coef.shape) > 0:
+                    if self.ranef_at_input and self.is_mixed_model:
                         coef = tf.gather(coef, tile_ix, axis=0)
                     else:
                         h = tf.gather(h, tile_ix, axis=0)

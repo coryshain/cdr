@@ -268,6 +268,7 @@ class Model(object):
         self.dv = f.dv
         self.has_intercept = f.has_intercept
         self.rangf = f.rangf
+        self.is_mixed_model = len(self.rangf) > 0
 
         if np.isfinite(self.minibatch_size):
             self.n_train_minibatch = math.ceil(float(self.n_train) / self.minibatch_size)
