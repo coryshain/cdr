@@ -1131,6 +1131,7 @@ class DenseLayer(object):
             activation=None,
             kernel_sd_init='he',
             dropout=None,
+            maxnorm=None,
             batch_normalization_decay=None,
             layer_normalization_type=None,
             normalize_after_activation=False,
@@ -1162,6 +1163,7 @@ class DenseLayer(object):
                     reuse=self.reuse,
                     session=self.session
                 )
+                self.maxnorm = maxnorm
 
                 self.batch_normalization_decay = batch_normalization_decay
                 self.use_batch_normalization = bool(self.batch_normalization_decay)
@@ -1271,7 +1273,10 @@ class DenseLayer(object):
 
         with self.session.as_default():
             with self.session.graph.as_default():
-                H = tf.tensordot(inputs, self.kernel, 1)
+                kernel = self.kernel
+                if self.maxnorm:
+                    kernel = tf.clip_by_norm(kernel, self.maxnorm, axes=[0])
+                H = tf.tensordot(inputs, kernel, 1)
                 if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
                 # if self.use_bias and not self.normalize_activations:
                     bias = self.bias
@@ -1332,6 +1337,7 @@ class DenseLayerBayes(DenseLayer):
             use_bias=True,
             activation=None,
             dropout=None,
+            maxnorm=None,
             batch_normalization_decay=None,
             layer_normalization_type=None,
             normalize_after_activation=False,
@@ -1360,6 +1366,7 @@ class DenseLayerBayes(DenseLayer):
             activation=activation,
             kernel_sd_init=kernel_sd_init,
             dropout=dropout,
+            maxnorm=maxnorm,
             batch_normalization_decay=batch_normalization_decay,
             layer_normalization_type=layer_normalization_type,
             normalize_after_activation=normalize_after_activation,

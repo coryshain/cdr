@@ -272,19 +272,19 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'max_global_gradient_norm',
-        1,
+        None,
         [float, None],
         'Maximum allowable value for the global norm of the gradient, which will be clipped as needed. If ``None``, no gradient clipping.'
     ),
     Kwarg(
         'epsilon',
-        1e-2,
+        1e-8,
         float,
         "Epsilon parameter to use for numerical stability in bounded parameter estimation."
     ),
     Kwarg(
         'optim_epsilon',
-        1,
+        1e-8,
         float,
         "Epsilon parameter to use if **optim_name** in ``['Adam', 'Nadam']``, ignored otherwise."
     ),
@@ -955,6 +955,12 @@ CDRNN_INITIALIZATION_KWARGS = [
         "Scale of weight regularizer (ignored if ``context_regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
     Kwarg(
+        'maxnorm',
+        None,
+        [float, None],
+        "Bound on norm of dense kernel dimensions for max-norm regularization. If ``None``, no max-norm regularization."
+    ),
+    Kwarg(
         'input_projection_dropout_rate',
         None,
         [float, None],
@@ -1047,7 +1053,13 @@ CDRNN_INITIALIZATION_KWARGS = [
         None,
         [float, None],
         "Standard deviation of jitter injected into inputs (predictors and timesteps) during training. If ``0`` or ``None``, no input jitter."
-    )
+    ),
+    Kwarg(
+        'plot_step',
+        '',
+        str,
+        "Size of step by predictor to take above reference in univariate IRF plots. Structured as space-delimited pairs ``NAME=FLOAT``. Any predictor without a specified step size will step 1 SD from training set."
+    ),
 ]
 
 CDRNNMLE_INITIALIZATION_KWARGS = [

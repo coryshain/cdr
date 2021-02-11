@@ -44,6 +44,7 @@ def plot_irf(
         irf_names,
         lq=None,
         uq=None,
+        density=None,
         sort_names=True,
         prop_cycle_length=None,
         prop_cycle_ix=None,
@@ -90,6 +91,8 @@ def plot_irf(
     :return: ``None``
     """
 
+    fig, ax = plt.subplots()
+    prop_cycle_kwargs = {}
     cm = plt.get_cmap(cmap)
     plt.rcParams["font.family"] = "sans-serif"
     if prop_cycle_length:
@@ -98,19 +101,32 @@ def plot_irf(
         n_colors = len(irf_names)
     if not prop_cycle_ix:
         prop_cycle_ix = list(range(n_colors))
-    prop_cycle_kwargs = {'color': [cm(1. * prop_cycle_ix[i] / n_colors) for i in range(len(irf_names))]}
+    color_cycle = [cm(1. * prop_cycle_ix[i] / n_colors) for i in range(len(irf_names))]
+    prop_cycle_kwargs['color'] = color_cycle
     if use_line_markers:
         markers_keys = list(markers.MarkerStyle.markers.keys())[:-3]
         prop_cycle_kwargs['marker'] = [markers_keys[prop_cycle_ix[i]] for i in range(len(irf_names))]
-    plt.gca().set_prop_cycle(**prop_cycle_kwargs)
-    plt.gca().spines['top'].set_visible(False)
-    plt.gca().spines['right'].set_visible(False)
-    plt.gca().spines['bottom'].set_visible(False)
-    plt.gca().spines['left'].set_visible(False)
-    plt.gca().tick_params(top='off', bottom='off', left='off', right='off', labelleft='on', labelbottom='on')
-    plt.grid(b=True, which='major', axis='both', ls='--', lw=.5, c='k', alpha=.3)
-    plt.axhline(y=0, lw=1, c='gray', alpha=1)
-    plt.axvline(x=0, lw=1, c='gray', alpha=1)
+    ax.set_prop_cycle(**prop_cycle_kwargs)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['bottom'].set_visible(False)
+    ax.spines['left'].set_visible(False)
+    ax.tick_params(top='off', bottom='off', left='off', right='off', labelleft='on', labelbottom='on')
+    ax.grid(b=True, which='major', axis='both', ls='--', lw=.5, c='k', alpha=.3)
+    ax.axhline(y=0, lw=1, c='gray', alpha=1)
+    ax.axvline(x=0, lw=1, c='gray', alpha=1)
+    if density is not None:
+        ax_d = ax.twinx()
+        ax_d.spines['top'].set_visible(False)
+        ax_d.spines['right'].set_visible(False)
+        ax_d.spines['bottom'].set_visible(False)
+        ax_d.spines['left'].set_visible(False)
+        # ax_d.tick_params(top='off', bottom='off', left='off', right='off', labelleft='off', labelbottom='off')
+        ax_d.set_ylabel('Density')
+        ax_d.plot(plot_x, density, lw=2, alpha=0.2, color='k', linestyle='dotted', solid_capstyle='butt')
+        ax_d.fill_between(plot_x[:,0], np.zeros_like(density), density, color='k', alpha=0.05)
+        ax.set_zorder(ax_d.get_zorder() + 1)
+        ax.patch.set_visible(False)
 
     irf_names_processed = irf_names[:]
     if irf_name_map is not None:
@@ -120,32 +136,44 @@ def plot_irf(
         sort_ix = [i[0] for i in sorted(enumerate(irf_names_processed), key=lambda x:x[1])]
     else:
         sort_ix = range(len(irf_names_processed))
+
     for i in range(len(sort_ix)):
+        # c = cm(color_cycle[i])
+        # if density is None:
+        #     c = c[:3] + (0.8,)
+        # else:
+        #     c = np.concatenate([np.ones((len(density), 3)), density[..., None]], axis=1)
+        #     print(c.shape)
+        #     print(plot_x.shape)
         if plot_y[1:,sort_ix[i]].sum() == 0:
-            plt.plot(plot_x[:2], plot_y[:2,sort_ix[i]], label=irf_names_processed[sort_ix[i]], lw=2, alpha=0.8, linestyle='-', solid_capstyle='butt')
+            ax.plot(plot_x[:2], plot_y[:2,sort_ix[i]], label=irf_names_processed[sort_ix[i]], lw=2, alpha=0.8, linestyle='-', solid_capstyle='butt')
         else:
             markevery = int(len(plot_y) / 10)
-            plt.plot(plot_x, plot_y[:,sort_ix[i]], label=irf_names_processed[sort_ix[i]], lw=2, alpha=0.8, linestyle='-', markevery=markevery, markersize=12, solid_capstyle='butt')
+            ax.plot(plot_x, plot_y[:,sort_ix[i]], label=irf_names_processed[sort_ix[i]], lw=2, alpha=0.8, linestyle='-', markevery=markevery, markersize=12, solid_capstyle='butt')
         if uq is not None and lq is not None:
-            plt.fill_between(plot_x[:,0], lq[:,sort_ix[i]], uq[:,sort_ix[i]], alpha=0.25)
+            ax.fill_between(plot_x[:,0], lq[:,sort_ix[i]], uq[:,sort_ix[i]], alpha=0.25)
 
     if xlab:
-        plt.xlabel(xlab, weight='bold')
+        ax.set_xlabel(xlab, weight='bold')
     if ylab:
-        plt.ylabel(ylab, weight='bold')
+        ax.set_ylabel(ylab, weight='bold')
     if legend:
-        plt.legend(fancybox=True, framealpha=0.75, frameon=True, facecolor='white', edgecolor='gray')
-        
-    if ylim is not None:
-        plt.ylim(ylim)
+        ax.legend(fancybox=True, framealpha=0.75, frameon=True, facecolor='white', edgecolor='gray')
 
-    plt.gcf().set_size_inches(plot_x_inches, plot_y_inches)
-    plt.tight_layout()
+    xlim = (plot_x.min(), plot_x.max())
+    ax.set_xlim(xlim)
+    if ylim is not None:
+        ax.set_ylim(ylim)
+
+    fig.set_size_inches(plot_x_inches, plot_y_inches)
+    fig.tight_layout()
     try:
-        plt.savefig(dir+'/'+filename, dpi=dpi, transparent=transparent_background)
-    except:
+        fig.savefig(dir+'/'+filename, dpi=dpi, transparent=transparent_background)
+    except Exception as e:
         stderr('Error saving plot to file %s. Skipping...\n' %(dir+'/'+filename))
-    plt.close('all')
+        stderr('Traceback:\n')
+        stderr('%s\n' % e)
+    plt.close(fig)
 
     if dump_source:
         csvname = '.'.join(filename.split('.')[:-1]) + '.csv'
@@ -169,6 +197,7 @@ def plot_surface(
         irf_names,
         lq=None,
         uq=None,
+        density=None,
         bounds_as_surface=False,
         sort_names=True,
         dir='.',
@@ -381,6 +410,12 @@ def plot_surface(
 
                 facecolors = getattr(cm, cmap)(norm(z))
                 facecolors_bounds = np.ones(z.shape + (4,)) * 0.5
+                if density is not None:
+                    alpha = (density - min(0, density.min()))
+                    alpha /= alpha.max()
+                    print(alpha.min(), alpha.max())
+                    facecolors[..., -1] = alpha
+
                 if bounds_as_surface and lq_cur is not None:
                     surf = ax.plot_surface(
                         x,

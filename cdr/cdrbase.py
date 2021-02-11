@@ -3239,7 +3239,8 @@ class CDR(Model):
             t_interaction=0.,
             plot_rangf=False,
             rangf_vals=None,
-            plot_mean_as_reference=True
+            plot_mean_as_reference=True,
+            estimate_density=False
     ):
         if rangf_vals is None:
             rangf_keys = [None]
@@ -3279,6 +3280,8 @@ class CDR(Model):
             out = (support, mean, lower, upper, samples)
         else:
             out = self.sess.run(to_run, feed_dict=fd)
+
+        out = (out, None) # Density currently isn't computed/used by CDR
 
         return out
 

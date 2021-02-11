@@ -3,6 +3,7 @@ import re
 import itertools
 import numpy as np
 import pandas as pd
+import scipy.stats
 import tensorflow as tf
 
 from .kwargs import CDRNN_INITIALIZATION_KWARGS
@@ -99,6 +100,8 @@ class CDRNN(Model):
         assert not (self.use_batch_normalization and self.use_layer_normalization), 'Cannot batch normalize and layer normalize the same model.'
 
         self.normalize_activations = self.use_batch_normalization or self.use_layer_normalization
+
+        # self.impulse_vectors_train['rate'] = np.ones((self.n_train,))
 
         # Initialize tree metadata
         self.t = self.form.t
@@ -263,6 +266,21 @@ class CDRNN(Model):
     def _initialize_cdrnn_inputs(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                plot_step_map = {}
+                for pair in self.plot_step.split():
+                    impulse_name, val = pair.split('=')
+                    plot_step = float(val) / self.impulse_sds[impulse_name]
+                    plot_step_map[impulse_name] = plot_step
+                self.plot_step_map = plot_step_map
+                for x in self.impulse_names:
+                    if not x in self.plot_step_map:
+                        self.plot_step_map[x] = 1
+                s = self.plot_step_map
+                s = np.array([s[x] for x in self.impulse_names])
+                if not self.rescale_inputs:
+                    s *= self.impulse_sds_arr
+                self.plot_step_arr = s
+
                 if len(self.rangf):
                     self.use_rangf = True
                     rangf_1hot = []
@@ -367,9 +385,36 @@ class CDRNN(Model):
                 plot_impulse_offset_default = tf.ones(
                     [len(self.impulse_names)],
                     dtype=self.FLOAT_TF
+                ) * self.plot_step_arr
+
+                plot_impulse_min_default = tf.ones(
+                    [len(self.impulse_names)],
+                    dtype=self.FLOAT_TF
                 )
-                if not self.rescale_inputs:
-                    plot_impulse_offset_default *= self.impulse_sds_arr
+                plot_impulse_max_default = tf.ones(
+                    [len(self.impulse_names)],
+                    dtype=self.FLOAT_TF
+                )
+
+                ix = self.PLOT_QUANTILE_IX
+                lq = self.impulse_quantiles_arr[ix]
+                uq = self.impulse_quantiles_arr[self.N_QUANTILES - ix - 1]
+                select = np.isclose(uq - lq, 0)
+                while ix > 1 and np.any(select):
+                    ix -= 1
+                    lq[select] = self.impulse_quantiles_arr[ix][select]
+                    uq[select] = self.impulse_quantiles_arr[self.N_QUANTILES - ix - 1][select]
+                    select = np.isclose(uq - lq, 0)
+
+                plot_impulse_min_default *= lq
+                plot_impulse_max_default *= uq
+
+                if self.center_inputs:
+                    plot_impulse_min_default -= self.impulse_means_arr
+                    plot_impulse_max_default -= self.impulse_means_arr
+                if self.rescale_inputs:
+                    plot_impulse_min_default /= self.impulse_sds_arr
+                    plot_impulse_max_default /= self.impulse_sds_arr
 
                 self.plot_impulse_base = tf.placeholder_with_default(
                     plot_impulse_base_default,
@@ -386,6 +431,16 @@ class CDRNN(Model):
                     shape=[len(self.impulse_names)],
                     name='plot_impulse_offset'
                 )
+                self.plot_impulse_min = tf.placeholder_with_default(
+                    plot_impulse_min_default,
+                    shape=[len(self.impulse_names)],
+                    name='plot_impulse_min'
+                )
+                self.plot_impulse_max = tf.placeholder_with_default(
+                    plot_impulse_max_default,
+                    shape=[len(self.impulse_names)],
+                    name='plot_impulse_max'
+                )
                 self.plot_impulse_1hot = tf.placeholder_with_default(
                     tf.zeros([len(self.impulse_names)], dtype=self.FLOAT_TF),
                     shape=[len(self.impulse_names)],
@@ -400,6 +455,8 @@ class CDRNN(Model):
                 self.plot_impulse_base_expanded = self.plot_impulse_base[None, None, ...]
                 self.plot_impulse_center_expanded = self.plot_impulse_center[None, None, ...]
                 self.plot_impulse_offset_expanded = self.plot_impulse_offset[None, None, ...]
+                self.plot_impulse_min_expanded = self.plot_impulse_min[None, None, ...]
+                self.plot_impulse_max_expanded = self.plot_impulse_max[None, None, ...]
                 self.plot_impulse_1hot_expanded = self.plot_impulse_1hot[None, None, ...]
                 self.plot_impulse_1hot_2_expanded = self.plot_impulse_1hot_2[None, None, ...]
 
@@ -479,12 +536,14 @@ class CDRNN(Model):
                         bn = None
                         ln = None
                         use_bias = False
+                    mn = self.maxnorm
 
                     projection = self.initialize_feedforward(
                         units=units,
                         use_bias=use_bias,
                         activation=activation,
                         dropout=dropout,
+                        maxnorm=mn,
                         batch_normalization_decay=bn,
                         layer_normalization_type=ln,
                         name='input_projection_l%s' % (l + 1)
@@ -558,12 +617,14 @@ class CDRNN(Model):
                             bn = None
                             ln = None
                             use_bias = False
+                        mn = self.maxnorm
 
                         projection = self.initialize_feedforward(
                             units=units,
                             use_bias=use_bias,
                             activation=activation,
                             dropout=None,
+                            mn=mn,
                             batch_normalization_decay=bn,
                             layer_normalization_type=ln,
                             name='rnn_projection_l%s' % (l + 1)
@@ -637,6 +698,7 @@ class CDRNN(Model):
                     use_bias=False,
                     activation=None,
                     dropout=self.irf_dropout_rate,
+                    maxnorm=self.maxnorm,
                     name='hidden_state_to_irf_l1'
                 )
                 self.layers.append(hidden_state_to_irf_l1)
@@ -660,6 +722,7 @@ class CDRNN(Model):
                             ln = None
                         use_bias = True
                         final = False
+                        mn = self.maxnorm
                     else:
                         units = 1
                         activation = self.irf_activation
@@ -668,12 +731,14 @@ class CDRNN(Model):
                         ln = None
                         use_bias = False
                         final = True
+                        mn = None
 
                     projection = self.initialize_feedforward(
                         units=units,
                         use_bias=use_bias,
                         activation=activation,
                         dropout=dropout,
+                        maxnorm=mn,
                         batch_normalization_decay=bn,
                         layer_normalization_type=ln,
                         name='irf_l%s' % (l + 1),
@@ -704,12 +769,14 @@ class CDRNN(Model):
                             bn = None
                             ln = None
                         use_bias = True
+                        mn = self.maxnorm
 
                         projection = self.initialize_feedforward(
                             units=units,
                             use_bias=use_bias,
                             activation=activation,
                             dropout=dropout,
+                            maxnorm=mn,
                             batch_normalization_decay=bn,
                             layer_normalization_type=ln,
                             name='error_params_fn_l%s' % (l + 1)
@@ -1623,6 +1690,8 @@ class CDRNN(Model):
                 b = self.plot_impulse_base_expanded
                 c = self.plot_impulse_center_expanded
                 s = self.plot_impulse_offset_expanded
+                lq = self.plot_impulse_min_expanded
+                uq = self.plot_impulse_max_expanded
 
                 means = self.impulse_means_arr_expanded
                 sds = self.impulse_sds_arr_expanded
@@ -1661,8 +1730,8 @@ class CDRNN(Model):
                 )
 
                 u_src = tf.linspace(
-                    tf.cast(-self.plot_n_sds, dtype=self.FLOAT_TF),
-                    tf.cast(self.plot_n_sds, dtype=self.FLOAT_TF),
+                    tf.cast(0, dtype=self.FLOAT_TF),
+                    tf.cast(1, dtype=self.FLOAT_TF),
                     self.n_surface_plot_points_per_side,
                 )
                 u = u_src[..., None, None]
@@ -1679,7 +1748,13 @@ class CDRNN(Model):
                 )
                 self.irf_surface_rate_meshgrid = tf.meshgrid(time_support, u_rate)
 
-                u = x * (c + u * s)
+                # Scale to cover range
+                u *= uq - lq
+                # Shift
+                u += lq
+                # Mask
+                u *= x
+                # u = x * (c + u)
                 X = tf.reshape(
                     tf.tile(
                         u + b,
@@ -1721,19 +1796,21 @@ class CDRNN(Model):
                 t_delta = tf.ones([T, 1, 1], dtype=self.FLOAT_TF) * t_interaction
 
                 u = tf.linspace(
-                    tf.cast(-self.plot_n_sds, dtype=self.FLOAT_TF),
-                    tf.cast(self.plot_n_sds, dtype=self.FLOAT_TF),
+                    tf.cast(0, dtype=self.FLOAT_TF),
+                    tf.cast(1, dtype=self.FLOAT_TF),
                     T,
                 )[..., None, None]
-                u = x * (c + u * s)
+                u = x * (u * (uq - lq) + lq - b)
                 X = u + b
+                # u = x * (c + u * s)
+                # X = u + b
                 curvature_plot = self._apply_model(X, t_delta, plot_mode=True)['y']
                 self.curvature_plot = tf.reshape(curvature_plot, [R, T, 1]) - rate_at_t[..., None]
 
                 if self.center_inputs:
-                    b_plot = b + means
+                    b_plot = means
                 else:
-                    b_plot = b
+                    b_plot = 0.
                 if self.rescale_inputs:
                     u_plot = u * sds
                 else:
@@ -1751,12 +1828,13 @@ class CDRNN(Model):
                 ) * t_interaction
 
                 v = tf.linspace(
-                    tf.cast(-self.plot_n_sds, dtype=self.FLOAT_TF),
-                    tf.cast(self.plot_n_sds, dtype=self.FLOAT_TF),
+                    tf.cast(0, dtype=self.FLOAT_TF),
+                    tf.cast(1, dtype=self.FLOAT_TF),
                     self.n_surface_plot_points_per_side,
                 )[..., None, None]
 
-                u_1 = x * (c + v * s)
+                # u_1 = x * (c + v * s)
+                u_1 = x * (v * (uq - lq) + lq)
                 X_1 = tf.reshape(
                     tf.tile(
                         u_1,
@@ -1765,7 +1843,8 @@ class CDRNN(Model):
                     [-1, 1, len(self.impulse_names)]
                 )
 
-                u_2 = y * (c + v * s)
+                # u_2 = y * (c + v * s)
+                u_2 = y * (v * (uq - lq) + lq)
                 X_2 = tf.reshape(
                     tf.tile(
                         u_2,
@@ -1822,6 +1901,7 @@ class CDRNN(Model):
             use_bias=True,
             activation=None,
             dropout=None,
+            maxnorm=None,
             batch_normalization_decay=None,
             layer_normalization_type=None,
             final=False,
@@ -1957,7 +2037,10 @@ class CDRNN(Model):
                 interactions_tmp.append(x)
         interactions = interactions_tmp
         if plot_type.lower() in ['irf_1d', 'irf_surface']:
-            out = ['rate'] + self.terminal_names[:]
+            out = []
+            if plot_type.lower() == 'irf_1d':
+                out.append('rate')
+            out += self.terminal_names[:]
             # out += interactions
         elif plot_type.lower() == 'curvature':
             out = self.terminal_names[:]
@@ -1995,10 +2078,14 @@ class CDRNN(Model):
             t_interaction=0.,
             plot_rangf=False,
             rangf_vals=None,
-            plot_mean_as_reference=True
+            plot_mean_as_reference=True,
+            estimate_density=False
     ):
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                names = name.split(':')
+                names_src = tuple([self.terminals_by_name[x].impulse.name() if x in self.terminals_by_name else x for x in names])
+
                 if rangf_vals is None:
                     rangf_keys = [None]
                     rangf_vals = [self.gf_defaults[0]]
@@ -2037,6 +2124,8 @@ class CDRNN(Model):
                         irf_1d_support = self.irf_1d_support
                         irf_1d = self.irf_1d_plot
                     to_run = [irf_1d_support, irf_1d]
+                    if estimate_density:
+                        density_fn = self.densities[('t_delta',)]
                 elif plot_type.lower().startswith('irf_surface'):
                     if name == 'rate':
                         irf_surface_meshgrid = self.irf_surface_rate_meshgrid
@@ -2045,19 +2134,23 @@ class CDRNN(Model):
                         irf_surface_meshgrid = self.irf_surface_support
                         irf_surface = self.irf_surface_plot
                     to_run = [irf_surface_meshgrid, irf_surface]
+                    if estimate_density:
+                        density_fn = None
                 elif plot_type.lower().startswith('curvature'):
                     assert not name == 'rate', 'Curvature plots are not available for "rate" (deconvolutional intercept).'
                     to_run = [self.curvature_support, self.curvature_plot]
+                    if estimate_density:
+                        density_fn = self.densities[names_src]
                 elif plot_type.lower().startswith('interaction_surface'):
-                    names = name.split(':')
                     assert len(names) == 2, 'Interaction surface plots require interactions of order 2'
                     impulse_one_hot1 = self.plot_impulse_name_to_1hot(names[0])
                     impulse_one_hot2 = self.plot_impulse_name_to_1hot(names[1])
-
                     fd[self.plot_impulse_1hot] = impulse_one_hot1
                     fd[self.plot_impulse_1hot_2] = impulse_one_hot2
-
                     to_run = [self.interaction_surface_support, self.interaction_surface_plot]
+                    if estimate_density:
+                        # density_fn = self.densities[names_src]
+                        density_fn = None
                 else:
                     raise ValueError('Plot type "%s" not supported.' % plot_type)
 
@@ -2075,6 +2168,34 @@ class CDRNN(Model):
                     out = (support, mean, lower, upper, samples)
                 else:
                     out = self.sess.run(to_run, feed_dict=fd)
+
+                density = None
+                if estimate_density and density_fn is not None:
+                    alpha_support = out[0]
+                    if plot_type.lower() in ['irf_1d', 'curvature']:
+                        density = density_fn(alpha_support[:,0])
+                    elif plot_type.lower().startswith('interaction_surface'):
+                        alpha_support_shape = alpha_support[0].shape
+                        alpha_support1, alpha_support2 = alpha_support[0].flatten(), alpha_support[1].flatten()
+                        print(alpha_support1.shape)
+                        print(alpha_support2.shape)
+                        print(density_fn)
+
+                        density = np.reshape(density_fn.ev(alpha_support1, alpha_support2), alpha_support_shape)
+                    else:
+                        pass
+                        # kde = scipy.stats.gaussian_kde(kde_support)
+                        # alpha_support = out[0]
+                        # if plot_type.lower().startswith('irf_1d') or plot_type.lower().startswith('curvature'):
+                        #     alpha_support = alpha_support.T
+                        #     density = kde.evaluate(alpha_support)
+                        # else:
+                        #     alpha_support_shape = alpha_support[0].shape
+                        #     alpha_support = np.stack([alpha_support[0].flatten(), alpha_support[1].flatten()], axis=0)
+                        #     density = np.reshape(kde.evaluate(alpha_support), alpha_support_shape)
+                        # print(out[1].shape, density.shape)
+
+                out = (out, density)
 
                 return out
 

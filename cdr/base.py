@@ -3,6 +3,7 @@ import textwrap
 import time as pytime
 import scipy.stats
 import scipy.signal
+import scipy.interpolate
 import pandas as pd
 from collections import defaultdict
 
@@ -82,6 +83,10 @@ class Model(object):
     #
     ######################################################
 
+    N_QUANTILES = 41
+    PLOT_QUANTILE_RANGE = 0.9
+    PLOT_QUANTILE_IX = int((1 - PLOT_QUANTILE_RANGE) / 2 * N_QUANTILES)
+
     def __new__(cls, *args, **kwargs):
         if cls is Model:
             raise TypeError("``Model`` is an abstract class and may not be instantiated")
@@ -121,19 +126,26 @@ class Model(object):
         else:
             self.ablated = set(ablated)
 
+        q = np.linspace(0.0, 1, self.N_QUANTILES)
+        q_plot = np.linspace(0.0, 1, 101)
+
         # Collect stats for response variable
         self.n_train = len(y)
         self.y_train_mean = float(y[dv].mean())
         self.y_train_sd = float(y[dv].std())
+        self.y_train_quantiles = np.quantile(y[dv], q)
 
-        # Collect stats for impulses
+        # Collect stats for and kernel density estimators for impulses
         impulse_means = {}
         impulse_sds = {}
         impulse_medians = {}
+        impulse_quantiles = {}
         impulse_lq = {}
         impulse_uq = {}
         impulse_min = {}
         impulse_max = {}
+        impulse_vectors = {}
+        densities = {}
 
         impulse_df_ix = []
         for impulse in self.form.t.impulses():
@@ -143,30 +155,51 @@ class Model(object):
             i = 0
             for i, df in enumerate(X + [y]):
                 if name in df.columns:
-                    impulse_means[name] = df[name].mean()
-                    impulse_sds[name] = df[name].std()
-                    impulse_medians[name] = df[name].quantile(0.5)
-                    impulse_lq[name] = df[name].quantile(0.1)
-                    impulse_uq[name] = df[name].quantile(0.9)
-                    impulse_min[name] = df[name].min()
-                    impulse_max[name] = df[name].max()
+                    column = df[name].values
+                    impulse_vectors[name] = column
+                    impulse_means[name] = column.mean()
+                    impulse_sds[name] = column.std()
+                    quantiles = np.quantile(column, q)
+                    impulse_quantiles[name] = quantiles
+                    impulse_medians[name] = np.quantile(column, 0.5)
+                    impulse_lq[name] = np.quantile(column, 0.1)
+                    impulse_uq[name] = np.quantile(column, 0.9)
+                    impulse_min[name] = column.min()
+                    impulse_max[name] = column.max()
+                    if name.lower() != 'rate' and False:
+                        kde = scipy.stats.gaussian_kde(column)
+                        density_support = np.linspace(quantiles[0], quantiles[-1], 100)
+                        density = kde(density_support)
+                        spline = scipy.interpolate.UnivariateSpline(density_support, density, ext='zeros', s=0.001)
+                        densities[(name,)] = spline
+
                     found = True
                     break
                 elif is_interaction:
                     found = True
+                    impulse_names = [x.name() for x in impulse.impulses()]
                     for x in impulse.impulses():
                         if not x.name() in df.columns:
                             found = False
                             break
                     if found:
-                        column = df[[x.name() for x in impulse.impulses()]].product(axis=1)
+                        column = df[impulse_names].product(axis=1)
+                        impulse_vectors[name] = column.values
                         impulse_means[name] = column.mean()
                         impulse_sds[name] = column.std()
-                        impulse_medians[name] = column.quantile(0.5)
-                        impulse_lq[name] = column.quantile(0.1)
-                        impulse_uq[name] = column.quantile(0.9)
+                        quantiles = np.quantile(column, q)
+                        impulse_quantiles[name] = quantiles
+                        impulse_medians[name] = np.quantile(column, 0.5)
+                        impulse_lq[name] = np.quantile(column, 0.1)
+                        impulse_uq[name] = np.quantile(column, 0.9)
                         impulse_min[name] = column.min()
                         impulse_max[name] = column.max()
+                        if False:
+                            kde = scipy.stats.gaussian_kde(column)
+                            density_support = np.linspace(quantiles[0], quantiles[-1], 100)
+                            density = kde(density_support)
+                            spline = scipy.interpolate.UnivariateSpline(density_support, density, ext='zeros', s=0.001)
+                            densities[(name,)] = spline
 
             if not found:
                 raise ValueError('Impulse %s was not found in an input file.' % name)
@@ -175,13 +208,34 @@ class Model(object):
         self.impulse_df_ix = impulse_df_ix
         impulse_df_ix_unique = set(self.impulse_df_ix)
 
+        # impulse_vector_names = list(impulse_vectors.keys())
+        # for i in range(len(impulse_vectors)):
+        #     name1 = impulse_vector_names[i]
+        #     column1 = impulse_vectors[name1]
+        #     for j in range(i + 1, len(impulse_vectors)):
+        #         name2 = impulse_vector_names[j]
+        #         column2 = impulse_vectors[name2]
+        #         kde_support = np.stack([column1, column2], axis=0)
+        #         kde = scipy.stats.gaussian_kde(kde_support)
+        #         density_support1 = np.linspace(impulse_quantiles[name1][0], impulse_quantiles[name1][-1], 20)
+        #         density_support2 = np.linspace(impulse_quantiles[name2][0], impulse_quantiles[name2][-1], 20)
+        #         density_support1, density_support2 = np.meshgrid(density_support1, density_support2)
+        #         density_support1 = density_support1.flatten()
+        #         density_support2 = density_support2.flatten()
+        #         density = kde(np.stack([density_support1, density_support2], axis=0))
+        #         spline = scipy.interpolate.SmoothBivariateSpline(density_support1, density_support2, density, s=0.001)
+        #         densities[(name1, name2)] = spline
+
         self.impulse_means = impulse_means
         self.impulse_sds = impulse_sds
         self.impulse_medians = impulse_medians
+        self.impulse_quantiles = impulse_quantiles
         self.impulse_lq = impulse_lq
         self.impulse_uq = impulse_uq
         self.impulse_min = impulse_min
         self.impulse_max = impulse_max
+        # self.impulse_vectors_train = impulse_vectors
+        self.densities = densities
 
         # Collect stats for temporal features
         t_deltas = []
@@ -205,18 +259,29 @@ class Model(object):
         time_X = np.concatenate(time_X, axis=0)
         t_deltas = np.concatenate(t_deltas, axis=0)
         t_delta_maxes = np.array(t_delta_maxes)
+        t_delta_quantiles = np.quantile(t_deltas, q)
 
-        self.t_delta_limit = np.percentile(t_deltas, 75)
+        kde = scipy.stats.gaussian_kde(t_deltas)
+        density_support = np.linspace(t_delta_quantiles[0], t_delta_quantiles[-1], 100)
+        density = kde(density_support)
+        spline = scipy.interpolate.UnivariateSpline(density_support, density, ext='zeros', s=0.001)
+        self.densities[('t_delta',)] = spline
+
+        # self.t_delta_vector_train = t_deltas
+        self.t_delta_limit = np.quantile(t_deltas, 0.75)
+        self.t_delta_quantiles = t_delta_quantiles
         self.t_delta_max = t_deltas.max()
         self.t_delta_mean_max = t_delta_maxes.mean()
         self.t_delta_mean = t_deltas.mean()
         self.t_delta_sd = t_deltas.std()
 
-        self.time_X_limit = np.percentile(time_X, 75)
+        self.time_X_limit = np.quantile(time_X, 0.75)
+        self.time_X_quantiles = np.quantile(time_X, q)
         self.time_X_max = time_X.max()
         self.time_X_mean = time_X.mean()
         self.time_X_sd = time_X.std()
 
+        self.time_y_quantiles = np.quantile(y_time, q)
         self.time_y_mean = y_time.mean()
         self.time_y_sd = y_time.std()
 
@@ -299,6 +364,7 @@ class Model(object):
             t = self.t
             self.impulse_names = t.impulse_names(include_interactions=True)
             self.terminal_names = t.terminal_names()
+            self.terminals_by_name = t.terminals_by_name()
         else:
             self.t = self.form.t
             t = self.t
@@ -311,6 +377,7 @@ class Model(object):
             self.fixed_interaction_names = t.fixed_interaction_names()
             self.impulse_names = t.impulse_names(include_interactions=True)
             self.terminal_names = t.terminal_names()
+            self.terminals_by_name = t.terminals_by_name()
 
         # Initialize model metadata
 
@@ -426,30 +493,38 @@ class Model(object):
             'ablated': self.ablated,
             'y_train_mean': self.y_train_mean,
             'y_train_sd': self.y_train_sd,
+            'y_train_quantiles': self.y_train_quantiles,
+            # 't_delta_vector_train': self.t_delta_vector_train,
             't_delta_max': self.t_delta_max,
             't_delta_mean_max': self.t_delta_mean_max,
             't_delta_mean': self.t_delta_mean,
             't_delta_sd': self.t_delta_sd,
+            't_delta_quantiles': self.t_delta_quantiles,
             't_delta_limit': self.t_delta_limit,
             'impulse_df_ix': self.impulse_df_ix,
             'time_X_max': self.time_X_max,
             'time_X_mean': self.time_X_mean,
             'time_X_sd': self.time_X_sd,
+            'time_X_quantiles': self.time_X_quantiles,
             'time_X_limit': self.time_X_limit,
             'time_y_mean': self.time_y_mean,
             'time_y_sd': self.time_y_sd,
+            'time_y_quantiles': self.time_y_quantiles,
             'rangf_map_base': self.rangf_map_base,
             'rangf_n_levels': self.rangf_n_levels,
             'impulse_means': self.impulse_means,
             'impulse_sds': self.impulse_sds,
             'impulse_medians': self.impulse_medians,
+            'impulse_quantiles': self.impulse_quantiles,
             'impulse_lq': self.impulse_lq,
             'impulse_uq': self.impulse_uq,
             'impulse_min': self.impulse_min,
             'impulse_max': self.impulse_max,
+            # 'impulse_vectors_train': self.impulse_vectors_train,
             'outdir': self.outdir,
             'crossval_factor': self.crossval_factor,
-            'crossval_fold': self.crossval_fold
+            'crossval_fold': self.crossval_fold,
+            'densities': self.densities
         }
         for kwarg in Model._INITIALIZATION_KWARGS:
             md[kwarg.key] = getattr(self, kwarg.key)
@@ -462,30 +537,38 @@ class Model(object):
         self.ablated = md.pop('ablated', set())
         self.y_train_mean = md.pop('y_train_mean')
         self.y_train_sd = md.pop('y_train_sd')
+        self.y_train_quantiles = md.pop('y_train_quantiles', None)
+        # self.t_delta_vector_train = md.pop('t_delta_vector_train', None)
         self.t_delta_max = md.pop('t_delta_max', md.pop('max_tdelta', None))
         self.t_delta_mean_max = md.pop('t_delta_mean_max', self.t_delta_max)
         self.t_delta_sd = md.pop('t_delta_sd', 1.)
         self.t_delta_mean = md.pop('t_delta_mean', 1.)
+        self.t_delta_quantiles = md.pop('t_delta_quantiles', None)
         self.t_delta_limit = md.pop('t_delta_limit', self.t_delta_max)
         self.impulse_df_ix = md.pop('impulse_df_ix', None)
         self.time_X_max = md.pop('time_X_max', md.pop('max_time_X', None))
         self.time_X_sd = md.pop('time_X_sd', 1.)
         self.time_X_mean = md.pop('time_X_mean', 1.)
+        self.time_X_quantiles = md.pop('time_X_quantiles', None)
         self.time_X_limit = md.pop('time_X_limit', self.t_delta_max)
         self.time_y_mean = md.pop('time_y_mean', 0.)
         self.time_y_sd = md.pop('time_y_sd', 1.)
+        self.time_y_quantiles = md.pop('time_y_quantiles', None)
         self.rangf_map_base = md.pop('rangf_map_base')
         self.rangf_n_levels = md.pop('rangf_n_levels')
         self.impulse_means = md.pop('impulse_means', {})
         self.impulse_sds = md.pop('impulse_sds', {})
         self.impulse_medians = md.pop('impulse_medians', {})
+        self.impulse_quantiles = md.pop('impulse_quantiles', {})
         self.impulse_lq = md.pop('impulse_lq', {})
         self.impulse_uq = md.pop('impulse_uq', {})
         self.impulse_min = md.pop('impulse_min', {})
         self.impulse_max = md.pop('impulse_max', {})
+        # self.impulse_vectors_train = md.pop('impulse_vectors_train', {})
         self.outdir = md.pop('outdir', './cdr_model/')
         self.crossval_factor = md.pop('crossval_factor', None)
         self.crossval_fold = md.pop('crossval_fold', [])
+        self.densities = md.pop('densities', {})
 
         for kwarg in Model._INITIALIZATION_KWARGS:
             setattr(self, kwarg.key, md.pop(kwarg.key, kwarg.default_value))
@@ -520,11 +603,18 @@ class Model(object):
                 self.impulse_means_arr_expanded = m
 
                 s = self.impulse_sds
-                s = np.array([s[x] for x in self.impulse_sds])
+                s = np.array([s[x] for x in self.impulse_names])
                 self.impulse_sds_arr = s
                 while len(s.shape) < len(X_processed.shape):
                     s = s[None, ...]
                 self.impulse_sds_arr_expanded = s
+
+                q = self.impulse_quantiles
+                q = np.stack([q[x] for x in self.impulse_names], axis=1)
+                self.impulse_quantiles_arr = q
+                while len(s.shape) < len(X_processed.shape):
+                    q = np.expand_dims(q, axis=1)
+                self.impulse_quantiles_arr_expanded = q
 
                 if self.center_inputs:
                     X_processed -= self.impulse_means_arr_expanded
@@ -3122,7 +3212,8 @@ class Model(object):
             t_interaction=0.,
             plot_rangf=False,
             rangf_vals=None,
-            plot_mean_as_reference=True
+            plot_mean_as_reference=True,
+            estimate_density=False
     ):
         raise NotImplementedError
 
@@ -3219,15 +3310,17 @@ class Model(object):
         if n_time_units is None:
             n_time_units = self.t_delta_limit
 
-        vals = self.get_plot_data(
+        vals, _ = self.get_plot_data(
             terminal_name,
             plot_type='irf_1d',
             rangf_vals=rangf,
             level=level,
             n_samples=n_samples,
             n_time_units=n_time_units,
-            n_time_points=n_time_points
-        )[-1]
+            n_time_points=n_time_points,
+            estimate_density=False
+        )
+        vals = vals[-1]
 
         step = float(n_time_units) / n_time_points
 
@@ -3267,6 +3360,7 @@ class Model(object):
             generate_irf_surface_plots=False,
             generate_interaction_surface_plots=False,
             generate_curvature_plots=False,
+            plot_density=False,
             plot_x_inches=6.,
             plot_y_inches=4.,
             ylim=None,
@@ -3316,6 +3410,7 @@ class Model(object):
         :param generate_irf_surface_plots: ``bool``; whether to plot IRF surfaces. CDRNN only.
         :param generate_interaction_surface_plots: ``bool``; whether to plot IRF interaction surfaces. CDRNN only.
         :param generate_curvature_plots: ``bool``; whether to plot IRF curvature at time **reference_time**. CDRNN only.
+        :param plot_density: ``bool``; whether to plot the density of the support. CDRNN only.
         :param plot_composite: ``bool``; plot any composite IRFs. If ``False``, only plots terminal IRFs.
         :param plot_x_inches: ``int``; width of plot in inches.
         :param plot_y_inches: ``int``; height of plot in inches.
@@ -3335,6 +3430,7 @@ class Model(object):
         :return: ``None``
         """
 
+        assert not plot_density, 'Density plotting is currently broken'
         assert not mc or self.is_bayesian or self.has_dropout, 'Monte Carlo estimation of credible intervals (mc=True) is only supported for Bayesian models or models trained using dropout.'
 
         if plot_dirac:
@@ -3433,7 +3529,7 @@ class Model(object):
                         plot_name = ''
                         if mc:
                             plot_name += 'mc_'
-                            plot_x, plot_y, lq, uq, _ = self.get_plot_data(
+                            (plot_x, plot_y, lq, uq, _), density = self.get_plot_data(
                                 name,
                                 plot_type='curvature',
                                 level=level,
@@ -3444,13 +3540,14 @@ class Model(object):
                                 t_interaction=reference_time,
                                 plot_rangf=plot_rangf,
                                 rangf_vals=rangf_vals,
-                                plot_mean_as_reference=plot_mean_as_reference
+                                plot_mean_as_reference=plot_mean_as_reference,
+                                estimate_density=plot_density
                             )
                             plot_y = plot_y[..., None]
                             lq = lq[..., None]
                             uq = uq[..., None]
                         else:
-                            plot_x, plot_y = self.get_plot_data(
+                            (plot_x, plot_y), density = self.get_plot_data(
                                 name,
                                 plot_type='curvature',
                                 support_start=plot_support_start,
@@ -3459,7 +3556,8 @@ class Model(object):
                                 t_interaction=reference_time,
                                 plot_rangf=plot_rangf,
                                 rangf_vals=rangf_vals,
-                                plot_mean_as_reference=plot_mean_as_reference
+                                plot_mean_as_reference=plot_mean_as_reference,
+                                estimate_density=plot_density
                             )
                             plot_y = plot_y
                             lq = None
@@ -3487,6 +3585,7 @@ class Model(object):
                                 [name],
                                 lq=None if lq is None else lq[g],
                                 uq=None if uq is None else uq[g],
+                                density=density,
                                 dir=self.outdir,
                                 filename=filename,
                                 irf_name_map=irf_name_map,
@@ -3522,7 +3621,7 @@ class Model(object):
                                     plot_name += '_t%s' % reference_time
                                 if mc:
                                     plot_name = 'mc_' + plot_name
-                                    (x_cur, y_cur), z_cur, lq_cur, uq_cur, _ = self.get_plot_data(
+                                    ((x_cur, y_cur), z_cur, lq_cur, uq_cur, _), density = self.get_plot_data(
                                         name,
                                         plot_type=plot_type,
                                         support_start=plot_support_start,
@@ -3533,7 +3632,8 @@ class Model(object):
                                         t_interaction=reference_time,
                                         plot_rangf=plot_rangf,
                                         rangf_vals=rangf_vals,
-                                        plot_mean_as_reference=plot_mean_as_reference
+                                        plot_mean_as_reference=plot_mean_as_reference,
+                                        estimate_density=plot_density
                                     )
 
                                     z_cur = z_cur[..., None]
@@ -3543,7 +3643,7 @@ class Model(object):
                                     lq.append(lq_cur)
                                     uq.append(uq_cur)
                                 else:
-                                    (x_cur, y_cur), z_cur = self.get_plot_data(
+                                    ((x_cur, y_cur), z_cur), density = self.get_plot_data(
                                         name,
                                         plot_type=plot_type,
                                         support_start=plot_support_start,
@@ -3552,7 +3652,8 @@ class Model(object):
                                         t_interaction=reference_time,
                                         plot_rangf=plot_rangf,
                                         rangf_vals=rangf_vals,
-                                        plot_mean_as_reference=plot_mean_as_reference
+                                        plot_mean_as_reference=plot_mean_as_reference,
+                                        estimate_density=plot_density
                                     )
 
                                 plot_x.append(x_cur)
@@ -3587,6 +3688,7 @@ class Model(object):
                                     names,
                                     lq=None if lq is None else lq[g],
                                     uq=None if uq is None else uq[g],
+                                    density=density,
                                     sort_names=True,
                                     dir=self.outdir,
                                     prefix=filename,
@@ -3635,7 +3737,7 @@ class Model(object):
                                         lq = []
                                         uq = []
                                     for name in names:
-                                        _, mean_cur, lq_cur, uq_cur, samples_cur = self.get_plot_data(
+                                        (_, mean_cur, lq_cur, uq_cur, samples_cur), density = self.get_plot_data(
                                             name,
                                             composite=a,
                                             scaled=b,
@@ -3648,7 +3750,8 @@ class Model(object):
                                             n_time_points=plot_n_time_points,
                                             plot_rangf=plot_rangf,
                                             rangf_vals=rangf_vals,
-                                            plot_mean_as_reference=plot_mean_as_reference
+                                            plot_mean_as_reference=plot_mean_as_reference,
+                                            estimate_density=plot_density
                                         )
 
                                         if summed:
@@ -3680,7 +3783,7 @@ class Model(object):
                                     plot_y = []
                                     names_cur = []
                                     for name in names:
-                                        _, y_cur = self.get_plot_data(
+                                        (_, y_cur), density = self.get_plot_data(
                                             name,
                                             composite=a,
                                             scaled=b,
@@ -3691,7 +3794,8 @@ class Model(object):
                                             n_time_points=plot_n_time_points,
                                             plot_rangf=plot_rangf,
                                             rangf_vals=rangf_vals,
-                                            plot_mean_as_reference=plot_mean_as_reference
+                                            plot_mean_as_reference=plot_mean_as_reference,
+                                            estimate_density=plot_density
                                         )
                                         plot_y.append(y_cur)
                                         names_cur.append(name)
@@ -3722,6 +3826,7 @@ class Model(object):
                                         names_cur,
                                         lq=None if lq is None else lq[g],
                                         uq=None if uq is None else uq[g],
+                                        density=density,
                                         sort_names=sort_names,
                                         prop_cycle_length=prop_cycle_length,
                                         prop_cycle_ix=prop_cycle_ix,
@@ -3859,6 +3964,7 @@ class Model(object):
                                             names_cur,
                                             lq=lq,
                                             uq=uq,
+                                            density=density,
                                             sort_names=sort_names,
                                             prop_cycle_length=prop_cycle_length,
                                             prop_cycle_ix=prop_cycle_ix,

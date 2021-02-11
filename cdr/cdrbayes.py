@@ -82,7 +82,7 @@ class CDRBayes(CDR):
             else:
                 self.y_sd_prior_sd = self.y_train_sd * self.y_sd_prior_sd_scaling_coefficient
 
-        self.kl_penalties = []
+        self.kl_penalties = {}
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -220,24 +220,28 @@ class CDRBayes(CDR):
                         name='intercept_q_scale'
                     )
 
-                    intercept_dist = Normal(
+                    intercept_q_dist = Normal(
                         loc=intercept_q_loc,
                         scale=self.constraint_fn(intercept_q_scale) + self.epsilon,
                         name='intercept_q'
                     )
 
-                    intercept = tf.cond(self.use_MAP_mode, intercept_dist.mean, intercept_dist.sample)
+                    intercept = tf.cond(self.use_MAP_mode, intercept_q_dist.mean, intercept_q_dist.sample)
 
-                    intercept_summary = intercept_dist.mean()
+                    intercept_summary = intercept_q_dist.mean()
 
                     if self.declare_priors_fixef:
                         # Prior distribution
-                        intercept_prior = Normal(
+                        intercept_prior_dist = Normal(
                             loc=self.intercept_init_tf,
                             scale=self.intercept_prior_sd_tf,
                             name='intercept'
                         )
-                        self.kl_penalties.append(intercept_dist.kl_divergence(intercept_prior))
+                        self.kl_penalties['intercept'] = {
+                            'loc': self.intercept_init,
+                            'scale': self.intercept_prior_sd,
+                            'val': intercept_q_dist.kl_divergence(intercept_prior_dist)
+                        }
 
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
@@ -253,24 +257,28 @@ class CDRBayes(CDR):
                         name='intercept_q_scale_by_%s' % sn(ran_gf)
                     )
 
-                    intercept_dist = Normal(
+                    intercept_q_dist = Normal(
                         loc=intercept_q_loc,
                         scale=self.constraint_fn(intercept_q_scale) + self.epsilon,
                         name='intercept_q_by_%s' % sn(ran_gf)
                     )
 
-                    intercept = tf.cond(self.use_MAP_mode, intercept_dist.mean, intercept_dist.sample)
+                    intercept = tf.cond(self.use_MAP_mode, intercept_q_dist.mean, intercept_q_dist.sample)
 
-                    intercept_summary = intercept_dist.mean()
+                    intercept_summary = intercept_q_dist.mean()
 
                     if self.declare_priors_ranef:
                         # Prior distribution
-                        intercept_prior = Normal(
+                        intercept_prior_dist = Normal(
                             loc=0.,
                             scale=self.intercept_ranef_prior_sd_tf,
                             name='intercept_by_%s' % sn(ran_gf)
                         )
-                        self.kl_penalties.append(intercept_dist.kl_divergence(intercept_prior))
+                        self.kl_penalties['intercept_by_%s' % sn(ran_gf)] = {
+                            'loc': 0.,
+                            'scale': self.intercept_prior_sd * self.ranef_to_fixef_prior_sd_ratio,
+                            'val': intercept_q_dist.kl_divergence(intercept_prior_dist)
+                        }
 
                 return intercept, intercept_summary
 
@@ -291,24 +299,28 @@ class CDRBayes(CDR):
                         name='coefficient_q_scale'
                     )
 
-                    coefficient_dist = Normal(
+                    coefficient_q_dist = Normal(
                         loc=coefficient_q_loc,
                         scale=self.constraint_fn(coefficient_q_scale) + self.epsilon,
                         name='coefficient_q'
                     )
 
-                    coefficient = tf.cond(self.use_MAP_mode, coefficient_dist.mean, coefficient_dist.sample)
+                    coefficient = tf.cond(self.use_MAP_mode, coefficient_q_dist.mean, coefficient_q_dist.sample)
 
-                    coefficient_summary = coefficient_dist.mean()
+                    coefficient_summary = coefficient_q_dist.mean()
 
                     if self.declare_priors_fixef:
                         # Prior distribution
-                        coefficient_prior = Normal(
+                        coefficient_prior_dist = Normal(
                             loc=0.,
                             scale=self.coef_prior_sd_tf,
                             name='coefficient'
                         )
-                        self.kl_penalties.append(coefficient_dist.kl_divergence(coefficient_prior))
+                        self.kl_penalties['coefficient'] = {
+                            'loc': 0.,
+                            'scale': self.coef_prior_sd,
+                            'val': coefficient_q_dist.kl_divergence(coefficient_prior_dist)
+                        }
 
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
@@ -324,24 +336,28 @@ class CDRBayes(CDR):
                         name='coefficient_q_scale_by_%s' % sn(ran_gf)
                     )
 
-                    coefficient_dist = Normal(
+                    coefficient_q_dist = Normal(
                         loc=coefficient_q_loc,
                         scale=self.constraint_fn(coefficient_q_scale) + self.epsilon,
                         name='coefficient_q_by_%s' % sn(ran_gf)
                     )
 
-                    coefficient = tf.cond(self.use_MAP_mode, coefficient_dist.mean, coefficient_dist.sample)
+                    coefficient = tf.cond(self.use_MAP_mode, coefficient_q_dist.mean, coefficient_q_dist.sample)
 
-                    coefficient_summary = coefficient_dist.mean()
+                    coefficient_summary = coefficient_q_dist.mean()
 
                     if self.declare_priors_ranef:
                         # Prior distribution
-                        coefficient_prior = Normal(
+                        coefficient_prior_dist = Normal(
                             loc=0.,
                             scale=self.coef_ranef_prior_sd_tf,
                             name='coefficient_by_%s' % sn(ran_gf)
                         )
-                        self.kl_penalties.append(coefficient_dist.kl_divergence(coefficient_prior))
+                        self.kl_penalties['coefficient_by_%s' % sn(ran_gf)] = {
+                            'loc': 0.,
+                            'scale': self.coef_prior_sd * self.ranef_to_fixef_prior_sd_ratio,
+                            'val': coefficient_q_dist.kl_divergence(coefficient_prior_dist)
+                        }
 
                 return coefficient, coefficient_summary
 
@@ -362,24 +378,28 @@ class CDRBayes(CDR):
                         name='interaction_q_scale'
                     )
 
-                    interaction_dist = Normal(
+                    interaction_q_dist = Normal(
                         loc=interaction_q_loc,
                         scale=self.constraint_fn(interaction_q_scale) + self.epsilon,
                         name='interaction_q'
                     )
 
-                    interaction = tf.cond(self.use_MAP_mode, interaction_dist.mean, interaction_dist.sample)
+                    interaction = tf.cond(self.use_MAP_mode, interaction_q_dist.mean, interaction_q_dist.sample)
 
-                    interaction_summary = interaction_dist.mean()
+                    interaction_summary = interaction_q_dist.mean()
 
                     if self.declare_priors_fixef:
                         # Prior distribution
-                        interaction_prior = Normal(
+                        interaction_prior_dist = Normal(
                             loc=0.,
                             scale=self.coef_prior_sd_tf,
                             name='interaction'
                         )
-                        self.kl_penalties.append(interaction_dist.kl_divergence(interaction_prior))
+                        self.kl_penalties['interaction'] = {
+                            'loc': 0.,
+                            'scale': self.coef_prior_sd,
+                            'val': interaction_q_dist.kl_divergence(interaction_prior_dist)
+                        }
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     # Posterior distribution
@@ -393,24 +413,28 @@ class CDRBayes(CDR):
                         name='interaction_q_scale_by_%s' % sn(ran_gf)
                     )
 
-                    interaction_dist = Normal(
+                    interaction_q_dist = Normal(
                         loc=interaction_q_loc,
                         scale=self.constraint_fn(interaction_q_scale) + self.epsilon,
                         name='interaction_q_by_%s' % sn(ran_gf)
                     )
 
-                    interaction = tf.cond(self.use_MAP_mode, interaction_dist.mean, interaction_dist.sample)
+                    interaction = tf.cond(self.use_MAP_mode, interaction_q_dist.mean, interaction_q_dist.sample)
 
-                    interaction_summary = interaction_dist.mean()
+                    interaction_summary = interaction_q_dist.mean()
 
                     if self.declare_priors_ranef:
                         # Prior distribution
-                        interaction_prior = Normal(
+                        interaction_prior_dist = Normal(
                             loc=0.,
                             scale=self.coef_ranef_prior_sd_tf,
                             name='interaction_by_%s' % sn(ran_gf)
                         )
-                        self.kl_penalties.append(interaction_dist.kl_divergence(interaction_prior))
+                        self.kl_penalties['interaction_by_%s' % sn(ran_gf)] = {
+                            'loc': 0.,
+                            'scale': self.coef_prior_sd * self.ranef_to_fixef_prior_sd_ratio,
+                            'val': interaction_q_dist.kl_divergence(interaction_prior_dist)
+                        }
 
                 return interaction, interaction_summary
 
@@ -429,24 +453,28 @@ class CDRBayes(CDR):
                         name=sn('%s_q_scale_%s' % (param_name, '-'.join(ids)))
                     )
 
-                    param_dist = Normal(
+                    param_q_dist = Normal(
                         loc=param_q_loc,
                         scale=self.constraint_fn(param_q_scale) + self.epsilon,
                         name=sn('%s_q_%s' % (param_name, '-'.join(ids)))
                     )
 
-                    param = tf.cond(self.use_MAP_mode, param_dist.mean, param_dist.sample)
+                    param = tf.cond(self.use_MAP_mode, param_q_dist.mean, param_q_dist.sample)
 
-                    param_summary = param_dist.mean()
+                    param_summary = param_q_dist.mean()
 
                     if self.declare_priors_fixef:
                         # Prior distribution
-                        param_prior = Normal(
+                        param_prior_dist = Normal(
                             loc=mean,
                             scale=self.irf_param_prior_sd,
                             name=sn('%s_%s' % (param_name, '-'.join(ids)))
                         )
-                        self.kl_penalties.append(param_dist.kl_divergence(param_prior))
+                        self.kl_penalties['%s_%s' % (param_name, '-'.join(ids))] = {
+                            'loc': mean,
+                            'scale': self.irf_param_prior_sd,
+                            'val': param_q_dist.kl_divergence(param_prior_dist)
+                        }
 
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
@@ -462,24 +490,28 @@ class CDRBayes(CDR):
                         name=sn('%s_q_scale_%s_by_%s' % (param_name, '-'.join(ids), sn(ran_gf)))
                     )
 
-                    param_dist = Normal(
+                    param_q_dist = Normal(
                         loc=param_q_loc,
                         scale=self.constraint_fn(param_q_scale) + self.epsilon,
                         name=sn('%s_q_%s_by_%s' % (param_name, '-'.join(ids), sn(ran_gf)))
                     )
 
-                    param = tf.cond(self.use_MAP_mode, param_dist.mean, param_dist.sample)
+                    param = tf.cond(self.use_MAP_mode, param_q_dist.mean, param_q_dist.sample)
 
-                    param_summary = param_dist.mean()
+                    param_summary = param_q_dist.mean()
 
                     if self.declare_priors_ranef:
                         # Prior distribution
-                        param_prior = Normal(
+                        param_prior_dist = Normal(
                             loc=0.,
                             scale=self.irf_param_ranef_prior_sd_tf,
                             name='%s_by_%s' % (param_name, sn(ran_gf))
                         )
-                        self.kl_penalties.append(param_dist.kl_divergence(param_prior))
+                        self.kl_penalties['%s_by_%s' % (param_name, sn(ran_gf))] = {
+                            'loc': 0.,
+                            'scale': self.irf_param_prior_sd * self.ranef_to_fixef_prior_sd_ratio,
+                            'val': param_q_dist.kl_divergence(param_prior_dist)
+                        }
 
                 return param, param_summary
 
@@ -512,24 +544,28 @@ class CDRBayes(CDR):
                     name='joint_q_scale' if ran_gf is None else 'joint_q_scale_by_%s' % sn(ran_gf)
                 )
 
-                joint_dist = MultivariateNormalTriL(
+                joint_q_dist = MultivariateNormalTriL(
                     loc=joint_q_loc,
                     scale_tril=tf.contrib.distributions.fill_triangular(joint_q_scale),
                     name='joint_q' if ran_gf is None else 'joint_q_by_%s' % sn(ran_gf)
                 )
 
-                joint = tf.cond(self.use_MAP_mode, joint_dist.mean, joint_dist.sample)
+                joint = tf.cond(self.use_MAP_mode, joint_q_dist.mean, joint_q_dist.sample)
 
-                joint_summary = joint_dist.mean()
+                joint_summary = joint_q_dist.mean()
 
                 if (ran_gf is None and self.declare_priors_fixef) or (ran_gf is not None and self.declare_priors_ranef):
                     # Prior distribution
-                    joint_prior = MultivariateNormalTriL(
+                    joint_prior_dist = MultivariateNormalTriL(
                         loc=means,
                         scale_tril=tf.contrib.distributions.fill_triangular(scale_init),
                         name='joint' if ran_gf is None else 'joint_by_%s' % sn(ran_gf)
                     )
-                    self.kl_penalties.append(joint_dist.kl_divergence(joint_prior))
+                    self.kl_penalties['joint' if ran_gf is None else 'joint_by_%s' % sn(ran_gf)] = {
+                        'loc': 'multiple',
+                        'scale': 'multiple',
+                        'val': joint_q_dist.kl_divergence(joint_prior_dist)
+                    }
 
                 return joint, joint_summary
 
@@ -548,24 +584,28 @@ class CDRBayes(CDR):
                         self.y_sd_posterior_sd_init_unconstrained,
                         name='y_sd_scale_q'
                     )
-                    y_sd_dist = Normal(
+                    y_sd_q_dist = Normal(
                         loc=y_sd_loc_q,
                         scale=self.constraint_fn(y_sd_scale_q) + self.epsilon,
                         name='y_sd_q'
                     )
 
-                    y_sd = tf.cond(self.use_MAP_mode, y_sd_dist.mean, y_sd_dist.sample)
+                    y_sd = tf.cond(self.use_MAP_mode, y_sd_q_dist.mean, y_sd_q_dist.sample)
 
-                    y_sd_summary = y_sd_dist.mean()
+                    y_sd_summary = y_sd_q_dist.mean()
 
                     if self.declare_priors_fixef:
                         # Prior distribution
-                        y_sd_prior = Normal(
+                        y_sd_prior_dist = Normal(
                             loc=y_sd_init_unconstrained,
                             scale=self.y_sd_prior_sd_tf,
                             name='y_sd'
                         )
-                        self.kl_penalties.append(y_sd_dist.kl_divergence(y_sd_prior))
+                        self.kl_penalties['y_sd'] = {
+                            'loc': self.y_sd_init,
+                            'scale': self.y_sd_prior_sd,
+                            'val': y_sd_q_dist.kl_divergence(y_sd_prior_dist)
+                        }
 
                     y_sd = self.constraint_fn(y_sd) + self.epsilon
                     y_sd_summary = self.constraint_fn(y_sd_summary) + self.epsilon
@@ -594,15 +634,15 @@ class CDRBayes(CDR):
                         self.y_skewness_posterior_sd_init_unconstrained,
                         name='y_skewness_q_loc'
                     )
-                    self.y_skewness_dist = Normal(
+                    self.y_skewness_q_dist = Normal(
                         loc=y_skewness_loc_q,
                         scale=self.constraint_fn(y_skewness_scale_q) + self.epsilon,
                         name='y_skewness_q'
                     )
 
-                    self.y_skewness = tf.cond(self.use_MAP_mode, self.y_skewness_dist.mean, self.y_skewness_dist.sample)
+                    self.y_skewness = tf.cond(self.use_MAP_mode, self.y_skewness_q_dist.mean, self.y_skewness_q_dist.sample)
 
-                    self.y_skewness_summary = self.y_skewness_dist.mean()
+                    self.y_skewness_summary = self.y_skewness_q_dist.mean()
 
                     tf.summary.scalar(
                         'error/y_skewness_summary',
@@ -618,15 +658,15 @@ class CDRBayes(CDR):
                         self.y_tailweight_posterior_sd_init_unconstrained,
                         name='y_tailweight_q_scale'
                     )
-                    self.y_tailweight_dist = Normal(
+                    self.y_tailweight_q_dist = Normal(
                         loc=y_tailweight_loc_q,
                         scale=self.constraint_fn(y_tailweight_scale_q) + self.epsilon,
                         name='y_tailweight_q'
                     )
 
-                    self.y_tailweight = tf.cond(self.use_MAP_mode, self.y_tailweight_dist.mean, self.y_tailweight_dist.sample)
+                    self.y_tailweight = tf.cond(self.use_MAP_mode, self.y_tailweight_q_dist.mean, self.y_tailweight_q_dist.sample)
 
-                    self.y_tailweight_summary = self.y_tailweight_dist.mean()
+                    self.y_tailweight_summary = self.y_tailweight_q_dist.mean()
                     tf.summary.scalar(
                         'error/y_tailweight',
                         self.constraint_fn(self.y_tailweight_summary) + self.epsilon,
@@ -635,18 +675,26 @@ class CDRBayes(CDR):
 
                     if self.declare_priors_fixef:
                         # Prior distributions
-                        self.y_skewness_prior = Normal(
+                        self.y_skewness_prior_dist = Normal(
                             loc=0.,
                             scale=self.y_skewness_prior_sd_tf,
                             name='y_skewness'
                         )
-                        self.y_tailweight_prior = Normal(
+                        self.y_tailweight_prior_dist = Normal(
                             loc=self.y_tailweight_prior_loc_unconstrained,
                             scale=self.y_tailweight_prior_sd_tf,
                             name='y_tailweight'
                         )
-                        self.kl_penalties.append(self.y_skewness_dist.kl_divergence(self.y_skewness_prior))
-                        self.kl_penalties.append(self.y_tailweight_dist.kl_divergence(self.y_tailweight_prior))
+                        self.kl_penalties['y_skewness'] = {
+                            'loc': 0.,
+                            'scale': self.y_skewness_prior_dist,
+                            'val': self.y_skewness_q_dist.kl_divergence(self.y_skewness_prior_dist)
+                        }
+                        self.kl_penalties['y_tailweight'] = {
+                            'loc': 1.,
+                            'scale': self.y_tailweight_prior_dist,
+                            'val': self.y_tailweight_q_dist.kl_divergence(self.y_tailweight_prior_dist)
+                        }
 
                     if self.standardize_response:
                         self.out_standardized_dist = SinhArcsinh(
@@ -867,8 +915,10 @@ class CDRBayes(CDR):
 
                 self.loss_func += self.reg_loss
 
-                self.kl_loss = tf.reduce_sum([tf.reduce_sum(x) for x in self.kl_penalties])
-                self.loss_func += self.kl_loss
+                self.kl_loss = tf.constant(0., dtype=self.FLOAT_TF)
+                if len(self.kl_penalties):
+                    self.kl_loss += tf.reduce_sum([tf.reduce_sum(self.kl_penalties[k]['val']) for k in self.kl_penalties])
+                    self.loss_func += self.kl_loss
 
                 self.optim = self._initialize_optimizer()
 
@@ -1018,6 +1068,34 @@ class CDRBayes(CDR):
         out += '\n'
 
         return out
+
+    def report_regularized_variables(self, indent=0):
+        """
+        Generate a string representation of the model's regularization structure.
+
+        :param indent: ``int``; indentation level
+        :return: ``str``; the regularization report
+        """
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                out = super(CDRBayes, self).report_regularized_variables(indent)
+
+                out += ' ' * indent + 'VARIATIONAL PRIORS:\n'
+
+                kl_penalties = self.kl_penalties
+
+                if len(kl_penalties) == 0:
+                    out +=  ' ' * indent + '  No variational priors.\n\n'
+                else:
+                    for name in sorted(list(kl_penalties.keys())):
+                        out += ' ' * indent + '  %s:\n' % name
+                        for k in sorted(list(kl_penalties[name].keys())):
+                            if not k == 'val':
+                                out += ' ' * indent + '    %s: %s\n' % (k, kl_penalties[name][k])
+
+                    out += '\n'
+
+                return out
 
     def run_predict_op(self, feed_dict, standardize_response=False, n_samples=None, algorithm='MAP', verbose=True):
         use_MAP_mode =  algorithm in ['map', 'MAP']

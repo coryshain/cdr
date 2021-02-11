@@ -17,6 +17,7 @@ if __name__ == '__main__':
     argparser.add_argument('paths', nargs='+', help='Path(s) to config file(s) defining experiments')
     argparser.add_argument('-m', '--models', nargs='*', default = [], help='Model names to plot. Regex permitted. If unspecified, plots all CDR models.')
     argparser.add_argument('-z', '--standardize_response', action='store_true', help='Standardize (Z-transform) response in plots. Ignored unless model was fitted using setting ``standardize_respose=True``.')
+    argparser.add_argument('-e', '--plot_density', action='store_true', help='Plot density of support distribubtion. CDRNN only.')
     argparser.add_argument('-S', '--summed', action='store_true', help='Plot summed rather than individual IRFs.')
     argparser.add_argument('-i', '--irf_ids', nargs='*', default = [], help='List of IDs for IRF to include in the plot. Regex supported.')
     argparser.add_argument('-U', '--unsorted_irf_ids', action='store_true', help='Leave IRF IDs unsorted (otherwise, they are sorted alphabetically).')
@@ -142,7 +143,7 @@ if __name__ == '__main__':
                 'dpi': p['dpi'] if args.dpi is None else args.dpi,
                 'generate_irf_surface_plots': p['generate_irf_surface_plots'],
                 'generate_interaction_surface_plots': p['generate_interaction_surface_plots'],
-                'generate_curvature_plots': p['generate_curvature_plots'],
+                'generate_curvature_plots': p['generate_curvature_plots']
             }
 
             stderr('Plotting...\n')
@@ -202,6 +203,7 @@ if __name__ == '__main__':
                     stderr('Model %s missing observation and/or prediction files, skipping Q-Q plot...\n' % m)
 
             cdr_model.make_plots(
+                plot_density=args.plot_density,
                 standardize_response=args.standardize_response,
                 summed=args.summed,
                 irf_name_map=name_map,

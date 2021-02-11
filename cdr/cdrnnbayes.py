@@ -276,6 +276,7 @@ class CDRNNBayes(CDRNN):
             use_bias=True,
             activation=None,
             dropout=None,
+            maxnorm=None,
             batch_normalization_decay=None,
             layer_normalization_type=None,
             name=None,
@@ -307,6 +308,7 @@ class CDRNNBayes(CDRNN):
                     use_bias=use_bias,
                     activation=activation,
                     dropout=dropout,
+                    maxnorm=maxnorm,
                     batch_normalization_decay=batch_normalization_decay,
                     layer_normalization_type=layer_normalization_type,
                     normalize_after_activation=self.normalize_after_activation,
@@ -1175,19 +1177,19 @@ class CDRNNBayes(CDRNN):
                         self.constraint_fn_inv(self.y_sd_posterior_sd_init),
                         name='y_sd_scale_q'
                     )
-                    y_sd_dist = Normal(
+                    y_sd_q_dist = Normal(
                         loc=y_sd_loc_q,
                         scale=self.constraint_fn(y_sd_scale_q) + self.epsilon,
                         name='y_sd_q'
                     )
 
-                    y_sd = tf.cond(self.use_MAP_mode, y_sd_dist.mean, y_sd_dist.sample) + self.y_sd_delta
+                    y_sd = tf.cond(self.use_MAP_mode, y_sd_q_dist.mean, y_sd_q_dist.sample) + self.y_sd_delta
 
-                    y_sd_summary = y_sd_dist.mean() + self.y_sd_delta_ema
+                    y_sd_summary = y_sd_q_dist.mean() + self.y_sd_delta_ema
 
                     if self.declare_priors_fixef:
                         # Prior distribution
-                        y_sd_prior = Normal(
+                        y_sd_prior_dist = Normal(
                             loc=y_sd_init_unconstrained,
                             scale=self.y_sd_prior_sd_tf,
                             name='y_sd'
@@ -1195,7 +1197,7 @@ class CDRNNBayes(CDRNN):
                         self.kl_penalties_base['y_sd'] = {
                             'loc': self.y_sd_init,
                             'scale': self.y_sd_prior_sd,
-                            'val': y_sd_dist.kl_divergence(y_sd_prior)
+                            'val': y_sd_q_dist.kl_divergence(y_sd_prior_dist)
                         }
 
                     y_sd = self.constraint_fn(y_sd) + self.epsilon
@@ -1225,14 +1227,14 @@ class CDRNNBayes(CDRNN):
                         self.constraint_fn_inv(self.y_skewness_posterior_sd_init),
                         name='y_skewness_q_loc'
                     )
-                    self.y_skewness_dist = Normal(
+                    self.y_skewness_q_dist = Normal(
                         loc=y_skewness_loc_q,
                         scale=self.constraint_fn(y_skewness_scale_q) + self.epsilon,
                         name='y_skewness_q'
                     )
 
-                    self.y_skewness = tf.cond(self.use_MAP_mode, self.y_skewness_dist.mean, self.y_skewness_dist.sample) + self.y_skewness_delta
-                    self.y_skewness_summary = self.y_skewness_dist.mean() + self.y_skewness_delta_ema
+                    self.y_skewness = tf.cond(self.use_MAP_mode, self.y_skewness_q_dist.mean, self.y_skewness_q_dist.sample) + self.y_skewness_delta
+                    self.y_skewness_summary = self.y_skewness_q_dist.mean() + self.y_skewness_delta_ema
 
                     tf.summary.scalar(
                         'error/y_skewness_summary',
@@ -1248,14 +1250,14 @@ class CDRNNBayes(CDRNN):
                         self.constraint_fn_inv(self.y_tailweight_posterior_sd_init),
                         name='y_tailweight_q_scale'
                     )
-                    self.y_tailweight_dist = Normal(
+                    self.y_tailweight_q_dist = Normal(
                         loc=y_tailweight_loc_q,
                         scale=self.constraint_fn(y_tailweight_scale_q) + self.epsilon,
                         name='y_tailweight_q'
                     )
 
-                    self.y_tailweight = tf.cond(self.use_MAP_mode, self.y_tailweight_dist.mean, self.y_tailweight_dist.sample) + self.y_tailweight_delta
-                    self.y_tailweight_summary = self.y_tailweight_dist.mean() + self.y_tailweight_delta_ema
+                    self.y_tailweight = tf.cond(self.use_MAP_mode, self.y_tailweight_q_dist.mean, self.y_tailweight_q_dist.sample) + self.y_tailweight_delta
+                    self.y_tailweight_summary = self.y_tailweight_q_dist.mean() + self.y_tailweight_delta_ema
 
                     tf.summary.scalar(
                         'error/y_tailweight',
@@ -1265,25 +1267,25 @@ class CDRNNBayes(CDRNN):
 
                     if self.declare_priors_fixef:
                         # Prior distributions
-                        self.y_skewness_prior = Normal(
+                        self.y_skewness_prior_dist = Normal(
                             loc=0.,
                             scale=self.y_skewness_prior_sd_tf,
                             name='y_skewness'
                         )
-                        self.y_tailweight_prior = Normal(
+                        self.y_tailweight_prior_dist = Normal(
                             loc=self.constraint_fn_inv(1.),
                             scale=self.y_tailweight_prior_sd_tf,
                             name='y_tailweight'
                         )
                         self.kl_penalties_base['y_skewness'] = {
                             'loc': 0.,
-                            'scale': self.y_skewness_prior,
-                            'val': self.y_skewness_dist.kl_divergence(self.y_skewness_prior)
+                            'scale': self.y_skewness_prior_dist,
+                            'val': self.y_skewness_q_dist.kl_divergence(self.y_skewness_prior_dist)
                         }
                         self.kl_penalties_base['y_tailweight'] = {
                             'loc': 1.,
-                            'scale': self.y_tailweight_prior,
-                            'val': self.y_tailweight_dist.kl_divergence(self.y_tailweight_prior)
+                            'scale': self.y_tailweight_prior_dist,
+                            'val': self.y_tailweight_q_dist.kl_divergence(self.y_tailweight_prior_dist)
                         }
 
                     if self.standardize_response:
