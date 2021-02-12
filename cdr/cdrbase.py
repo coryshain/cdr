@@ -904,11 +904,9 @@ class CDR(Model):
         self.irf_proportion_in_bounds = {}
         self.irf_proportion_in_bounds_mc = {}
         self.irf_plot = {}
-        self.irf_mc = {}
         self.irf_integral_tensors = {}
         if self.pc:
             self.src_irf_plot = {}
-            self.src_irf_mc = {}
             self.src_irf_integral_tensors = {}
         self.irf_impulses = {}
         self.convolutions = {}
@@ -2473,35 +2471,23 @@ class CDR(Model):
                     assert t.name() not in self.irf, 'Duplicate IRF node name already in self.irf'
                     self.irf[t.name()] = self.irf[t.p.name()][:]
 
-                    assert not t.name() in self.irf_mc, 'Duplicate IRF node name already in self.irf_mc'
-                    self.irf_mc[t.name()] = {
-                        'atomic': {
-                            'scaled': self.irf_mc[t.p.name()]['atomic']['unscaled'] * tf.expand_dims(tf.gather(self.coefficient, coef_ix, axis=1), axis=-1),
-                            'unscaled': self.irf_mc[t.p.name()]['atomic']['unscaled']
-                        },
-                        'composite': {
-                            'scaled': self.irf_mc[t.p.name()]['composite']['unscaled'] * tf.expand_dims(tf.gather(self.coefficient, coef_ix, axis=1), axis=-1),
-                            'unscaled': self.irf_mc[t.p.name()]['composite']['unscaled']
-                        }
-                    }
-
                     assert not t.name() in self.irf_plot, 'Duplicate IRF node name already in self.irf_plot'
                     self.irf_plot[t.name()] = {
                         'atomic': {
-                            'scaled': self.irf_plot[t.p.name()]['atomic']['unscaled'] * tf.expand_dims(tf.gather(self.coefficient_summary, coef_ix, axis=1), axis=-1),
+                            'scaled': self.irf_plot[t.p.name()]['atomic']['unscaled'] * tf.expand_dims(tf.gather(self.coefficient, coef_ix, axis=1), axis=-1),
                             'unscaled': self.irf_plot[t.p.name()]['atomic']['unscaled']
                         },
                         'composite': {
-                            'scaled': self.irf_plot[t.p.name()]['composite']['unscaled'] * tf.expand_dims(tf.gather(self.coefficient_summary, coef_ix, axis=1), axis=-1),
+                            'scaled': self.irf_plot[t.p.name()]['composite']['unscaled'] * tf.expand_dims(tf.gather(self.coefficient, coef_ix, axis=1), axis=-1),
                             'unscaled': self.irf_plot[t.p.name()]['composite']['unscaled']
                         }
                     }
 
                     assert not t.name() in self.irf_integral_tensors, 'Duplicate IRF node name already in self.mc_integrals'
                     if t.p.family == 'DiracDelta':
-                        integral_tensor = tf.gather(self.coefficient_summary, coef_ix, axis=1)[:,0]
+                        integral_tensor = tf.gather(self.coefficient, coef_ix, axis=1)[:,0]
                     else:
-                        integral_tensor = tf.reduce_sum(self.irf_mc[t.name()]['composite']['scaled'], axis=(1,2)) * self.n_time_units / tf.cast(self.n_time_points, dtype=self.FLOAT_TF)
+                        integral_tensor = tf.reduce_sum(self.irf_plot[t.name()]['composite']['scaled'], axis=(1,2)) * self.n_time_units / tf.cast(self.n_time_points, dtype=self.FLOAT_TF)
                     self.irf_integral_tensors[t.name()] = integral_tensor
 
                 elif t.family == 'DiracDelta':
@@ -2510,18 +2496,6 @@ class CDR(Model):
 
                     assert t.name() not in self.irf, 'Duplicate IRF node name already in self.irf'
                     self.irf[t.name()] = self.irf[t.p.name()][:]
-
-                    assert not t.name() in self.irf_mc, 'Duplicate IRF node name already in self.irf_mc'
-                    self.irf_mc[t.name()] = {
-                        'atomic': {
-                            'scaled': self.dd_support[None, ...],
-                            'unscaled': self.dd_support[None, ...]
-                        },
-                        'composite' : {
-                            'scaled': self.dd_support[None, ...],
-                            'unscaled': self.dd_support[None, ...]
-                        }
-                    }
 
                     assert not t.name() in self.irf_plot, 'Duplicate IRF node name already in self.irf_plot'
                     self.irf_plot[t.name()] = {
@@ -2559,33 +2533,16 @@ class CDR(Model):
                     assert t.name() not in self.irf_proportion_in_bounds, 'Duplicate IRF node name already in self.irf_proportion_in_bounds'
                     self.irf_proportion_in_bounds[t.name()] = irf_proportion_in_bounds
 
-                    atomic_irf_mc = atomic_irf(self.support)
-                    atomic_irf_plot = atomic_irf_plot(self.support)
+                    atomic_irf_plot = atomic_irf(self.support)
 
                     if len(irf) > 1:
-                        composite_irf_mc = self._compose_irf(irf)(self.support[None, ...])
-                    else:
-                        composite_irf_mc = atomic_irf_mc
-                    if len(irf_plot) > 1:
-                        composite_irf_plot = self._compose_irf(irf_plot)(self.support[None, ...])
+                        composite_irf_plot = self._compose_irf(irf)(self.support[None, ...])
                     else:
                         composite_irf_plot = atomic_irf_plot
                     if len(irf_proportion_in_bounds) > 1:
                         composite_irf_proportion_in_bounds = self._compose_irf(irf_proportion_in_bounds)(self.support[None, ...])
                     else:
                         composite_irf_proportion_in_bounds = atomic_irf_proportion_in_bounds
-
-                    assert t.name() not in self.irf_mc, 'Duplicate IRF node name already in self.irf_mc'
-                    self.irf_mc[t.name()] = {
-                        'atomic': {
-                            'unscaled': atomic_irf_mc,
-                            'scaled': atomic_irf_mc
-                        },
-                        'composite': {
-                            'unscaled': composite_irf_mc,
-                            'scaled': composite_irf_mc
-                        }
-                    }
 
                     assert t.name() not in self.irf_plot, 'Duplicate IRF node name already in self.irf_plot'
                     self.irf_plot[t.name()] = {
@@ -2623,7 +2580,6 @@ class CDR(Model):
                         t_impulse_names = t.impulse_names()
                         if t_impulse_names == ['rate'] and len(src_irf_names) == 1 and self.src_node_table[src_irf_names[0]].impulse_names() == ['rate']:
                             self.src_irf_plot[src_irf_names[0]] = self.irf_plot[t.name()]
-                            self.src_irf_mc[src_irf_names[0]] = self.irf_mc[t.name()]
                             if t.name() in self.irf_integral_tensors:
                                 self.src_irf_integral_tensors[src_irf_names[0]] = self.irf_integral_tensors[t.name()]
                         else:
@@ -2656,22 +2612,6 @@ class CDR(Model):
                                                 'composite': {
                                                     'scaled': tf.reduce_sum(self.irf_plot[t.name()]['composite']['scaled'] * e, axis=1, keep_dims=True),
                                                     'unscaled': tf.reduce_sum(self.irf_plot[t.name()]['composite']['unscaled'] * e, axis=1, keep_dims=True)
-                                                }
-                                            }
-                                        if src_irf_name in self.src_irf_mc:
-                                            self.src_irf_mc[src_irf_name]['atomic']['scaled'] += tf.reduce_sum(self.irf_mc[t.name()]['atomic']['scaled'] * e, axis=1, keep_dims=True)
-                                            self.src_irf_mc[src_irf_name]['atomic']['unscaled'] += tf.reduce_sum(self.irf_mc[t.name()]['atomic']['unscaled'] * e, axis=1, keep_dims=True)
-                                            self.src_irf_mc[src_irf_name]['composite']['scaled'] += tf.reduce_sum(self.irf_mc[t.name()]['composite']['scaled'] * e, axis=1, keep_dims=True)
-                                            self.src_irf_mc[src_irf_name]['composite']['unscaled'] += tf.reduce_sum(self.irf_mc[t.name()]['composite']['unscaled'] * e, axis=1, keep_dims=True)
-                                        else:
-                                            self.src_irf_mc[src_irf_name] = {
-                                                'atomic': {
-                                                    'scaled': tf.reduce_sum(self.irf_mc[t.name()]['atomic']['scaled'] * e, axis=1, keep_dims=True),
-                                                    'unscaled': tf.reduce_sum(self.irf_mc[t.name()]['atomic']['unscaled'] * e, axis=1, keep_dims=True)
-                                                },
-                                                'composite': {
-                                                    'scaled': tf.reduce_sum(self.irf_mc[t.name()]['composite']['scaled'] * e, axis=1, keep_dims=True),
-                                                    'unscaled': tf.reduce_sum(self.irf_mc[t.name()]['composite']['unscaled'] * e, axis=1, keep_dims=True)
                                                 }
                                             }
                                         if t.name() in self.irf_integral_tensors:
@@ -2808,18 +2748,6 @@ class CDR(Model):
                 for i, interaction in enumerate(self.interaction_names):
                     interaction_ix = [i]
                     estimate = self.dd_support * tf.gather(self.interaction_fixed, interaction_ix)
-                    self.irf_mc[interaction] = {
-                        'atomic': {
-                            'scaled': estimate,
-                            'unscaled': estimate
-                        },
-                        'composite': {
-                            'scaled': estimate,
-                            'unscaled': estimate
-                        }
-                    }
-
-                    estimate = self.dd_support * tf.gather(self.interaction_fixed_summary, interaction_ix)
                     self.irf_plot[interaction] = {
                         'atomic': {
                             'scaled': estimate,
@@ -3272,7 +3200,9 @@ class CDR(Model):
         if n_samples and self.is_bayesian:
             alpha = 100-float(level)
             support = self.sess.run(to_run[0], feed_dict=fd)
-            samples = [self.sess.run(to_run[1], feed_dict=fd) for _ in range(n_samples)]
+            samples = []
+            for i in range(n_samples):
+                samples.append(self.sess.run(to_run[1], feed_dict=fd))
             samples = np.concatenate(samples, axis=-1)
             mean = samples.mean(axis=-1)
             lower = np.percentile(samples, alpha / 2, axis=-1)
@@ -3506,6 +3436,7 @@ class CDR(Model):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                self.set_predict_mode(True)
                 if not n_time_units:
                     n_time_units = self.t_delta_limit
 
@@ -3522,12 +3453,14 @@ class CDR(Model):
                     self.support_start: 0.,
                     self.n_time_units: n_time_units,
                     self.n_time_points: n_time_points,
-                    self.max_tdelta_batch: n_time_units
+                    self.max_tdelta_batch: n_time_units,
+                    self.training: not self.predict_mode
                 }
 
                 if type(self).__name__ == 'CDRBayes' and algorithm.lower() == 'sampling':
                     if n_samples is None:
                         n_samples = self.n_samples_eval
+                    fd[self.use_MAP_mode] = False
 
                     # fd[self.time_y] = np.ones((1,)) * n_time_units
                     # fd[self.time_X] = np.zeros((1, self.history_length))
@@ -3535,7 +3468,7 @@ class CDR(Model):
                     preds = []
 
                     for name in names:
-                        posterior = self.irf_mc[name]['atomic']['scaled']
+                        posterior = self.irf_plot[name]['atomic']['scaled']
 
                         samples = [self.sess.run(posterior, feed_dict=fd)[0] for _ in range(n_samples)]
                         samples = np.concatenate(samples, axis=1)
@@ -3557,6 +3490,7 @@ class CDR(Model):
 
                 rmsd = np.sqrt(((gold - preds) ** 2).mean())
 
+                self.set_predict_mode(False)
                 return rmsd
 
     def plot_eigenvectors(self):
