@@ -624,7 +624,7 @@ class CDRNN(Model):
                             use_bias=use_bias,
                             activation=activation,
                             dropout=None,
-                            mn=mn,
+                            maxnorm=mn,
                             batch_normalization_decay=bn,
                             layer_normalization_type=ln,
                             name='rnn_projection_l%s' % (l + 1)
@@ -2177,9 +2177,6 @@ class CDRNN(Model):
                     elif plot_type.lower().startswith('interaction_surface'):
                         alpha_support_shape = alpha_support[0].shape
                         alpha_support1, alpha_support2 = alpha_support[0].flatten(), alpha_support[1].flatten()
-                        print(alpha_support1.shape)
-                        print(alpha_support2.shape)
-                        print(density_fn)
 
                         density = np.reshape(density_fn.ev(alpha_support1, alpha_support2), alpha_support_shape)
                     else:
