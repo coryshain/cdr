@@ -741,6 +741,12 @@ CDRNN_INITIALIZATION_KWARGS = [
         "Number of posterior predictive samples to draw for prediction/evaluation."
     ),
     Kwarg(
+        'direct_irf',
+        True,
+        bool,
+        "Whether to generate the response directly as the output of the IRF (``True``). Otherwise, IRF provides weights on the input dimensions."
+    ),
+    Kwarg(
         'heteroskedastic',
         True,
         bool,

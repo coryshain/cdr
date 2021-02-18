@@ -341,42 +341,22 @@ class CDRNN(Model):
                 )
 
                 def get_plot_reference_mean():
-                    if self.center_inputs:
-                        plot_impulse_base_default = tf.zeros(
-                            [len(self.impulse_names)],
-                            dtype=self.FLOAT_TF
-                        )
-                    else:
-                        plot_impulse_base_default = tf.convert_to_tensor(
-                            [self.impulse_means[x] for x in self.impulse_names],
-                            dtype=self.FLOAT_TF
-                        )
-                    plot_impulse_center_default = tf.zeros(
-                        [len(self.impulse_names)],
+                    plot_impulse_base_default = tf.convert_to_tensor(
+                        [self.impulse_means[x] for x in self.impulse_names],
                         dtype=self.FLOAT_TF
                     )
 
-                    return plot_impulse_base_default, plot_impulse_center_default
+                    return plot_impulse_base_default
 
                 def get_plot_reference_zero():
                     plot_impulse_base_default = tf.zeros(
                         [len(self.impulse_names)],
                         dtype=self.FLOAT_TF
                     )
-                    if self.center_inputs:
-                        plot_impulse_center_default = tf.zeros(
-                            [len(self.impulse_names)],
-                            dtype=self.FLOAT_TF
-                        )
-                    else:
-                        plot_impulse_center_default = tf.convert_to_tensor(
-                            [self.impulse_means[x] for x in self.impulse_names],
-                            dtype=self.FLOAT_TF
-                        )
 
-                    return plot_impulse_base_default, plot_impulse_center_default
+                    return plot_impulse_base_default
 
-                plot_impulse_base_default, plot_impulse_center_default = tf.cond(
+                plot_impulse_base_default = tf.cond(
                     self.plot_mean_as_reference,
                     get_plot_reference_mean,
                     get_plot_reference_zero
@@ -409,22 +389,10 @@ class CDRNN(Model):
                 plot_impulse_min_default *= lq
                 plot_impulse_max_default *= uq
 
-                if self.center_inputs:
-                    plot_impulse_min_default -= self.impulse_means_arr
-                    plot_impulse_max_default -= self.impulse_means_arr
-                if self.rescale_inputs:
-                    plot_impulse_min_default /= self.impulse_sds_arr
-                    plot_impulse_max_default /= self.impulse_sds_arr
-
                 self.plot_impulse_base = tf.placeholder_with_default(
                     plot_impulse_base_default,
                     shape=[len(self.impulse_names)],
                     name='plot_impulse_base'
-                )
-                self.plot_impulse_center = tf.placeholder_with_default(
-                    plot_impulse_center_default,
-                    shape=[len(self.impulse_names)],
-                    name='plot_impulse_center'
                 )
                 self.plot_impulse_offset = tf.placeholder_with_default(
                     plot_impulse_offset_default,
@@ -453,7 +421,6 @@ class CDRNN(Model):
                 )
 
                 self.plot_impulse_base_expanded = self.plot_impulse_base[None, None, ...]
-                self.plot_impulse_center_expanded = self.plot_impulse_center[None, None, ...]
                 self.plot_impulse_offset_expanded = self.plot_impulse_offset[None, None, ...]
                 self.plot_impulse_min_expanded = self.plot_impulse_min[None, None, ...]
                 self.plot_impulse_max_expanded = self.plot_impulse_max[None, None, ...]
@@ -724,7 +691,10 @@ class CDRNN(Model):
                         final = False
                         mn = self.maxnorm
                     else:
-                        units = 1
+                        if self.direct_irf:
+                            units = 1
+                        else:
+                            units = len(self.impulse_names)
                         activation = self.irf_activation
                         dropout = None
                         bn = None
@@ -1406,6 +1376,7 @@ class CDRNN(Model):
                         lambda: time_X
                     )
 
+                X_src = X
                 X = tf.concat([X, time_X], axis=-1)
 
                 # Compute hidden state
@@ -1522,7 +1493,12 @@ class CDRNN(Model):
                 if not self.normalize_after_activation:
                     irf_l1 = get_activation(self.irf_inner_activation, session=self.sess)(irf_l1)
 
-                y = self.irf(irf_l1)
+
+                if self.direct_irf:
+                    y = self.irf(irf_l1)
+                else:
+                    X_conv = self.irf(irf_l1) * X_src
+                    y = tf.reduce_sum(X_conv, axis=-1, keepdims=True)
                 if time_X_mask is not None:
                     y *= time_X_mask[..., None]
                 y = tf.reduce_sum(y, axis=1)
@@ -1688,7 +1664,6 @@ class CDRNN(Model):
                 x = self.plot_impulse_1hot_expanded
                 y = self.plot_impulse_1hot_2_expanded
                 b = self.plot_impulse_base_expanded
-                c = self.plot_impulse_center_expanded
                 s = self.plot_impulse_offset_expanded
                 lq = self.plot_impulse_min_expanded
                 uq = self.plot_impulse_max_expanded
@@ -1696,11 +1671,23 @@ class CDRNN(Model):
                 means = self.impulse_means_arr_expanded
                 sds = self.impulse_sds_arr_expanded
 
+                b_in = b
+                lq_in = lq
+                uq_in = uq
+                if self.center_inputs:
+                    b_in -= means
+                    lq_in -= means
+                    uq_in -= means
+                if self.rescale_inputs:
+                    b_in /= sds
+                    lq_in /= sds
+                    uq_in /= sds
+
                 R = tf.shape(self.gf_y)[0]
                 T = tf.shape(self.support)[0]
 
                 X_rate = tf.tile(
-                    b,
+                    b_in,
                     [T, 1, 1]
                 )
 
@@ -1709,7 +1696,7 @@ class CDRNN(Model):
                 self.irf_1d_rate_plot = tf.reshape(irf_1d_rate_plot, [R, T, 1])
 
                 X = tf.tile(
-                     x * s + b,
+                     x * s + b_in,
                     [T, 1, 1]
                 )
                 self.irf_1d_support = self.support
@@ -1729,16 +1716,15 @@ class CDRNN(Model):
                     [self.n_surface_plot_points_per_side, 1, 1]
                 )
 
-                u_src = tf.linspace(
+                v = tf.linspace(
                     tf.cast(0, dtype=self.FLOAT_TF),
                     tf.cast(1, dtype=self.FLOAT_TF),
                     self.n_surface_plot_points_per_side,
-                )
-                u = u_src[..., None, None]
+                )[..., None, None]
 
-                u_rate = u_src
+                u_rate = v
                 X_rate = tf.tile(
-                    b,
+                    b_in,
                     [self.n_surface_plot_points_normalized, 1, 1]
                 )
                 irf_surface_rate_plot = self._apply_model(X_rate, t_delta_square, plot_mode=True)['y']
@@ -1749,15 +1735,10 @@ class CDRNN(Model):
                 self.irf_surface_rate_meshgrid = tf.meshgrid(time_support, u_rate)
 
                 # Scale to cover range
-                u *= uq - lq
-                # Shift
-                u += lq
-                # Mask
-                u *= x
-                # u = x * (c + u)
+                u = v * (uq_in - lq_in) + lq_in
                 X = tf.reshape(
                     tf.tile(
-                        u + b,
+                        x * u + (1 - x) * b_in,
                         [1, self.n_surface_plot_points_per_side, 1]
                     ),
                     [-1, 1, len(self.impulse_names)]
@@ -1767,16 +1748,9 @@ class CDRNN(Model):
                     irf_surface_plot,
                     [R, self.n_surface_plot_points_per_side, self.n_surface_plot_points_per_side, 1]
                 ) - self.irf_surface_rate_plot
-                if self.center_inputs:
-                    b_plot = b + means
-                else:
-                    b_plot = b
-                if self.rescale_inputs:
-                    u_plot = u * sds
-                else:
-                    u_plot = u
+                u_plot = v * (uq - lq) + lq
                 irf_surface_support_impulse = tf.reduce_prod(
-                    u_plot + x * b_plot + (1 - x),  # Fill empty one-hot cols with ones so we only reduce_prod on valid cols
+                    x * u_plot + (1 - x),  # Fill empty one-hot cols with ones so we only reduce_prod on valid cols
                     axis=[1,2]
                 )
                 self.irf_surface_support = tf.meshgrid(
@@ -1788,34 +1762,25 @@ class CDRNN(Model):
                 t_interaction = self.t_interaction
 
                 rate_at_t = self._apply_model(
-                    b,
+                    b_in,
                     tf.ones([1, 1, 1], dtype=self.FLOAT_TF) * t_interaction,
                     plot_mode=True
                 )['y']
 
                 t_delta = tf.ones([T, 1, 1], dtype=self.FLOAT_TF) * t_interaction
 
-                u = tf.linspace(
+                v = tf.linspace(
                     tf.cast(0, dtype=self.FLOAT_TF),
                     tf.cast(1, dtype=self.FLOAT_TF),
                     T,
                 )[..., None, None]
-                u = x * (u * (uq - lq) + lq - b)
-                X = u + b
-                # u = x * (c + u * s)
-                # X = u + b
+                u = v * (uq_in - lq_in) + lq_in
+                X = x * u + (1 - x) * b_in
                 curvature_plot = self._apply_model(X, t_delta, plot_mode=True)['y']
                 self.curvature_plot = tf.reshape(curvature_plot, [R, T, 1]) - rate_at_t[..., None]
 
-                if self.center_inputs:
-                    b_plot = means
-                else:
-                    b_plot = 0.
-                if self.rescale_inputs:
-                    u_plot = u * sds
-                else:
-                    u_plot = u
-                curvature_support = u_plot + x * b_plot + (1 - x)  # Fill empty one-hot cols with ones so we only reduce_prod on valid cols
+                u_plot = v * (uq - lq) + lq
+                curvature_support = x * u_plot + (1 - x)  # Fill empty one-hot cols with ones so we only reduce_prod on valid cols
                 self.curvature_support = tf.reduce_prod(
                     curvature_support,
                     axis=[1,2]
@@ -1833,8 +1798,8 @@ class CDRNN(Model):
                     self.n_surface_plot_points_per_side,
                 )[..., None, None]
 
-                # u_1 = x * (c + v * s)
-                u_1 = x * (v * (uq - lq) + lq)
+                v_range_in = (v * (uq_in - lq_in) + lq_in)
+                u_1 = x * v_range_in
                 X_1 = tf.reshape(
                     tf.tile(
                         u_1,
@@ -1843,8 +1808,7 @@ class CDRNN(Model):
                     [-1, 1, len(self.impulse_names)]
                 )
 
-                # u_2 = y * (c + v * s)
-                u_2 = y * (v * (uq - lq) + lq)
+                u_2 = y * v_range_in
                 X_2 = tf.reshape(
                     tf.tile(
                         u_2,
@@ -1853,30 +1817,22 @@ class CDRNN(Model):
                     [-1, 1, len(self.impulse_names)]
                 )
 
-                X = X_1 + X_2 + b
+                X = X_1 + X_2 + (1 - x) * (1 - y) * b_in
                 interaction_surface_plot = self._apply_model(X, t_delta, plot_mode=True)['y']
                 self.interaction_surface_plot = tf.reshape(
                     interaction_surface_plot[None, ...],
                     [R, self.n_surface_plot_points_per_side, self.n_surface_plot_points_per_side, 1]
                 ) - rate_at_t[..., None, None]
 
-
-                if self.center_inputs:
-                    b_plot = b + means
-                else:
-                    b_plot = b
-                if self.rescale_inputs:
-                    u_1_plot = u_1 * sds
-                    u_2_plot = u_2 * sds
-                else:
-                    u_1_plot = u_1
-                    u_2_plot = u_2
+                v_range = (v * (uq - lq) + lq)
+                u_1_plot = x * v_range
+                u_2_plot = y * v_range
                 pred1_support = tf.reduce_prod(
-                    u_1_plot + x * b_plot + (1 - x),  # Fill empty one-hot cols with ones so we only reduce_prod on valid cols
+                    u_1_plot + (1 - x),  # Fill empty one-hot cols with ones so we only reduce_prod on valid cols
                     axis=[1, 2]
                 )
                 pred2_support = tf.reduce_prod(
-                    u_2_plot + y * b_plot + (1 - y),  # Fill empty one-hot cols with ones so we only reduce_prod on valid cols
+                    u_2_plot + (1 - y),  # Fill empty one-hot cols with ones so we only reduce_prod on valid cols
                     axis=[1, 2]
                 )
 
