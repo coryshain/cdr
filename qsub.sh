@@ -2,6 +2,6 @@
 
 for pbs in "$@"
 do
-    qsub "$pbs"
+    sbatch "$pbs"
 done
 
