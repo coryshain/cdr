@@ -2696,7 +2696,7 @@ class Model(object):
 
                     training_rho = np.corrcoef(y[self.dv], preds)[0,1]
 
-                    with open(self.outdir + '/losses_mse_train.txt', 'w') as e_file:
+                    with open(self.outdir + '/squared_error_train.txt', 'w') as e_file:
                         for i in range(len(training_se)):
                             e_file.write(str(training_se[i]) + '\n')
 

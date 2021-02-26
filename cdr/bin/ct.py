@@ -135,8 +135,10 @@ if __name__ == '__main__':
                                         a = scale(df.CDRpreds)
                                         if 'y' in df.columns:
                                             y = scale(df.y)
-                                        else:
+                                        elif 'yStandardized' in df.columns:
                                             y = scale(df.yStandardized)
+                                        else:
+                                            y = scale(df.CDRobs)
                                     else:
                                         y = scale(pd.read_csv(p.outdir + '/' + a_model_path + '/' + obs_file_name, sep=' ', header=None, skipinitialspace=True)[0])
                                         a = scale(pd.read_csv(p.outdir + '/' + a_model_path + '/' + pred_file_name, sep=' ', header=None, skipinitialspace=True)[0])
@@ -214,8 +216,10 @@ if __name__ == '__main__':
                         if exp_outdir not in targets:
                             if 'y' in df.columns:
                                 targets[exp_outdir] = scale(df.y)
-                            else:
+                            elif 'yStandardized' in df.columns:
                                 targets[exp_outdir] = scale(df.yStandardized)
+                            else:
+                                targets[exp_outdir] = scale(df.CDRobs)
                     else:
                         pooled_data[a][exp_outdir][m] = scale(pd.read_csv(exp_outdir + '/' + m_name_path + '/' + pred_file_name, sep=' ', header=None, skipinitialspace=True)[0])
                         if exp_outdir not in targets:

@@ -795,8 +795,8 @@ class CDRNN(Model):
 
                     self.error_params_final_fn = compose_lambdas([projection])
 
-                    # # ERROR PARAM BIASES
-                    # self.error_params_b, self.error_params_b_summary = self.initialize_error_params_biases(ran_gf=None)
+                    # ERROR PARAM BIASES
+                    self.error_params_b, self.error_params_b_summary = self.initialize_error_params_biases(ran_gf=None)
 
                 # INTERCEPT
                 if self.has_intercept[None]:
@@ -815,11 +815,11 @@ class CDRNN(Model):
                 self.intercept_summary = self.intercept_fixed_summary
 
                 # COEFFICIENTS
-                if self.ranef_at_input:
+                if self.ranef_at_input or self.use_coefficient:
                     self.coefficient_fixed, self.coefficient_fixed_summary = self.initialize_coefficient(ran_gf=None)
                     self.coefficient = self.coefficient_fixed
-                    # TODO: Add named Tensorboard logs
                     self._regularize(self.coefficient_fixed, type='coefficient', var_name=reg_name('coefficient'))
+                    # TODO: Add named Tensorboard logs
 
                 # INTERCEPT DELTA
                 if self.nonstationary_intercept:
@@ -890,18 +890,18 @@ class CDRNN(Model):
                 if self.ranef_at_input:
                     self.coefficient_ran = []
                     self.coefficient_ran_matrix = []
-                # self.error_params_b_ran = []
-                # self.error_params_b_ran_matrix = []
                 self.rnn_h_ran_matrix = [[] for l in range(self.n_layers_rnn)]
                 self.rnn_h_ran = [[] for l in range(self.n_layers_rnn)]
                 self.rnn_c_ran_matrix = [[] for l in range(self.n_layers_rnn)]
                 self.rnn_c_ran = [[] for l in range(self.n_layers_rnn)]
                 self.h_bias_ran_matrix = []
                 self.h_bias_ran = []
-                # self.irf_l1_W_ran_matrix = []
-                # self.irf_l1_W_ran = []
-                # self.irf_l1_b_ran_matrix = []
-                # self.irf_l1_b_ran = []
+                self.irf_l1_W_ran_matrix = []
+                self.irf_l1_W_ran = []
+                self.irf_l1_b_ran_matrix = []
+                self.irf_l1_b_ran = []
+                self.error_params_b_ran = []
+                self.error_params_b_ran_matrix = []
                 if self.nonstationary_intercept:
                     self.intercept_l1_W_ran_matrix = []
                     self.intercept_l1_W_ran = []
@@ -915,6 +915,7 @@ class CDRNN(Model):
                         self.ranef_dropout_rate,
                         training=self.training,
                         use_MAP_mode=tf.constant(True, dtype=tf.bool),
+                        constant=self.gf_defaults,
                         name='ranef_dropout',
                         session=self.sess
                     )
@@ -980,7 +981,7 @@ class CDRNN(Model):
 
                             if self.log_random:
                                 tf.summary.histogram(
-                                    sn('by_%s/h' % sn(gf)),
+                                    sn('by_%s/coefficient' % sn(gf)),
                                     coefficient_ran_matrix_cur_summary,
                                     collections=['random']
                                 )
@@ -988,7 +989,7 @@ class CDRNN(Model):
                             coefficient_ran_matrix_cur = tf.concat(
                                 [
                                     coefficient_ran_matrix_cur,
-                                    tf.zeros([1, len(self.impulse_names) + 2])
+                                    tf.zeros([1, len(self.impulse_names) + 1])
                                 ],
                                 axis=0
                             )
@@ -999,121 +1000,91 @@ class CDRNN(Model):
                             self.coefficient_ran.append(coefficient_ran)
 
                             self.coefficient += tf.expand_dims(coefficient_ran, axis=-2)
-                        else:
-                            # # Random error bias offsets
-                            # error_params_b_ran_matrix_cur, error_params_b_ran_matrix_cur_summary = self.initialize_error_params_biases(ran_gf=gf)
-                            # error_params_b_ran_matrix_cur -= tf.reduce_mean(error_params_b_ran_matrix_cur, axis=0, keepdims=True)
-                            # error_params_b_ran_matrix_cur_summary -= tf.reduce_mean(error_params_b_ran_matrix_cur_summary, axis=0,
-                            #                                                 keepdims=True)
-                            # self._regularize(error_params_b_ran_matrix_cur, type='ranef',
-                            #                  var_name=reg_name('error_params_b_by_%s' % (sn(gf))))
-                            #
-                            # if self.log_random:
-                            #     tf.summary.histogram(
-                            #         sn('by_%s/h' % sn(gf)),
-                            #         error_params_b_ran_matrix_cur_summary,
-                            #         collections=['random']
-                            #     )
-                            #
-                            # error_params_b_ran_matrix_cur = tf.concat(
-                            #     [
-                            #         error_params_b_ran_matrix_cur,
-                            #         tf.zeros([1, self.n_units_hidden_state])
-                            #     ],
-                            #     axis=0
-                            # )
-                            #
-                            # error_params_b_ran = tf.gather(error_params_b_ran_matrix_cur, gf_y)
-                            #
-                            # self.error_params_b_ran_matrix.append(error_params_b_ran_matrix_cur)
-                            # self.error_params_b_ran.append(error_params_b_ran)
-                            #
-                            # self.error_params_b += tf.expand_dims(error_params_b_ran, axis=-2)
 
-                            # Random rnn initialization offsets
-                            for l in range(self.n_layers_rnn):
-                                rnn_h_ran_matrix_cur, rnn_h_ran_matrix_cur_summary = self.initialize_rnn_h(l, ran_gf=gf)
-                                rnn_h_ran_matrix_cur -= tf.reduce_mean(rnn_h_ran_matrix_cur, axis=0, keepdims=True)
-                                rnn_h_ran_matrix_cur_summary -= tf.reduce_mean(rnn_h_ran_matrix_cur_summary, axis=0, keepdims=True)
-                                self._regularize(rnn_h_ran_matrix_cur, type='ranef', var_name=reg_name('rnn_h_ran_l%d_by_%s' % (l, sn(gf))))
-
-                                if self.log_random:
-                                    tf.summary.histogram(
-                                        sn('by_%s/rnn_h_l%d' % (sn(gf), l+1)),
-                                        rnn_h_ran_matrix_cur_summary,
-                                        collections=['random']
-                                    )
-
-                                rnn_h_ran_matrix_cur = tf.concat(
-                                    [
-                                        rnn_h_ran_matrix_cur,
-                                        tf.zeros([1, self.n_units_rnn[l]])
-                                    ],
-                                    axis=0
-                                )
-                                rnn_h_ran = tf.gather(rnn_h_ran_matrix_cur, gf_y)
-
-                                self.rnn_h_ran_matrix[l].append(rnn_h_ran_matrix_cur)
-                                self.rnn_h_ran[l].append(rnn_h_ran)
-
-                                self.rnn_h_init[l] += rnn_h_ran
-
-                                rnn_c_ran_matrix_cur, rnn_c_ran_matrix_cur_summary = self.initialize_rnn_c(l, ran_gf=gf)
-                                rnn_c_ran_matrix_cur -= tf.reduce_mean(rnn_c_ran_matrix_cur, axis=0, keepdims=True)
-                                rnn_c_ran_matrix_cur_summary -= tf.reduce_mean(rnn_c_ran_matrix_cur_summary, axis=0, keepdims=True)
-                                self._regularize(rnn_c_ran_matrix_cur, type='ranef', var_name=reg_name('rnn_c_ran_l%d_by_%s' % (l+1, sn(gf))))
-
-                                if self.log_random:
-                                    tf.summary.histogram(
-                                        sn('by_%s/rnn_c_l%d' % (sn(gf), l+1)),
-                                        rnn_c_ran_matrix_cur_summary,
-                                        collections=['random']
-                                    )
-
-                                rnn_c_ran_matrix_cur = tf.concat(
-                                    [
-                                        rnn_c_ran_matrix_cur,
-                                        tf.zeros([1, self.n_units_rnn[l]])
-                                    ],
-                                    axis=0
-                                )
-                                rnn_c_ran = tf.gather(rnn_c_ran_matrix_cur, gf_y)
-
-                                self.rnn_c_ran_matrix[l].append(rnn_c_ran_matrix_cur)
-                                self.rnn_c_ran[l].append(rnn_c_ran)
-
-                                self.rnn_c_init[l] += rnn_c_ran
-
-                            # Random hidden state offsets
-                            h_bias_ran_matrix_cur, h_bias_ran_matrix_cur_summary = self.initialize_h_bias(ran_gf=gf)
-                            h_bias_ran_matrix_cur -= tf.reduce_mean(h_bias_ran_matrix_cur, axis=0, keepdims=True)
-                            h_bias_ran_matrix_cur_summary -= tf.reduce_mean(h_bias_ran_matrix_cur_summary, axis=0, keepdims=True)
-                            self._regularize(h_bias_ran_matrix_cur, type='ranef', var_name=reg_name('h_bias_by_%s' % (sn(gf))))
+                        # Random rnn initialization offsets
+                        for l in range(self.n_layers_rnn):
+                            rnn_h_ran_matrix_cur, rnn_h_ran_matrix_cur_summary = self.initialize_rnn_h(l, ran_gf=gf)
+                            rnn_h_ran_matrix_cur -= tf.reduce_mean(rnn_h_ran_matrix_cur, axis=0, keepdims=True)
+                            rnn_h_ran_matrix_cur_summary -= tf.reduce_mean(rnn_h_ran_matrix_cur_summary, axis=0, keepdims=True)
+                            self._regularize(rnn_h_ran_matrix_cur, type='ranef', var_name=reg_name('rnn_h_ran_l%d_by_%s' % (l, sn(gf))))
 
                             if self.log_random:
                                 tf.summary.histogram(
-                                    sn('by_%s/h' % sn(gf)),
-                                    h_bias_ran_matrix_cur_summary,
+                                    sn('by_%s/rnn_h_l%d' % (sn(gf), l+1)),
+                                    rnn_h_ran_matrix_cur_summary,
                                     collections=['random']
                                 )
 
-                            n_units_hidden_state = self.n_units_hidden_state
-                            if self.split_h:
-                                n_units_hidden_state *= 2
-                            h_bias_ran_matrix_cur = tf.concat(
+                            rnn_h_ran_matrix_cur = tf.concat(
                                 [
-                                    h_bias_ran_matrix_cur,
-                                    tf.zeros([1, n_units_hidden_state])
+                                    rnn_h_ran_matrix_cur,
+                                    tf.zeros([1, self.n_units_rnn[l]])
                                 ],
                                 axis=0
                             )
+                            rnn_h_ran = tf.gather(rnn_h_ran_matrix_cur, gf_y)
 
-                            h_bias_ran = tf.gather(h_bias_ran_matrix_cur, gf_y)
+                            self.rnn_h_ran_matrix[l].append(rnn_h_ran_matrix_cur)
+                            self.rnn_h_ran[l].append(rnn_h_ran)
 
-                            self.h_bias_ran_matrix.append(h_bias_ran_matrix_cur)
-                            self.h_bias_ran.append(h_bias_ran)
+                            self.rnn_h_init[l] += rnn_h_ran
 
-                            self.h_bias += tf.expand_dims(h_bias_ran, axis=-2)
+                            rnn_c_ran_matrix_cur, rnn_c_ran_matrix_cur_summary = self.initialize_rnn_c(l, ran_gf=gf)
+                            rnn_c_ran_matrix_cur -= tf.reduce_mean(rnn_c_ran_matrix_cur, axis=0, keepdims=True)
+                            rnn_c_ran_matrix_cur_summary -= tf.reduce_mean(rnn_c_ran_matrix_cur_summary, axis=0, keepdims=True)
+                            self._regularize(rnn_c_ran_matrix_cur, type='ranef', var_name=reg_name('rnn_c_ran_l%d_by_%s' % (l+1, sn(gf))))
+
+                            if self.log_random:
+                                tf.summary.histogram(
+                                    sn('by_%s/rnn_c_l%d' % (sn(gf), l+1)),
+                                    rnn_c_ran_matrix_cur_summary,
+                                    collections=['random']
+                                )
+
+                            rnn_c_ran_matrix_cur = tf.concat(
+                                [
+                                    rnn_c_ran_matrix_cur,
+                                    tf.zeros([1, self.n_units_rnn[l]])
+                                ],
+                                axis=0
+                            )
+                            rnn_c_ran = tf.gather(rnn_c_ran_matrix_cur, gf_y)
+
+                            self.rnn_c_ran_matrix[l].append(rnn_c_ran_matrix_cur)
+                            self.rnn_c_ran[l].append(rnn_c_ran)
+
+                            self.rnn_c_init[l] += rnn_c_ran
+
+                        # Random hidden state offsets
+                        h_bias_ran_matrix_cur, h_bias_ran_matrix_cur_summary = self.initialize_h_bias(ran_gf=gf)
+                        h_bias_ran_matrix_cur -= tf.reduce_mean(h_bias_ran_matrix_cur, axis=0, keepdims=True)
+                        h_bias_ran_matrix_cur_summary -= tf.reduce_mean(h_bias_ran_matrix_cur_summary, axis=0, keepdims=True)
+                        self._regularize(h_bias_ran_matrix_cur, type='ranef', var_name=reg_name('h_bias_by_%s' % (sn(gf))))
+
+                        if self.log_random:
+                            tf.summary.histogram(
+                                sn('by_%s/h' % sn(gf)),
+                                h_bias_ran_matrix_cur_summary,
+                                collections=['random']
+                            )
+
+                        n_units_hidden_state = self.n_units_hidden_state
+                        if self.split_h:
+                            n_units_hidden_state *= 2
+                        h_bias_ran_matrix_cur = tf.concat(
+                            [
+                                h_bias_ran_matrix_cur,
+                                tf.zeros([1, n_units_hidden_state])
+                            ],
+                            axis=0
+                        )
+
+                        h_bias_ran = tf.gather(h_bias_ran_matrix_cur, gf_y)
+
+                        self.h_bias_ran_matrix.append(h_bias_ran_matrix_cur)
+                        self.h_bias_ran.append(h_bias_ran)
+
+                        self.h_bias += tf.expand_dims(h_bias_ran, axis=-2)
 
                         if self.nonstationary_intercept:
                             # Random intercept L1 weights
@@ -1173,62 +1144,90 @@ class CDRNN(Model):
 
                                 self.intercept_l1_b += intercept_l1_b_bias_ran
 
-                        # # Random IRF L1 weights
-                        # irf_l1_W_ran_matrix_cur, irf_l1_W_ran_matrix_cur_summary, = self.initialize_irf_l1_weights(ran_gf=gf)
-                        # irf_l1_W_ran_matrix_cur -= tf.reduce_mean(irf_l1_W_ran_matrix_cur, axis=0, keepdims=True)
-                        # irf_l1_W_ran_matrix_cur_summary -= tf.reduce_mean(irf_l1_W_ran_matrix_cur_summary, axis=0, keepdims=True)
-                        # self._regularize(irf_l1_W_ran_matrix_cur, type='ranef', var_name=reg_name('irf_l1_W_bias_by_%s' % (sn(gf))))
-                        #
-                        # if self.log_random:
-                        #     tf.summary.histogram(
-                        #         sn('by_%s/irf_l1_W' % sn(gf)),
-                        #         irf_l1_W_ran_matrix_cur_summary,
-                        #         collections=['random']
-                        #     )
-                        #
-                        # irf_l1_W_ran_matrix_cur = tf.concat(
-                        #     [
-                        #         irf_l1_W_ran_matrix_cur,
-                        #         tf.zeros([1, self.n_units_irf[0]])
-                        #     ],
-                        #     axis=0
-                        # )
-                        #
-                        # irf_l1_W_bias_ran = tf.gather(irf_l1_W_ran_matrix_cur, gf_y)
-                        #
-                        # self.irf_l1_W_ran_matrix.append(irf_l1_W_ran_matrix_cur)
-                        # self.irf_l1_W_ran.append(irf_l1_W_bias_ran)
-                        #
-                        # self.irf_l1_W += tf.expand_dims(irf_l1_W_bias_ran, axis=-2)
-                        #
-                        # # Random IRF L1 biases
-                        # if self.irf_l1_use_bias:
-                        #     irf_l1_b_ran_matrix_cur, irf_l1_b_ran_matrix_cur_summary = self.initialize_irf_l1_biases(ran_gf=gf)
-                        #     irf_l1_b_ran_matrix_cur -= tf.reduce_mean(irf_l1_b_ran_matrix_cur, axis=0, keepdims=True)
-                        #     irf_l1_b_ran_matrix_cur_summary -= tf.reduce_mean(irf_l1_b_ran_matrix_cur_summary, axis=0, keepdims=True)
-                        #     self._regularize(irf_l1_b_ran_matrix_cur, type='ranef', var_name=reg_name('irf_l1_b_bias_by_%s' % (sn(gf))))
-                        #
-                        #     if self.log_random:
-                        #         tf.summary.histogram(
-                        #             sn('by_%s/irf_l1_b' % sn(gf)),
-                        #             irf_l1_b_ran_matrix_cur_summary,
-                        #             collections=['random']
-                        #         )
-                        #
-                        #     irf_l1_b_ran_matrix_cur = tf.concat(
-                        #         [
-                        #             irf_l1_b_ran_matrix_cur,
-                        #             tf.zeros([1, self.n_units_irf[0]])
-                        #         ],
-                        #         axis=0
-                        #     )
-                        #
-                        #     irf_l1_b_bias_ran = tf.gather(irf_l1_b_ran_matrix_cur, gf_y)
-                        #
-                        #     self.irf_l1_b_ran_matrix.append(irf_l1_b_ran_matrix_cur)
-                        #     self.irf_l1_b_ran.append(irf_l1_b_bias_ran)
-                        #
-                        #     self.irf_l1_b += tf.expand_dims(irf_l1_b_bias_ran, axis=-2)
+                        # Random IRF L1 weights
+                        irf_l1_W_ran_matrix_cur, irf_l1_W_ran_matrix_cur_summary, = self.initialize_irf_l1_weights(ran_gf=gf)
+                        irf_l1_W_ran_matrix_cur -= tf.reduce_mean(irf_l1_W_ran_matrix_cur, axis=0, keepdims=True)
+                        irf_l1_W_ran_matrix_cur_summary -= tf.reduce_mean(irf_l1_W_ran_matrix_cur_summary, axis=0, keepdims=True)
+                        self._regularize(irf_l1_W_ran_matrix_cur, type='ranef', var_name=reg_name('irf_l1_W_bias_by_%s' % (sn(gf))))
+
+                        if self.log_random:
+                            tf.summary.histogram(
+                                sn('by_%s/irf_l1_W' % sn(gf)),
+                                irf_l1_W_ran_matrix_cur_summary,
+                                collections=['random']
+                            )
+
+                        irf_l1_W_ran_matrix_cur = tf.concat(
+                            [
+                                irf_l1_W_ran_matrix_cur,
+                                tf.zeros([1, self.n_units_irf[0]])
+                            ],
+                            axis=0
+                        )
+
+                        irf_l1_W_bias_ran = tf.gather(irf_l1_W_ran_matrix_cur, gf_y)
+
+                        self.irf_l1_W_ran_matrix.append(irf_l1_W_ran_matrix_cur)
+                        self.irf_l1_W_ran.append(irf_l1_W_bias_ran)
+
+                        self.irf_l1_W += tf.expand_dims(irf_l1_W_bias_ran, axis=-2)
+
+                        # Random IRF L1 biases
+                        if self.irf_l1_use_bias:
+                            irf_l1_b_ran_matrix_cur, irf_l1_b_ran_matrix_cur_summary = self.initialize_irf_l1_biases(ran_gf=gf)
+                            irf_l1_b_ran_matrix_cur -= tf.reduce_mean(irf_l1_b_ran_matrix_cur, axis=0, keepdims=True)
+                            irf_l1_b_ran_matrix_cur_summary -= tf.reduce_mean(irf_l1_b_ran_matrix_cur_summary, axis=0, keepdims=True)
+                            self._regularize(irf_l1_b_ran_matrix_cur, type='ranef', var_name=reg_name('irf_l1_b_bias_by_%s' % (sn(gf))))
+
+                            if self.log_random:
+                                tf.summary.histogram(
+                                    sn('by_%s/irf_l1_b' % sn(gf)),
+                                    irf_l1_b_ran_matrix_cur_summary,
+                                    collections=['random']
+                                )
+
+                            irf_l1_b_ran_matrix_cur = tf.concat(
+                                [
+                                    irf_l1_b_ran_matrix_cur,
+                                    tf.zeros([1, self.n_units_irf[0]])
+                                ],
+                                axis=0
+                            )
+
+                            irf_l1_b_bias_ran = tf.gather(irf_l1_b_ran_matrix_cur, gf_y)
+
+                            self.irf_l1_b_ran_matrix.append(irf_l1_b_ran_matrix_cur)
+                            self.irf_l1_b_ran.append(irf_l1_b_bias_ran)
+
+                            self.irf_l1_b += tf.expand_dims(irf_l1_b_bias_ran, axis=-2)
+
+                        # Random error bias offsets
+                        error_params_b_ran_matrix_cur, error_params_b_ran_matrix_cur_summary = self.initialize_error_params_biases(ran_gf=gf)
+                        error_params_b_ran_matrix_cur -= tf.reduce_mean(error_params_b_ran_matrix_cur, axis=0, keepdims=True)
+                        error_params_b_ran_matrix_cur_summary -= tf.reduce_mean(error_params_b_ran_matrix_cur_summary, axis=0, keepdims=True)
+                        self._regularize(error_params_b_ran_matrix_cur, type='ranef', var_name=reg_name('error_params_bias_by_%s' % (sn(gf))))
+
+                        if self.log_random:
+                            tf.summary.histogram(
+                                sn('by_%s/error_params_bias' % sn(gf)),
+                                error_params_b_ran_matrix_cur_summary,
+                                collections=['random']
+                            )
+
+                        error_params_b_ran_matrix_cur = tf.concat(
+                            [
+                                error_params_b_ran_matrix_cur,
+                                tf.zeros([1, error_params_b_ran_matrix_cur.shape[-1]])
+                            ],
+                            axis=0
+                        )
+
+                        error_params_b_ran = tf.gather(error_params_b_ran_matrix_cur, gf_y)
+
+                        self.error_params_b_ran_matrix.append(error_params_b_ran_matrix_cur)
+                        self.error_params_b_ran.append(error_params_b_ran)
+
+                        self.error_params_b += error_params_b_ran
 
     def _rnn_encoder(self, X, plot_mode=False, **kwargs):
         with self.sess.as_default():
@@ -1290,11 +1289,12 @@ class CDRNN(Model):
                     if self.nonstationary_intercept:
                         time_y -= self.time_y_mean
 
-                if self.rescale_time:
+                if self.rescale_time_X:
                     time_X /= self.time_X_sd
-                    t_delta /= self.t_delta_sd
                     if self.nonstationary_intercept:
                         time_y /= self.time_y_sd
+                if self.rescale_t_delta:
+                    t_delta /= self.t_delta_sd
 
                 if len(self.impulse_indices) > 1:
                     X_cdrnn = []
@@ -1383,8 +1383,11 @@ class CDRNN(Model):
                 h = self.h_bias
                 W = self.irf_l1_W
                 b = self.irf_l1_b
-                if self.ranef_at_input:
+                if self.ranef_at_input or self.use_coefficient:
                     coef = self.coefficient
+                    # input_bias = self.input_bias
+                if self.heteroskedastic:
+                    error_params_b = self.error_params_b
                 if self.nonstationary_intercept:
                     W_int = self.intercept_l1_W
                     b_int = self.intercept_l1_b
@@ -1395,24 +1398,24 @@ class CDRNN(Model):
                     B = tf.shape(X)[0]
                     tile_ix = tf.tile(tf.range(R)[..., None], [1, B])
                     tile_ix = tf.reshape(tile_ix, [-1])
-                    # W = tf.gather(W, tile_ix, axis=0)
-                    # b = tf.gather(b, tile_ix, axis=0)
+                    W = tf.gather(W, tile_ix, axis=0)
+                    b = tf.gather(b, tile_ix, axis=0)
                     if self.ranef_at_input and self.is_mixed_model:
                         coef = tf.gather(coef, tile_ix, axis=0)
-                    else:
-                        h = tf.gather(h, tile_ix, axis=0)
+                        # input_bias = tf.gather(input_bias, tile_ix, axis=0)
+                    h = tf.gather(h, tile_ix, axis=0)
                     X = tf.tile(X, [R, 1 ,1])
                     time_X = tf.tile(time_X, [R, 1 ,1])
                     t_delta = tf.tile(t_delta, [R, 1 ,1])
+                    if self.heteroskedastic and self.is_mixed_model:
+                        error_params_b = tf.gather(error_params_b, tile_ix, axis=0)
                     if self.nonstationary_intercept:
                         tile_ix_int = tf.range(R)
                         W_int = tf.gather(W_int, tile_ix_int, axis=0)
                         b_int = tf.gather(b_int, tile_ix_int, axis=0)
 
-                if self.ranef_at_input:
-                    # coef = tf.Print(coef, [tf.shape(coef)])
-                    X *= coef[..., :-1]
-                    t_delta *= coef[..., -1:]
+                if self.ranef_at_input or self.use_coefficient:
+                    X *= coef
 
                 if self.nonstationary_intercept:
                     intercept_delta_l1 = W_int * time_y + b_int
@@ -1493,7 +1496,6 @@ class CDRNN(Model):
                 if not self.normalize_after_activation:
                     irf_l1 = get_activation(self.irf_inner_activation, session=self.sess)(irf_l1)
 
-
                 if self.direct_irf:
                     y = self.irf(irf_l1)
                 else:
@@ -1510,9 +1512,14 @@ class CDRNN(Model):
                     error_params = self.error_params_final_fn(error_params)
 
                     y_sd_delta = error_params[..., 0]
+                    if self.is_mixed_model:
+                        y_sd_delta += error_params_b[..., 0]
                     if self.asymmetric_error:
                         y_skewness_delta = error_params[..., 1]
                         y_tailweight_delta = error_params[..., 2]
+                        if self.is_mixed_model:
+                            y_skewness_delta += error_params_b[..., 1]
+                            y_tailweight_delta += error_params_b[..., 2]
                     else:
                         y_skewness_delta = y_tailweight_delta = None
                 else:
@@ -1850,6 +1857,12 @@ class CDRNN(Model):
     #  should only be called at initialization.
     #
     ######################################################
+
+    def initialize_input_bias(
+            self,
+            ran_gf
+    ):
+        raise NotImplementedError
 
     def initialize_feedforward(
             self,

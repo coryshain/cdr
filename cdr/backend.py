@@ -114,7 +114,16 @@ def get_regularizer(init, scale=None, session=None):
             return out
 
 
-def get_dropout(rate, training=True, use_MAP_mode=True, noise_shape=None, name=None, reuse=tf.AUTO_REUSE, session=None):
+def get_dropout(
+        rate,
+        training=True,
+        use_MAP_mode=True,
+        noise_shape=None,
+        name=None,
+        constant=None,
+        reuse=tf.AUTO_REUSE,
+        session=None
+):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
@@ -124,6 +133,7 @@ def get_dropout(rate, training=True, use_MAP_mode=True, noise_shape=None, name=N
                     noise_shape=noise_shape,
                     training=training,
                     use_MAP_mode=use_MAP_mode,
+                    constant=constant,
                     name=name,
                     reuse=reuse,
                     session=session
@@ -2179,6 +2189,7 @@ class DropoutLayer(object):
             noise_shape=None,
             training=False,
             use_MAP_mode=True,
+            constant=None,
             name=None,
             reuse=tf.AUTO_REUSE,
             session=None
@@ -2187,6 +2198,7 @@ class DropoutLayer(object):
         self.noise_shape = noise_shape
         self.training = training
         self.use_MAP_mode = use_MAP_mode
+        self.constant = constant
         self.name = name
         self.reuse = reuse
         self.session = get_session(session)
@@ -2246,21 +2258,31 @@ class DropoutLayer(object):
                         except TypeError:
                             noise_shape.append(inputs_shape[i])
 
-                    dropout_mask = tf.cast(tf.random_uniform(noise_shape) > self.rate, inputs.dtype)
+                    dropout_mask = tf.random_uniform(noise_shape) > self.rate
 
-                    return inputs * dropout_mask
+                    return dropout_mask
 
                 def eval_fn(inputs=inputs):
                     def map_fn(inputs=inputs):
-                        return inputs
+                        return tf.ones(tf.shape(inputs), dtype=tf.bool)
 
-                    def sample_fn(inputs=inputs):
-                        dropout_mask_eval = tf.cast(self.dropout_mask_eval, dtype=inputs.dtype)
-                        return inputs * dropout_mask_eval
+                    def sample_fn():
+                        dropout_mask = self.dropout_mask_eval
+                        return dropout_mask
 
                     return tf.cond(self.use_MAP_mode, map_fn, sample_fn)
 
-                return tf.cond(self.training, train_fn, eval_fn)
+                dropout_mask = tf.cond(self.training, train_fn, eval_fn)
+
+                if self.constant is None:
+                    dropout_mask = tf.cast(dropout_mask, dtype=inputs.dtype)
+                    out = inputs * dropout_mask
+                else:
+                    defaults = tf.ones_like(inputs) * self.constant
+                    out = tf.where(dropout_mask, inputs, defaults)
+                    # out = tf.Print(out, ['in', inputs, 'mask', dropout_mask, 'defaults', defaults, 'output', out], summarize=100)
+
+                return out
 
     def dropout_resample_ops(self):
         out = []

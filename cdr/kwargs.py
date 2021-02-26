@@ -747,6 +747,12 @@ CDRNN_INITIALIZATION_KWARGS = [
         "Whether to generate the response directly as the output of the IRF (``True``). Otherwise, IRF provides weights on the input dimensions."
     ),
     Kwarg(
+        'use_coefficient',
+        False,
+        bool,
+        "Whether to apply a trainable coefficient vector to the input dimensions."
+    ),
+    Kwarg(
         'heteroskedastic',
         True,
         bool,
@@ -765,11 +771,18 @@ CDRNN_INITIALIZATION_KWARGS = [
         "Whether to center time values by their mean under the hood, which can help with convergence. Times are automatically reconverted back to the source location for plotting and model criticism."
     ),
     Kwarg(
-        'rescale_time',
+        'rescale_time_X',
         False,
         bool,
-        "Whether to rescale time values by their training SD under the hood, which can help with convergence. Times are automatically reconverted back to the source scale for plotting and model criticism.",
-        aliases=['rescale_t_delta']
+        "Whether to rescale time values as inputs by their training SD under the hood. Times are automatically reconverted back to the source scale for plotting and model criticism.",
+        aliases=['rescale_time']
+    ),
+    Kwarg(
+        'rescale_t_delta',
+        False,
+        bool,
+        "Whether to rescale time offset values by their training SD under the hood. Offsets are automatically reconverted back to the source scale for plotting and model criticism.",
+        aliases=['rescale_time', 'rescale_tdelta']
     ),
     Kwarg(
         'ranef_at_input',

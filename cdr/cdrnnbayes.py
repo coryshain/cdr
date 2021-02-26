@@ -1088,40 +1088,8 @@ class CDRNNBayes(CDRNN):
                 error_params_b_sd_posterior = error_params_b_sd_prior * self.posterior_to_prior_sd_ratio
 
                 if ran_gf is None:
-                    # Posterior distribution
-                    error_params_b_q_loc = tf.Variable(
-                        tf.zeros([1, 1, units]),
-                        name='error_params_b_q_loc'
-                    )
-
-                    error_params_b_q_scale = tf.Variable(
-                        tf.zeros([1, 1, units]) * self.constraint_fn_inv(error_params_b_sd_posterior),
-                        name='error_params_b_q_scale'
-                    )
-
-                    error_params_b_q_dist = Normal(
-                        loc=error_params_b_q_loc,
-                        scale=self.constraint_fn(error_params_b_q_scale) + self.epsilon,
-                        name='error_params_fn_b_q'
-                    )
-
-                    error_params_b = tf.cond(self.use_MAP_mode, error_params_b_q_dist.mean, error_params_b_q_dist.sample)
-
-                    error_params_b_summary = error_params_b_q_dist.mean()
-
-                    if self.declare_priors_biases:
-                        # Prior distribution
-                        error_params_b_prior_dist = Normal(
-                            loc=0.,
-                            scale=error_params_b_sd_prior,
-                            name='error_params_b'
-                        )
-                        self.kl_penalties_base['error_params_b'] = {
-                            'loc': 0.,
-                            'scale': error_params_b_sd_prior,
-                            'val': error_params_b_q_dist.kl_divergence(error_params_b_prior_dist)
-                        }
-
+                    error_params_b = tf.zeros([1, units])
+                    error_params_b_summary = error_params_b
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
 

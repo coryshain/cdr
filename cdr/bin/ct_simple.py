@@ -40,8 +40,10 @@ if __name__ == '__main__':
         a = scale(df.CDRpreds)
         if 'y' in df.columns:
             y = scale(df.y)
-        else:
+        elif 'yStandardized' in df.columns:
             y = scale(df.yStandardized)
+        else:
+            y = scale(df.CDRobs)
         b = pd.read_csv(df2_path, sep=' ', skipinitialspace=True).CDRpreds
 
     select = np.logical_and(np.isfinite(y), np.logical_and(np.isfinite(np.array(a)), np.isfinite(np.array(b))))

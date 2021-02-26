@@ -98,7 +98,7 @@ class CDRNNMLE(CDRNN):
     def initialize_coefficient(self, coef_ids=None, ran_gf=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                units = len(self.impulse_names) + 2
+                units = len(self.impulse_names) + 1
                 if ran_gf is None:
                     coefficient = tf.Variable(
                         tf.zeros([1, 1, units]),
@@ -115,6 +115,22 @@ class CDRNNMLE(CDRNN):
                 coefficient_summary = coefficient
 
                 return coefficient, coefficient_summary
+
+    def initialize_input_bias(self, ran_gf=None):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                units = len(self.impulse_names) + 1
+                if ran_gf is None:
+                    input_bias = tf.zeros([1, 1, units])
+                else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+                    input_bias = tf.Variable(
+                        tf.zeros([rangf_n_levels, units]),
+                        name='input_bias_by_%s' % (sn(ran_gf))
+                    )
+                input_bias_summary = input_bias
+
+                return input_bias, input_bias_summary
 
     def initialize_feedforward(
             self,
@@ -321,11 +337,7 @@ class CDRNNMLE(CDRNN):
                 else:
                     units = 1
                 if ran_gf is None:
-                    error_params_b = tf.get_variable(
-                        name='error_params_b',
-                        initializer=tf.zeros_initializer(),
-                        shape=[1, 1, units]
-                    )
+                    error_params_b = tf.zeros([1, units])
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     error_params_b = tf.get_variable(

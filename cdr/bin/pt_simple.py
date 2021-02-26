@@ -29,7 +29,7 @@ if __name__ == '__main__':
     df1_path = args.df1_path
     df2_path = args.df2_path
 
-    if df1_path.startswith('losses_mse'):
+    if df1_path.startswith('losses_mse') or df1_path.startswith('squared_error'):
         metric = 'err'
     elif df1_path.startswith('loglik'):
         metric = 'loglik'

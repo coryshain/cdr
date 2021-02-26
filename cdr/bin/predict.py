@@ -26,10 +26,10 @@ def predict_LM(lm, outdir, X, y, dv, partition_name, model_name=''):
     with open(outdir + '/' + model_name + '/%spreds_%s.txt' % ('' if model_name=='' else model_name + '_', partition_name), 'w') as p_file:
         for i in range(len(lm_preds)):
             p_file.write(str(lm_preds[i]) + '\n')
-    losses = np.array(y[dv] - lm_preds) ** 2
-    with open(outdir + '/' + model_name + '/%s_losses_mse_%s.txt' % ('' if model_name=='' else model_name + '_', partition_name), 'w') as p_file:
-        for i in range(len(losses)):
-            p_file.write(str(losses[i]) + '\n')
+    squared_error = np.array(y[dv] - lm_preds) ** 2
+    with open(outdir + '/' + model_name + '/%s_squared_error_%s.txt' % ('' if model_name=='' else model_name + '_', partition_name), 'w') as p_file:
+        for i in range(len(squared_error)):
+            p_file.write(str(squared_error[i]) + '\n')
     lm_mse = mse(y[dv], lm_preds)
     lm_mae = mae(y[dv], lm_preds)
     summary = '=' * 50 + '\n'
@@ -38,7 +38,7 @@ def predict_LM(lm, outdir, X, y, dv, partition_name, model_name=''):
     summary += 'Formula:\n'
     summary += '  ' + formula + '\n'
     summary += str(lm.summary()) + '\n'
-    summary += 'Loss (%s set):\n' % partition_name
+    summary += 'Error (%s set):\n' % partition_name
     summary += '  MSE: %.4f\n' % lm_mse
     summary += '  MAE: %.4f\n' % lm_mae
     summary += '=' * 50 + '\n'
@@ -64,14 +64,14 @@ def predict_LME(model_path, outdir, X, y, dv, partition_name, model_name=''):
         with open(outdir + '/%spreds_%s.txt' % ('' if model_name=='' else model_name + '_', partition_name), 'w') as p_file:
             for i in range(len(lme_preds)):
                 p_file.write(str(lme_preds[i]) + '\n')
-        losses = np.array(y[dv] - lme_preds) ** 2
-        with open(outdir + '/%slosses_mse_%s.txt' % ('' if model_name=='' else model_name + '_', partition_name), 'w') as p_file:
-            for i in range(len(losses)):
-                p_file.write(str(losses[i]) + '\n')
+        squared_error = np.array(y[dv] - lme_preds) ** 2
+        with open(outdir + '/%ssquared_error_%s.txt' % ('' if model_name=='' else model_name + '_', partition_name), 'w') as p_file:
+            for i in range(len(squared_error)):
+                p_file.write(str(squared_error[i]) + '\n')
         lme_mse = mse(y[dv], lme_preds)
         lme_mae = mae(y[dv], lme_preds)
 
-        summary += 'Loss (%s set):\n' % partition_name
+        summary += 'Error (%s set):\n' % partition_name
         summary += '  MSE: %.4f\n' % lme_mse
         summary += '  MAE: %.4f\n' % lme_mae
 
@@ -87,11 +87,10 @@ if __name__ == '__main__':
     ''')
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of model names from which to predict. Regex permitted. If unspecified, predicts from all models.')
-    argparser.add_argument('-d', '--data', nargs='+', default=[], help='Pairs of paths or buffers <predictors, responses>, allowing prediction on arbitrary evaluation data. Predictors may consist of ``;``-delimited paths designating files containing predictors with different timestamps. Within each file, timestamps are treated as identical across predictors.')
-    argparser.add_argument('-p', '--partition', nargs='+', default=['dev'], help='List of names of partitions to use ("train", "dev", "test", or hyphen-delimited subset of these).')
+    argparser.add_argument('-p', '--partition', nargs='+', default=['dev'], help='List of names of partitions to use ("train", "dev", "test", "PREDICTOR_PATH;RESPONSE_PATH", or hyphen-delimited subset of these).')
     argparser.add_argument('-z', '--standardize_response', action='store_true', help='Standardize (Z-transform) response. Ignored for non-CDR models, and ignored for CDR models unless fitting used setting ``standardize_respose=True``.')
     argparser.add_argument('-n', '--nsamples', type=int, default=1024, help='Number of posterior samples to average (only used for CDRBayes)')
-    argparser.add_argument('-M', '--mode', nargs='+', default=None, help='Predict mode(s) (set of "response", "loglik", and/or "loss") or default ``None``, which does both "response" and "loglik". Modes "loglik" and "loss" are only valid for CDR.')
+    argparser.add_argument('-M', '--mode', nargs='+', default=None, help='Predict mode(s) (set of "response", "loglik", "loss", and/or "err") or default ``None``, which does loglik, response, and err. Modes "loglik" and "loss" are only valid for CDR.')
     argparser.add_argument('-a', '--algorithm', type=str, default='MAP', help='Algorithm ("sampling" or "MAP") to use for extracting predictions from CDRBayes. Ignored for CDRMLE.')
     argparser.add_argument('-t', '--twostep', action='store_true', help='For CDR models, predict from fitted LME model from two-step hypothesis test.')
     argparser.add_argument('-T', '--training_mode', action='store_true', help='Use training mode for prediction.')
@@ -122,10 +121,15 @@ if __name__ == '__main__':
     evaluation_set_names = []
     evaluation_set_paths = []
 
-    for p_name in args.partition:
+    for i, p_name in enumerate(args.partition):
         partitions = get_partition_list(p_name)
-        partition_str = '-'.join(partitions)
-        X_paths, y_paths = paths_from_partition_cliarg(partitions, p)
+        if ';' in p_name:
+            partition_str = '%d' % (i + 1)
+            X_paths = [partitions[0]]
+            y_paths = [partitions[1]]
+        else:
+            partition_str = '-'.join(partitions)
+            X_paths, y_paths = paths_from_partition_cliarg(partitions, p)
         X, y = read_data(
             X_paths,
             y_paths,
@@ -144,31 +148,6 @@ if __name__ == '__main__':
         )
         evaluation_sets.append((X, y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors))
         evaluation_set_partitions.append(partitions)
-        evaluation_set_names.append(partition_str)
-        evaluation_set_paths.append((X_paths, y_paths))
-
-    assert len(args.data) % 2 == 0, 'Argument ``data`` must be a list with an even number of elements.'
-    for i in range(0, len(args.data), 2):
-        partition_str = '%d' % (int(i / 2) + 1)
-        X_paths, y_paths = args.data[i:i+2]
-        X, y = read_data(
-            X_paths,
-            y_paths,
-            p.series_ids,
-            sep=p.sep,
-            categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in cdr_formula_list for v in x.rangf]))
-        )
-        X, y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors = preprocess_data(
-            X,
-            y,
-            cdr_formula_list,
-            p.series_ids,
-            filters=p.filters,
-            compute_history=run_cdr,
-            history_length=p.history_length
-        )
-        evaluation_sets.append((X, y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors))
-        evaluation_set_partitions.append(None)
         evaluation_set_names.append(partition_str)
         evaluation_set_paths.append((X_paths, y_paths))
 
@@ -297,10 +276,10 @@ if __name__ == '__main__':
                 with open(p.outdir + '/' + m_path + '/preds_%s.txt' % partition_str, 'w') as p_file:
                     for i in range(len(gam_preds)):
                         p_file.write(str(gam_preds[i]) + '\n')
-                losses = np.array(y[dv] - gam_preds) ** 2
-                with open(p.outdir + '/' + m_path + '/losses_mse_%s.txt' % partition_str, 'w') as p_file:
-                    for i in range(len(losses)):
-                        p_file.write(str(losses[i]) + '\n')
+                squared_error = np.array(y[dv] - gam_preds) ** 2
+                with open(p.outdir + '/' + m_path + '/squared_error_%s.txt' % partition_str, 'w') as p_file:
+                    for i in range(len(squared_error)):
+                        p_file.write(str(squared_error[i]) + '\n')
                 gam_mse = mse(y[dv], gam_preds)
                 gam_mae = mae(y[dv], gam_preds)
                 summary = '=' * 50 + '\n'
@@ -422,28 +401,28 @@ if __name__ == '__main__':
                             standardize_response=args.standardize_response
                         )
 
-                        losses = np.array(y_cur - cdr_preds) ** 2
+                        squared_error = np.array(y_cur - cdr_preds) ** 2
 
                         if args.extra_cols:
                             df_out = pd.DataFrame(
                                 {
-                                    'CDRlossMSE': losses,
+                                    'CDRsquarederror': squared_error,
                                     'CDRpreds': cdr_preds,
-                                    'yStandardized': y_cur
+                                    'CDRobs': y_cur
                                 }
                             )
                             df_out = pd.concat([y_valid.reset_index(drop=True), df_out.reset_index(drop=True)], axis=1)
                         else:
                             preds_outfile = p.outdir + '/' + m_path + '/preds_%s.txt' % partition_str
-                            loss_outfile = p.outdir + '/' + m_path + '/losses_mse_%s.txt' % partition_str
+                            err_outfile = p.outdir + '/' + m_path + '/squared_error_%s.txt' % partition_str
                             obs_outfile = p.outdir + '/' + m_path + '/obs_%s.txt' % partition_str
 
                             with open(preds_outfile, 'w') as p_file:
                                 for i in range(len(cdr_preds)):
                                     p_file.write(str(cdr_preds[i]) + '\n')
-                            with open(loss_outfile, 'w') as l_file:
-                                for i in range(len(losses)):
-                                    l_file.write(str(losses[i]) + '\n')
+                            with open(err_outfile, 'w') as l_file:
+                                for i in range(len(squared_error)):
+                                    l_file.write(str(squared_error[i]) + '\n')
                             with open(obs_outfile, 'w') as p_file:
                                 for i in range(len(y_cur)):
                                     p_file.write(str(y_cur.iloc[i]) + '\n')
@@ -515,7 +494,7 @@ if __name__ == '__main__':
                             terminal_names = model_cur.terminal_names
 
                     if args.extra_cols:
-                        preds_outfile = p.outdir + '/' + m_path + '/preds_table_%s.csv' % partition_str
+                        preds_outfile = p.outdir + '/' + m_path + '/pred_table_%s.csv' % partition_str
                         df_out.to_csv(preds_outfile, sep=' ', na_rep='NaN', index=False)
 
                     summary += 'Training iterations completed: %d\n\n' % model_cur.global_step.eval(session=model_cur.sess)
