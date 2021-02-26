@@ -2,27 +2,23 @@ import sys
 import argparse
 from cdr.config import Config
 
-base = """
-#PBS -l walltime=%d:00:00
-#PBS -l nodes=1:ppn=8
-#PBS -l mem=%dGB
+base = """#!/bin/bash
+#
+#SBATCH --job-name=%s
+#SBATCH --time=%d:00:00
+#SBATCH --ntasks=8
+#SBATCH --mem=%dgb
 
-module load %s
-source activate %s
-cd %s
 """
 
  
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser('''
-    Generate PBS batch jobs to run CDR models specified in one or more config files.
+    Generate SLURM batch jobs to run CDR models specified in one or more config files.
     ''')
     argparser.add_argument('paths', nargs='+', help='Path(s) to CDR config file(s).')
     argparser.add_argument('-j', '--job_type', default='fit', help='Type of job to run. One of ``["fit", "predict", "plot", "save_and_exit"]``')
     argparser.add_argument('-p', '--partition', nargs='+', help='Partition(s) over which to predict/evaluate')
-    argparser.add_argument('-d', '--working_dir', type=str, default='/fs/project/schuler.77/shain.3/cdrnn', help='CDR working directory.')
-    argparser.add_argument('-M', '--python_module', type=str, default='python/3.7-conda4.5', help='Python module to load')
-    argparser.add_argument('-c', '--conda', type=str, default='cdr', help='Name of conda environment to load')
     argparser.add_argument('-t', '--time', type=int, default=48, help='Maximum number of hours to train models.')
     argparser.add_argument('-m', '--memory', type=int, default=64, help='Number of GB of memory to request')
     argparser.add_argument('-P', '--plot_cli', default='', help='CLI args to add to any plotting calls.')
@@ -31,9 +27,6 @@ if __name__ == '__main__':
     paths = args.paths
     job_type = args.job_type
     partitions = args.partition
-    working_dir = args.working_dir
-    python_module = args.python_module
-    conda = args.conda
     time = args.time
     memory = args.memory
     plot_cli = args.plot_cli
@@ -53,8 +46,7 @@ if __name__ == '__main__':
             job_name = '_'.join([basename, job_type])
             filename = job_name + '.pbs'
             with open(filename, 'w') as f:
-                f.write('#PBS -N %s\n' % job_name)
-                f.write(base % (time, memory, python_module, conda, working_dir))
+                f.write(base % (job_name, time, memory))
                 if job_type.lower() == 'save_and_exit':
                     f.write('python3 -m cdr.bin.train %s -m %s -s\n' % (path, m))
                 if job_type.lower() == 'fit':
