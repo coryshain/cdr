@@ -1092,22 +1092,10 @@ class CDR(Model):
                     self.X_rate = tf.gather(X, rate_ix, axis=-1)
 
                 # Initialize regularizers
-                if self.irf_regularizer_name is None:
-                    self.irf_regularizer = None
-                elif self.irf_regularizer_name == 'inherit':
-                    self.irf_regularizer = self.regularizer
-                else:
-                    scale = self.irf_regularizer_scale
-                    if self.scale_regularizer_with_data:
-                        scale *= self.minibatch_size * self.minibatch_scale
-                    self.irf_regularizer = getattr(tf.contrib.layers, self.irf_regularizer_name)(scale)
-
-                self.oob_regularizer_name = 'l1_regularizer'
-                if self.oob_regularizer_scale:
-                    scale = self.oob_regularizer_scale
-                    self.oob_regularizer = getattr(tf.contrib.layers, self.oob_regularizer_name)(scale)
-                else:
-                    self.oob_regularizer = None
+                self.irf_regularizer = self._initialize_regularizer(
+                    self.irf_regularizer_name,
+                    self.irf_regularizer_scale
+                )
 
     def _initialize_base_params(self):
         with self.sess.as_default():
@@ -2763,20 +2751,6 @@ class CDR(Model):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self._initialize_irfs(self.t)
-                if self.oob_regularizer_scale:
-                    n = 0
-                    oob_penalty = 0
-                    if self.oob_regularizer_threshold:
-                        t = self.oob_regularizer_threshold
-                    else:
-                        t = self.t_delta_limit.astype(dtype=self.FLOAT_NP)
-                    for x in self.irf_proportion_in_bounds_mc:
-                        prop_before_cur = self.irf_proportion_in_bounds_mc[x]['composite']['scaled'](t)
-                        penalty_cur = tf.exp(1 / (prop_before_cur + self.epsilon))
-                        n += 1
-                        oob_penalty += penalty_cur
-                    if n > 0:
-                        self._regularize(oob_penalty, type='oob', var_name='out-of-bounds penalty')
                 self._initialize_impulses()
                 self._initialize_convolutions()
                 self._initialize_backtransformed_irf_plot(self.t)
@@ -2792,7 +2766,9 @@ class CDR(Model):
                 coef = tf.gather(self.coefficient, coef_ix, axis=1)
                 self.X_conv_scaled = self.X_conv*coef
 
-                out = self.intercept + tf.reduce_sum(self.X_conv_scaled, axis=1)
+                self.out_pre_intercept = tf.reduce_sum(self.X_conv_scaled, axis=1)
+
+                out = self.out_pre_intercept + self.intercept
 
                 if len(self.interaction_names) > 0:
                     self._initialize_interactions()
@@ -2800,8 +2776,6 @@ class CDR(Model):
                     out += self.summed_interactions
 
                 self.out = out
-                # Hack needed for MAP evaluation of CDRBayes
-                self.out_summary = self.out
 
 
 

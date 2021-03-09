@@ -266,21 +266,6 @@ class CDRNN(Model):
     def _initialize_cdrnn_inputs(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                plot_step_map = {}
-                for pair in self.plot_step.split():
-                    impulse_name, val = pair.split('=')
-                    plot_step = float(val) / self.impulse_sds[impulse_name]
-                    plot_step_map[impulse_name] = plot_step
-                self.plot_step_map = plot_step_map
-                for x in self.impulse_names:
-                    if not x in self.plot_step_map:
-                        self.plot_step_map[x] = 1
-                s = self.plot_step_map
-                s = np.array([s[x] for x in self.impulse_names])
-                if not self.rescale_inputs:
-                    s *= self.impulse_sds_arr
-                self.plot_step_arr = s
-
                 if len(self.rangf):
                     self.use_rangf = True
                     rangf_1hot = []
@@ -334,15 +319,15 @@ class CDRNN(Model):
                     name='plot_n_sds'
                 )
 
-                self.plot_mean_as_reference = tf.placeholder_with_default(
-                    True,
+                self.plot_mean_as_reference_tf = tf.placeholder_with_default(
+                    self.plot_mean_as_reference,
                     shape=[],
                     name='plot_mean_as_reference'
                 )
 
                 def get_plot_reference_mean():
                     plot_impulse_base_default = tf.convert_to_tensor(
-                        [self.impulse_means[x] for x in self.impulse_names],
+                        self.reference_arr,
                         dtype=self.FLOAT_TF
                     )
 
@@ -357,7 +342,7 @@ class CDRNN(Model):
                     return plot_impulse_base_default
 
                 plot_impulse_base_default = tf.cond(
-                    self.plot_mean_as_reference,
+                    self.plot_mean_as_reference_tf,
                     get_plot_reference_mean,
                     get_plot_reference_zero
                 )
@@ -427,21 +412,10 @@ class CDRNN(Model):
                 self.plot_impulse_1hot_expanded = self.plot_impulse_1hot[None, None, ...]
                 self.plot_impulse_1hot_2_expanded = self.plot_impulse_1hot_2[None, None, ...]
 
-                if self.nn_regularizer_name is None:
-                    self.nn_regularizer = None
-                elif self.nn_regularizer_name == 'inherit':
-                    self.nn_regularizer = self.regularizer
-                else:
-                    scale = self.nn_regularizer_scale
-                    if self.scale_regularizer_with_data:
-                        scale *= self.minibatch_size * self.minibatch_scale
-                    if self.nn_regularizer_name == 'l1_l2_regularizer':
-                        self.nn_regularizer = getattr(tf.contrib.layers, self.nn_regularizer_name)(
-                            scale,
-                            scale
-                        )
-                    else:
-                        self.nn_regularizer = getattr(tf.contrib.layers, self.nn_regularizer_name)(scale)
+                self.nn_regularizer = self._initialize_regularizer(
+                    self.nn_regularizer_name,
+                    self.nn_regularizer_scale
+                )
 
                 if self.context_regularizer_name is None:
                     self.context_regularizer = None
@@ -1283,11 +1257,12 @@ class CDRNN(Model):
                     if len(time_y.shape) == 1:
                         time_y = time_y[..., None]
 
-                if self.center_time:
+                if self.center_time_X:
                     time_X -= self.time_X_mean
-                    t_delta -= self.t_delta_mean
                     if self.nonstationary_intercept:
                         time_y -= self.time_y_mean
+                if self.center_t_delta:
+                    t_delta -= self.t_delta_mean
 
                 if self.rescale_time_X:
                     time_X /= self.time_X_sd
@@ -1565,6 +1540,7 @@ class CDRNN(Model):
                 y_tailweight_delta = model_dict['y_tailweight_delta']
 
                 y = tf.squeeze(y, axis=-1)
+                self.out_pre_intercept = y
                 y += self.intercept
                 if self.nonstationary_intercept:
                     intercept_delta = model_dict['intercept_delta']
@@ -1572,8 +1548,6 @@ class CDRNN(Model):
                     y += intercept_delta
 
                 self.out = y
-                # Hack needed for MAP evaluation of CDRNNBayes
-                self.out_mean = self.out
 
                 ema_rate = self.ema_decay
                 if ema_rate is None:
@@ -1643,7 +1617,6 @@ class CDRNN(Model):
                     )
 
                 self.batch_norm_ema_ops = []
-                self.dropout_resample_ops = []
                 if self.ranef_dropout_rate:
                     self.dropout_resample_ops += self.ranef_dropout_layer.dropout_resample_ops()
                 if self.rnn_dropout_rate:
@@ -1679,6 +1652,7 @@ class CDRNN(Model):
                 sds = self.impulse_sds_arr_expanded
 
                 b_in = b
+                s_in = s
                 lq_in = lq
                 uq_in = uq
                 if self.center_inputs:
@@ -1687,6 +1661,7 @@ class CDRNN(Model):
                     uq_in -= means
                 if self.rescale_inputs:
                     b_in /= sds
+                    s_in /= sds
                     lq_in /= sds
                     uq_in /= sds
 
@@ -1703,9 +1678,10 @@ class CDRNN(Model):
                 self.irf_1d_rate_plot = tf.reshape(irf_1d_rate_plot, [R, T, 1])
 
                 X = tf.tile(
-                     x * s + b_in,
+                     x * s_in + b_in,
                     [T, 1, 1]
                 )
+                # X = tf.Print(X, [X_rate, X], summarize=100)
                 self.irf_1d_support = self.support
                 irf_1d_plot = self._apply_model(X, t_delta, plot_mode=True)['y']
                 self.irf_1d_plot_uncorrected = tf.reshape(irf_1d_plot, [R, T, 1])
@@ -2080,7 +2056,7 @@ class CDRNN(Model):
                     self.plot_impulse_1hot: impulse_one_hot,
                     self.t_interaction: t_interaction,
                     self.training: not self.predict_mode,
-                    self.plot_mean_as_reference: plot_mean_as_reference
+                    self.plot_mean_as_reference_tf: plot_mean_as_reference
                 }
                 if n_samples:
                     fd[self.use_MAP_mode] = False

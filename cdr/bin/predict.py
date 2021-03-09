@@ -96,6 +96,7 @@ if __name__ == '__main__':
     argparser.add_argument('-T', '--training_mode', action='store_true', help='Use training mode for prediction.')
     argparser.add_argument('-A', '--ablated_models', action='store_true', help='For two-step prediction from CDR models, predict from data convolved using the ablated model. Otherwise predict from data convolved using the full model.')
     argparser.add_argument('-e', '--extra_cols', action='store_true', help='For prediction from CDR models, dump prediction outputs and response metadata to a single csv.')
+    argparser.add_argument('--cpu_only', action='store_true', help='Use CPU implementation even if GPU is available.')
     args, unknown = argparser.parse_known_args()
 
     p = Config(args.config_path)
@@ -297,7 +298,7 @@ if __name__ == '__main__':
                 stderr(summary)
 
             elif (m.startswith('CDR') or m.startswith('DTSR')):
-                if not p.use_gpu_if_available:
+                if not p.use_gpu_if_available or args.cpu_only:
                     os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
                 dv = formula.strip().split('~')[0].strip()

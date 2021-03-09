@@ -344,8 +344,8 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'regularizer_scale',
-        0.01,
-        float,
+        0.,
+        [str, float],
         "Scale of global regularizer; can be overridden by more regularizers for more specific parameters (ignored if ``regularizer_name==None``)."
     ),
     Kwarg(
@@ -357,7 +357,7 @@ MODEL_INITIALIZATION_KWARGS = [
     Kwarg(
         'coefficient_regularizer_scale',
         'inherit',
-        [float, 'inherit'],
+        [str, float, 'inherit'],
         "Scale of coefficient regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
     Kwarg(
@@ -381,7 +381,7 @@ MODEL_INITIALIZATION_KWARGS = [
     Kwarg(
         'intercept_regularizer_scale',
         'inherit',
-        [float, 'inherit'],
+        [str, float, 'inherit'],
         "Scale of intercept regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
     Kwarg(
@@ -393,7 +393,7 @@ MODEL_INITIALIZATION_KWARGS = [
     Kwarg(
         'ranef_regularizer_scale',
         'inherit',
-        [float, 'inherit'],
+        [str, float, 'inherit'],
         "Scale of random effects regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
     Kwarg(
@@ -530,6 +530,30 @@ MODEL_INITIALIZATION_KWARGS = [
         "Log the network graph to Tensorboard"
     ),
     Kwarg(
+        'indicator_names',
+        '',
+        str,
+        "Space-delimited list of predictors that are indicators (0 or 1). Used for plotting and effect estimation (value 0 is always used as reference, rather than mean)."
+    ),
+    Kwarg(
+        'reference_values',
+        '',
+        str,
+        "Predictor values to use as a reference in plotting and effect estimation. Structured as space-delimited pairs ``NAME=FLOAT``. Any predictor without a specified reference value will use either 0 or the training set mean, depending on **plot_mean_as_reference**."
+    ),
+    Kwarg(
+        'plot_step',
+        '',
+        str,
+        "Size of step by predictor to take above reference in univariate IRF plots. Structured as space-delimited pairs ``NAME=FLOAT``. Any predictor without a specified step size will step 1 SD from training set."
+    ),
+    Kwarg(
+        'plot_mean_as_reference',
+        True,
+        bool,
+        "Whether to use predictor means as reference values by default. If ``False``, use 0."
+    ),
+    Kwarg(
         'keep_plot_history',
         False,
         bool,
@@ -568,20 +592,8 @@ CDR_INITIALIZATION_KWARGS = [
     Kwarg(
         'irf_regularizer_scale',
         'inherit',
-        [float, 'inherit'],
+        [str, float, 'inherit'],
         "Scale of IRF parameter regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
-    ),
-    Kwarg(
-        'oob_regularizer_threshold',
-        None,
-        [float, None],
-        "Threshold (in units time) for out-of-bounds regularizer. If ``None``, default to 75th percentile of temporal offsets seen in training."
-    ),
-    Kwarg(
-        'oob_regularizer_scale',
-        None,
-        [float, 'inherit', None],
-        "Scale of out-of-bounds regularizer. If ``'inherit'``, inherits **regularizer_scale**. If ``None``, no out-of-bounds regularization."
     ),
     Kwarg(
         'validate_irf_args',
@@ -765,10 +777,18 @@ CDRNN_INITIALIZATION_KWARGS = [
         "Whether to split the hidden state between IRF and error params fn. Ignored unless **heteroskedastic** is ``True``."
     ),
     Kwarg(
-        'center_time',
+        'center_time_X',
         False,
         bool,
-        "Whether to center time values by their mean under the hood, which can help with convergence. Times are automatically reconverted back to the source location for plotting and model criticism."
+        "Whether to center time values as inputs under the hood. Times are automatically shifted back to the source location for plotting and model criticism.",
+        aliases=['center_time']
+    ),
+    Kwarg(
+        'center_t_delta',
+        False,
+        bool,
+        "Whether to center time offset values under the hood. Offsets are automatically shifted back to the source location for plotting and model criticism.",
+        aliases=['center_time', 'center_tdelta']
     ),
     Kwarg(
         'rescale_time_X',
@@ -958,7 +978,7 @@ CDRNN_INITIALIZATION_KWARGS = [
     Kwarg(
         'nn_regularizer_scale',
         1.,
-        [float, 'inherit'],
+        [str, float, 'inherit'],
         "Scale of weight regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
     Kwarg(
@@ -1072,13 +1092,7 @@ CDRNN_INITIALIZATION_KWARGS = [
         None,
         [float, None],
         "Standard deviation of jitter injected into inputs (predictors and timesteps) during training. If ``0`` or ``None``, no input jitter."
-    ),
-    Kwarg(
-        'plot_step',
-        '',
-        str,
-        "Size of step by predictor to take above reference in univariate IRF plots. Structured as space-delimited pairs ``NAME=FLOAT``. Any predictor without a specified step size will step 1 SD from training set."
-    ),
+    )
 ]
 
 CDRNNMLE_INITIALIZATION_KWARGS = [

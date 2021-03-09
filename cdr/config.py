@@ -282,7 +282,9 @@ class Config(object):
         if 'plot_interactions' in settings or add_defaults:
             out['plot_interactions'] = settings.get('plot_interactions', '').split()
         if 'plot_t_interaction' in settings or add_defaults:
-            out['plot_t_interaction'] = settings.get('plot_t_interaction', 0.)
+            out['reference_time'] = settings.get('plot_t_interaction', 0.)
+        elif 'reference_time' in settings or add_defaults:
+            out['reference_time'] = settings.get('reference_time', 0.)
         if 'plot_x_inches' in settings or add_defaults:
             out['plot_x_inches'] = settings.getfloat('plot_x_inches', 6)
         if 'plot_y_inches' in settings or add_defaults:

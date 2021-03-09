@@ -104,7 +104,37 @@ class Model(object):
         self.crossval_factor = kwargs['crossval_factor']
         del kwargs['crossval_factor']
         self.crossval_fold = kwargs['crossval_fold']
+
+        # Plot default settings
         del kwargs['crossval_fold']
+        self.irf_name_map = kwargs['irf_name_map']
+        del kwargs['irf_name_map']
+        self.plot_interactions = kwargs['plot_interactions']
+        del kwargs['plot_interactions']
+        self.reference_time = kwargs['reference_time']
+        del kwargs['reference_time']
+        self.plot_n_time_units = kwargs['plot_n_time_units']
+        del kwargs['plot_n_time_units']
+        self.plot_n_time_points = kwargs['plot_n_time_points']
+        del kwargs['plot_n_time_points']
+        self.surface_plot_n_time_points = kwargs['surface_plot_n_time_points']
+        del kwargs['surface_plot_n_time_points']
+        self.generate_irf_surface_plots = kwargs['generate_irf_surface_plots']
+        del kwargs['generate_irf_surface_plots']
+        self.generate_interaction_surface_plots = kwargs['generate_interaction_surface_plots']
+        del kwargs['generate_interaction_surface_plots']
+        self.generate_curvature_plots = kwargs['generate_curvature_plots']
+        del kwargs['generate_curvature_plots']
+        self.plot_x_inches = kwargs['plot_x_inches']
+        del kwargs['plot_x_inches']
+        self.plot_y_inches = kwargs['plot_y_inches']
+        del kwargs['plot_y_inches']
+        self.plot_legend = kwargs['plot_legend']
+        del kwargs['plot_legend']
+        self.cmap = kwargs['cmap']
+        del kwargs['cmap']
+        self.dpi = kwargs['dpi']
+        del kwargs['dpi']
 
         # Parse and store model data from formula
         if isinstance(form, str):
@@ -144,8 +174,8 @@ class Model(object):
         impulse_uq = {}
         impulse_min = {}
         impulse_max = {}
-        impulse_vectors = {}
-        densities = {}
+        # impulse_vectors = {}
+        # densities = {}
 
         impulse_df_ix = []
         for impulse in self.form.t.impulses():
@@ -153,38 +183,22 @@ class Model(object):
             is_interaction = type(impulse).__name__ == 'ImpulseInteraction'
             found = False
             i = 0
-            for i, df in enumerate(X + [y]):
-                if name in df.columns:
-                    column = df[name].values
-                    impulse_vectors[name] = column
-                    impulse_means[name] = column.mean()
-                    impulse_sds[name] = column.std()
-                    quantiles = np.quantile(column, q)
-                    impulse_quantiles[name] = quantiles
-                    impulse_medians[name] = np.quantile(column, 0.5)
-                    impulse_lq[name] = np.quantile(column, 0.1)
-                    impulse_uq[name] = np.quantile(column, 0.9)
-                    impulse_min[name] = column.min()
-                    impulse_max[name] = column.max()
-                    if name.lower() != 'rate' and False:
-                        kde = scipy.stats.gaussian_kde(column)
-                        density_support = np.linspace(quantiles[0], quantiles[-1], 100)
-                        density = kde(density_support)
-                        spline = scipy.interpolate.UnivariateSpline(density_support, density, ext='zeros', s=0.001)
-                        densities[(name,)] = spline
-
-                    found = True
-                    break
-                elif is_interaction:
-                    found = True
-                    impulse_names = [x.name() for x in impulse.impulses()]
-                    for x in impulse.impulses():
-                        if not x.name() in df.columns:
-                            found = False
-                            break
-                    if found:
-                        column = df[impulse_names].product(axis=1)
-                        impulse_vectors[name] = column.values
+            if name.lower() == 'rate':
+                found = True
+                impulse_means[name] = 1.
+                impulse_sds[name] = 1.
+                quantiles = np.ones_like(q)
+                impulse_quantiles[name] = quantiles
+                impulse_medians[name] = 1.
+                impulse_lq[name] = 1.
+                impulse_uq[name] = 1.
+                impulse_min[name] = 1.
+                impulse_max[name] = 1.
+            else:
+                for i, df in enumerate(X + [y]):
+                    if name in df.columns and not name.lower() == 'rate':
+                        column = df[name].values
+                        # impulse_vectors[name] = column
                         impulse_means[name] = column.mean()
                         impulse_sds[name] = column.std()
                         quantiles = np.quantile(column, q)
@@ -194,12 +208,39 @@ class Model(object):
                         impulse_uq[name] = np.quantile(column, 0.9)
                         impulse_min[name] = column.min()
                         impulse_max[name] = column.max()
-                        if False:
-                            kde = scipy.stats.gaussian_kde(column)
-                            density_support = np.linspace(quantiles[0], quantiles[-1], 100)
-                            density = kde(density_support)
-                            spline = scipy.interpolate.UnivariateSpline(density_support, density, ext='zeros', s=0.001)
-                            densities[(name,)] = spline
+                        # if name.lower() != 'rate' and False:
+                        #     kde = scipy.stats.gaussian_kde(column)
+                        #     density_support = np.linspace(quantiles[0], quantiles[-1], 100)
+                        #     density = kde(density_support)
+                        #     spline = scipy.interpolate.UnivariateSpline(density_support, density, ext='zeros', s=0.001)
+                        #     densities[(name,)] = spline
+
+                        found = True
+                        break
+                    elif is_interaction:
+                        found = True
+                        impulse_names = [x.name() for x in impulse.impulses()]
+                        for x in impulse.impulses():
+                            if not x.name() in df.columns:
+                                found = False
+                                break
+                        if found:
+                            column = df[impulse_names].product(axis=1)
+                            # impulse_vectors[name] = column.values
+                            impulse_means[name] = column.mean()
+                            impulse_sds[name] = column.std()
+                            quantiles = np.quantile(column, q)
+                            impulse_quantiles[name] = quantiles
+                            impulse_medians[name] = np.quantile(column, 0.5)
+                            impulse_lq[name] = np.quantile(column, 0.1)
+                            impulse_uq[name] = np.quantile(column, 0.9)
+                            impulse_min[name] = column.min()
+                            impulse_max[name] = column.max()
+                            # kde = scipy.stats.gaussian_kde(column)
+                            # density_support = np.linspace(quantiles[0], quantiles[-1], 100)
+                            # density = kde(density_support)
+                            # spline = scipy.interpolate.UnivariateSpline(density_support, density, ext='zeros', s=0.001)
+                            # densities[(name,)] = spline
 
             if not found:
                 raise ValueError('Impulse %s was not found in an input file.' % name)
@@ -235,7 +276,7 @@ class Model(object):
         self.impulse_min = impulse_min
         self.impulse_max = impulse_max
         # self.impulse_vectors_train = impulse_vectors
-        self.densities = densities
+        # self.densities = densities
 
         # Collect stats for temporal features
         t_deltas = []
@@ -261,11 +302,11 @@ class Model(object):
         t_delta_maxes = np.array(t_delta_maxes)
         t_delta_quantiles = np.quantile(t_deltas, q)
 
-        kde = scipy.stats.gaussian_kde(t_deltas)
-        density_support = np.linspace(t_delta_quantiles[0], t_delta_quantiles[-1], 100)
-        density = kde(density_support)
-        spline = scipy.interpolate.UnivariateSpline(density_support, density, ext='zeros', s=0.001)
-        self.densities[('t_delta',)] = spline
+        # kde = scipy.stats.gaussian_kde(t_deltas)
+        # density_support = np.linspace(t_delta_quantiles[0], t_delta_quantiles[-1], 100)
+        # density = kde(density_support)
+        # spline = scipy.interpolate.UnivariateSpline(density_support, density, ext='zeros', s=0.001)
+        # self.densities[('t_delta',)] = spline
 
         # self.t_delta_vector_train = t_deltas
         self.t_delta_limit = np.quantile(t_deltas, 0.75)
@@ -333,6 +374,7 @@ class Model(object):
         self.dv = f.dv
         self.has_intercept = f.has_intercept
         self.rangf = f.rangf
+        self.rangf2ix = {x: i for i, x in enumerate(self.rangf)}
         self.is_mixed_model = len(self.rangf) > 0
 
         if np.isfinite(self.minibatch_size):
@@ -352,6 +394,22 @@ class Model(object):
             t_src = self.t_src
             self.src_impulse_names = t_src.impulse_names(include_interactions=True)
             self.src_terminal_names = t_src.terminal_names()
+            self.src_terminals_by_name = t_src.terminals_by_name()
+            self.impulse_names_to_ix = {}
+            self.impulse_names_printable = {}
+            for i, x in enumerate(self.src_impulse_names):
+                self.impulse_names_to_ix[x] = i
+                self.impulse_names_printable[x] = ':'.join([get_irf_name(x, self.irf_name_map) for y in x.split(':')])
+            self.src_terminal_names = t_src.terminal_names()
+            self.terminal_names_to_ix = {}
+            self.terminal_names_printable = {}
+            self.non_dirac_impulses = set()
+            for i, x in enumerate(self.src_terminal_names):
+                if self.is_cdrnn or not x.startswith('DiracDelta'):
+                    for y in self.src_terminals_by_name[x].impulses():
+                        self.non_dirac_impulses.add(y.name())
+                self.terminal_names_to_ix[x] = i
+                self.terminal_names_printable[x] = ':'.join([get_irf_name(x, self.irf_name_map) for y in x.split(':')])
 
             self.n_pc = len(self.src_impulse_names)
             self.has_rate = 'rate' in self.src_impulse_names
@@ -376,8 +434,22 @@ class Model(object):
             self.interaction_names = t.interaction_names()
             self.fixed_interaction_names = t.fixed_interaction_names()
             self.impulse_names = t.impulse_names(include_interactions=True)
+            self.impulse_names_to_ix = {}
+            self.impulse_names_printable = {}
+            for i, x in enumerate(self.impulse_names):
+                self.impulse_names_to_ix[x] = i
+                self.impulse_names_printable[x] = ':'.join([get_irf_name(x, self.irf_name_map) for y in x.split(':')])
             self.terminal_names = t.terminal_names()
             self.terminals_by_name = t.terminals_by_name()
+            self.terminal_names_to_ix = {}
+            self.terminal_names_printable = {}
+            self.non_dirac_impulses = set()
+            for i, x in enumerate(self.terminal_names):
+                if self.is_cdrnn or not x.startswith('DiracDelta'):
+                    for y in self.terminals_by_name[x].impulses():
+                        self.non_dirac_impulses.add(y.name())
+                self.terminal_names_to_ix[x] = i
+                self.terminal_names_printable[x] = ':'.join([get_irf_name(x, self.irf_name_map) for y in x.split(':')])
 
         # Initialize model metadata
 
@@ -422,6 +494,63 @@ class Model(object):
         self.use_crossval = bool(self.crossval_factor)
 
         self.parameter_table_columns = ['Estimate']
+
+        self.indicators = set()
+        for x in self.indicator_names.split():
+            self.indicators.add(x)
+
+        m = self.impulse_means
+        m = np.array([m[x] for x in self.impulse_names])
+        self.impulse_means_arr = m
+        while len(m.shape) < 3:
+            m = m[None, ...]
+        self.impulse_means_arr_expanded = m
+
+        s = self.impulse_sds
+        s = np.array([s[x] for x in self.impulse_names])
+        self.impulse_sds_arr = s
+        while len(s.shape) < 3:
+            s = s[None, ...]
+        self.impulse_sds_arr_expanded = s
+
+        q = self.impulse_quantiles
+        q = np.stack([q[x] for x in self.impulse_names], axis=1)
+        self.impulse_quantiles_arr = q
+        while len(s.shape) < 3:
+            q = np.expand_dims(q, axis=1)
+        self.impulse_quantiles_arr_expanded = q
+
+        reference_map = {}
+        for pair in self.reference_values.split():
+            impulse_name, val = pair.split('=')
+            reference = float(val)
+            reference_map[impulse_name] = reference
+        self.reference_map = reference_map
+        for x in self.impulse_names:
+            if not x in self.reference_map:
+                if self.plot_mean_as_reference and not x in self.indicators:
+                    self.reference_map[x] = self.impulse_means[x]
+                else:
+                    self.reference_map[x] = 0
+        r = self.reference_map
+        r = np.array([r[x] for x in self.impulse_names])
+        self.reference_arr = r
+
+        plot_step_map = {}
+        for pair in self.plot_step.split():
+            impulse_name, val = pair.split('=')
+            plot_step = float(val)
+            plot_step_map[impulse_name] = plot_step
+        self.plot_step_map = plot_step_map
+        for x in self.impulse_names:
+            if not x in self.plot_step_map:
+                if x in self.indicators:
+                    self.plot_step_map[x] = 1
+                else:
+                    self.plot_step_map[x] = self.impulse_sds[x]
+        s = self.plot_step_map
+        s = np.array([s[x] for x in self.impulse_names])
+        self.plot_step_arr = s
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -521,10 +650,24 @@ class Model(object):
             'impulse_min': self.impulse_min,
             'impulse_max': self.impulse_max,
             # 'impulse_vectors_train': self.impulse_vectors_train,
+            # 'densities': self.densities
             'outdir': self.outdir,
             'crossval_factor': self.crossval_factor,
             'crossval_fold': self.crossval_fold,
-            'densities': self.densities
+            'irf_name_map': self.irf_name_map,
+            'plot_interactions': self.plot_interactions,
+            'reference_time': self.reference_time,
+            'plot_n_time_units': self.plot_n_time_units,
+            'plot_n_time_points': self.plot_n_time_points,
+            'surface_plot_n_time_points': self.surface_plot_n_time_points,
+            'generate_irf_surface_plots': self.generate_irf_surface_plots,
+            'generate_interaction_surface_plots': self.generate_interaction_surface_plots,
+            'generate_curvature_plots': self.generate_curvature_plots,
+            'plot_x_inches': self.plot_x_inches,
+            'plot_y_inches': self.plot_y_inches,
+            'plot_legend': self.plot_legend,
+            'cmap': self.cmap,
+            'dpi': self.dpi,
         }
         for kwarg in Model._INITIALIZATION_KWARGS:
             md[kwarg.key] = getattr(self, kwarg.key)
@@ -565,10 +708,24 @@ class Model(object):
         self.impulse_min = md.pop('impulse_min', {})
         self.impulse_max = md.pop('impulse_max', {})
         # self.impulse_vectors_train = md.pop('impulse_vectors_train', {})
+        # self.densities = md.pop('densities', {})
         self.outdir = md.pop('outdir', './cdr_model/')
         self.crossval_factor = md.pop('crossval_factor', None)
         self.crossval_fold = md.pop('crossval_fold', [])
-        self.densities = md.pop('densities', {})
+        self.irf_name_map = md.pop('irf_name_map', {})
+        self.plot_interactions = md.pop('plot_interactions', False)
+        self.reference_time = md.pop('reference_time', 0.)
+        self.plot_n_time_units = md.pop('plot_n_time_units', 2.5)
+        self.plot_n_time_points = md.pop('plot_n_time_points', 1000)
+        self.surface_plot_n_time_points = md.pop('surface_plot_n_time_points', 1024)
+        self.generate_irf_surface_plots = md.pop('generate_irf_surface_plots', False)
+        self.generate_interaction_surface_plots = md.pop('generate_interaction_surface_plots', False)
+        self.generate_curvature_plots = md.pop('generate_curvature_plots', False)
+        self.plot_x_inches = md.pop('plot_x_inches', 6.)
+        self.plot_y_inches = md.pop('plot_y_inches', 4.)
+        self.plot_legend = md.pop('plot_legend', True)
+        self.cmap = md.pop('cmap', 'gist_rainbow')
+        self.dpi = md.pop('dpi', 300)
 
         for kwarg in Model._INITIALIZATION_KWARGS:
             setattr(self, kwarg.key, md.pop(kwarg.key, kwarg.default_value))
@@ -581,6 +738,36 @@ class Model(object):
     #  Network Initialization
     #
     ######################################################
+    
+    def _initialize_regularizer(self, regularizer_name, regularizer_scale):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if regularizer_name is None:
+                    regularizer = None
+                elif regularizer_name == 'inherit':
+                    regularizer = self.regularizer
+                else:
+                    scale = regularizer_scale
+                    if isinstance(scale, str):
+                        scale = [float(x) for x in scale.split(';')]
+                    else:
+                        scale = [scale]
+                    if self.scale_regularizer_with_data:
+                        scale = [x * self.minibatch_size * self.minibatch_scale for x in scale]
+                    if regularizer_name == 'l1_l2_regularizer':
+                        if len(scale) == 1:
+                            scale_l1 = scale_l2 = scale[0]
+                        else:
+                            scale_l1 = scale[0]
+                            scale_l2 = scale[1]
+                        regularizer = getattr(tf.contrib.layers, regularizer_name)(
+                            scale_l1,
+                            scale_l2
+                        )
+                    else:
+                        regularizer = getattr(tf.contrib.layers, regularizer_name)(scale[0])
+
+                return regularizer
 
     def _initialize_inputs(self, n_impulse):
         with self.sess.as_default():
@@ -588,33 +775,12 @@ class Model(object):
                 self.training = tf.placeholder_with_default(tf.constant(False, dtype=tf.bool), shape=[], name='training')
 
                 self.X = tf.placeholder(
-                    shape=[None, self.history_length, n_impulse],
+                    shape=[None, None, n_impulse],
                     dtype=self.FLOAT_TF,
                     name='X'
                 )
                 X_batch = tf.shape(self.X)[0]
                 X_processed = self.X
-
-                m = self.impulse_means
-                m = np.array([m[x] for x in self.impulse_names])
-                self.impulse_means_arr = m
-                while len(m.shape) < len(X_processed.shape):
-                    m = m[None, ...]
-                self.impulse_means_arr_expanded = m
-
-                s = self.impulse_sds
-                s = np.array([s[x] for x in self.impulse_names])
-                self.impulse_sds_arr = s
-                while len(s.shape) < len(X_processed.shape):
-                    s = s[None, ...]
-                self.impulse_sds_arr_expanded = s
-
-                q = self.impulse_quantiles
-                q = np.stack([q[x] for x in self.impulse_names], axis=1)
-                self.impulse_quantiles_arr = q
-                while len(s.shape) < len(X_processed.shape):
-                    q = np.expand_dims(q, axis=1)
-                self.impulse_quantiles_arr_expanded = q
 
                 if self.center_inputs:
                     X_processed -= self.impulse_means_arr_expanded
@@ -622,18 +788,19 @@ class Model(object):
                     scale = self.impulse_sds_arr_expanded
                     scale = np.where(np.logical_not(np.isclose(scale, 0.)), scale, 1.)
                     X_processed /= scale
+                # X_processed = tf.Print(X_processed, [X_processed], summarize=100)
                 self.X_processed = X_processed
 
                 self.X_batch = X_batch
                 self.time_X = tf.placeholder_with_default(
                     tf.zeros([X_batch, self.history_length,  max(n_impulse, 1)], dtype=self.FLOAT_TF),
-                    shape=[None, self.history_length, max(n_impulse, 1)],
+                    shape=[None, None, max(n_impulse, 1)],
                     name='time_X'
                 )
 
                 self.time_X_mask = tf.placeholder_with_default(
                     tf.ones([X_batch, self.history_length, max(n_impulse, 1)], dtype=self.FLOAT_TF),
-                    shape=[None, self.history_length, max(n_impulse, 1)],
+                    shape=[None, None, max(n_impulse, 1)],
                     name='time_X_mask'
                 )
 
@@ -724,23 +891,25 @@ class Model(object):
                 self.training_complete_false = tf.assign(self.training_complete, False)
 
                 # Initialize regularizers
-                if self.regularizer_name is None:
-                    self.regularizer = None
-                else:
-                    scale = self.regularizer_scale
-                    if self.scale_regularizer_with_data:
-                        scale *= self.minibatch_size * self.minibatch_scale
-                    self.regularizer = getattr(tf.contrib.layers, self.regularizer_name)(scale)
+                self.regularizer = self._initialize_regularizer(
+                    self.regularizer_name,
+                    self.regularizer_scale
+                )
 
-                if self.coefficient_regularizer_name is None:
-                    self.coefficient_regularizer = None
-                elif self.coefficient_regularizer_name == 'inherit':
-                    self.coefficient_regularizer = self.regularizer
-                else:
-                    scale = self.coefficient_regularizer_scale
-                    if self.scale_regularizer_with_data:
-                        scale *= self.minibatch_size * self.minibatch_scale
-                    self.coefficient_regularizer = getattr(tf.contrib.layers, self.coefficient_regularizer_name)(scale)
+                self.intercept_regularizer = self._initialize_regularizer(
+                    self.intercept_regularizer_name,
+                    self.intercept_regularizer_scale
+                )
+                
+                self.coefficient_regularizer = self._initialize_regularizer(
+                    self.coefficient_regularizer_name,
+                    self.coefficient_regularizer_scale
+                )
+                    
+                self.ranef_regularizer = self._initialize_regularizer(
+                    self.ranef_regularizer_name,
+                    self.ranef_regularizer_scale
+                )
 
                 self.loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='loss_total')
                 self.reg_loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='reg_loss_total')
@@ -791,9 +960,26 @@ class Model(object):
                     self.ranef_regularizer = self.regularizer
                 else:
                     scale = self.ranef_regularizer_scale
+                    if isinstance(scale, str):
+                        scale = [float(x) for x in scale.split(';')]
+                    else:
+                        scale = [scale]
                     if self.scale_regularizer_with_data:
-                        scale *= self.minibatch_size * self.minibatch_scale
-                    self.ranef_regularizer = getattr(tf.contrib.layers, self.ranef_regularizer_name)(scale)
+                        scale = [x * self.minibatch_size * self.minibatch_scale for x in scale]
+                    if self.ranef_regularizer_name == 'l1_l2_regularizer':
+                        if len(scale) == 1:
+                            scale_l1 = scale_l2 = scale[0]
+                        else:
+                            scale_l1 = scale[0]
+                            scale_l2 = scale[1]
+                        self.ranef_regularizer = getattr(tf.contrib.layers, self.ranef_regularizer_name)(
+                            scale_l1,
+                            scale_l2
+                        )
+                    else:
+                        self.ranef_regularizer = getattr(tf.contrib.layers, self.ranef_regularizer_name)(scale[0])
+
+                self.dropout_resample_ops = []
 
     ## Thanks to Keisuke Fujii (https://github.com/blei-lab/edward/issues/708) for this idea
     def _clipped_optimizer_class(self, base_optimizer):
@@ -1287,7 +1473,7 @@ class Model(object):
     ######################################################
 
     def _regularize(self, var, center=None, type=None, var_name=None):
-        assert type in [None, 'intercept', 'coefficient', 'irf', 'ranef', 'oob', 'nn', 'context']
+        assert type in [None, 'intercept', 'coefficient', 'irf', 'ranef', 'nn', 'context']
         if type is None:
             regularizer = self.regularizer
         else:
@@ -2321,6 +2507,16 @@ class Model(object):
 
         raise NotImplementedError
 
+    def is_non_dirac(self, impulse_name):
+        """
+        Check whether an impulse is associated with a non-Dirac response function
+
+        :param impulse_name: ``str``; name of impulse
+        :return: ``bool``; whether the impulse is associated with a non-Dirac response function
+        """
+
+        return impulse_name not in self.non_dirac_impulses
+
     def fit(self,
             X,
             y,
@@ -2329,21 +2525,7 @@ class Model(object):
             X_response_aligned_predictors=None,
             X_2d_predictor_names=None,
             X_2d_predictors=None,
-            force_training_evaluation=True,
-            irf_name_map=None,
-            plot_interactions=None,
-            reference_time=0.,
-            plot_n_time_units=2.5,
-            plot_n_time_points=1000,
-            surface_plot_n_time_points=1024,
-            generate_irf_surface_plots=False,
-            generate_interaction_surface_plots=False,
-            generate_curvature_plots=False,
-            plot_x_inches=7,
-            plot_y_inches=5,
-            plot_legend=True,
-            cmap='gist_rainbow',
-            dpi=300
+            force_training_evaluation=True
             ):
         """
         Fit the model.
@@ -2372,21 +2554,6 @@ class Model(object):
         :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
         :param force_training_evaluation: ``bool``; (Re-)run post-fitting evaluation, even if resuming a model whose training is already complete.
         :param n_iter: ``int``; the number of training iterations
-        :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
-            If ``None``, IRF tree node string ID's will be used.
-        :param plot_interactions: ``list`` of ``str``; List of all implicit interactions to plot (CDRNN only).
-        :param reference_time: ``float``; Time value at which to plot (CDRNN only).
-        :param plot_n_time_units: ``float``; number if time units to use for plotting.
-        :param plot_n_time_points: ``float``; number of points to use for plotting.
-        :param surface_plot_n_time_points: ``float``; number of points to use in any surface plots (CDRNN only).
-        :param generate_irf_surface_plots: ``bool``; whether to generate IRF surface plots (CDRNN only)
-        :param generate_interaction_surface_plots: ``bool``; whether to generate interaction surface plots (CDRNN only)
-        :param generate_curvature_plots: ``bool``; whether to generate GAM-like curvature plots (CDRNN only)
-        :param plot_x_inches: ``int``; width of plot in inches.
-        :param plot_y_inches: ``int``; height of plot in inches.
-        :param cmap: ``str``; name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot).
-        :param dpi: ``int``; dots per inch.
-        :return: ``None``
         """
 
         if hasattr(self, 'pc') and self.pc:
@@ -2455,20 +2622,20 @@ class Model(object):
 
         if False:
             self.make_plots(
-                irf_name_map=irf_name_map,
-                plot_interactions=plot_interactions,
-                reference_time=reference_time,
-                plot_n_time_units=plot_n_time_units,
-                plot_n_time_points=plot_n_time_points,
-                surface_plot_n_time_points=surface_plot_n_time_points,
-                generate_irf_surface_plots=generate_irf_surface_plots,
-                generate_interaction_surface_plots=generate_interaction_surface_plots,
-                generate_curvature_plots=generate_curvature_plots,
-                plot_x_inches=plot_x_inches,
-                plot_y_inches=plot_y_inches,
-                legend=plot_legend,
-                cmap=cmap,
-                dpi=dpi,
+                irf_name_map=self.irf_name_map,
+                plot_interactions=self.plot_interactions,
+                reference_time=self.reference_time,
+                plot_n_time_units=self.plot_n_time_units,
+                plot_n_time_points=self.plot_n_time_points,
+                surface_plot_n_time_points=self.surface_plot_n_time_points,
+                generate_irf_surface_plots=self.generate_irf_surface_plots,
+                generate_interaction_surface_plots=self.generate_interaction_surface_plots,
+                generate_curvature_plots=self.generate_curvature_plots,
+                plot_x_inches=self.plot_x_inches,
+                plot_y_inches=self.plot_y_inches,
+                legend=self.plot_legend,
+                cmap=self.cmap,
+                dpi=self.dpi,
                 keep_plot_history=self.keep_plot_history
             )
 
@@ -2556,20 +2723,20 @@ class Model(object):
                             # if self.global_batch_step.eval(session=self.sess) % 1000 == 0:
                             #     self.save()
                             #     self.make_plots(
-                            #         irf_name_map=irf_name_map,
-                            #         plot_interactions=plot_interactions,
-                            #         plot_t_interaction=plot_t_interaction,
-                            #         plot_n_time_units=plot_n_time_units,
-                            #         plot_n_time_points=plot_n_time_points,
-                            #         surface_plot_n_time_points=surface_plot_n_time_points,
-                            #         generate_irf_surface_plots=generate_irf_surface_plots,
-                            #         generate_interaction_surface_plots=generate_interaction_surface_plots,
-                            #         generate_curvature_plots=generate_curvature_plots,
-                            #         plot_x_inches=plot_x_inches,
-                            #         plot_y_inches=plot_y_inches,
-                            #         legend=plot_legend,
-                            #         cmap=cmap,
-                            #         dpi=dpi,
+                            #         irf_name_map=self.irf_name_map,
+                            #         plot_interactions=self.plot_interactions,
+                            #         plot_t_interaction=self.plot_t_interaction,
+                            #         plot_n_time_units=self.plot_n_time_units,
+                            #         plot_n_time_points=self.plot_n_time_points,
+                            #         surface_plot_n_time_points=self.surface_plot_n_time_points,
+                            #         generate_irf_surface_plots=self.generate_irf_surface_plots,
+                            #         generate_interaction_surface_plots=self.generate_interaction_surface_plots,
+                            #         generate_curvature_plots=self.generate_curvature_plots,
+                            #         plot_x_inches=self.plot_x_inches,
+                            #         plot_y_inches=self.plot_y_inches,
+                            #         legend=self.plot_legend,
+                            #         cmap=self.cmap,
+                            #         dpi=self.dpi,
                             #         keep_plot_history=self.keep_plot_history
                             #     )
 
@@ -2602,20 +2769,20 @@ class Model(object):
                         if self.save_freq > 0 and self.global_step.eval(session=self.sess) % self.save_freq == 0:
                             self.save()
                             self.make_plots(
-                                irf_name_map=irf_name_map,
-                                plot_interactions=plot_interactions,
-                                reference_time=reference_time,
-                                plot_n_time_units=plot_n_time_units,
-                                plot_n_time_points=plot_n_time_points,
-                                surface_plot_n_time_points=surface_plot_n_time_points,
-                                generate_irf_surface_plots=generate_irf_surface_plots,
-                                generate_interaction_surface_plots=generate_interaction_surface_plots,
-                                generate_curvature_plots=generate_curvature_plots,
-                                plot_x_inches=plot_x_inches,
-                                plot_y_inches=plot_y_inches,
-                                legend=plot_legend,
-                                cmap=cmap,
-                                dpi=dpi,
+                                irf_name_map=self.irf_name_map,
+                                plot_interactions=self.plot_interactions,
+                                reference_time=self.reference_time,
+                                plot_n_time_units=self.plot_n_time_units,
+                                plot_n_time_points=self.plot_n_time_points,
+                                surface_plot_n_time_points=self.surface_plot_n_time_points,
+                                generate_irf_surface_plots=self.generate_irf_surface_plots,
+                                generate_interaction_surface_plots=self.generate_interaction_surface_plots,
+                                generate_curvature_plots=self.generate_curvature_plots,
+                                plot_x_inches=self.plot_x_inches,
+                                plot_y_inches=self.plot_y_inches,
+                                legend=self.plot_legend,
+                                cmap=self.cmap,
+                                dpi=self.dpi,
                                 keep_plot_history=self.keep_plot_history
                             )
 
@@ -2629,40 +2796,40 @@ class Model(object):
                     # variance of the output distribution for computing log likelihood.
 
                     self.make_plots(
-                        irf_name_map=irf_name_map,
-                        plot_interactions=plot_interactions,
-                        reference_time=reference_time,
-                        plot_n_time_units=plot_n_time_units,
-                        plot_n_time_points=plot_n_time_points,
-                        surface_plot_n_time_points=surface_plot_n_time_points,
-                        generate_irf_surface_plots=generate_irf_surface_plots,
-                        generate_interaction_surface_plots=generate_interaction_surface_plots,
-                        generate_curvature_plots=generate_curvature_plots,
-                        plot_x_inches=plot_x_inches,
-                        plot_y_inches=plot_y_inches,
-                        legend=plot_legend,
-                        cmap=cmap,
-                        dpi=dpi,
+                        irf_name_map=self.irf_name_map,
+                        plot_interactions=self.plot_interactions,
+                        reference_time=self.reference_time,
+                        plot_n_time_units=self.plot_n_time_units,
+                        plot_n_time_points=self.plot_n_time_points,
+                        surface_plot_n_time_points=self.surface_plot_n_time_points,
+                        generate_irf_surface_plots=self.generate_irf_surface_plots,
+                        generate_interaction_surface_plots=self.generate_interaction_surface_plots,
+                        generate_curvature_plots=self.generate_curvature_plots,
+                        plot_x_inches=self.plot_x_inches,
+                        plot_y_inches=self.plot_y_inches,
+                        legend=self.plot_legend,
+                        cmap=self.cmap,
+                        dpi=self.dpi,
                         keep_plot_history=self.keep_plot_history
                     )
 
-                    if type(self).__name__ == 'CDRBayes':
+                    if self.is_bayesian or self.has_dropout:
                         # Generate plots with 95% credible intervals
                         self.make_plots(
-                            irf_name_map=irf_name_map,
-                            plot_interactions=plot_interactions,
-                            reference_time=reference_time,
-                            plot_n_time_units=plot_n_time_units,
-                            plot_n_time_points=plot_n_time_points,
-                            surface_plot_n_time_points=surface_plot_n_time_points,
-                            generate_irf_surface_plots=generate_irf_surface_plots,
-                            generate_interaction_surface_plots=generate_interaction_surface_plots,
-                            generate_curvature_plots=generate_curvature_plots,
-                            plot_x_inches=plot_x_inches,
-                            plot_y_inches=plot_y_inches,
-                            legend=plot_legend,
-                            cmap=cmap,
-                            dpi=dpi,
+                            irf_name_map=self.irf_name_map,
+                            plot_interactions=self.plot_interactions,
+                            reference_time=self.reference_time,
+                            plot_n_time_units=self.plot_n_time_units,
+                            plot_n_time_points=self.plot_n_time_points,
+                            surface_plot_n_time_points=self.surface_plot_n_time_points,
+                            generate_irf_surface_plots=self.generate_irf_surface_plots,
+                            generate_interaction_surface_plots=self.generate_interaction_surface_plots,
+                            generate_curvature_plots=self.generate_curvature_plots,
+                            plot_x_inches=self.plot_x_inches,
+                            plot_y_inches=self.plot_y_inches,
+                            legend=self.plot_legend,
+                            cmap=self.cmap,
+                            dpi=self.dpi,
                             mc=True,
                             keep_plot_history=self.keep_plot_history
                         )
@@ -3221,6 +3388,345 @@ class Model(object):
     ):
         raise NotImplementedError
 
+    def get_2d_plot_data(
+            self,
+            xvar='t_delta',
+            X_ref=None,
+            time_X_ref=None,
+            t_delta_ref=None,
+            gf_y_ref=None,
+            ref_varies_with_x=False,
+            manipulations=None,
+            pair_manipulations=False,
+            standardize_response=False,
+            xaxis=None,
+            xres=1024,
+            n_samples=None,
+            level=95
+    ):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                n_impulse = len(self.impulse_names)
+                vbase = np.linspace(0., 1., xres)
+                if manipulations is None:
+                    manipulations = []
+
+                if xaxis is None or len(xaxis) == 2:
+                    T = xres
+                else:
+                    T = len(xaxis)
+                if n_samples and (self.is_bayesian or self.has_dropout):
+                    resample = True
+                else:
+                    resample = False
+                    n_samples = 1
+
+                xplot = None
+
+                # Initialize predictor reference
+                X_ref_arr = np.copy(self.reference_arr)
+                if X_ref is None:
+                    X_ref = {}
+                for x in X_ref:
+                    ix = self.impulse_names_to_ix[x]
+                    X_ref_arr[ix] = X_ref[x]
+                X_ref = X_ref_arr[None, None, ...]
+
+                # Initialize timestamp reference
+                if time_X_ref is None:
+                    time_X_ref = self.time_X_mean
+                assert np.isscalar(time_X_ref), 'time_X_ref must be a scalar'
+                time_X_ref = np.reshape(time_X_ref, (1, 1, 1))
+                time_X_ref = np.tile(time_X_ref, [1, 1, max(n_impulse, 1)])
+
+                # Initialize offset reference
+                if t_delta_ref is None:
+                    t_delta_ref = self.t_delta_mean
+                assert np.isscalar(t_delta_ref), 't_delta_ref must be a scalar'
+                t_delta_ref = np.reshape(t_delta_ref, (1, 1, 1))
+                t_delta_ref = np.tile(t_delta_ref, [1, 1, max(n_impulse, 1)])
+
+                # Initialize random effects reference
+                gf_y_ref_arr = np.copy(self.gf_defaults)
+                if gf_y_ref is None:
+                    gf_y_ref = []
+                for x in gf_y_ref:
+                    if x is not None:
+                        ix = self.rangf2ix[x]
+                        gf_y_ref_arr[0, ix] = gf_y_ref[x]
+                gf_y_ref = gf_y_ref_arr
+
+                if xvar in self.impulse_names_to_ix:
+                    ix = self.impulse_names_to_ix[xvar]
+                    X_ref_mask = np.ones_like(X_ref)
+                    X_ref_mask[..., ix] = 0
+                    if xaxis is None:
+                        qix = self.PLOT_QUANTILE_IX
+                        lq = self.impulse_quantiles_arr[qix][ix]
+                        uq = self.impulse_quantiles_arr[self.N_QUANTILES - qix - 1][ix]
+                        select = np.isclose(uq - lq, 0)
+                        while ix > 1 and np.any(select):
+                            qix -= 1
+                            lq = self.impulse_quantiles_arr[qix][ix]
+                            uq = self.impulse_quantiles_arr[self.N_QUANTILES - qix - 1][ix]
+                            select = np.isclose(uq - lq, 0)
+                        xmin = lq
+                        xmax = uq
+                        X_var = (vbase * (xmax - xmin) + xmin)
+                    elif len(xaxis) == 2:
+                        xmin = xaxis[0]
+                        xmax = xaxis[1]
+                        X_var = (vbase * (xmax - xmin) + xmin)
+                    else:
+                        X_var = np.array(xaxis)
+                    assert len(X_var.shape) == 1, 'xaxis must be a (1D) vector. Got a tensor of rank %d.' % len(X_var.shape)
+                    xplot = X_var
+                    X_base = np.pad(X_var[..., None, None], ((0, 0), (0, 0), (ix, n_impulse - (ix + 1)))) + X_ref * X_ref_mask
+                    if ref_varies_with_x:
+                        X_ref = X_base
+                else:
+                    X_base = np.tile(X_ref, (T, 1, 1))
+                    if ref_varies_with_x:
+                        X_ref = X_base
+
+                if xvar == 'time_X':
+                    if xaxis is None:
+                        xmin = self.time_X_mean - self.time_X_sd
+                        xmax = self.time_X_mean + self.time_X_sd
+                        time_X_var = (vbase * (xmax - xmin) + xmin)
+                    elif len(xaxis) == 2:
+                        xmin = xaxis[0]
+                        xmax = xaxis[1]
+                        time_X_var = (vbase * (xmax - xmin) + xmin)
+                    else:
+                        time_X_var = np.array(xaxis)
+                    assert len(time_X_var.shape) == 1, 'xaxis must be a (1D) vector. Got a tensor of rank %d.' % len(time_X_var.shape)
+                    xplot = time_X_var
+                    time_X_base = np.tile(time_X_var[..., None, None], (1, 1, max(n_impulse, 1)))
+                    if ref_varies_with_x:
+                        time_X_ref = time_X_base
+                else:
+                    time_X_base = np.tile(time_X_ref, (T, 1, 1))
+                    if ref_varies_with_x:
+                        time_X_ref = time_X_base
+
+                if xvar == 't_delta':
+                    if xaxis is None:
+                        xmin = 0
+                        xmax = self.plot_n_time_units
+                        t_delta_var = (vbase * (xmax - xmin) + xmin)
+                    elif len(xaxis) == 2:
+                        xmin = xaxis[0]
+                        xmax = xaxis[1]
+                        t_delta_var = (vbase * (xmax - xmin) + xmin)
+                    else:
+                        t_delta_var = np.array(xaxis)
+                    assert len(t_delta_var.shape) == 1, 'xaxis must be a (1D) vector. Got a tensor of rank %d.' % len(t_delta_var.shape)
+                    xplot = t_delta_var
+                    t_delta_base = np.tile(t_delta_var[..., None, None], (1, 1, max(n_impulse, 1)))
+                    if ref_varies_with_x:
+                        t_delta_ref = t_delta_base
+                else:
+                    t_delta_base = np.tile(t_delta_ref, (T, 1, 1))
+                    if ref_varies_with_x:
+                        t_delta_ref = t_delta_base
+
+                gf_y_base = np.tile(gf_y_ref, (T, 1))
+                if ref_varies_with_x:
+                    gf_y_ref = gf_y_base
+
+                assert xplot is not None, 'Unrecognized value for xvar: "%s"' % xvar
+                xplot = xplot
+
+                X = []
+                time_X = []
+                t_delta = []
+                gf_y = []
+
+                if pair_manipulations:
+                    X_ref_in = []
+                    time_X_ref_in = []
+                    t_delta_ref_in = []
+                    gf_y_ref_in = []
+                    if len(X_ref) == 1:
+                        X_ref_tiled = np.tile(X_ref, [T, 1, 1])
+                    else:
+                        X_ref_tiled = X_ref
+                    if len(time_X_ref) == 1:
+                        time_X_ref_tiled = np.tile(time_X_ref, [T, 1, 1])
+                    else:
+                        time_X_ref_tiled = time_X_ref
+                    if len(t_delta_ref) == 1:
+                        t_delta_ref_tiled = np.tile(t_delta_ref, [T, 1, 1])
+                    else:
+                        t_delta_ref_tiled = t_delta_ref
+                    gf_y_ref_tiled = np.tile(gf_y_ref, [T, 1])
+                else:
+                    X_ref_in = X_ref
+                    time_X_ref_in = time_X_ref
+                    t_delta_ref_in = t_delta_ref
+                    gf_y_ref_in = gf_y_ref
+
+                n_manip = 0
+
+                if not ref_varies_with_x:
+                    n_manip += 1
+                    X.append(X_base)
+                    time_X.append(time_X_base)
+                    t_delta.append(t_delta_base)
+                    gf_y.append(gf_y_base)
+                    if pair_manipulations:
+                        X_ref_in.append(X_ref_tiled)
+                        time_X_ref_in.append(time_X_ref_tiled)
+                        t_delta_ref_in.append(t_delta_ref_tiled)
+                        gf_y_ref_in.append(gf_y_ref_tiled)
+
+                for manipulation in manipulations:
+                    X_cur = None
+                    time_X_cur = time_X_base
+                    t_delta_cur = t_delta_base
+                    gf_y_cur = gf_y_base
+
+                    if pair_manipulations:
+                        X_ref_cur = None
+                        time_X_ref_cur = time_X_ref_tiled
+                        t_delta_ref_cur = t_delta_ref_tiled
+                        gf_y_ref_cur = gf_y_ref_tiled
+
+                    for k in manipulation:
+                        if k in self.impulse_names_to_ix:
+                            if X_cur is None:
+                                X_cur = np.copy(X_base)
+                            ix = self.impulse_names_to_ix[k]
+                            X_cur[..., ix] = manipulation[k](X_cur[..., ix])
+                            if pair_manipulations:
+                                if X_ref_cur is None:
+                                    X_ref_cur = np.copy(X_ref_tiled)
+                                X_ref_cur[..., ix] = manipulation[k](X_ref_cur[..., ix])
+                        elif k == 'time_X':
+                            time_X_cur = manipulation[k](time_X_cur)
+                            if pair_manipulations:
+                                time_X_ref_cur = time_X_cur
+                        elif k == 't_delta':
+                            t_delta_cur = manipulation[k](t_delta_cur)
+                            if pair_manipulations:
+                                t_delta_ref_cur = t_delta_cur
+                        elif k == 'ranef':
+                            gf_y_cur = np.copy(gf_y_cur)
+                            for gf in manipulation[k]:
+                                ix = self.rangf2ix[gf]
+                                gf_y_cur[..., ix] = manipulation[k][gf]
+                                if pair_manipulations:
+                                    gf_y_ref_cur = gf_y_cur
+                        else:
+                            raise ValueError('Unrecognized manipulation key: "%s"' % k)
+
+                    if X_cur is None:
+                        X_cur = X_base
+                    X.append(X_cur)
+                    time_X.append(time_X_cur)
+                    t_delta.append(t_delta_cur)
+                    gf_y.append(gf_y_cur)
+
+                    if pair_manipulations:
+                        if X_ref_cur is None:
+                            X_ref_cur = X_ref_tiled
+                        X_ref_in.append(X_ref_cur)
+                        time_X_ref_in.append(time_X_ref_cur)
+                        t_delta_ref_in.append(t_delta_ref_cur)
+                        gf_y_ref_in.append(gf_y_ref_cur)
+
+                    n_manip += 1
+
+                if pair_manipulations:
+                    X_ref_in = np.concatenate(X_ref_in, axis=0)
+                    time_X_ref_in = np.concatenate(time_X_ref_in, axis=0)
+                    t_delta_ref_in = np.concatenate(t_delta_ref_in, axis=0)
+                    gf_y_ref_in = np.concatenate(gf_y_ref_in, axis=0)
+
+                # print('ref')
+                # print(X_ref_in.shape)
+                # print(time_X_ref_in.shape)
+                # print(t_delta_ref_in.shape)
+                # print(gf_y_ref_in.shape)
+                # print()
+
+                fd_ref = {
+                    self.X: X_ref_in,
+                    self.time_X: time_X_ref_in,
+                    self.time_X_mask: np.ones_like(time_X_ref_in),
+                    self.t_delta: t_delta_ref_in,
+                    self.gf_y: gf_y_ref_in,
+                    self.training: not self.predict_mode
+                }
+
+                # Bring manipulations into 1-1 alignment on the batch dimension
+                if n_manip:
+                    X = np.concatenate(X, axis=0)
+                    time_X = np.concatenate(time_X, axis=0)
+                    t_delta = np.concatenate(t_delta, axis=0)
+                    gf_y = np.concatenate(gf_y, axis=0)
+
+                    # print('manips')
+                    # print(X.shape)
+                    # print(time_X.shape)
+                    # print(t_delta.shape)
+                    # print(gf_y.shape)
+                    # print()
+
+                    fd_main = {
+                        self.X: X,
+                        self.time_X: time_X,
+                        self.time_X_mask: np.ones_like(time_X),
+                        self.t_delta: t_delta,
+                        self.gf_y: gf_y,
+                        self.training: not self.predict_mode
+                    }
+
+                response = self.out_pre_intercept
+
+                if resample:
+                    fd_ref[self.use_MAP_mode] = False
+                    if n_manip:
+                        fd_main[self.use_MAP_mode] = False
+
+                samples = []
+                alpha = 100-float(level)
+
+                for i in range(n_samples):
+                    self.sess.run(self.dropout_resample_ops)
+                    sample_ref = self.sess.run(response, feed_dict=fd_ref)
+                    if pair_manipulations:
+                        sample_ref = np.reshape(sample_ref, (T, n_manip), 'F')
+                    elif ref_varies_with_x:
+                        sample_ref = np.reshape(sample_ref, (T, 1), 'F')
+                    else:
+                        sample_ref = np.squeeze(sample_ref)
+                    if n_manip:
+                        sample_main = self.sess.run(response, feed_dict=fd_main)
+                        sample_main = np.reshape(sample_main, (T, n_manip), 'F')
+                        sample_main -= sample_ref
+                        if ref_varies_with_x:
+                            sample = np.concatenate([sample_ref, sample_main], axis=-1)
+                        else:
+                            sample = sample_main
+                    else:
+                        sample = sample_ref
+                    samples.append(sample)
+
+                samples = np.stack(samples, axis=0)
+                if self.standardize_response and not standardize_response:
+                    samples *= self.y_train_sd
+                mean = samples.mean(axis=0)
+                if resample:
+                    lower = np.percentile(samples, alpha / 2, axis=0)
+                    upper = np.percentile(samples, 100 - (alpha / 2), axis=0)
+                else:
+                    lower = upper = samples = None
+                out = (xplot, mean, lower, upper, samples)
+
+                return out
+
     def irf_integrals(self, standardize_response=False, level=95, random=False, n_samples=None, n_time_units=None, n_time_points=1000):
         """
         Generate effect size estimates by computing the area under each IRF curve in the model via discrete approximation.
@@ -3445,8 +3951,11 @@ class Model(object):
         if not plot_interactions:
             plot_interactions = []
 
-        if n_samples is None and (self.is_bayesian or self.has_dropout):
-            n_samples = self.n_samples_eval
+        if mc and (self.is_bayesian or self.has_dropout):
+            if n_samples is None:
+                n_samples = self.n_samples_eval
+        else:
+            n_samples = None
 
         if prefix is None:
             prefix = ''
@@ -3456,15 +3965,19 @@ class Model(object):
         if summed:
             alpha = 100 - float(level)
 
-        rangf_keys = [None]
-        rangf_vals = [self.gf_defaults[0]]
+        ranef_gf_keys = [None]
+        ranef_keys = [None]
+        ranef_vals = [self.gf_defaults[0]]
+        ranef_vals_2 = [None]
         if plot_rangf:
             for i in range(len(self.rangf)):
                 if type(self).__name__.startswith('CDRNN') or self.t.has_coefficient(self.rangf[i]) or self.t.has_irf(self.rangf[i]):
                     for k in self.rangf_map[i].keys():
-                        rangf_keys.append(str(k))
-                        rangf_vals.append(np.concatenate([self.gf_defaults[0, :i], [self.rangf_map[i][k]], self.gf_defaults[0, i+1:]], axis=0))
-        rangf_vals = np.stack(rangf_vals, axis=0)
+                        ranef_gf_keys.append(self.rangf[i])
+                        ranef_keys.append(str(k))
+                        ranef_vals.append(np.concatenate([self.gf_defaults[0, :i], [self.rangf_map[i][k]], self.gf_defaults[0, i+1:]], axis=0))
+                        ranef_vals_2.append(self.rangf_map[i][k])
+        ranef_vals = np.stack(ranef_vals, axis=0)
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -3519,77 +4032,58 @@ class Model(object):
                     self.n_time_units: plot_n_time_units,
                     self.n_time_points: plot_n_time_points,
                     self.max_tdelta_batch: plot_n_time_units,
-                    self.gf_y: rangf_vals,
+                    self.gf_y: ranef_vals,
                     self.training: not self.predict_mode
                 }
 
                 if hasattr(self, 'n_surface_plot_points'):
                     fd[self.n_surface_plot_points] = surface_plot_n_time_points
 
-                # Curvature plots (CDRNN only)
-                if generate_curvature_plots and hasattr(self, 'curvature_plot'):
-                    names = self.get_plot_names(plot_type='curvature', interactions=plot_interactions)
+                # Curvature plots
+                if generate_curvature_plots:
+                    names = [x for x in self.impulse_names if (self.is_non_dirac(x) and  x != 'rate')]
+
+                    if plot_rangf:
+                        manipulations = [{'ranef': {x: y}} for x, y in zip(ranef_gf_keys[1:], ranef_vals_2[1:])]
+                    else:
+                        manipulations = None
+
                     for name in names:
                         plot_name = ''
                         if mc:
                             plot_name += 'mc_'
-                            (plot_x, plot_y, lq, uq, _), density = self.get_plot_data(
-                                name,
-                                plot_type='curvature',
-                                level=level,
-                                n_samples=n_samples,
-                                support_start=plot_support_start,
-                                n_time_units=plot_n_time_units,
-                                n_time_points=plot_n_time_points,
-                                t_interaction=reference_time,
-                                plot_rangf=plot_rangf,
-                                rangf_vals=rangf_vals,
-                                plot_mean_as_reference=plot_mean_as_reference,
-                                estimate_density=plot_density
-                            )
-                            plot_y = plot_y[..., None]
-                            lq = lq[..., None]
-                            uq = uq[..., None]
-                        else:
-                            (plot_x, plot_y), density = self.get_plot_data(
-                                name,
-                                plot_type='curvature',
-                                support_start=plot_support_start,
-                                n_time_units=plot_n_time_units,
-                                n_time_points=plot_n_time_points,
-                                t_interaction=reference_time,
-                                plot_rangf=plot_rangf,
-                                rangf_vals=rangf_vals,
-                                plot_mean_as_reference=plot_mean_as_reference,
-                                estimate_density=plot_density
-                            )
-                            plot_y = plot_y
-                            lq = None
-                            uq = None
+
+                        plot_x, plot_y, lq, uq, samples = self.get_2d_plot_data(
+                            xvar=name,
+                            X_ref=None,
+                            time_X_ref=None,
+                            t_delta_ref=reference_time,
+                            gf_y_ref=None,
+                            ref_varies_with_x=False,
+                            manipulations=manipulations,
+                            pair_manipulations=True,
+                            standardize_response=standardize_response,
+                            xaxis=None,
+                            xres=1024,
+                            n_samples=n_samples,
+                            level=95
+                        )
 
                         xlab_cur = ':'.join([get_irf_name(x, irf_name_map) for x in name.split(':')])
                         plot_name += 'curvature_plot_t%s_%s.png' % (reference_time, sn(xlab_cur))
 
-                        if self.standardize_response and not standardize_response:
-                            plot_y *= self.y_train_sd
-                            if lq is not None:
-                                lq *= self.y_train_sd
-                            if uq is not None:
-                                uq *= self.y_train_sd
-
-                        for g in range(len(rangf_keys)):
-                            if rangf_keys[g]:
-                                filename = prefix + rangf_keys[g] + '_' + plot_name
+                        for g in range(len(ranef_keys)):
+                            if ranef_keys[g]:
+                                filename = prefix + ranef_keys[g] + '_' + plot_name
                             else:
                                 filename = prefix + plot_name
 
                             plot_irf(
                                 plot_x,
-                                plot_y[g],
+                                plot_y[:, g:g+1],
                                 [name],
-                                lq=None if lq is None else lq[g],
-                                uq=None if uq is None else uq[g],
-                                density=density,
+                                lq=None if lq is None else lq[:, g:g+1],
+                                uq=None if uq is None else uq[:, g:g+1],
                                 dir=self.outdir,
                                 filename=filename,
                                 irf_name_map=irf_name_map,
@@ -3635,7 +4129,7 @@ class Model(object):
                                         n_time_points=plot_n_time_points,
                                         t_interaction=reference_time,
                                         plot_rangf=plot_rangf,
-                                        rangf_vals=rangf_vals,
+                                        rangf_vals=ranef_vals,
                                         plot_mean_as_reference=plot_mean_as_reference,
                                         estimate_density=plot_density
                                     )
@@ -3655,7 +4149,7 @@ class Model(object):
                                         n_time_points=plot_n_time_points,
                                         t_interaction=reference_time,
                                         plot_rangf=plot_rangf,
-                                        rangf_vals=rangf_vals,
+                                        rangf_vals=ranef_vals,
                                         plot_mean_as_reference=plot_mean_as_reference,
                                         estimate_density=plot_density
                                     )
@@ -3679,9 +4173,9 @@ class Model(object):
                                 if uq is not None:
                                     uq *= self.y_train_sd
 
-                            for g in range(len(rangf_keys)):
-                                if rangf_keys[g]:
-                                    filename = prefix + rangf_keys[g] + '_' + plot_name
+                            for g in range(len(ranef_keys)):
+                                if ranef_keys[g]:
+                                    filename = prefix + ranef_keys[g] + '_' + plot_name
                                 else:
                                     filename = prefix + plot_name
 
@@ -3707,286 +4201,370 @@ class Model(object):
                                 )
 
                 # 1D IRF plots
-                plot_x = self.sess.run(self.support, fd)
 
-                switches = [['atomic'], ['scaled']]
-                if not self.is_cdrnn:
-                    if plot_composite:
-                        switches[0].append('composite')
-                    if plot_unscaled:
-                        switches[1].append('unscaled')
+                if summed:
+                    plot_name = 'irf_univariate_summed_%d.png' % self.global_step.eval(session=self.sess) if keep_plot_history else 'irf_univariate_summed.png'
+                else:
+                    plot_name = 'irf_univariate_%d.png' % self.global_step.eval(session=self.sess) if keep_plot_history else 'irf_univariate.png'
 
-                for a in switches[0]:
-                    if self.t.has_composed_irf() or a == 'atomic':
-                        for b in switches[1]:
-                            if summed:
-                                plot_name = 'irf_%s_%s_summed_%d.png' %(a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'irf_%s_%s_summed.png' %(a, b)
-                            else:
-                                plot_name = 'irf_%s_%s_%d.png' %(a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'irf_%s_%s.png' %(a, b)
-                            names = self.get_plot_names(composite=a, scaled=b, dirac=dirac, plot_type='irf_1d', interactions=plot_interactions)
-                            if irf_ids is not None and len(irf_ids) > 0:
-                                new_names = []
-                                for i, name in enumerate(names):
-                                    for ID in irf_ids:
-                                        if ID==name or re.match(ID if ID.endswith('$') else ID + '$', name) is not None:
-                                            new_names.append(name)
-                                names = new_names
-                            if len(names) > 0:
-                                if mc:
-                                    names_cur = names[:]
-                                    if summed:
-                                        samples = []
-                                    else:
-                                        plot_y = []
-                                        lq = []
-                                        uq = []
-                                    for name in names:
-                                        (_, mean_cur, lq_cur, uq_cur, samples_cur), density = self.get_plot_data(
-                                            name,
-                                            composite=a,
-                                            scaled=b,
-                                            dirac=dirac,
-                                            plot_type='irf_1d',
-                                            level=level,
-                                            n_samples=n_samples,
-                                            support_start=plot_support_start,
-                                            n_time_units=plot_n_time_units,
-                                            n_time_points=plot_n_time_points,
-                                            plot_rangf=plot_rangf,
-                                            rangf_vals=rangf_vals,
-                                            plot_mean_as_reference=plot_mean_as_reference,
-                                            estimate_density=plot_density
-                                        )
+                if mc:
+                    plot_name = 'mc_' + plot_name
 
-                                        if summed:
-                                            samples.append(samples_cur)
-                                        else:
-                                            plot_y.append(mean_cur)
-                                            lq.append(lq_cur)
-                                            uq.append(uq_cur)
+                names = self.impulse_names
+                if not plot_dirac:
+                    names = [x for x in names if self.is_non_dirac(x)]
+                if irf_ids is not None and len(irf_ids) > 0:
+                    new_names = []
+                    for i, name in enumerate(names):
+                        for ID in irf_ids:
+                            if ID == name or re.match(ID if ID.endswith('$') else ID + '$', name) is not None:
+                                new_names.append(name)
+                    names = new_names
 
-                                    if summed:
-                                        samples = np.stack(samples, axis=3)
-                                        samples = samples.sum(axis=3, keepdims=True)
-                                        lq = np.percentile(samples, alpha / 2, axis=2)
-                                        uq = np.percentile(samples, 100 - (alpha / 2), axis=2)
-                                        plot_y = samples.mean(axis=2)
-                                    else:
-                                        lq = np.stack(lq, axis=2)
-                                        uq = np.stack(uq, axis=2)
-                                        plot_y = np.stack(plot_y, axis=2)
+                manipulations = []
+                for x in names:
+                    delta = self.plot_step_map[x]
+                    def manip(y, delta=delta):
+                        return y + delta
+                    manipulations.append({x: manip})
+                gf_y_refs = [{x: y} for x, y in zip(ranef_gf_keys, ranef_vals_2)]
 
-                                    if self.standardize_response and not standardize_response:
-                                        plot_y *= self.y_train_sd
-                                        lq *= self.y_train_sd
-                                        uq *= self.y_train_sd
+                for g, (gf_y_ref, gf_key) in enumerate(zip(gf_y_refs, ranef_keys)):
+                    plot_x, plot_y, lq, uq, samples = self.get_2d_plot_data(
+                        xvar='t_delta',
+                        X_ref=None,
+                        time_X_ref=None,
+                        t_delta_ref=None,
+                        gf_y_ref=gf_y_ref,
+                        ref_varies_with_x=True,
+                        manipulations=manipulations,
+                        pair_manipulations=False,
+                        standardize_response=standardize_response,
+                        xaxis=None,
+                        xres=1024,
+                        n_samples=n_samples,
+                        level=95
+                    )
 
-                                    plot_name = 'mc_' + plot_name
+                    if ranef_keys[g]:
+                        filename = prefix + ranef_keys[g] + '_' + plot_name
+                    else:
+                        filename = prefix + plot_name
 
-                                else:
-                                    plot_y = []
-                                    names_cur = []
-                                    for name in names:
-                                        (_, y_cur), density = self.get_plot_data(
-                                            name,
-                                            composite=a,
-                                            scaled=b,
-                                            dirac=dirac,
-                                            plot_type='irf_1d',
-                                            support_start=plot_support_start,
-                                            n_time_units=plot_n_time_units,
-                                            n_time_points=plot_n_time_points,
-                                            plot_rangf=plot_rangf,
-                                            rangf_vals=rangf_vals,
-                                            plot_mean_as_reference=plot_mean_as_reference,
-                                            estimate_density=plot_density
-                                        )
-                                        plot_y.append(y_cur)
-                                        names_cur.append(name)
-                                    for i, plot_y_cur in enumerate(plot_y):
-                                        if len(plot_y_cur) == 1 and len(rangf_vals) > 1:
-                                            plot_y_cur = np.repeat(plot_y_cur, len(rangf_vals), axis=0)
-                                        plot_y[i] = plot_y_cur
-                                    lq = None
-                                    uq = None
-                                    plot_y = np.concatenate(plot_y, axis=-1)
-                                    if summed:
-                                        plot_y = plot_y.sum(axis=-1, keepdims=True)
-                                    if self.standardize_response and not standardize_response:
-                                        plot_y *= self.y_train_sd
+                    if 'rate' in self.impulse_names:
+                        plot_y = plot_y[..., 1:]
+                        if lq is not None:
+                            lq = lq[..., 1:]
+                        if uq is not None:
+                            uq = uq[..., 1:]
+                    else:
+                        names = ['rate'] + names
 
-                                if summed:
-                                    names_cur = ['Sum']
+                    plot_irf(
+                        plot_x,
+                        plot_y,
+                        names,
+                        lq=lq,
+                        uq=uq,
+                        sort_names=sort_names,
+                        prop_cycle_length=prop_cycle_length,
+                        prop_cycle_ix=prop_cycle_ix,
+                        dir=self.outdir,
+                        filename=filename,
+                        irf_name_map=irf_name_map,
+                        plot_x_inches=plot_x_inches,
+                        plot_y_inches=plot_y_inches,
+                        ylim=ylim,
+                        cmap=cmap,
+                        dpi=dpi,
+                        legend=legend,
+                        xlab=xlab,
+                        ylab=ylab,
+                        use_line_markers=use_line_markers,
+                        transparent_background=transparent_background,
+                        dump_source=dump_source
+                    )
 
-                                for g in range(len(rangf_keys)):
-                                    if rangf_keys[g]:
-                                        filename = prefix + rangf_keys[g] + '_' + plot_name
-                                    else:
-                                        filename = prefix + plot_name
-
-                                    plot_irf(
-                                        plot_x,
-                                        plot_y[g],
-                                        names_cur,
-                                        lq=None if lq is None else lq[g],
-                                        uq=None if uq is None else uq[g],
-                                        density=density,
-                                        sort_names=sort_names,
-                                        prop_cycle_length=prop_cycle_length,
-                                        prop_cycle_ix=prop_cycle_ix,
-                                        dir=self.outdir,
-                                        filename=filename,
-                                        irf_name_map=irf_name_map,
-                                        plot_x_inches=plot_x_inches,
-                                        plot_y_inches=plot_y_inches,
-                                        ylim=ylim,
-                                        cmap=cmap,
-                                        dpi=dpi,
-                                        legend=legend,
-                                        xlab=xlab,
-                                        ylab=ylab,
-                                        use_line_markers=use_line_markers,
-                                        transparent_background=transparent_background,
-                                        dump_source=dump_source
-                                    )
-
-                                    # print(names_cur[0])
-                                    # print(names_cur[2])
-                                    # rate_vec = plot_y[g][..., 0]
-                                    # surp_vec = plot_y[g][..., 2]
-                                    # surp_vec_in = np.concatenate([surp_vec, np.zeros(len(surp_vec)-1)], axis=0)
-                                    # surp_neuronal, _ = scipy.signal.deconvolve(surp_vec_in, rate_vec)
-                                    # print(surp_neuronal.shape)
-                                    # plot_y = np.stack(
-                                    #     [
-                                    #         rate_vec,
-                                    #         surp_vec,
-                                    #         surp_neuronal
-                                    #     ],
-                                    #     axis=-1
-                                    # )
-                                    # names_fft = [names_cur[0], names_cur[2], '5-gram surprisal (neuronal)']
-                                    #
-                                    # plot_irf(
-                                    #     plot_x,
-                                    #     plot_y,
-                                    #     names_fft,
-                                    #     dir=self.outdir,
-                                    #     filename='surp_fft.png',
-                                    #     irf_name_map=irf_name_map,
-                                    #     plot_x_inches=plot_x_inches,
-                                    #     plot_y_inches=plot_y_inches,
-                                    #     ylim=ylim,
-                                    #     cmap=cmap,
-                                    #     dpi=dpi,
-                                    #     legend=legend,
-                                    #     xlab=xlab,
-                                    #     ylab=ylab,
-                                    #     use_line_markers=use_line_markers,
-                                    #     transparent_background=transparent_background,
-                                    #     dump_source=dump_source
-                                    # )
-
-                if hasattr(self, 'pc') and self.pc:
-                    for a in switches[0]:
-                        if self.t.has_composed_irf() or a == 'atomic':
-                            for b in switches[1]:
-                                if b == 'scaled':
-                                    if summed:
-                                        plot_name = 'src_irf_%s_%s_summed_%d.png' % (a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'src_irf_%s_%s_summed.png' % (a, b)
-                                    else:
-                                        plot_name = 'src_irf_%s_%s_%d.png' % (a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'src_irf_%s_%s.png' % (a, b)
-                                    names = self.src_plot_tensors[a][b][dirac]['names']
-                                    if irf_ids is not None and len(irf_ids) > 0:
-                                        new_names = []
-                                        for i, name in enumerate(names):
-                                            for ID in irf_ids:
-                                                if ID == name or re.match(ID if ID.endswith('$') else ID + '$',
-                                                                          name) is not None:
-                                                    new_names.append(name)
-                                        names = new_names
-                                    if len(names) > 0:
-                                        if mc:
-                                            if summed:
-                                                samples = []
-                                            else:
-                                                plot_y = []
-                                                lq = []
-                                                uq = []
-                                            for name in names:
-                                                mean_cur, lq_cur, uq_cur, samples_cur = self.ci_curve(
-                                                    self.src_irf_mc[name][a][b],
-                                                    level=level,
-                                                    n_samples=n_samples,
-                                                    n_time_units=plot_n_time_units,
-                                                    n_time_points=plot_n_time_points,
-                                                )
-
-                                                if summed:
-                                                    samples.append(samples_cur)
-                                                else:
-                                                    plot_y.append(mean_cur)
-                                                    lq.append(lq_cur)
-                                                    uq.append(uq_cur)
-
-                                            if summed:
-                                                samples = np.stack(samples, axis=2)
-                                                samples = samples.sum(axis=2, keepdims=True)
-                                                lq = np.percentile(samples, alpha / 2, axis=1)
-                                                uq = np.percentile(samples, 100 - (alpha / 2), axis=1)
-                                                plot_y = samples.mean(axis=1)
-                                            else:
-                                                lq = np.stack(lq, axis=1)
-                                                uq = np.stack(uq, axis=1)
-                                                plot_y = np.stack(plot_y, axis=1)
-
-                                            if self.standardize_response and not standardize_response:
-                                                plot_y = plot_y * self.y_train_sd
-                                                lq = lq * self.y_train_sd
-                                                uq = uq * self.y_train_sd
-
-                                            plot_name = 'mc_' + plot_name
-
-                                        else:
-                                            plot_y = [self.sess.run(self.src_plot_tensors[a][b][dirac]['plot'][i], feed_dict=fd) for i in range(len(self.src_plot_tensors[a][b][dirac]['plot'])) if self.src_plot_tensors[a][b][dirac]['names'][i] in names]
-                                            lq = None
-                                            uq = None
-                                            plot_y = np.concatenate(plot_y, axis=1)
-                                            if summed:
-                                                plot_y = plot_y.sum(axis=1, keepdims=True)
-                                            if self.standardize_response and not standardize_response:
-                                                plot_y = plot_y * self.y_train_sd
-
-                                        if summed:
-                                            names_cur = ['Sum']
-                                        else:
-                                            names_cur = names
-
-                                        plot_irf(
-                                            plot_x,
-                                            plot_y,
-                                            names_cur,
-                                            lq=lq,
-                                            uq=uq,
-                                            density=density,
-                                            sort_names=sort_names,
-                                            prop_cycle_length=prop_cycle_length,
-                                            prop_cycle_ix=prop_cycle_ix,
-                                            dir=self.outdir,
-                                            filename=prefix + plot_name,
-                                            irf_name_map=irf_name_map,
-                                            plot_x_inches=plot_x_inches,
-                                            plot_y_inches=plot_y_inches,
-                                            ylim=ylim,
-                                            cmap=cmap,
-                                            dpi=dpi,
-                                            legend=legend,
-                                            xlab=xlab,
-                                            ylab=ylab,
-                                            use_line_markers=use_line_markers,
-                                            transparent_background=transparent_background,
-                                            dump_source=dump_source
-                                        )
+                # plot_x = self.sess.run(self.support, fd)
+                #
+                # switches = [['atomic'], ['scaled']]
+                # if not self.is_cdrnn:
+                #     if plot_composite:
+                #         switches[0].append('composite')
+                #     if plot_unscaled:
+                #         switches[1].append('unscaled')
+                #
+                # for a in switches[0]:
+                #     if self.t.has_composed_irf() or a == 'atomic':
+                #         for b in switches[1]:
+                #             if summed:
+                #                 plot_name = 'irf_%s_%s_summed_%d.png' %(a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'irf_%s_%s_summed.png' %(a, b)
+                #             else:
+                #                 plot_name = 'irf_%s_%s_%d.png' %(a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'irf_%s_%s.png' %(a, b)
+                #             names = self.get_plot_names(composite=a, scaled=b, dirac=dirac, plot_type='irf_1d', interactions=plot_interactions)
+                #             if irf_ids is not None and len(irf_ids) > 0:
+                #                 new_names = []
+                #                 for i, name in enumerate(names):
+                #                     for ID in irf_ids:
+                #                         if ID==name or re.match(ID if ID.endswith('$') else ID + '$', name) is not None:
+                #                             new_names.append(name)
+                #                 names = new_names
+                #             if len(names) > 0:
+                #                 if mc:
+                #                     names_cur = names[:]
+                #                     if summed:
+                #                         samples = []
+                #                     else:
+                #                         plot_y = []
+                #                         lq = []
+                #                         uq = []
+                #                     for name in names:
+                #                         (_, mean_cur, lq_cur, uq_cur, samples_cur), density = self.get_plot_data(
+                #                             name,
+                #                             composite=a,
+                #                             scaled=b,
+                #                             dirac=dirac,
+                #                             plot_type='irf_1d',
+                #                             level=level,
+                #                             n_samples=n_samples,
+                #                             support_start=plot_support_start,
+                #                             n_time_units=plot_n_time_units,
+                #                             n_time_points=plot_n_time_points,
+                #                             plot_rangf=plot_rangf,
+                #                             rangf_vals=ranef_vals,
+                #                             plot_mean_as_reference=plot_mean_as_reference,
+                #                             estimate_density=plot_density
+                #                         )
+                #
+                #                         if summed:
+                #                             samples.append(samples_cur)
+                #                         else:
+                #                             plot_y.append(mean_cur)
+                #                             lq.append(lq_cur)
+                #                             uq.append(uq_cur)
+                #
+                #                     if summed:
+                #                         samples = np.stack(samples, axis=3)
+                #                         samples = samples.sum(axis=3, keepdims=True)
+                #                         lq = np.percentile(samples, alpha / 2, axis=2)
+                #                         uq = np.percentile(samples, 100 - (alpha / 2), axis=2)
+                #                         plot_y = samples.mean(axis=2)
+                #                     else:
+                #                         lq = np.stack(lq, axis=2)
+                #                         uq = np.stack(uq, axis=2)
+                #                         plot_y = np.stack(plot_y, axis=2)
+                #
+                #                     if self.standardize_response and not standardize_response:
+                #                         plot_y *= self.y_train_sd
+                #                         lq *= self.y_train_sd
+                #                         uq *= self.y_train_sd
+                #
+                #                     plot_name = 'mc_' + plot_name
+                #
+                #                 else:
+                #                     plot_y = []
+                #                     names_cur = []
+                #                     for name in names:
+                #                         (_, y_cur), density = self.get_plot_data(
+                #                             name,
+                #                             composite=a,
+                #                             scaled=b,
+                #                             dirac=dirac,
+                #                             plot_type='irf_1d',
+                #                             support_start=plot_support_start,
+                #                             n_time_units=plot_n_time_units,
+                #                             n_time_points=plot_n_time_points,
+                #                             plot_rangf=plot_rangf,
+                #                             rangf_vals=ranef_vals,
+                #                             plot_mean_as_reference=plot_mean_as_reference,
+                #                             estimate_density=plot_density
+                #                         )
+                #                         plot_y.append(y_cur)
+                #                         names_cur.append(name)
+                #                     for i, plot_y_cur in enumerate(plot_y):
+                #                         if len(plot_y_cur) == 1 and len(ranef_vals) > 1:
+                #                             plot_y_cur = np.repeat(plot_y_cur, len(ranef_vals), axis=0)
+                #                         plot_y[i] = plot_y_cur
+                #                     lq = None
+                #                     uq = None
+                #                     plot_y = np.concatenate(plot_y, axis=-1)
+                #                     if summed:
+                #                         plot_y = plot_y.sum(axis=-1, keepdims=True)
+                #                     if self.standardize_response and not standardize_response:
+                #                         plot_y *= self.y_train_sd
+                #
+                #                 if summed:
+                #                     names_cur = ['Sum']
+                #
+                #                 for g in range(len(ranef_keys)):
+                #                     if ranef_keys[g]:
+                #                         filename = prefix + ranef_keys[g] + '_' + plot_name
+                #                     else:
+                #                         filename = prefix + plot_name
+                #
+                #                     plot_irf(
+                #                         plot_x,
+                #                         plot_y[g],
+                #                         names_cur,
+                #                         lq=None if lq is None else lq[g],
+                #                         uq=None if uq is None else uq[g],
+                #                         density=density,
+                #                         sort_names=sort_names,
+                #                         prop_cycle_length=prop_cycle_length,
+                #                         prop_cycle_ix=prop_cycle_ix,
+                #                         dir=self.outdir,
+                #                         filename=filename,
+                #                         irf_name_map=irf_name_map,
+                #                         plot_x_inches=plot_x_inches,
+                #                         plot_y_inches=plot_y_inches,
+                #                         ylim=ylim,
+                #                         cmap=cmap,
+                #                         dpi=dpi,
+                #                         legend=legend,
+                #                         xlab=xlab,
+                #                         ylab=ylab,
+                #                         use_line_markers=use_line_markers,
+                #                         transparent_background=transparent_background,
+                #                         dump_source=dump_source
+                #                     )
+                #
+                #                     # print(names_cur[0])
+                #                     # print(names_cur[2])
+                #                     # rate_vec = plot_y[g][..., 0]
+                #                     # surp_vec = plot_y[g][..., 2]
+                #                     # surp_vec_in = np.concatenate([surp_vec, np.zeros(len(surp_vec)-1)], axis=0)
+                #                     # surp_neuronal, _ = scipy.signal.deconvolve(surp_vec_in, rate_vec)
+                #                     # print(surp_neuronal.shape)
+                #                     # plot_y = np.stack(
+                #                     #     [
+                #                     #         rate_vec,
+                #                     #         surp_vec,
+                #                     #         surp_neuronal
+                #                     #     ],
+                #                     #     axis=-1
+                #                     # )
+                #                     # names_fft = [names_cur[0], names_cur[2], '5-gram surprisal (neuronal)']
+                #                     #
+                #                     # plot_irf(
+                #                     #     plot_x,
+                #                     #     plot_y,
+                #                     #     names_fft,
+                #                     #     dir=self.outdir,
+                #                     #     filename='surp_fft.png',
+                #                     #     irf_name_map=irf_name_map,
+                #                     #     plot_x_inches=plot_x_inches,
+                #                     #     plot_y_inches=plot_y_inches,
+                #                     #     ylim=ylim,
+                #                     #     cmap=cmap,
+                #                     #     dpi=dpi,
+                #                     #     legend=legend,
+                #                     #     xlab=xlab,
+                #                     #     ylab=ylab,
+                #                     #     use_line_markers=use_line_markers,
+                #                     #     transparent_background=transparent_background,
+                #                     #     dump_source=dump_source
+                #                     # )
+                #
+                # if hasattr(self, 'pc') and self.pc:
+                #     for a in switches[0]:
+                #         if self.t.has_composed_irf() or a == 'atomic':
+                #             for b in switches[1]:
+                #                 if b == 'scaled':
+                #                     if summed:
+                #                         plot_name = 'src_irf_%s_%s_summed_%d.png' % (a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'src_irf_%s_%s_summed.png' % (a, b)
+                #                     else:
+                #                         plot_name = 'src_irf_%s_%s_%d.png' % (a, b, self.global_step.eval(session=self.sess)) if keep_plot_history else 'src_irf_%s_%s.png' % (a, b)
+                #                     names = self.src_plot_tensors[a][b][dirac]['names']
+                #                     if irf_ids is not None and len(irf_ids) > 0:
+                #                         new_names = []
+                #                         for i, name in enumerate(names):
+                #                             for ID in irf_ids:
+                #                                 if ID == name or re.match(ID if ID.endswith('$') else ID + '$',
+                #                                                           name) is not None:
+                #                                     new_names.append(name)
+                #                         names = new_names
+                #                     if len(names) > 0:
+                #                         if mc:
+                #                             if summed:
+                #                                 samples = []
+                #                             else:
+                #                                 plot_y = []
+                #                                 lq = []
+                #                                 uq = []
+                #                             for name in names:
+                #                                 mean_cur, lq_cur, uq_cur, samples_cur = self.ci_curve(
+                #                                     self.src_irf_mc[name][a][b],
+                #                                     level=level,
+                #                                     n_samples=n_samples,
+                #                                     n_time_units=plot_n_time_units,
+                #                                     n_time_points=plot_n_time_points,
+                #                                 )
+                #
+                #                                 if summed:
+                #                                     samples.append(samples_cur)
+                #                                 else:
+                #                                     plot_y.append(mean_cur)
+                #                                     lq.append(lq_cur)
+                #                                     uq.append(uq_cur)
+                #
+                #                             if summed:
+                #                                 samples = np.stack(samples, axis=2)
+                #                                 samples = samples.sum(axis=2, keepdims=True)
+                #                                 lq = np.percentile(samples, alpha / 2, axis=1)
+                #                                 uq = np.percentile(samples, 100 - (alpha / 2), axis=1)
+                #                                 plot_y = samples.mean(axis=1)
+                #                             else:
+                #                                 lq = np.stack(lq, axis=1)
+                #                                 uq = np.stack(uq, axis=1)
+                #                                 plot_y = np.stack(plot_y, axis=1)
+                #
+                #                             if self.standardize_response and not standardize_response:
+                #                                 plot_y = plot_y * self.y_train_sd
+                #                                 lq = lq * self.y_train_sd
+                #                                 uq = uq * self.y_train_sd
+                #
+                #                             plot_name = 'mc_' + plot_name
+                #
+                #                         else:
+                #                             plot_y = [self.sess.run(self.src_plot_tensors[a][b][dirac]['plot'][i], feed_dict=fd) for i in range(len(self.src_plot_tensors[a][b][dirac]['plot'])) if self.src_plot_tensors[a][b][dirac]['names'][i] in names]
+                #                             lq = None
+                #                             uq = None
+                #                             plot_y = np.concatenate(plot_y, axis=1)
+                #                             if summed:
+                #                                 plot_y = plot_y.sum(axis=1, keepdims=True)
+                #                             if self.standardize_response and not standardize_response:
+                #                                 plot_y = plot_y * self.y_train_sd
+                #
+                #                         if summed:
+                #                             names_cur = ['Sum']
+                #                         else:
+                #                             names_cur = names
+                #
+                #                         plot_irf(
+                #                             plot_x,
+                #                             plot_y,
+                #                             names_cur,
+                #                             lq=lq,
+                #                             uq=uq,
+                #                             density=density,
+                #                             sort_names=sort_names,
+                #                             prop_cycle_length=prop_cycle_length,
+                #                             prop_cycle_ix=prop_cycle_ix,
+                #                             dir=self.outdir,
+                #                             filename=prefix + plot_name,
+                #                             irf_name_map=irf_name_map,
+                #                             plot_x_inches=plot_x_inches,
+                #                             plot_y_inches=plot_y_inches,
+                #                             ylim=ylim,
+                #                             cmap=cmap,
+                #                             dpi=dpi,
+                #                             legend=legend,
+                #                             xlab=xlab,
+                #                             ylab=ylab,
+                #                             use_line_markers=use_line_markers,
+                #                             transparent_background=transparent_background,
+                #                             dump_source=dump_source
+                #                         )
 
                 self.set_predict_mode(False)
 

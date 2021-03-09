@@ -91,6 +91,9 @@ def plot_irf(
     :return: ``None``
     """
 
+    while len(plot_x.shape) > 1:
+        plot_x = plot_x[..., 0]
+
     fig, ax = plt.subplots()
     prop_cycle_kwargs = {}
     cm = plt.get_cmap(cmap)
@@ -124,7 +127,7 @@ def plot_irf(
         # ax_d.tick_params(top='off', bottom='off', left='off', right='off', labelleft='off', labelbottom='off')
         ax_d.set_ylabel('Density')
         ax_d.plot(plot_x, density, lw=2, alpha=0.2, color='k', linestyle='dotted', solid_capstyle='butt')
-        ax_d.fill_between(plot_x[:,0], np.zeros_like(density), density, color='k', alpha=0.05)
+        ax_d.fill_between(plot_x, np.zeros_like(density), density, color='k', alpha=0.05)
         ax.set_zorder(ax_d.get_zorder() + 1)
         ax.patch.set_visible(False)
 
@@ -151,7 +154,7 @@ def plot_irf(
             markevery = int(len(plot_y) / 10)
             ax.plot(plot_x, plot_y[:,sort_ix[i]], label=irf_names_processed[sort_ix[i]], lw=2, alpha=0.8, linestyle='-', markevery=markevery, markersize=12, solid_capstyle='butt')
         if uq is not None and lq is not None:
-            ax.fill_between(plot_x[:,0], lq[:,sort_ix[i]], uq[:,sort_ix[i]], alpha=0.25)
+            ax.fill_between(plot_x, lq[:,sort_ix[i]], uq[:,sort_ix[i]], alpha=0.25)
 
     if xlab:
         ax.set_xlabel(xlab, weight='bold')
@@ -413,7 +416,6 @@ def plot_surface(
                 if density is not None:
                     alpha = (density - min(0, density.min()))
                     alpha /= alpha.max()
-                    print(alpha.min(), alpha.max())
                     facecolors[..., -1] = alpha
 
                 if bounds_as_surface and lq_cur is not None:

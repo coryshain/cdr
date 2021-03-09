@@ -24,12 +24,13 @@ if __name__ == '__main__':
     argparser.add_argument('-u', '--unscaled', action='store_true', help='Do not multiply outputs by CDR-fitted coefficients')
     argparser.add_argument('-a', '--algorithm', type=str, default='MAP', help='Algorithm ("sampling" or "MAP") to use for extracting predictions.')
     argparser.add_argument('-A', '--ablated_models', action='store_true', help='Perform convolution using ablated models. Otherwise only convolves using the full model in each ablation set.')
+    argparser.add_argument('--cpu_only', action='store_true', help='Use CPU implementation even if GPU is available.')
     args, unknown = argparser.parse_known_args()
 
     for path in args.config_paths:
         p = Config(path)
 
-        if not p.use_gpu_if_available:
+        if not p.use_gpu_if_available or args.cpu_only:
             os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
         models = filter_models(p.model_list, args.models)

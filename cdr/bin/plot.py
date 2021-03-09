@@ -26,7 +26,7 @@ if __name__ == '__main__':
     argparser.add_argument('-P', '--prop_cycle_length', type=int, default=None, help='Length of plotting properties cycle (defines step size in the color map). If unspecified, inferred from **irf_names**.')
     argparser.add_argument('-I', '--prop_cycle_ix', nargs='*', type=int, default=None, help='Integer indices to use in the properties cycle for each entry in **irf_names**. If unspecified, indices are automatically assigned.')
     argparser.add_argument('-s', '--plot_true_synthetic', action='store_true', help='If the models are fit to synthetic data, also generate plots of the true IRF')
-    argparser.add_argument('-t', '--reference_time', type=float, default=0., help='Reference time to use for CDRNN plots.')
+    argparser.add_argument('-t', '--reference_time', type=float, default=None, help='Reference time to use for CDRNN plots.')
     argparser.add_argument('-p', '--prefix', type=str, default=None, help='Filename prefix to use for outputs. If unspecified, creates prefix based on output path.')
     argparser.add_argument('-u', '--ntimeunits', type=float, default=None, help='Number of time units on x-axis')
     argparser.add_argument('-r', '--resolution', type=float, default=None, help='Number of points on x-axis')
@@ -46,12 +46,13 @@ if __name__ == '__main__':
     argparser.add_argument('-B', '--transparent_background', action='store_true', help='Use transparent background (otherwise white background)')
     argparser.add_argument('-C', '--dump_source', action='store_true', help='Dump plot source arrays to CSV')
     argparser.add_argument('-g', '--config_path', type=str, help='Path to config file specifying plot arguments')
+    argparser.add_argument('--cpu_only', action='store_true', help='Use CPU implementation even if GPU is available.')
     args = argparser.parse_args()
 
     for path in args.paths:
         p = Config(path)
 
-        if not p.use_gpu_if_available:
+        if not p.use_gpu_if_available or args.cpu_only:
             os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
         models = filter_models(p.model_list, args.models, cdr_only=True)
@@ -224,7 +225,6 @@ if __name__ == '__main__':
                 dump_source=args.dump_source,
                 **kwargs
             )
-            
 
             if cdr_model.is_bayesian or cdr_model.has_dropout:
                 cdr_model.make_plots(
