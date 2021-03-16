@@ -112,23 +112,27 @@ class CDRMLE(CDR):
                     intercept_summary = intercept
                 return intercept, intercept_summary
 
-    def initialize_coefficient(self, coef_ids=None, ran_gf=None):
+    def initialize_coefficient(self, coef_ids=None, ran_gf=None, suffix=None):
         if coef_ids is None:
             coef_ids = self.coef_names
+        if suffix is None:
+            suffix = ''
+        elif not suffix.startswith('_'):
+            suffix = '_' + suffix
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if ran_gf is None:
                     coefficient = tf.Variable(
                         tf.zeros([len(coef_ids)], dtype=self.FLOAT_TF),
-                        name='coefficient'
+                        name='coefficient%s' % suffix
                     )
                     coefficient_summary = coefficient
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     coefficient = tf.Variable(
                         tf.zeros([rangf_n_levels, len(coef_ids)], dtype=self.FLOAT_TF),
-                        name='coefficient_by_%s' % sn(ran_gf)
+                        name='coefficient%s_by_%s' % (suffix, sn(ran_gf))
                     )
                     coefficient_summary = coefficient
                 return coefficient, coefficient_summary

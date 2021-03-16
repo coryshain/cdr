@@ -95,22 +95,27 @@ class CDRNNMLE(CDRNN):
 
                 return intercept, intercept_summary
 
-    def initialize_coefficient(self, coef_ids=None, ran_gf=None):
+    def initialize_coefficient(self, coef_ids=None, ran_gf=None, suffix=None):
+        if suffix is None:
+            suffix = ''
+        elif not suffix.startswith('_'):
+            suffix = '_' + suffix
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 units = len(self.impulse_names) + 1
                 if ran_gf is None:
                     coefficient = tf.Variable(
                         tf.zeros([1, 1, units]),
+                        # tf.ones([1, 1, units]) * self.epsilon,
                         dtype=self.FLOAT_TF,
-                        name='coefficient'
+                        name='coefficient%s' % suffix
                     )
                     # coefficient = tf.ones([1, 1, units])
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     coefficient = tf.Variable(
                         tf.zeros([rangf_n_levels, units]),
-                        name='coefficient_by_%s' % (sn(ran_gf))
+                        name='coefficient%s_by_%s' % (suffix, sn(ran_gf))
                     )
                 coefficient_summary = coefficient
 

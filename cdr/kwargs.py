@@ -805,12 +805,6 @@ CDRNN_INITIALIZATION_KWARGS = [
         aliases=['rescale_time', 'rescale_tdelta']
     ),
     Kwarg(
-        'ranef_at_input',
-        False,
-        bool,
-        "Whether to random effects as coefficients on the input features. Otherwise, they will be applied as biases on the hidden state."
-    ),
-    Kwarg(
         'n_layers_input_projection',
         None,
         [int, None],
@@ -998,6 +992,12 @@ CDRNN_INITIALIZATION_KWARGS = [
         None,
         [float, None],
         "Bound on norm of dense kernel dimensions for max-norm regularization. If ``None``, no max-norm regularization."
+    ),
+    Kwarg(
+        'input_dropout_rate',
+        None,
+        [float, None],
+        "Rate at which to drop input_features."
     ),
     Kwarg(
         'input_projection_dropout_rate',

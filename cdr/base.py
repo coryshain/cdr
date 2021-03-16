@@ -1441,7 +1441,7 @@ class Model(object):
         """
         raise NotImplementedError
 
-    def initialize_coefficient(self, coef_ids=None, ran_gf=None):
+    def initialize_coefficient(self, coef_ids=None, ran_gf=None, suffix=None):
         """
         Add coefficients.
         This method must be implemented by subclasses of ``CDR`` and should only be called at model initialization.
@@ -1449,6 +1449,7 @@ class Model(object):
 
         :param coef_ids: ``list`` of ``str``: List of coefficient IDs
         :param ran_gf: ``str`` or ``None``: Name of random grouping factor for random coefficient (if ``None``, constructs a fixed coefficient)
+        :param suffix: ``str`` or ``None``: Suffix to add to coefficient variable name. If ``None``, no suffix.
         :return: 2-tuple of ``Tensor`` ``(coefficient, coefficient_summary)``; ``coefficient`` is the coefficient for use by the model. ``coefficient_summary`` is an identically-shaped representation of the current coefficient values for logging and plotting (can be identical to ``coefficient``). For fixed coefficients, should return a vector of ``len(coef_ids)`` trainable weights. For random coefficients, should return batch-length matrix of trainable weights with ``len(coef_ids)`` columns for each input in the batch. Weights should be initialized around 0.
         """
 
@@ -2515,7 +2516,7 @@ class Model(object):
         :return: ``bool``; whether the impulse is associated with a non-Dirac response function
         """
 
-        return impulse_name not in self.non_dirac_impulses
+        return impulse_name in self.non_dirac_impulses
 
     def fit(self,
             X,
@@ -2787,6 +2788,8 @@ class Model(object):
                             )
 
                         t1_iter = pytime.time()
+                        if self.check_convergence:
+                            stderr('Convergence:    %.2f%%\n' % (100 * self.sess.run(self.proportion_converged) / self.convergence_alpha))
                         stderr('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
 
                     self.save()
@@ -3399,6 +3402,7 @@ class Model(object):
             manipulations=None,
             pair_manipulations=False,
             standardize_response=False,
+            subtract_reference=True,
             xaxis=None,
             xres=1024,
             n_samples=None,
@@ -3705,7 +3709,8 @@ class Model(object):
                     if n_manip:
                         sample_main = self.sess.run(response, feed_dict=fd_main)
                         sample_main = np.reshape(sample_main, (T, n_manip), 'F')
-                        sample_main -= sample_ref
+                        if subtract_reference:
+                            sample_main -= sample_ref
                         if ref_varies_with_x:
                             sample = np.concatenate([sample_ref, sample_main], axis=-1)
                         else:

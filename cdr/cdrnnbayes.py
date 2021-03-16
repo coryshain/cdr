@@ -188,7 +188,11 @@ class CDRNNBayes(CDRNN):
 
                 return intercept, intercept_summary
 
-    def initialize_coefficient(self, coef_ids=None, ran_gf=None):
+    def initialize_coefficient(self, coef_ids=None, ran_gf=None, suffix=None):
+        if suffix is None:
+            suffix = ''
+        elif not suffix.startswith('_'):
+            suffix = '_' + suffix
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 units = len(self.impulse_names) + 1
@@ -200,18 +204,18 @@ class CDRNNBayes(CDRNN):
                     # Posterior distribution
                     coefficient_q_loc = tf.Variable(
                         tf.zeros([1, units]),
-                        name='coefficient_q_loc'
+                        name='coefficient%s_q_loc' % suffix
                     )
 
                     coefficient_q_scale = tf.Variable(
                         tf.ones([1, units]) * self.constraint_fn_inv(coefficient_sd_posterior),
-                        name='coefficient_q_scale'
+                        name='coefficient%s_q_scale' % suffix
                     )
 
                     coefficient_q_dist = Normal(
                         loc=coefficient_q_loc,
                         scale=self.constraint_fn(coefficient_q_scale) + self.epsilon,
-                        name='coefficient_q'
+                        name='coefficient%s_q' % suffix
                     )
 
                     coefficient = tf.cond(self.use_MAP_mode, coefficient_q_dist.mean, coefficient_q_dist.sample)
@@ -223,9 +227,9 @@ class CDRNNBayes(CDRNN):
                         coefficient_prior_dist = Normal(
                             loc=0.,
                             scale=coefficient_sd_prior,
-                            name='coefficient'
+                            name='coefficient%s' % suffix
                         )
-                        self.kl_penalties_base['coefficient'] = {
+                        self.kl_penalties_base['coefficient%s' % suffix] = {
                             'loc': 0.,
                             'scale': coefficient_sd_prior,
                             'val': coefficient_q_dist.kl_divergence(coefficient_prior_dist)
@@ -237,18 +241,18 @@ class CDRNNBayes(CDRNN):
                     # Posterior distribution
                     coefficient_q_loc = tf.Variable(
                         tf.zeros([rangf_n_levels, units], dtype=self.FLOAT_TF),
-                        name='coefficient_q_loc_by_%s' % sn(ran_gf)
+                        name='coefficient%s_q_loc_by_%s' % (suffix, sn(ran_gf))
                     )
 
                     coefficient_q_scale = tf.Variable(
                         tf.ones([rangf_n_levels, units], dtype=self.FLOAT_TF) * self.constraint_fn_inv(coefficient_sd_posterior * self.ranef_to_fixef_prior_sd_ratio),
-                        name='coefficient_q_scale_by_%s' % sn(ran_gf)
+                        name='coefficient%s_q_scale_by_%s' % (suffix, sn(ran_gf))
                     )
 
                     coefficient_q_dist = Normal(
                         loc=coefficient_q_loc,
                         scale=self.constraint_fn(coefficient_q_scale) + self.epsilon,
-                        name='coefficient_q_by_%s' % sn(ran_gf)
+                        name='coefficient%s_q_by_%s' % (suffix, sn(ran_gf))
                     )
 
                     coefficient = tf.cond(self.use_MAP_mode, coefficient_q_dist.mean, coefficient_q_dist.sample)
@@ -260,9 +264,9 @@ class CDRNNBayes(CDRNN):
                         coefficient_prior_dist = Normal(
                             loc=0.,
                             scale=coefficient_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
-                            name='coefficient_by_%s' % sn(ran_gf)
+                            name='coefficient%s_by_%s' % (suffix, sn(ran_gf))
                         )
-                        self.kl_penalties_base['coefficient_by_%s' % sn(ran_gf)] = {
+                        self.kl_penalties_base['coefficient%s_by_%s' % (suffix, sn(ran_gf))] = {
                             'loc': 0.,
                             'scale': coefficient_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
                             'val': coefficient_q_dist.kl_divergence(coefficient_prior_dist)
