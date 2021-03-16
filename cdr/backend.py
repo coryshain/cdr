@@ -118,6 +118,7 @@ def get_dropout(
         rate,
         training=True,
         use_MAP_mode=True,
+        rescale=True,
         noise_shape=None,
         name=None,
         constant=None,
@@ -133,6 +134,7 @@ def get_dropout(
                     noise_shape=noise_shape,
                     training=training,
                     use_MAP_mode=use_MAP_mode,
+                    rescale=rescale,
                     constant=constant,
                     name=name,
                     reuse=reuse,
@@ -2189,6 +2191,7 @@ class DropoutLayer(object):
             noise_shape=None,
             training=False,
             use_MAP_mode=True,
+            rescale=True,
             constant=None,
             name=None,
             reuse=tf.AUTO_REUSE,
@@ -2198,6 +2201,7 @@ class DropoutLayer(object):
         self.noise_shape = noise_shape
         self.training = training
         self.use_MAP_mode = use_MAP_mode
+        self.rescale = rescale
         self.constant = constant
         self.name = name
         self.reuse = reuse
@@ -2281,6 +2285,17 @@ class DropoutLayer(object):
                     defaults = tf.ones_like(inputs) * self.constant
                     out = tf.where(dropout_mask, inputs, defaults)
                     # out = tf.Print(out, ['in', inputs, 'mask', dropout_mask, 'defaults', defaults, 'output', out], summarize=100)
+
+                if self.rescale:
+                    def rescale(x=out, rate=self.rate):
+                        out = x * (1. / (1. - rate))
+                        return out
+
+                    out = tf.cond(
+                        tf.logical_or(self.training, tf.logical_not(self.use_MAP_mode)),
+                        rescale,
+                        lambda: out
+                    )
 
                 return out
 

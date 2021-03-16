@@ -81,9 +81,10 @@ class CDRNN(Model):
             setattr(self, kwarg.key, kwargs.pop(kwarg.key, kwarg.default_value))
 
     def _initialize_metadata(self):
+        self.is_cdrnn = True
+
         super(CDRNN, self)._initialize_metadata()
 
-        self.is_cdrnn = True
         self.has_dropout = self.input_projection_dropout_rate or \
                            self.rnn_h_dropout_rate or \
                            self.rnn_c_dropout_rate or \
@@ -461,6 +462,7 @@ class CDRNN(Model):
                         self.input_dropout_rate,
                         training=self.training,
                         use_MAP_mode=self.use_MAP_mode,
+                        rescale=False,
                         name='input_dropout',
                         session=self.sess
                     )
@@ -468,6 +470,7 @@ class CDRNN(Model):
                         self.input_dropout_rate,
                         training=self.training,
                         use_MAP_mode=self.use_MAP_mode,
+                        rescale=False,
                         name='time_X_dropout',
                         session=self.sess
                     )
@@ -608,6 +611,7 @@ class CDRNN(Model):
                     noise_shape=[None, None, 1],
                     training=self.training,
                     use_MAP_mode=self.use_MAP_mode,
+                    rescale=False,
                     name='rnn_dropout',
                     session=self.sess
                 )
@@ -811,9 +815,9 @@ class CDRNN(Model):
                         self.coefficient = self.coefficient_fixed
                         self._regularize(self.coefficient, type='coefficient', var_name=reg_name('coefficient'))
 
-                    self.coefficient_irf_fixed, self.coefficient_irf_fixed_summary = self.initialize_coefficient(ran_gf=None, suffix='irf')
-                    self.coefficient_irf = self.coefficient_irf_fixed
-                    self._regularize(self.coefficient_irf, type='coefficient', var_name=reg_name('coefficient_irf'))
+                    self.coefficient_irf_in_fixed, self.coefficient_irf_in_fixed_summary = self.initialize_coefficient(ran_gf=None, suffix='irf_in')
+                    self.coefficient_irf_in = self.coefficient_irf_in_fixed
+                    self._regularize(self.coefficient_irf_in, type='coefficient', var_name=reg_name('coefficient_irf_in'))
                     # TODO: Add named Tensorboard logs
 
                 # INTERCEPT DELTA
@@ -886,8 +890,8 @@ class CDRNN(Model):
                     if not self.direct_irf:
                         self.coefficient_ran = []
                         self.coefficient_ran_matrix = []
-                    self.coefficient_irf_ran = []
-                    self.coefficient_irf_ran_matrix = []
+                    self.coefficient_irf_in_ran = []
+                    self.coefficient_irf_in_ran_matrix = []
                 self.rnn_h_ran_matrix = [[] for l in range(self.n_layers_rnn)]
                 self.rnn_h_ran = [[] for l in range(self.n_layers_rnn)]
                 self.rnn_c_ran_matrix = [[] for l in range(self.n_layers_rnn)]
@@ -913,6 +917,7 @@ class CDRNN(Model):
                         self.ranef_dropout_rate,
                         training=self.training,
                         use_MAP_mode=tf.constant(True, dtype=tf.bool),
+                        rescale=False,
                         constant=self.gf_defaults,
                         name='ranef_dropout',
                         session=self.sess
@@ -998,32 +1003,32 @@ class CDRNN(Model):
     
                                 self.coefficient += tf.expand_dims(coefficient_ran, axis=-2)
 
-                            coefficient_irf_ran_matrix_cur, coefficient_irf_ran_matrix_cur_summary = self.initialize_coefficient(ran_gf=gf, suffix='irf')
-                            coefficient_irf_ran_matrix_cur -= tf.reduce_mean(coefficient_irf_ran_matrix_cur, axis=0, keepdims=True)
-                            coefficient_irf_ran_matrix_cur_summary -= tf.reduce_mean(coefficient_irf_ran_matrix_cur_summary, axis=0, keepdims=True)
-                            self._regularize(coefficient_irf_ran_matrix_cur, type='ranef', var_name=reg_name('coefficient_irf_by_%s' % (sn(gf))))
+                            coefficient_irf_in_ran_matrix_cur, coefficient_irf_in_ran_matrix_cur_summary = self.initialize_coefficient(ran_gf=gf, suffix='irf_in')
+                            coefficient_irf_in_ran_matrix_cur -= tf.reduce_mean(coefficient_irf_in_ran_matrix_cur, axis=0, keepdims=True)
+                            coefficient_irf_in_ran_matrix_cur_summary -= tf.reduce_mean(coefficient_irf_in_ran_matrix_cur_summary, axis=0, keepdims=True)
+                            self._regularize(coefficient_irf_in_ran_matrix_cur, type='ranef', var_name=reg_name('coefficient_irf_in_by_%s' % (sn(gf))))
 
                             if self.log_random:
                                 tf.summary.histogram(
-                                    sn('by_%s/coefficient_irf' % sn(gf)),
-                                    coefficient_irf_ran_matrix_cur_summary,
+                                    sn('by_%s/coefficient_irf_in' % sn(gf)),
+                                    coefficient_irf_in_ran_matrix_cur_summary,
                                     collections=['random']
                                 )
 
-                            coefficient_irf_ran_matrix_cur = tf.concat(
+                            coefficient_irf_in_ran_matrix_cur = tf.concat(
                                 [
-                                    coefficient_irf_ran_matrix_cur,
+                                    coefficient_irf_in_ran_matrix_cur,
                                     tf.zeros([1, len(self.impulse_names) + 1])
                                 ],
                                 axis=0
                             )
 
-                            coefficient_irf_ran = tf.gather(coefficient_irf_ran_matrix_cur, gf_y)
+                            coefficient_irf_in_ran = tf.gather(coefficient_irf_in_ran_matrix_cur, gf_y)
 
-                            self.coefficient_irf_ran_matrix.append(coefficient_irf_ran_matrix_cur)
-                            self.coefficient_irf_ran.append(coefficient_irf_ran)
+                            self.coefficient_irf_in_ran_matrix.append(coefficient_irf_in_ran_matrix_cur)
+                            self.coefficient_irf_in_ran.append(coefficient_irf_in_ran)
 
-                            self.coefficient_irf += tf.expand_dims(coefficient_irf_ran, axis=-2)
+                            self.coefficient_irf_in += tf.expand_dims(coefficient_irf_in_ran, axis=-2)
 
                         # Random rnn initialization offsets
                         for l in range(self.n_layers_rnn):
@@ -1418,7 +1423,7 @@ class CDRNN(Model):
                 if self.use_coefficient:
                     if not self.direct_irf:
                         coef = self.coefficient
-                    coef_irf = self.coefficient_irf
+                    coef_irf_in = self.coefficient_irf_in
                 if self.heteroskedastic:
                     error_params_b = self.error_params_b
                 if self.nonstationary_intercept:
@@ -1436,7 +1441,7 @@ class CDRNN(Model):
                     if self.use_coefficient and self.is_mixed_model:
                         if not self.direct_irf:
                             coef = tf.gather(coef, tile_ix, axis=0)
-                        coef_irf = self.coefficient_irf
+                        coef_irf_in = self.coefficient_irf_in
                     h = tf.gather(h, tile_ix, axis=0)
                     X = tf.tile(X, [R, 1 ,1])
                     if not self.direct_irf:
@@ -1452,7 +1457,7 @@ class CDRNN(Model):
                         b_int = tf.gather(b_int, tile_ix_int, axis=0)
 
                 if self.use_coefficient: # coefs on inputs to IRF
-                    X *= coef_irf
+                    X *= coef_irf_in
 
                 if self.nonstationary_intercept:
                     intercept_delta_l1 = W_int * time_y + b_int
@@ -1533,15 +1538,15 @@ class CDRNN(Model):
                 if not self.normalize_after_activation:
                     irf_l1 = get_activation(self.irf_inner_activation, session=self.sess)(irf_l1)
 
-                if self.direct_irf:
-                    y = self.irf(irf_l1)
-                else:
-                    y = self.irf(irf_l1) * X_src # 1st dim is deconvolutional bias (rate)
+                y = self.irf(irf_l1)
+                if not self.direct_irf:
+                    # y = tf.Print(y, [y, tf.reduce_mean(y), tf.reduce_min(y), tf.reduce_max(y)], summarize=1000)
+                    y = y * X_src # 1st dim is deconvolutional bias (rate)
                 if time_X_mask is not None:
                     y *= time_X_mask[..., None]
                 y = tf.reduce_sum(y, axis=1)
                 X_conv = y
-                if not self.direct_irf: # coefs on convolved predictors
+                if not self.direct_irf and self.use_coefficient: # coefs on convolved predictors
                     X_conv = X_conv * tf.squeeze(coef, axis=-2)
                 y = tf.reduce_sum(X_conv, axis=-1, keepdims=True)
 

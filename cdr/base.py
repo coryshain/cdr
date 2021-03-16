@@ -361,8 +361,10 @@ class Model(object):
         self.sess = tf.Session(graph=self.g, config=tf_config)
 
     def _initialize_metadata(self):
-        self.is_bayesian = False
-        self.is_cdrnn = False
+        if not hasattr(self, 'is_bayesian'):
+            self.is_bayesian = False
+        if not hasattr(self, 'is_cdrnn'):
+            self.is_cdrnn = False
 
         ## Compute secondary data from intialization settings
         self.FLOAT_TF = getattr(tf, self.float_type)
@@ -4046,7 +4048,7 @@ class Model(object):
 
                 # Curvature plots
                 if generate_curvature_plots:
-                    names = [x for x in self.impulse_names if (self.is_non_dirac(x) and  x != 'rate')]
+                    names = [x for x in self.impulse_names if (self.is_non_dirac(x) and x != 'rate')]
 
                     if plot_rangf:
                         manipulations = [{'ranef': {x: y}} for x, y in zip(ranef_gf_keys[1:], ranef_vals_2[1:])]
