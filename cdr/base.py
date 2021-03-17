@@ -2625,7 +2625,6 @@ class Model(object):
 
         if False:
             self.make_plots(
-                irf_name_map=self.irf_name_map,
                 plot_interactions=self.plot_interactions,
                 reference_time=self.reference_time,
                 plot_n_time_units=self.plot_n_time_units,
@@ -2726,7 +2725,6 @@ class Model(object):
                             # if self.global_batch_step.eval(session=self.sess) % 1000 == 0:
                             #     self.save()
                             #     self.make_plots(
-                            #         irf_name_map=self.irf_name_map,
                             #         plot_interactions=self.plot_interactions,
                             #         plot_t_interaction=self.plot_t_interaction,
                             #         plot_n_time_units=self.plot_n_time_units,
@@ -2772,7 +2770,6 @@ class Model(object):
                         if self.save_freq > 0 and self.global_step.eval(session=self.sess) % self.save_freq == 0:
                             self.save()
                             self.make_plots(
-                                irf_name_map=self.irf_name_map,
                                 plot_interactions=self.plot_interactions,
                                 reference_time=self.reference_time,
                                 plot_n_time_units=self.plot_n_time_units,
@@ -2801,7 +2798,6 @@ class Model(object):
                     # variance of the output distribution for computing log likelihood.
 
                     self.make_plots(
-                        irf_name_map=self.irf_name_map,
                         plot_interactions=self.plot_interactions,
                         reference_time=self.reference_time,
                         plot_n_time_units=self.plot_n_time_units,
@@ -2821,7 +2817,6 @@ class Model(object):
                     if self.is_bayesian or self.has_dropout:
                         # Generate plots with 95% credible intervals
                         self.make_plots(
-                            irf_name_map=self.irf_name_map,
                             plot_interactions=self.plot_interactions,
                             reference_time=self.reference_time,
                             plot_n_time_units=self.plot_n_time_units,
@@ -3406,6 +3401,8 @@ class Model(object):
             standardize_response=False,
             subtract_reference=True,
             xaxis=None,
+            xmin=None,
+            xmax=None,
             xres=1024,
             n_samples=None,
             level=95
@@ -3476,12 +3473,16 @@ class Model(object):
                             lq = self.impulse_quantiles_arr[qix][ix]
                             uq = self.impulse_quantiles_arr[self.N_QUANTILES - qix - 1][ix]
                             select = np.isclose(uq - lq, 0)
-                        xmin = lq
-                        xmax = uq
+                        if xmin is None:
+                            xmin = lq
+                        if xmax is None:
+                            xmax = uq
                         X_var = (vbase * (xmax - xmin) + xmin)
                     elif len(xaxis) == 2:
-                        xmin = xaxis[0]
-                        xmax = xaxis[1]
+                        if xmin is None:
+                            xmin = xaxis[0]
+                        if xmax is None:
+                            xmax = xaxis[1]
                         X_var = (vbase * (xmax - xmin) + xmin)
                     else:
                         X_var = np.array(xaxis)
@@ -3497,12 +3498,16 @@ class Model(object):
 
                 if xvar == 'time_X':
                     if xaxis is None:
-                        xmin = self.time_X_mean - self.time_X_sd
-                        xmax = self.time_X_mean + self.time_X_sd
+                        if xmin is None:
+                            xmin = self.time_X_mean - self.time_X_sd
+                        elif xmax is None:
+                            xmax = self.time_X_mean + self.time_X_sd
                         time_X_var = (vbase * (xmax - xmin) + xmin)
                     elif len(xaxis) == 2:
-                        xmin = xaxis[0]
-                        xmax = xaxis[1]
+                        if xmin is None:
+                            xmin = xaxis[0]
+                        if xmax is None:
+                            xmax = xaxis[1]
                         time_X_var = (vbase * (xmax - xmin) + xmin)
                     else:
                         time_X_var = np.array(xaxis)
@@ -3518,12 +3523,16 @@ class Model(object):
 
                 if xvar == 't_delta':
                     if xaxis is None:
-                        xmin = 0
-                        xmax = self.plot_n_time_units
+                        if xmin is None:
+                            xmin = 0
+                        if xmax is None:
+                            xmax = self.plot_n_time_units
                         t_delta_var = (vbase * (xmax - xmin) + xmin)
                     elif len(xaxis) == 2:
-                        xmin = xaxis[0]
-                        xmax = xaxis[1]
+                        if xmin is None:
+                            xmin = xaxis[0]
+                        if xmax is None:
+                            xmax = xaxis[1]
                         t_delta_var = (vbase * (xmax - xmin) + xmin)
                     else:
                         t_delta_var = np.array(xaxis)
@@ -3950,6 +3959,9 @@ class Model(object):
         assert not plot_density, 'Density plotting is currently broken'
         assert not mc or self.is_bayesian or self.has_dropout, 'Monte Carlo estimation of credible intervals (mc=True) is only supported for Bayesian models or models trained using dropout.'
 
+        if irf_name_map is None:
+            irf_name_map = self.irf_name_map
+
         if plot_dirac:
             dirac = 'dirac'
         else:
@@ -4248,6 +4260,8 @@ class Model(object):
                         pair_manipulations=False,
                         standardize_response=standardize_response,
                         xaxis=None,
+                        xmin=0,
+                        xmax=plot_n_time_units,
                         xres=1024,
                         n_samples=n_samples,
                         level=95
