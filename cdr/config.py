@@ -101,7 +101,7 @@ class Config(object):
         # CDR Settings  #
         #################
 
-        self.global_cdr_settings = self.build_cdr_settings(cdr_settings)
+        self.global_cdr_settings = self.build_cdr_settings(cdr_settings, add_defaults=False)
 
         ############
         # Model(s) #
@@ -203,11 +203,12 @@ class Config(object):
         else:
             raise ValueError('There is no model named "%s" defined in the config file.' %model_name)
 
-    def build_cdr_settings(self, settings, global_settings=None, is_cdr=True, is_cdrnn=False):
+    def build_cdr_settings(self, settings, add_defaults=True, global_settings=None, is_cdr=True, is_cdrnn=False):
         """
         Given a settings object parsed from a config file, compute CDR parameter dictionary.
 
         :param settings: settings from a ``ConfigParser`` object.
+        :param add_defaults: ``bool``; whether to add default settings not explicitly specified in the config.
         :param global_settings: ``dict`` or ``None``; dictionary of global defaults for parameters missing from **settings**.
         :param is_cdr: ``bool``; whether this is a CDR(NN) model.
         :param is_cdrnn: ``bool``; whether this is a CDRNN model.
@@ -235,68 +236,89 @@ class Config(object):
             # in the config (defaults are ignored).
 
             for kwarg in MODEL_INITIALIZATION_KWARGS:
-                if kwarg.in_settings(settings) or kwarg.key not in global_settings:
-                    out[kwarg.key] = kwarg.kwarg_from_config(settings)
-                else:
-                    out[kwarg.key] = global_settings[kwarg.key]
-
-            # CDRNN initialization keyword arguments
-            for kwarg in CDRNN_INITIALIZATION_KWARGS:
-                if is_cdrnn:
+                if add_defaults:
                     if kwarg.in_settings(settings) or kwarg.key not in global_settings:
                         out[kwarg.key] = kwarg.kwarg_from_config(settings)
                     else:
                         out[kwarg.key] = global_settings[kwarg.key]
+                elif kwarg.in_settings(settings):
+                    out[kwarg.key] = kwarg.kwarg_from_config(settings)
+
+            # CDRNN initialization keyword arguments
+            for kwarg in CDRNN_INITIALIZATION_KWARGS:
+                if is_cdrnn:
+                    if add_defaults:
+                        if kwarg.in_settings(settings) or kwarg.key not in global_settings:
+                            out[kwarg.key] = kwarg.kwarg_from_config(settings)
+                        else:
+                            out[kwarg.key] = global_settings[kwarg.key]
+                    elif kwarg.in_settings(settings):
+                        out[kwarg.key] = kwarg.kwarg_from_config(settings)
                 elif kwarg.in_settings(settings) and not kwarg.key in out:
                     out[kwarg.key] = kwarg.kwarg_from_config(settings)
 
             # CDRNNBayes initialization keyword arguments
             for kwarg in CDRNNBAYES_INITIALIZATION_KWARGS:
                 if is_cdrnn and is_bayes:
-                    if kwarg.in_settings(settings) or kwarg.key not in global_settings:
+                    if add_defaults:
+                        if kwarg.in_settings(settings) or kwarg.key not in global_settings:
+                            out[kwarg.key] = kwarg.kwarg_from_config(settings)
+                        else:
+                            out[kwarg.key] = global_settings[kwarg.key]
+                    elif kwarg.in_settings(settings):
                         out[kwarg.key] = kwarg.kwarg_from_config(settings)
-                    else:
-                        out[kwarg.key] = global_settings[kwarg.key]
                 elif kwarg.in_settings(settings) and not kwarg.key in out:
                     out[kwarg.key] = kwarg.kwarg_from_config(settings)
 
             # CDRNNMLE initialization keyword arguments
             for kwarg in CDRNNMLE_INITIALIZATION_KWARGS:
                 if is_cdrnn and not is_bayes:
-                    if kwarg.in_settings(settings) or kwarg.key not in global_settings:
+                    if add_defaults:
+                        if kwarg.in_settings(settings) or kwarg.key not in global_settings:
+                            out[kwarg.key] = kwarg.kwarg_from_config(settings)
+                        else:
+                            out[kwarg.key] = global_settings[kwarg.key]
+                    elif kwarg.in_settings(settings):
                         out[kwarg.key] = kwarg.kwarg_from_config(settings)
-                    else:
-                        out[kwarg.key] = global_settings[kwarg.key]
                 elif kwarg.in_settings(settings) and not kwarg.key in out:
                     out[kwarg.key] = kwarg.kwarg_from_config(settings)
 
             # CDR initialization keyword arguments
             for kwarg in CDR_INITIALIZATION_KWARGS:
                 if not is_cdrnn:
-                    if kwarg.in_settings(settings) or kwarg.key not in global_settings:
+                    if add_defaults:
+                        if kwarg.in_settings(settings) or kwarg.key not in global_settings:
+                            out[kwarg.key] = kwarg.kwarg_from_config(settings)
+                        else:
+                            out[kwarg.key] = global_settings[kwarg.key]
+                    elif kwarg.in_settings(settings):
                         out[kwarg.key] = kwarg.kwarg_from_config(settings)
-                    else:
-                        out[kwarg.key] = global_settings[kwarg.key]
                 elif kwarg.in_settings(settings) and not kwarg.key in out:
                     out[kwarg.key] = kwarg.kwarg_from_config(settings)
 
             # CDRBayes initialization keyword arguments
             for kwarg in CDRBAYES_INITIALIZATION_KWARGS:
                 if not is_cdrnn and is_bayes:
-                    if kwarg.in_settings(settings) or kwarg.key not in global_settings:
+                    if add_defaults:
+                        if kwarg.in_settings(settings) or kwarg.key not in global_settings:
+                            out[kwarg.key] = kwarg.kwarg_from_config(settings)
+                        else:
+                            out[kwarg.key] = global_settings[kwarg.key]
+                    elif kwarg.in_settings(settings):
                         out[kwarg.key] = kwarg.kwarg_from_config(settings)
-                    else:
-                        out[kwarg.key] = global_settings[kwarg.key]
                 elif kwarg.in_settings(settings) and not kwarg.key in out:
                     out[kwarg.key] = kwarg.kwarg_from_config(settings)
 
             # CDRMLE initialization keyword arguments
             for kwarg in CDRMLE_INITIALIZATION_KWARGS:
                 if not is_cdrnn and not is_bayes:
-                    if kwarg.in_settings(settings) or kwarg.key not in global_settings:
+                    if add_defaults:
+                        if kwarg.in_settings(settings) or kwarg.key not in global_settings:
+                            out[kwarg.key] = kwarg.kwarg_from_config(settings)
+                        else:
+                            out[kwarg.key] = global_settings[kwarg.key]
+                    elif kwarg.in_settings(settings):
                         out[kwarg.key] = kwarg.kwarg_from_config(settings)
-                    else:
-                        out[kwarg.key] = global_settings[kwarg.key]
                 elif kwarg.in_settings(settings) and not kwarg.key in out:
                     out[kwarg.key] = kwarg.kwarg_from_config(settings)
 
