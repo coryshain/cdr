@@ -548,10 +548,10 @@ MODEL_INITIALIZATION_KWARGS = [
         "Size of step by predictor to take above reference in univariate IRF plots. Structured as space-delimited pairs ``NAME=FLOAT``. Any predictor without a specified step size will step 1 SD from training set."
     ),
     Kwarg(
-        'plot_mean_as_reference',
-        True,
-        bool,
-        "Whether to use predictor means as reference values by default. If ``False``, use 0."
+        'plot_step_default',
+        1.,
+        [str, float],
+        "Default size of step to take above reference in univariate IRF plots, if not specified in **plot_step**. Either a float or the string ``'sd'``, which indicates training sample standard deviation."
     ),
     Kwarg(
         'keep_plot_history',
@@ -600,7 +600,13 @@ CDR_INITIALIZATION_KWARGS = [
         True,
         bool,
         "Check whether inputs and parameters to IRF obey constraints. Imposes a small performance cost but helps catch and report bugs in the model."
-    )
+    ),
+    Kwarg(
+        'default_reference_type',
+        0.,
+        ['mean', 0.],
+        "Reference stimulus to use by default for plotting and effect estimation. If `0`, zero vector. If `mean`, training set mean by predictor."
+    ),
 ]
 
 CDRMLE_INITIALIZATION_KWARGS = [
@@ -1092,7 +1098,13 @@ CDRNN_INITIALIZATION_KWARGS = [
         None,
         [float, None],
         "Standard deviation of jitter injected into inputs (predictors and timesteps) during training. If ``0`` or ``None``, no input jitter."
-    )
+    ),
+    Kwarg(
+        'default_reference_type',
+        'mean',
+        ['mean', 0.],
+        "Reference stimulus to use by default for plotting and effect estimation. If `0`, zero vector. If `mean`, training set mean by predictor."
+    ),
 ]
 
 CDRNNMLE_INITIALIZATION_KWARGS = [

@@ -3141,7 +3141,7 @@ class CDR(Model):
             t_interaction=0.,
             plot_rangf=False,
             rangf_vals=None,
-            plot_mean_as_reference=True,
+            reference_type=None,
             estimate_density=False
     ):
         if rangf_vals is None:

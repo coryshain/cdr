@@ -134,6 +134,7 @@ if __name__ == '__main__':
             cdr_model = load_cdr(p.outdir + '/' + m_path)
 
             kwargs = {
+                'reference_type': p['default_reference_type'],
                 'plot_n_time_units': p['plot_n_time_units'] if n_time_units is None else n_time_units,
                 'plot_n_time_points': p['plot_n_time_points'] if resolution is None else resolution,
                 'surface_plot_n_time_points': p['surface_plot_n_time_points'] if resolution is None else resolution,

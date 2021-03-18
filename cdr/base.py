@@ -483,6 +483,10 @@ class Model(object):
             else:
                 self.y_sd_init = self.y_train_sd
 
+        self.output_distr_params = ['loc', 'sd']
+        if self.asymmetric_error:
+            self.output_distr_params = ['skewness', 'tailweight']
+
         if self.impulse_df_ix is None:
             self.impulse_df_ix = np.zeros(len(self.form.t.impulses()))
         self.impulse_df_ix = np.array(self.impulse_df_ix, dtype=self.INT_NP)
@@ -530,7 +534,7 @@ class Model(object):
         self.reference_map = reference_map
         for x in self.impulse_names:
             if not x in self.reference_map:
-                if self.plot_mean_as_reference and not x in self.indicators:
+                if self.default_reference_type == 'mean' and not x in self.indicators:
                     self.reference_map[x] = self.impulse_means[x]
                 else:
                     self.reference_map[x] = 0
@@ -548,8 +552,10 @@ class Model(object):
             if not x in self.plot_step_map:
                 if x in self.indicators:
                     self.plot_step_map[x] = 1
-                else:
+                elif isinstance(self.plot_step_default, str) and self.plot_step_default.lower() == 'sd':
                     self.plot_step_map[x] = self.impulse_sds[x]
+                else:
+                    self.plot_step_map[x] = self.plot_step_default
         s = self.plot_step_map
         s = np.array([s[x] for x in self.impulse_names])
         self.plot_step_arr = s
@@ -3383,7 +3389,7 @@ class Model(object):
             t_interaction=0.,
             plot_rangf=False,
             rangf_vals=None,
-            plot_mean_as_reference=True,
+            reference_type=None,
             estimate_density=False
     ):
         raise NotImplementedError
@@ -3400,6 +3406,7 @@ class Model(object):
             pair_manipulations=False,
             standardize_response=False,
             subtract_reference=True,
+            reference_type=None,
             xaxis=None,
             xmin=None,
             xmax=None,
@@ -3409,6 +3416,7 @@ class Model(object):
     ):
         with self.sess.as_default():
             with self.sess.graph.as_default():
+
                 n_impulse = len(self.impulse_names)
                 vbase = np.linspace(0., 1., xres)
                 if manipulations is None:
@@ -3427,7 +3435,12 @@ class Model(object):
                 xplot = None
 
                 # Initialize predictor reference
-                X_ref_arr = np.copy(self.reference_arr)
+                if reference_type is None:
+                    X_ref_arr = np.copy(self.reference_arr)
+                elif reference_type == 'mean':
+                    X_ref_arr = np.copy(self.impulse_means_arr)
+                else:
+                    X_ref_arr = np.zeros_like(self.reference_arr)
                 if X_ref is None:
                     X_ref = {}
                 for x in X_ref:
@@ -3882,7 +3895,7 @@ class Model(object):
             plot_n_time_points=1000,
             plot_support_start=0.,
             surface_plot_n_time_points=1024,
-            plot_mean_as_reference=True,
+            reference_type=None,
             generate_irf_surface_plots=False,
             generate_interaction_surface_plots=False,
             generate_curvature_plots=False,
@@ -3932,7 +3945,7 @@ class Model(object):
         :param plot_rangf: ``bool``; plot all (marginal) random effects.
         :param plot_n_time_units: ``float``; number if time units to use for plotting.
         :param plot_support_start: ``float``; start time for IRF plots.
-        :param plot_mean_as_reference: ``bool``; whether to use the predictor means as baseline reference (otherwise use zero). CDRNN only.
+        :param reference_type: ``bool``; whether to use the predictor means as baseline reference (otherwise use zero). CDRNN only.
         :param generate_irf_surface_plots: ``bool``; whether to plot IRF surfaces. CDRNN only.
         :param generate_interaction_surface_plots: ``bool``; whether to plot IRF interaction surfaces. CDRNN only.
         :param generate_curvature_plots: ``bool``; whether to plot IRF curvature at time **reference_time**. CDRNN only.
@@ -4082,6 +4095,7 @@ class Model(object):
                             manipulations=manipulations,
                             pair_manipulations=True,
                             standardize_response=standardize_response,
+                            reference_type=reference_type,
                             xaxis=None,
                             xres=1024,
                             n_samples=n_samples,
@@ -4149,7 +4163,7 @@ class Model(object):
                                         t_interaction=reference_time,
                                         plot_rangf=plot_rangf,
                                         rangf_vals=ranef_vals,
-                                        plot_mean_as_reference=plot_mean_as_reference,
+                                        reference_type=reference_type,
                                         estimate_density=plot_density
                                     )
 
@@ -4169,7 +4183,7 @@ class Model(object):
                                         t_interaction=reference_time,
                                         plot_rangf=plot_rangf,
                                         rangf_vals=ranef_vals,
-                                        plot_mean_as_reference=plot_mean_as_reference,
+                                        reference_type=reference_type,
                                         estimate_density=plot_density
                                     )
 
@@ -4259,6 +4273,7 @@ class Model(object):
                         manipulations=manipulations,
                         pair_manipulations=False,
                         standardize_response=standardize_response,
+                        reference_type=reference_type,
                         xaxis=None,
                         xmin=0,
                         xmax=plot_n_time_units,
@@ -4353,7 +4368,7 @@ class Model(object):
                 #                             n_time_points=plot_n_time_points,
                 #                             plot_rangf=plot_rangf,
                 #                             rangf_vals=ranef_vals,
-                #                             plot_mean_as_reference=plot_mean_as_reference,
+                #                             reference_type=reference_type,
                 #                             estimate_density=plot_density
                 #                         )
                 #
@@ -4397,7 +4412,7 @@ class Model(object):
                 #                             n_time_points=plot_n_time_points,
                 #                             plot_rangf=plot_rangf,
                 #                             rangf_vals=ranef_vals,
-                #                             plot_mean_as_reference=plot_mean_as_reference,
+                #                             reference_type=reference_type,
                 #                             estimate_density=plot_density
                 #                         )
                 #                         plot_y.append(y_cur)

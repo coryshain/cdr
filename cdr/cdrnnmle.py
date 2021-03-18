@@ -393,6 +393,7 @@ class CDRNNMLE(CDRNN):
                     name='y_sd_base_unconstrained'
                 )
                 self.y_sd = self.constraint_fn(self.y_sd_base_unconstrained + self.y_sd_delta) + self.epsilon
+                # self.y_sd = tf.Print(self.y_sd, [self.y_sd, tf.reduce_mean(self.y_sd), tf.reduce_min(self.y_sd), tf.reduce_max(self.y_sd)], summarize=1000)
                 self.y_sd_summary = self.constraint_fn(self.y_sd_base_unconstrained + self.y_sd_delta_ema) + self.epsilon
                 tf.summary.scalar(
                     'error/y_sd',

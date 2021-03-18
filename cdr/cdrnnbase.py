@@ -321,7 +321,7 @@ class CDRNN(Model):
                 )
 
                 self.plot_mean_as_reference_tf = tf.placeholder_with_default(
-                    self.plot_mean_as_reference,
+                    self.default_reference_type == 'mean',
                     shape=[],
                     name='plot_mean_as_reference'
                 )
@@ -689,6 +689,7 @@ class CDRNN(Model):
                             units = 1
                         else:
                             units = len(self.impulse_names) + 1
+                        units *= len(self.output_distr_params)
                         activation = self.irf_activation
                         dropout = None
                         bn = None
@@ -719,78 +720,100 @@ class CDRNN(Model):
                 self.irf_layers = irf_layers
                 self.irf = irf
 
-                # ERROR PARAMS FN
+                # # ERROR PARAMS FN
+                # if self.heteroskedastic:
+                #     error_params_fn_layers = []
+                #     for l in range(self.n_layers_error_params_fn):
+                #         units = self.n_units_error_params_fn[l]
+                #         activation = self.error_params_fn_inner_activation
+                #         dropout = self.error_params_fn_dropout_rate
+                #         if self.normalize_error_params_fn:
+                #             bn = self.batch_normalization_decay
+                #             ln = self.layer_normalization_type
+                #         else:
+                #             bn = None
+                #             ln = None
+                #         use_bias = True
+                #         mn = self.maxnorm
+                #
+                #         projection = self.initialize_feedforward(
+                #             units=units,
+                #             use_bias=use_bias,
+                #             activation=activation,
+                #             dropout=dropout,
+                #             maxnorm=mn,
+                #             batch_normalization_decay=bn,
+                #             layer_normalization_type=ln,
+                #             name='error_params_fn_l%s' % (l + 1)
+                #         )
+                #         self.layers.append(projection)
+                #
+                #         self.regularizable_layers.append(projection)
+                #         error_params_fn_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
+                #
+                #     self.error_params_fn_layers = error_params_fn_layers
+                #     self.error_params_fn = compose_lambdas(error_params_fn_layers)
+                #
+                #     units = 1
+                #     if self.asymmetric_error:
+                #         units += 2
+                #     n = len(self.impulse_indices)
+                #     if n > 1:
+                #         if n == 2:
+                #             units += 1
+                #         else:
+                #             units += n
+                #
+                #     if self.heteroskedastic:
+                #         # self.y_sd_coef = tf.sigmoid(tf.Variable(
+                #         #     -1.,
+                #         #     name='y_sd_coef'
+                #         # ))
+                #         if self.asymmetric_error:
+                #             self.y_skewness_coef = tf.sigmoid(tf.Variable(
+                #                 -1.,
+                #                 name='y_skewness_coef'
+                #             ))
+                #             self.y_tailweight_coef = tf.sigmoid(tf.Variable(
+                #                 -1.,
+                #                 name='y_tailweight_coef'
+                #             ))
+                #
+                #     projection = self.initialize_feedforward(
+                #         units=units,
+                #         use_bias=False,
+                #         activation=self.error_params_fn_activation,
+                #         name='error_params_fn_l%s' % (self.n_layers_error_params_fn + 1),
+                #         final=final
+                #     )
+                #     self.layers.append(projection)
+                #
+                #     self.error_params_final_fn = compose_lambdas([projection])
+
+                # ERROR PARAM BIASES
                 if self.heteroskedastic:
-                    error_params_fn_layers = []
-                    for l in range(self.n_layers_error_params_fn):
-                        units = self.n_units_error_params_fn[l]
-                        activation = self.error_params_fn_inner_activation
-                        dropout = self.error_params_fn_dropout_rate
-                        if self.normalize_error_params_fn:
-                            bn = self.batch_normalization_decay
-                            ln = self.layer_normalization_type
-                        else:
-                            bn = None
-                            ln = None
-                        use_bias = True
-                        mn = self.maxnorm
-
-                        projection = self.initialize_feedforward(
-                            units=units,
-                            use_bias=use_bias,
-                            activation=activation,
-                            dropout=dropout,
-                            maxnorm=mn,
-                            batch_normalization_decay=bn,
-                            layer_normalization_type=ln,
-                            name='error_params_fn_l%s' % (l + 1)
-                        )
-                        self.layers.append(projection)
-
-                        self.regularizable_layers.append(projection)
-                        error_params_fn_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
-
-                    self.error_params_fn_layers = error_params_fn_layers
-                    self.error_params_fn = compose_lambdas(error_params_fn_layers)
-
-                    units = 1
-                    if self.asymmetric_error:
-                        units += 2
-                    n = len(self.impulse_indices)
-                    if n > 1:
-                        if n == 2:
-                            units += 1
-                        else:
-                            units += n
-
-                    if self.heteroskedastic:
-                        # self.y_sd_coef = tf.sigmoid(tf.Variable(
-                        #     -1.,
-                        #     name='y_sd_coef'
-                        # ))
-                        if self.asymmetric_error:
-                            self.y_skewness_coef = tf.sigmoid(tf.Variable(
-                                -1.,
-                                name='y_skewness_coef'
-                            ))
-                            self.y_tailweight_coef = tf.sigmoid(tf.Variable(
-                                -1.,
-                                name='y_tailweight_coef'
-                            ))
-
-                    projection = self.initialize_feedforward(
-                        units=units,
-                        use_bias=False,
-                        activation=self.error_params_fn_activation,
-                        name='error_params_fn_l%s' % (self.n_layers_error_params_fn + 1),
-                        final=final
-                    )
-                    self.layers.append(projection)
-
-                    self.error_params_final_fn = compose_lambdas([projection])
-
-                    # ERROR PARAM BIASES
                     self.error_params_b, self.error_params_b_summary = self.initialize_error_params_biases(ran_gf=None)
+
+                # OUTPUT COEFFICIENTS
+                # (to avoid early training instability)
+                self.y_coef = tf.Variable(
+                    self.epsilon,
+                    name='y_coef'
+                )
+                if self.heteroskedastic:
+                    self.y_sd_coef = tf.Variable(
+                        self.epsilon,
+                        name='y_sd_coef'
+                    )
+                    if self.asymmetric_error:
+                        self.y_skewness_coef = tf.Variable(
+                            self.epsilon,
+                            name='y_skewness_coef'
+                        )
+                        self.y_tailweight_coef = tf.Variable(
+                            self.epsilon,
+                            name='y_tailweight_coef'
+                        )
 
                 # INTERCEPT
                 if self.has_intercept[None]:
@@ -815,9 +838,24 @@ class CDRNN(Model):
                         self.coefficient = self.coefficient_fixed
                         self._regularize(self.coefficient, type='coefficient', var_name=reg_name('coefficient'))
 
+                        if self.heteroskedastic:
+                            self.coefficient_y_sd_fixed, self.coefficient_y_sd_fixed_summary = self.initialize_coefficient(ran_gf=None, suffix='y_sd')
+                            self.coefficient_y_sd = self.coefficient_y_sd_fixed
+                            self._regularize(self.coefficient_y_sd, type='coefficient', var_name=reg_name('coefficient_y_sd'))
+                            
+                            if self.asymmetric_error:
+                                self.coefficient_y_skewness_fixed, self.coefficient_y_skewness_fixed_summary = self.initialize_coefficient(ran_gf=None, suffix='y_skewness')
+                                self.coefficient_y_skewness = self.coefficient_y_skewness_fixed
+                                self._regularize(self.coefficient_y_skewness, type='coefficient', var_name=reg_name('coefficient_y_skewness'))
+                                
+                                self.coefficient_y_tailweight_fixed, self.coefficient_y_tailweight_fixed_summary = self.initialize_coefficient(ran_gf=None, suffix='y_tailweight')
+                                self.coefficient_y_tailweight = self.coefficient_y_tailweight_fixed
+                                self._regularize(self.coefficient_y_tailweight, type='coefficient', var_name=reg_name('coefficient_y_tailweight'))
+
                     self.coefficient_irf_in_fixed, self.coefficient_irf_in_fixed_summary = self.initialize_coefficient(ran_gf=None, suffix='irf_in')
                     self.coefficient_irf_in = self.coefficient_irf_in_fixed
                     self._regularize(self.coefficient_irf_in, type='coefficient', var_name=reg_name('coefficient_irf_in'))
+
                     # TODO: Add named Tensorboard logs
 
                 # INTERCEPT DELTA
@@ -890,6 +928,14 @@ class CDRNN(Model):
                     if not self.direct_irf:
                         self.coefficient_ran = []
                         self.coefficient_ran_matrix = []
+                        if self.heteroskedastic:
+                            self.coefficient_y_sd_ran = []
+                            self.coefficient_y_sd_ran_matrix = []
+                            if self.asymmetric_error:
+                                self.coefficient_y_skewness_ran = []
+                                self.coefficient_y_skewness_ran_matrix = []
+                                self.coefficient_y_tailweight_ran = []
+                                self.coefficient_y_tailweight_ran_matrix = []
                     self.coefficient_irf_in_ran = []
                     self.coefficient_irf_in_ran_matrix = []
                 self.rnn_h_ran_matrix = [[] for l in range(self.n_layers_rnn)]
@@ -1002,6 +1048,89 @@ class CDRNN(Model):
                                 self.coefficient_ran.append(coefficient_ran)
     
                                 self.coefficient += tf.expand_dims(coefficient_ran, axis=-2)
+                                
+                                if self.heteroskedastic:
+                                    coefficient_y_sd_ran_matrix_cur, coefficient_y_sd_ran_matrix_cur_summary = self.initialize_coefficient(ran_gf=gf, suffix='y_sd')
+                                    coefficient_y_sd_ran_matrix_cur -= tf.reduce_mean(coefficient_y_sd_ran_matrix_cur, axis=0, keepdims=True)
+                                    coefficient_y_sd_ran_matrix_cur_summary -= tf.reduce_mean(coefficient_y_sd_ran_matrix_cur_summary, axis=0, keepdims=True)
+                                    self._regularize(coefficient_y_sd_ran_matrix_cur, type='ranef', var_name=reg_name('coefficient_y_sd_by_%s' % (sn(gf))))
+        
+                                    if self.log_random:
+                                        tf.summary.histogram(
+                                            sn('by_%s/coefficient_y_sd' % sn(gf)),
+                                            coefficient_y_sd_ran_matrix_cur_summary,
+                                            collections=['random']
+                                        )
+        
+                                    coefficient_y_sd_ran_matrix_cur = tf.concat(
+                                        [
+                                            coefficient_y_sd_ran_matrix_cur,
+                                            tf.zeros([1, len(self.impulse_names) + 1])
+                                        ],
+                                        axis=0
+                                    )
+        
+                                    coefficient_y_sd_ran = tf.gather(coefficient_y_sd_ran_matrix_cur, gf_y)
+        
+                                    self.coefficient_y_sd_ran_matrix.append(coefficient_y_sd_ran_matrix_cur)
+                                    self.coefficient_y_sd_ran.append(coefficient_y_sd_ran)
+        
+                                    self.coefficient_y_sd += tf.expand_dims(coefficient_y_sd_ran, axis=-2)
+                                    
+                                    if self.asymmetric_error:
+                                        coefficient_y_skewness_ran_matrix_cur, coefficient_y_skewness_ran_matrix_cur_summary = self.initialize_coefficient(ran_gf=gf, suffix='y_skewness')
+                                        coefficient_y_skewness_ran_matrix_cur -= tf.reduce_mean(coefficient_y_skewness_ran_matrix_cur, axis=0, keepdims=True)
+                                        coefficient_y_skewness_ran_matrix_cur_summary -= tf.reduce_mean(coefficient_y_skewness_ran_matrix_cur_summary, axis=0, keepdims=True)
+                                        self._regularize(coefficient_y_skewness_ran_matrix_cur, type='ranef', var_name=reg_name('coefficient_y_skewness_by_%s' % (sn(gf))))
+            
+                                        if self.log_random:
+                                            tf.summary.histogram(
+                                                sn('by_%s/coefficient_y_skewness' % sn(gf)),
+                                                coefficient_y_skewness_ran_matrix_cur_summary,
+                                                collections=['random']
+                                            )
+            
+                                        coefficient_y_skewness_ran_matrix_cur = tf.concat(
+                                            [
+                                                coefficient_y_skewness_ran_matrix_cur,
+                                                tf.zeros([1, len(self.impulse_names) + 1])
+                                            ],
+                                            axis=0
+                                        )
+            
+                                        coefficient_y_skewness_ran = tf.gather(coefficient_y_skewness_ran_matrix_cur, gf_y)
+            
+                                        self.coefficient_y_skewness_ran_matrix.append(coefficient_y_skewness_ran_matrix_cur)
+                                        self.coefficient_y_skewness_ran.append(coefficient_y_skewness_ran)
+            
+                                        self.coefficient_y_skewness += tf.expand_dims(coefficient_y_skewness_ran, axis=-2)
+                                        
+                                        coefficient_y_tailweight_ran_matrix_cur, coefficient_y_tailweight_ran_matrix_cur_summary = self.initialize_coefficient(ran_gf=gf, suffix='y_tailweight')
+                                        coefficient_y_tailweight_ran_matrix_cur -= tf.reduce_mean(coefficient_y_tailweight_ran_matrix_cur, axis=0, keepdims=True)
+                                        coefficient_y_tailweight_ran_matrix_cur_summary -= tf.reduce_mean(coefficient_y_tailweight_ran_matrix_cur_summary, axis=0, keepdims=True)
+                                        self._regularize(coefficient_y_tailweight_ran_matrix_cur, type='ranef', var_name=reg_name('coefficient_y_tailweight_by_%s' % (sn(gf))))
+            
+                                        if self.log_random:
+                                            tf.summary.histogram(
+                                                sn('by_%s/coefficient_y_tailweight' % sn(gf)),
+                                                coefficient_y_tailweight_ran_matrix_cur_summary,
+                                                collections=['random']
+                                            )
+            
+                                        coefficient_y_tailweight_ran_matrix_cur = tf.concat(
+                                            [
+                                                coefficient_y_tailweight_ran_matrix_cur,
+                                                tf.zeros([1, len(self.impulse_names) + 1])
+                                            ],
+                                            axis=0
+                                        )
+            
+                                        coefficient_y_tailweight_ran = tf.gather(coefficient_y_tailweight_ran_matrix_cur, gf_y)
+            
+                                        self.coefficient_y_tailweight_ran_matrix.append(coefficient_y_tailweight_ran_matrix_cur)
+                                        self.coefficient_y_tailweight_ran.append(coefficient_y_tailweight_ran)
+            
+                                        self.coefficient_y_tailweight += tf.expand_dims(coefficient_y_tailweight_ran, axis=-2)
 
                             coefficient_irf_in_ran_matrix_cur, coefficient_irf_in_ran_matrix_cur_summary = self.initialize_coefficient(ran_gf=gf, suffix='irf_in')
                             coefficient_irf_in_ran_matrix_cur -= tf.reduce_mean(coefficient_irf_in_ran_matrix_cur, axis=0, keepdims=True)
@@ -1423,6 +1552,11 @@ class CDRNN(Model):
                 if self.use_coefficient:
                     if not self.direct_irf:
                         coef = self.coefficient
+                        if self.heteroskedastic:
+                            coef_y_sd = self.coefficient_y_sd
+                            if self.asymmetric_error:
+                                coef_y_skewness = self.coefficient_y_skewness
+                                coef_y_tailweight = self.coef_y_tailweight
                     coef_irf_in = self.coefficient_irf_in
                 if self.heteroskedastic:
                     error_params_b = self.error_params_b
@@ -1441,6 +1575,11 @@ class CDRNN(Model):
                     if self.use_coefficient and self.is_mixed_model:
                         if not self.direct_irf:
                             coef = tf.gather(coef, tile_ix, axis=0)
+                            if self.heteroskedastic:
+                                coef_y_sd = tf.gather(coef_y_sd, tile_ix, axis=0)
+                                if self.asymmetric_error:
+                                    coef_y_skewness = tf.gather(coef_y_skewness, tile_ix, axis=0)
+                                    coef_y_tailweight = tf.gather(coef_y_tailweight, tile_ix, axis=0)
                         coef_irf_in = self.coefficient_irf_in
                     h = tf.gather(h, tile_ix, axis=0)
                     X = tf.tile(X, [R, 1 ,1])
@@ -1515,12 +1654,13 @@ class CDRNN(Model):
                 if not self.normalize_after_activation:
                     h = get_activation(self.hidden_state_activation, session=self.sess)(h)
 
-                if self.split_h and self.heteroskedastic:
-                    h_irf_in = h[..., :self.n_units_hidden_state]
-                    h_error_params_fn_in = h[..., -self.n_units_hidden_state:]
-                else:
-                    h_irf_in = h
-                    h_error_params_fn_in = h
+                # if self.split_h and self.heteroskedastic:
+                #     h_irf_in = h[..., :self.n_units_hidden_state]
+                #     h_error_params_fn_in = h[..., -self.n_units_hidden_state:]
+                # else:
+                #     h_irf_in = h
+                #     h_error_params_fn_in = h
+                h_irf_in = h
 
                 # Compute response
                 Wb_proj = self.hidden_state_to_irf_l1(h_irf_in)
@@ -1538,33 +1678,74 @@ class CDRNN(Model):
                 if not self.normalize_after_activation:
                     irf_l1 = get_activation(self.irf_inner_activation, session=self.sess)(irf_l1)
 
-                y = self.irf(irf_l1)
+                irf_out = self.irf(irf_l1)
+
                 if not self.direct_irf:
-                    # y = tf.Print(y, [y, tf.reduce_mean(y), tf.reduce_min(y), tf.reduce_max(y)], summarize=1000)
+                    n_dim = len(self.impulse_names) + 1
+                    y = irf_out[..., :n_dim]
                     y = y * X_src # 1st dim is deconvolutional bias (rate)
+                else:
+                    n_dim = 1
                 if time_X_mask is not None:
                     y *= time_X_mask[..., None]
                 y = tf.reduce_sum(y, axis=1)
-                X_conv = y
                 if not self.direct_irf and self.use_coefficient: # coefs on convolved predictors
-                    X_conv = X_conv * tf.squeeze(coef, axis=-2)
-                y = tf.reduce_sum(X_conv, axis=-1, keepdims=True)
+                    y = y * tf.squeeze(coef, axis=-2)
+                X_conv = y
+                y = tf.reduce_sum(y, axis=-1, keepdims=True)
+                y = y * self.y_coef
 
                 if self.heteroskedastic:
-                    error_params = self.error_params_fn(h_error_params_fn_in)
-                    # Max pooling over time
-                    error_params = tf.reduce_max(error_params, axis=-2)
-                    error_params = self.error_params_final_fn(error_params)
+                    # error_params = self.error_params_fn(h_error_params_fn_in)
+                    # # Max pooling over time
+                    # error_params = tf.reduce_max(error_params, axis=-2)
+                    # error_params = self.error_params_final_fn(error_params)
 
-                    y_sd_delta = error_params[..., 0]
+                    # y_skewness_delta = error_params[..., 0]
+                    if not self.direct_irf:
+                        y_sd_delta = irf_out[..., n_dim:2*n_dim]
+                        y_sd_delta = y_sd_delta * X_src # 1st dim is deconvolutional bias (rate)
+                    if time_X_mask is not None:
+                        y_sd_delta *= time_X_mask[..., None]
+                    y_sd_delta = tf.reduce_sum(y_sd_delta, axis=1)
+                    if not self.direct_irf and self.use_coefficient: # coefs on convolved predictors
+                        y_sd_delta = y_sd_delta * tf.squeeze(coef_y_sd, axis=-2)
+                    y_sd_delta = tf.reduce_sum(y_sd_delta, axis=-1)
+                    y_sd_delta = y_sd_delta * self.y_sd_coef
+
                     if self.is_mixed_model:
                         y_sd_delta += error_params_b[..., 0]
+
                     if self.asymmetric_error:
-                        y_skewness_delta = error_params[..., 1]
-                        y_tailweight_delta = error_params[..., 2]
+                        # y_skewness_delta = error_params[..., 1]
+                        # y_tailweight_delta = error_params[..., 2]
+
+                        if not self.direct_irf:
+                            y_skewness_delta = irf_out[..., 2*n_dim:3*n_dim]
+                            y_skewness_delta = y_skewness_delta * X_src  # 1st dim is deconvolutional bias (rate)
+                        if time_X_mask is not None:
+                            y_skewness_delta *= time_X_mask[..., None]
+                        y_skewness_delta = tf.reduce_sum(y_skewness_delta, axis=1)
+                        if not self.direct_irf and self.use_coefficient:  # coefs on convolved predictors
+                            y_skewness_delta = y_skewness_delta * tf.squeeze(coef_y_skewness, axis=-2)
+                        y_skewness_delta = tf.reduce_sum(y_skewness_delta, axis=-1)
+                        y_skewness_delta = y_skewness_delta * self.y_skewness_coef
+
+                        if not self.direct_irf:
+                            y_tailweight_delta = irf_out[..., 3*n_dim:]
+                            y_tailweight_delta = y_tailweight_delta * X_src  # 1st dim is deconvolutional bias (rate)
+                        if time_X_mask is not None:
+                            y_tailweight_delta *= time_X_mask[..., None]
+                        y_tailweight_delta = tf.reduce_sum(y_tailweight_delta, axis=1)
+                        if not self.direct_irf and self.use_coefficient:  # coefs on convolved predictors
+                            y_tailweight_delta = y_tailweight_delta * tf.squeeze(coef_y_tailweight, axis=-2)
+                        y_tailweight_delta = tf.reduce_sum(y_tailweight_delta, axis=-1)
+                        y_tailweight_delta = y_tailweight_delta * self.y_tailweight_coef
+
                         if self.is_mixed_model:
                             y_skewness_delta += error_params_b[..., 1]
                             y_tailweight_delta += error_params_b[..., 2]
+
                     else:
                         y_skewness_delta = y_tailweight_delta = None
                 else:
@@ -2098,11 +2279,14 @@ class CDRNN(Model):
             t_interaction=0.,
             plot_rangf=False,
             rangf_vals=None,
-            plot_mean_as_reference=True,
+            reference_type=None,
             estimate_density=False
     ):
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                if reference_type is None:
+                    reference_type = self.default_reference_type
+
                 names = name.split(':')
                 names_src = tuple([self.terminals_by_name[x].impulse.name() if x in self.terminals_by_name else x for x in names])
 
@@ -2121,6 +2305,8 @@ class CDRNN(Model):
                     impulse_one_hot = np.zeros(len(self.impulse_names))
                 else:
                     impulse_one_hot = self.plot_impulse_name_to_1hot(name)
+
+                plot_mean_as_reference = reference_type == 'mean'
 
                 fd = {
                     self.support_start: support_start,
