@@ -113,8 +113,11 @@ class Config(object):
         for model_field in [m for m in config.keys() if m.startswith('model_')]:
             model_name = model_field[6:]
             reg_type = None
+            is_cdrnn = False
             if model_name.startswith('CDR') or model_name.startswith('DTSR'):
                 reg_type = 'cdr'
+                if model_name.startswith('CDRNN'):
+                    is_cdrnn = True
             elif model_name.startswith('LME'):
                 reg_type = 'lme'
             use_crossval = 'crossval_factor' in config[model_field]
@@ -136,8 +139,9 @@ class Config(object):
                 model_config = model_configs[model_name]
                 model_settings = self.build_cdr_settings(
                     model_config,
-                    add_defaults=False,
-                    is_cdr=reg_type=='cdr'
+                    global_settings=self.global_cdr_settings,
+                    is_cdr=reg_type=='cdr',
+                    is_cdrnn=is_cdrnn
                 )
                 self.models[model_name] = model_settings
                 if reg_type == 'lme':
@@ -175,7 +179,7 @@ class Config(object):
         if self.current_model is None:
             return self.global_cdr_settings[item]
         if self.current_model in self.models:
-            return self.models[self.current_model].get(item, self.global_cdr_settings[item])
+            return self.models[self.current_model][item]
         raise ValueError('There is no model named "%s" defined in the config file.' %self.current_model)
 
     def __str__(self):
@@ -199,102 +203,134 @@ class Config(object):
         else:
             raise ValueError('There is no model named "%s" defined in the config file.' %model_name)
 
-    def build_cdr_settings(self, settings, add_defaults=True, is_cdr=True):
+    def build_cdr_settings(self, settings, global_settings=None, is_cdr=True, is_cdrnn=False):
         """
         Given a settings object parsed from a config file, compute CDR parameter dictionary.
 
         :param settings: settings from a ``ConfigParser`` object.
-        :param add_defaults: ``bool``; whether to supply defaults for parameters missing from **settings**.
-        :param is_cdr: ``bool``; whether this is a CDR model.
+        :param global_settings: ``dict`` or ``None``; dictionary of global defaults for parameters missing from **settings**.
+        :param is_cdr: ``bool``; whether this is a CDR(NN) model.
+        :param is_cdrnn: ``bool``; whether this is a CDRNN model.
         :return: ``dict``; dictionary of settings key-value pairs.
         """
 
+        if global_settings is None:
+            global_settings = {}
         out = {}
 
         # Core fields
         out['formula'] = settings.get('formula', None)
+        is_bayes = False
         if is_cdr and out['formula']:
             # Standardize the model string
             out['formula'] = str(Formula(out['formula']))
-        if 'network_type' in settings or add_defaults:
-            out['network_type'] = settings.get('network_type', 'bayes')
+        out['network_type'] = settings.get('network_type', global_settings.get('network_type', 'bayes'))
+        is_bayes = out['network_type'] == 'bayes'
 
         # Model initialization keyword arguments
-        for kwarg in MODEL_INITIALIZATION_KWARGS:
-            if kwarg.in_settings(settings) or add_defaults:
-                out[kwarg.key] = kwarg.kwarg_from_config(settings)
+        if is_cdr:
+            # Allowing settings to propagate for the wrong model type if specified
+            # allows the global config to specify defaults for multiple model types.
+            # Cross-type settings will only propagate if they are explicitly defined
+            # in the config (defaults are ignored).
 
-        # CDR initialization keyword arguments
-        for kwarg in CDR_INITIALIZATION_KWARGS:
-            if kwarg.in_settings(settings) or add_defaults:
-                out[kwarg.key] = kwarg.kwarg_from_config(settings)
+            for kwarg in MODEL_INITIALIZATION_KWARGS:
+                if kwarg.in_settings(settings) or kwarg.key not in global_settings:
+                    out[kwarg.key] = kwarg.kwarg_from_config(settings)
+                else:
+                    out[kwarg.key] = global_settings[kwarg.key]
 
-        # CDRMLE initialization keyword arguments
-        for kwarg in CDRMLE_INITIALIZATION_KWARGS:
-            if kwarg.in_settings(settings) or add_defaults:
-                out[kwarg.key] = kwarg.kwarg_from_config(settings)
+            # CDRNN initialization keyword arguments
+            for kwarg in CDRNN_INITIALIZATION_KWARGS:
+                if is_cdrnn:
+                    if kwarg.in_settings(settings) or kwarg.key not in global_settings:
+                        out[kwarg.key] = kwarg.kwarg_from_config(settings)
+                    else:
+                        out[kwarg.key] = global_settings[kwarg.key]
+                elif kwarg.in_settings(settings) and not kwarg.key in out:
+                    out[kwarg.key] = kwarg.kwarg_from_config(settings)
 
-        # CDRBayes initialization keyword arguments
-        for kwarg in CDRBAYES_INITIALIZATION_KWARGS:
-            if kwarg.in_settings(settings) or add_defaults:
-                out[kwarg.key] = kwarg.kwarg_from_config(settings)
+            # CDRNNBayes initialization keyword arguments
+            for kwarg in CDRNNBAYES_INITIALIZATION_KWARGS:
+                if is_cdrnn and is_bayes:
+                    if kwarg.in_settings(settings) or kwarg.key not in global_settings:
+                        out[kwarg.key] = kwarg.kwarg_from_config(settings)
+                    else:
+                        out[kwarg.key] = global_settings[kwarg.key]
+                elif kwarg.in_settings(settings) and not kwarg.key in out:
+                    out[kwarg.key] = kwarg.kwarg_from_config(settings)
 
-        # CDRNN initialization keyword arguments
-        for kwarg in CDRNN_INITIALIZATION_KWARGS:
-            if kwarg.in_settings(settings) or add_defaults:
-                out[kwarg.key] = kwarg.kwarg_from_config(settings)
+            # CDRNNMLE initialization keyword arguments
+            for kwarg in CDRNNMLE_INITIALIZATION_KWARGS:
+                if is_cdrnn and not is_bayes:
+                    if kwarg.in_settings(settings) or kwarg.key not in global_settings:
+                        out[kwarg.key] = kwarg.kwarg_from_config(settings)
+                    else:
+                        out[kwarg.key] = global_settings[kwarg.key]
+                elif kwarg.in_settings(settings) and not kwarg.key in out:
+                    out[kwarg.key] = kwarg.kwarg_from_config(settings)
 
-        # CDRNNMLE initialization keyword arguments
-        for kwarg in CDRNNMLE_INITIALIZATION_KWARGS:
-            if kwarg.in_settings(settings) or add_defaults:
-                out[kwarg.key] = kwarg.kwarg_from_config(settings)
+            # CDR initialization keyword arguments
+            for kwarg in CDR_INITIALIZATION_KWARGS:
+                if not is_cdrnn:
+                    if kwarg.in_settings(settings) or kwarg.key not in global_settings:
+                        out[kwarg.key] = kwarg.kwarg_from_config(settings)
+                    else:
+                        out[kwarg.key] = global_settings[kwarg.key]
+                elif kwarg.in_settings(settings) and not kwarg.key in out:
+                    out[kwarg.key] = kwarg.kwarg_from_config(settings)
 
-        # CDRNNBayes initialization keyword arguments
-        for kwarg in CDRNNBAYES_INITIALIZATION_KWARGS:
-            if kwarg.in_settings(settings) or add_defaults:
-                out[kwarg.key] = kwarg.kwarg_from_config(settings)
+            # CDRBayes initialization keyword arguments
+            for kwarg in CDRBAYES_INITIALIZATION_KWARGS:
+                if not is_cdrnn and is_bayes:
+                    if kwarg.in_settings(settings) or kwarg.key not in global_settings:
+                        out[kwarg.key] = kwarg.kwarg_from_config(settings)
+                    else:
+                        out[kwarg.key] = global_settings[kwarg.key]
+                elif kwarg.in_settings(settings) and not kwarg.key in out:
+                    out[kwarg.key] = kwarg.kwarg_from_config(settings)
+
+            # CDRMLE initialization keyword arguments
+            for kwarg in CDRMLE_INITIALIZATION_KWARGS:
+                if not is_cdrnn and not is_bayes:
+                    if kwarg.in_settings(settings) or kwarg.key not in global_settings:
+                        out[kwarg.key] = kwarg.kwarg_from_config(settings)
+                    else:
+                        out[kwarg.key] = global_settings[kwarg.key]
+                elif kwarg.in_settings(settings) and not kwarg.key in out:
+                    out[kwarg.key] = kwarg.kwarg_from_config(settings)
 
         out['ablated'] = set()
 
         # Cross validation settings
-        if 'crossval_factor' in settings or add_defaults:
-            out['crossval_factor'] = settings.get('crossval_factor', None)
-        if 'crossval_fold' in settings or add_defaults:
-            if 'crossval_fold' in settings:
-                crossval_fold = settings['crossval_fold'].split(';')
-            else:
-                crossval_fold = []
-            out['crossval_fold'] = crossval_fold
+        out['crossval_factor'] = settings.get('crossval_factor', global_settings.get('crossval_factor', None))
+        if 'crossval_fold' in settings:
+            crossval_fold = settings['crossval_fold'].split(';')
+        elif 'crossval_fold' in global_settings:
+            crossval_fold = global_settings['crossval_fold']
+        else:
+            crossval_fold = []
+        out['crossval_fold'] = crossval_fold
 
         # Plotting defaults
-        if 'plot_n_time_units' in settings or add_defaults:
-            out['plot_n_time_units'] = settings.getfloat('plot_n_time_units', 2.5)
-        if 'plot_n_time_points' in settings or add_defaults:
-            out['plot_n_time_points'] = settings.getfloat('plot_n_time_points', 1000)
-        if 'surface_plot_n_time_points' in settings or add_defaults:
-            out['surface_plot_n_time_points'] = settings.getfloat('surface_plot_n_time_points', 1024)
-        if 'generate_irf_surface_plots' in settings or add_defaults:
-            out['generate_irf_surface_plots'] = settings.getboolean('generate_irf_surface_plots', False)
-        if 'generate_interaction_surface_plots' in settings or add_defaults:
-            out['generate_interaction_surface_plots'] = settings.getboolean('generate_interaction_surface_plots', False)
-        if 'generate_curvature_plots' in settings or add_defaults:
-            out['generate_curvature_plots'] = settings.getboolean('generate_curvature_plots', False)
-        if 'plot_interactions' in settings or add_defaults:
-            out['plot_interactions'] = settings.get('plot_interactions', '').split()
-        if 'plot_t_interaction' in settings or add_defaults:
-            out['reference_time'] = settings.get('plot_t_interaction', 0.)
-        elif 'reference_time' in settings or add_defaults:
-            out['reference_time'] = settings.get('reference_time', 0.)
-        if 'plot_x_inches' in settings or add_defaults:
-            out['plot_x_inches'] = settings.getfloat('plot_x_inches', 6)
-        if 'plot_y_inches' in settings or add_defaults:
-            out['plot_y_inches'] = settings.getfloat('plot_y_inches', 4)
-        if 'plot_legend' in settings or add_defaults:
-            out['plot_legend'] = settings.getboolean('plot_legend', True)
-        if 'cmap' in settings or add_defaults:
-            out['cmap'] = settings.get('cmap', 'gist_rainbow')
-        if 'dpi' in settings or add_defaults:
-            out['dpi'] = settings.get('dpi', 300)
+        out['plot_n_time_units'] = settings.getfloat('plot_n_time_units', global_settings.get('plot_n_time_units', 2.5))
+        out['plot_n_time_points'] = settings.getfloat('plot_n_time_points', global_settings.get('plot_n_time_points', 1000))
+        out['surface_plot_n_time_points'] = settings.getfloat('surface_plot_n_time_points', global_settings.get('surface_plot_n_time_points', 1024))
+        out['generate_irf_surface_plots'] = settings.getboolean('generate_irf_surface_plots', global_settings.get('generate_irf_surface_plots', False))
+        out['generate_interaction_surface_plots'] = settings.getboolean('generate_interaction_surface_plots', global_settings.get('generate_interaction_surface_plots', False))
+        out['generate_curvature_plots'] = settings.getboolean('generate_curvature_plots', global_settings.get('generate_curvature_plots', False))
+        plot_interactions = settings.get('plot_interactions', global_settings.get('plot_interactions', ''))
+        if isinstance(plot_interactions, str):
+            plot_interactions = plot_interactions.split()
+        out['plot_interactions'] = plot_interactions
+        out['reference_time'] = settings.get('reference_time', settings.get('plot_t_interaction', global_settings.get('reference_time', 0.)))
+        out['plot_x_inches'] = settings.getfloat('plot_x_inches', global_settings.get('plot_x_inches', 6))
+        out['plot_y_inches'] = settings.getfloat('plot_y_inches', global_settings.get('plot_y_inches', 4))
+        out['plot_legend'] = settings.getboolean('plot_legend', global_settings.get('plot_legend', True))
+        out['cmap'] = settings.get('cmap', global_settings.get('cmap', 'gist_rainbow'))
+        out['dpi'] = settings.get('dpi', global_settings.get('dpi', 300))
+
+
 
         return out
 
