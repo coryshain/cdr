@@ -31,8 +31,9 @@ if __name__ == '__main__':
     argparser.add_argument('-p', '--partition', type=str, default='train', help='Name of partition to train on ("train", "dev", "test", or space- or hyphen-delimited subset of these)')
     argparser.add_argument('-e', '--force_training_evaluation', action='store_true', help='Recompute training evaluation even for models that are already finished.')
     argparser.add_argument('-s', '--save_and_exit', action='store_true', help='Initialize, save, and exit (CDR only). Useful for bringing non-backward compatible trained models up to spec for plotting and evaluation.')
+    argparser.add_argument('-S', '--skip_confirmation', action='store_true', help='If running with **-s**, skip interactive confirmation. Useful for batch re-saving many models. Use with caution, since old models will be overwritten without the option to confirm.')
     argparser.add_argument('--cpu_only', action='store_true', help='Use CPU implementation even if GPU is available.')
-    args, unknown = argparser.parse_known_args()
+    args = argparser.parse_args()
 
     p = Config(args.config_path)
 
@@ -258,19 +259,6 @@ if __name__ == '__main__':
             kwargs['crossval_factor'] = p['crossval_factor']
             kwargs['crossval_fold'] = p['crossval_fold']
             kwargs['irf_name_map'] = p.irf_name_map
-            kwargs['plot_interactions'] = p['plot_interactions']
-            kwargs['reference_time'] = p['reference_time']
-            kwargs['plot_n_time_units'] = p['plot_n_time_units']
-            kwargs['plot_n_time_points'] = p['plot_n_time_points']
-            kwargs['surface_plot_n_time_points'] = p['surface_plot_n_time_points']
-            kwargs['generate_irf_surface_plots'] = p['generate_irf_surface_plots']
-            kwargs['generate_interaction_surface_plots'] = p['generate_interaction_surface_plots']
-            kwargs['generate_curvature_plots'] = p['generate_curvature_plots']
-            kwargs['plot_x_inches'] = p['plot_x_inches']
-            kwargs['plot_y_inches'] = p['plot_y_inches']
-            kwargs['plot_legend'] = p['plot_legend']
-            kwargs['cmap'] = p['cmap']
-            kwargs['dpi'] = p['dpi']
 
             if m.startswith('CDRNN'):
                 for kwarg in CDRNN_INITIALIZATION_KWARGS:
@@ -345,9 +333,16 @@ if __name__ == '__main__':
                     raise ValueError('Unrecognized network type %s.' % p['network_type'])
 
             if args.save_and_exit:
-                ans = input('Model initialized. Continue saving? [y]/n >>> ')
-                if ans.strip().lower() != 'n':
+                save = True
+                if not args.skip_confirmation:
+                    ans = input('Model initialized. Continue saving? [y]/n >>> ')
+                    if ans.strip().lower() == 'n':
+                        save = False
+                if save:
+                    stderr('Saving...\n')
                     cdr_model.save()
+                    with open(cdr_model.outdir + '/initialization_summary.txt', 'w') as i_file:
+                        i_file.write(cdr_model.initialization_summary())
                 continue
 
             stderr('\nFitting model %s...\n\n' % m)

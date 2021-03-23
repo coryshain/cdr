@@ -18,7 +18,7 @@ if __name__ == '__main__':
     argparser.add_argument('-m', '--models', nargs='*', default = [], help='Model names to plot. Regex permitted. If unspecified, plots all CDR models.')
     argparser.add_argument('-z', '--standardize_response', action='store_true', help='Standardize (Z-transform) response in plots. Ignored unless model was fitted using setting ``standardize_respose=True``.')
     argparser.add_argument('-e', '--plot_density', action='store_true', help='Plot density of support distribubtion. CDRNN only.')
-    argparser.add_argument('-S', '--summed', action='store_true', help='Plot summed rather than individual IRFs.')
+    # argparser.add_argument('-S', '--summed', action='store_true', help='Plot summed rather than individual IRFs.')
     argparser.add_argument('-i', '--irf_ids', nargs='*', default = [], help='List of IDs for IRF to include in the plot. Regex supported.')
     argparser.add_argument('-U', '--unsorted_irf_ids', action='store_true', help='Leave IRF IDs unsorted (otherwise, they are sorted alphabetically).')
     argparser.add_argument('-d', '--plot_dirac', action='store_true', help='Also plot linear effects and interaction estimates (stick functions at 0).')
@@ -31,9 +31,7 @@ if __name__ == '__main__':
     argparser.add_argument('-u', '--ntimeunits', type=float, default=None, help='Number of time units on x-axis')
     argparser.add_argument('-r', '--resolution', type=float, default=None, help='Number of points on x-axis')
     argparser.add_argument('-x', '--x', type=float, default=None, help='Width of plot in inches')
-    argparser.add_argument('-X', '--xlab', type=str, default=None, help='x-axis label (if default -- None -- no label)')
     argparser.add_argument('-y', '--y', type=float, default=None, help='Height of plot in inches')
-    argparser.add_argument('-Y', '--ylab', type=str, default=None, help='y-axis label (if default -- None -- no label)')
     argparser.add_argument('-b', '--ylim', type=float, nargs=2, default=None, help='Fixed ylim value to use for all IRF plots. If unspecified, automatically inferred.')
     argparser.add_argument('-c', '--cmap', type=str, default=None, help='Name of matplotlib colormap library to use for curves')
     argparser.add_argument('-D', '--dpi', type=int, default=None, help='Dots per inch')
@@ -81,50 +79,46 @@ if __name__ == '__main__':
             )
             names = string.ascii_lowercase[:d.n_pred]
 
-            if args.summed:
-                plot_irf(
-                    x,
-                    y.sum(axis=1, keepdims=True),
-                    ['Sum'],
-                    prop_cycle_length=args.prop_cycle_length,
-                    prop_cycle_ix=args.prop_cycle_ix,
-                    dir=p.outdir,
-                    filename=prefix + 'synthetic_true_summed.png',
-                    plot_x_inches=p['plot_x_inches'] if x_inches is None else x_inches,
-                    plot_y_inches=p['plot_y_inches'] if y_inches is None else y_inches,
-                    ylim=args.ylim,
-                    cmap=p['cmap'] if cmap is None else cmap,
-                    dpi=args.dpi,
-                    legend=legend,
-                    xlab=args.xlab,
-                    ylab=args.ylab,
-                    use_line_markers=args.markers,
-                    transparent_background=args.transparent_background,
-                    dump_source=args.dump_source
-                )
-
-            else:
-                plot_irf(
-                    x,
-                    y,
-                    names,
-                    sort_names=not args.unsorted_irf_ids,
-                    prop_cycle_length=args.prop_cycle_length,
-                    prop_cycle_ix=args.prop_cycle_ix,
-                    dir=p.outdir,
-                    filename=prefix + 'synthetic_true.png',
-                    plot_x_inches=p['plot_x_inches'] if x_inches is None else x_inches,
-                    plot_y_inches=p['plot_y_inches'] if y_inches is None else y_inches,
-                    ylim=args.ylim,
-                    cmap=p['cmap'] if cmap is None else cmap,
-                    dpi=args.dpi,
-                    legend=legend,
-                    xlab=args.xlab,
-                    ylab=args.ylab,
-                    use_line_markers=args.markers,
-                    transparent_background=args.transparent_background,
-                    dump_source=args.dump_source
-                )
+            # if args.summed:
+            #     plot_irf(
+            #         x,
+            #         y.sum(axis=1, keepdims=True),
+            #         ['Sum'],
+            #         prop_cycle_length=args.prop_cycle_length,
+            #         prop_cycle_ix=args.prop_cycle_ix,
+            #         dir=p.outdir,
+            #         filename=prefix + 'synthetic_true_summed.png',
+            #         plot_x_inches=p['plot_x_inches'] if x_inches is None else x_inches,
+            #         plot_y_inches=p['plot_y_inches'] if y_inches is None else y_inches,
+            #         ylim=args.ylim,
+            #         cmap=p['cmap'] if cmap is None else cmap,
+            #         dpi=args.dpi,
+            #         legend=legend,
+            #         use_line_markers=args.markers,
+            #         transparent_background=args.transparent_background,
+            #         dump_source=args.dump_source
+            #     )
+            #
+            # else:
+            plot_irf(
+                x,
+                y,
+                names,
+                sort_names=not args.unsorted_irf_ids,
+                prop_cycle_length=args.prop_cycle_length,
+                prop_cycle_ix=args.prop_cycle_ix,
+                dir=p.outdir,
+                filename=prefix + 'synthetic_true.png',
+                plot_x_inches=p['plot_x_inches'] if x_inches is None else x_inches,
+                plot_y_inches=p['plot_y_inches'] if y_inches is None else y_inches,
+                ylim=args.ylim,
+                cmap=p['cmap'] if cmap is None else cmap,
+                dpi=args.dpi,
+                legend=legend,
+                use_line_markers=args.markers,
+                transparent_background=args.transparent_background,
+                dump_source=args.dump_source
+            )
 
         for m in models:
             m_path = m.replace(':', '+')
@@ -134,10 +128,8 @@ if __name__ == '__main__':
             cdr_model = load_cdr(p.outdir + '/' + m_path)
 
             kwargs = {
-                'reference_type': p['default_reference_type'],
                 'plot_n_time_units': p['plot_n_time_units'] if n_time_units is None else n_time_units,
                 'plot_n_time_points': p['plot_n_time_points'] if resolution is None else resolution,
-                'surface_plot_n_time_points': p['surface_plot_n_time_points'] if resolution is None else resolution,
                 'reference_time': p['reference_time'] if reference_time is None else reference_time,
                 'plot_x_inches': p['plot_x_inches'] if x_inches is None else x_inches,
                 'plot_y_inches': p['plot_y_inches'] if y_inches is None else y_inches,
@@ -145,6 +137,7 @@ if __name__ == '__main__':
                 'dpi': p['dpi'] if args.dpi is None else args.dpi,
                 'generate_irf_surface_plots': p['generate_irf_surface_plots'],
                 'generate_interaction_surface_plots': p['generate_interaction_surface_plots'],
+                'generate_nonstationarity_surface_plots': p['generate_nonstationarity_surface_plots'],
                 'generate_curvature_plots': p['generate_curvature_plots']
             }
 
@@ -207,20 +200,16 @@ if __name__ == '__main__':
             cdr_model.make_plots(
                 plot_density=args.plot_density,
                 standardize_response=args.standardize_response,
-                summed=args.summed,
                 irf_name_map=name_map,
                 irf_ids=args.irf_ids,
                 sort_names=not args.unsorted_irf_ids,
                 prop_cycle_length=args.prop_cycle_length,
                 prop_cycle_ix=args.prop_cycle_ix,
-                plot_unscaled=False,
                 plot_dirac=args.plot_dirac,
                 plot_rangf=args.plot_rangf,
                 ylim=args.ylim,
                 prefix=prefix + m_path,
                 legend=legend,
-                xlab=args.xlab,
-                ylab=args.ylab,
                 use_line_markers=args.markers,
                 transparent_background=args.transparent_background,
                 dump_source=args.dump_source,
@@ -230,24 +219,20 @@ if __name__ == '__main__':
             if cdr_model.is_bayesian or cdr_model.has_dropout:
                 cdr_model.make_plots(
                     standardize_response=args.standardize_response,
-                    summed=args.summed,
                     irf_name_map=name_map,
                     irf_ids=args.irf_ids,
                     sort_names=not args.unsorted_irf_ids,
                     prop_cycle_length=args.prop_cycle_length,
                     prop_cycle_ix=args.prop_cycle_ix,
-                    plot_unscaled=False,
                     plot_dirac=args.plot_dirac,
                     plot_rangf=args.plot_rangf,
-                    mc=True,
                     ylim=args.ylim,
                     prefix=prefix + m_path,
                     legend=legend,
-                    xlab=args.xlab,
-                    ylab=args.ylab,
                     use_line_markers=args.markers,
                     transparent_background=args.transparent_background,
                     dump_source=args.dump_source,
+                    n_samples=p['n_samples_eval'],
                     **kwargs
                 )
 

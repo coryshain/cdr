@@ -432,12 +432,12 @@ MODEL_INITIALIZATION_KWARGS = [
         bool,
         "Whether to apply normalization (if applicable) to non-initial internal IRF layers.",
     ),
-    Kwarg(
-        'normalize_error_params_fn',
-        False,
-        bool,
-        "Whether to apply normalization (if applicable) to internal layers of the error parameter function.",
-    ),
+    # Kwarg(
+    #     'normalize_error_params_fn',
+    #     False,
+    #     bool,
+    #     "Whether to apply normalization (if applicable) to internal layers of the error parameter function.",
+    # ),
     Kwarg(
         'normalize_after_activation',
         True,
@@ -554,6 +554,60 @@ MODEL_INITIALIZATION_KWARGS = [
         "Default size of step to take above reference in univariate IRF plots, if not specified in **plot_step**. Either a float or the string ``'sd'``, which indicates training sample standard deviation."
     ),
     Kwarg(
+        'plot_interactions',
+        '',
+        str,
+        "Space-delimited list of all implicit interactions to plot."
+    ),
+    Kwarg(
+        'reference_time',
+        0.,
+        float,
+        "Timepoint at which to plot interactions."
+    ),
+    Kwarg(
+        'plot_n_time_units',
+        2.5,
+        float,
+        "Number of time units to use for plotting."
+    ),
+    Kwarg(
+        'plot_n_time_points',
+        1024,
+        int,
+        "Resolution of plot axis (for 3D plots, uses sqrt of this number for each axis)."
+    ),
+    Kwarg(
+        'plot_x_inches',
+        6.,
+        float,
+        "Width of plot in inches."
+    ),
+    Kwarg(
+        'plot_y_inches',
+        4.,
+        float,
+        "Height of plot in inches."
+    ),
+    Kwarg(
+        'plot_legend',
+        True,
+        bool,
+        "Whether to include a legend in plots with multiple components."
+    ),
+    Kwarg(
+        'cmap',
+        'gist_rainbow',
+        str,
+        "Name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot)."
+    ),
+    Kwarg(
+        'dpi',
+        300,
+        int,
+        "Dots per inch of saved plot image file."
+    ),
+    Kwarg(
         'keep_plot_history',
         False,
         bool,
@@ -607,6 +661,30 @@ CDR_INITIALIZATION_KWARGS = [
         ['mean', 0.],
         "Reference stimulus to use by default for plotting and effect estimation. If `0`, zero vector. If `mean`, training set mean by predictor."
     ),
+    Kwarg(
+        'generate_curvature_plots',
+        False,
+        bool,
+        "Whether to plot IRF curvature at time **reference_time**."
+    ),
+    Kwarg(
+        'generate_irf_surface_plots',
+        False,
+        bool,
+        "Whether to plot IRF surfaces."
+    ),
+    Kwarg(
+        'generate_interaction_surface_plots',
+        False,
+        bool,
+        "Whether to plot IRF interaction surfaces at time **reference_time**."
+    ),
+    Kwarg(
+        'generate_nonstationarity_surface_plots',
+        False,
+        bool,
+        "Whether to plot IRF surfaces showing non-stationarity in the response."
+    )
 ]
 
 CDRMLE_INITIALIZATION_KWARGS = [
@@ -872,20 +950,20 @@ CDRNN_INITIALIZATION_KWARGS = [
         bool,
         "Whether to implement a time-varying intercept term, using a feedforward network architecturally matched to the IRF."
     ),
-    Kwarg(
-        'n_layers_error_params_fn',
-        None,
-        [int, None],
-        "Number of hidden layers mapping hidden state to parameters of error distribution (e.g. variance). If ``None``, inferred from length of **n_units_error_params_fn**.",
-        aliases=['n_layers_decoder']
-    ),
-    Kwarg(
-        'n_units_error_params_fn',
-        32,
-        [int, str, None],
-        "Number of units per hidden layer in mapping from hidden state to parameters of error distribution. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_units_variance_fn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers.",
-        aliases=['n_units_decoder']
-    ),
+    # Kwarg(
+    #     'n_layers_error_params_fn',
+    #     None,
+    #     [int, None],
+    #     "Number of hidden layers mapping hidden state to parameters of error distribution (e.g. variance). If ``None``, inferred from length of **n_units_error_params_fn**.",
+    #     aliases=['n_layers_decoder']
+    # ),
+    # Kwarg(
+    #     'n_units_error_params_fn',
+    #     32,
+    #     [int, str, None],
+    #     "Number of units per hidden layer in mapping from hidden state to parameters of error distribution. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_units_variance_fn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers.",
+    #     aliases=['n_units_decoder']
+    # ),
     Kwarg(
         'input_projection_inner_activation',
         'gelu',
@@ -944,19 +1022,19 @@ CDRNN_INITIALIZATION_KWARGS = [
         [str, None],
         "Name of activation function to use for final layer in IRF."
     ),
-    Kwarg(
-        'error_params_fn_inner_activation',
-        'gelu',
-        [str, None],
-        "Name of activation function to use for hidden layers of error params function.",
-        aliases=['activation']
-    ),
-    Kwarg(
-        'error_params_fn_activation',
-        None,
-        [str, None],
-        "Name of activation function to use for final layer in error params function."
-    ),
+    # Kwarg(
+    #     'error_params_fn_inner_activation',
+    #     'gelu',
+    #     [str, None],
+    #     "Name of activation function to use for hidden layers of error params function.",
+    #     aliases=['activation']
+    # ),
+    # Kwarg(
+    #     'error_params_fn_activation',
+    #     None,
+    #     [str, None],
+    #     "Name of activation function to use for final layer in error params function."
+    # ),
     Kwarg(
         'kernel_initializer',
         'glorot_uniform_initializer',
@@ -1061,13 +1139,13 @@ CDRNN_INITIALIZATION_KWARGS = [
         "Rate at which to drop neurons of IRF layers.",
         aliases=['dropout_rate']
     ),
-    Kwarg(
-        'error_params_fn_dropout_rate',
-        None,
-        [float, None],
-        "Rate at which to drop neurons of error params function.",
-        aliases=['dropout_rate']
-    ),
+    # Kwarg(
+    #     'error_params_fn_dropout_rate',
+    #     None,
+    #     [float, None],
+    #     "Rate at which to drop neurons of error params function.",
+    #     aliases=['dropout_rate']
+    # ),
     Kwarg(
         'ranef_dropout_rate',
         None,
@@ -1105,6 +1183,30 @@ CDRNN_INITIALIZATION_KWARGS = [
         ['mean', 0.],
         "Reference stimulus to use by default for plotting and effect estimation. If `0`, zero vector. If `mean`, training set mean by predictor."
     ),
+    Kwarg(
+        'generate_curvature_plots',
+        True,
+        bool,
+        "Whether to plot IRF curvature at time **reference_time**."
+    ),
+    Kwarg(
+        'generate_irf_surface_plots',
+        True,
+        bool,
+        "Whether to plot IRF surfaces."
+    ),
+    Kwarg(
+        'generate_interaction_surface_plots',
+        False,
+        bool,
+        "Whether to plot IRF interaction surfaces at time **reference_time**."
+    ),
+    Kwarg(
+        'generate_nonstationarity_surface_plots',
+        False,
+        bool,
+        "Whether to plot IRF surfaces showing non-stationarity in the response."
+    )
 ]
 
 CDRNNMLE_INITIALIZATION_KWARGS = [

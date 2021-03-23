@@ -168,12 +168,14 @@ class Config(object):
                         self.models[new_name] = new_model
                         self.model_list.append(new_name)
 
+        self.irf_name_map = {
+            't_delta': 'Delay (s)',
+            'time_X': 'Timestamp (s)',
+            'rate': 'Rate'
+        }
         if 'irf_name_map' in config:
-            self.irf_name_map = {}
             for x in config['irf_name_map']:
                 self.irf_name_map[x] = config['irf_name_map'][x]
-        else:
-            self.irf_name_map = {}
 
     def __getitem__(self, item):
         if self.current_model is None:
@@ -243,6 +245,8 @@ class Config(object):
                         out[kwarg.key] = global_settings[kwarg.key]
                 elif kwarg.in_settings(settings):
                     out[kwarg.key] = kwarg.kwarg_from_config(settings)
+                if kwarg.key == 'plot_interactions' and kwarg.key in out and isinstance(out[kwarg.key], str):
+                    out[kwarg.key] = out[kwarg.key].split()
 
             # CDRNN initialization keyword arguments
             for kwarg in CDRNN_INITIALIZATION_KWARGS:
@@ -333,26 +337,6 @@ class Config(object):
         else:
             crossval_fold = []
         out['crossval_fold'] = crossval_fold
-
-        # Plotting defaults
-        out['plot_n_time_units'] = settings.getfloat('plot_n_time_units', global_settings.get('plot_n_time_units', 2.5))
-        out['plot_n_time_points'] = settings.getfloat('plot_n_time_points', global_settings.get('plot_n_time_points', 1000))
-        out['surface_plot_n_time_points'] = settings.getfloat('surface_plot_n_time_points', global_settings.get('surface_plot_n_time_points', 1024))
-        out['generate_irf_surface_plots'] = settings.getboolean('generate_irf_surface_plots', global_settings.get('generate_irf_surface_plots', False))
-        out['generate_interaction_surface_plots'] = settings.getboolean('generate_interaction_surface_plots', global_settings.get('generate_interaction_surface_plots', False))
-        out['generate_curvature_plots'] = settings.getboolean('generate_curvature_plots', global_settings.get('generate_curvature_plots', False))
-        plot_interactions = settings.get('plot_interactions', global_settings.get('plot_interactions', ''))
-        if isinstance(plot_interactions, str):
-            plot_interactions = plot_interactions.split()
-        out['plot_interactions'] = plot_interactions
-        out['reference_time'] = settings.get('reference_time', settings.get('plot_t_interaction', global_settings.get('reference_time', 0.)))
-        out['plot_x_inches'] = settings.getfloat('plot_x_inches', global_settings.get('plot_x_inches', 6))
-        out['plot_y_inches'] = settings.getfloat('plot_y_inches', global_settings.get('plot_y_inches', 4))
-        out['plot_legend'] = settings.getboolean('plot_legend', global_settings.get('plot_legend', True))
-        out['cmap'] = settings.get('cmap', global_settings.get('cmap', 'gist_rainbow'))
-        out['dpi'] = settings.get('dpi', global_settings.get('dpi', 300))
-
-
 
         return out
 
