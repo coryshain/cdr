@@ -432,12 +432,6 @@ MODEL_INITIALIZATION_KWARGS = [
         bool,
         "Whether to apply normalization (if applicable) to non-initial internal IRF layers.",
     ),
-    # Kwarg(
-    #     'normalize_error_params_fn',
-    #     False,
-    #     bool,
-    #     "Whether to apply normalization (if applicable) to internal layers of the error parameter function.",
-    # ),
     Kwarg(
         'normalize_after_activation',
         True,
@@ -855,12 +849,6 @@ CDRNN_INITIALIZATION_KWARGS = [
         "Whether to parameterize the error distribution using a neural net. Otherwise, constant error parameters are used."
     ),
     Kwarg(
-        'split_h',
-        False,
-        bool,
-        "Whether to split the hidden state between IRF and error params fn. Ignored unless **heteroskedastic** is ``True``."
-    ),
-    Kwarg(
         'center_time_X',
         False,
         bool,
@@ -908,7 +896,7 @@ CDRNN_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'n_units_rnn',
-        32,
+        None,
         [int, str, None],
         "Number of units per RNN layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_rnn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no RNN encoding (i.e. use a context-independent convolution kernel)."
     ),
@@ -950,20 +938,6 @@ CDRNN_INITIALIZATION_KWARGS = [
         bool,
         "Whether to implement a time-varying intercept term, using a feedforward network architecturally matched to the IRF."
     ),
-    # Kwarg(
-    #     'n_layers_error_params_fn',
-    #     None,
-    #     [int, None],
-    #     "Number of hidden layers mapping hidden state to parameters of error distribution (e.g. variance). If ``None``, inferred from length of **n_units_error_params_fn**.",
-    #     aliases=['n_layers_decoder']
-    # ),
-    # Kwarg(
-    #     'n_units_error_params_fn',
-    #     32,
-    #     [int, str, None],
-    #     "Number of units per hidden layer in mapping from hidden state to parameters of error distribution. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_units_variance_fn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers.",
-    #     aliases=['n_units_decoder']
-    # ),
     Kwarg(
         'input_projection_inner_activation',
         'gelu',
@@ -1022,19 +996,6 @@ CDRNN_INITIALIZATION_KWARGS = [
         [str, None],
         "Name of activation function to use for final layer in IRF."
     ),
-    # Kwarg(
-    #     'error_params_fn_inner_activation',
-    #     'gelu',
-    #     [str, None],
-    #     "Name of activation function to use for hidden layers of error params function.",
-    #     aliases=['activation']
-    # ),
-    # Kwarg(
-    #     'error_params_fn_activation',
-    #     None,
-    #     [str, None],
-    #     "Name of activation function to use for final layer in error params function."
-    # ),
     Kwarg(
         'kernel_initializer',
         'glorot_uniform_initializer',
@@ -1139,13 +1100,6 @@ CDRNN_INITIALIZATION_KWARGS = [
         "Rate at which to drop neurons of IRF layers.",
         aliases=['dropout_rate']
     ),
-    # Kwarg(
-    #     'error_params_fn_dropout_rate',
-    #     None,
-    #     [float, None],
-    #     "Rate at which to drop neurons of error params function.",
-    #     aliases=['dropout_rate']
-    # ),
     Kwarg(
         'ranef_dropout_rate',
         None,

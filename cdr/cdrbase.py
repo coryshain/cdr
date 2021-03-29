@@ -2766,9 +2766,9 @@ class CDR(Model):
                 coef = tf.gather(self.coefficient, coef_ix, axis=1)
                 self.X_conv_scaled = self.X_conv*coef
 
-                self.out_pre_intercept = tf.reduce_sum(self.X_conv_scaled, axis=1)
+                self.y_delta = tf.reduce_sum(self.X_conv_scaled, axis=1)
 
-                out = self.out_pre_intercept + self.intercept
+                out = self.y_delta + self.intercept
 
                 if len(self.interaction_names) > 0:
                     self._initialize_interactions()
@@ -2776,6 +2776,12 @@ class CDR(Model):
                     out += self.summed_interactions
 
                 self.out = out
+
+                # Other predictive distribution parameters do not vary in CDR,
+                # defined here for a unified plotting API.
+                self.y_sd_delta = tf.constant(0.)
+                self.y_skewness_delta = tf.constant(0.)
+                self.y_tailweight_delta = tf.constant(0.)
 
 
 
@@ -3119,75 +3125,6 @@ class CDR(Model):
                 self._collect_plots()
 
                 self.sess.graph.finalize()
-
-    # def get_plot_names(self, composite='composite', scaled='scaled', dirac='dirac', plot_type='irf_1d', interactions=None):
-    #     if plot_type.lower() == 'irf_1d':
-    #         return self.plots[composite][scaled][dirac]['names']
-    #     else:
-    #         raise ValueError('Plot type "%s" not supported.' % plot_type)
-    #
-    # def get_plot_data(
-    #         self,
-    #         name,
-    #         composite='composite',
-    #         scaled='scaled',
-    #         dirac='dirac',
-    #         plot_type='irf_1d',
-    #         level=95,
-    #         n_samples=None,
-    #         support_start=0.,
-    #         n_time_units=2.5,
-    #         n_time_points=1000,
-    #         t_interaction=0.,
-    #         plot_rangf=False,
-    #         rangf_vals=None,
-    #         reference_type=None,
-    #         estimate_density=False
-    # ):
-    #     if rangf_vals is None:
-    #         rangf_keys = [None]
-    #         rangf_vals = [self.gf_defaults[0]]
-    #         if plot_rangf:
-    #             for i in range(len(self.rangf)):
-    #                 if type(self).__name__.startswith('CDRNN') or self.t.has_coefficient(self.rangf[i]) or self.t.has_irf(self.rangf[i]):
-    #                     for k in self.rangf_map[i].keys():
-    #                         rangf_keys.append(str(k))
-    #                         rangf_vals.append(np.concatenate(
-    #                             [self.gf_defaults[0, :i], [self.rangf_map[i][k]], self.gf_defaults[0, i + 1:]], axis=0))
-    #         rangf_vals = np.stack(rangf_vals, axis=0)
-    #     if plot_type.lower() == 'irf_1d':
-    #         fd = {
-    #             self.support_start: support_start,
-    #             self.n_time_units: n_time_units,
-    #             self.n_time_points: n_time_points,
-    #             self.max_tdelta_batch: n_time_points,
-    #             self.gf_y: rangf_vals,
-    #             self.training: not self.predict_mode
-    #         }
-    #         if n_samples and self.is_bayesian:
-    #             fd[self.use_MAP_mode] = False
-    #         ix = self.plots[composite][scaled][dirac]['names'].index(name)
-    #         to_run = [self.support, self.plots[composite][scaled][dirac]['plot'][ix]]
-    #     else:
-    #         raise ValueError('Plot type "%s" not supported.' % plot_type)
-    #
-    #     if n_samples and self.is_bayesian:
-    #         alpha = 100-float(level)
-    #         support = self.sess.run(to_run[0], feed_dict=fd)
-    #         samples = []
-    #         for i in range(n_samples):
-    #             samples.append(self.sess.run(to_run[1], feed_dict=fd))
-    #         samples = np.concatenate(samples, axis=-1)
-    #         mean = samples.mean(axis=-1)
-    #         lower = np.percentile(samples, alpha / 2, axis=-1)
-    #         upper = np.percentile(samples, 100 - (alpha / 2), axis=-1)
-    #         out = (support, mean, lower, upper, samples)
-    #     else:
-    #         out = self.sess.run(to_run, feed_dict=fd)
-    #
-    #     out = (out, None) # Density currently isn't computed/used by CDR
-    #
-    #     return out
 
     def report_settings(self, indent=0):
         out = super(CDR, self).report_settings(indent=indent)

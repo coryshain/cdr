@@ -90,7 +90,6 @@ class CDRNN(Model):
                            self.h_rnn_dropout_rate or \
                            self.rnn_dropout_rate or \
                            self.irf_dropout_rate or \
-                           self.error_params_fn_dropout_rate or \
                            self.ranef_dropout_rate
 
         super(CDRNN, self)._initialize_metadata()
@@ -202,24 +201,6 @@ class CDRNN(Model):
         else:
             self.n_units_irf_l1 = 1
             self.irf_l1_use_bias = False
-
-        # if self.n_units_error_params_fn:
-        #     if isinstance(self.n_units_error_params_fn, str):
-        #         self.n_units_error_params_fn = [int(x) for x in self.n_units_error_params_fn.split()]
-        #     elif isinstance(self.n_units_error_params_fn, int):
-        #         if self.n_layers_error_params_fn is None:
-        #             self.n_units_error_params_fn = [self.n_units_error_params_fn]
-        #         else:
-        #             self.n_units_error_params_fn = [self.n_units_error_params_fn] * self.n_layers_error_params_fn
-        #     if self.n_layers_error_params_fn is None:
-        #         self.n_layers_error_params_fn = len(self.n_units_error_params_fn)
-        #     if len(self.n_units_error_params_fn) == 1 and self.n_layers_error_params_fn != 1:
-        #         self.n_units_error_params_fn = [self.n_units_error_params_fn[0]] * self.n_layers_error_params_fn
-        #         self.n_layers_error_params_fn = len(self.n_units_error_params_fn)
-        # else:
-        #     self.n_units_error_params_fn = []
-        #     self.n_layers_error_params_fn = 0
-        # assert self.n_layers_error_params_fn == len(self.n_units_error_params_fn), 'Inferred n_layers_error_params_fn and n_units_error_params_fn must have the same number of layers. Saw %d and %d, respectively.' % (self.n_layers_error_params_fn, len(self.n_units_error_params_fn))
 
         if self.n_units_hidden_state is None:
             if self.n_units_irf:
@@ -489,8 +470,6 @@ class CDRNN(Model):
                         use_bias = True
                     else:
                         units = self.n_units_hidden_state
-                        if self.split_h:
-                            units *= 2
                         activation = self.input_projection_activation
                         dropout = None
                         bn = None
@@ -571,8 +550,6 @@ class CDRNN(Model):
                             use_bias = True
                         else:
                             units = self.n_units_hidden_state
-                            if self.split_h:
-                                units *= 2
                             activation = self.rnn_projection_activation
                             bn = None
                             ln = None
@@ -719,76 +696,6 @@ class CDRNN(Model):
 
                 self.irf_layers = irf_layers
                 self.irf = irf
-
-                # # ERROR PARAMS FN
-                # if self.heteroskedastic:
-                #     error_params_fn_layers = []
-                #     for l in range(self.n_layers_error_params_fn):
-                #         units = self.n_units_error_params_fn[l]
-                #         activation = self.error_params_fn_inner_activation
-                #         dropout = self.error_params_fn_dropout_rate
-                #         if self.normalize_error_params_fn:
-                #             bn = self.batch_normalization_decay
-                #             ln = self.layer_normalization_type
-                #         else:
-                #             bn = None
-                #             ln = None
-                #         use_bias = True
-                #         mn = self.maxnorm
-                #
-                #         projection = self.initialize_feedforward(
-                #             units=units,
-                #             use_bias=use_bias,
-                #             activation=activation,
-                #             dropout=dropout,
-                #             maxnorm=mn,
-                #             batch_normalization_decay=bn,
-                #             layer_normalization_type=ln,
-                #             name='error_params_fn_l%s' % (l + 1)
-                #         )
-                #         self.layers.append(projection)
-                #
-                #         self.regularizable_layers.append(projection)
-                #         error_params_fn_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
-                #
-                #     self.error_params_fn_layers = error_params_fn_layers
-                #     self.error_params_fn = compose_lambdas(error_params_fn_layers)
-                #
-                #     units = 1
-                #     if self.asymmetric_error:
-                #         units += 2
-                #     n = len(self.impulse_indices)
-                #     if n > 1:
-                #         if n == 2:
-                #             units += 1
-                #         else:
-                #             units += n
-                #
-                #     if self.heteroskedastic:
-                #         # self.y_sd_coef = tf.sigmoid(tf.Variable(
-                #         #     -1.,
-                #         #     name='y_sd_coef'
-                #         # ))
-                #         if self.asymmetric_error:
-                #             self.y_skewness_coef = tf.sigmoid(tf.Variable(
-                #                 -1.,
-                #                 name='y_skewness_coef'
-                #             ))
-                #             self.y_tailweight_coef = tf.sigmoid(tf.Variable(
-                #                 -1.,
-                #                 name='y_tailweight_coef'
-                #             ))
-                #
-                #     projection = self.initialize_feedforward(
-                #         units=units,
-                #         use_bias=False,
-                #         activation=self.error_params_fn_activation,
-                #         name='error_params_fn_l%s' % (self.n_layers_error_params_fn + 1),
-                #         final=final
-                #     )
-                #     self.layers.append(projection)
-                #
-                #     self.error_params_final_fn = compose_lambdas([projection])
 
                 # ERROR PARAM BIASES
                 if self.heteroskedastic:
@@ -1231,8 +1138,6 @@ class CDRNN(Model):
                             )
 
                         n_units_hidden_state = self.n_units_hidden_state
-                        if self.split_h:
-                            n_units_hidden_state *= 2
                         h_bias_ran_matrix_cur = tf.concat(
                             [
                                 h_bias_ran_matrix_cur,
@@ -1658,12 +1563,6 @@ class CDRNN(Model):
                 if not self.normalize_after_activation:
                     h = get_activation(self.hidden_state_activation, session=self.sess)(h)
 
-                # if self.split_h and self.heteroskedastic:
-                #     h_irf_in = h[..., :self.n_units_hidden_state]
-                #     h_error_params_fn_in = h[..., -self.n_units_hidden_state:]
-                # else:
-                #     h_irf_in = h
-                #     h_error_params_fn_in = h
                 h_irf_in = h
 
                 # Compute response
@@ -1700,12 +1599,6 @@ class CDRNN(Model):
                 y = y * self.y_coef
 
                 if self.heteroskedastic:
-                    # error_params = self.error_params_fn(h_error_params_fn_in)
-                    # # Max pooling over time
-                    # error_params = tf.reduce_max(error_params, axis=-2)
-                    # error_params = self.error_params_final_fn(error_params)
-
-                    # y_skewness_delta = error_params[..., 0]
                     if not self.direct_irf:
                         y_sd_delta = irf_out[..., n_dim:2*n_dim]
                         y_sd_delta = y_sd_delta * X_src # 1st dim is deconvolutional bias (rate)
@@ -1721,9 +1614,6 @@ class CDRNN(Model):
                         y_sd_delta += error_params_b[..., 0]
 
                     if self.asymmetric_error:
-                        # y_skewness_delta = error_params[..., 1]
-                        # y_tailweight_delta = error_params[..., 2]
-
                         if not self.direct_irf:
                             y_skewness_delta = irf_out[..., 2*n_dim:3*n_dim]
                             y_skewness_delta = y_skewness_delta * X_src  # 1st dim is deconvolutional bias (rate)
@@ -1798,7 +1688,7 @@ class CDRNN(Model):
                 y_tailweight_delta = model_dict['y_tailweight_delta']
 
                 y = tf.squeeze(y, axis=-1)
-                self.out_pre_intercept = y
+                self.y_delta = y
                 y += self.intercept
                 if self.nonstationary_intercept:
                     intercept_delta = model_dict['intercept_delta']
@@ -1873,6 +1763,9 @@ class CDRNN(Model):
                         self.y_tailweight_delta_ema,
                         ema_rate * self.y_tailweight_delta_ema + (1 - ema_rate) * tf.reduce_mean(y_tailweight_delta)
                     )
+                else:
+                    self.y_skewness_delta = tf.constant(0.)
+                    self.y_tailweight_delta = tf.constant(0.)
 
                 self.batch_norm_ema_ops = []
                 if self.input_dropout_rate:
@@ -2227,184 +2120,6 @@ class CDRNN(Model):
                 # self._collect_plots()
 
                 self.sess.graph.finalize()
-
-    # def get_plot_names(self, composite='composite', scaled='scaled', dirac='dirac', plot_type='irf_1d', interactions=None):
-    #     if interactions is None:
-    #         interactions = []
-    #     interactions_tmp = []
-    #     for x in interactions:  # Make sure all requested inputs are present in the model, otherwise skip
-    #         add = True
-    #         for y in x.split(':'):
-    #             if not y in self.terminal_names:
-    #                 add = False
-    #                 break
-    #         if add:
-    #             interactions_tmp.append(x)
-    #     interactions = interactions_tmp
-    #     if plot_type.lower() in ['irf_1d', 'irf_surface']:
-    #         out = []
-    #         if plot_type.lower() == 'irf_1d':
-    #             out.append('rate')
-    #         out += self.terminal_names[:]
-    #         # out += interactions
-    #     elif plot_type.lower() == 'curvature':
-    #         out = self.terminal_names[:]
-    #         # out = self.impulse_names[:] + interactions
-    #     elif plot_type.lower() == 'interaction_surface':
-    #         if not interactions:
-    #             out = [':'.join(x) for x in itertools.combinations(self.terminal_names, 2)]
-    #         else:
-    #             out = interactions
-    #     else:
-    #         raise ValueError('Plot type "%s" not supported.' % plot_type)
-    #
-    #     return out
-    #
-    # def plot_impulse_name_to_1hot(self, name):
-    #     names = name.split(':')
-    #     ix = names2ix(names, self.terminal_names)
-    #     one_hot = np.zeros(len(self.terminal_names), self.FLOAT_NP)
-    #     one_hot[ix] = 1
-    #
-    #     return one_hot
-    #
-    # def get_plot_data(
-    #         self,
-    #         name,
-    #         composite='composite',
-    #         scaled='scaled',
-    #         dirac='dirac',
-    #         plot_type='irf_1d',
-    #         level=95,
-    #         n_samples=None,
-    #         support_start=0.,
-    #         n_time_units=2.5,
-    #         n_time_points=1000,
-    #         t_interaction=0.,
-    #         plot_rangf=False,
-    #         rangf_vals=None,
-    #         reference_type=None,
-    #         estimate_density=False
-    # ):
-    #     with self.sess.as_default():
-    #         with self.sess.graph.as_default():
-    #             if reference_type is None:
-    #                 reference_type = self.default_reference_type
-    #
-    #             names = name.split(':')
-    #             names_src = tuple([self.terminals_by_name[x].impulse.name() if x in self.terminals_by_name else x for x in names])
-    #
-    #             if rangf_vals is None:
-    #                 rangf_keys = [None]
-    #                 rangf_vals = [self.gf_defaults[0]]
-    #                 if plot_rangf:
-    #                     for i in range(len(self.rangf)):
-    #                         for k in self.rangf_map[i].keys():
-    #                             rangf_keys.append(str(k))
-    #                             rangf_vals.append(np.concatenate(
-    #                                 [self.gf_defaults[0, :i], [self.rangf_map[i][k]], self.gf_defaults[0, i + 1:]], axis=0))
-    #                 rangf_vals = np.stack(rangf_vals, axis=0)
-    #
-    #             if name == 'rate':
-    #                 impulse_one_hot = np.zeros(len(self.impulse_names))
-    #             else:
-    #                 impulse_one_hot = self.plot_impulse_name_to_1hot(name)
-    #
-    #             plot_mean_as_reference = reference_type == 'mean'
-    #
-    #             fd = {
-    #                 self.support_start: support_start,
-    #                 self.n_time_units: n_time_units,
-    #                 self.n_time_points: n_time_points,
-    #                 self.max_tdelta_batch: n_time_points,
-    #                 self.gf_y: rangf_vals,
-    #                 self.plot_impulse_1hot: impulse_one_hot,
-    #                 self.t_interaction: t_interaction,
-    #                 self.training: not self.predict_mode,
-    #                 self.plot_mean_as_reference_tf: plot_mean_as_reference
-    #             }
-    #             if n_samples:
-    #                 fd[self.use_MAP_mode] = False
-    #
-    #             if plot_type.lower().startswith('irf_1d'):
-    #                 if name == 'rate':
-    #                     irf_1d_support = self.irf_1d_rate_support
-    #                     irf_1d = self.irf_1d_rate_plot
-    #                 else:
-    #                     irf_1d_support = self.irf_1d_support
-    #                     irf_1d = self.irf_1d_plot
-    #                 to_run = [irf_1d_support, irf_1d]
-    #                 if estimate_density:
-    #                     density_fn = self.densities[('t_delta',)]
-    #             elif plot_type.lower().startswith('irf_surface'):
-    #                 if name == 'rate':
-    #                     irf_surface_meshgrid = self.irf_surface_rate_meshgrid
-    #                     irf_surface = self.irf_surface_rate_plot
-    #                 else:
-    #                     irf_surface_meshgrid = self.irf_surface_support
-    #                     irf_surface = self.irf_surface_plot
-    #                 to_run = [irf_surface_meshgrid, irf_surface]
-    #                 if estimate_density:
-    #                     density_fn = None
-    #             elif plot_type.lower().startswith('curvature'):
-    #                 assert not name == 'rate', 'Curvature plots are not available for "rate" (deconvolutional intercept).'
-    #                 to_run = [self.curvature_support, self.curvature_plot]
-    #                 if estimate_density:
-    #                     density_fn = self.densities[names_src]
-    #             elif plot_type.lower().startswith('interaction_surface'):
-    #                 assert len(names) == 2, 'Interaction surface plots require interactions of order 2'
-    #                 impulse_one_hot1 = self.plot_impulse_name_to_1hot(names[0])
-    #                 impulse_one_hot2 = self.plot_impulse_name_to_1hot(names[1])
-    #                 fd[self.plot_impulse_1hot] = impulse_one_hot1
-    #                 fd[self.plot_impulse_1hot_2] = impulse_one_hot2
-    #                 to_run = [self.interaction_surface_support, self.interaction_surface_plot]
-    #                 if estimate_density:
-    #                     # density_fn = self.densities[names_src]
-    #                     density_fn = None
-    #             else:
-    #                 raise ValueError('Plot type "%s" not supported.' % plot_type)
-    #
-    #             if n_samples and (self.is_bayesian or self.has_dropout):
-    #                 alpha = 100-float(level)
-    #                 support = self.sess.run(to_run[0], feed_dict=fd)
-    #                 samples = []
-    #                 for i in range(n_samples):
-    #                     self.sess.run(self.dropout_resample_ops)
-    #                     samples.append(self.sess.run(to_run[1], feed_dict=fd))
-    #                 samples = np.concatenate(samples, axis=-1)
-    #                 mean = samples.mean(axis=-1)
-    #                 lower = np.percentile(samples, alpha / 2, axis=-1)
-    #                 upper = np.percentile(samples, 100 - (alpha / 2), axis=-1)
-    #                 out = (support, mean, lower, upper, samples)
-    #             else:
-    #                 out = self.sess.run(to_run, feed_dict=fd)
-    #
-    #             density = None
-    #             if estimate_density and density_fn is not None:
-    #                 alpha_support = out[0]
-    #                 if plot_type.lower() in ['irf_1d', 'curvature']:
-    #                     density = density_fn(alpha_support[:,0])
-    #                 elif plot_type.lower().startswith('interaction_surface'):
-    #                     alpha_support_shape = alpha_support[0].shape
-    #                     alpha_support1, alpha_support2 = alpha_support[0].flatten(), alpha_support[1].flatten()
-    #
-    #                     density = np.reshape(density_fn.ev(alpha_support1, alpha_support2), alpha_support_shape)
-    #                 else:
-    #                     pass
-    #                     # kde = scipy.stats.gaussian_kde(kde_support)
-    #                     # alpha_support = out[0]
-    #                     # if plot_type.lower().startswith('irf_1d') or plot_type.lower().startswith('curvature'):
-    #                     #     alpha_support = alpha_support.T
-    #                     #     density = kde.evaluate(alpha_support)
-    #                     # else:
-    #                     #     alpha_support_shape = alpha_support[0].shape
-    #                     #     alpha_support = np.stack([alpha_support[0].flatten(), alpha_support[1].flatten()], axis=0)
-    #                     #     density = np.reshape(kde.evaluate(alpha_support), alpha_support_shape)
-    #                     # print(out[1].shape, density.shape)
-    #
-    #             out = (out, density)
-    #
-    #             return out
 
     def report_settings(self, indent=0):
         out = super(CDRNN, self).report_settings(indent=indent)

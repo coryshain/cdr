@@ -896,7 +896,7 @@ class Model(object):
                 self.reg_loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='reg_loss_total')
                 if self.is_bayesian:
                     self.kl_loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='kl_loss_total')
-                self.proportion_dropped = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='proportion_dropped')
+                self.n_dropped_in = tf.placeholder(shape=[], dtype=self.INT_TF, name='n_dropped_in')
 
                 self.training_mse_in = tf.placeholder(self.FLOAT_TF, shape=[], name='training_mse_in')
                 self.training_mse = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_mse')
@@ -1075,7 +1075,7 @@ class Model(object):
                 if self.is_bayesian:
                     tf.summary.scalar('opt/kl_loss_by_iter', self.kl_loss_total, collections=['opt'])
                 if self.loss_filter_n_sds:
-                    tf.summary.scalar('opt/proportion_dropped', self.proportion_dropped, collections=['opt'])
+                    tf.summary.scalar('opt/n_dropped', self.n_dropped_in, collections=['opt'])
                 if self.log_graph:
                     self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/cdr', self.sess.graph)
                 else:
@@ -2607,7 +2607,7 @@ class Model(object):
         stderr(str(rho) + '\n\n')
 
         if False:
-            self.make_plots()
+            self.make_plots(prefix='plt')
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -2692,7 +2692,7 @@ class Model(object):
 
                             # if self.global_batch_step.eval(session=self.sess) % 1000 == 0:
                             #     self.save()
-                            #     self.make_plots()
+                            #     self.make_plots(prefix='plt')
 
                         self.sess.run(self.incr_global_step)
 
@@ -2710,7 +2710,7 @@ class Model(object):
                                 kl_loss_total /= n_minibatch
                                 log_fd[self.kl_loss_total] = kl_loss_total
                             if self.loss_filter_n_sds:
-                                log_fd[self.proportion_dropped] = n_dropped / n_train
+                                log_fd[self.n_dropped_in] = n_dropped
                             summary_train_loss = self.sess.run(self.summary_opt, feed_dict=log_fd)
                             self.writer.add_summary(summary_train_loss, self.global_step.eval(session=self.sess))
                             summary_params = self.sess.run(self.summary_params)
@@ -2722,7 +2722,7 @@ class Model(object):
 
                         if self.save_freq > 0 and self.global_step.eval(session=self.sess) % self.save_freq == 0:
                             self.save()
-                            self.make_plots()
+                            self.make_plots(prefix='plt')
 
                         t1_iter = pytime.time()
                         if self.check_convergence:
@@ -2735,11 +2735,11 @@ class Model(object):
                     # For CDRMLE, this is a crucial step in the model definition because it provides the
                     # variance of the output distribution for computing log likelihood.
 
-                    self.make_plots()
+                    self.make_plots(prefix='plt')
 
                     if self.is_bayesian or self.has_dropout:
                         # Generate plots with 95% credible intervals
-                        self.make_plots(n_samples=self.n_samples_eval)
+                        self.make_plots(n_samples=self.n_samples_eval, prefix='plt')
 
 
                 if not self.training_complete.eval(session=self.sess) or force_training_evaluation:
@@ -3272,33 +3272,11 @@ class Model(object):
 
                 return D, p_value
 
-    # def get_plot_names(self, composite='composite', scaled='scaled', dirac='dirac', plot_type='irf_1d', interactions=None):
-    #     raise NotImplementedError
-    #
-    # def get_plot_data(
-    #         self,
-    #         name,
-    #         composite='composite',
-    #         scaled='scaled',
-    #         dirac='dirac',
-    #         plot_type='irf_1d',
-    #         level=95,
-    #         n_samples=None,
-    #         support_start=0.,
-    #         n_time_units=2.5,
-    #         n_time_points=1000,
-    #         t_interaction=0.,
-    #         plot_rangf=False,
-    #         rangf_vals=None,
-    #         reference_type=None,
-    #         estimate_density=False
-    # ):
-    #     raise NotImplementedError
-
     def get_plot_data(
             self,
             xvar='t_delta',
             yvar=None,
+            resvar='y_mean',
             X_ref=None,
             time_X_ref=None,
             t_delta_ref=None,
@@ -3345,13 +3323,14 @@ class Model(object):
 
         :param xvar: ``str``; Name of continuous variable for x-axis. Can be a predictor (impulse), ``'rate'``, ``'t_delta'``, or ``'time_X'``.
         :param yvar: ``str``; Name of continuous variable for y-axis in 3D plots. Can be a predictor (impulse), ``'rate'``, ``'t_delta'``, or ``'time_X'``. If ``None``, 2D plot.
+        :param resvar: ``str``; Name of parameter of predictive distribution to plot as response variable. One of ``'y_mean'``, ``'y_sd'``, ``'y_skewness'``, or ``'y_tailweight'``. Only ``'y_mean'`` is interesting for CDR, since the others are assumed scalar. CDRNN fits all predictive parameters via IRFs.
         :param X_ref: ``dict`` or ``None``; Dictionary mapping impulse names to numeric values for use in constructing the reference. Any impulses not specified here will take default values.
         :param time_X_ref: ``float`` or ``None``; Timestamp to use for constructing the reference. If ``None``, use default value.
         :param t_delta_ref: ``float`` or ``None``; Delay/offset to use for constructing the reference. If ``None``, use default value.
         :param gf_y_ref: ``dict`` or ``None``; Dictionary mapping random grouping factor names to random grouping factor levels for use in constructing the reference. Any random effects not specified here will take default values.
         :param ref_varies_with_x: ``bool``; Whether the reference varies along the x-axis. If ``False``, use the scalar reference value for the x-axis.
         :param ref_varies_with_y: ``bool``; Whether the reference varies along the y-axis. If ``False``, use the scalar reference value for the y-axis. Ignored if **yvar** is ``None``.
-        :param manipulations: ``list`` of ``dict``; A list of manipulations, where each manipulation is constructed as a dictionary mapping a variable name (e.g. ``'predictorX'``, ``'t_delta'``) to a function that transforms the reference value for that variable (e.g. increases it by ``1``). Alternatively, the keyword ``'ranef'`` can be used to manipulate random effects. The ``'ranef'`` entry must map to a ``dict`` that itself maps random grouping factor names (e.g. ``'subject'``) to levels (e.g. ``'subjectA'``).
+        :param manipulations: ``list`` of ``dict``; A list of manipulations, where each manipulation is constructed as a dictionary mapping a variable name (e.g. ``'predictorX'``, ``'t_delta'``) to either a float offset or a function that transforms the reference value for that variable (e.g. multiplies it by ``2``). Alternatively, the keyword ``'ranef'`` can be used to manipulate random effects. The ``'ranef'`` entry must map to a ``dict`` that itself maps random grouping factor names (e.g. ``'subject'``) to levels (e.g. ``'subjectA'``).
         :param pair_manipulations: ``bool``; Whether to apply the manipulations to the reference input. If ``False``, all manipulations are compared to the same reference. For example, when plotting by-subject IRFs by subject, each subject might have a difference base response. In this case, set **pair_manipulations** to ``True`` in order to match the random effects used to compute the reference response and the response of interest.
         :param standardize_response: ``bool``; If the model uses implicit response standardization, whether to generate plot data on the standardized scale. If ``False``, plots will be rescaled back to the input scale.
         :param reference_type: ``bool``; Type of reference to use. If ``0``, use a zero-valued reference. If ``'mean'``, use the training set mean for all variables. If ``'default'``, use the default reference vector specified in the model's configuration file.
@@ -3637,34 +3616,38 @@ class Model(object):
                         gf_y_ref_cur = gf_y_ref_tiled
 
                     for k in manipulation:
+                        if isinstance(manipulation[k], float) or isinstance(manipulation[k], int):
+                            manip = lambda x, offset=float(manipulation[k]): x + offset
+                        else:
+                            manip = manipulation[k]
                         if k in self.impulse_names_to_ix:
                             if X_cur is None:
                                 X_cur = np.copy(X_base)
                             ix = self.impulse_names_to_ix[k]
-                            X_cur[..., ix] = manipulation[k](X_cur[..., ix])
+                            X_cur[..., ix] = manip(X_cur[..., ix])
                             if pair_manipulations:
                                 if X_ref_cur is None:
                                     X_ref_cur = np.copy(X_ref_tiled)
-                                X_ref_cur[..., ix] = manipulation[k](X_ref_cur[..., ix])
+                                X_ref_cur[..., ix] = manip(X_ref_cur[..., ix])
                         elif k == 'time_X':
-                            time_X_cur = manipulation[k](time_X_cur)
+                            time_X_cur = manip(time_X_cur)
                             if pair_manipulations:
                                 time_X_ref_cur = time_X_cur
                         elif k == 't_delta':
-                            t_delta_cur = manipulation[k](t_delta_cur)
+                            t_delta_cur = manip(t_delta_cur)
                             if pair_manipulations:
                                 t_delta_ref_cur = t_delta_cur
                         elif k == 'ranef':
                             gf_y_cur = np.copy(gf_y_cur)
                             if gf_y_ref is None:
                                 gf_y_ref = []
-                            for x in manipulation[k]:
+                            for x in manip:
                                 if x is not None:
                                     if isinstance(x, str):
                                         g_ix = self.ranef_group2ix[x]
                                     else:
                                         g_ix = x
-                                    val = manipulation[k][x]
+                                    val = manip[x]
                                     if isinstance(val, str):
                                         l_ix = self.ranef_level2ix[x][val]
                                     else:
@@ -3735,7 +3718,16 @@ class Model(object):
                         self.training: not self.predict_mode
                     }
 
-                response = self.out_pre_intercept
+                if resvar == 'y_mean':
+                    response = self.y_delta
+                elif resvar == 'y_sd':
+                    response = self.y_sd_delta
+                elif resvar == 'y_skewness':
+                    response = self.y_skewness_delta
+                elif resvar == 'y_tailweight':
+                    response = self.y_tailweight_delta
+                else:
+                    raise ValueError('')
 
                 if resample:
                     fd_ref[self.use_MAP_mode] = False
@@ -3780,7 +3772,8 @@ class Model(object):
 
                 samples = np.stack(samples, axis=0)
                 if self.standardize_response and not standardize_response:
-                    samples *= self.y_train_sd
+                    if resvar in ['y_mean', 'y_sd']:
+                        samples *= self.y_train_sd
                 mean = samples.mean(axis=0)
                 if resample:
                     lower = np.percentile(samples, alpha / 2, axis=0)
@@ -3827,11 +3820,7 @@ class Model(object):
         manipulations = []
         for x in self.impulse_names:
             delta = self.plot_step_map[x]
-
-            def manip(y, delta=delta):
-                return y + delta
-
-            manipulations.append({x: manip})
+            manipulations.append({x: delta})
 
         if random:
             ranef_group_names = self.ranef_group_names
@@ -3901,8 +3890,9 @@ class Model(object):
 
     def make_plots(
             self,
-            standardize_response=False,
             irf_name_map=None,
+            resvar='y_mean',
+            standardize_response=False,
             irf_ids=None,
             sort_names=True,
             prop_cycle_length=None,
@@ -3948,6 +3938,7 @@ class Model(object):
         :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
             If ``None``, IRF tree node string ID's will be used.
         :param standardize_response: ``bool``; Whether to report response using standard units. Ignored unless model was fitted using ``standardize_response==True``.
+        :param resvar: ``str``; Name of parameter of predictive distribution to plot as response variable. One of ``'y_mean'``, ``'y_sd'``, ``'y_skewness'``, or ``'y_tailweight'``. Only ``'y_mean'`` is interesting for CDR, since the others are assumed scalar. CDRNN fits all predictive parameters via IRFs.
         :param summed: ``bool``; whether to plot individual IRFs or their sum.
         :param irf_ids: ``list`` or ``None``; list of irf ID's to plot. If ``None``, all IRF's are plotted.
         :param sort_names: ``bool``; alphabetically sort IRF names.
@@ -4097,10 +4088,14 @@ class Model(object):
                     names = [x for x in self.impulse_names if (self.is_non_dirac(x) and x != 'rate')]
 
                     for name in names:
-                        plot_name = ''
+                        plot_name = 'curvature'
+
+                        if resvar != 'y_mean':
+                            plot_name += '_%s' % resvar
 
                         plot_x, plot_y, lq, uq, samples = self.get_plot_data(
                             xvar=name,
+                            resvar=resvar,
                             t_delta_ref=reference_time,
                             ref_varies_with_x=False,
                             manipulations=manipulations,
@@ -4112,7 +4107,7 @@ class Model(object):
                             level=level
                         )
 
-                        plot_name += 'curvature_%s_at_delay%s' % (name, reference_time)
+                        plot_name += '_%s_at_delay%s' % (sn(name), reference_time)
 
                         for g in range(len(ranef_level_names)):
                             filename = prefix + plot_name
@@ -4121,6 +4116,15 @@ class Model(object):
                             if mc:
                                 filename += '_mc'
                             filename += '.png'
+
+                            if resvar == 'y_mean':
+                                ylab = self.dv
+                            elif resvar == 'y_sd':
+                                ylab = '%s, SD' % get_irf_name(self.dv, irf_name_map)
+                            elif resvar == 'y_skewness':
+                                ylab = '%s, skewness' % get_irf_name(self.dv, irf_name_map)
+                            elif resvar == 'y_tailweight':
+                                ylab = '%s, tailweight' % get_irf_name(self.dv, irf_name_map)
 
                             plot_irf(
                                 plot_x,
@@ -4137,7 +4141,7 @@ class Model(object):
                                 dpi=dpi,
                                 legend=False,
                                 xlab=name,
-                                ylab=self.dv,
+                                ylab=ylab,
                                 use_line_markers=use_line_markers,
                                 transparent_background=transparent_background,
                                 dump_source=dump_source
@@ -4145,6 +4149,15 @@ class Model(object):
 
                 # Surface plots (CDRNN only)
                 for plot_type, run_plot in zip(('irf_surface', 'nonstationarity_surface', 'interaction_surface',), (generate_irf_surface_plots, generate_nonstationarity_surface_plots, generate_interaction_surface_plots)):
+                    if resvar == 'y_mean':
+                        zlab = self.dv
+                    elif resvar == 'y_sd':
+                        zlab = '%s, SD' % get_irf_name(self.dv, irf_name_map)
+                    elif resvar == 'y_skewness':
+                        zlab = '%s, skewness' % get_irf_name(self.dv, irf_name_map)
+                    elif resvar == 'y_tailweight':
+                        zlab = '%s, tailweight' % get_irf_name(self.dv, irf_name_map)
+
                     if run_plot:
                         if plot_type == 'irf_surface':
                             names = ['t_delta:%s' % x for x in self.impulse_names if (self.is_non_dirac(x) and x != 'rate')]
@@ -4158,6 +4171,9 @@ class Model(object):
                                 xvar, yvar = name.split(':')
 
                                 plot_name = 'surface'
+                                if resvar != 'y_mean':
+                                    plot_name += '_%s' % resvar
+
                                 if plot_type in ('nonstationarity_surface', 'interaction_surface'):
                                     ref_varies_with_x = False
                                 else:
@@ -4166,6 +4182,7 @@ class Model(object):
                                 (plot_x, plot_y), plot_z, lq, uq, _ = self.get_plot_data(
                                     xvar=xvar,
                                     yvar=yvar,
+                                    resvar=resvar,
                                     t_delta_ref=reference_time,
                                     ref_varies_with_x=ref_varies_with_x,
                                     manipulations=manipulations,
@@ -4179,7 +4196,7 @@ class Model(object):
                                 )
 
                                 for g in range(len(ranef_level_names)):
-                                    filename = prefix + plot_name + '_' + yvar + '_by_' + xvar
+                                    filename = prefix + plot_name + '_' + sn(yvar) + '_by_' + sn(xvar)
                                     if plot_type in ('nonstationarity_surface', 'interaction_surface'):
                                         filename += '_at_delay%s' % reference_time
                                     if ranef_level_names[g]:
@@ -4201,14 +4218,25 @@ class Model(object):
                                         plot_y_inches=plot_y_inches,
                                         xlab=xvar,
                                         ylab=yvar,
-                                        zlab=self.dv,
-                                        ylim=ylim,
+                                        zlab=zlab,
                                         transparent_background=transparent_background,
                                         dpi=dpi,
                                         dump_source=dump_source
                                     )
 
-                plot_name = 'irf_univariate_%d' % self.global_step.eval(session=self.sess) if keep_plot_history else 'irf_univariate'
+                # IRF 1D
+                plot_name = 'irf_univariate'
+                if resvar != 'y_mean':
+                    plot_name += '_%s' % resvar
+
+                if resvar == 'y_mean':
+                    ylab = self.dv
+                elif resvar == 'y_sd':
+                    ylab = '%s, SD' % get_irf_name(self.dv, irf_name_map)
+                elif resvar == 'y_skewness':
+                    ylab = '%s, skewness' % get_irf_name(self.dv, irf_name_map)
+                elif resvar == 'y_tailweight':
+                    ylab = '%s, tailweight' % get_irf_name(self.dv, irf_name_map)
 
                 names = self.impulse_names
                 if not plot_dirac:
@@ -4224,14 +4252,13 @@ class Model(object):
                 manipulations = []
                 for x in names:
                     delta = self.plot_step_map[x]
-                    def manip(y, delta=delta):
-                        return y + delta
-                    manipulations.append({x: manip})
+                    manipulations.append({x: delta})
                 gf_y_refs = [{x: y} for x, y in zip(ranef_group_names, ranef_level_names)]
 
                 for g, (gf_y_ref, gf_key) in enumerate(zip(gf_y_refs, ranef_level_names)):
                     plot_x, plot_y, lq, uq, samples = self.get_plot_data(
                         xvar='t_delta',
+                        resvar=resvar,
                         X_ref=None,
                         time_X_ref=None,
                         t_delta_ref=None,
@@ -4285,7 +4312,7 @@ class Model(object):
                         dpi=dpi,
                         legend=legend,
                         xlab='t_delta',
-                        ylab=self.dv,
+                        ylab=ylab,
                         use_line_markers=use_line_markers,
                         transparent_background=transparent_background,
                         dump_source=dump_source

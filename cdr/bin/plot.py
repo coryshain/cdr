@@ -16,9 +16,9 @@ if __name__ == '__main__':
     ''')
     argparser.add_argument('paths', nargs='+', help='Path(s) to config file(s) defining experiments')
     argparser.add_argument('-m', '--models', nargs='*', default = [], help='Model names to plot. Regex permitted. If unspecified, plots all CDR models.')
+    argparser.add_argument('-v', '--resvar', default='y_mean', help="Response variable to plot. One of One of ``'y_mean'``, ``'y_sd'``, ``'y_skewness'``, or ``'y_tailweight'``.")
     argparser.add_argument('-z', '--standardize_response', action='store_true', help='Standardize (Z-transform) response in plots. Ignored unless model was fitted using setting ``standardize_respose=True``.')
     argparser.add_argument('-e', '--plot_density', action='store_true', help='Plot density of support distribubtion. CDRNN only.')
-    # argparser.add_argument('-S', '--summed', action='store_true', help='Plot summed rather than individual IRFs.')
     argparser.add_argument('-i', '--irf_ids', nargs='*', default = [], help='List of IDs for IRF to include in the plot. Regex supported.')
     argparser.add_argument('-U', '--unsorted_irf_ids', action='store_true', help='Leave IRF IDs unsorted (otherwise, they are sorted alphabetically).')
     argparser.add_argument('-d', '--plot_dirac', action='store_true', help='Also plot linear effects and interaction estimates (stick functions at 0).')
@@ -198,6 +198,7 @@ if __name__ == '__main__':
                     stderr('Model %s missing observation and/or prediction files, skipping Q-Q plot...\n' % m)
 
             cdr_model.make_plots(
+                resvar=args.resvar,
                 plot_density=args.plot_density,
                 standardize_response=args.standardize_response,
                 irf_name_map=name_map,
@@ -218,6 +219,7 @@ if __name__ == '__main__':
 
             if cdr_model.is_bayesian or cdr_model.has_dropout:
                 cdr_model.make_plots(
+                    resvar=args.resvar,
                     standardize_response=args.standardize_response,
                     irf_name_map=name_map,
                     irf_ids=args.irf_ids,

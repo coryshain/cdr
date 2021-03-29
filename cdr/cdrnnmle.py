@@ -233,8 +233,6 @@ class CDRNNMLE(CDRNN):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 units = self.n_units_hidden_state
-                if self.split_h:
-                    units *= 2
                 if ran_gf is None:
                     h_bias = tf.Variable(tf.zeros([1, 1, units]), name='h_bias')
                 else:
