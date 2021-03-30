@@ -8,7 +8,6 @@ base = """#!/bin/bash
 #SBATCH --time=%d:00:00
 #SBATCH --ntasks=8
 #SBATCH --mem=%dgb
-
 """
 
  
@@ -19,9 +18,10 @@ if __name__ == '__main__':
     argparser.add_argument('paths', nargs='+', help='Path(s) to CDR config file(s).')
     argparser.add_argument('-j', '--job_type', default='fit', help='Type of job to run. One of ``["fit", "predict", "plot", "save_and_exit"]``')
     argparser.add_argument('-p', '--partition', nargs='+', help='Partition(s) over which to predict/evaluate')
-    argparser.add_argument('-t', '--time', type=int, default=48, help='Maximum number of hours to train models.')
+    argparser.add_argument('-t', '--time', type=int, default=48, help='Maximum number of hours to train models')
     argparser.add_argument('-m', '--memory', type=int, default=64, help='Number of GB of memory to request')
-    argparser.add_argument('-P', '--plot_cli', default='', help='CLI args to add to any plotting calls.')
+    argparser.add_argument('-P', '--slurm_partition', default=None, help='Value for SLURM --partition setting, if applicable')
+    argparser.add_argument('-C', '--plot_cli', default='', help='CLI args to add to any plotting calls')
     args = argparser.parse_args()
 
     paths = args.paths
@@ -29,6 +29,7 @@ if __name__ == '__main__':
     partitions = args.partition
     time = args.time
     memory = args.memory
+    slurm_partition = args.slurm_partition
     plot_cli = args.plot_cli
    
     for path in paths:
@@ -47,6 +48,9 @@ if __name__ == '__main__':
             filename = job_name + '.pbs'
             with open(filename, 'w') as f:
                 f.write(base % (job_name, time, memory))
+                if slurm_partition:
+                    f.write('#SBATCH  --partition=%s\n' % slurm_partition)
+                f.write('\n')
                 if job_type.lower() == 'save_and_exit':
                     f.write('python3 -m cdr.bin.train %s -m %s -s\n' % (path, m))
                 if job_type.lower() == 'fit':
