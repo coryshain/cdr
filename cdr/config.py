@@ -10,7 +10,8 @@ else:
 from .formula import Formula
 from .kwargs import MODEL_INITIALIZATION_KWARGS, \
     CDR_INITIALIZATION_KWARGS, CDRMLE_INITIALIZATION_KWARGS, CDRBAYES_INITIALIZATION_KWARGS, \
-    CDRNN_INITIALIZATION_KWARGS, CDRNNMLE_INITIALIZATION_KWARGS, CDRNNBAYES_INITIALIZATION_KWARGS
+    CDRNN_INITIALIZATION_KWARGS, CDRNNMLE_INITIALIZATION_KWARGS, CDRNNBAYES_INITIALIZATION_KWARGS, \
+    PLOT_KWARGS_CORE, PLOT_KWARGS_OTHER
 
 
 # Thanks to Brice (https://stackoverflow.com/users/140264/brice) at Stack Overflow for this
@@ -184,6 +185,12 @@ class Config(object):
             return self.models[self.current_model][item]
         raise ValueError('There is no model named "%s" defined in the config file.' %self.current_model)
 
+    def get(self, item, default=None):
+        if (self.current_model is None and item in self.global_cdr_settings) or \
+                (self.current_model in self.models and item in self.models[self.current_model]):
+            return self[item]
+        return default
+
     def __str__(self):
         out = ''
         V = vars(self)
@@ -341,3 +348,70 @@ class Config(object):
         return out
 
 
+class PlotConfig(object):
+    """
+    Parses an \*.ini file and stores settings needed to define CDR plots
+
+    :param path: Path to \*.ini file
+    """
+
+    def __init__(self, path=None):
+        if path is None:
+            self.settings_core = {}
+            self.settings_other = {}
+        else:
+            config = configparser.ConfigParser()
+            config.optionxform = str
+            assert os.path.exists(path), 'Config file %s does not exist' %path
+            config.read(path)
+
+            plot_settings = config['plot']
+            self.settings_core, self.settings_other = self.build_plot_settings(plot_settings)
+
+    def __getitem__(self, item):
+        if item in self.settings_core:
+            return self.settings_core[item]
+        return self.settings_other[item]
+
+    def get(self, item, default=None):
+        if item in self.settings_core:
+            return self.settings_core.get(item, default)
+        return self.settings_other.get(item, default)
+
+    def build_plot_settings(self, settings):
+        """
+        Given a settings object parsed from a config file, compute plot parameters.
+
+        :param settings: settings from a ``ConfigParser`` object.
+        :return: ``dict``; dictionary of settings key-value pairs.
+        """
+
+        out_core = {}
+        out_other = {}
+
+        for kwarg in PLOT_KWARGS_CORE:
+            if kwarg.in_settings(settings):
+                val = kwarg.kwarg_from_config(settings)
+                if kwarg == 'pred_names' and val is not None:
+                    val = val.split()
+                elif kwarg == 'prop_cycle_map' and val is not None:
+                    val = val.split()
+                    is_dict = len(val[-1].split(';')) == 2
+                    if is_dict:
+                        val_tmp = val
+                        val = {}
+                        for x in val_tmp:
+                            k, v = x.split(';')
+                            val[k] = int(v)
+                    else:
+                        val = [int(x) for x in val]
+                elif kwarg == 'ylim' and val is not None:
+                    val = tuple(int(x) for x in val.split())
+                out_core[kwarg.key] = val
+
+        for kwarg in PLOT_KWARGS_OTHER:
+            if kwarg.in_settings(settings):
+                val = kwarg.kwarg_from_config(settings)
+                out_other[kwarg.key] = val
+
+        return out_core, out_other

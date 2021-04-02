@@ -719,7 +719,6 @@ CDRMLE_INITIALIZATION_KWARGS = [
     )
 ]
 
-
 CDRBAYES_INITIALIZATION_KWARGS = [
     Kwarg(
         'declare_priors_fixef',
@@ -1157,7 +1156,7 @@ CDRNN_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'generate_nonstationarity_surface_plots',
-        False,
+        True,
         bool,
         "Whether to plot IRF surfaces showing non-stationarity in the response."
     )
@@ -1308,6 +1307,197 @@ CDRNNBAYES_INITIALIZATION_KWARGS = [
     )
 ]
 
+PLOT_KWARGS_CORE = [
+    Kwarg(
+        'resvar',
+        'y_mean',
+        str,
+        "Name of parameter of predictive distribution to plot as response variable. One of ``'y_mean'``, ``'y_sd'``, ``'y_skewness'``, or ``'y_tailweight'``. Only ``'y_mean'`` is interesting for CDR, since the others are assumed scalar. CDRNN fits all predictive parameters via IRFs."
+    ),
+    Kwarg(
+        'standardize_response',
+        False,
+        bool,
+        "Whether to report response using standard units. Ignored unless model was fitted using ``standardize_response==True``."
+    ),
+    Kwarg(
+        'pred_names',
+        None,
+        [str, None],
+        "List of names of predictors to include in univariate IRF plots. If ``None``, all predictors are plotted."
+    ),
+    Kwarg(
+        'sort_names',
+        True,
+        bool,
+        "Whether to alphabetically sort IRF names."
+    ),
+    Kwarg(
+        'prop_cycle_length',
+        None,
+        [int, None],
+        "Length of plotting properties cycle (defines step size in the color map). If ``None``, inferred from **pred_names**."
+    ),
+    Kwarg(
+        'prop_cycle_map',
+        None,
+        [str, None],
+        "Integer indices to use in the properties cycle for each entry in **pred_names**. Can be (1) a space-delimited list of ``;``-delimited pairs mapping from predictor names to ``int``; (2) a space-delimited list of ``int`` which is assumed to align one-to-one with predictor names, or (3) ``None``, in which case indices are automatically assigned."
+    ),
+    Kwarg(
+        'plot_dirac',
+        False,
+        bool,
+        "Whether to include any Dirac delta IRF's (stick functions at t=0) in plot."
+    ),
+    Kwarg(
+        'reference_time',
+        0.,
+        float,
+        "Timepoint at which to plot interactions."
+    ),
+    Kwarg(
+        'plot_rangf',
+        False,
+        bool,
+        "Whether to plot all (marginal) random effects."
+    ),
+    Kwarg(
+        'plot_n_time_units',
+        2.5,
+        float,
+        "Number of time units to use for plotting."
+    ),
+    Kwarg(
+        'plot_n_time_points',
+        1024,
+        int,
+        "Resolution of plot axis (for 3D plots, uses sqrt of this number for each axis)."
+    ),
+    Kwarg(
+        'generate_curvature_plots',
+        True,
+        bool,
+        "Whether to plot IRF curvature at time **reference_time**."
+    ),
+    Kwarg(
+        'generate_irf_surface_plots',
+        True,
+        bool,
+        "Whether to plot IRF surfaces."
+    ),
+    Kwarg(
+        'generate_interaction_surface_plots',
+        False,
+        bool,
+        "Whether to plot IRF interaction surfaces at time **reference_time**."
+    ),
+    Kwarg(
+        'generate_nonstationarity_surface_plots',
+        True,
+        bool,
+        "Whether to plot IRF surfaces showing non-stationarity in the response."
+    ),
+    Kwarg(
+        'plot_x_inches',
+        6.,
+        float,
+        "Width of plot in inches."
+    ),
+    Kwarg(
+        'plot_y_inches',
+        4.,
+        float,
+        "Height of plot in inches."
+    ),
+    Kwarg(
+        'ylim',
+        None,
+        [str, None],
+        "Space-delimited ``lower_bound upper_bound`` to use for y axis. If ``None``, automatically inferred."
+    ),
+    Kwarg(
+        'legend',
+        True,
+        bool,
+        "Whether to include a legend in plots with multiple components."
+    ),
+    Kwarg(
+        'use_line_markers',
+        False,
+        bool,
+        "Whether to add markers to lines in univariate IRF plots."
+    ),
+    Kwarg(
+        'transparent_background',
+        False,
+        bool,
+        "Whether to use a transparent background. If ``False``, uses a white background."
+    ),
+    Kwarg(
+        'cmap',
+        'gist_rainbow',
+        str,
+        "Name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot)."
+    ),
+    Kwarg(
+        'dpi',
+        300,
+        int,
+        "Dots per inch of saved plot image file."
+    ),
+    Kwarg(
+        'n_samples',
+        1024,
+        int,
+        "Number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults."
+    ),
+    Kwarg(
+        'level',
+        95.,
+        float,
+        "Significance level for confidence/credible intervals, if supported."
+    ),
+    Kwarg(
+        'prefix',
+        None,
+        [str, None],
+        "Name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot)."
+    )
+]
+
+PLOT_KWARGS_OTHER = [
+    Kwarg(
+        'plot_true_synthetic',
+        False,
+        bool,
+        "If the models are fitted to synthetic data, whether to additionally generate plots of the true IRF."
+    ),
+    Kwarg(
+        'qq_partition',
+        None,
+        [str, None],
+        "Partition over which to generate Q-Q plot for errors. Ignored if ``None`` or model directory does not contain saved errors for the requested partition."
+    ),
+    Kwarg(
+        'qq_use_axis_labels',
+        False,
+        bool,
+        "Whether to add axis labels to Q-Q plots."
+    ),
+    Kwarg(
+        'qq_use_ticks',
+        False,
+        bool,
+        "Whether to add ticks to Q-Q plots."
+    ),
+    Kwarg(
+        'qq_use_legend',
+        False,
+        bool,
+        "Whether to add legend to Q-Q plots."
+    )
+]
 
 def cdr_kwarg_docstring():
     """

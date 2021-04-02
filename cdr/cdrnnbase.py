@@ -1323,7 +1323,7 @@ class CDRNN(Model):
 
                 return h, c
 
-    def _apply_model(self, X, t_delta, time_X=None, time_X_mask=None, time_y=None, plot_mode=False):
+    def _apply_model(self, X, t_delta, time_X=None, time_X_mask=None, time_y=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if time_X is None:
@@ -1444,7 +1444,6 @@ class CDRNN(Model):
                         lambda: time_X
                     )
 
-
                 if self.input_dropout_rate:
                     X = self.input_dropout_layer(X)
                     time_X = self.time_X_dropout_layer(time_X)
@@ -1474,35 +1473,35 @@ class CDRNN(Model):
                     b_int = self.intercept_l1_b
 
                 # If plotting, tile out random effects
-                if plot_mode:
-                    R = tf.shape(self.gf_y)[0]
-                    B = tf.shape(X)[0]
-                    tile_ix = tf.tile(tf.range(R)[..., None], [1, B])
-                    tile_ix = tf.reshape(tile_ix, [-1])
-                    W = tf.gather(W, tile_ix, axis=0)
-                    b = tf.gather(b, tile_ix, axis=0)
-                    if self.use_coefficient and self.is_mixed_model:
-                        if not self.direct_irf:
-                            coef = tf.gather(coef, tile_ix, axis=0)
-                            if self.heteroskedastic:
-                                coef_y_sd = tf.gather(coef_y_sd, tile_ix, axis=0)
-                                if self.asymmetric_error:
-                                    coef_y_skewness = tf.gather(coef_y_skewness, tile_ix, axis=0)
-                                    coef_y_tailweight = tf.gather(coef_y_tailweight, tile_ix, axis=0)
-                        coef_irf_in = self.coefficient_irf_in
-                    h = tf.gather(h, tile_ix, axis=0)
-                    X = tf.tile(X, [R, 1 ,1])
-                    if not self.direct_irf:
-                        X_src = tf.tile(X_src, [R, 1 ,1])
-                    X = tf.tile(X, [R, 1 ,1])
-                    time_X = tf.tile(time_X, [R, 1 ,1])
-                    t_delta = tf.tile(t_delta, [R, 1 ,1])
-                    if self.heteroskedastic and self.is_mixed_model:
-                        error_params_b = tf.gather(error_params_b, tile_ix, axis=0)
-                    if self.nonstationary_intercept:
-                        tile_ix_int = tf.range(R)
-                        W_int = tf.gather(W_int, tile_ix_int, axis=0)
-                        b_int = tf.gather(b_int, tile_ix_int, axis=0)
+                # if plot_mode:
+                #     R = tf.shape(self.gf_y)[0]
+                #     B = tf.shape(X)[0]
+                #     tile_ix = tf.tile(tf.range(R)[..., None], [1, B])
+                #     tile_ix = tf.reshape(tile_ix, [-1])
+                #     W = tf.gather(W, tile_ix, axis=0)
+                #     b = tf.gather(b, tile_ix, axis=0)
+                #     if self.use_coefficient and self.is_mixed_model:
+                #         if not self.direct_irf:
+                #             coef = tf.gather(coef, tile_ix, axis=0)
+                #             if self.heteroskedastic:
+                #                 coef_y_sd = tf.gather(coef_y_sd, tile_ix, axis=0)
+                #                 if self.asymmetric_error:
+                #                     coef_y_skewness = tf.gather(coef_y_skewness, tile_ix, axis=0)
+                #                     coef_y_tailweight = tf.gather(coef_y_tailweight, tile_ix, axis=0)
+                #         coef_irf_in = self.coefficient_irf_in
+                #     h = tf.gather(h, tile_ix, axis=0)
+                #     X = tf.tile(X, [R, 1 ,1])
+                #     if not self.direct_irf:
+                #         X_src = tf.tile(X_src, [R, 1 ,1])
+                #     X = tf.tile(X, [R, 1 ,1])
+                #     time_X = tf.tile(time_X, [R, 1 ,1])
+                #     t_delta = tf.tile(t_delta, [R, 1 ,1])
+                #     if self.heteroskedastic and self.is_mixed_model:
+                #         error_params_b = tf.gather(error_params_b, tile_ix, axis=0)
+                #     if self.nonstationary_intercept:
+                #         tile_ix_int = tf.range(R)
+                #         W_int = tf.gather(W_int, tile_ix_int, axis=0)
+                #         b_int = tf.gather(b_int, tile_ix_int, axis=0)
 
                 if self.use_coefficient: # coefs on inputs to IRF
                     X *= coef_irf_in
@@ -1532,8 +1531,7 @@ class CDRNN(Model):
                     rnn_hidden, rnn_cell = self._rnn_encoder(
                         X,
                         times=time_X,
-                        mask=time_X_mask,
-                        plot_mode=plot_mode
+                        mask=time_X_mask
                     )
                     h_rnn = self.rnn_projection_fn(rnn_hidden[-1])
 
@@ -1676,8 +1674,7 @@ class CDRNN(Model):
                     self.t_delta,
                     time_X=self.time_X,
                     time_X_mask=self.time_X_mask,
-                    time_y=self.time_y,
-                    plot_mode=False
+                    time_y=self.time_y
                 )
 
                 self.X_conv = model_dict['X_conv']
@@ -1777,205 +1774,6 @@ class CDRNN(Model):
                 for x in self.layers:
                     self.batch_norm_ema_ops += x.ema_ops()
                     self.dropout_resample_ops += x.dropout_resample_ops()
-
-
-
-
-
-    ######################################################
-    #
-    #  Model construction subroutines
-    #
-    ######################################################
-
-    def _collect_plots(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                # IRF 1D PLOTS
-                t_delta = self.support[..., None]
-
-                x = self.plot_impulse_1hot_expanded
-                y = self.plot_impulse_1hot_2_expanded
-                b = self.plot_impulse_base_expanded
-                s = self.plot_impulse_offset_expanded
-                lq = self.plot_impulse_min_expanded
-                uq = self.plot_impulse_max_expanded
-
-                means = self.impulse_means_arr_expanded
-                sds = self.impulse_sds_arr_expanded
-
-                b_in = b
-                s_in = s
-                lq_in = lq
-                uq_in = uq
-                if self.center_inputs:
-                    b_in -= means
-                    lq_in -= means
-                    uq_in -= means
-                if self.rescale_inputs:
-                    b_in /= sds
-                    s_in /= sds
-                    lq_in /= sds
-                    uq_in /= sds
-
-                R = tf.shape(self.gf_y)[0]
-                T = tf.shape(self.support)[0]
-
-                X_rate = tf.tile(
-                    b_in,
-                    [T, 1, 1]
-                )
-
-                self.irf_1d_rate_support = self.support
-                irf_1d_rate_plot = self._apply_model(X_rate, t_delta, plot_mode=True)['y']
-                self.irf_1d_rate_plot = tf.reshape(irf_1d_rate_plot, [R, T, 1])
-
-                X = tf.tile(
-                     x * s_in + b_in,
-                    [T, 1, 1]
-                )
-                # X = tf.Print(X, [X_rate, X], summarize=100)
-                self.irf_1d_support = self.support
-                irf_1d_plot = self._apply_model(X, t_delta, plot_mode=True)['y']
-                self.irf_1d_plot_uncorrected = tf.reshape(irf_1d_plot, [R, T, 1])
-                self.irf_1d_plot = self.irf_1d_plot_uncorrected - self.irf_1d_rate_plot
-
-                # IRF SURFACE PLOTS
-                time_support = tf.linspace(
-                    self.support_start,
-                    self.n_time_units+self.support_start,
-                    self.n_surface_plot_points_per_side
-                )
-
-                t_delta_square = tf.tile(
-                    time_support[..., None, None],
-                    [self.n_surface_plot_points_per_side, 1, 1]
-                )
-
-                v = tf.linspace(
-                    tf.cast(0, dtype=self.FLOAT_TF),
-                    tf.cast(1, dtype=self.FLOAT_TF),
-                    self.n_surface_plot_points_per_side,
-                )[..., None, None]
-
-                u_rate = v
-                X_rate = tf.tile(
-                    b_in,
-                    [self.n_surface_plot_points_normalized, 1, 1]
-                )
-                irf_surface_rate_plot = self._apply_model(X_rate, t_delta_square, plot_mode=True)['y']
-                self.irf_surface_rate_plot = tf.reshape(
-                    irf_surface_rate_plot,
-                    [R, self.n_surface_plot_points_per_side, self.n_surface_plot_points_per_side, 1]
-                )
-                self.irf_surface_rate_meshgrid = tf.meshgrid(time_support, u_rate)
-
-                # Scale to cover range
-                u = v * (uq_in - lq_in) + lq_in
-                X = tf.reshape(
-                    tf.tile(
-                        x * u + (1 - x) * b_in,
-                        [1, self.n_surface_plot_points_per_side, 1]
-                    ),
-                    [-1, 1, len(self.impulse_names)]
-                )
-                irf_surface_plot = self._apply_model(X, t_delta_square, plot_mode=True)['y']
-                self.irf_surface_plot = tf.reshape(
-                    irf_surface_plot,
-                    [R, self.n_surface_plot_points_per_side, self.n_surface_plot_points_per_side, 1]
-                ) - self.irf_surface_rate_plot
-                u_plot = v * (uq - lq) + lq
-                irf_surface_support_impulse = tf.reduce_prod(
-                    x * u_plot + (1 - x),  # Fill empty one-hot cols with ones so we only reduce_prod on valid cols
-                    axis=[1,2]
-                )
-                self.irf_surface_support = tf.meshgrid(
-                    time_support,
-                    irf_surface_support_impulse
-                )
-
-                # CURVATURE PLOTS
-                t_interaction = self.t_interaction
-
-                rate_at_t = self._apply_model(
-                    b_in,
-                    tf.ones([1, 1, 1], dtype=self.FLOAT_TF) * t_interaction,
-                    plot_mode=True
-                )['y']
-
-                t_delta = tf.ones([T, 1, 1], dtype=self.FLOAT_TF) * t_interaction
-
-                v = tf.linspace(
-                    tf.cast(0, dtype=self.FLOAT_TF),
-                    tf.cast(1, dtype=self.FLOAT_TF),
-                    T,
-                )[..., None, None]
-                u = v * (uq_in - lq_in) + lq_in
-                X = x * u + (1 - x) * b_in
-                curvature_plot = self._apply_model(X, t_delta, plot_mode=True)['y']
-                self.curvature_plot = tf.reshape(curvature_plot, [R, T, 1]) - rate_at_t[..., None]
-
-                u_plot = v * (uq - lq) + lq
-                curvature_support = x * u_plot + (1 - x)  # Fill empty one-hot cols with ones so we only reduce_prod on valid cols
-                self.curvature_support = tf.reduce_prod(
-                    curvature_support,
-                    axis=[1,2]
-                )[..., None]
-
-                # INTERACTION PLOTS
-                t_delta = tf.ones(
-                    [self.n_surface_plot_points_normalized, 1, 1],
-                    dtype=self.FLOAT_TF
-                ) * t_interaction
-
-                v = tf.linspace(
-                    tf.cast(0, dtype=self.FLOAT_TF),
-                    tf.cast(1, dtype=self.FLOAT_TF),
-                    self.n_surface_plot_points_per_side,
-                )[..., None, None]
-
-                v_range_in = (v * (uq_in - lq_in) + lq_in)
-                u_1 = x * v_range_in
-                X_1 = tf.reshape(
-                    tf.tile(
-                        u_1,
-                        [self.n_surface_plot_points_per_side, 1, 1]
-                    ),
-                    [-1, 1, len(self.impulse_names)]
-                )
-
-                u_2 = y * v_range_in
-                X_2 = tf.reshape(
-                    tf.tile(
-                        u_2,
-                        [1, self.n_surface_plot_points_per_side, 1]
-                    ),
-                    [-1, 1, len(self.impulse_names)]
-                )
-
-                X = X_1 + X_2 + (1 - x) * (1 - y) * b_in
-                interaction_surface_plot = self._apply_model(X, t_delta, plot_mode=True)['y']
-                self.interaction_surface_plot = tf.reshape(
-                    interaction_surface_plot[None, ...],
-                    [R, self.n_surface_plot_points_per_side, self.n_surface_plot_points_per_side, 1]
-                ) - rate_at_t[..., None, None]
-
-                v_range = (v * (uq - lq) + lq)
-                u_1_plot = x * v_range
-                u_2_plot = y * v_range
-                pred1_support = tf.reduce_prod(
-                    u_1_plot + (1 - x),  # Fill empty one-hot cols with ones so we only reduce_prod on valid cols
-                    axis=[1, 2]
-                )
-                pred2_support = tf.reduce_prod(
-                    u_2_plot + (1 - y),  # Fill empty one-hot cols with ones so we only reduce_prod on valid cols
-                    axis=[1, 2]
-                )
-
-                self.interaction_surface_support = tf.meshgrid(
-                    pred1_support,
-                    pred2_support
-                )
 
 
 

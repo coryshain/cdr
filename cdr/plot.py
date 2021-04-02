@@ -29,15 +29,6 @@ class MidpointNormalize(matplotlib.colors.Normalize):
         return np.ma.masked_array(np.interp(value, x, y))
 
 
-def get_plot_config(path):
-    config = configparser.ConfigParser()
-    config.optionxform = str
-    assert os.path.exists(path), 'Config file %s does not exist' % path
-    config.read(path)
-
-    return config
-
-
 def plot_irf(
         plot_x,
         plot_y,
@@ -47,7 +38,7 @@ def plot_irf(
         density=None,
         sort_names=True,
         prop_cycle_length=None,
-        prop_cycle_ix=None,
+        prop_cycle_map=None,
         dir='.',
         filename='irf_plot.png',
         irf_name_map=None,
@@ -73,7 +64,7 @@ def plot_irf(
     :param uq: ``numpy`` array with shape (T, N), or ``None``; upper bound of credible interval for each time point. If ``None``, no credible interval will be plotted.
     :param sort_names: ``bool``; alphabetically sort IRF names.
     :param prop_cycle_length: ``int`` or ``None``; Length of plotting properties cycle (defines step size in the color map). If ``None``, inferred from **irf_names**.
-    :param prop_cycle_ix: ``list`` of ``int``, or ``None``; Integer indices to use in the properties cycle for each entry in **irf_names**. If ``None``, indices are automatically assigned.
+    :param prop_cycle_map: ``list`` of ``int``, or ``None``; Integer indices to use in the properties cycle for each entry in **irf_names**. If ``None``, indices are automatically assigned.
     :param dir: ``str``; output directory.
     :param filename: ``str``; filename.
     :param irf_name_map: ``dict`` of ``str`` to ``str``; map from CDR IRF ID's to more readable names to appear in legend. Any plotted IRF whose ID is not found in **irf_name_map** will be represented with the CDR IRF ID.
@@ -91,6 +82,15 @@ def plot_irf(
     :return: ``None``
     """
 
+    irf_names_processed = irf_names[:]
+    if irf_name_map is not None:
+        for i in range(len(irf_names_processed)):
+            irf_names_processed[i] = ':'.join([get_irf_name(x, irf_name_map) for x in irf_names_processed[i].split(':')])
+    if sort_names:
+        sort_ix = [i[0] for i in sorted(enumerate(irf_names_processed), key=lambda x:x[1])]
+    else:
+        sort_ix = range(len(irf_names_processed))
+
     while len(plot_x.shape) > 1:
         plot_x = plot_x[..., 0]
 
@@ -102,14 +102,17 @@ def plot_irf(
         n_colors = prop_cycle_length
     else:
         n_colors = len(irf_names)
-    if not prop_cycle_ix:
-        prop_cycle_ix = list(range(n_colors))
-    color_cycle = [cm(1. * prop_cycle_ix[i] / n_colors) for i in range(len(irf_names))]
+    if not prop_cycle_map:
+        prop_cycle_map = list(range(n_colors))
+    elif isinstance(prop_cycle_map, dict):
+        prop_cycle_map = [prop_cycle_map[irf_names_processed[sort_ix[i]]] for i in range(len(irf_names_processed))]
+    color_cycle = [cm(1. * prop_cycle_map[i] / n_colors) for i in range(len(irf_names))]
     prop_cycle_kwargs['color'] = color_cycle
     if use_line_markers:
         markers_keys = list(markers.MarkerStyle.markers.keys())[:-3]
-        prop_cycle_kwargs['marker'] = [markers_keys[prop_cycle_ix[i]] for i in range(len(irf_names))]
+        prop_cycle_kwargs['marker'] = [markers_keys[prop_cycle_map[i]] for i in range(len(irf_names))]
     ax.set_prop_cycle(**prop_cycle_kwargs)
+
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     ax.spines['bottom'].set_visible(False)
@@ -132,15 +135,6 @@ def plot_irf(
         ax_d.fill_between(plot_x, np.zeros_like(density), density, color='k', alpha=0.05)
         ax.set_zorder(ax_d.get_zorder() + 1)
         ax.patch.set_visible(False)
-
-    irf_names_processed = irf_names[:]
-    if irf_name_map is not None:
-        for i in range(len(irf_names_processed)):
-            irf_names_processed[i] = ':'.join([get_irf_name(x, irf_name_map) for x in irf_names_processed[i].split(':')])
-    if sort_names:
-        sort_ix = [i[0] for i in sorted(enumerate(irf_names_processed), key=lambda x:x[1])]
-    else:
-        sort_ix = range(len(irf_names_processed))
 
     for i in range(len(sort_ix)):
         # c = cm(color_cycle[i])

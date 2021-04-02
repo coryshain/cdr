@@ -18,7 +18,7 @@ class ExecDirective(Directive):
     def run(self):
         oldStdout, sys.stdout = sys.stdout, StringIO()
 
-        tab_width = self.options.get('tab-width', self.state.document.settings.tab_width)
+        tab_width = self.options.get('tab-width', self.state.document.settings_core.tab_width)
         source = self.state_machine.input_lines.source(self.lineno - self.state_machine.input_offset - 1)
 
         try:

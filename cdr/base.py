@@ -3352,9 +3352,6 @@ class Model(object):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 is_3d = yvar is not None
-
-                n_impulse = len(self.impulse_names)
-
                 if manipulations is None:
                     manipulations = []
 
@@ -3386,6 +3383,35 @@ class Model(object):
                 else:
                     resample = False
                     n_samples = 1
+
+                ref_as_manip = ref_varies_with_x and (not is_3d or ref_varies_with_y)  # Only return ref as manip if it fully varies along all axes
+
+                n_impulse = len(self.impulse_names)
+                n_manip = int(not ref_as_manip) + len(manipulations) # If ref is not returned, return default variation as first manip
+                assert not (ref_as_manip and pair_manipulations), "Cannot both vary reference along all axes and pair manipulations, since doing so will cause all responses to cancel."
+
+                if is_3d:
+                    sample_shape = (xres, yres, n_manip)
+                    if pair_manipulations:
+                        ref_shape = sample_shape
+                        B_ref = T
+                    elif ref_varies_with_x or ref_varies_with_y:
+                        ref_shape = (xres, yres, 1)
+                        B_ref = T
+                    else:
+                        ref_shape = tuple()
+                        B_ref = 1
+                else:
+                    sample_shape = (T, n_manip)
+                    if pair_manipulations:
+                        ref_shape = sample_shape
+                        B_ref = T
+                    elif ref_varies_with_x:
+                        ref_shape = (T, 1)
+                        B_ref = T
+                    else:
+                        ref_shape = tuple()
+                        B_ref = 1
 
                 # Initialize predictor reference
                 if reference_type is None:
@@ -3560,48 +3586,35 @@ class Model(object):
                 else:
                     plot_axes = plot_axes[0]
 
-                X = []
-                time_X = []
-                t_delta = []
-                gf_y = []
+                # Bring reference arrays into conformable shape
+                if X_ref.shape[0] == 1 and B_ref > 1:
+                    X_ref = np.tile(X_ref, (B_ref, 1, 1))
+                if time_X_ref.shape[0] == 1 and B_ref > 1:
+                    time_X_ref = np.tile(time_X_ref, (B_ref, 1, 1))
+                if t_delta_ref.shape[0] == 1 and B_ref > 1:
+                    t_delta_ref = np.tile(t_delta_ref, (B_ref, 1, 1))
+                if gf_y_ref.shape[0] == 1 and B_ref > 1:
+                    gf_y_ref = np.tile(gf_y_ref, (B_ref, 1))
 
-                if pair_manipulations:
-                    X_ref_in = []
-                    time_X_ref_in = []
-                    t_delta_ref_in = []
-                    gf_y_ref_in = []
-                    if len(X_ref) == 1:
-                        X_ref_tiled = np.tile(X_ref, [T, 1, 1])
-                    else:
-                        X_ref_tiled = X_ref
-                    if len(time_X_ref) == 1:
-                        time_X_ref_tiled = np.tile(time_X_ref, [T, 1, 1])
-                    else:
-                        time_X_ref_tiled = time_X_ref
-                    if len(t_delta_ref) == 1:
-                        t_delta_ref_tiled = np.tile(t_delta_ref, [T, 1, 1])
-                    else:
-                        t_delta_ref_tiled = t_delta_ref
-                    gf_y_ref_tiled = np.tile(gf_y_ref, [T, 1])
+                if ref_as_manip:
+                    X = []
+                    time_X = []
+                    t_delta = []
+                    gf_y = []
+                    X_ref_in = [X_ref]
+                    time_X_ref_in = [time_X_ref]
+                    t_delta_ref_in = [t_delta_ref]
+                    gf_y_ref_in = [gf_y_ref]
                 else:
-                    X_ref_in = X_ref
-                    time_X_ref_in = time_X_ref
-                    t_delta_ref_in = t_delta_ref
-                    gf_y_ref_in = gf_y_ref
-
-                n_manip = 0
-
-                if not ref_varies_with_x or (is_3d and not ref_varies_with_y):
-                    n_manip += 1
-                    X.append(X_base)
-                    time_X.append(time_X_base)
-                    t_delta.append(t_delta_base)
-                    gf_y.append(gf_y_base)
+                    X = [X_base]
+                    time_X = [time_X_base]
+                    t_delta = [t_delta_base]
+                    gf_y = [gf_y_base]
                     if pair_manipulations:
-                        X_ref_in.append(X_ref_tiled)
-                        time_X_ref_in.append(time_X_ref_tiled)
-                        t_delta_ref_in.append(t_delta_ref_tiled)
-                        gf_y_ref_in.append(gf_y_ref_tiled)
+                        X_ref_in = [X_ref]
+                        time_X_ref_in = [time_X_ref]
+                        t_delta_ref_in = [t_delta_ref]
+                        gf_y_ref_in = [gf_y_ref]
 
                 for manipulation in manipulations:
                     X_cur = None
@@ -3611,9 +3624,9 @@ class Model(object):
 
                     if pair_manipulations:
                         X_ref_cur = None
-                        time_X_ref_cur = time_X_ref_tiled
-                        t_delta_ref_cur = t_delta_ref_tiled
-                        gf_y_ref_cur = gf_y_ref_tiled
+                        time_X_ref_cur = time_X_ref
+                        t_delta_ref_cur = t_delta_ref
+                        gf_y_ref_cur = gf_y_ref
 
                     for k in manipulation:
                         if isinstance(manipulation[k], float) or isinstance(manipulation[k], int):
@@ -3627,7 +3640,7 @@ class Model(object):
                             X_cur[..., ix] = manip(X_cur[..., ix])
                             if pair_manipulations:
                                 if X_ref_cur is None:
-                                    X_ref_cur = np.copy(X_ref_tiled)
+                                    X_ref_cur = np.copy(X_ref)
                                 X_ref_cur[..., ix] = manip(X_ref_cur[..., ix])
                         elif k == 'time_X':
                             time_X_cur = manip(time_X_cur)
@@ -3665,26 +3678,16 @@ class Model(object):
 
                     if pair_manipulations:
                         if X_ref_cur is None:
-                            X_ref_cur = X_ref_tiled
+                            X_ref_cur = X_ref
                         X_ref_in.append(X_ref_cur)
                         time_X_ref_in.append(time_X_ref_cur)
                         t_delta_ref_in.append(t_delta_ref_cur)
                         gf_y_ref_in.append(gf_y_ref_cur)
 
-                    n_manip += 1
-
-                if pair_manipulations:
-                    X_ref_in = np.concatenate(X_ref_in, axis=0)
-                    time_X_ref_in = np.concatenate(time_X_ref_in, axis=0)
-                    t_delta_ref_in = np.concatenate(t_delta_ref_in, axis=0)
-                    gf_y_ref_in = np.concatenate(gf_y_ref_in, axis=0)
-
-                # print('ref')
-                # print(X_ref_in.shape)
-                # print(time_X_ref_in.shape)
-                # print(t_delta_ref_in.shape)
-                # print(gf_y_ref_in.shape)
-                # print()
+                X_ref_in = np.concatenate(X_ref_in, axis=0)
+                time_X_ref_in = np.concatenate(time_X_ref_in, axis=0)
+                t_delta_ref_in = np.concatenate(t_delta_ref_in, axis=0)
+                gf_y_ref_in = np.concatenate(gf_y_ref_in, axis=0)
 
                 fd_ref = {
                     self.X: X_ref_in,
@@ -3694,6 +3697,15 @@ class Model(object):
                     self.gf_y: gf_y_ref_in,
                     self.training: not self.predict_mode
                 }
+                
+                # print('X_ref_in')
+                # print(fd_ref[self.X].shape)
+                # print('time_X_ref_in')
+                # print(fd_ref[self.time_X].shape)
+                # print('time_X_mask_ref_in')
+                # print(fd_ref[self.time_X_mask].shape)
+                # print('t_delta_ref_in')
+                # print(fd_ref[self.t_delta].shape)
 
                 # Bring manipulations into 1-1 alignment on the batch dimension
                 if n_manip:
@@ -3701,13 +3713,6 @@ class Model(object):
                     time_X = np.concatenate(time_X, axis=0)
                     t_delta = np.concatenate(t_delta, axis=0)
                     gf_y = np.concatenate(gf_y, axis=0)
-
-                    # print('manips')
-                    # print(X.shape)
-                    # print(time_X.shape)
-                    # print(t_delta.shape)
-                    # print(gf_y.shape)
-                    # print()
 
                     fd_main = {
                         self.X: X,
@@ -3717,6 +3722,15 @@ class Model(object):
                         self.gf_y: gf_y,
                         self.training: not self.predict_mode
                     }
+
+                    # print('X_in')
+                    # print(fd_main[self.X].shape)
+                    # print('time_X_in')
+                    # print(fd_main[self.time_X].shape)
+                    # print('time_X_mask_in')
+                    # print(fd_main[self.time_X_mask].shape)
+                    # print('t_delta_in')
+                    # print(fd_main[self.t_delta].shape)
 
                 if resvar == 'y_mean':
                     response = self.y_delta
@@ -3737,23 +3751,6 @@ class Model(object):
                 samples = []
                 alpha = 100-float(level)
 
-                if is_3d:
-                    sample_shape = (xres, yres, n_manip)
-                    if pair_manipulations:
-                        ref_shape = sample_shape
-                    elif ref_varies_with_x or ref_varies_with_y:
-                        ref_shape = (xres, yres, 1)
-                    else:
-                        ref_shape = tuple()
-                else:
-                    sample_shape = (T, n_manip)
-                    if pair_manipulations:
-                        ref_shape = sample_shape
-                    elif ref_varies_with_x:
-                        ref_shape = (T, 1)
-                    else:
-                        ref_shape = tuple()
-
                 for i in range(n_samples):
                     self.sess.run(self.dropout_resample_ops)
                     sample_ref = self.sess.run(response, feed_dict=fd_ref)
@@ -3762,7 +3759,7 @@ class Model(object):
                         sample_main = self.sess.run(response, feed_dict=fd_main)
                         sample_main = np.reshape(sample_main, sample_shape, 'F')
                         sample_main -= sample_ref
-                        if ref_varies_with_x and (not is_3d or ref_varies_with_y):
+                        if ref_as_manip:
                             sample = np.concatenate([sample_ref, sample_main], axis=-1)
                         else:
                             sample = sample_main
@@ -3893,10 +3890,10 @@ class Model(object):
             irf_name_map=None,
             resvar='y_mean',
             standardize_response=False,
-            irf_ids=None,
+            pred_names=None,
             sort_names=True,
             prop_cycle_length=None,
-            prop_cycle_ix=None,
+            prop_cycle_map=None,
             plot_dirac=False,
             plot_interactions=None,
             reference_time=None,
@@ -3908,7 +3905,6 @@ class Model(object):
             generate_irf_surface_plots=None,
             generate_nonstationarity_surface_plots=None,
             generate_interaction_surface_plots=None,
-            plot_density=False,
             plot_x_inches=None,
             plot_y_inches=None,
             ylim=None,
@@ -3940,16 +3936,16 @@ class Model(object):
         :param standardize_response: ``bool``; Whether to report response using standard units. Ignored unless model was fitted using ``standardize_response==True``.
         :param resvar: ``str``; Name of parameter of predictive distribution to plot as response variable. One of ``'y_mean'``, ``'y_sd'``, ``'y_skewness'``, or ``'y_tailweight'``. Only ``'y_mean'`` is interesting for CDR, since the others are assumed scalar. CDRNN fits all predictive parameters via IRFs.
         :param summed: ``bool``; whether to plot individual IRFs or their sum.
-        :param irf_ids: ``list`` or ``None``; list of irf ID's to plot. If ``None``, all IRF's are plotted.
-        :param sort_names: ``bool``; alphabetically sort IRF names.
+        :param pred_names: ``list`` or ``None``; list of names of predictors to include in univariate IRF plots. If ``None``, all predictors are plotted.
+        :param sort_names: ``bool``; whether to alphabetically sort IRF names.
         :param plot_unscaled: ``bool``; plot unscaled IRFs.
         :param plot_composite: ``bool``; plot any composite IRFs. If ``False``, only plots terminal IRFs.
-        :param prop_cycle_length: ``int`` or ``None``; Length of plotting properties cycle (defines step size in the color map). If ``None``, inferred from **irf_names**.
-        :param prop_cycle_ix: ``list`` of ``int``, or ``None``; Integer indices to use in the properties cycle for each entry in **irf_names**. If ``None``, indices are automatically assigned.
-        :param plot_dirac: ``bool``; include any linear Dirac delta IRF's (stick functions at t=0) in plot.
+        :param prop_cycle_length: ``int`` or ``None``; Length of plotting properties cycle (defines step size in the color map). If ``None``, inferred from **pred_names**.
+        :param prop_cycle_map: ``dict``, ``list`` of ``int``, or ``None``; Integer indices to use in the properties cycle for each entry in **pred_names**. If a ``dict``, a map from predictor names to ``int``. If a ``list`` of ``int``, predictors inferred using **pred_names** are aligned to ``int`` indices one-to-one. If ``None``, indices are automatically assigned.
+        :param plot_dirac: ``bool``; whether to include any Dirac delta IRF's (stick functions at t=0) in plot.
         :param plot_interactions: ``list`` of ``str`` or ``None``; List of all implicit interactions to plot. If ``None``, use default setting.
         :param reference_time: ``float`` or ``None``; timepoint at which to plot interactions. If ``None``, use default setting.
-        :param plot_rangf: ``bool``; plot all (marginal) random effects.
+        :param plot_rangf: ``bool``; whether to plot all (marginal) random effects.
         :param plot_n_time_units: ``float`` or ``None``; resolution of plot axis (for 3D plots, uses sqrt of this number for each axis). If ``None``, use default setting.
         :param plot_support_start: ``float`` or ``None``; start time for IRF plots. If ``None``, use default setting.
         :param reference_type: ``bool``; whether to use the predictor means as baseline reference (otherwise use zero).
@@ -3957,32 +3953,24 @@ class Model(object):
         :param generate_irf_surface_plots: ``bool`` or ``None``; whether to plot IRF surfaces.  If ``None``, use default setting.
         :param generate_nonstationarity_surface_plots: ``bool`` or ``None``; whether to plot IRF surfaces showing non-stationarity in the response.  If ``None``, use default setting.
         :param generate_interaction_surface_plots: ``bool`` or ``None``; whether to plot IRF interaction surfaces at time **reference_time**.  If ``None``, use default setting.
-        :param plot_density: ``bool``; whether to plot the density of the support. CDRNN only.
-        :param plot_composite: ``bool``; plot any composite IRFs. If ``False``, only plots terminal IRFs.
         :param plot_x_inches: ``float`` or ``None``; width of plot in inches. If ``None``, use default setting.
         :param plot_y_inches: ``float`` or ``None; height of plot in inches. If ``None``, use default setting.
         :param ylim: 2-element ``tuple`` or ``list``; (lower_bound, upper_bound) to use for y axis. If ``None``, automatically inferred.
         :param cmap: ``str``; name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot).
         :param dpi: ``int`` or ``None``; dots per inch of saved plot image file. If ``None``, use default setting.
-        :param level: ``float``; significance level for credible intervals, ignored unless **mc** is ``True``.
+        :param level: ``float``; significance level for confidence/credible intervals, if supported.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param prefix: ``str`` or ``None``; prefix appended to output filenames. If ``None``, no prefix added.
         :param legend: ``bool`` or ``None``; whether to include a legend in plots with multiple components. If ``None``, use default setting.
-        :param transparent_background: ``bool``; use a transparent background. If ``False``, uses a white background.
+        :param use_line_markers: ``bool``; whether to add markers to lines in univariate IRF plots.
+        :param transparent_background: ``bool``; whether to use a transparent background. If ``False``, uses a white background.
         :param keep_plot_history: ``bool`` or ``None``; keep the history of all plots by adding a suffix with the iteration number. Can help visualize learning but can also consume a lot of disk space. If ``False``, always overwrite with most recent plot. If ``None``, use default setting.
         :param dump_source: ``bool``; Whether to dump the plot source array to a csv file.
         :return: ``None``
         """
 
-        assert not plot_density, 'Density plotting is currently broken'
-
         if irf_name_map is None:
             irf_name_map = self.irf_name_map
-
-        if plot_dirac:
-            dirac = 'dirac'
-        else:
-            dirac = 'nodirac'
 
         if not plot_interactions:
             plot_interactions = []
@@ -4241,10 +4229,10 @@ class Model(object):
                 names = self.impulse_names
                 if not plot_dirac:
                     names = [x for x in names if self.is_non_dirac(x)]
-                if irf_ids is not None and len(irf_ids) > 0:
+                if pred_names is not None and len(pred_names) > 0:
                     new_names = []
                     for i, name in enumerate(names):
-                        for ID in irf_ids:
+                        for ID in pred_names:
                             if ID == name or re.match(ID if ID.endswith('$') else ID + '$', name) is not None:
                                 new_names.append(name)
                     names = new_names
@@ -4301,7 +4289,7 @@ class Model(object):
                         uq=uq,
                         sort_names=sort_names,
                         prop_cycle_length=prop_cycle_length,
-                        prop_cycle_ix=prop_cycle_ix,
+                        prop_cycle_map=prop_cycle_map,
                         dir=self.outdir,
                         filename=filename,
                         irf_name_map=irf_name_map,

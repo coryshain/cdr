@@ -49,7 +49,7 @@ if __name__ == '__main__':
             with open(filename, 'w') as f:
                 f.write(base % (job_name, time, memory))
                 if slurm_partition:
-                    f.write('#SBATCH  --partition=%s\n' % slurm_partition)
+                    f.write('#SBATCH --partition=%s\n' % slurm_partition)
                 f.write('\n')
                 if job_type.lower() == 'save_and_exit':
                     f.write('python3 -m cdr.bin.train %s -m %s -s\n' % (path, m))
