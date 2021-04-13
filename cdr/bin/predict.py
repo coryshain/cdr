@@ -462,8 +462,7 @@ if __name__ == '__main__':
                             X_2d_predictors=X_2d_predictors,
                             n_samples=args.nsamples,
                             algorithm=args.algorithm,
-                            standardize_response=args.standardize_response,
-                            training=args.training_mode
+                            standardize_response=args.standardize_response
                         )
 
                         if args.extra_cols:

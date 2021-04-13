@@ -1448,8 +1448,8 @@ PLOT_KWARGS_CORE = [
     ),
     Kwarg(
         'n_samples',
-        1024,
-        int,
+        None,
+        [int, None],
         "Number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults."
     ),
     Kwarg(
@@ -1542,6 +1542,23 @@ def cdr_kwarg_docstring():
     for kwarg in CDRNNBAYES_INITIALIZATION_KWARGS:
         out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
 
+
+    out += '\n'
+
+    return out
+
+
+def plot_kwarg_docstring():
+    """
+    Generate docstring snippet summarizing all plotting kwargs, dtypes, and defaults.
+
+    :return: ``str``; docstring snippet
+    """
+
+    out = "**Plotting options**\n\n"
+
+    for kwarg in PLOT_KWARGS_CORE + PLOT_KWARGS_OTHER:
+        out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
 
     out += '\n'
 

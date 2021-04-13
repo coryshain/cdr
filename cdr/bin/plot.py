@@ -6,14 +6,17 @@ import pickle
 import numpy as np
 import pandas as pd
 from cdr.config import Config, PlotConfig
+from cdr.kwargs import plot_kwarg_docstring
 from cdr.util import load_cdr, filter_models, stderr
 from cdr.plot import plot_irf, plot_qq
 
 if __name__ == '__main__':
 
     argparser = argparse.ArgumentParser('''
-        Plot estimates from saved model(s)
-    ''')
+        Plot estimates from saved model(s).
+        
+        %s
+    ''' % plot_kwarg_docstring())
     argparser.add_argument('paths', nargs='+', help='Path(s) to config file(s) defining experiments')
     argparser.add_argument('-c', '--plot_config_path', default=None, help='Path to config file specifying plot settings')
     argparser.add_argument('-m', '--models', nargs='*', default = [], help='Model names to plot. Regex permitted. If unspecified, plots all CDR models.')
@@ -38,8 +41,6 @@ if __name__ == '__main__':
         prefix = plot_config.get('prefix', None)
         if prefix is None:
             prefix = '_'.join([x for x in p.outdir.split('/') if x not in ['.', '..']])
-        if prefix != '':
-            prefix += '_'
 
         n_time_units = plot_config.get('plot_n_time_units', p.get('plot_n_time_units', 2.5))
         reference_time = plot_config.get('reference_time', p.get('reference_time', 0.))

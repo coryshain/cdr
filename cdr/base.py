@@ -2975,7 +2975,6 @@ class Model(object):
             n_samples=None,
             algorithm='MAP',
             standardize_response=False,
-            training=None,
             verbose=True
     ):
         """
@@ -3044,9 +3043,6 @@ class Model(object):
             float_type=self.float_type,
         )
 
-        if training is None:
-            training = not self.predict_mode
-
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.set_predict_mode(True)
@@ -3059,7 +3055,7 @@ class Model(object):
                         self.time_y: time_y,
                         self.gf_y: gf_y,
                         self.y: y_dv,
-                        self.training: training
+                        self.training: not self.predict_mode
                     }
                     log_lik = self.run_loglik_op(
                         fd,
@@ -3081,7 +3077,7 @@ class Model(object):
                             self.time_y: time_y[i:i + self.eval_minibatch_size],
                             self.gf_y: gf_y[i:i + self.eval_minibatch_size] if len(gf_y) > 0 else gf_y,
                             self.y: y_dv[i:i+self.eval_minibatch_size],
-                            self.training: training
+                            self.training: not self.predict_mode
                         }
                         log_lik[i:i+self.eval_minibatch_size] = self.run_loglik_op(
                             fd_minibatch,
@@ -3177,12 +3173,12 @@ class Model(object):
             float_type=self.float_type,
         )
 
-        if training is None:
-            training = not self.predict_mode
-
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.set_predict_mode(True)
+
+                if training is None:
+                    training = not self.predict_mode
 
                 if not np.isfinite(self.minibatch_size):
                     fd = {
@@ -3665,7 +3661,9 @@ class Model(object):
                                         l_ix = self.ranef_level2ix[x][val]
                                     else:
                                         l_ix = val
-                                    gf_y_ref_arr[0, g_ix] = l_ix
+                                    gf_y_cur[:, g_ix] = l_ix
+                            if pair_manipulations:
+                                gf_y_ref_cur = gf_y_cur
                         else:
                             raise ValueError('Unrecognized manipulation key: "%s"' % k)
 
@@ -4008,7 +4006,7 @@ class Model(object):
 
         if prefix is None:
             prefix = ''
-        if prefix != '':
+        if prefix != '' and not prefix.endswith('_'):
             prefix += '_'
 
         if plot_rangf:
@@ -4100,7 +4098,7 @@ class Model(object):
                         for g in range(len(ranef_level_names)):
                             filename = prefix + plot_name
                             if ranef_level_names[g]:
-                                filename += ranef_level_names[g]
+                                filename += '_' + ranef_level_names[g]
                             if mc:
                                 filename += '_mc'
                             filename += '.png'
@@ -4243,7 +4241,30 @@ class Model(object):
                     manipulations.append({x: delta})
                 gf_y_refs = [{x: y} for x, y in zip(ranef_group_names, ranef_level_names)]
 
+                fixed_impulses = set()
+                for x in self.t.terminals():
+                    if x.fixed:
+                        for y in x.impulse_names():
+                            fixed_impulses.add(y)
+
+                print(fixed_impulses)
+                names_fixed = [x for x in names if x in fixed_impulses]
+                manipulations_fixed = [x for x in manipulations if list(x.keys())[0] in fixed_impulses]
+
+                if self.is_cdrnn:
+                    if 'rate' not in names:
+                        names = ['rate'] + names
+                    if 'rate' not in names_fixed:
+                        names_fixed = ['rate'] + names_fixed
+
                 for g, (gf_y_ref, gf_key) in enumerate(zip(gf_y_refs, ranef_level_names)):
+                    if gf_key is None:
+                        names_cur = names_fixed
+                        manipulations_cur = manipulations_fixed
+                    else:
+                        names_cur = names
+                        manipulations_cur = manipulations
+
                     plot_x, plot_y, lq, uq, samples = self.get_plot_data(
                         xvar='t_delta',
                         resvar=resvar,
@@ -4252,7 +4273,7 @@ class Model(object):
                         t_delta_ref=None,
                         gf_y_ref=gf_y_ref,
                         ref_varies_with_x=True,
-                        manipulations=manipulations,
+                        manipulations=manipulations_cur,
                         pair_manipulations=False,
                         standardize_response=standardize_response,
                         reference_type=reference_type,
@@ -4264,17 +4285,15 @@ class Model(object):
                         level=level
                     )
 
+                    filename = prefix + plot_name
+
                     if ranef_level_names[g]:
-                        filename = prefix + ranef_level_names[g] + '_' + plot_name
-                    else:
-                        filename = prefix + plot_name
+                        filename += '_' + ranef_level_names[g]
                     if mc:
                         filename += '_mc'
                     filename += '.png'
 
-                    if self.is_cdrnn:
-                        names = ['rate'] + names
-                    else:
+                    if not self.is_cdrnn:
                         plot_y = plot_y[..., 1:]
                         if lq is not None:
                             lq = lq[..., 1:]
@@ -4284,7 +4303,7 @@ class Model(object):
                     plot_irf(
                         plot_x,
                         plot_y,
-                        names,
+                        names_cur,
                         lq=lq,
                         uq=uq,
                         sort_names=sort_names,
