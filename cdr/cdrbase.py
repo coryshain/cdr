@@ -2420,13 +2420,14 @@ class CDR(Model):
                                         )
                                     )
 
-                    self.parameter_table_random_keys += parameter_table_random_keys
-                    self.parameter_table_random_rangf += parameter_table_random_rangf
-                    self.parameter_table_random_rangf_levels += parameter_table_random_rangf_levels
-                    self.parameter_table_random_values = tf.concat(
-                        [self.parameter_table_random_values, tf.concat(parameter_table_random_values, 0)],
-                        0,
-                    )
+                    if len(parameter_table_random_keys):
+                        self.parameter_table_random_keys += parameter_table_random_keys
+                        self.parameter_table_random_rangf += parameter_table_random_rangf
+                        self.parameter_table_random_rangf_levels += parameter_table_random_rangf_levels
+                        self.parameter_table_random_values = tf.concat(
+                            [self.parameter_table_random_values, tf.concat(parameter_table_random_values, 0)],
+                            0,
+                        )
 
     def _initialize_random_mean_vector(self):
         with self.sess.as_default():
