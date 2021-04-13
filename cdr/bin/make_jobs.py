@@ -21,7 +21,7 @@ if __name__ == '__main__':
     argparser.add_argument('-t', '--time', type=int, default=48, help='Maximum number of hours to train models')
     argparser.add_argument('-m', '--memory', type=int, default=64, help='Number of GB of memory to request')
     argparser.add_argument('-P', '--slurm_partition', default=None, help='Value for SLURM --partition setting, if applicable')
-    argparser.add_argument('-C', '--plot_cli', default='', help='CLI args to add to any plotting calls')
+    argparser.add_argument('-C', '--plot_config', default=None, help='Path to config file for plotting jobs')
     args = argparser.parse_args()
 
     paths = args.paths
@@ -30,7 +30,7 @@ if __name__ == '__main__':
     time = args.time
     memory = args.memory
     slurm_partition = args.slurm_partition
-    plot_cli = args.plot_cli
+    plot_config = args.plot_config
    
     for path in paths:
         c = Config(path)
@@ -58,6 +58,6 @@ if __name__ == '__main__':
                 if partitions and job_type.lower() in ['fit', 'predict']:
                     f.write('python3 -m cdr.bin.predict %s -p %s -m %s\n' % (path, ' '.join(partitions), m))
                 if job_type.lower() == 'plot':
-                    f.write('python3 -m cdr.bin.plot %s -m %s -p %s %s\n' % (path, basename, m, plot_cli))
+                    f.write('python3 -m cdr.bin.plot %s -c %s -m %s\n' % (plot_config, path, m))
 
     
