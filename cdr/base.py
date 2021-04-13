@@ -2756,6 +2756,11 @@ class Model(object):
                         X_2d_predictors=X_2d_predictors
                     )
 
+                    with open(self.outdir + '/obs_train.txt', 'w') as o_file:
+                        obs = y[self.dv]
+                        for i in range(len(obs)):
+                            o_file.write(str(obs[i]) + '\n')
+
                     with open(self.outdir + '/preds_train.txt', 'w') as p_file:
                         for i in range(len(preds)):
                             p_file.write(str(preds[i]) + '\n')
