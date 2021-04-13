@@ -4247,7 +4247,6 @@ class Model(object):
                         for y in x.impulse_names():
                             fixed_impulses.add(y)
 
-                print(fixed_impulses)
                 names_fixed = [x for x in names if x in fixed_impulses]
                 manipulations_fixed = [x for x in manipulations if list(x.keys())[0] in fixed_impulses]
 
