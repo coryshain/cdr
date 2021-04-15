@@ -6,7 +6,7 @@ base = """#!/bin/bash
 #
 #SBATCH --job-name=%s
 #SBATCH --time=%d:00:00
-#SBATCH --ntasks=8
+#SBATCH --ntasks=%d
 #SBATCH --mem=%dgb
 """
 
@@ -19,15 +19,17 @@ if __name__ == '__main__':
     argparser.add_argument('-j', '--job_type', default='fit', help='Type of job to run. One of ``["fit", "predict", "summarize", "summarizeR", "plot", "save_and_exit"]``')
     argparser.add_argument('-p', '--partition', nargs='+', help='Partition(s) over which to predict/evaluate')
     argparser.add_argument('-t', '--time', type=int, default=48, help='Maximum number of hours to train models')
+    argparser.add_argument('-n', '--n_cores', type=int, default=8, help='Number of cores to request')
     argparser.add_argument('-m', '--memory', type=int, default=64, help='Number of GB of memory to request')
     argparser.add_argument('-P', '--slurm_partition', default=None, help='Value for SLURM --partition setting, if applicable')
-    argparser.add_argument('-C', '--plot_config', default=None, help='Path to config file for plotting jobs')
+    argparser.add_argument('-c', '--plot_config', default=None, help='Path to config file for plotting jobs')
     args = argparser.parse_args()
 
     paths = args.paths
     job_type = args.job_type
     partitions = args.partition
     time = args.time
+    n_cores = args.n_cores
     memory = args.memory
     slurm_partition = args.slurm_partition
     plot_config = args.plot_config
@@ -47,7 +49,7 @@ if __name__ == '__main__':
             job_name = '_'.join([basename, job_type])
             filename = job_name + '.pbs'
             with open(filename, 'w') as f:
-                f.write(base % (job_name, time, memory))
+                f.write(base % (job_name, time, n_cores, memory))
                 if slurm_partition:
                     f.write('#SBATCH --partition=%s\n' % slurm_partition)
                 f.write('\n')
@@ -62,7 +64,7 @@ if __name__ == '__main__':
                 elif job_type.lower() == 'summarizer':
                     f.write('python3 -m cdr.bin.summarize %s -m %s -r\n' % (path, m))
                 elif job_type.lower() == 'plot':
-                    f.write('python3 -m cdr.bin.plot %s -c %s -m %s\n' % (plot_config, path, m))
+                    f.write('python3 -m cdr.bin.plot %s -c %s -m %s\n' % (path, plot_config, m))
                 else:
                     raise ValueError('Unrecognized job type: %s.' % job_type)
 
