@@ -16,7 +16,7 @@ if __name__ == '__main__':
     Generate SLURM batch jobs to run CDR models specified in one or more config files.
     ''')
     argparser.add_argument('paths', nargs='+', help='Path(s) to CDR config file(s).')
-    argparser.add_argument('-j', '--job_type', default='fit', help='Type of job to run. One of ``["fit", "predict", "plot", "save_and_exit"]``')
+    argparser.add_argument('-j', '--job_type', default='fit', help='Type of job to run. One of ``["fit", "predict", "summarize", "summarizeR", "plot", "save_and_exit"]``')
     argparser.add_argument('-p', '--partition', nargs='+', help='Partition(s) over which to predict/evaluate')
     argparser.add_argument('-t', '--time', type=int, default=48, help='Maximum number of hours to train models')
     argparser.add_argument('-m', '--memory', type=int, default=64, help='Number of GB of memory to request')
@@ -53,11 +53,17 @@ if __name__ == '__main__':
                 f.write('\n')
                 if job_type.lower() == 'save_and_exit':
                     f.write('python3 -m cdr.bin.train %s -m %s -s\n' % (path, m))
-                if job_type.lower() == 'fit':
+                elif job_type.lower() == 'fit':
                     f.write('python3 -m cdr.bin.train %s -m %s\n' % (path, m))
-                if partitions and job_type.lower() in ['fit', 'predict']:
+                elif partitions and job_type.lower() in ['fit', 'predict']:
                     f.write('python3 -m cdr.bin.predict %s -p %s -m %s\n' % (path, ' '.join(partitions), m))
-                if job_type.lower() == 'plot':
+                elif job_type.lower() == 'summarize':
+                    f.write('python3 -m cdr.bin.summarize %s -m %s\n' % (path, m))
+                elif job_type.lower() == 'summarizer':
+                    f.write('python3 -m cdr.bin.summarize %s -m %s -r\n' % (path, m))
+                elif job_type.lower() == 'plot':
                     f.write('python3 -m cdr.bin.plot %s -c %s -m %s\n' % (plot_config, path, m))
+                else:
+                    raise ValueError('Unrecognized job type: %s.' % job_type)
 
     
