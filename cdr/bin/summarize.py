@@ -13,17 +13,19 @@ if __name__ == '__main__':
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of models for which to generate summaries. Regex permitted. If not, generates summaries for all CDR models.')
     argparser.add_argument('-r', '--random', action='store_true', help='Report random effects.')
     argparser.add_argument('-l', '--level', type=float, default=95., help='Level (in percent) for any credible intervals (CDRBayes only).')
-    argparser.add_argument('-n', '--nsamples', default='default', help='Number of MC samples to use for computing statistics. If unspecified, uses model default (**n_samples_eval** parameter).')
+    argparser.add_argument('-n', '--n_samples', default='default', help='Number of MC samples to use for computing statistics. If unspecified, uses model default (**n_samples_eval** parameter).')
     argparser.add_argument('-t', '--timeunits', type=float, default=None, help='Number of time units over which to compute effect size integrals. If unspecified, uses longest timespan attested in training.')
     argparser.add_argument('-T', '--save_table', action='store_true', help='Save CSV table of model parameters.')
     argparser.add_argument('-p', '--prefix', type=str, default=None, help='String to prepend to output file.')
     argparser.add_argument('--cpu_only', action='store_true', help='Use CPU implementation even if GPU is available.')
     args = argparser.parse_args()
 
-    if args.nsamples == 'default':
-        nsamples = args.nsamples
+    if args.n_samples == 'default':
+        n_samples = args.n_samples
+    elif args.n_samples == 'None':
+        n_samples = None
     else:
-        nsamples = int(args.nsamples)
+        n_samples = int(args.n_samples)
 
     for path in args.paths:
         p = Config(path)
@@ -42,7 +44,7 @@ if __name__ == '__main__':
             summary = cdr_model.summary(
                 random=args.random,
                 level=args.level,
-                n_samples=nsamples,
+                n_samples=n_samples,
                 integral_n_time_units=args.timeunits
             )
 
@@ -62,13 +64,13 @@ if __name__ == '__main__':
                 else:
                     outname = p.outdir + '/' + m_path + '/cdr_parameters.csv'
 
-                cdr_model.save_parameter_table(level=args.level, n_samples=args.nsamples, outfile=outname)
+                cdr_model.save_parameter_table(level=args.level, n_samples=n_samples, outfile=outname)
                 
                 if args.prefix:
                     outname = p.outdir + '/' + m_path + '/' + args.prefix + '_cdr_irf_integrals.csv'
                 else:
                     outname = p.outdir + '/' + m_path + '/cdr_irf_integrals.csv'
 
-                cdr_model.save_integral_table(level=args.level, n_samples=args.nsamples, outfile=outname)
+                cdr_model.save_integral_table(level=args.level, n_samples=n_samples, outfile=outname)
 
             cdr_model.finalize()

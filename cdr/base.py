@@ -1947,13 +1947,13 @@ class Model(object):
 
         return out
 
-    def report_parameter_values(self, random=False, level=95, n_samples=None, indent=0):
+    def report_parameter_values(self, random=False, level=95, n_samples='default', indent=0):
         """
         Generate a string representation of the model's parameter table.
 
         :param random: ``bool``; report random effects estimates.
         :param level: ``float``; significance level for credible intervals if Bayesian, otherwise ignored.
-        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param n_samples: ``int``, ``'default'``, or ``None``; number of posterior samples to draw. If ``None``, use MLE/MAP estimate. If ``'default'``, use model defaults.
         :param indent: ``int``; indentation level.
         :return: ``str``; the parameter table report
         """
@@ -2011,13 +2011,13 @@ class Model(object):
 
         return out
 
-    def report_irf_integrals(self, random=False, level=95, n_samples=None, integral_n_time_units=None, indent=0):
+    def report_irf_integrals(self, random=False, level=95, n_samples='default', integral_n_time_units=None, indent=0):
         """
         Generate a string representation of the model's IRF integrals (effect sizes)
 
         :param random: ``bool``; whether to compute IRF integrals for random effects estimates
         :param level: ``float``; significance level for credible intervals if Bayesian, otherwise ignored.
-        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param n_samples: ``int``, ``'default'``, or ``None``; number of posterior samples to draw. If ``None``, use MLE/MAP estimate. If ``'default'``, use model defaults.
         :param integral_n_time_units: ``float``; number if time units over which to take the integral.
         :param indent: ``int``; indentation level.
         :return: ``str``; the IRF integrals report
@@ -2061,13 +2061,13 @@ class Model(object):
 
         return out
 
-    def parameter_summary(self, random=False, level=95, n_samples=None, integral_n_time_units=None, indent=0):
+    def parameter_summary(self, random=False, level=95, n_samples='default', integral_n_time_units=None, indent=0):
         """
         Generate a string representation of the model's effect sizes and parameter values.
 
         :param random: ``bool``; report random effects estimates
         :param level: ``float``; significance level for credible intervals if Bayesian, otherwise ignored.
-        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param n_samples: ``int``, ``'default'``, or ``None``; number of posterior samples to draw. If ``None``, use MLE/MAP estimate. If ``'default'``, use model defaults.
         :param integral_n_time_units: ``float``; number if time units over which to take the integral.
         :param indent: ``int``; indentation level.
         :return: ``str``; the parameter summary
@@ -2094,13 +2094,13 @@ class Model(object):
 
         return out
 
-    def summary(self, random=False, level=95, n_samples=None, integral_n_time_units=None, indent=0):
+    def summary(self, random=False, level=95, n_samples='default', integral_n_time_units=None, indent=0):
         """
         Generate a summary of the fitted model.
 
         :param random: ``bool``; report random effects estimates
         :param level: ``float``; significance level for credible intervals if Bayesian, otherwise ignored.
-        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param n_samples: ``int``, ``'default'``, or ``None``; number of posterior samples to draw. If ``None``, use MLE/MAP estimate. If ``'default'``, use model defaults.
         :param integral_n_time_units: ``float``; number if time units over which to take the integral.
         :return: ``str``; the model summary
         """
@@ -3786,7 +3786,7 @@ class Model(object):
 
                 return out
 
-    def irf_integrals(self, standardize_response=False, level=95, random=False, n_samples=None, n_time_units=None, n_time_points=1000):
+    def irf_integrals(self, standardize_response=False, level=95, random=False, n_samples='default', n_time_units=None, n_time_points=1000):
         """
         Generate effect size estimates by computing the area under each IRF curve in the model via discrete approximation.
 
@@ -4331,21 +4331,22 @@ class Model(object):
 
                 self.set_predict_mode(False)
 
-    def parameter_table(self, standardize_response=False, fixed=True, level=95, n_samples=None):
+    def parameter_table(self, standardize_response=False, fixed=True, level=95, n_samples='default'):
         """
         Generate a pandas table of parameter names and values.
 
         :param standardize_response: ``bool``; Whether to report response using standard units. Ignored unless model was fitted using ``standardize_response==True``.
         :param fixed: ``bool``; Return a table of fixed parameters (otherwise returns a table of random parameters).
         :param level: ``float``; significance level for credible intervals if model is Bayesian, ignored otherwise.
-        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param n_samples: ``int``, ``'default'``, or ``None``; number of posterior samples to draw. If ``None``, use MLE/MAP estimate. If ``'default'``, use model defaults.
         :return: ``pandas`` ``DataFrame``; The parameter table.
         """
 
         assert fixed or len(self.rangf) > 0, 'Attempted to generate a random effects parameter table in a fixed-effects-only model'
 
-        if n_samples is None and getattr(self, 'n_samples_eval', None) is not None:
-            n_samples = self.n_samples_eval
+        if n_samples == 'default':
+            if self.is_bayesian or self.has_dropout:
+                n_samples = self.n_samples_eval
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -4431,7 +4432,7 @@ class Model(object):
 
         :param random: ``bool``; whether to compute IRF integrals for random effects estimates
         :param level: ``float``; significance level for credible intervals if Bayesian, otherwise ignored.
-        :param n_samples: ``int``, ``'default'``, or ``None``; number of posterior samples to draw.
+        :param n_samples: ``int``, ``'default'``, or ``None``; number of posterior samples to draw. If ``None``, use MLE/MAP estimate. If ``'default'``, use model defaults.
         :param integral_n_time_units: ``float``; number if time units over which to take the integral.
         :param outfile: ``str``; Path to output file. If ``None``, use model defaults.
         :return: ``str``; the IRF integrals report
