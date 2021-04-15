@@ -2757,7 +2757,7 @@ class Model(object):
                     )
 
                     with open(self.outdir + '/obs_train.txt', 'w') as o_file:
-                        obs = y[self.dv]
+                        obs = y[self.dv].values
                         for i in range(len(obs)):
                             o_file.write(str(obs[i]) + '\n')
 
