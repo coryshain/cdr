@@ -54,7 +54,7 @@ if __name__ == '__main__':
                     f.write('#SBATCH --partition=%s\n' % slurm_partition)
                 f.write('\n')
                 if job_type.lower() == 'save_and_exit':
-                    f.write('python3 -m cdr.bin.train %s -m %s -s\n' % (path, m))
+                    f.write('python3 -m cdr.bin.train %s -m %s -s -S\n' % (path, m))
                 elif job_type.lower() == 'fit':
                     f.write('python3 -m cdr.bin.train %s -m %s\n' % (path, m))
                 elif partitions and job_type.lower() in ['fit', 'predict']:
