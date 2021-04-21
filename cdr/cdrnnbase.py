@@ -142,6 +142,8 @@ class CDRNN(Model):
             if isinstance(self.n_units_rnn, str):
                 if self.n_units_rnn.lower() == 'infer':
                     self.n_units_rnn = [len(self.impulse_names) + len(self.ablated) + 1]
+                elif self.n_units_rnn.lower() == 'inherit':
+                    self.n_units_rnn = ['inherit']
                 else:
                     self.n_units_rnn = [int(x) for x in self.n_units_rnn.split()]
             elif isinstance(self.n_units_rnn, int):
@@ -207,7 +209,7 @@ class CDRNN(Model):
                 self.n_units_hidden_state = self.n_units_irf[0]
             elif self.n_units_input_projection:
                 self.n_units_hidden_state = self.n_units_input_projection[-1]
-            elif self.n_units_rnn:
+            elif self.n_units_rnn and self.n_units_rnn[-1] != 'inherit':
                 self.n_units_hidden_state = self.n_units_rnn[-1]
             else:
                 raise ValueError("Cannot infer size of hidden state. Units are not specified for hidden state, IRF, input projection, or RNN projection.")
@@ -216,6 +218,9 @@ class CDRNN(Model):
                 self.n_units_hidden_state = len(self.impulse_names) + len(self.ablated) + 1
             else:
                 self.n_units_hidden_state = int(self.n_units_hidden_state)
+
+        if self.n_units_rnn and self.n_units_rnn[-1] == 'inherit':
+            self.n_units_rnn = [self.n_units_hidden_state]
 
         self.layers = []
 

@@ -554,6 +554,8 @@ class CDRNNMLE(CDRNN):
 
                 loss_func = - ll_objective
 
+                # loss_func = tf.Print(loss_func, [tf.reduce_min(self.out), tf.reduce_max(self.out), tf.reduce_mean(self.out), self.y_sd_coef, tf.reduce_min(self.y_sd_delta), tf.reduce_max(self.y_sd_delta), tf.reduce_mean(self.y_sd_delta), tf.reduce_min(self.y_sd), tf.reduce_max(self.y_sd), tf.reduce_mean(self.y_sd)])
+
                 if self.loss_filter_n_sds and self.ema_decay:
                     beta = self.ema_decay
                     ema_warm_up = int(2/(1 - self.ema_decay))

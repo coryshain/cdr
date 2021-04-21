@@ -897,7 +897,7 @@ CDRNN_INITIALIZATION_KWARGS = [
         'n_units_rnn',
         None,
         [int, str, None],
-        "Number of units per RNN layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_rnn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no RNN encoding (i.e. use a context-independent convolution kernel)."
+        "Number of units per RNN layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_rnn** space-delimited integers, one for each layer in order from bottom to top. Can also be ``'infer'``, which infers the size from the number of predictors, or ``'inherit'``, which uses size **n_units_hidden_state**. If ``0`` or ``None``, no RNN encoding (i.e. use a context-independent convolution kernel)."
     ),
     Kwarg(
         'n_layers_rnn_projection',
