@@ -706,31 +706,6 @@ class CDRNN(Model):
                 if self.heteroskedastic:
                     self.error_params_b, self.error_params_b_summary = self.initialize_error_params_biases(ran_gf=None)
 
-                # OUTPUT COEFFICIENTS
-                # (to avoid early training instability)
-                self.y_coef = tf.Variable(
-                    # self.epsilon,
-                    0.,
-                    name='y_coef'
-                )
-                if self.heteroskedastic:
-                    self.y_sd_coef = tf.Variable(
-                        # self.epsilon,
-                        0.,
-                        name='y_sd_coef'
-                    )
-                    if self.asymmetric_error:
-                        self.y_skewness_coef = tf.Variable(
-                            # self.epsilon,
-                            0.,
-                            name='y_skewness_coef'
-                        )
-                        self.y_tailweight_coef = tf.Variable(
-                            # self.epsilon,
-                            0.,
-                            name='y_tailweight_coef'
-                        )
-
                 # INTERCEPT
                 if self.has_intercept[None]:
                     self.intercept_fixed, self.intercept_fixed_summary = self.initialize_intercept(ran_gf=None)
@@ -1585,21 +1560,22 @@ class CDRNN(Model):
                     irf_l1 = get_activation(self.irf_inner_activation, session=self.sess)(irf_l1)
 
                 irf_out = self.irf(irf_l1)
+                n_dim = len(self.impulse_names) + 1
+                stabilizing_constant = 1. / (self.history_length * n_dim)
 
                 if not self.direct_irf:
-                    n_dim = len(self.impulse_names) + 1
                     y = irf_out[..., :n_dim]
                     y = y * X_src # 1st dim is deconvolutional bias (rate)
                 else:
                     n_dim = 1
                 if time_X_mask is not None:
                     y *= time_X_mask[..., None]
+                    y *= stabilizing_constant
                 y = tf.reduce_sum(y, axis=1)
                 if not self.direct_irf and self.use_coefficient: # coefs on convolved predictors
                     y = y * tf.squeeze(coef, axis=-2)
                 X_conv = y
                 y = tf.reduce_sum(y, axis=-1, keepdims=True)
-                y = y * self.y_coef
 
                 if self.heteroskedastic:
                     if not self.direct_irf:
@@ -1607,11 +1583,11 @@ class CDRNN(Model):
                         y_sd_delta = y_sd_delta * X_src # 1st dim is deconvolutional bias (rate)
                     if time_X_mask is not None:
                         y_sd_delta *= time_X_mask[..., None]
+                        y_sd_delta *= stabilizing_constant
                     y_sd_delta = tf.reduce_sum(y_sd_delta, axis=1)
                     if not self.direct_irf and self.use_coefficient: # coefs on convolved predictors
                         y_sd_delta = y_sd_delta * tf.squeeze(coef_y_sd, axis=-2)
                     y_sd_delta = tf.reduce_sum(y_sd_delta, axis=-1)
-                    y_sd_delta = y_sd_delta * self.y_sd_coef
 
                     if self.is_mixed_model:
                         y_sd_delta += error_params_b[..., 0]
@@ -1622,22 +1598,22 @@ class CDRNN(Model):
                             y_skewness_delta = y_skewness_delta * X_src  # 1st dim is deconvolutional bias (rate)
                         if time_X_mask is not None:
                             y_skewness_delta *= time_X_mask[..., None]
+                            y_skewness_delta *= stabilizing_constant
                         y_skewness_delta = tf.reduce_sum(y_skewness_delta, axis=1)
                         if not self.direct_irf and self.use_coefficient:  # coefs on convolved predictors
                             y_skewness_delta = y_skewness_delta * tf.squeeze(coef_y_skewness, axis=-2)
                         y_skewness_delta = tf.reduce_sum(y_skewness_delta, axis=-1)
-                        y_skewness_delta = y_skewness_delta * self.y_skewness_coef
 
                         if not self.direct_irf:
                             y_tailweight_delta = irf_out[..., 3*n_dim:]
                             y_tailweight_delta = y_tailweight_delta * X_src  # 1st dim is deconvolutional bias (rate)
                         if time_X_mask is not None:
                             y_tailweight_delta *= time_X_mask[..., None]
+                            y_tailweight_delta *= stabilizing_constant
                         y_tailweight_delta = tf.reduce_sum(y_tailweight_delta, axis=1)
                         if not self.direct_irf and self.use_coefficient:  # coefs on convolved predictors
                             y_tailweight_delta = y_tailweight_delta * tf.squeeze(coef_y_tailweight, axis=-2)
                         y_tailweight_delta = tf.reduce_sum(y_tailweight_delta, axis=-1)
-                        y_tailweight_delta = y_tailweight_delta * self.y_tailweight_coef
 
                         if self.is_mixed_model:
                             y_skewness_delta += error_params_b[..., 1]
