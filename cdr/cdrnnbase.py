@@ -1920,7 +1920,7 @@ class CDRNN(Model):
                     to_run += [self.y_skewness_delta_ema_op, self.y_tailweight_delta_ema_op]
                 if self.loss_filter_n_sds:
                     to_run_names.append('n_dropped')
-                    to_run += [self.loss_ema_op, self.loss_sd_ema_op, self.n_dropped]
+                    to_run += [self.loss_m1_ema_op, self.loss_m2_ema_op, self.n_dropped]
                 to_run_names += ['loss', 'reg_loss']
                 to_run += [self.loss_func, self.reg_loss]
                 if self.is_bayesian:

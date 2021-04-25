@@ -561,14 +561,16 @@ class CDRNNMLE(CDRNN):
                     ema_warm_up = int(2/(1 - self.ema_decay))
                     n_sds = self.loss_filter_n_sds
 
-                    self.loss_ema = tf.Variable(0., trainable=False, name='loss_ema')
-                    self.loss_sd_ema = tf.Variable(0., trainable=False, name='loss_sd_ema')
+                    self.loss_m1_ema = tf.Variable(0., trainable=False, name='loss_m1_ema')
+                    self.loss_m2_ema = tf.Variable(0., trainable=False, name='loss_m2_ema')
 
-                    loss_cutoff = self.loss_ema + n_sds * self.loss_sd_ema
+                    sd = tf.sqrt(self.loss_m2_ema - self.loss_m1_ema**2)
+                    loss_cutoff = self.loss_m1_ema + n_sds * sd
                     loss_func_filter = tf.cast(loss_func < loss_cutoff, dtype=self.FLOAT_TF)
                     loss_func_filtered = loss_func * loss_func_filter
                     n_batch = tf.cast(tf.shape(loss_func)[0], dtype=self.FLOAT_TF)
                     n_retained = tf.reduce_sum(loss_func_filter)
+                    self.n_dropped = n_batch - n_retained
 
                     loss_func, n_retained = tf.cond(
                         self.global_batch_step > ema_warm_up,
@@ -576,18 +578,15 @@ class CDRNNMLE(CDRNN):
                         lambda loss_func=loss_func: (loss_func, n_batch),
                     )
 
-                    self.n_dropped = n_batch - n_retained
+                    denom = n_retained + self.epsilon
+                    loss_m1_cur = tf.reduce_sum(loss_func) / denom
+                    loss_m2_cur = tf.reduce_sum(loss_func**2) / denom
 
-                    # loss_func = tf.Print(loss_func, ['cutoff', loss_cutoff, 'n_retained', n_retained, 'ema', self.loss_ema, 'sd ema', self.loss_sd_ema])
+                    loss_m1_ema_update = beta * self.loss_m1_ema + (1 - beta) * loss_m1_cur
+                    loss_m2_ema_update = beta * self.loss_m2_ema + (1 - beta) * loss_m2_cur
 
-                    loss_mean_cur = tf.reduce_sum(loss_func) / (n_retained + self.epsilon)
-                    loss_sd_cur = tf.sqrt(tf.reduce_sum((loss_func - loss_mean_cur)**2)) / (n_retained + self.epsilon)
-
-                    loss_ema_update = (beta * self.loss_ema + (1 - beta) * loss_mean_cur)
-                    loss_sd_ema_update = beta * self.loss_sd_ema + (1 - beta) * loss_sd_cur
-
-                    self.loss_ema_op = tf.assign(self.loss_ema, loss_ema_update)
-                    self.loss_sd_ema_op = tf.assign(self.loss_sd_ema, loss_sd_ema_update)
+                    self.loss_m1_ema_op = tf.assign(self.loss_m1_ema, loss_m1_ema_update)
+                    self.loss_m2_ema_op = tf.assign(self.loss_m2_ema, loss_m2_ema_update)
 
                 if self.scale_loss_with_data:
                     self.loss_func = tf.reduce_sum(loss_func) * self.minibatch_scale
