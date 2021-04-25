@@ -570,13 +570,14 @@ class CDRNNMLE(CDRNN):
                     loss_func_filtered = loss_func * loss_func_filter
                     n_batch = tf.cast(tf.shape(loss_func)[0], dtype=self.FLOAT_TF)
                     n_retained = tf.reduce_sum(loss_func_filter)
-                    self.n_dropped = n_batch - n_retained
 
                     loss_func, n_retained = tf.cond(
                         self.global_batch_step > ema_warm_up,
                         lambda loss_func_filtered=loss_func_filtered, n_retained=n_retained: (loss_func_filtered, n_retained),
                         lambda loss_func=loss_func: (loss_func, n_batch),
                     )
+
+                    self.n_dropped = n_batch - n_retained
 
                     denom = n_retained + self.epsilon
                     loss_m1_cur = tf.reduce_sum(loss_func) / denom
