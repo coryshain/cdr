@@ -486,7 +486,7 @@ class Model(object):
 
         self.output_distr_params = ['loc', 'sd']
         if self.asymmetric_error:
-            self.output_distr_params = ['skewness', 'tailweight']
+            self.output_distr_params += ['skewness', 'tailweight']
 
         if self.impulse_df_ix is None:
             self.impulse_df_ix = np.zeros(len(self.form.t.impulses()))
