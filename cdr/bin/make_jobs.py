@@ -54,13 +54,13 @@ if __name__ == '__main__':
                     f.write('#SBATCH --partition=%s\n' % slurm_partition)
                 f.write('\n')
                 if job_type.lower() == 'save_and_exit':
-                    f.write('python3 -m cdr.bin.train %s -m %s -s -Ss %s\n' % (path, m, cli_args))
+                    f.write('python3 -m cdr.bin.train %s -m %s -s -S %s\n' % (path, m, cli_args))
                 elif job_type.lower() == 'fit':
-                    f.write('python3 -m cdr.bin.train %s -m %ss %s\n' % (path, m, cli_args))
+                    f.write('python3 -m cdr.bin.train %s -m %s %s\n' % (path, m, cli_args))
                 elif partitions and job_type.lower() in ['fit', 'predict']:
-                    f.write('python3 -m cdr.bin.predict %s -p %s -m %ss %s\n' % (path, ' '.join(partitions), m, cli_args))
+                    f.write('python3 -m cdr.bin.predict %s -p %s -m %s %s\n' % (path, ' '.join(partitions), m, cli_args))
                 elif job_type.lower() == 'summarize':
-                    f.write('python3 -m cdr.bin.summarize %s -m %ss %s\n' % (path, m, cli_args))
+                    f.write('python3 -m cdr.bin.summarize %s -m %s %s\n' % (path, m, cli_args))
                 elif job_type.lower() == 'plot':
                     f.write('python3 -m cdr.bin.plot %s -m %s %s\n' % (path, m, cli_args))
                 else:
