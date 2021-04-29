@@ -1513,7 +1513,7 @@ class CDRNNBayes(CDRNN):
                         vars = [l]
                     for v in vars:
                         if 'bias' not in v.name:
-                            self._regularize(v, type='nn', var_name=reg_name(v.name))
+                            self._regularize(v, regtype='nn', var_name=reg_name(v.name))
 
                 self.reg_loss = tf.constant(0., dtype=self.FLOAT_TF)
                 if len(self.regularizer_losses_varnames):

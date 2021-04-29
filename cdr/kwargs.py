@@ -1020,6 +1020,18 @@ CDRNN_INITIALIZATION_KWARGS = [
         "Scale of weight regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
     Kwarg(
+        'conv_output_regularizer_name',
+        None,
+        [str, 'inherit', None],
+        "Name of regularizer on convolution outputs (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
+    ),
+    Kwarg(
+        'conv_output_regularizer_scale',
+        1.,
+        [str, float, 'inherit'],
+        "Scale of regularizer on convolution outputs (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
+    ),
+    Kwarg(
         'context_regularizer_name',
         None,
         [str, 'inherit', None],

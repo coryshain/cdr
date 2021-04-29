@@ -1299,7 +1299,7 @@ class CDR(Model):
                         self.intercept_fixed_summary,
                         collections=['params']
                     )
-                    self._regularize(self.intercept_fixed, type='intercept', var_name='intercept')
+                    self._regularize(self.intercept_fixed, regtype='intercept', var_name='intercept')
                     if self.convergence_basis.lower() == 'parameters':
                         self._add_convergence_tracker(self.intercept_fixed_summary, 'intercept_fixed')
 
@@ -1326,7 +1326,7 @@ class CDR(Model):
                     self.coefficient_fixed_base_summary,
                     [len(coef_ids)]
                 )
-                self._regularize(self.coefficient_fixed_base, type='coefficient', var_name='coefficient')
+                self._regularize(self.coefficient_fixed_base, regtype='coefficient', var_name='coefficient')
                 if self.convergence_basis.lower() == 'parameters':
                     self._add_convergence_tracker(self.coefficient_fixed_base_summary, 'coefficient_fixed')
 
@@ -1359,7 +1359,7 @@ class CDR(Model):
                         self.interaction_fixed_base_summary,
                         [len(interaction_ids)]
                     )
-                    self._regularize(self.interaction_fixed, type='coefficient', var_name='interaction')
+                    self._regularize(self.interaction_fixed, regtype='coefficient', var_name='interaction')
                     if self.convergence_basis.lower() == 'parameters':
                         self._add_convergence_tracker(self.interaction_fixed_summary, 'interaction_fixed')
 
@@ -1392,7 +1392,7 @@ class CDR(Model):
                         intercept_random -= intercept_random_means
                         intercept_random_summary -= intercept_random_summary_means
 
-                        self._regularize(intercept_random, type='ranef', var_name='intercept_by_%s' % gf)
+                        self._regularize(intercept_random, regtype='ranef', var_name='intercept_by_%s' % gf)
 
                         intercept_random = self._scatter_along_axis(
                             levels_ix,
@@ -1436,7 +1436,7 @@ class CDR(Model):
 
                         coefficient_random -= coefficient_random_means
                         coefficient_random_summary -= coefficient_random_summary_means
-                        self._regularize(coefficient_random, type='ranef', var_name='coefficient_by_%s' % gf)
+                        self._regularize(coefficient_random, regtype='ranef', var_name='coefficient_by_%s' % gf)
 
                         coefficient_random = self._scatter_along_axis(
                             nonzero_coef_ix,
@@ -1493,7 +1493,7 @@ class CDR(Model):
 
                             interaction_random -= interaction_random_means
                             interaction_random_summary -= interaction_random_summary_means
-                            self._regularize(interaction_random, type='ranef', var_name='interaction_by_%s' % gf)
+                            self._regularize(interaction_random, regtype='ranef', var_name='interaction_by_%s' % gf)
 
                             interaction_random = self._scatter_along_axis(
                                 interaction_ix,
@@ -1869,7 +1869,7 @@ class CDR(Model):
                                 param_random_summary_mean = tf.reduce_mean(param_random_summary, axis=0, keepdims=True)
                                 param_random_summary -= param_random_summary_mean
 
-                                self._regularize(param_random, type='ranef', var_name='%s_by_%s' % (param_name, gf))
+                                self._regularize(param_random, regtype='ranef', var_name='%s_by_%s' % (param_name, gf))
 
                                 param_random = self._scatter_along_axis(
                                     irfs_ix,
@@ -1936,7 +1936,7 @@ class CDR(Model):
                         param = self._softplus_sigmoid(param, a=param_lb, b=param_ub)
                         param_summary = self._softplus_sigmoid(param_summary, a=param_lb, b=param_ub)
 
-                    self._regularize(param_fixed, trainable_means, type='irf', var_name=param_name)
+                    self._regularize(param_fixed, trainable_means, regtype='irf', var_name=param_name)
                 else:
                     param_fixed = param_fixed_summary = None
 

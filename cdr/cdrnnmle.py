@@ -554,7 +554,7 @@ class CDRNNMLE(CDRNN):
 
                 loss_func = - ll_objective
 
-                # loss_func = tf.Print(loss_func, [tf.reduce_min(self.out), tf.reduce_max(self.out), tf.reduce_mean(self.out), self.y_sd_coef, tf.reduce_min(self.y_sd_delta), tf.reduce_max(self.y_sd_delta), tf.reduce_mean(self.y_sd_delta), tf.reduce_min(self.y_sd), tf.reduce_max(self.y_sd), tf.reduce_mean(self.y_sd)])
+                # loss_func = tf.Print(loss_func, ['y', tf.reduce_min(self.out), tf.reduce_max(self.out), tf.reduce_mean(self.out), 'y_sd', tf.reduce_min(self.y_sd_delta), tf.reduce_max(self.y_sd_delta), tf.reduce_mean(self.y_sd_delta), tf.reduce_min(self.y_sd), tf.reduce_max(self.y_sd), tf.reduce_mean(self.y_sd), 'y_skewness', tf.reduce_min(self.y_skewness_delta), tf.reduce_max(self.y_skewness_delta), tf.reduce_mean(self.y_skewness_delta), tf.reduce_min(self.y_skewness), tf.reduce_max(self.y_skewness), tf.reduce_mean(self.y_skewness), 'y_tailweight', tf.reduce_min(self.y_tailweight_delta), tf.reduce_max(self.y_tailweight_delta), tf.reduce_mean(self.y_tailweight_delta), tf.reduce_mean(self.y_tailweight_delta**2), tf.reduce_min(self.y_tailweight), tf.reduce_max(self.y_tailweight), tf.reduce_mean(self.y_tailweight)])
 
                 if self.loss_filter_n_sds and self.ema_decay:
                     beta = self.ema_decay
@@ -601,9 +601,10 @@ class CDRNNMLE(CDRNN):
                         vars = [l]
                     for v in vars:
                         if 'bias' not in v.name:
-                            self._regularize(v, type='nn', var_name=reg_name(v.name))
+                            self._regularize(v, regtype='nn', var_name=reg_name(v.name))
 
                 self.reg_loss = tf.constant(0., dtype=self.FLOAT_TF)
+                # self.reg_loss = tf.Print(self.reg_loss, ['reg'] + self.regularizer_losses)
                 if len(self.regularizer_losses_varnames) > 0:
                     self.reg_loss += tf.add_n(self.regularizer_losses)
                     self.loss_func += self.reg_loss

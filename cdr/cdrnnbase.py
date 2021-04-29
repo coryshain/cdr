@@ -422,6 +422,29 @@ class CDRNN(Model):
                     else:
                         self.context_regularizer = getattr(tf.contrib.layers, self.context_regularizer_name)(scale)
 
+                self.conv_output_regularizer = self._initialize_regularizer(
+                    self.conv_output_regularizer_name,
+                    self.conv_output_regularizer_scale
+                )
+
+                # if self.conv_output_regularizer_name is None:
+                #     self.conv_output_regularizer = None
+                # elif self.conv_output_regularizer_name == 'inherit':
+                #     self.conv_output_regularizer = self.regularizer
+                # else:
+                #     scale = self.conv_output_regularizer_scale / (self.history_length * max(1, len(self.impulse_indices))) # Average over time
+                #     if self.scale_regularizer_with_data:
+                #          scale *= self.minibatch_scale # Sum over batch, multiply by n batches
+                #     else:
+                #         scale /= self.minibatch_size # Mean over batch
+                #     if self.conv_output_regularizer_name == 'l1_l2_regularizer':
+                #         self.conv_output_regularizer = getattr(tf.contrib.layers, self.conv_output_regularizer_name)(
+                #             scale,
+                #             scale
+                #         )
+                #     else:
+                #         self.conv_output_regularizer = getattr(tf.contrib.layers, self.conv_output_regularizer_name)(scale)
+
                 self.regularizable_layers = []
 
     def _add_rangf(self, x, rangf_embeddings=None):
@@ -714,7 +737,7 @@ class CDRNN(Model):
                         self.intercept_fixed_summary,
                         collections=['params']
                     )
-                    self._regularize(self.intercept_fixed, type='intercept', var_name=reg_name('intercept'))
+                    self._regularize(self.intercept_fixed, regtype='intercept', var_name=reg_name('intercept'))
                     if self.convergence_basis.lower() == 'parameters':
                         self._add_convergence_tracker(self.intercept_fixed_summary, 'intercept_fixed')
                 else:
@@ -727,25 +750,25 @@ class CDRNN(Model):
                     if not self.direct_irf:
                         self.coefficient_fixed, self.coefficient_fixed_summary = self.initialize_coefficient(ran_gf=None)
                         self.coefficient = self.coefficient_fixed
-                        self._regularize(self.coefficient, type='coefficient', var_name=reg_name('coefficient'))
+                        self._regularize(self.coefficient, regtype='coefficient', var_name=reg_name('coefficient'))
 
                         if self.heteroskedastic:
                             self.coefficient_y_sd_fixed, self.coefficient_y_sd_fixed_summary = self.initialize_coefficient(ran_gf=None, suffix='y_sd')
                             self.coefficient_y_sd = self.coefficient_y_sd_fixed
-                            self._regularize(self.coefficient_y_sd, type='coefficient', var_name=reg_name('coefficient_y_sd'))
+                            self._regularize(self.coefficient_y_sd, regtype='coefficient', var_name=reg_name('coefficient_y_sd'))
                             
                             if self.asymmetric_error:
                                 self.coefficient_y_skewness_fixed, self.coefficient_y_skewness_fixed_summary = self.initialize_coefficient(ran_gf=None, suffix='y_skewness')
                                 self.coefficient_y_skewness = self.coefficient_y_skewness_fixed
-                                self._regularize(self.coefficient_y_skewness, type='coefficient', var_name=reg_name('coefficient_y_skewness'))
+                                self._regularize(self.coefficient_y_skewness, regtype='coefficient', var_name=reg_name('coefficient_y_skewness'))
                                 
                                 self.coefficient_y_tailweight_fixed, self.coefficient_y_tailweight_fixed_summary = self.initialize_coefficient(ran_gf=None, suffix='y_tailweight')
                                 self.coefficient_y_tailweight = self.coefficient_y_tailweight_fixed
-                                self._regularize(self.coefficient_y_tailweight, type='coefficient', var_name=reg_name('coefficient_y_tailweight'))
+                                self._regularize(self.coefficient_y_tailweight, regtype='coefficient', var_name=reg_name('coefficient_y_tailweight'))
 
                     self.coefficient_irf_in_fixed, self.coefficient_irf_in_fixed_summary = self.initialize_coefficient(ran_gf=None, suffix='irf_in')
                     self.coefficient_irf_in = self.coefficient_irf_in_fixed
-                    self._regularize(self.coefficient_irf_in, type='coefficient', var_name=reg_name('coefficient_irf_in'))
+                    self._regularize(self.coefficient_irf_in, regtype='coefficient', var_name=reg_name('coefficient_irf_in'))
 
                     # TODO: Add named Tensorboard logs
 
@@ -879,7 +902,7 @@ class CDRNN(Model):
                         intercept_random -= intercept_random_means
                         intercept_random_summary -= intercept_random_summary_means
 
-                        self._regularize(intercept_random, type='ranef', var_name=reg_name('intercept_by_%s' % gf))
+                        self._regularize(intercept_random, regtype='ranef', var_name=reg_name('intercept_by_%s' % gf))
 
                         intercept_random = self._scatter_along_axis(
                             levels_ix,
@@ -916,7 +939,7 @@ class CDRNN(Model):
                                 coefficient_ran_matrix_cur, coefficient_ran_matrix_cur_summary = self.initialize_coefficient(ran_gf=gf)
                                 coefficient_ran_matrix_cur -= tf.reduce_mean(coefficient_ran_matrix_cur, axis=0, keepdims=True)
                                 coefficient_ran_matrix_cur_summary -= tf.reduce_mean(coefficient_ran_matrix_cur_summary, axis=0, keepdims=True)
-                                self._regularize(coefficient_ran_matrix_cur, type='ranef', var_name=reg_name('coefficient_by_%s' % (sn(gf))))
+                                self._regularize(coefficient_ran_matrix_cur, regtype='ranef', var_name=reg_name('coefficient_by_%s' % (sn(gf))))
     
                                 if self.log_random:
                                     tf.summary.histogram(
@@ -944,7 +967,7 @@ class CDRNN(Model):
                                     coefficient_y_sd_ran_matrix_cur, coefficient_y_sd_ran_matrix_cur_summary = self.initialize_coefficient(ran_gf=gf, suffix='y_sd')
                                     coefficient_y_sd_ran_matrix_cur -= tf.reduce_mean(coefficient_y_sd_ran_matrix_cur, axis=0, keepdims=True)
                                     coefficient_y_sd_ran_matrix_cur_summary -= tf.reduce_mean(coefficient_y_sd_ran_matrix_cur_summary, axis=0, keepdims=True)
-                                    self._regularize(coefficient_y_sd_ran_matrix_cur, type='ranef', var_name=reg_name('coefficient_y_sd_by_%s' % (sn(gf))))
+                                    self._regularize(coefficient_y_sd_ran_matrix_cur, regtype='ranef', var_name=reg_name('coefficient_y_sd_by_%s' % (sn(gf))))
         
                                     if self.log_random:
                                         tf.summary.histogram(
@@ -972,7 +995,7 @@ class CDRNN(Model):
                                         coefficient_y_skewness_ran_matrix_cur, coefficient_y_skewness_ran_matrix_cur_summary = self.initialize_coefficient(ran_gf=gf, suffix='y_skewness')
                                         coefficient_y_skewness_ran_matrix_cur -= tf.reduce_mean(coefficient_y_skewness_ran_matrix_cur, axis=0, keepdims=True)
                                         coefficient_y_skewness_ran_matrix_cur_summary -= tf.reduce_mean(coefficient_y_skewness_ran_matrix_cur_summary, axis=0, keepdims=True)
-                                        self._regularize(coefficient_y_skewness_ran_matrix_cur, type='ranef', var_name=reg_name('coefficient_y_skewness_by_%s' % (sn(gf))))
+                                        self._regularize(coefficient_y_skewness_ran_matrix_cur, regtype='ranef', var_name=reg_name('coefficient_y_skewness_by_%s' % (sn(gf))))
             
                                         if self.log_random:
                                             tf.summary.histogram(
@@ -999,7 +1022,7 @@ class CDRNN(Model):
                                         coefficient_y_tailweight_ran_matrix_cur, coefficient_y_tailweight_ran_matrix_cur_summary = self.initialize_coefficient(ran_gf=gf, suffix='y_tailweight')
                                         coefficient_y_tailweight_ran_matrix_cur -= tf.reduce_mean(coefficient_y_tailweight_ran_matrix_cur, axis=0, keepdims=True)
                                         coefficient_y_tailweight_ran_matrix_cur_summary -= tf.reduce_mean(coefficient_y_tailweight_ran_matrix_cur_summary, axis=0, keepdims=True)
-                                        self._regularize(coefficient_y_tailweight_ran_matrix_cur, type='ranef', var_name=reg_name('coefficient_y_tailweight_by_%s' % (sn(gf))))
+                                        self._regularize(coefficient_y_tailweight_ran_matrix_cur, regtype='ranef', var_name=reg_name('coefficient_y_tailweight_by_%s' % (sn(gf))))
             
                                         if self.log_random:
                                             tf.summary.histogram(
@@ -1026,7 +1049,7 @@ class CDRNN(Model):
                             coefficient_irf_in_ran_matrix_cur, coefficient_irf_in_ran_matrix_cur_summary = self.initialize_coefficient(ran_gf=gf, suffix='irf_in')
                             coefficient_irf_in_ran_matrix_cur -= tf.reduce_mean(coefficient_irf_in_ran_matrix_cur, axis=0, keepdims=True)
                             coefficient_irf_in_ran_matrix_cur_summary -= tf.reduce_mean(coefficient_irf_in_ran_matrix_cur_summary, axis=0, keepdims=True)
-                            self._regularize(coefficient_irf_in_ran_matrix_cur, type='ranef', var_name=reg_name('coefficient_irf_in_by_%s' % (sn(gf))))
+                            self._regularize(coefficient_irf_in_ran_matrix_cur, regtype='ranef', var_name=reg_name('coefficient_irf_in_by_%s' % (sn(gf))))
 
                             if self.log_random:
                                 tf.summary.histogram(
@@ -1055,7 +1078,7 @@ class CDRNN(Model):
                             rnn_h_ran_matrix_cur, rnn_h_ran_matrix_cur_summary = self.initialize_rnn_h(l, ran_gf=gf)
                             rnn_h_ran_matrix_cur -= tf.reduce_mean(rnn_h_ran_matrix_cur, axis=0, keepdims=True)
                             rnn_h_ran_matrix_cur_summary -= tf.reduce_mean(rnn_h_ran_matrix_cur_summary, axis=0, keepdims=True)
-                            self._regularize(rnn_h_ran_matrix_cur, type='ranef', var_name=reg_name('rnn_h_ran_l%d_by_%s' % (l, sn(gf))))
+                            self._regularize(rnn_h_ran_matrix_cur, regtype='ranef', var_name=reg_name('rnn_h_ran_l%d_by_%s' % (l, sn(gf))))
 
                             if self.log_random:
                                 tf.summary.histogram(
@@ -1081,7 +1104,7 @@ class CDRNN(Model):
                             rnn_c_ran_matrix_cur, rnn_c_ran_matrix_cur_summary = self.initialize_rnn_c(l, ran_gf=gf)
                             rnn_c_ran_matrix_cur -= tf.reduce_mean(rnn_c_ran_matrix_cur, axis=0, keepdims=True)
                             rnn_c_ran_matrix_cur_summary -= tf.reduce_mean(rnn_c_ran_matrix_cur_summary, axis=0, keepdims=True)
-                            self._regularize(rnn_c_ran_matrix_cur, type='ranef', var_name=reg_name('rnn_c_ran_l%d_by_%s' % (l+1, sn(gf))))
+                            self._regularize(rnn_c_ran_matrix_cur, regtype='ranef', var_name=reg_name('rnn_c_ran_l%d_by_%s' % (l + 1, sn(gf))))
 
                             if self.log_random:
                                 tf.summary.histogram(
@@ -1108,7 +1131,7 @@ class CDRNN(Model):
                         h_bias_ran_matrix_cur, h_bias_ran_matrix_cur_summary = self.initialize_h_bias(ran_gf=gf)
                         h_bias_ran_matrix_cur -= tf.reduce_mean(h_bias_ran_matrix_cur, axis=0, keepdims=True)
                         h_bias_ran_matrix_cur_summary -= tf.reduce_mean(h_bias_ran_matrix_cur_summary, axis=0, keepdims=True)
-                        self._regularize(h_bias_ran_matrix_cur, type='ranef', var_name=reg_name('h_bias_by_%s' % (sn(gf))))
+                        self._regularize(h_bias_ran_matrix_cur, regtype='ranef', var_name=reg_name('h_bias_by_%s' % (sn(gf))))
 
                         if self.log_random:
                             tf.summary.histogram(
@@ -1138,7 +1161,7 @@ class CDRNN(Model):
                             intercept_l1_W_ran_matrix_cur, intercept_l1_W_ran_matrix_cur_summary, = self.initialize_intercept_l1_weights(ran_gf=gf)
                             intercept_l1_W_ran_matrix_cur -= tf.reduce_mean(intercept_l1_W_ran_matrix_cur, axis=0, keepdims=True)
                             intercept_l1_W_ran_matrix_cur_summary -= tf.reduce_mean(intercept_l1_W_ran_matrix_cur_summary, axis=0, keepdims=True)
-                            self._regularize(intercept_l1_W_ran_matrix_cur, type='ranef', var_name=reg_name('intercept_l1_W_bias_by_%s' % (sn(gf))))
+                            self._regularize(intercept_l1_W_ran_matrix_cur, regtype='ranef', var_name=reg_name('intercept_l1_W_bias_by_%s' % (sn(gf))))
 
                             if self.log_random:
                                 tf.summary.histogram(
@@ -1167,7 +1190,7 @@ class CDRNN(Model):
                                 intercept_l1_b_ran_matrix_cur, intercept_l1_b_ran_matrix_cur_summary = self.initialize_intercept_l1_biases(ran_gf=gf)
                                 intercept_l1_b_ran_matrix_cur -= tf.reduce_mean(intercept_l1_b_ran_matrix_cur, axis=0, keepdims=True)
                                 intercept_l1_b_ran_matrix_cur_summary -= tf.reduce_mean(intercept_l1_b_ran_matrix_cur_summary, axis=0, keepdims=True)
-                                self._regularize(intercept_l1_b_ran_matrix_cur, type='ranef', var_name=reg_name('intercept_l1_b_bias_by_%s' % (sn(gf))))
+                                self._regularize(intercept_l1_b_ran_matrix_cur, regtype='ranef', var_name=reg_name('intercept_l1_b_bias_by_%s' % (sn(gf))))
 
                                 if self.log_random:
                                     tf.summary.histogram(
@@ -1195,7 +1218,7 @@ class CDRNN(Model):
                         irf_l1_W_ran_matrix_cur, irf_l1_W_ran_matrix_cur_summary, = self.initialize_irf_l1_weights(ran_gf=gf)
                         irf_l1_W_ran_matrix_cur -= tf.reduce_mean(irf_l1_W_ran_matrix_cur, axis=0, keepdims=True)
                         irf_l1_W_ran_matrix_cur_summary -= tf.reduce_mean(irf_l1_W_ran_matrix_cur_summary, axis=0, keepdims=True)
-                        self._regularize(irf_l1_W_ran_matrix_cur, type='ranef', var_name=reg_name('irf_l1_W_bias_by_%s' % (sn(gf))))
+                        self._regularize(irf_l1_W_ran_matrix_cur, regtype='ranef', var_name=reg_name('irf_l1_W_bias_by_%s' % (sn(gf))))
 
                         if self.log_random:
                             tf.summary.histogram(
@@ -1224,7 +1247,7 @@ class CDRNN(Model):
                             irf_l1_b_ran_matrix_cur, irf_l1_b_ran_matrix_cur_summary = self.initialize_irf_l1_biases(ran_gf=gf)
                             irf_l1_b_ran_matrix_cur -= tf.reduce_mean(irf_l1_b_ran_matrix_cur, axis=0, keepdims=True)
                             irf_l1_b_ran_matrix_cur_summary -= tf.reduce_mean(irf_l1_b_ran_matrix_cur_summary, axis=0, keepdims=True)
-                            self._regularize(irf_l1_b_ran_matrix_cur, type='ranef', var_name=reg_name('irf_l1_b_bias_by_%s' % (sn(gf))))
+                            self._regularize(irf_l1_b_ran_matrix_cur, regtype='ranef', var_name=reg_name('irf_l1_b_bias_by_%s' % (sn(gf))))
 
                             if self.log_random:
                                 tf.summary.histogram(
@@ -1252,7 +1275,7 @@ class CDRNN(Model):
                         error_params_b_ran_matrix_cur, error_params_b_ran_matrix_cur_summary = self.initialize_error_params_biases(ran_gf=gf)
                         error_params_b_ran_matrix_cur -= tf.reduce_mean(error_params_b_ran_matrix_cur, axis=0, keepdims=True)
                         error_params_b_ran_matrix_cur_summary -= tf.reduce_mean(error_params_b_ran_matrix_cur_summary, axis=0, keepdims=True)
-                        self._regularize(error_params_b_ran_matrix_cur, type='ranef', var_name=reg_name('error_params_bias_by_%s' % (sn(gf))))
+                        self._regularize(error_params_b_ran_matrix_cur, regtype='ranef', var_name=reg_name('error_params_bias_by_%s' % (sn(gf))))
 
                         if self.log_random:
                             tf.summary.histogram(
@@ -1660,14 +1683,21 @@ class CDRNN(Model):
 
                 self.X_conv = model_dict['X_conv']
 
-                y = model_dict['y']
+                y_delta = model_dict['y']
                 y_sd_delta = model_dict['y_sd_delta']
                 y_skewness_delta = model_dict['y_skewness_delta']
                 y_tailweight_delta = model_dict['y_tailweight_delta']
 
-                y = tf.squeeze(y, axis=-1)
-                self.y_delta = y
-                y += self.intercept
+                self._regularize(tf.reduce_max(y_delta), regtype='conv_output', var_name='y_delta')
+                if self.heteroskedastic:
+                    self._regularize(tf.reduce_max(y_sd_delta), regtype='conv_output', var_name='y_sd')
+                    if self.asymmetric_error:
+                        self._regularize(tf.reduce_max(y_skewness_delta), regtype='conv_output', var_name='y_skewness_delta')
+                        self._regularize(tf.reduce_max(y_tailweight_delta), regtype='conv_output', var_name='y_tailweight_delta')
+
+                y_delta = tf.squeeze(y_delta, axis=-1)
+                self.y_delta = y_delta
+                y = y_delta + self.intercept
                 if self.nonstationary_intercept:
                     intercept_delta = model_dict['intercept_delta']
                     intercept_delta = tf.squeeze(intercept_delta, axis=-1)
@@ -1692,7 +1722,7 @@ class CDRNN(Model):
                     h_rnn_masked = h_rnn[l] * mask
                     denom = tf.reduce_sum(mask)
 
-                    self._regularize(h_rnn_masked, type='context', var_name=reg_name('context'))
+                    self._regularize(h_rnn_masked, regtype='context', var_name=reg_name('context'))
 
                     reduction_axes = list(range(len(rnn_hidden[l].shape)-1))
 

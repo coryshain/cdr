@@ -1454,12 +1454,12 @@ class Model(object):
     #
     ######################################################
 
-    def _regularize(self, var, center=None, type=None, var_name=None):
-        assert type in [None, 'intercept', 'coefficient', 'irf', 'ranef', 'nn', 'context']
-        if type is None:
+    def _regularize(self, var, center=None, regtype=None, var_name=None):
+        assert regtype in [None, 'intercept', 'coefficient', 'irf', 'ranef', 'nn', 'context', 'conv_output']
+        if regtype is None:
             regularizer = self.regularizer
         else:
-            regularizer = getattr(self, '%s_regularizer' %type)
+            regularizer = getattr(self, '%s_regularizer' % regtype)
 
         if regularizer is not None:
             with self.sess.as_default():
@@ -1470,14 +1470,14 @@ class Model(object):
                         reg = tf.contrib.layers.apply_regularization(regularizer, [var - center])
                     self.regularizer_losses.append(reg)
                     self.regularizer_losses_varnames.append(str(var_name))
-                    if type is None:
+                    if regtype is None:
                         reg_name = self.regularizer_name
                         reg_scale = self.regularizer_scale
                         if self.scale_regularizer_with_data:
                             reg_scale *= self.minibatch_size * self.minibatch_scale
                     else:
-                        reg_name = getattr(self, '%s_regularizer_name' %type)
-                        reg_scale = getattr(self, '%s_regularizer_scale' %type)
+                        reg_name = getattr(self, '%s_regularizer_name' % regtype)
+                        reg_scale = getattr(self, '%s_regularizer_scale' % regtype)
                     if reg_name == 'inherit':
                         reg_name = self.regularizer_name
                     if reg_scale == 'inherit':

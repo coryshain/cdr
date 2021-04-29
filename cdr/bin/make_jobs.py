@@ -16,13 +16,13 @@ if __name__ == '__main__':
     Generate SLURM batch jobs to run CDR models specified in one or more config files.
     ''')
     argparser.add_argument('paths', nargs='+', help='Path(s) to CDR config file(s).')
-    argparser.add_argument('-j', '--job_type', default='fit', help='Type of job to run. One of ``["fit", "predict", "summarize", "summarizeR", "plot", "save_and_exit"]``')
+    argparser.add_argument('-j', '--job_type', default='fit', help='Type of job to run. One of ``["fit", "predict", "summarize", "plot", "save_and_exit"]``')
     argparser.add_argument('-p', '--partition', nargs='+', help='Partition(s) over which to predict/evaluate')
     argparser.add_argument('-t', '--time', type=int, default=48, help='Maximum number of hours to train models')
     argparser.add_argument('-n', '--n_cores', type=int, default=8, help='Number of cores to request')
     argparser.add_argument('-m', '--memory', type=int, default=64, help='Number of GB of memory to request')
     argparser.add_argument('-P', '--slurm_partition', default=None, help='Value for SLURM --partition setting, if applicable')
-    argparser.add_argument('-c', '--plot_config', default=None, help='Path to config file for plotting jobs')
+    argparser.add_argument('-c', '--cli_args', default='', help='Command line arguments to pass into call')
     args = argparser.parse_args()
 
     paths = args.paths
@@ -32,7 +32,7 @@ if __name__ == '__main__':
     n_cores = args.n_cores
     memory = args.memory
     slurm_partition = args.slurm_partition
-    plot_config = args.plot_config
+    cli_args = args.cli_args
    
     for path in paths:
         c = Config(path)
@@ -54,17 +54,15 @@ if __name__ == '__main__':
                     f.write('#SBATCH --partition=%s\n' % slurm_partition)
                 f.write('\n')
                 if job_type.lower() == 'save_and_exit':
-                    f.write('python3 -m cdr.bin.train %s -m %s -s -S\n' % (path, m))
+                    f.write('python3 -m cdr.bin.train %s -m %s -s -Ss %s\n' % (path, m, cli_args))
                 elif job_type.lower() == 'fit':
-                    f.write('python3 -m cdr.bin.train %s -m %s\n' % (path, m))
+                    f.write('python3 -m cdr.bin.train %s -m %ss %s\n' % (path, m, cli_args))
                 elif partitions and job_type.lower() in ['fit', 'predict']:
-                    f.write('python3 -m cdr.bin.predict %s -p %s -m %s\n' % (path, ' '.join(partitions), m))
+                    f.write('python3 -m cdr.bin.predict %s -p %s -m %ss %s\n' % (path, ' '.join(partitions), m, cli_args))
                 elif job_type.lower() == 'summarize':
-                    f.write('python3 -m cdr.bin.summarize %s -m %s\n' % (path, m))
-                elif job_type.lower() == 'summarizer':
-                    f.write('python3 -m cdr.bin.summarize %s -m %s -r\n' % (path, m))
+                    f.write('python3 -m cdr.bin.summarize %s -m %ss %s\n' % (path, m, cli_args))
                 elif job_type.lower() == 'plot':
-                    f.write('python3 -m cdr.bin.plot %s -c %s -m %s\n' % (path, plot_config, m))
+                    f.write('python3 -m cdr.bin.plot %s -m %s %s\n' % (path, m, cli_args))
                 else:
                     raise ValueError('Unrecognized job type: %s.' % job_type)
 
