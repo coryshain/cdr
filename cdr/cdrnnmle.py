@@ -558,14 +558,19 @@ class CDRNNMLE(CDRNN):
 
                 if self.loss_filter_n_sds and self.ema_decay:
                     beta = self.ema_decay
-                    ema_warm_up = int(2/(1 - self.ema_decay))
+                    ema_warm_up = 0
                     n_sds = self.loss_filter_n_sds
+                    step = tf.cast(self.global_batch_step, self.FLOAT_TF)
 
                     self.loss_m1_ema = tf.Variable(0., trainable=False, name='loss_m1_ema')
                     self.loss_m2_ema = tf.Variable(0., trainable=False, name='loss_m2_ema')
 
-                    sd = tf.sqrt(self.loss_m2_ema - self.loss_m1_ema**2)
-                    loss_cutoff = self.loss_m1_ema + n_sds * sd
+                    # Debias
+                    loss_m1_ema = self.loss_m1_ema / (1. - beta ** step )
+                    loss_m2_ema = self.loss_m2_ema / (1. - beta ** step )
+
+                    sd = tf.sqrt(loss_m2_ema - loss_m1_ema**2)
+                    loss_cutoff = loss_m1_ema + n_sds * sd
                     loss_func_filter = tf.cast(loss_func < loss_cutoff, dtype=self.FLOAT_TF)
                     loss_func_filtered = loss_func * loss_func_filter
                     n_batch = tf.cast(tf.shape(loss_func)[0], dtype=self.FLOAT_TF)
