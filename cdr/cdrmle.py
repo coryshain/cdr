@@ -354,15 +354,9 @@ class CDRMLE(CDR):
                 self.err_dist_summary_theoretical_quantiles = self.err_dist_theoretical_quantiles
                 self.err_dist_summary_theoretical_cdf = self.err_dist_theoretical_cdf
 
-                self.mae_loss = tf.losses.absolute_difference(self.y, self.out)
-                self.mse_loss = tf.losses.mean_squared_error(self.y, self.out)
+                loss_func = -ll_objective
 
-                self.loss_func = -(tf.reduce_sum(ll_objective) * self.minibatch_scale)
-                # self.loss_func = -tf.reduce_sum(ll_objective)
-                self.reg_loss = tf.constant(0., self.FLOAT_TF)
-                if len(self.regularizer_losses_varnames) > 0:
-                    self.reg_loss += tf.add_n(self.regularizer_losses)
-                    self.loss_func += self.reg_loss
+                self.loss_func, self.reg_loss, self.kl_loss = self._process_objective(loss_func)
 
                 self.optim = self._initialize_optimizer()
                 assert self.optim_name is not None, 'An optimizer name must be supplied'

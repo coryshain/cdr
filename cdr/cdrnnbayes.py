@@ -1464,53 +1464,9 @@ class CDRNNBayes(CDRNN):
                 self._initialize_output_model()
 
                 if self.standardize_response:
-                    loss_func = - self.ll_standardized
+                    loss_func = -self.ll_standardized
                 else:
-                    loss_func = - self.ll
-
-                if self.loss_filter_n_sds and self.ema_decay:
-                    beta = self.ema_decay
-                    ema_warm_up = 0
-                    n_sds = self.loss_filter_n_sds
-                    step = tf.cast(self.global_batch_step, self.FLOAT_TF)
-
-                    self.loss_m1_ema = tf.Variable(0., trainable=False, name='loss_m1_ema')
-                    self.loss_m2_ema = tf.Variable(0., trainable=False, name='loss_m2_ema')
-
-                    # Debias
-                    loss_m1_ema = self.loss_m1_ema / (1. - beta ** step)
-                    loss_m2_ema = self.loss_m2_ema / (1. - beta ** step)
-
-                    sd = tf.sqrt(loss_m2_ema - loss_m1_ema ** 2)
-                    loss_cutoff = loss_m1_ema + n_sds * sd
-                    loss_func_filter = tf.cast(loss_func < loss_cutoff, dtype=self.FLOAT_TF)
-                    loss_func_filtered = loss_func * loss_func_filter
-                    n_batch = tf.cast(tf.shape(loss_func)[0], dtype=self.FLOAT_TF)
-                    n_retained = tf.reduce_sum(loss_func_filter)
-
-                    loss_func, n_retained = tf.cond(
-                        self.global_batch_step > ema_warm_up,
-                        lambda loss_func_filtered=loss_func_filtered, n_retained=n_retained: (
-                        loss_func_filtered, n_retained),
-                        lambda loss_func=loss_func: (loss_func, n_batch),
-                    )
-
-                    self.n_dropped = n_batch - n_retained
-
-                    denom = n_retained + self.epsilon
-                    loss_m1_cur = tf.reduce_sum(loss_func) / denom
-                    loss_m2_cur = tf.reduce_sum(loss_func ** 2) / denom
-
-                    loss_m1_ema_update = beta * self.loss_m1_ema + (1 - beta) * loss_m1_cur
-                    loss_m2_ema_update = beta * self.loss_m2_ema + (1 - beta) * loss_m2_cur
-
-                    self.loss_m1_ema_op = tf.assign(self.loss_m1_ema, loss_m1_ema_update)
-                    self.loss_m2_ema_op = tf.assign(self.loss_m2_ema, loss_m2_ema_update)
-
-                if self.scale_loss_with_data:
-                    self.loss_func = tf.reduce_sum(loss_func) * self.minibatch_scale
-                else:
-                    self.loss_func = tf.reduce_mean(loss_func)
+                    loss_func = -self.ll
 
                 for l in self.regularizable_layers:
                     if hasattr(l, 'weights'):
@@ -1521,23 +1477,13 @@ class CDRNNBayes(CDRNN):
                         if 'bias' not in v.name:
                             self._regularize(v, regtype='nn', var_name=reg_name(v.name))
 
-                self.reg_loss = tf.constant(0., dtype=self.FLOAT_TF)
-                if len(self.regularizer_losses_varnames):
-                    self.reg_loss += tf.add_n(self.regularizer_losses)
-                    self.loss_func += self.reg_loss
-
-                self.kl_loss = tf.constant(0., dtype=self.FLOAT_TF)
-
                 kl_penalties = self.kl_penalties_base
                 for layer in self.layers:
                     kl_penalties.update(layer.kl_penalties())
                 self.kl_penalties = kl_penalties
 
-                if len(self.kl_penalties):
-                    self.kl_loss += tf.reduce_sum([tf.reduce_sum(self.kl_penalties[k]['val']) for k in self.kl_penalties])
-                    self.loss_func += self.kl_loss
+                self.loss_func, self.reg_loss, self.kl_loss = self._process_objective(loss_func)
 
-                assert self.optim_name is not None, 'An optimizer name must be supplied'
                 self.optim = self._initialize_optimizer()
 
                 self.train_op = self.optim.minimize(self.loss_func, global_step=self.global_batch_step)

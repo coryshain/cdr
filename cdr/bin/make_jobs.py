@@ -5,6 +5,7 @@ from cdr.config import Config
 base = """#!/bin/bash
 #
 #SBATCH --job-name=%s
+#SBATCH --output=%s.out
 #SBATCH --time=%d:00:00
 #SBATCH --ntasks=%d
 #SBATCH --mem=%dgb
@@ -49,7 +50,7 @@ if __name__ == '__main__':
             job_name = '_'.join([basename, job_type])
             filename = job_name + '.pbs'
             with open(filename, 'w') as f:
-                f.write(base % (job_name, time, n_cores, memory))
+                f.write(base % (job_name, job_name, time, n_cores, memory))
                 if slurm_partition:
                     f.write('#SBATCH --partition=%s\n' % slurm_partition)
                 f.write('\n')

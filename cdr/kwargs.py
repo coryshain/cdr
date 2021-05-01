@@ -362,7 +362,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'scale_loss_with_data',
-        False,
+        True,
         bool,
         "Whether to multiply the scale of the LL loss by N, where N is num batches. This turns the loss into an expectation over training set likelihood."
     ),
