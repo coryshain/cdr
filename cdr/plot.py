@@ -181,7 +181,7 @@ def plot_irf(
         csvname = '.'.join(filename.split('.')[:-1]) + '.csv'
         if irf_name_map is not None:
             names_cur = [get_irf_name(x, irf_name_map) for x in irf_names]
-        df = pd.DataFrame(np.concatenate([plot_x, plot_y], axis=1), columns=['time'] + names_cur)
+        df = pd.DataFrame(np.concatenate([plot_x[..., None], plot_y], axis=1), columns=['time'] + names_cur)
         
         if lq is not None:
             for i, name in enumerate(names_cur):
