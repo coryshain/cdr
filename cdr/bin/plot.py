@@ -146,7 +146,7 @@ if __name__ == '__main__':
                 else:
                     stderr('Model %s missing observation and/or prediction files, skipping Q-Q plot...\n' % m)
 
-            cdr_model.make_plots(prefix=prefix, **plot_config.settings_core)
+            cdr_model.make_plots(prefix=prefix, dump_source=args.dump_source, **plot_config.settings_core)
 
             cdr_model.finalize()
 
