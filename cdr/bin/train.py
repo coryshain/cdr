@@ -284,6 +284,8 @@ if __name__ == '__main__':
                 dpi=p['dpi']
             )
 
+            cdr_model.save()
+
             summary = cdr_model.summary()
 
             with open(p.outdir + '/' + m + '/summary.txt', 'w') as f_out:

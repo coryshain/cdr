@@ -39,6 +39,7 @@ class Config(object):
             cdr_settings = config['dtsr_settings']
         else:
             config['cdr_settings'] = {}
+            cdr_settings = config['cdr_settings']
 
         ########
         # Data #

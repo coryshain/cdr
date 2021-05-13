@@ -102,7 +102,7 @@ if __name__ == '__main__':
                 exps_outdirs.append(p.outdir)
         else:
             comparison_sets = {
-                None: cdr_models
+                None: models
             }
 
         if not args.pool:
