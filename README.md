@@ -1,39 +1,41 @@
 # Continuous-Time Deconvolutional Regression (CDR)
-CDR (formerly _deconvolutional time series regression_ or _DTSR_) is a regression technique for modeling temporally diffuse effects (Shain & Schuler, 2018, 2019).
+CDR is a regression technique for modeling temporally diffuse effects (Shain & Schuler, 2018, 2019).
 
-This repository contains source code for the `cdr` Python module as well as support for reproducing published experiments.
-Full documentation for the `cdr` module is available at [http://dtsr.readthedocs.io/en/latest/](http://dtsr.readthedocs.io/en/latest/).
+This branch (npsy) exists to support reprodiction of results reported in Shain, Blank, et al. (2020).
+It locks the repository at a previous state and therefore lacks any subsequent improvements or bug fixes.
+Do not use this branch to run regressions on your own data.
+Instead, first run the following command from the repository root:
 
-CDR models can be trained and evaluated using provided utility executables.
-Help strings for all available utilities can be viewed by running `python -m cdr.bin.help`.
-Full repository documentation, including an API, is provided at the link above.
+`git checkout -b master`
 
-Note that some published experiments below also involve fitting LME and GAM models, which require `rpy2` and therefore won't work on Windows systems without some serious hacking.
-The `cdr` module is cross-platform and therefore CDR models should train regardless of operating system.
+Installation of dependencies can be managed through Anaconda (https://www.anaconda.com/).
+Once you have an Anaconda distribution installed, the software environment can be set up by running the following from the root of this repository:
 
-## Reproducing published results
+`conda env create -f npsy.yml`
 
-This repository is under active development, and reproducibility of previously published results is not guaranteed from the master branch.
-For this reason, repository states associated with previous results are saved in Git branches.
-To reproduce those results, checkout the relevant branch and follow the instructions in the `README`.
-Current reproduction branches are:
+Once complete, activate the conda environment as follows:
 
- - `emnlp18`
- - `naacl19`
+`conda activate npsy`
 
-Thus, to reproduce results from NAACL19, for example, run `git checkout naacl19` from the repository root, and follow instructions in the `README` file.
-The reproduction branches are also useful sources of example configuration files to use as templates for setting up your own experiments, although you should consult the docs for full documentation of the structure of CDR experiment configurations.
+## _Neuropsychologia_ results
 
 Published results depend on both (1) datasets and (2) models as defined in experiment-specific configuration files.
-In general, we do not distribute data with this repository.
-The datasets used can be provided by email upon request.
+The data are available on OSF: https://osf.io/eyp8q/.
+This reproduction branch assumes the data are all placed into a directory at the repository root called `fmri_data`.
+If you wish to place them elsewhere, the paths in the `*.ini` files of the `npsy_ini` directory must be updated accordingly.
 
-## Help and support
+The _Neuropsychologia_ experiments (Shain, Blank, et al., 2020) are defined in the `npsy_ini` directory. The files
+`lang.ini`, `md.ini`, and `combined.ini` respectively define models for the language network, multiple demand network, and combined language+MD networks.
 
-For questions, concerns, or data requests, contact Cory Shain ([shain.3@osu.edu](shain.3@osu.edu)).
-Bug reports can be logged in the issue tracker on [Github](https://github.com/coryshain/dtsr).
+Results can be reproduced on UNIX-based systems by navigating to the repository root and invoking the following command:
 
+`make npsy`
+
+Windows users without the ``make`` utility will need to either obtain it or run the commands specified in the `npsy` target of the Makefile by hand.
+
+Results will be placed into a directory called `results` at the root of this repository.
 
 ## References
 Shain, Cory and Schuler, William (2018). Deconvolutional time series regression: A technique for modeling temporally diffuse effects. _EMNLP18_.
 Shain, Cory and Schuler, William (2019). Continuous-time deconvolutional regression for psycholinguistic modeling. _PsyArXiv_. [https://doi.org/10.31234/osf.io/whvk5](https://doi.org/10.31234/osf.io/whvk5).
+Shain, Cory; Blank, Idan; van Schijndel, Marten; Schuler, William; and Fedorenko, Evelina (2020). fMRI reveals language-specific predictive coding during naturalistic sentence comprehension. _Neuropsychologia_.
