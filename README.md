@@ -1,7 +1,7 @@
 # Continuous-Time Deconvolutional Regression (CDR)
 CDR is a regression technique for modeling temporally diffuse effects (Shain & Schuler, 2018, 2019).
 
-This branch (npsy) exists to support reprodiction of results reported in Shain, Blank, et al. (2020).
+This branch (`npsy`) exists to support reprodiction of results reported in Shain, Blank, et al. (2020).
 It locks the repository at a previous state and therefore lacks any subsequent improvements or bug fixes.
 Do not use this branch to run regressions on your own data.
 Instead, first run the following command from the repository root:
