@@ -1,39 +1,60 @@
 # Continuous-Time Deconvolutional Regression (CDR)
-CDR (formerly _deconvolutional time series regression_ or _DTSR_) is a regression technique for modeling temporally diffuse effects (Shain & Schuler, 2018, 2019).
+CDR is a regression technique for modeling temporally diffuse effects (Shain & Schuler, 2018, 2021).
 
-This repository contains source code for the `cdr` Python module as well as support for reproducing published experiments.
-Full documentation for the `cdr` module is available at [http://dtsr.readthedocs.io/en/latest/](http://dtsr.readthedocs.io/en/latest/).
+This branch (`cognition21`) exists to support reprodiction of results reported in Shain & Schuler (2021).
+It locks the repository at a previous state and therefore lacks any subsequent improvements or bug fixes.
+Do not use this branch to run regressions on your own data.
+Instead, first run the following command from the repository root:
 
-CDR models can be trained and evaluated using provided utility executables.
-Help strings for all available utilities can be viewed by running `python -m cdr.bin.help`.
-Full repository documentation, including an API, is provided at the link above.
+`git checkout -b master`
 
-Note that some published experiments below also involve fitting LME and GAM models, which require `rpy2` and therefore won't work on Windows systems without some serious hacking.
-The `cdr` module is cross-platform and therefore CDR models should train regardless of operating system.
+Installation of dependencies can be managed through Anaconda (https://www.anaconda.com/).
+Once you have an Anaconda distribution installed, the software environment can be set up by running the following from the root of this repository:
 
-## Reproducing published results
+`conda env create -f cognition.yml`
 
-This repository is under active development, and reproducibility of previously published results is not guaranteed from the master branch.
-For this reason, repository states associated with previous results are saved in Git branches.
-To reproduce those results, checkout the relevant branch and follow the instructions in the `README`.
-Current reproduction branches are:
+Once complete, activate the conda environment as follows:
 
- - `emnlp18`
- - `naacl19`
+`conda activate cognition`
 
-Thus, to reproduce results from NAACL19, for example, run `git checkout naacl19` from the repository root, and follow instructions in the `README` file.
-The reproduction branches are also useful sources of example configuration files to use as templates for setting up your own experiments, although you should consult the docs for full documentation of the structure of CDR experiment configurations.
+## _Cognition_ (2021) results
 
 Published results depend on both (1) datasets and (2) models as defined in experiment-specific configuration files.
-In general, we do not distribute data with this repository.
-The datasets used can be provided by email upon request.
+The synthetic and self-paced reading data are available on OSF: https://osf.io/hb5w2/.
+The fMRI data are also available on OSF: https://osf.io/eyp8q/.
+The eye-tracking (Dundee) data are not publicly available but can be provided by email upon request (cory.shain@gmail.com).
+This reproduction branch assumes the data are all placed into a directory at the repository root called `data`.
+If you wish to place them elsewhere, the paths in the `*.ini` files of the `npsy_ini` directory must be updated accordingly.
 
-## Help and support
+The _Cognition_ experiments (Shain & Schuler, 2021) are defined in the `cognition_ini` directory, with names
+corresponding to the various datasets described in the paper. 
 
-For questions, concerns, or data requests, contact Cory Shain ([shain.3@osu.edu](shain.3@osu.edu)).
-Bug reports can be logged in the issue tracker on [Github](https://github.com/coryshain/dtsr).
+In principle, results can be reproduced on UNIX-based systems by navigating to the repository root and invoking the following command:
 
+`make cognition`
+
+However, this will fit hundreds of models sequentially, which will take a long time (probably months).
+We therefore recommend either (1) targeted reproduction of the specific models of interest to you or (2) full reproduction on a compute cluster that can fit models in parallel.
+Unfortunately, because job schedulers differ substantially between clusters, we do not provide general automation for this use case.
+Users will instead need to write their own scripts to schedule all the required jobs.
+To this end, note that each *ini file contains multiple models, each of which is defined by a section prefixed by `model_`.
+Everything following this prefix in the section header is used by the system as the model name, with models involving ablated variables additionally using the suffix `!<VAR>` following the model name, where `<VAR>` stands for the name of the ablated variable.
+
+To fit a model, run:
+
+`python -m cdr.bin.fit <INI_FILE> -m <MODEL_NAME>`
+
+To evaluate (predict from) a model, run:
+
+`python -m cdr.bin.fit <INI_FILE> -m <MODEL_NAME> -p (train|dev|test)`
+
+Documentation for additional utilities can be viewed by running:
+
+`python -m cdr.bin.help`
+
+For optimal efficiency, each of the above commands should be run as a distinct job.
+Results will be placed into a directory called `results` at the root of this repository.
 
 ## References
 Shain, Cory and Schuler, William (2018). Deconvolutional time series regression: A technique for modeling temporally diffuse effects. _EMNLP18_.
-Shain, Cory and Schuler, William (2019). Continuous-time deconvolutional regression for psycholinguistic modeling. _PsyArXiv_. [https://doi.org/10.31234/osf.io/whvk5](https://doi.org/10.31234/osf.io/whvk5).
+Shain, Cory and Schuler, William (2021). Continuous-time deconvolutional regression for psycholinguistic modeling. _Cognition_.
