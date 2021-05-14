@@ -1,6 +1,7 @@
 import argparse
 import os
 import sys
+import re
 import pickle
 import numpy as np
 import pandas as pd
@@ -13,6 +14,10 @@ from cdr.io import read_data
 from cdr.formula import Formula
 from cdr.data import add_dv, filter_invalid_responses, preprocess_data, compute_splitID, compute_partition
 from cdr.util import mse, mae, filter_models, get_partition_list, paths_from_partition_cliarg, stderr
+
+
+spillover = re.compile('(z_)?([^ (),]+)S([0-9]+)')
+
 
 if __name__ == '__main__':
 
@@ -75,21 +80,48 @@ if __name__ == '__main__':
             else:
                 part_select &= part[partition_name_to_ix[partition]]
 
-        X_baseline = X_cur[part_select]
-        X_baseline = X_baseline.reset_index(drop=True)[select]
+        X_baseline = X_cur
 
         for m in models:
             if not m in cdr_formula_name_list:
                 p.set_model(m)
                 form = p['formula']
-                dv = form.split('~')[0].strip()
+                lhs, rhs = form.split('~')
+                preds = rhs.split('+')
+                for pred in preds:
+                    sp = spillover.search(pred)
+                    if sp and sp.group(2) in X_baseline.columns:
+                        x_id = sp.group(2)
+                        n = int(sp.group(3))
+                        x_id_sp = x_id + 'S' + str(n)
+                        if x_id_sp not in X_baseline.columns:
+                            X_baseline[x_id_sp] = X_baseline.groupby(p.series_ids)[x_id].shift(n, fill_value=0.)
+
+        X_baseline = X_baseline[part_select]
+        if p.merge_cols is None:
+            merge_cols = sorted(list(set(X_baseline.columns) & set(y.columns)))
+        else:
+            merge_cols = p.merge_cols
+        X_baseline = pd.merge(X_baseline, y, on=merge_cols, how='inner')
+ 
+        for m in models:
+            if not m in cdr_formula_name_list:
+                p.set_model(m)
+                form = p['formula']
+                lhs, rhs = form.split('~')
+                dv = lhs.strip()
                 y = add_dv(dv, y)
-                if not dv in X_baseline.columns:
-                    X_baseline[dv] = y[dv]
+
+        for c in y.columns:
+            if c not in X_baseline.columns:
+                X_baseline[c] = y[c] 
 
         for c in X_baseline.columns:
             if X_baseline[c].dtype.name == 'category':
                 X_baseline[c] = X_baseline[c].astype(str)
+
+        X_baseline.corr().to_csv('X_baseline_corr.csv', sep=' ', na_rep='NaN')
+        X_baseline.to_csv('X_baseline.csv', sep=' ', index=False, na_rep=True)
 
         X_baseline = py2ri(X_baseline)
 

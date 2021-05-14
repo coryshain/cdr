@@ -14,7 +14,6 @@ def scale(a, b):
     df = np.stack([np.array(a), np.array(b)], axis=1)
     df = df[np.where(np.isfinite(df))] 
     scaling_factor = df.std()
-    print(scaling_factor)
     return a/scaling_factor, b/scaling_factor
 
 
@@ -40,9 +39,8 @@ if __name__ == '__main__':
         model_errors.append(pd.read_csv(path, sep=' ', header=None, skipinitialspace=True))
 
     baseline_errors = []
-    for baseline in args.baseline_error_paths:
-        for path in baseline:
-            baseline_errors.append(pd.read_csv(path, sep=' ', header=None, skipinitialspace=True))
+    for path in args.baseline_error_paths:
+        baseline_errors.append(pd.read_csv(path, sep=' ', header=None, skipinitialspace=True))
 
     assert len(model_errors) == len(baseline_errors), 'Model and baseline must contain the same number of datasets. Saw %d and %d, respectively.' % (len(model_errors), len(baseline))
 

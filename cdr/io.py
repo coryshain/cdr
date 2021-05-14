@@ -47,9 +47,9 @@ def read_data(X_paths, y_paths, series_ids, categorical_columns=None, sep=' '):
     y = pd.concat(y, axis=0)
 
     stderr('Ensuring sort order...\n')
-    for x in X:
-        x.sort_values(series_ids + ['time'], inplace=True)
-    y.sort_values(series_ids + ['time'], inplace=True)
+    for i, x in enumerate(X):
+        X[i] = x.sort_values(series_ids + ['time']).reset_index(drop=True)
+    y = y.sort_values(series_ids + ['time']).reset_index(drop=True)
 
     if categorical_columns is not None:
         for col in categorical_columns:
@@ -70,4 +70,5 @@ def read_data(X_paths, y_paths, series_ids, categorical_columns=None, sep=' '):
     # X_groups = X.groupby(series_ids + ['sentid'])
     # X['percentSentComplete'] = X_groups['sentpos'].apply(lambda x: x / max(x))
     # X._get_numeric_data().fillna(value=0, inplace=True)
+
     return X, y

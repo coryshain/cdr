@@ -1,6 +1,7 @@
 import argparse
 import os
 import sys
+import re
 import pickle
 import numpy as np
 import pandas as pd
@@ -10,10 +11,13 @@ pd.options.mode.chained_assignment = None
 from cdr.config import Config
 from cdr.io import read_data
 from cdr.formula import Formula
-from cdr.data import add_dv, filter_invalid_responses, preprocess_data, compute_splitID, compute_partition, get_first_last_obs_lists
+from cdr.data import add_dv, filter_invalid_responses, preprocess_data, compute_splitID, compute_partition, get_first_last_obs_lists, s, c, z
 from cdr.util import mse, mae, percent_variance_explained
 from cdr.util import load_cdr, filter_models, get_partition_list, paths_from_partition_cliarg, stderr
 from cdr.plot import plot_qq
+
+
+spillover = re.compile('(z_)?([^ (),]+)S([0-9]+)')
 
 
 # These code blocks are factored out because they are used by both LM/E objects and CDR objects under 2-step analysis
@@ -166,7 +170,24 @@ if __name__ == '__main__':
             X_cur = X[0]
             partitions = evaluation_set_partitions[i]
             X_cur['splitID'] = compute_splitID(X_cur, p.split_ids)
+
             X_baseline = X_cur
+
+            for m in models:
+                if not m in cdr_formula_name_list:
+                    p.set_model(m)
+                    form = p['formula']
+                    lhs, rhs = form.split('~')
+                    preds = rhs.split('+')
+                    for pred in preds:
+                        sp = spillover.search(pred)
+                        if sp and sp.group(2) in X_baseline.columns:
+                            x_id = sp.group(2)
+                            n = int(sp.group(3))
+                            x_id_sp = x_id + 'S' + str(n)
+                            if x_id_sp not in X_baseline.columns:
+                                X_baseline[x_id_sp] = X_baseline.groupby(p.series_ids)[x_id].shift(n, fill_value=0.)
+
             if partitions is not None:
                 part = compute_partition(X_cur, p.modulus, 3)
                 part_select = None
@@ -177,13 +198,19 @@ if __name__ == '__main__':
                         part_select &= part[partition_name_to_ix[partition]]
 
                 X_baseline = X_baseline[part_select]
-            X_baseline = X_baseline.reset_index(drop=True)[select]
+
+            if p.merge_cols is None:
+                merge_cols = sorted(list(set(X_baseline.columns) & set(y.columns)))
+            else:
+                merge_cols = p.merge_cols
+            X_baseline = pd.merge(X_baseline, y, on=merge_cols, how='inner')
 
             for m in models:
                 if not m in cdr_formula_name_list:
                     p.set_model(m)
                     form = p['formula']
-                    dv = form.split('~')[0].strip()
+                    lhs, rhs = form.split('~')
+                    dv = lhs.strip()
                     y = add_dv(dv, y)
                     if not dv in X_baseline.columns:
                         X_baseline[dv] = y[dv]
@@ -191,6 +218,7 @@ if __name__ == '__main__':
             for c in X_baseline.columns:
                 if X_baseline[c].dtype.name == 'category':
                     X_baseline[c] = X_baseline[c].astype(str)
+
             X_baseline = py2ri(X_baseline)
             evaluation_set_baselines.append(X_baseline)
 

@@ -14,7 +14,7 @@ def get_coefs(path):
             starts_coefs = line.startswith('Fixed effects') or line.startswith('Coefficients')
             n_fixed += (starts_coefs or n_fixed > 0)
             if n_fixed > 3:
-                if line.strip() and not line.strip() == '---':
+                if line.strip() and not (line.strip() == '---' or line.startswith('convergence')):
                     coefs.append(float(line.strip().split()[1]))
                 else:
                     break 
@@ -51,8 +51,10 @@ if __name__ == '__main__':
                 if f == 'lm_%s_summary.txt' % args.partition:
                     summaries.append(os.path.join(root, f))
 
+    included = []
     coefs = []
     for e in paths:
+        included_cur = []
         coefs_cur = []
         for p in e:
             f = re.compile(p)
@@ -65,9 +67,23 @@ if __name__ == '__main__':
                             excluded = True
                             break
                     if not excluded:
-                        coefs_cur += get_coefs(x)
+                        coefs_new = get_coefs(x)
+                        coefs_cur += coefs_new
+                        included_cur.append(x)
+#                        print(x)
+#                        print(coefs_new)
+#                        input()
         coefs.append(coefs_cur)
-       
+        included.append(included_cur)
+      
+#    for x in included:
+#        for y in x:
+#            print(y)
+#        print() 
+#    for x in coefs:
+#        print(len(x))
+#    print()
+
     coefs = [np.array(c) for c in coefs]
     medians = [np.percentile(c, 50) for c in coefs]
     uq = [np.percentile(c,75) for c in coefs]
@@ -81,10 +97,15 @@ if __name__ == '__main__':
     plt.gca().tick_params(top='off', bottom='off', left='off', right='off', labelleft='on', labelbottom='on') 
     plt.grid(b=True, which='major', axis='both', ls='--', lw=.5, c='k', alpha=.3)
 
+#    plt.boxplot(coefs, flierprops=dict(markersize=1, marker='.'))
     for i in range(len(coefs)):
+        print(medians[i])
+        print(lq[i])
+        print(uq[i])
+        print()
         yerr = np.stack([medians[i]-lq[i],uq[i]-medians[i]], axis=0)[..., None]
         plt.bar(i, medians[i], yerr=yerr, capsize=10)
-    plt.xticks(range(len(coefs)), names)
+    plt.xticks(range(1, len(coefs)+1), names)
     plt.ylabel('LME Estimate', weight='bold')
     plt.gcf().set_size_inches(4,2.5)
     plt.tight_layout()

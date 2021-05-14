@@ -9,7 +9,7 @@ from .data import z, c, s, compute_time_mask, expand_history
 from .util import names2ix, sn, stderr
 
 interact = re.compile('([^ ]+):([^ ]+)')
-spillover = re.compile('^.+S[0-9]+$')
+spillover = re.compile('(^.+)S([0-9]+)$')
 split_irf = re.compile('(.+)\(([^(]+)')
 nonparametric = re.compile('([SOG])(o([0-9]+))?(b([0-9]+))?(l([0-9]*\.?[0-9]+))?(p([0-9]+))?(t([0-9]*\.?[0-9]+))?$')
 starts_numeric = re.compile('^[0-9]')
@@ -1166,7 +1166,8 @@ class Formula(object):
             X_response_aligned_predictors=None,
             X_2d_predictor_names=None,
             X_2d_predictors=None,
-            history_length=128
+            history_length=128,
+            series_ids=None
     ):
         """
         Extract all data and compute all transforms required by the model formula.
@@ -1178,6 +1179,7 @@ class Formula(object):
         :param X_2d_predictor_names: ``list`` or ``None``; List of column names 2D predictors (predictors whose value depends on properties of the most recent impulse) if applicable, ``None`` otherwise.
         :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
         :param history_length: ``int``; maximum number of timesteps in the history dimension.
+        :param series_ids: ``list`` of ``str`` or ``None``; column names to use a grouping factors for computing lagged effects. If ``None``, lagging will not be attempted..
         :return: 6-tuple; transformed **X**, transformed **y**, transformed response-aligned predictor names, transformed response-aligned predictors, transformed 2D predictor names, transformed 2D predictors
         """
         if not isinstance(X, list):
@@ -1238,13 +1240,25 @@ class Formula(object):
                     )
 
                 elif x.id not in X_columns:
-                    if x.name() not in X_response_aligned_predictor_names:
-                        X_response_aligned_predictor_names.append(x.name())
-                        if X_response_aligned_predictors is None:
-                            X_response_aligned_predictors = y[[x.id]]
-                        else:
-                            X_response_aligned_predictors[[x.id]] = y[[x.id]]
-                        X_response_aligned_predictors = self.apply_ops(x, X_response_aligned_predictors)
+                    sp = spillover.match(x.id)
+                    if sp and sp.group(1) in X_columns and series_ids is not None:
+                        x_id = sp.group(1)
+                        n = int(sp.group(2))
+                        for i in range(len(X)):
+                            X_cur = X[i]
+                            if x_id in X_cur.columns:
+                                X[x_id] = X_cur.groupby(series_ids)[x_id].shift(n, fill_value=0.)
+                                X_cur = self.apply_ops(x, X_cur)
+                                X[i] = X_cur
+                                break
+                    else:
+                        if x.name() not in X_response_aligned_predictor_names:
+                            X_response_aligned_predictor_names.append(x.name())
+                            if X_response_aligned_predictors is None:
+                                X_response_aligned_predictors = y[[x.id]]
+                            else:
+                                X_response_aligned_predictors[[x.id]] = y[[x.id]]
+                            X_response_aligned_predictors = self.apply_ops(x, X_response_aligned_predictors)
                 else:
                     for i in range(len(X)):
                         X_cur = X[i]

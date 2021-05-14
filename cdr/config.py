@@ -71,6 +71,10 @@ class Config(object):
 
         self.history_length = data.getint('history_length', 128)
 
+        self.merge_cols = data.get('merge_cols', None)
+        if self.merge_cols is not None:
+            self.merge_cols = self.merge_cols.split()
+
         ###################
         # Global Settings #
         ###################

@@ -25,6 +25,7 @@ if __name__ == '__main__':
             os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
         models = filter_models(p.model_list, args.models, cdr_only=True)
+        print(models)
 
         synth_path = os.path.dirname(os.path.dirname(p.X_train)) + '/d.obj'
         if not os.path.exists(synth_path):
@@ -51,6 +52,9 @@ if __name__ == '__main__':
                 algorithm=args.algorithm
             )
 
+            if args.algorithm.lower() != 'map':
+                rmsd, rmsd_lq, rmsd_uq = rmsd
+
             summary = '=' * 50 + '\n'
             summary += 'CDR regression\n\n'
             summary += 'Model name: %s\n\n' % m
@@ -58,8 +62,15 @@ if __name__ == '__main__':
             summary += '  ' + formula + '\n\n'
             summary += 'Path to synth model:\n'
             summary += '  ' + synth_path + '\n\n'
-            summary += 'RMSD from gold: %s\n\n' % rmsd
-            summary += '=' * 50 + '\n'
+            if args.algorithm.lower() == 'map':
+                summary += 'RMSD from gold: %s\n\n' % rmsd
+                summary += '=' * 50 + '\n'
+            else:
+                summary += 'RMSD from gold:\n'
+                summary += '  Mean: %s\n' % rmsd
+                summary += '  2.5%%: %s\n' % rmsd_lq
+                summary += '  97.5%%: %s\n' % rmsd_uq
+                summary += '=' * 50 + '\n'
 
             if args.summed:
                 out_name = 'synth_summed_rmsd'

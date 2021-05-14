@@ -6333,6 +6333,15 @@ class CDR(object):
                     if summed:
                         preds = preds.sum(axis=2)
                     gold = np.expand_dims(gold, 1)
+                    
+                    if self.standardize_response and not standardize_response:
+                        preds = preds * self.y_train_sd
+
+                    rmsds = np.sqrt(((gold - preds) ** 2).mean(axis=(0, 2)))
+                    uq = np.quantile(rmsds, 0.975)
+                    lq = np.quantile(rmsds, 0.025)
+                    mean = rmsds.mean()
+                    out = (mean, lq, uq)
 
                 else:
                     preds = [self.sess.run(plots['plot'][i][0], feed_dict=fd) for i in range(len(plots['plot'])) if plots['names'][i] in names]
@@ -6340,12 +6349,12 @@ class CDR(object):
                     if summed:
                         preds = preds.sum(axis=1)
 
-                if self.standardize_response and not standardize_response:
-                    preds = preds * self.y_train_sd
+                    if self.standardize_response and not standardize_response:
+                        preds = preds * self.y_train_sd
 
-                rmsd = np.sqrt(((gold - preds) ** 2).mean())
+                    out = np.sqrt(((gold - preds) ** 2).mean())
 
-                return rmsd
+                return out
 
     def plot_eigenvectors(self):
         """

@@ -376,25 +376,57 @@ def compute_filter(y, field, cond):
     :return: ``numpy`` vector; boolean mask to use for ``pandas`` subsetting operations.
     """
 
+    assert isinstance(cond, str), 'Argument ``cond`` must be of type ``str``.'
+
     cond = cond.strip()
     if cond.startswith('<='):
-        return y[field] <= (np.inf if cond[2:].strip() == 'inf' else float(cond[2:].strip()))
+        op = '<='
+        var = cond[2:].strip()
+    elif cond.startswith('>='):
+        op = '<='
+        var = cond[2:].strip()
+    elif cond.startswith('<'):
+        op = '<'
+        var = cond[1:].strip()
+    elif cond.startswith('>'):
+        op = '>'
+        var = cond[1:].strip()
+    elif cond.startswith('=='):
+        op = '=='
+        var = cond[2:].strip()
+    elif cond.startswith('!='):
+        op = '!='
+        var = cond[2:].strip()
+    else:
+        raise ValueError('Unrecognized filtering condition: %s' % cond)
+
+    if var == 'inf':
+        var = np.inf
+    else:
+        try:
+            var = float(var)
+        except ValueError:
+            if var in y:
+                var = y[var]
+
+    if op == '<=':
+        return ~pd.isna(y[field]) & (y[field] <= var)
     if cond.startswith('>='):
-        return y[field] >= (np.inf if cond[2:].strip() == 'inf' else float(cond[2:].strip()))
+        return ~pd.isna(y[field]) & (y[field] >= var)
     if cond.startswith('<'):
-        return y[field] < (np.inf if cond[1:].strip() == 'inf' else float(cond[1:].strip()))
+        return ~pd.isna(y[field]) & (y[field] < var)
     if cond.startswith('>'):
-        return y[field] > (np.inf if cond[1:].strip() == 'inf' else float(cond[1:].strip()))
+        return ~pd.isna(y[field]) & (y[field] > var)
     if cond.startswith('=='):
         try:
-            return y[field] == (np.inf if cond[2:].strip() == 'inf' else float(cond[2:].strip()))
+            return ~pd.isna(y[field]) & (y[field] == var)
         except:
-            return y[field].astype('str') == cond[2:].strip()
+            return ~pd.isna(y[field]) & (y[field].astype('str') == var)
     if cond.startswith('!='):
         try:
-            return y[field] != (np.inf if cond[2:].strip() == 'inf' else float(cond[2:].strip()))
+            return ~pd.isna(y[field]) & (y[field] != var)
         except:
-            return y[field].astype('str') != cond[2:].strip()
+            return ~pd.isna(y[field]) & (y[field].astype('str') != var)
     raise ValueError('Unsupported comparator in filter "%s"' %cond)
 
 
@@ -556,7 +588,8 @@ def preprocess_data(X, y, formula_list, series_ids, filters=None, compute_histor
                 X_2d_predictors=X_2d_predictors,
                 X_response_aligned_predictor_names=X_response_aligned_predictor_names,
                 X_response_aligned_predictors=X_response_aligned_predictors,
-                history_length=history_length
+                history_length=history_length,
+                series_ids=series_ids
             )
     else:
         X_new = X
