@@ -75,6 +75,7 @@ Current reproduction branches are:
 
  - `emnlp18`
  - `naacl19`
+ - `npsy`
 
 Thus, to reproduce results from NAACL19, for example, run `git checkout naacl19` from the repository root, and follow instructions in the `README` file.
 The reproduction branches are also useful sources of example configuration files to use as templates for setting up your own experiments, although you should consult the docs for full documentation of the structure of CDR experiment configurations.
