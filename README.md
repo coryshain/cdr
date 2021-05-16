@@ -20,11 +20,14 @@ Once complete, activate the conda environment as follows:
 ## _Cognition_ (2021) results
 
 Published results depend on both (1) datasets and (2) models as defined in experiment-specific configuration files.
-The synthetic and self-paced reading data are available on OSF: https://osf.io/hb5w2/.
-The fMRI data are also available on OSF: https://osf.io/eyp8q/.
+The synthetic, self-paced reading, and fMRI data are available on OSF: https://osf.io/hb5w2/.
 The eye-tracking (Dundee) data are not publicly available but can be provided by email upon request (cory.shain@gmail.com).
+
+Preprocessing for the fMRI baselines was performed by passing the language network predictor and response dataframes from Shain, Blank, et al. (2020) (available at https://osf.io/eyp8q/) through the script `fmri_align.py`, which itself depends on Alex Huth's tutorial repository: https://github.com/HuthLab/speechmodeltutorial.
+To reproduce, clone the tutorial to the root of this repository, and apply the script as described by its usage (e.g. by running `python fmri_align.py -h`).
+
 This reproduction branch assumes the data are all placed into a directory at the repository root called `data`.
-If you wish to place them elsewhere, the paths in the `*.ini` files of the `npsy_ini` directory must be updated accordingly.
+If you wish to place them elsewhere, the paths in the `*.ini` files of the `cognition_ini` directory must be updated accordingly.
 
 The _Cognition_ experiments (Shain & Schuler, 2021) are defined in the `cognition_ini` directory, with names
 corresponding to the various datasets described in the paper. 
@@ -43,6 +46,10 @@ Everything following this prefix in the section header is used by the system as 
 To fit a model, run:
 
 `python -m cdr.bin.fit <INI_FILE> -m <MODEL_NAME>`
+
+For example, if config file `example.ini` contains a model defined in section name `model_CDR_example`, the model can be fitted by running:
+
+`python -m cdr.bin.fit example.ini -m CDR_example`
 
 To evaluate (predict from) a model, run:
 
