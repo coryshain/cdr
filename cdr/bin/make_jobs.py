@@ -47,7 +47,7 @@ if __name__ == '__main__':
             else:
                 start_ix = -1
             basename = '_'.join(path[:-4].split('/')[start_ix:] + [m])
-            job_name = '_'.join([basename, '_'.join(job_types)])
+            job_name = '_'.join([basename, ''.join(job_types)])
             filename = job_name + '.pbs'
             with open(filename, 'w') as f:
                 f.write(base % (job_name, job_name, time, n_cores, memory))
