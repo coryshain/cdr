@@ -573,7 +573,7 @@ class Model(object):
                     self.constraint_fn = tf.square
                     self.constraint_fn_inv = tf.sqrt
                 elif self.constraint.lower() == 'abs':
-                    self.constraint_fn = self._safe_abs
+                    self.constraint_fn = self._abs
                     self.constraint_fn_inv = tf.identity
                 else:
                     raise ValueError('Unrecognized constraint function %s' % self.constraint)
@@ -1453,14 +1453,8 @@ class Model(object):
 
                 return x_interp, time_interp
 
-    def _safe_abs(self, x):
-        out = tf.where(
-            tf.equal(x, 0.),
-            x + 1e-8,
-            tf.abs(x)
-        )
-
-        return out
+    def _abs(self, x):
+        return tf.where(x > 0., x, -x)
 
 
 
