@@ -259,10 +259,20 @@ def paths_from_partition_cliarg(partition, config):
 
 
 def get_irf_name(x, irf_name_map):
+    k = None
     for y in sorted(list(irf_name_map.keys())):
-        if y in x:
-            return irf_name_map[y]
-    return x
+        if y == x:
+            k = y
+        elif y in x:
+            if k is None or len(y) > len(k):
+                k = y
+
+    if k is None:
+        out = x
+    else:
+        out = irf_name_map[k]
+
+    return out
 
 
 def get_numerical_sd(sd, in_dim=1, out_dim=1):
