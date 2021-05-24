@@ -392,9 +392,9 @@ class PlotConfig(object):
         for kwarg in PLOT_KWARGS_CORE:
             if kwarg.in_settings(settings):
                 val = kwarg.kwarg_from_config(settings)
-                if kwarg == 'pred_names' and val is not None:
+                if kwarg.key == 'pred_names' and val is not None:
                     val = val.split()
-                elif kwarg == 'prop_cycle_map' and val is not None:
+                elif kwarg.key == 'prop_cycle_map' and val is not None:
                     val = val.split()
                     is_dict = len(val[-1].split(';')) == 2
                     if is_dict:
@@ -405,8 +405,8 @@ class PlotConfig(object):
                             val[k] = int(v)
                     else:
                         val = [int(x) for x in val]
-                elif kwarg == 'ylim' and val is not None:
-                    val = tuple(int(x) for x in val.split())
+                elif kwarg.key == 'ylim' and val is not None:
+                    val = tuple(float(x) for x in val.split())
                 out_core[kwarg.key] = val
 
         for kwarg in PLOT_KWARGS_OTHER:
