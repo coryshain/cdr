@@ -39,8 +39,7 @@ if __name__ == '__main__':
    
     for path in paths:
         c = Config(path)
-        outdir = c.outdir
-    
+
         models = c.model_list
     
         for m in models:
