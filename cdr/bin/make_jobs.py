@@ -24,6 +24,7 @@ if __name__ == '__main__':
     argparser.add_argument('-m', '--memory', type=int, default=64, help='Number of GB of memory to request')
     argparser.add_argument('-P', '--slurm_partition', default=None, help='Value for SLURM --partition setting, if applicable')
     argparser.add_argument('-c', '--cli_args', default='', help='Command line arguments to pass into call')
+    argparser.add_argument('-o', '--outdir', default='./', help='Directory in which to place generated batch scripts.')
     args = argparser.parse_args()
 
     paths = args.paths
@@ -34,6 +35,7 @@ if __name__ == '__main__':
     memory = args.memory
     slurm_partition = args.slurm_partition
     cli_args = args.cli_args
+    outdir = args.outdir
    
     for path in paths:
         c = Config(path)
@@ -42,13 +44,10 @@ if __name__ == '__main__':
         models = c.model_list
     
         for m in models:
-            if 'synth' in path:
-                start_ix = -2
-            else:
-                start_ix = -1
+            start_ix = -1
             basename = '_'.join(path[:-4].split('/')[start_ix:] + [m])
             job_name = '_'.join([basename, ''.join(job_types)])
-            filename = job_name + '.pbs'
+            filename = outdir + job_name + '.pbs'
             with open(filename, 'w') as f:
                 f.write(base % (job_name, job_name, time, n_cores, memory))
                 if slurm_partition:
