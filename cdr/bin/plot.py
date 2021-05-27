@@ -98,6 +98,11 @@ if __name__ == '__main__':
 
             stderr('Plotting...\n')
 
+            if prefix:
+                prefix += '_' + m
+            else:
+                prefix = m
+
             if qq:
                 obs_path = p.outdir + '/%s/obs_%s.txt' % (m_path, qq)
                 preds_path = p.outdir + '/%s/preds_%s.txt' % (m_path, qq)

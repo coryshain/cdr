@@ -105,7 +105,7 @@ def plot_irf(
     if not prop_cycle_map:
         prop_cycle_map = list(range(n_colors))
     elif isinstance(prop_cycle_map, dict):
-        prop_cycle_map = [prop_cycle_map[irf_names_processed[sort_ix[i]]] for i in range(len(irf_names_processed))]
+        prop_cycle_map = [prop_cycle_map[irf_names[sort_ix[i]]] for i in range(len(irf_names))]
     color_cycle = [cm(1. * prop_cycle_map[i] / n_colors) for i in range(len(irf_names))]
     prop_cycle_kwargs['color'] = color_cycle
     if use_line_markers:
