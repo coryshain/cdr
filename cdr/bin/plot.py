@@ -99,9 +99,9 @@ if __name__ == '__main__':
             stderr('Plotting...\n')
 
             if prefix:
-                prefix += '_' + m
+                prefix_cur = prefix + '_' + m
             else:
-                prefix = m
+                prefix_cur = m
 
             if qq:
                 obs_path = p.outdir + '/%s/obs_%s.txt' % (m_path, qq)
@@ -141,7 +141,7 @@ if __name__ == '__main__':
                         err_theoretical_q,
                         err,
                         dir=cdr_model.outdir,
-                        filename=prefix + '%s_error_qq_plot_%s.png' % (m_path, qq),
+                        filename=prefix_cur + '%s_error_qq_plot_%s.png' % (m_path, qq),
                         xlab=xlab,
                         ylab=ylab,
                         legend=qq_use_legend,
@@ -151,7 +151,7 @@ if __name__ == '__main__':
                 else:
                     stderr('Model %s missing observation and/or prediction files, skipping Q-Q plot...\n' % m)
 
-            cdr_model.make_plots(prefix=prefix, dump_source=args.dump_source, **plot_config.settings_core)
+            cdr_model.make_plots(prefix=prefix_cur, dump_source=args.dump_source, **plot_config.settings_core)
 
             cdr_model.finalize()
 
