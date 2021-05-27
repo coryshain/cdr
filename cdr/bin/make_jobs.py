@@ -1,4 +1,5 @@
 import sys
+import os
 import argparse
 from cdr.config import Config
 
@@ -36,6 +37,9 @@ if __name__ == '__main__':
     slurm_partition = args.slurm_partition
     cli_args = args.cli_args
     outdir = args.outdir
+
+    if not os.path.exists(outdir):
+        os.makedirs(outdir)
    
     for path in paths:
         c = Config(path)
