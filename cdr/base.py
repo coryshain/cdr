@@ -3960,6 +3960,7 @@ class Model(object):
             plot_n_time_units=None,
             plot_n_time_points=None,
             reference_type=None,
+            generate_univariate_IRF_plots=True,
             generate_curvature_plots=None,
             generate_irf_surface_plots=None,
             generate_nonstationarity_surface_plots=None,
@@ -3967,6 +3968,8 @@ class Model(object):
             plot_x_inches=None,
             plot_y_inches=None,
             ylim=None,
+            use_horiz_axlab=True,
+            use_vert_axlab=True,
             cmap=None,
             dpi=None,
             level=95,
@@ -4008,6 +4011,7 @@ class Model(object):
         :param plot_n_time_units: ``float`` or ``None``; resolution of plot axis (for 3D plots, uses sqrt of this number for each axis). If ``None``, use default setting.
         :param plot_support_start: ``float`` or ``None``; start time for IRF plots. If ``None``, use default setting.
         :param reference_type: ``bool``; whether to use the predictor means as baseline reference (otherwise use zero).
+        :param generate_univariate_IRF_plots: ``bool``; whether to plot univariate IRFs over time.
         :param generate_curvature_plots: ``bool`` or ``None``; whether to plot IRF curvature at time **reference_time**. If ``None``, use default setting.
         :param generate_irf_surface_plots: ``bool`` or ``None``; whether to plot IRF surfaces.  If ``None``, use default setting.
         :param generate_nonstationarity_surface_plots: ``bool`` or ``None``; whether to plot IRF surfaces showing non-stationarity in the response.  If ``None``, use default setting.
@@ -4015,6 +4019,8 @@ class Model(object):
         :param plot_x_inches: ``float`` or ``None``; width of plot in inches. If ``None``, use default setting.
         :param plot_y_inches: ``float`` or ``None; height of plot in inches. If ``None``, use default setting.
         :param ylim: 2-element ``tuple`` or ``list``; (lower_bound, upper_bound) to use for y axis. If ``None``, automatically inferred.
+        :param use_horiz_axlab: ``bool``; whether to include horizontal axis label(s) (x axis in 2D plots, x/y axes in 3D plots).
+        :param use_vert_axlab: ``bool``; whether to include vertical axis label (y axis in 2D plots, z axis in 3D plots).
         :param cmap: ``str``; name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot).
         :param dpi: ``int`` or ``None``; dots per inch of saved plot image file. If ``None``, use default setting.
         :param level: ``float``; significance level for confidence/credible intervals, if supported.
@@ -4164,14 +4170,23 @@ class Model(object):
                                 filename += '_mc'
                             filename += '.png'
 
-                            if resvar == 'y_mean':
-                                ylab = self.dv
-                            elif resvar == 'y_sd':
-                                ylab = '%s, SD' % get_irf_name(self.dv, irf_name_map)
-                            elif resvar == 'y_skewness':
-                                ylab = '%s, skewness' % get_irf_name(self.dv, irf_name_map)
-                            elif resvar == 'y_tailweight':
-                                ylab = '%s, tailweight' % get_irf_name(self.dv, irf_name_map)
+                            if use_horiz_axlab:
+                                xlab = name
+                            else:
+                                xlab = None
+                            if use_vert_axlab:
+                                if resvar == 'y_mean':
+                                    ylab = self.dv
+                                elif resvar == 'y_sd':
+                                    ylab = '%s, SD' % get_irf_name(self.dv, irf_name_map)
+                                elif resvar == 'y_skewness':
+                                    ylab = '%s, skewness' % get_irf_name(self.dv, irf_name_map)
+                                elif resvar == 'y_tailweight':
+                                    ylab = '%s, tailweight' % get_irf_name(self.dv, irf_name_map)
+                                else:
+                                    raise ValueError('Unrecognized resvar %s.' % resvar)
+                            else:
+                                ylab = None
 
                             plot_irf(
                                 plot_x,
@@ -4187,7 +4202,7 @@ class Model(object):
                                 cmap=cmap,
                                 dpi=dpi,
                                 legend=False,
-                                xlab=name,
+                                xlab=xlab,
                                 ylab=ylab,
                                 use_line_markers=use_line_markers,
                                 transparent_background=transparent_background,
@@ -4196,14 +4211,19 @@ class Model(object):
 
                 # Surface plots (CDRNN only)
                 for plot_type, run_plot in zip(('irf_surface', 'nonstationarity_surface', 'interaction_surface',), (generate_irf_surface_plots, generate_nonstationarity_surface_plots, generate_interaction_surface_plots)):
-                    if resvar == 'y_mean':
-                        zlab = self.dv
-                    elif resvar == 'y_sd':
-                        zlab = '%s, SD' % get_irf_name(self.dv, irf_name_map)
-                    elif resvar == 'y_skewness':
-                        zlab = '%s, skewness' % get_irf_name(self.dv, irf_name_map)
-                    elif resvar == 'y_tailweight':
-                        zlab = '%s, tailweight' % get_irf_name(self.dv, irf_name_map)
+                    if use_vert_axlab:
+                        if resvar == 'y_mean':
+                            zlab = self.dv
+                        elif resvar == 'y_sd':
+                            zlab = '%s, SD' % get_irf_name(self.dv, irf_name_map)
+                        elif resvar == 'y_skewness':
+                            zlab = '%s, skewness' % get_irf_name(self.dv, irf_name_map)
+                        elif resvar == 'y_tailweight':
+                            zlab = '%s, tailweight' % get_irf_name(self.dv, irf_name_map)
+                        else:
+                            raise ValueError('Unrecognized resvar %s.' % resvar)
+                    else:
+                        zlab = None
 
                     if run_plot:
                         if plot_type == 'irf_surface':
@@ -4252,6 +4272,13 @@ class Model(object):
                                         filename += '_mc'
                                     filename += '.png'
 
+                                    if use_horiz_axlab:
+                                        xlab = xvar
+                                        ylab = yvar
+                                    else:
+                                        xlab = xvar
+                                        ylab = yvar
+
                                     plot_surface(
                                         plot_x,
                                         plot_y,
@@ -4263,8 +4290,8 @@ class Model(object):
                                         irf_name_map=irf_name_map,
                                         plot_x_inches=plot_x_inches,
                                         plot_y_inches=plot_y_inches,
-                                        xlab=xvar,
-                                        ylab=yvar,
+                                        xlab=xlab,
+                                        ylab=ylab,
                                         zlab=zlab,
                                         transparent_background=transparent_background,
                                         dpi=dpi,
@@ -4272,120 +4299,130 @@ class Model(object):
                                     )
 
                 # IRF 1D
-                plot_name = 'irf_univariate'
-                if resvar != 'y_mean':
-                    plot_name += '_%s' % resvar
+                if generate_univariate_IRF_plots:
+                    plot_name = 'irf_univariate'
+                    if resvar != 'y_mean':
+                        plot_name += '_%s' % resvar
 
-                if resvar == 'y_mean':
-                    ylab = self.dv
-                elif resvar == 'y_sd':
-                    ylab = '%s, SD' % get_irf_name(self.dv, irf_name_map)
-                elif resvar == 'y_skewness':
-                    ylab = '%s, skewness' % get_irf_name(self.dv, irf_name_map)
-                elif resvar == 'y_tailweight':
-                    ylab = '%s, tailweight' % get_irf_name(self.dv, irf_name_map)
-
-                names = self.impulse_names
-                if not plot_dirac:
-                    names = [x for x in names if self.is_non_dirac(x)]
-                if pred_names is not None and len(pred_names) > 0:
-                    new_names = []
-                    for i, name in enumerate(names):
-                        for ID in pred_names:
-                            if ID == name or re.match(ID if ID.endswith('$') else ID + '$', name) is not None:
-                                new_names.append(name)
-                    names = new_names
-
-                manipulations = []
-                for x in names:
-                    delta = self.plot_step_map[x]
-                    manipulations.append({x: delta})
-                gf_y_refs = [{x: y} for x, y in zip(ranef_group_names, ranef_level_names)]
-
-                fixed_impulses = set()
-                for x in self.t.terminals():
-                    if x.fixed:
-                        for y in x.impulse_names():
-                            fixed_impulses.add(y)
-
-                names_fixed = [x for x in names if x in fixed_impulses]
-                manipulations_fixed = [x for x in manipulations if list(x.keys())[0] in fixed_impulses]
-
-                if self.is_cdrnn:
-                    if 'rate' not in names:
-                        names = ['rate'] + names
-                    if 'rate' not in names_fixed:
-                        names_fixed = ['rate'] + names_fixed
-
-                for g, (gf_y_ref, gf_key) in enumerate(zip(gf_y_refs, ranef_level_names)):
-                    if gf_key is None:
-                        names_cur = names_fixed
-                        manipulations_cur = manipulations_fixed
+                    if use_horiz_axlab:
+                        xlab = 't_delta'
                     else:
-                        names_cur = names
-                        manipulations_cur = manipulations
+                        xlab = None
+                    if use_vert_axlab:
+                        if resvar == 'y_mean':
+                            ylab = self.dv
+                        elif resvar == 'y_sd':
+                            ylab = '%s, SD' % get_irf_name(self.dv, irf_name_map)
+                        elif resvar == 'y_skewness':
+                            ylab = '%s, skewness' % get_irf_name(self.dv, irf_name_map)
+                        elif resvar == 'y_tailweight':
+                            ylab = '%s, tailweight' % get_irf_name(self.dv, irf_name_map)
+                        else:
+                            raise ValueError('Unrecognized resvar %s.' % resvar)
+                    else:
+                        ylab = None
 
-                    plot_x, plot_y, lq, uq, samples = self.get_plot_data(
-                        xvar='t_delta',
-                        resvar=resvar,
-                        X_ref=None,
-                        time_X_ref=None,
-                        t_delta_ref=None,
-                        gf_y_ref=gf_y_ref,
-                        ref_varies_with_x=True,
-                        manipulations=manipulations_cur,
-                        pair_manipulations=False,
-                        standardize_response=standardize_response,
-                        reference_type=reference_type,
-                        xaxis=None,
-                        xmin=0,
-                        xmax=plot_n_time_units,
-                        xres=plot_n_time_points,
-                        n_samples=n_samples,
-                        level=level
-                    )
+                    names = self.impulse_names
+                    if not plot_dirac:
+                        names = [x for x in names if self.is_non_dirac(x)]
+                    if pred_names is not None and len(pred_names) > 0:
+                        new_names = []
+                        for i, name in enumerate(names):
+                            for ID in pred_names:
+                                if ID == name or re.match(ID if ID.endswith('$') else ID + '$', name) is not None:
+                                    new_names.append(name)
+                        names = new_names
 
-                    filename = prefix + plot_name
+                    manipulations = []
+                    for x in names:
+                        delta = self.plot_step_map[x]
+                        manipulations.append({x: delta})
+                    gf_y_refs = [{x: y} for x, y in zip(ranef_group_names, ranef_level_names)]
 
-                    if ranef_level_names[g]:
-                        filename += '_' + ranef_level_names[g]
-                    if mc:
-                        filename += '_mc'
-                    filename += '.png'
+                    fixed_impulses = set()
+                    for x in self.t.terminals():
+                        if x.fixed:
+                            for y in x.impulse_names():
+                                fixed_impulses.add(y)
 
-                    if not self.is_cdrnn:
-                        plot_y = plot_y[..., 1:]
-                        if lq is not None:
-                            lq = lq[..., 1:]
-                        if uq is not None:
-                            uq = uq[..., 1:]
+                    names_fixed = [x for x in names if x in fixed_impulses]
+                    manipulations_fixed = [x for x in manipulations if list(x.keys())[0] in fixed_impulses]
 
-                    plot_irf(
-                        plot_x,
-                        plot_y,
-                        names_cur,
-                        lq=lq,
-                        uq=uq,
-                        sort_names=sort_names,
-                        prop_cycle_length=prop_cycle_length,
-                        prop_cycle_map=prop_cycle_map,
-                        dir=self.outdir,
-                        filename=filename,
-                        irf_name_map=irf_name_map,
-                        plot_x_inches=plot_x_inches,
-                        plot_y_inches=plot_y_inches,
-                        ylim=ylim,
-                        cmap=cmap,
-                        dpi=dpi,
-                        legend=legend,
-                        xlab='t_delta',
-                        ylab=ylab,
-                        use_line_markers=use_line_markers,
-                        transparent_background=transparent_background,
-                        dump_source=dump_source
-                    )
+                    if self.is_cdrnn:
+                        if 'rate' not in names:
+                            names = ['rate'] + names
+                        if 'rate' not in names_fixed:
+                            names_fixed = ['rate'] + names_fixed
 
-                self.set_predict_mode(False)
+                    for g, (gf_y_ref, gf_key) in enumerate(zip(gf_y_refs, ranef_level_names)):
+                        if gf_key is None:
+                            names_cur = names_fixed
+                            manipulations_cur = manipulations_fixed
+                        else:
+                            names_cur = names
+                            manipulations_cur = manipulations
+
+                        plot_x, plot_y, lq, uq, samples = self.get_plot_data(
+                            xvar='t_delta',
+                            resvar=resvar,
+                            X_ref=None,
+                            time_X_ref=None,
+                            t_delta_ref=None,
+                            gf_y_ref=gf_y_ref,
+                            ref_varies_with_x=True,
+                            manipulations=manipulations_cur,
+                            pair_manipulations=False,
+                            standardize_response=standardize_response,
+                            reference_type=reference_type,
+                            xaxis=None,
+                            xmin=0,
+                            xmax=plot_n_time_units,
+                            xres=plot_n_time_points,
+                            n_samples=n_samples,
+                            level=level
+                        )
+
+                        filename = prefix + plot_name
+
+                        if ranef_level_names[g]:
+                            filename += '_' + ranef_level_names[g]
+                        if mc:
+                            filename += '_mc'
+                        filename += '.png'
+
+                        if not self.is_cdrnn:
+                            plot_y = plot_y[..., 1:]
+                            if lq is not None:
+                                lq = lq[..., 1:]
+                            if uq is not None:
+                                uq = uq[..., 1:]
+
+                        plot_irf(
+                            plot_x,
+                            plot_y,
+                            names_cur,
+                            lq=lq,
+                            uq=uq,
+                            sort_names=sort_names,
+                            prop_cycle_length=prop_cycle_length,
+                            prop_cycle_map=prop_cycle_map,
+                            dir=self.outdir,
+                            filename=filename,
+                            irf_name_map=irf_name_map,
+                            plot_x_inches=plot_x_inches,
+                            plot_y_inches=plot_y_inches,
+                            ylim=ylim,
+                            cmap=cmap,
+                            dpi=dpi,
+                            legend=legend,
+                            xlab=xlab,
+                            ylab=ylab,
+                            use_line_markers=use_line_markers,
+                            transparent_background=transparent_background,
+                            dump_source=dump_source
+                        )
+
+                    self.set_predict_mode(False)
 
     def parameter_table(self, standardize_response=False, fixed=True, level=95, n_samples='default'):
         """

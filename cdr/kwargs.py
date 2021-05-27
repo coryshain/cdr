@@ -1387,6 +1387,12 @@ PLOT_KWARGS_CORE = [
         "Resolution of plot axis (for 3D plots, uses sqrt of this number for each axis)."
     ),
     Kwarg(
+        'generate_univariate_IRF_plots',
+        True,
+        bool,
+        "Whether to plot univariate IRFs over time."
+    ),
+    Kwarg(
         'generate_curvature_plots',
         True,
         bool,
@@ -1429,10 +1435,16 @@ PLOT_KWARGS_CORE = [
         "Space-delimited ``lower_bound upper_bound`` to use for y axis. If ``None``, automatically inferred."
     ),
     Kwarg(
-        'legend',
+        'use_horiz_axlab',
         True,
         bool,
-        "Whether to include a legend in plots with multiple components."
+        "Whether to include horizontal axis label(s) (x axis in 2D plots, x/y axes in 3D plots)."
+    ),
+    Kwarg(
+        'use_vert_axlab',
+        True,
+        bool,
+        "Whether to include vertical axis label (y axis in 2D plots, z axis in 3D plots)."
     ),
     Kwarg(
         'use_line_markers',
