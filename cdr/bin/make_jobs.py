@@ -5,7 +5,7 @@ from cdr.config import Config
 base = """#!/bin/bash
 #
 #SBATCH --job-name=%s
-#SBATCH --output=%s.out
+#SBATCH --output="%s.out"
 #SBATCH --time=%d:00:00
 #SBATCH --ntasks=%d
 #SBATCH --mem=%dgb
@@ -46,7 +46,7 @@ if __name__ == '__main__':
             start_ix = -1
             basename = '_'.join(path[:-4].split('/')[start_ix:] + [m])
             job_name = '_'.join([basename, ''.join(job_types)])
-            filename = outdir + '/' + job_name + '.pbs'
+            filename = outdir + '/' + job_name + '-%j.pbs'
             with open(filename, 'w') as f:
                 f.write(base % (job_name, job_name, time, n_cores, memory))
                 if slurm_partition:
