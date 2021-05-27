@@ -1447,6 +1447,12 @@ PLOT_KWARGS_CORE = [
         "Whether to include vertical axis label (y axis in 2D plots, z axis in 3D plots)."
     ),
     Kwarg(
+        'plot_legend',
+        True,
+        bool,
+        "Whether to add legend to univariate IRF plots."
+    ),
+    Kwarg(
         'use_line_markers',
         False,
         bool,
