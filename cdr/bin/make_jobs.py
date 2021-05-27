@@ -5,7 +5,7 @@ from cdr.config import Config
 base = """#!/bin/bash
 #
 #SBATCH --job-name=%s
-#SBATCH --output="%s-%j.out"
+#SBATCH --output="%s-%%j.out"
 #SBATCH --time=%d:00:00
 #SBATCH --ntasks=%d
 #SBATCH --mem=%dgb
