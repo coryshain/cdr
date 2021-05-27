@@ -3975,7 +3975,7 @@ class Model(object):
             level=95,
             n_samples=None,
             prefix=None,
-            legend=None,
+            use_legend=None,
             use_line_markers=False,
             transparent_background=False,
             keep_plot_history=None,
@@ -4026,7 +4026,7 @@ class Model(object):
         :param level: ``float``; significance level for confidence/credible intervals, if supported.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param prefix: ``str`` or ``None``; prefix appended to output filenames. If ``None``, no prefix added.
-        :param legend: ``bool`` or ``None``; whether to include a legend in plots with multiple components. If ``None``, use default setting.
+        :param use_legend: ``bool`` or ``None``; whether to include a legend in plots with multiple components. If ``None``, use default setting.
         :param use_line_markers: ``bool``; whether to add markers to lines in univariate IRF plots.
         :param transparent_background: ``bool``; whether to use a transparent background. If ``False``, uses a white background.
         :param keep_plot_history: ``bool`` or ``None``; keep the history of all plots by adding a suffix with the iteration number. Can help visualize learning but can also consume a lot of disk space. If ``False``, always overwrite with most recent plot. If ``None``, use default setting.
@@ -4062,8 +4062,8 @@ class Model(object):
             plot_x_inches = self.plot_x_inches
         if plot_y_inches is None:
             plot_y_inches = self.plot_y_inches
-        if legend is None:
-            legend = self.plot_legend
+        if use_legend is None:
+            use_legend = self.plot_legend
         if cmap is None:
             cmap = self.cmap
         if dpi is None:
@@ -4414,7 +4414,7 @@ class Model(object):
                             ylim=ylim,
                             cmap=cmap,
                             dpi=dpi,
-                            legend=legend,
+                            legend=use_legend,
                             xlab=xlab,
                             ylab=ylab,
                             use_line_markers=use_line_markers,

@@ -51,7 +51,7 @@ if __name__ == '__main__':
         cmap = plot_config.get('cmap', p.get('cmap', 'gist_rainbow'))
         dpi = plot_config.get('dpi', p.get('dpi', 300))
         name_map = p.irf_name_map
-        legend = plot_config.get('legend', p.get('plot_legend', True))
+        legend = plot_config.get('use_legend', p.get('plot_legend', True))
         markers = plot_config.get('use_markers', False)
         transparent_background = plot_config.get('transparent_background', False)
         plot_true_synthetic = plot_config.get('plot_true_synthetic', False)

@@ -584,7 +584,7 @@ MODEL_INITIALIZATION_KWARGS = [
         "Height of plot in inches."
     ),
     Kwarg(
-        'legend',
+        'plot_legend',
         True,
         bool,
         "Whether to include a legend in plots with multiple components."
@@ -1447,7 +1447,7 @@ PLOT_KWARGS_CORE = [
         "Whether to include vertical axis label (y axis in 2D plots, z axis in 3D plots)."
     ),
     Kwarg(
-        'legend',
+        'use_legend',
         True,
         bool,
         "Whether to add legend to univariate IRF plots."
