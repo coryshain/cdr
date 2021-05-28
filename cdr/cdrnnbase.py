@@ -1719,8 +1719,9 @@ class CDRNN(Model):
                 rnn_hidden = model_dict['rnn_hidden']
                 rnn_cell = model_dict['rnn_cell']
 
-                h_rnn_masked = h_rnn * mask
-                self._regularize(h_rnn_masked, regtype='context', var_name=reg_name('context'))
+                if h_rnn is not None:
+                    h_rnn_masked = h_rnn * mask
+                    self._regularize(h_rnn_masked, regtype='context', var_name=reg_name('context'))
 
                 for l in range(self.n_layers_rnn):
                     reduction_axes = list(range(len(rnn_hidden[l].shape)-1))
