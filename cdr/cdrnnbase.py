@@ -1714,16 +1714,15 @@ class CDRNN(Model):
                 self.rnn_c_ema_ops = []
 
                 mask = model_dict['time_X_mask'][..., None]
+                denom = tf.reduce_sum(mask)
 
                 rnn_hidden = model_dict['rnn_hidden']
                 rnn_cell = model_dict['rnn_cell']
 
+                h_rnn_masked = h_rnn * mask
+                self._regularize(h_rnn_masked, regtype='context', var_name=reg_name('context'))
+
                 for l in range(self.n_layers_rnn):
-                    h_rnn_masked = h_rnn[l] * mask
-                    denom = tf.reduce_sum(mask)
-
-                    self._regularize(h_rnn_masked, regtype='context', var_name=reg_name('context'))
-
                     reduction_axes = list(range(len(rnn_hidden[l].shape)-1))
 
                     h_sum = tf.reduce_sum(rnn_hidden[l+1] * mask, axis=reduction_axes) # 0th layer is the input, so + 1
