@@ -153,7 +153,7 @@ if __name__ == '__main__':
 
             kwargs = {x: plot_config.settings_core[x] for x in plot_config.settings_core if x != 'prefix'}
 
-            cdr_model.make_plots(prefix=prefix_cur, dump_source=args.dump_source, **plot_config.settings_core)
+            cdr_model.make_plots(prefix=prefix_cur, dump_source=args.dump_source, **kwargs)
 
             cdr_model.finalize()
 
