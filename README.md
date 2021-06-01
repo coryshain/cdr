@@ -1,5 +1,6 @@
 # Continuous-Time Deconvolutional Regression (CDR)
 CDR (formerly _deconvolutional time series regression_ or _DTSR_) is a regression technique for analyzing time series with delayed effects (Shain & Schuler, 2018, 2021).
+Continuous-time deconvolutional regressive neural networks (CDRNNs) are a deep neural generalization of the CDR technique (Shain, 2021).
 
 This repository contains source code for the `cdr` Python module as well as support for reproducing published experiments.
 Full documentation for the `cdr` module is available at [http://dtsr.readthedocs.io/en/latest/](http://dtsr.readthedocs.io/en/latest/).
@@ -7,9 +8,6 @@ Full documentation for the `cdr` module is available at [http://dtsr.readthedocs
 CDR models can be trained and evaluated using provided utility executables.
 Help strings for all available utilities can be viewed by running `python -m cdr.bin.help`.
 Full repository documentation, including an API, is provided at the link above.
-
-This repository also provides alpha support for CDRNN (*manuscript in preparation*), a deep neural extension of CDR that models the impulse response as a non-stationary, context-dependent manifold over the predictor and time dimensions.
-CDRNN eliminates many simplifying assumptions made by CDR and improves its ability to capture non-linear featural and temporal relationships between the predictors and the response.
 
 ## Installation
 
@@ -54,6 +52,12 @@ For example, a modle with the following specification
     
 will fit a CDR model that convolves predictors `a`, `b`, `c` using `Normal` IRFs with trainable location and scale parameters.
 
+CDRNN models do not require user-specification of a kernel family, so their formula syntax is simpler:
+
+    formula = DV ~ a + b + c
+
+The response shape to all variables (and all their interactions) will be fitted jointly.
+
 Once a model file has been written (e.g. `model.ini`), the model(s) defined in it can be trained by running:
 
     python -m cdr.bin.train model.ini
@@ -77,6 +81,7 @@ Current reproduction branches are:
  - `naacl19`
  - `npsy`
  - `cognition21`
+ - `acl21`
 
 Thus, to reproduce results from NAACL19, for example, run `git checkout naacl19` from the repository root, and follow instructions in the `README` file.
 The reproduction branches are also useful sources of example configuration files to use as templates for setting up your own experiments, although you should consult the docs for full documentation of the structure of CDR experiment configurations.
@@ -98,3 +103,5 @@ Bug reports can be logged in the issue tracker on [Github](https://github.com/co
 Shain, Cory and Schuler, William (2018). Deconvolutional time series regression: A technique for modeling temporally diffuse effects. _EMNLP18_.
 
 Shain, Cory and Schuler, William (2021). Continuous-time deconvolutional regression for psycholinguistic modeling. _Cognition_.
+
+Shain, Cory (2021). CDRNN: Discovering complex dynamics in human language processing. _ACL21_.
