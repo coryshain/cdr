@@ -26,7 +26,7 @@ class Config(object):
     :param path: Path to \*.ini file
     """
 
-    def __init__(self, path):
+    def __init__(self, path: str):
         self.current_model = None
 
         config = configparser.ConfigParser()
