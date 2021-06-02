@@ -1,5 +1,5 @@
 # Continuous-Time Deconvolutional Regression (CDR)
-In many real world time series, events trigger "ripples" in a response of interest that unfold slowly and overlap in time (temporal diffusion).
+In many real world time series, events trigger "ripples" in a dependent variable that unfold slowly and overlap in time (temporal diffusion).
 Recovering the underlying dynamics of temporally diffuse effects is challenging when events and/or responses occur at irregular intervals.
 Continuous-time deconvolutional regression (CDR) is a regression technique for time series that directly models temporal diffusion of effects (Shain & Schuler, 2018, 2021) as a funtion of continuous time.
 CDR recasts the streams of independent and dependent variables as _signals_ and learns continuous-time impulse response functions (IRFs) that mediate between them.
