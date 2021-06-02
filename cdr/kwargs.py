@@ -1530,38 +1530,38 @@ def cdr_kwarg_docstring():
     :return: ``str``; docstring snippet
     """
 
-    out = "**All models**\n\n"
+    out = "All models\n^^^^^^^^^^\n\n"
 
     for kwarg in MODEL_INITIALIZATION_KWARGS:
         out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
 
-    out = "**All CDR models**\n\n"
+    out = "All CDR models\n^^^^^^^^^^^^^^\n\n"
 
     for kwarg in CDR_INITIALIZATION_KWARGS:
         if kwarg.key not in ['history_length']:
             out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
 
-    out += '\n**CDRMLE only**\n\n'
+    out += '\nCDRMLE\n^^^^^^\n\n'
 
     for kwarg in CDRMLE_INITIALIZATION_KWARGS:
         out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
 
-    out += '\n**CDRBayes only**\n\n'
+    out += '\nCDRBayes\n^^^^^^^^\n\n'
 
     for kwarg in CDRBAYES_INITIALIZATION_KWARGS:
         out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
 
-    out += '\n**All CDRNN models**\n\n'
+    out += 'All CDRNN models\n^^^^^^^^^^^^^^^^\n\n'
 
     for kwarg in CDRNN_INITIALIZATION_KWARGS:
         out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
 
-    out += '\n**CDRNNMLE only**\n\n'
+    out += '\nCDRNNMLE\n^^^^^^^^\n\n'
 
     for kwarg in CDRNNMLE_INITIALIZATION_KWARGS:
         out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
 
-    out += '\n**CDRNNBayes only**\n\n'
+    out += '\nCDRNNBayes\n^^^^^^^^^^\n\n'
 
     for kwarg in CDRNNBAYES_INITIALIZATION_KWARGS:
         out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)

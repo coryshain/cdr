@@ -4076,6 +4076,130 @@ class Model(object):
                 else:
                     manipulations = None
 
+                # IRF 1D plots
+                if generate_univariate_IRF_plots:
+                    plot_name = 'irf_univariate'
+                    if resvar != 'y_mean':
+                        plot_name += '_%s' % resvar
+
+                    if use_horiz_axlab:
+                        xlab = 't_delta'
+                    else:
+                        xlab = None
+                    if use_vert_axlab:
+                        if resvar == 'y_mean':
+                            ylab = self.dv
+                        elif resvar == 'y_sd':
+                            ylab = '%s, SD' % get_irf_name(self.dv, irf_name_map)
+                        elif resvar == 'y_skewness':
+                            ylab = '%s, skewness' % get_irf_name(self.dv, irf_name_map)
+                        elif resvar == 'y_tailweight':
+                            ylab = '%s, tailweight' % get_irf_name(self.dv, irf_name_map)
+                        else:
+                            raise ValueError('Unrecognized resvar %s.' % resvar)
+                    else:
+                        ylab = None
+
+                    names = self.impulse_names
+                    if not plot_dirac:
+                        names = [x for x in names if self.is_non_dirac(x)]
+                    if pred_names is not None and len(pred_names) > 0:
+                        new_names = []
+                        for i, name in enumerate(names):
+                            for ID in pred_names:
+                                if ID == name or re.match(ID if ID.endswith('$') else ID + '$', name) is not None:
+                                    new_names.append(name)
+                        names = new_names
+
+                    manipulations = []
+                    for x in names:
+                        delta = self.plot_step_map[x]
+                        manipulations.append({x: delta})
+                    gf_y_refs = [{x: y} for x, y in zip(ranef_group_names, ranef_level_names)]
+
+                    fixed_impulses = set()
+                    for x in self.t.terminals():
+                        if x.fixed:
+                            for y in x.impulse_names():
+                                fixed_impulses.add(y)
+
+                    names_fixed = [x for x in names if x in fixed_impulses]
+                    manipulations_fixed = [x for x in manipulations if list(x.keys())[0] in fixed_impulses]
+
+                    if self.is_cdrnn:
+                        if 'rate' not in names:
+                            names = ['rate'] + names
+                        if 'rate' not in names_fixed:
+                            names_fixed = ['rate'] + names_fixed
+
+                    for g, (gf_y_ref, gf_key) in enumerate(zip(gf_y_refs, ranef_level_names)):
+                        if gf_key is None:
+                            names_cur = names_fixed
+                            manipulations_cur = manipulations_fixed
+                        else:
+                            names_cur = names
+                            manipulations_cur = manipulations
+
+                        plot_x, plot_y, lq, uq, samples = self.get_plot_data(
+                            xvar='t_delta',
+                            resvar=resvar,
+                            X_ref=None,
+                            time_X_ref=None,
+                            t_delta_ref=None,
+                            gf_y_ref=gf_y_ref,
+                            ref_varies_with_x=True,
+                            manipulations=manipulations_cur,
+                            pair_manipulations=False,
+                            standardize_response=standardize_response,
+                            reference_type=reference_type,
+                            xaxis=None,
+                            xmin=0,
+                            xmax=plot_n_time_units,
+                            xres=plot_n_time_points,
+                            n_samples=n_samples,
+                            level=level
+                        )
+
+                        filename = prefix + plot_name
+
+                        if ranef_level_names[g]:
+                            filename += '_' + ranef_level_names[g]
+                        if mc:
+                            filename += '_mc'
+                        filename += '.png'
+
+                        if not self.is_cdrnn:
+                            plot_y = plot_y[..., 1:]
+                            if lq is not None:
+                                lq = lq[..., 1:]
+                            if uq is not None:
+                                uq = uq[..., 1:]
+
+                        plot_irf(
+                            plot_x,
+                            plot_y,
+                            names_cur,
+                            lq=lq,
+                            uq=uq,
+                            sort_names=sort_names,
+                            prop_cycle_length=prop_cycle_length,
+                            prop_cycle_map=prop_cycle_map,
+                            dir=self.outdir,
+                            filename=filename,
+                            irf_name_map=irf_name_map,
+                            plot_x_inches=plot_x_inches,
+                            plot_y_inches=plot_y_inches,
+                            ylim=ylim,
+                            cmap=cmap,
+                            dpi=dpi,
+                            legend=use_legend,
+                            xlab=xlab,
+                            ylab=ylab,
+                            use_line_markers=use_line_markers,
+                            transparent_background=transparent_background,
+                            dump_source=dump_source
+                        )
+
                 # Curvature plots
                 if generate_curvature_plots:
                     names = [x for x in self.impulse_names if (self.is_non_dirac(x) and x != 'rate')]
@@ -4237,130 +4361,6 @@ class Model(object):
                                         dpi=dpi,
                                         dump_source=dump_source
                                     )
-
-                # IRF 1D
-                if generate_univariate_IRF_plots:
-                    plot_name = 'irf_univariate'
-                    if resvar != 'y_mean':
-                        plot_name += '_%s' % resvar
-
-                    if use_horiz_axlab:
-                        xlab = 't_delta'
-                    else:
-                        xlab = None
-                    if use_vert_axlab:
-                        if resvar == 'y_mean':
-                            ylab = self.dv
-                        elif resvar == 'y_sd':
-                            ylab = '%s, SD' % get_irf_name(self.dv, irf_name_map)
-                        elif resvar == 'y_skewness':
-                            ylab = '%s, skewness' % get_irf_name(self.dv, irf_name_map)
-                        elif resvar == 'y_tailweight':
-                            ylab = '%s, tailweight' % get_irf_name(self.dv, irf_name_map)
-                        else:
-                            raise ValueError('Unrecognized resvar %s.' % resvar)
-                    else:
-                        ylab = None
-
-                    names = self.impulse_names
-                    if not plot_dirac:
-                        names = [x for x in names if self.is_non_dirac(x)]
-                    if pred_names is not None and len(pred_names) > 0:
-                        new_names = []
-                        for i, name in enumerate(names):
-                            for ID in pred_names:
-                                if ID == name or re.match(ID if ID.endswith('$') else ID + '$', name) is not None:
-                                    new_names.append(name)
-                        names = new_names
-
-                    manipulations = []
-                    for x in names:
-                        delta = self.plot_step_map[x]
-                        manipulations.append({x: delta})
-                    gf_y_refs = [{x: y} for x, y in zip(ranef_group_names, ranef_level_names)]
-
-                    fixed_impulses = set()
-                    for x in self.t.terminals():
-                        if x.fixed:
-                            for y in x.impulse_names():
-                                fixed_impulses.add(y)
-
-                    names_fixed = [x for x in names if x in fixed_impulses]
-                    manipulations_fixed = [x for x in manipulations if list(x.keys())[0] in fixed_impulses]
-
-                    if self.is_cdrnn:
-                        if 'rate' not in names:
-                            names = ['rate'] + names
-                        if 'rate' not in names_fixed:
-                            names_fixed = ['rate'] + names_fixed
-
-                    for g, (gf_y_ref, gf_key) in enumerate(zip(gf_y_refs, ranef_level_names)):
-                        if gf_key is None:
-                            names_cur = names_fixed
-                            manipulations_cur = manipulations_fixed
-                        else:
-                            names_cur = names
-                            manipulations_cur = manipulations
-
-                        plot_x, plot_y, lq, uq, samples = self.get_plot_data(
-                            xvar='t_delta',
-                            resvar=resvar,
-                            X_ref=None,
-                            time_X_ref=None,
-                            t_delta_ref=None,
-                            gf_y_ref=gf_y_ref,
-                            ref_varies_with_x=True,
-                            manipulations=manipulations_cur,
-                            pair_manipulations=False,
-                            standardize_response=standardize_response,
-                            reference_type=reference_type,
-                            xaxis=None,
-                            xmin=0,
-                            xmax=plot_n_time_units,
-                            xres=plot_n_time_points,
-                            n_samples=n_samples,
-                            level=level
-                        )
-
-                        filename = prefix + plot_name
-
-                        if ranef_level_names[g]:
-                            filename += '_' + ranef_level_names[g]
-                        if mc:
-                            filename += '_mc'
-                        filename += '.png'
-
-                        if not self.is_cdrnn:
-                            plot_y = plot_y[..., 1:]
-                            if lq is not None:
-                                lq = lq[..., 1:]
-                            if uq is not None:
-                                uq = uq[..., 1:]
-
-                        plot_irf(
-                            plot_x,
-                            plot_y,
-                            names_cur,
-                            lq=lq,
-                            uq=uq,
-                            sort_names=sort_names,
-                            prop_cycle_length=prop_cycle_length,
-                            prop_cycle_map=prop_cycle_map,
-                            dir=self.outdir,
-                            filename=filename,
-                            irf_name_map=irf_name_map,
-                            plot_x_inches=plot_x_inches,
-                            plot_y_inches=plot_y_inches,
-                            ylim=ylim,
-                            cmap=cmap,
-                            dpi=dpi,
-                            legend=use_legend,
-                            xlab=xlab,
-                            ylab=ylab,
-                            use_line_markers=use_line_markers,
-                            transparent_background=transparent_background,
-                            dump_source=dump_source
-                        )
 
                     self.set_predict_mode(False)
 
