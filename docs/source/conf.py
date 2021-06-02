@@ -37,9 +37,7 @@ MOCK_MODULES = [
     'tensorflow.contrib.layers',
     'tensorflow.python',
     'tensorflow.python.framework',
-    'tensorflow.python.ops',
-    'matplotlib',
-    'matplotlib.pyplot'
+    'tensorflow.python.ops'
 ]
 sys.modules.update((mod_name, Mock()) for mod_name in MOCK_MODULES)
 
