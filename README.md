@@ -1,9 +1,17 @@
 # Continuous-Time Deconvolutional Regression (CDR)
+In many real world time series, events trigger "ripples" in a response of interest that unfold slowly and overlap in time (temporal diffusion).
+Recovering the underlying dynamics of temporally diffuse effects is challenging when events and/or responses occur at irregular intervals.
+Continuous-time deconvolutional regression (CDR) is a regression technique for time series that directly models temporal diffusion of effects (Shain & Schuler, 2018, 2021) as a funtion of continuous time.
+CDR recasts the streams of independent and dependent variables as _signals_ and learns continuous-time impulse response functions (IRFs) that mediate between them.
+Given data and a model template specifying the functional form(s) of the IRF kernel(s), CDR finds IRF parameters that optimize some objective function.
+This approach can be generalized to account for non-stationary, non-linear, non-additive, and context-dependent response functions by implementing the IRF as a deep neural network (Shain, 2021).
+
 CDR (formerly _deconvolutional time series regression_ or _DTSR_) is a regression technique for analyzing time series with delayed effects (Shain & Schuler, 2018, 2021).
 Continuous-time deconvolutional regressive neural networks (CDRNNs) are a deep neural generalization of the CDR technique (Shain, 2021).
 
 This repository contains source code for the `cdr` Python module as well as support for reproducing published experiments.
-Full documentation for the `cdr` module is available at [http://dtsr.readthedocs.io/en/latest/](http://dtsr.readthedocs.io/en/latest/).
+This package provides (1) an API for programming with CDR(NN) and (2) executables that allow users to train and evaluate CDR(NN) models out of the box, without needing to write any code.
+Full documentation for the `cdr` module is available at [http://cdr.readthedocs.io/en/latest/](http://cdr.readthedocs.io/en/latest/).
 
 CDR models can be trained and evaluated using provided utility executables.
 Help strings for all available utilities can be viewed by running `python -m cdr.bin.help`.
@@ -23,30 +31,30 @@ The `cdr` environment must first be activated anytime you want to use the CDR co
 
 ## Basic usage
 
-Once CDR is installed system-wide as described above (and the `cdr` conda environment is activated via `conda activate cdr`), the CDR package can be imported into Python as shown
+Once the `cdr` package is installed system-wide as described above (and the `cdr` conda environment is activated via `conda activate cdr`), the `cdr` package can be imported into Python as shown
 
     import cdr
     
-Most users will not need to program with CDR, but will instead run command-line executables for model fitting and criticism.
+Most users will not need to program with CDR(NN), but will instead run command-line executables for model fitting and criticism.
 These can be run as
 
     python -m cdr.bin.<EXECUTABLE-NAME> ...
     
-For documentation of available CDR executables, run
+For documentation of available CDR(NN) executables, run
 
     python -m cdr.bin.help( <SCRIPT-NAME>)*
 
-CDR models are defined using configuration (`*.ini`) files, which can be more convenient than shell arguments for specifying many settings at once, and which provide written documentation of the specific settings used to generate any given result.
+CDR(NN) models are defined using configuration (`*.ini`) files, which can be more convenient than shell arguments for specifying many settings at once, and which provide written documentation of the specific settings used to generate any given result.
 For convenience, we have provided annotated CDR and CDRNN model templates:
     
     cdr_model_template.ini
     cdrnn_model_template.ini
     
-These files can be duplicated and modified (e.g. with paths to data and model specifications) in order to quickly get a CDR model up and running.
+These files can be duplicated and modified (e.g. with paths to data and model specifications) in order to quickly get a CDR(NN) model up and running.
 
-CDR model formula syntax resembles R-style model formulas (`DV ~ IV1 + IV2 + ...`) and is fully described in the [docs](http://dtsr.readthedocs.io/en/latest/).
+CDR model formula syntax resembles R-style model formulas (`DV ~ IV1 + IV2 + ...`) and is fully described in the [docs](http://cdr.readthedocs.io/en/latest/).
 The core novelty is the `C(preds, IRF)` call (`C` for "convolve"), in which the first argument is a '+'-delimited list of predictors and the second argument is a call to an impulse response kernel (e.g. `Exp`, `Normal`, `ShiftedGammaShapeGT1`, see docs for complete list).
-For example, a modle with the following specification
+For example, a model with the following specification
 
     formula = DV ~ C(a + b + c, Normal())
     

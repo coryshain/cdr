@@ -5,27 +5,87 @@ Introduction
 
 .. image:: rtdbanner.png
 
-Continuous-time deconvolutional regression (CDR) is a regression technique for time series that directly models temporal diffusion of effects (Shain & Schuler, 2018, 2019).
-CDR recasts the streams of independent and dependent variables as `signals` and learns impulse response functions (IRF) that mediate the relationship between them.
+In many real world time series, events trigger "ripples" in a response of interest that unfold slowly and overlap in time (temporal diffusion).
+Recovering the underlying dynamics of temporally diffuse effects is challenging when events and/or responses occur at irregular intervals.
+Continuous-time deconvolutional regression (CDR) is a regression technique for time series that directly models temporal diffusion of effects (Shain & Schuler, 2018, 2021) as a funtion of continuous time.
+CDR recasts the streams of independent and dependent variables as `signals` and learns continuous-time impulse response functions (IRFs) that mediate between them.
 Given data and a model template specifying the functional form(s) of the IRF kernel(s), CDR finds IRF parameters that optimize some objective function.
+This approach can be generalized to account for non-stationary, non-linear, non-additive, and context-dependent response functions by implementing the IRF as a deep neural network (Shain, 2021).
 
-The ``cdr`` package documented here provides Python implementations of two broad inference algorithms for CDR models: a maximum likelihood implementation (CDRMLE) and a Bayesian implementation (CDRBayes).
-CDRMLE is implemented in TensorFlow, learns point estimates for the parameters, and generally trains more quickly.
-However, it does not quantify uncertainty in the parameter estimates.
-CDRBayes is implemented in TensorFlow+Edward, learns posterior distributions over the parameters using one of a number of variational and MCMC inference techniques, and generally trains more slowly.
-However, CDRBayes models directly quantify uncertainty in the parameter estimates.
-An intermediary approach is to run a CDRBayes model using variational inference with implicit improper uniform priors.
-Such a model considers parameters to be random variables but uses maximum likelihood estimation to fit their means and variances, permitting quantification of uncertainty without injecting a learning bias through the prior.
-See :ref:`config` for more information on how to do this.
+The ``cdr`` package documented here provides Python implementations of both CDR and CDRNN.
+This package provides (1) an API for programming with CDR(NN) and (2) executables that allow users to train and evaluate CDR(NN) models out of the box, without needing to write any code.
+Source code and bug reporting tools are available on `Github <https://github.com/coryshain/cdr>`_.
 
-This package provides (1) an API for programming with CDR and (2) executables that allow users to train and evaluate CDR models out of the box, without needing to write any code.
+Installation
+------------
 
-This package was built and tested using Python 3.6.4, Tensorflow 1.6.0, and Edward 1.3.5.
-Python 2.7.* support is not guaranteed, although certain CDR features may still work.
-If you run into issues using CDR with other versions of these tools, you may report them in the issue tracker on `Github <https://github.com/coryshain/cdr>`_.
+Install `anaconda <https://www.anaconda.com/>`_ and clone the CDR repository (`<https://github.com/coryshain/cdr>`_) to the directory of your choice.
+From the CDR repository root, run the following commands to create a new conda environment::
+
+    conda env create -f conda_cdr.yml
+    conda activate cdr
+
+(Optional) Run the following from the CDR repository root to install CDR system-wide (otherwise, simply run CDR from the repository root)::
+
+    python setup.py install
+
+The ``cdr`` environment must first be activated anytime you want to use the CDR codebase::
+
+    conda activate cdr
+
+
+
+Basic Usage
+-----------
+
+Once the ``cdr`` package is installed system-wide as described above (and the ``cdr`` conda environment is activated via ``conda activate cdr``), the ``cdr`` package can be imported into Python as shown::
+
+    import cdr
+
+Most users will not need to program with CDR(NN), but will instead run command-line executables for model fitting and criticism.
+These can be run as::
+
+    python -m cdr.bin.<EXECUTABLE-NAME> ...
+
+For documentation of available CDR(NN) executables, run::
+
+    python -m cdr.bin.help( <SCRIPT-NAME>)*
+
+CDR(NN) models are defined using configuration (``*.ini``) files (fully described in :ref:`config`), which can be more convenient than shell arguments for specifying many settings at once, and which provide written documentation of the specific settings used to generate any given result.
+For convenience, we have provided annotated CDR and CDRNN model templates::
+
+    cdr_model_template.ini
+    cdrnn_model_template.ini
+
+These files can be duplicated and modified (e.g. with paths to data and model specifications) in order to quickly get a CDR(NN) model up and running.
+
+CDR model formula syntax resembles R-style model formulas (``DV ~ IV1 + IV2 + ...``) and is fully described in :ref:`formula`.
+The core novelty is the ``C(preds, IRF)`` call (``C`` for "convolve"), in which the first argument is a '+'-delimited list of predictors and the second argument is a call to an impulse response kernel (e.g. ``Exp``, ``Normal``, ``ShiftedGammaShapeGT1``, see :ref:`formula` for complete list).
+For example, a model with the following specification::
+
+    formula = DV ~ C(a + b + c, Normal())
+
+will fit a CDR model that convolves predictors ``a``, ``b``, ``c`` using ``Normal`` IRFs with trainable location and scale parameters.
+
+CDRNN models do not require user-specification of a kernel family, so their formula syntax is simpler::
+
+    formula = DV ~ a + b + c
+
+The response shape to all variables (and all their interactions) will be fitted jointly.
+
+Once a model file has been written (e.g. ``model.ini``), the model(s) defined in it can be trained by running::
+
+    python -m cdr.bin.train model.ini
+
+IRF estimates will be incrementally dumped into the output directory specified by ``model.ini``,
+and learning curves can be inspected in Tensorboard::
+
+    python -m tensorboard.main --logdir=<PATH-TO-CDR-OUTPUT>
+
 
 
 References
 ----------
 Shain, Cory and Schuler, William (2018). Deconvolutional time series regression: A technique for modeling temporally diffuse effects. *EMNLP18*.
-Shain, Cory and Schuler, William (2019). Continuous-time deconvolutional regression for psycholinguistic modeling. *PsyArXiv*. [https://doi.org/10.31234/osf.io/whvk5](https://doi.org/10.31234/osf.io/whvk5).
+Shain, Cory and Schuler, William (2021). Continuous-time deconvolutional regression for psycholinguistic modeling. *Cognition*.
+Shain, Cory (2021). CDRNN: Discovering complex dynamics in human language processing. *ACL21*.

@@ -872,16 +872,8 @@ class CDR(Model):
         for kwarg in CDR._INITIALIZATION_KWARGS:
             setattr(self, kwarg.key, kwargs.pop(kwarg.key, kwarg.default_value))
 
-        if self.pc:
-            self.src_impulse_names_norate = list(filter(lambda x: x != 'rate', self.form.t.impulse_names(include_interactions=True)))
-            _, self.eigenvec, self.eigenval, self.impulse_means, self.impulse_sds = pca(X[self.src_impulse_names_norate])
-        else:
-            self.eigenvec = self.eigenval = None
-
     def _initialize_metadata(self):
         super(CDR, self)._initialize_metadata()
-
-        assert not self.pc, 'The use of ``pc=True`` is not currently supported.'
 
         # Initialize lookup tables of network objects
         self.irf_lambdas = {}
@@ -905,141 +897,41 @@ class CDR(Model):
         self.irf_proportion_in_bounds_mc = {}
         self.irf_plot = {}
         self.irf_integral_tensors = {}
-        if self.pc:
-            self.src_irf_plot = {}
-            self.src_irf_integral_tensors = {}
         self.irf_impulses = {}
         self.convolutions = {}
 
         # Initialize model metadata
 
-        if self.pc:
-            # Initialize source tree metadata
-            t_src = self.t_src
-            self.src_node_table = t_src.node_table()
-            self.src_coef_names = t_src.coef_names()
-            self.src_fixed_coef_names = t_src.fixed_coef_names()
-            self.src_nonparametric_coef_names = t_src.nonparametric_coef_names()
-            self.src_interaction_list = t_src.interactions()
-            self.src_interaction_names = t_src.interaction_names()
-            self.src_fixed_interaction_names = t_src.fixed_interaction_names()
-            self.src_atomic_irf_names_by_family = t_src.atomic_irf_by_family()
-            self.src_atomic_irf_family_by_name = {}
-            for family in self.src_atomic_irf_names_by_family:
-                for id in self.src_atomic_irf_names_by_family[family]:
-                    assert id not in self.src_atomic_irf_family_by_name, 'Duplicate IRF ID found for multiple families: %s' % id
-                    self.src_atomic_irf_family_by_name[id] = family
-            self.src_param_init_by_family = t_src.atomic_irf_param_init_by_family()
-            self.src_param_trainable_by_family = t_src.atomic_irf_param_trainable_by_family()
-            self.src_coef2impulse = t_src.coef2impulse()
-            self.src_impulse2coef = t_src.impulse2coef()
-            self.src_coef2terminal = t_src.coef2terminal()
-            self.src_terminal2coef = t_src.terminal2coef()
-            self.src_impulse2terminal = t_src.impulse2terminal()
-            self.src_terminal2impulse = t_src.terminal2impulse()
-            self.src_interaction2inputs = t_src.interactions2inputs()
-            self.src_coef_by_rangf = t_src.coef_by_rangf()
-            self.src_interaction_by_rangf = t_src.interaction_by_rangf()
-            self.src_irf_by_rangf = t_src.irf_by_rangf()
-            self.src_interactions_list = t_src.interactions()
-
-            # Initialize PC tree metadata
-            t = self.t
-            self.node_table = t.node_table()
-            self.coef_names = t.coef_names()
-            self.fixed_coef_names = t.fixed_coef_names()
-            self.unary_nonparametric_coef_names = t.unary_nonparametric_coef_names()
-            self.interaction_list = t.interactions()
-            self.interaction_names = t.interaction_names()
-            self.fixed_interaction_names = t.fixed_interaction_names()
-            self.atomic_irf_names_by_family = t.atomic_irf_by_family()
-            self.atomic_irf_family_by_name = {}
-            for family in self.atomic_irf_names_by_family:
-                for id in self.atomic_irf_names_by_family[family]:
-                    assert id not in self.atomic_irf_family_by_name, 'Duplicate IRF ID found for multiple families: %s' %id
-                    self.atomic_irf_family_by_name[id] = family
-            self.atomic_irf_param_init_by_family = t.atomic_irf_param_init_by_family()
-            self.atomic_irf_param_trainable_by_family = t.atomic_irf_param_trainable_by_family()
-            self.coef2impulse = t.coef2impulse()
-            self.impulse2coef = t.impulse2coef()
-            self.coef2terminal = t.coef2terminal()
-            self.terminal2coef = t.terminal2coef()
-            self.impulse2terminal = t.impulse2terminal()
-            self.terminal2impulse = t.terminal2impulse()
-            self.interaction2inputs = t.interactions2inputs()
-            self.coef_by_rangf = t.coef_by_rangf()
-            self.interaction_by_rangf = t.interaction_by_rangf()
-            self.irf_by_rangf = t.irf_by_rangf()
-            self.interactions_list = t.interactions()
-
-            # Compute names and indices of source impulses excluding rate term
-            self.src_terminal_ix_norate = names2ix(self.src_impulse_names_norate, self.src_impulse_names)
-            self.src_terminal_ix_rate = np.setdiff1d(np.arange(len(self.src_impulse_names)),
-                                                     self.src_impulse_names_norate)
-
-            # Compute names and indices of PC impulses excluding rate term
-            self.impulse_names_norate = list(filter(lambda x: x != 'rate', self.impulse_names))
-            self.terminal_ix_norate = names2ix(self.impulse_names_norate, self.impulse_names)
-            self.terminal_ix_rate = np.setdiff1d(np.arange(len(self.impulse_names)), self.impulse_names_norate)
-
-            # Compute names and indices of source coefficients excluding rate term
-            self.src_coef_names_norate = list(filter(
-                lambda x: not ('rate' in self.src_impulse2coef and x in self.src_impulse2coef['rate']),
-                self.src_coef_names
-            ))
-            self.src_coef_ix_norate = names2ix(self.src_coef_names_norate, self.src_coef_names)
-            self.src_coef_names_rate = list(filter(
-                lambda x: 'rate' in self.src_impulse2coef and x in self.src_impulse2coef['rate'],
-                self.src_coef_names
-            ))
-            self.src_coef_ix_rate = names2ix(self.src_coef_names_rate, self.src_coef_names)
-
-            # Compute names and indices of PC coefficients excluding rate term
-            self.coef_names_norate = list(filter(
-                lambda x: not ('rate' in self.impulse2coef and x in self.impulse2coef['rate']),
-                self.coef_names
-            ))
-            self.coef_ix_norate = names2ix(self.src_coef_names_norate, self.src_coef_names)
-            self.coef_names_rate = list(filter(
-                lambda x: 'rate' in self.impulse2coef and x in self.impulse2coef['rate'],
-                self.coef_names
-            ))
-            self.coef_ix_rate = names2ix(self.coef_names_rate, self.coef_names)
-
-            self.plot_eigenvectors()
-
-        else:
-            # Initialize tree metadata
-            self.t = self.form.t
-            t = self.t
-            self.node_table = t.node_table()
-            self.coef_names = t.coef_names()
-            self.fixed_coef_names = t.fixed_coef_names()
-            self.unary_nonparametric_coef_names = t.unary_nonparametric_coef_names()
-            self.interaction_list = t.interactions()
-            self.interaction_names = t.interaction_names()
-            self.fixed_interaction_names = t.fixed_interaction_names()
-            self.impulse_names = t.impulse_names(include_interactions=True)
-            self.terminal_names = t.terminal_names()
-            self.atomic_irf_names_by_family = t.atomic_irf_by_family()
-            self.atomic_irf_family_by_name = {}
-            for family in self.atomic_irf_names_by_family:
-                for id in self.atomic_irf_names_by_family[family]:
-                    assert id not in self.atomic_irf_family_by_name, 'Duplicate IRF ID found for multiple families: %s' % id
-                    self.atomic_irf_family_by_name[id] = family
-            self.atomic_irf_param_init_by_family = t.atomic_irf_param_init_by_family()
-            self.atomic_irf_param_trainable_by_family = t.atomic_irf_param_trainable_by_family()
-            self.coef2impulse = t.coef2impulse()
-            self.impulse2coef = t.impulse2coef()
-            self.coef2terminal = t.coef2terminal()
-            self.terminal2coef = t.terminal2coef()
-            self.impulse2terminal = t.impulse2terminal()
-            self.terminal2impulse = t.terminal2impulse()
-            self.interaction2inputs = t.interactions2inputs()
-            self.coef_by_rangf = t.coef_by_rangf()
-            self.interaction_by_rangf = t.interaction_by_rangf()
-            self.irf_by_rangf = t.irf_by_rangf()
-            self.interactions_list = t.interactions()
+        self.t = self.form.t
+        t = self.t
+        self.node_table = t.node_table()
+        self.coef_names = t.coef_names()
+        self.fixed_coef_names = t.fixed_coef_names()
+        self.unary_nonparametric_coef_names = t.unary_nonparametric_coef_names()
+        self.interaction_list = t.interactions()
+        self.interaction_names = t.interaction_names()
+        self.fixed_interaction_names = t.fixed_interaction_names()
+        self.impulse_names = t.impulse_names(include_interactions=True)
+        self.terminal_names = t.terminal_names()
+        self.atomic_irf_names_by_family = t.atomic_irf_by_family()
+        self.atomic_irf_family_by_name = {}
+        for family in self.atomic_irf_names_by_family:
+            for id in self.atomic_irf_names_by_family[family]:
+                assert id not in self.atomic_irf_family_by_name, 'Duplicate IRF ID found for multiple families: %s' % id
+                self.atomic_irf_family_by_name[id] = family
+        self.atomic_irf_param_init_by_family = t.atomic_irf_param_init_by_family()
+        self.atomic_irf_param_trainable_by_family = t.atomic_irf_param_trainable_by_family()
+        self.coef2impulse = t.coef2impulse()
+        self.impulse2coef = t.impulse2coef()
+        self.coef2terminal = t.coef2terminal()
+        self.terminal2coef = t.terminal2coef()
+        self.impulse2terminal = t.impulse2terminal()
+        self.terminal2impulse = t.terminal2impulse()
+        self.interaction2inputs = t.interactions2inputs()
+        self.coef_by_rangf = t.coef_by_rangf()
+        self.interaction_by_rangf = t.interaction_by_rangf()
+        self.irf_by_rangf = t.irf_by_rangf()
+        self.interactions_list = t.interactions()
 
     def __getstate__(self):
         md = self._pack_metadata()
@@ -1085,11 +977,6 @@ class CDR(Model):
                     ),
                     self.FLOAT_TF
                 )
-
-                if self.pc:
-                    self.e = tf.constant(self.eigenvec, dtype=self.FLOAT_TF)
-                    rate_ix = names2ix('rate', self.src_impulse_names)
-                    self.X_rate = tf.gather(X, rate_ix, axis=-1)
 
                 # Initialize regularizers
                 self.irf_regularizer = self._initialize_regularizer(
@@ -2560,59 +2447,6 @@ class CDR(Model):
                 for c in t.children:
                     self._initialize_irfs(c)
 
-    def _initialize_backtransformed_irf_plot(self, t):
-        if self.pc:
-            with self.sess.as_default():
-                with self.sess.graph.as_default():
-                    if t.name() in self.irf_plot:
-                        src_irf_names = self.bw_pointers[t.name()]
-                        t_impulse_names = t.impulse_names()
-                        if t_impulse_names == ['rate'] and len(src_irf_names) == 1 and self.src_node_table[src_irf_names[0]].impulse_names() == ['rate']:
-                            self.src_irf_plot[src_irf_names[0]] = self.irf_plot[t.name()]
-                            if t.name() in self.irf_integral_tensors:
-                                self.src_irf_integral_tensors[src_irf_names[0]] = self.irf_integral_tensors[t.name()]
-                        else:
-                            for src_irf_name in src_irf_names:
-                                src_irf = self.src_node_table[src_irf_name]
-                                src_impulse_names = src_irf.impulse_names()
-                                src_impulse_names_norate = list(filter(lambda x: x != 'rate', src_impulse_names))
-                                src_ix = names2ix(src_impulse_names_norate, self.src_impulse_names_norate)
-                                if len(src_ix) > 0:
-                                    impulse_names = t.impulse_names()
-                                    impulse_names_norate = list(filter(lambda x: x != 'rate', impulse_names))
-                                    pc_ix = names2ix(impulse_names_norate, self.impulse_names_norate)
-                                    if len(pc_ix) > 0:
-                                        e = self.e
-                                        e = tf.gather(e, src_ix, axis=0)
-                                        e = tf.gather(e, pc_ix, axis=1)
-                                        e = tf.reduce_sum(e, axis=1)
-
-                                        if src_irf_name in self.src_irf_plot:
-                                            self.src_irf_plot[src_irf_name]['atomic']['scaled'] += tf.reduce_sum(self.irf_plot[t.name()]['atomic']['scaled'] * e, axis=1, keep_dims=True)
-                                            self.src_irf_plot[src_irf_name]['atomic']['unscaled'] += tf.reduce_sum(self.irf_plot[t.name()]['atomic']['unscaled'] * e, axis=1, keep_dims=True)
-                                            self.src_irf_plot[src_irf_name]['composite']['scaled'] += tf.reduce_sum(self.irf_plot[t.name()]['composite']['scaled'] * e, axis=1, keep_dims=True)
-                                            self.src_irf_plot[src_irf_name]['composite']['unscaled'] += tf.reduce_sum(self.irf_plot[t.name()]['composite']['unscaled'] * e, axis=1, keep_dims=True)
-                                        else:
-                                            self.src_irf_plot[src_irf_name] = {
-                                                'atomic': {
-                                                    'scaled': tf.reduce_sum(self.irf_plot[t.name()]['atomic']['scaled'] * e, axis=1, keep_dims=True),
-                                                    'unscaled': tf.reduce_sum(self.irf_plot[t.name()]['atomic']['unscaled'] * e, axis=1, keep_dims=True)
-                                                },
-                                                'composite': {
-                                                    'scaled': tf.reduce_sum(self.irf_plot[t.name()]['composite']['scaled'] * e, axis=1, keep_dims=True),
-                                                    'unscaled': tf.reduce_sum(self.irf_plot[t.name()]['composite']['unscaled'] * e, axis=1, keep_dims=True)
-                                                }
-                                            }
-                                        if t.name() in self.irf_integral_tensors:
-                                            if src_irf_name in self.src_irf_integral_tensors:
-                                                self.src_irf_integral_tensors[src_irf_name] += tf.reduce_sum(self.irf_integral_tensors[t.name()] * e, axis=0, keep_dims=True)
-                                            else:
-                                                self.src_irf_integral_tensors[src_irf_name] = tf.reduce_sum(self.irf_integral_tensors[t.name()] * e, axis=0, keep_dims=True)
-
-                    for c in t.children:
-                        if c.name() in self.irf_plot:
-                            self._initialize_backtransformed_irf_plot(c)
-
     def _initialize_impulses(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -2622,38 +2456,12 @@ class CDR(Model):
                     impulse_ix = names2ix(impulse_name, self.impulse_names)
 
                     if t.p.family == 'DiracDelta':
-                        if self.pc:
-                            if impulse_name == 'rate':
-                                impulse = self.X_rate[:, -1, :]
-                            else:
-                                src_term_names = self.bw_pointers[t.name()]
-                                src_impulse_names = set()
-                                for x in src_term_names:
-                                    src_impulse_names.add(self.src_node_table[x].impulse.name())
-                                src_impulse_names = list(src_impulse_names)
-                                src_impulse_ix = names2ix(src_impulse_names, self.src_impulse_names)
-                                X = self.X_processed[:, -1, :]
-                                impulse = self._apply_pc(X, src_ix=src_impulse_ix, pc_ix=impulse_ix)
-                        else:
-                            impulse = tf.gather(self.X_processed, impulse_ix, axis=2)[:, -1, :]
+                        impulse = tf.gather(self.X_processed, impulse_ix, axis=2)[:, -1, :]
 
                         # Zero-out impulses to DiracDelta that are not response-aligned
                         impulse *= self.is_response_aligned[:, impulse_ix[0]:impulse_ix[0]+1]
                     else:
-                        if self.pc:
-                            if impulse_name == 'rate':
-                                impulse = self.X_rate
-                            else:
-                                src_term_names = self.bw_pointers[t.name()]
-                                src_impulse_names = set()
-                                for x in src_term_names:
-                                    src_impulse_names.add(self.src_node_table[x].impulse.name())
-                                src_impulse_names = list(src_impulse_names)
-                                src_impulse_ix = names2ix(src_impulse_names, self.src_impulse_names)
-                                X = self.X_processed
-                                impulse = self._apply_pc(X, src_ix=src_impulse_ix, pc_ix=impulse_ix)
-                        else:
-                            impulse = tf.gather(self.X_processed, impulse_ix, axis=2)
+                        impulse = tf.gather(self.X_processed, impulse_ix, axis=2)
 
                     self.irf_impulses[name] = impulse
 
@@ -2754,7 +2562,6 @@ class CDR(Model):
                 self._initialize_irfs(self.t)
                 self._initialize_impulses()
                 self._initialize_convolutions()
-                self._initialize_backtransformed_irf_plot(self.t)
 
                 convolutions = [self.convolutions[x] for x in self.terminal_names]
                 if len(convolutions) > 0:
@@ -2997,39 +2804,6 @@ class CDR(Model):
                                 'plot': plot_y
                             }
 
-                if self.pc:
-                    self.src_plot_tensors = {}
-                    irf_names = [x for x in self.src_node_table if x in self.src_irf_plot and not (len(self.src_node_table[x].children) == 1 and self.src_node_table[x].children[0].terminal())]
-                    irf_names_terminal = [x for x in self.src_node_table if x in self.src_irf_plot and self.src_node_table[x].terminal()]
-
-                    for a in switches[0]:
-                        if a not in self.src_plot_tensors:
-                            self.src_plot_tensors[a] = {}
-                        for b in switches[1]:
-                            self.plots[a][b] = {}
-                            for c in switches[2]:
-                                plot_y = []
-
-                                if b == 'unscaled':
-                                    if c == 'dirac':
-                                        names = irf_names
-                                    else:
-                                        names = irf_names_nodirac
-                                else:
-                                    if c == 'dirac':
-                                        names = irf_names_terminal
-                                    else:
-                                        names = irf_names_terminal_nodirac
-
-                                for x in names:
-                                    plot_y.append(self.src_irf_plot[x][a][b])
-
-                                self.src_plot_tensors[a][b][c] = {
-                                    'names': names,
-                                    'plot': plot_y
-                                }
-
-
 
 
     ######################################################
@@ -3096,10 +2870,7 @@ class CDR(Model):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                if self.pc:
-                    n_impulse = len(self.src_impulse_names)
-                else:
-                    n_impulse = len(self.impulse_names)
+                n_impulse = len(self.impulse_names)
 
                 self._initialize_inputs(n_impulse)
                 self._initialize_cdr_inputs()
@@ -3212,10 +2983,7 @@ class CDR(Model):
             usingGPU = tf.test.is_gpu_available()
             stderr('Using GPU: %s\n' % usingGPU)
 
-        if self.pc:
-            impulse_names = self.src_impulse_names
-        else:
-            impulse_names  = self.impulse_names
+        impulse_names  = self.impulse_names
 
         y_rangf = y[self.rangf]
         for i in range(len(self.rangf)):
@@ -3404,14 +3172,5 @@ class CDR(Model):
 
                 self.set_predict_mode(False)
                 return rmsd
-
-    def plot_eigenvectors(self):
-        """
-        Save heatmap representation of training data eigenvector matrix to the model's output directory.
-        Will throw an error unless ``self.pc == True``.
-
-        :return: ``None``
-        """
-        plot_heatmap(self.eigenvec, self.src_impulse_names_norate, self.impulse_names_norate, dir=self.outdir)
 
 

@@ -365,70 +365,34 @@ class Model(object):
         self.regularizer_losses_scales = []
         self.regularizer_losses_varnames = []
 
-        if self.pc:
-            # Initialize source tree metadata
-            self.t_src = self.form.t
-            t_src = self.t_src
-            self.src_impulse_names = t_src.impulse_names(include_interactions=True)
-            self.src_terminal_names = t_src.terminal_names()
-            self.src_terminals_by_name = t_src.terminals_by_name()
-            self.impulse_names_to_ix = {}
-            self.impulse_names_printable = {}
-            for i, x in enumerate(self.src_impulse_names):
-                self.impulse_names_to_ix[x] = i
-                self.impulse_names_printable[x] = ':'.join([get_irf_name(x, self.irf_name_map) for y in x.split(':')])
-            self.src_terminal_names = t_src.terminal_names()
-            self.terminal_names_to_ix = {}
-            self.terminal_names_printable = {}
-            self.non_dirac_impulses = set()
-            for i, x in enumerate(self.src_terminal_names):
-                if self.is_cdrnn or not x.startswith('DiracDelta'):
-                    for y in self.src_terminals_by_name[x].impulses():
-                        self.non_dirac_impulses.add(y.name())
-                self.terminal_names_to_ix[x] = i
-                self.terminal_names_printable[x] = ':'.join([get_irf_name(x, self.irf_name_map) for y in x.split(':')])
-
-            self.n_pc = len(self.src_impulse_names)
-            self.has_rate = 'rate' in self.src_impulse_names
-            if self.has_rate:
-                self.n_pc -= 1
-            pointers = {}
-            self.fw_pointers, self.bw_pointers = IRFNode.pointers2namemmaps(pointers)
-            self.form_pc = self.form.pc_transform(self.n_pc, pointers)
-            self.t = self.form_pc.t
-            t = self.t
-            self.impulse_names = t.impulse_names(include_interactions=True)
-            self.terminal_names = t.terminal_names()
-            self.terminals_by_name = t.terminals_by_name()
-        else:
-            self.t = self.form.t
-            t = self.t
-            self.node_table = t.node_table()
-            self.coef_names = t.coef_names()
-            self.fixed_coef_names = t.fixed_coef_names()
-            self.unary_nonparametric_coef_names = t.unary_nonparametric_coef_names()
-            self.interaction_list = t.interactions()
-            self.interaction_names = t.interaction_names()
-            self.fixed_interaction_names = t.fixed_interaction_names()
-            self.impulse_names = t.impulse_names(include_interactions=True)
-            self.impulse_names_to_ix = {}
-            self.impulse_names_printable = {}
-            for i, x in enumerate(self.impulse_names):
-                self.impulse_names_to_ix[x] = i
-                self.impulse_names_printable[x] = ':'.join([get_irf_name(x, self.irf_name_map) for y in x.split(':')])
-            self.terminal_names = t.terminal_names()
-            self.terminals_by_name = t.terminals_by_name()
-            self.terminal_names_to_ix = {}
-            self.terminal_names_printable = {}
-            self.non_dirac_impulses = set()
-            for i, x in enumerate(self.terminal_names):
-                if self.is_cdrnn or not x.startswith('DiracDelta'):
-                    for y in self.terminals_by_name[x].impulses():
-                        self.non_dirac_impulses.add(y.name())
-                self.terminal_names_to_ix[x] = i
-                self.terminal_names_printable[x] = ':'.join([get_irf_name(x, self.irf_name_map) for y in x.split(':')])
-
         # Initialize model metadata
+
+        self.t = self.form.t
+        t = self.t
+        self.node_table = t.node_table()
+        self.coef_names = t.coef_names()
+        self.fixed_coef_names = t.fixed_coef_names()
+        self.unary_nonparametric_coef_names = t.unary_nonparametric_coef_names()
+        self.interaction_list = t.interactions()
+        self.interaction_names = t.interaction_names()
+        self.fixed_interaction_names = t.fixed_interaction_names()
+        self.impulse_names = t.impulse_names(include_interactions=True)
+        self.impulse_names_to_ix = {}
+        self.impulse_names_printable = {}
+        for i, x in enumerate(self.impulse_names):
+            self.impulse_names_to_ix[x] = i
+            self.impulse_names_printable[x] = ':'.join([get_irf_name(x, self.irf_name_map) for y in x.split(':')])
+        self.terminal_names = t.terminal_names()
+        self.terminals_by_name = t.terminals_by_name()
+        self.terminal_names_to_ix = {}
+        self.terminal_names_printable = {}
+        self.non_dirac_impulses = set()
+        for i, x in enumerate(self.terminal_names):
+            if self.is_cdrnn or not x.startswith('DiracDelta'):
+                for y in self.terminals_by_name[x].impulses():
+                    self.non_dirac_impulses.add(y.name())
+            self.terminal_names_to_ix[x] = i
+            self.terminal_names_printable[x] = ':'.join([get_irf_name(x, self.irf_name_map) for y in x.split(':')])
 
         # Can't pickle defaultdict because it requires a lambda term for the default value,
         # so instead we pickle a normal dictionary (``rangf_map_base``) and compute the defaultdict
@@ -2203,14 +2167,6 @@ class Model(object):
             new_tree_str += ' ' * (indent + 2) + line + '\n'
         out += new_tree_str + '\n'
 
-        if hasattr(self, 'pc') and self.pc:
-            out += ' ' * indent + 'SOURCE IRF TREE:\n'
-            tree_str = str(self.t_src)
-            new_tree_str = ''
-            for line in tree_str.splitlines():
-                new_tree_str += ' ' * (indent + 2) + line + '\n'
-            out += new_tree_str + '\n'
-
         return out
 
     def report_impulse_types(self, indent=0):
@@ -2224,10 +2180,7 @@ class Model(object):
         out = ''
         out += ' ' * indent + 'IMPULSE TYPES:\n'
 
-        if hasattr(self, 'pc') and self.pc:
-            t = self.t_src
-        else:
-            t = self.t
+        t = self.t
         for x in t.terminals():
             out += ' ' * (indent + 2) + x.name() + ': ' + ('continuous' if x.cont else 'transient') + '\n'
 
@@ -2598,11 +2551,7 @@ class Model(object):
         :param n_iter: ``int``; the number of training iterations
         """
 
-        if hasattr(self, 'pc') and self.pc:
-            impulse_names = self.src_impulse_names
-            assert X_2d_predictors is None, 'Principal components regression not supported for models with 2d predictors'
-        else:
-            impulse_names  = self.impulse_names
+        impulse_names  = self.impulse_names
 
         if not np.isfinite(self.minibatch_size):
             minibatch_size = len(y)
@@ -2947,10 +2896,7 @@ class Model(object):
             usingGPU = tf.test.is_gpu_available()
             stderr('Using GPU: %s\n' % usingGPU)
 
-        if hasattr(self, 'pc') and self.pc:
-            impulse_names = self.src_impulse_names
-        else:
-            impulse_names  = self.impulse_names
+        impulse_names  = self.impulse_names
 
         if verbose:
             stderr('Computing predictions...\n')
@@ -3071,10 +3017,7 @@ class Model(object):
             usingGPU = tf.test.is_gpu_available()
             stderr('Using GPU: %s\n' % usingGPU)
 
-        if hasattr(self, 'pc') and self.pc:
-            impulse_names = self.src_impulse_names
-        else:
-            impulse_names  = self.impulse_names
+        impulse_names  = self.impulse_names
 
         if verbose:
             stderr('Computing likelihoods...\n')
@@ -3201,10 +3144,7 @@ class Model(object):
             usingGPU = tf.test.is_gpu_available()
             stderr('Using GPU: %s\n' % usingGPU)
 
-        if hasattr(self, 'pc') and self.pc:
-            impulse_names = self.src_impulse_names
-        else:
-            impulse_names  = self.impulse_names
+        impulse_names  = self.impulse_names
 
         if verbose:
             stderr('Computing loss using objective function...\n')

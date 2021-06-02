@@ -606,12 +606,6 @@ MODEL_INITIALIZATION_KWARGS = [
         False,
         bool,
         "Keep IRF plots from each checkpoint of a run, which can help visualize learning trajectories but can also consume a lot of disk space. If ``False``, only the most recent plot of each type is kept."
-    ),
-    Kwarg(
-        'pc',
-        False,
-        bool,
-        "Transform input variables using principal components analysis. BROKEN, DO NOT USE."
     )
 ]
 
