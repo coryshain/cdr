@@ -10,8 +10,8 @@ Documentation for the ``cdr`` Python package.
 
    introduction
    getting_started
-   formula
    config
+   formula
    convergence
    api
    irftree
