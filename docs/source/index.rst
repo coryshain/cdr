@@ -12,7 +12,6 @@ Documentation for the ``cdr`` Python package.
    getting_started
    config
    formula
-   convergence
    irftree
    cdr
 
