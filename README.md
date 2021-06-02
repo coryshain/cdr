@@ -6,9 +6,6 @@ CDR recasts the streams of independent and dependent variables as _signals_ and 
 Given data and a model template specifying the functional form(s) of the IRF kernel(s), CDR finds IRF parameters that optimize some objective function.
 This approach can be generalized to account for non-stationary, non-linear, non-additive, and context-dependent response functions by implementing the IRF as a deep neural network (Shain, 2021).
 
-CDR (formerly _deconvolutional time series regression_ or _DTSR_) is a regression technique for analyzing time series with delayed effects (Shain & Schuler, 2018, 2021).
-Continuous-time deconvolutional regressive neural networks (CDRNNs) are a deep neural generalization of the CDR technique (Shain, 2021).
-
 This repository contains source code for the `cdr` Python module as well as support for reproducing published experiments.
 This package provides (1) an API for programming with CDR(NN) and (2) executables that allow users to train and evaluate CDR(NN) models out of the box, without needing to write any code.
 Full documentation for the `cdr` module is available at [http://cdr.readthedocs.io/en/latest/](http://cdr.readthedocs.io/en/latest/).
