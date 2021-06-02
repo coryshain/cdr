@@ -170,12 +170,7 @@ class CDRMLE(CDR):
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     param = tf.Variable(
-                        tf.random_normal(
-                            shape=[rangf_n_levels, len(ids)],
-                            mean=0.,
-                            stddev=self.epsilon,
-                            dtype=self.FLOAT_TF
-                        ),
+                        tf.zeros([rangf_n_levels, len(ids)], dtype=self.FLOAT_TF),
                         name=sn('%s_%s_by_%s' % (param_name, '-'.join(ids), sn(ran_gf)))
                     )
                     param_summary = param
