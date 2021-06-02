@@ -29,6 +29,7 @@ MOCK_MODULES = [
     'rpy2',
     'rpy2.globalenv',
     'tensorflow',
+    'tensorflow.contrib',
     'tensorflow.python',
     'tensorflow.python.framework',
     'tensorflow.python.ops',
