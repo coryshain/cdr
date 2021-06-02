@@ -17,7 +17,7 @@ There are several reasons for representing IRFs as nodes on a tree. In particula
 Factorization
 -------------
 
-CDR models contain *impulses*, *coefficients*, and *IRFs*, each of whose structure can be separably manipulated.
+CDR models contain *impulses*, *coefficients*, and *IRFs*, each of whose structure can be separately manipulated.
 Impulses are timestamped data streams that constitute the predictors of the model.
 Impulses are computed from the input data prior to entering the CDR computation graph.
 

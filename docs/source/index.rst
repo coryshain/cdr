@@ -13,7 +13,6 @@ Documentation for the ``cdr`` Python package.
    config
    formula
    convergence
-   api
    irftree
    cdr
 

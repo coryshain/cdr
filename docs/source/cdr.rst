@@ -1,7 +1,7 @@
-CDR Module Index
-=================
+CDR Package API
+===============
 
-Complete alphabetic API for all public classes and methods in this package, grouped by module.
+Complete API for all public classes and methods in this package.
 
 
 cdr\.config module
