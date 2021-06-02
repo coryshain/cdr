@@ -13,6 +13,9 @@ There are several reasons for representing IRFs as nodes on a tree. In particula
   - **IRF composition**: convolving multiple IRF with each other in a hierarchical fashion
   - **Parameter tying**: sharing a single IRF or coefficient across multiple portions of the model
 
+Note that these components cannot be cleanly factorized in CDRNN, so CDRNN "trees" are flat.
+The remainder of this page applies only to CDR.
+
 
 Factorization
 -------------

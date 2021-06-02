@@ -1,6 +1,6 @@
 .. _formula:
 
-CDR Model Formulae
+CDR Model Formulas
 ===================
 
 
@@ -17,17 +17,19 @@ The left-hand side (LHS) of the formula contains the name a single (possibly tra
 Intercept terms can be added by including ``1`` in the RHS and removed by including ``0`` in the RHS.
 If neither of these appears in the RHS, an intercept is added by default.
 
-**WARNING:** The compiler for CDR formulae is still early in development and may fail to correctly process certain formula strings, especially ones that contain hierarchical term expansions, categorical variable expansions, and/or interactions.
+**WARNING:** The compiler for CDR formulas is still early in development and may fail to correctly process certain formula strings, especially ones that contain hierarchical term expansions, categorical variable expansions, and/or interactions.
 Please double-check the correctness of the model formula reported at the start of training and report problems in the issue tracker on `Github <https://github.com/coryshain/cdr>`_.
 
 **WARNING:** If you are using interaction terms, it is easy to accidentally mis-specify your formula because interactions are trickier in CDR than in linear models.
 Make sure to read :ref:`interactions` before fitting models with interactions.
 
 
+CDR Model Formulas (**not** CDRNN)
+----------------------------------
 
 .. _linear:
 Linear (DiracDelta) Predictors
-------------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 A trivial way of "deconvolving" a predictor ``A`` is to assume a Dirac delta response to ``A``: :math:`A` at :math:`t=0`, :math:`0` otherwise.
 DiracDelta IRF are thus equivalent to predictors in linear models; only the value of the predictor that coincides with the response measurement is used for prediction.
@@ -39,7 +41,7 @@ However, the availability of Dirac delta responses in this package means that CD
 For example, imagine a bi-variate model with predictors ``stimulus`` and ``condition``, where ``stimulus`` varies within each time series can might engender a temporally diffise response while ``condition`` is held fixed within each time series.
 In this case, a convolution of ``condition`` would be meaningless (or at least perfectly confounded with ``rate``, the deconvolutional intercept); instead, we're interested in a `linear` effect of ``condition`` and a `convolved` effect of ``stimulus`` on the response.
 Dirac delta responses can specified manually using the syntax described in the following sections.
-However, for convenience, bare predictor names in model formulae (outside of convolution calls ``C()``) are automatically interpreted as Dirac delta.
+However, for convenience, bare predictor names in model formulas (outside of convolution calls ``C()``) are automatically interpreted as Dirac delta.
 This allows you to retain stock formula syntax that might already be familiar from linear (mixed) models in **R** in order to define linear substructures of your CDR model.
 For example, the following is interpreted as specifying linear effects for each of ``A``, ``B``, and the interaction ``A:B``::
 
@@ -52,7 +54,7 @@ However, the model does internally mask all elements in a Dirac delta predictor 
 Therefore, fitting a Dirac delta response to a stimulus-aligned predictor will not produce an erroneous model; in the worst case, the entire predictor will be masked and therefore ignored by the model.
 
 Defining an Impulse Response Function (IRF)
--------------------------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 A convolutional term is defined using the syntax ``C(..., IRF_FAMILY())``, where ``...`` is replaced by names of predictors contained in the input data.
 For example, to define a Gamma convolution of predictor ``A``, the expression ``C(A, Gamma())`` is added to the RHS.
@@ -61,12 +63,12 @@ For example, to add a Gaussian convolution of predictor ``B``, the RHS above bec
 
 
 Supported Parametric IRFs
--------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The currently supported parametric IRF families are the following.
 All IRFs are normalized to integrate to 1 over the positive real line.
 For simplicity, normalization constants are omitted from the equations below.
-For details, see Shain & Schuler (2019).
+For details, see Shain & Schuler (2021).
 
 - ``DiracDelta``: Stick function (equivalent to a predictor in linear regression, see :ref:`linear`)
 
@@ -239,14 +241,14 @@ s default offset (10). Parameter :math:`\beta` is tied between both gammas.
 .. _interactions:
 
 Interactions in CDR
---------------------
+^^^^^^^^^^^^^^^^^^^
 
 In comparison to interactions in linear models, deconvolution introduces the additional complexity of needing to decide and specify whether interactions precede (impulse-level interactions) or follow (response-level interactions) the convolution step.
 Impulse-level interactions consider interactions as `events` which may trigger a temporally diffuse response (i.e. a response to both A and B happening together at a particular point in time).
 Response-level interactions capture non-additive effects of multiple (possibly convolved) variables; they do not get their own impulse responses.
 Response-level interactions correspond to interactions in linear models and are almost always what you want except in the special case of linear (DiracDelta IRF) predictors, where impulse-level interactions should be used (just like in linear models).
 
-CDR formulae use a simple syntax to distinguish these two types of interactions: impulse-level interactions are specified `inside` the first argument of convolution calls `C()`, while response-level interactions are specified outside them.
+CDR formulas use a simple syntax to distinguish these two types of interactions: impulse-level interactions are specified `inside` the first argument of convolution calls `C()`, while response-level interactions are specified outside them.
 As in **R**, interaction terms are designated with ``:``, as in ``A:B``.
 And as in **R**, for convenience, two-way cross-product interactions can be designated with ``*`` (e.g. ``A*B`` is shorthand for ``A + B + A:B``) and multi-way cross-product interactions can be designated with power notation ``^<INT>`` or ``**<INT>`` (e.g. ``(A+B+C)^3`` equals ``A + B + C + A:B + B:C + A:C + A:B:C``).
 The following defines an impulse-level interaction between ``A`` and ``B`` underneath a ``Normal`` IRF kernel::
@@ -292,7 +294,7 @@ Order of operations between term expansions can be enforced through parentheses:
 
 
 Automatic Term Expansion
-------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^
 
 For convenience, the ``C()`` function distributes the impulse response family over multiple ``+``-delimited terms in its first argument.
 Therefore, the following two expressions are equivalent::
@@ -330,7 +332,7 @@ Note also that (unlike **R**) redundant terms are **not** automatically collapse
 
 
 Random Effects
---------------
+^^^^^^^^^^^^^^
 
 Random effects in CDR are specified using the following syntax::
 
@@ -360,7 +362,8 @@ Random effects fit for grouping factors that vary during the experiment should t
 
 
 Parameter Initialization
-------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^
+
 IRF parameters can be initialized for a given convolutional term by specifying their initial values in the IRF call, using the parameter name as the keyword (see supported IRF and their associated parameters above).
 For example, to initialize a Gamma IRF with :math:`\alpha = 2` and :math:`\beta = 2` for predictor ``A``, use the following call::
 
@@ -376,7 +379,7 @@ For example, :math:`\alpha` of the Gamma distribution is constrained to be > 0, 
 However, keep in mind that for CDRBayes, prior variances are necessarily on the unconstrained space and get squashed by the constraint function, so choosing initializations that are very close to constraint boundaries can indirectly tighten the prior.
 For example, choosing an initialization :math:`\alpha = 0.001` for the Gamma distribution will result in a much tighter prior around small values of :math:`\alpha`.
 
-Initializations for irrelevant parameters in ill-specified formulae will be ignored and the defaults for the parameters will be used instead.
+Initializations for irrelevant parameters in ill-specified formulas will be ignored and the defaults for the parameters will be used instead.
 For example, if the model receives the IRF specification ``Normal(alpha=1, beta=1)``, it will initialize a Normal IRF at :math:`\mu=0`, :math:`\sigma=1` (the defaults for this kernel), since :math:`\alpha` and :math:`\beta` are not recognized parameter names for the Normal distribution.
 Therefore, make sure to match the parameter names above when specifying parameter defaults.
 The correctness of initializations can be checked in the Tensorboard logs.
@@ -384,7 +387,8 @@ The correctness of initializations can be checked in the Tensorboard logs.
 
 
 Using Constant (Non-trainable) Parameters
------------------------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 By default, CDR trains all the variables that parameterize an IRF kernel (e.g. both :math:`\mu` and :math:`\sigma` for a Gaussian IRF kernel).
 But in some cases it's useful to treat certain IRF parameters as constants and leave them untrained.
 To do this, specify a list of trainable parameters with the keyword argument ``trainable``, using Python list syntax.
@@ -402,7 +406,7 @@ Constant parameters will show 0 trainable parameters.
 
 
 Parameter Tying
----------------
+^^^^^^^^^^^^^^^
 
 A convolutional term in a CDR model is factored into two components, an IRF component with appropriate parameters and a coefficient governing the overall amplitude of the estimate.
 Unless otherwise specified, both of these terms are fit separately for every predictor in the model.
@@ -427,9 +431,10 @@ And the following fits a single IRF (called "IRF_NAME") and a single coefficient
 
 
 Transforming Variables
-----------------------
-CDR provides limited support for automatic variable transformations based on model formulae.
-As in **R** formulae, a transformation is applied by wrapping the predictor name in the transformation function.
+^^^^^^^^^^^^^^^^^^^^^^
+
+CDR provides limited support for automatic variable transformations based on model formulas.
+As in **R** formulas, a transformation is applied by wrapping the predictor name in the transformation function.
 For example, to fit a Gamma IRF to a log transform of predictor ``A``, the following is added to the RHS::
 
     C(log(A), Gamma())
@@ -450,7 +455,7 @@ Other transformations must be applied via data preprocessing.
 
 
 Continuous predictors
----------------------
+^^^^^^^^^^^^^^^^^^^^^
 
 CDR's discrete convolution is only exact for discrete impulses (e.g. spikes of stimulus).
 Impulse streams that constitute `samples` from a continuous source signal cannot be convolved exactly because the source is generally not analytically integrable.
@@ -464,33 +469,29 @@ Be warned that, due to the need for interpolation, continuous predictors tend to
 Speedups can be obtained at the expense of accuracy by choose a small value for the **n_interp** initialization parameter, decreasing the resolution of the interpolation.
 
 
-Spline IRF
-----------
+Pseudo Non-Parametric IRFs
+^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-CDR also supports non-parametric IRF in the form of spline functions.
-Instead of a parametric IRF kernel, the model is supplied with control points (knots) that define a smooth function which can be moved around the x/y plane.
-The advantage of spline IRF is that they do not require precommitment to a particular functional form for the IRF.
-The disadvantage is that fitting them is much more computationally expensive because computing the spline function between the control points requires matrix inversion.
+CDR also supports pseudo non-parametric IRFs in the form of Gaussian kernel functions (linear combination of Gaussians or LCG).
+Instead of a parametric IRF kernel, the model implements the IRF as a sum of Gaussian kernel functions whose location, spread, and height can be optimized by the model.
+The advantage of LCG IRFs is that they do not require precommitment to a particular functional form for the IRF.
+The disadvantage is that fitting them is slower because they involve more parameters and computation.
 
-The splines themselves have a number of free parameters which are specified by the name of the spline in the IRF call of the model formula.
-The syntax for a spline IRF kernel is as follows::
+The kernels themselves have a number of free parameters which are specified by the name of the kernel in the IRF call of the model formula.
+The syntax for an LCG IRF kernel is as follows::
 
-    S(o([0-9]+))?(b([0-9]+))?(l([0-9]+))?(p([0-9]+))?(i([0-1]))?
+    G(b([0-9]+))?
 
-This is a string representation of a function call ``S`` with optional keyword arguments ``o``, ``b``, ``l``, ``p``, and ``i``, in that order.
+This is a string representation of a function call ``G`` with optional keyword argument ``b``.
 
-The keyword arguments are defined as follows:
+The keyword argument is defined as follows:
 
-  - **o** (order): ``int``, the order of the spline. Order 1 is linear interpolation, order 2 is a thin-plate spline, order 3 is a cubic spline, etc. **Default**: 2.
   - **b** (bases): ``int``, number of bases (control points). **Default**: 10.
-  - **l** (roughness penalty): ``int``, digits following the decimal representing the roughness penalty (regularization against wiggliness). For example, ``l01`` specifies a roughness penalty of 0.01. **Default**: 001.
-  - **p** (spacing power): ``int``, power to use for initial spacing of control points in time between 0 and the maximum time offset attested in the training data. If 1, control points will be initialized as evenly spaced. If 2, control points will be quadratically spaced, etc. Initially concentrating more control points toward smaller time offsets is motivated in many cases by the fact that (1) many real-world IRF have more complex dynamics closer to the time of the impulse and (2) most datasets will contain more training data for smaller time offsets than longer ones, possibly resulting in decreasing precision of the IRF estimate at long latencies. **Default**: 1.
-  - **i** (instantaneous response): ``int`` (0 or 1), whether to allow an instantaneous response. If 0, the response at time 0 is forced to be 0. **Default**: 1.
 
 
 
 IRF Composition
----------------
+^^^^^^^^^^^^^^^
 
 In some cases it may be desirable to decompose the response into multiple convolutions of an impulse.
 For example, it is possible that the BOLD response in fMRI consists underlyingly of 2 convolutional responses: a **neural response** that convolves the impulse into a timecourse of neural activation, which is then convolved with a **hemodynamic response** into a BOLD signal.
@@ -522,4 +523,24 @@ CDR is not able to recognize and flag identifiability problems and it will happi
 It is up to the user to think carefully about whether the model structure could introduce such problems.
 For example, in the BOLD example discussed above, the neural response is predictor-specific while the hemodynamic response is predictor-independent given the neural response.
 The two responses can thus be separated via parameter tying of the hemodynamic response portion (see below), requiring all predictors to share a single hemodynamic response and forcing predictor-level variation into the neural response alone.
+
+
+
+CDRNN Model Formulas
+--------------------
+
+CDRNN models compute a single joint multivariate IRF with a highly distributed and interactive structure.
+As a result, it is not necessary (or even possible) to constrain the IRF to have a particular shape.
+Instead, all shape features are estimated from data.
+Therefore, CDRNN model formulas are very simple: they contain a list of predictors and (optionally) a list of random grouping factors.
+For example, the following defines a CDRNN model with predictors ``A`` and ``B`` and random grouping factor ``subject``::
+
+    y ~ A + B + (1 | subject)
+
+The ``(1 | subject)`` term may look like a random intercept from linear mixed models, but this is misleading.
+It simply allows CDRNN to take ``subject`` into account when computing any aspect of the response.
+It thus incorporates by-subject variation in the size, shape, and degree of interaction for all variables in the model.
+Because of the distributed nature of CDRNN representations, it is not possible to distinguish e.g. random intercepts, slopes, and IRF parameters, as CDR permits.
+A random term is simply present or not, and its influence can be accommodated as needed throughout the model.
+For details about how random effects are incorporated into the CDRNN architecture, see Shain (2021).
 
