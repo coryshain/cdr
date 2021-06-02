@@ -4071,12 +4071,7 @@ class Model(object):
                         legend=False,
                     )
 
-                if plot_rangf:
-                    manipulations = [{'ranef': {x: y}} for x, y in zip(ranef_group_names[1:], ranef_level_names[1:])]
-                else:
-                    manipulations = None
-
-                # IRF 1D plots
+                # IRF 1D
                 if generate_univariate_IRF_plots:
                     plot_name = 'irf_univariate'
                     if resvar != 'y_mean':
@@ -4199,6 +4194,11 @@ class Model(object):
                             transparent_background=transparent_background,
                             dump_source=dump_source
                         )
+
+                if plot_rangf:
+                    manipulations = [{'ranef': {x: y}} for x, y in zip(ranef_group_names[1:], ranef_level_names[1:])]
+                else:
+                    manipulations = None
 
                 # Curvature plots
                 if generate_curvature_plots:
@@ -4340,8 +4340,8 @@ class Model(object):
                                         xlab = xvar
                                         ylab = yvar
                                     else:
-                                        xlab = xvar
-                                        ylab = yvar
+                                        xlab = None
+                                        ylab = None
 
                                     plot_surface(
                                         plot_x,
@@ -4362,7 +4362,7 @@ class Model(object):
                                         dump_source=dump_source
                                     )
 
-                    self.set_predict_mode(False)
+                self.set_predict_mode(False)
 
     def parameter_table(self, standardize_response=False, fixed=True, level=95, n_samples='default'):
         """
