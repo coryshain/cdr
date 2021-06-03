@@ -42,10 +42,10 @@ For documentation of available CDR(NN) executables, run
     python -m cdr.bin.help( <SCRIPT-NAME>)*
 
 CDR(NN) models are defined using configuration (`*.ini`) files, which can be more convenient than shell arguments for specifying many settings at once, and which provide written documentation of the specific settings used to generate any given result.
-For convenience, we have provided annotated CDR and CDRNN model templates:
+For convenience, we have provided annotated CDR and CDRNN model templates in the ``cdr/templates`` directory:
     
-    cdr_model_template.ini
-    cdrnn_model_template.ini
+    cdr/templates/cdr_model_template.ini
+    cdr/templates/cdrnn_model_template.ini
     
 These files can be duplicated and modified (e.g. with paths to data and model specifications) in order to quickly get a CDR(NN) model up and running.
 
