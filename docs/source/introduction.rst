@@ -52,7 +52,7 @@ For documentation of available CDR(NN) executables, run::
     python -m cdr.bin.help( <SCRIPT-NAME>)*
 
 CDR(NN) models are defined using configuration (``*.ini``) files (fully described in :ref:`config`), which can be more convenient than shell arguments for specifying many settings at once, and which provide written documentation of the specific settings used to generate any given result.
-For convenience, we have provided a utility to initialize a new ``*.ini`` file, which can be run like this (where chunks followed by "?" are optional)::
+For convenience, we have provided a utility to initialize a new ``*.ini`` file, which can be run like this::
 
     python -m cdr.bin.create_config > PATH.ini
 
