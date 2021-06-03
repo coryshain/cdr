@@ -18,7 +18,7 @@ if __name__ == '__main__':
         %s
     ''' % plot_kwarg_docstring())
     argparser.add_argument('paths', nargs='+', help='Path(s) to config file(s) defining experiments')
-    argparser.add_argument('-c', '--plot_config_path', default=None, help='Path to config file specifying plot settings')
+    argparser.add_argument('-c', '--plot_config_path', default=None, help='Path to config file specifying plot settings. To initialize an annotated plot config file, run ``python -m cdr.bin.create_config -t plot -a``.')
     argparser.add_argument('-m', '--models', nargs='*', default = [], help='Model names to plot. Regex permitted. If unspecified, plots all CDR models.')
     argparser.add_argument('-d', '--dump_source', action='store_true', help='Dump plot source arrays to CSV')
     argparser.add_argument('-C', '--cpu_only', action='store_true', help='Use CPU implementation even if GPU is available.')

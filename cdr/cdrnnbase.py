@@ -422,29 +422,6 @@ class CDRNN(Model):
                     else:
                         self.context_regularizer = getattr(tf.contrib.layers, self.context_regularizer_name)(scale)
 
-                self.conv_output_regularizer = self._initialize_regularizer(
-                    self.conv_output_regularizer_name,
-                    self.conv_output_regularizer_scale
-                )
-
-                # if self.conv_output_regularizer_name is None:
-                #     self.conv_output_regularizer = None
-                # elif self.conv_output_regularizer_name == 'inherit':
-                #     self.conv_output_regularizer = self.regularizer
-                # else:
-                #     scale = self.conv_output_regularizer_scale / (self.history_length * max(1, len(self.impulse_indices))) # Average over time
-                #     if self.scale_regularizer_with_data:
-                #          scale *= self.minibatch_scale # Sum over batch, multiply by n batches
-                #     else:
-                #         scale /= self.minibatch_size # Mean over batch
-                #     if self.conv_output_regularizer_name == 'l1_l2_regularizer':
-                #         self.conv_output_regularizer = getattr(tf.contrib.layers, self.conv_output_regularizer_name)(
-                #             scale,
-                #             scale
-                #         )
-                #     else:
-                #         self.conv_output_regularizer = getattr(tf.contrib.layers, self.conv_output_regularizer_name)(scale)
-
                 self.regularizable_layers = []
 
     def _add_rangf(self, x, rangf_embeddings=None):
@@ -1687,13 +1664,6 @@ class CDRNN(Model):
                 y_sd_delta = model_dict['y_sd_delta']
                 y_skewness_delta = model_dict['y_skewness_delta']
                 y_tailweight_delta = model_dict['y_tailweight_delta']
-
-                self._regularize(tf.reduce_max(y_delta), regtype='conv_output', var_name='y_delta')
-                if self.heteroskedastic:
-                    self._regularize(tf.reduce_max(y_sd_delta), regtype='conv_output', var_name='y_sd')
-                    if self.asymmetric_error:
-                        self._regularize(tf.reduce_max(y_skewness_delta), regtype='conv_output', var_name='y_skewness_delta')
-                        self._regularize(tf.reduce_max(y_tailweight_delta), regtype='conv_output', var_name='y_tailweight_delta')
 
                 y_delta = tf.squeeze(y_delta, axis=-1)
                 self.y_delta = y_delta

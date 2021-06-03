@@ -52,12 +52,15 @@ For documentation of available CDR(NN) executables, run::
     python -m cdr.bin.help( <SCRIPT-NAME>)*
 
 CDR(NN) models are defined using configuration (``*.ini``) files (fully described in :ref:`config`), which can be more convenient than shell arguments for specifying many settings at once, and which provide written documentation of the specific settings used to generate any given result.
-For convenience, we have provided annotated CDR and CDRNN model templates::
+For convenience, we have provided a utility to initialize a new ``*.ini`` file, which can be run like this (where chunks followed by "?" are optional)::
 
-    cdr_model_template.ini
-    cdrnn_model_template.ini
+    python -m cdr.bin.create_config > PATH.ini
 
-These files can be duplicated and modified (e.g. with paths to data and model specifications) in order to quickly get a CDR(NN) model up and running.
+This will initialize a CDR-oriented config file.
+To initialize a CDRNN-oriented config file, add the flag ``-t cdrnn``.
+To initialize a plotting-oriented config file (which defines visualizations to run for an already fitted model), add the flag ``-t plot``.
+To include annotation comments in the output file (which can help with customizing it), add the flag ``-a``.
+The ``PATH.ini`` file can then be modified as needed to set up the analysis.
 
 CDR model formula syntax resembles R-style model formulas (``DV ~ IV1 + IV2 + ...``) and is fully described in :ref:`formula`.
 The core novelty is the ``C(preds, IRF)`` call (``C`` for "convolve"), in which the first argument is a '+'-delimited list of predictors and the second argument is a call to an impulse response kernel (e.g. ``Exp``, ``Normal``, ``ShiftedGammaShapeGT1``, see :ref:`formula` for complete list).
