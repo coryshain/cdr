@@ -42,6 +42,7 @@ class Config(object):
             cdr_settings = config['dtsr_settings']
         else:
             config['cdr_settings'] = {}
+            cdr_settings = config['cdr_settings']
 
         ########
         # Data #
@@ -119,8 +120,8 @@ class Config(object):
                 reg_type = 'cdr'
                 if model_name.startswith('CDRNN'):
                     is_cdrnn = True
-            elif model_name.startswith('LME'):
-                reg_type = 'lme'
+            else:
+                reg_type = model_name.split('_')[0]
             use_crossval = 'crossval_factor' in config[model_field]
             if use_crossval:
                 model_configs = {}
@@ -230,11 +231,15 @@ class Config(object):
 
         # Core fields
         out['formula'] = settings.get('formula', None)
-        is_bayes = False
         if is_cdr and out['formula']:
             # Standardize the model string
             out['formula'] = str(Formula(out['formula']))
-        out['network_type'] = settings.get('network_type', global_settings.get('network_type', 'bayes'))
+
+        if is_cdr and not is_cdrnn:
+            network_type_default = 'bayes'
+        else:
+            network_type_default = 'mle'
+        out['network_type'] = settings.get('network_type', global_settings.get('network_type', network_type_default))
         is_bayes = out['network_type'] == 'bayes'
 
         # Model initialization keyword arguments

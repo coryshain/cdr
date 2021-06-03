@@ -198,7 +198,7 @@ MODEL_INITIALIZATION_KWARGS = [
         'history_length',
         None,
         int,
-        "Length of the history window to use."
+        "Length of the history window (in timesteps)."
     ),
     Kwarg(
         'n_iter',
@@ -210,7 +210,7 @@ MODEL_INITIALIZATION_KWARGS = [
         'n_samples',
         1,
         int,
-        "For MLE models, number of samples from joint distribution (used only if either **covarying_fixef** or **covarying_ranef** is ``True``, otherwise ignored). For BBVI models, number of posterior samples to draw at each training step during variational inference. If using MCMC inference, the number of samples is set deterministically as ``n_iter * n_minibatch``, so this user-supplied parameter is overridden."
+        "**DEPRECATED**"
     ),
     Kwarg(
         'n_interp',
@@ -278,7 +278,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'epsilon',
-        1e-8,
+        1e-2,
         float,
         "Epsilon parameter to use for numerical stability in bounded parameter estimation."
     ),
@@ -501,13 +501,13 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'save_freq',
-        1,
+        100,
         int,
         "Frequency (in iterations) with which to save model checkpoints."
     ),
     Kwarg(
         'log_freq',
-        1,
+        100,
         int,
         "Frequency (in iterations) with which to log model params to Tensorboard."
     ),
@@ -561,7 +561,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'plot_n_time_units',
-        2.5,
+        5,
         float,
         "Number of time units to use for plotting."
     ),
@@ -730,7 +730,7 @@ CDRBAYES_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'n_samples_eval',
-        1024,
+        1000,
         int,
         "Number of posterior predictive samples to draw for prediction/evaluation."
     ),
@@ -819,7 +819,7 @@ CDRNN_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'n_samples_eval',
-        1024,
+        1000,
         int,
         "Number of posterior predictive samples to draw for prediction/evaluation."
     ),
@@ -1533,38 +1533,38 @@ def cdr_kwarg_docstring():
     out = "All models\n^^^^^^^^^^\n\n"
 
     for kwarg in MODEL_INITIALIZATION_KWARGS:
-        out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
+        out += '- **%s**: %s; %s. **Default:** %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr, kwarg.default_value)
 
     out = "All CDR models\n^^^^^^^^^^^^^^\n\n"
 
     for kwarg in CDR_INITIALIZATION_KWARGS:
         if kwarg.key not in ['history_length']:
-            out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
+            out += '- **%s**: %s; %s. **Default:** %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr, kwarg.default_value)
 
     out += '\nCDRMLE\n^^^^^^\n\n'
 
     for kwarg in CDRMLE_INITIALIZATION_KWARGS:
-        out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
+        out += '- **%s**: %s; %s. **Default:** %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr, kwarg.default_value)
 
     out += '\nCDRBayes\n^^^^^^^^\n\n'
 
     for kwarg in CDRBAYES_INITIALIZATION_KWARGS:
-        out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
+        out += '- **%s**: %s; %s. **Default:** %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr, kwarg.default_value)
 
     out += 'All CDRNN models\n^^^^^^^^^^^^^^^^\n\n'
 
     for kwarg in CDRNN_INITIALIZATION_KWARGS:
-        out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
+        out += '- **%s**: %s; %s. **Default:** %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr, kwarg.default_value)
 
     out += '\nCDRNNMLE\n^^^^^^^^\n\n'
 
     for kwarg in CDRNNMLE_INITIALIZATION_KWARGS:
-        out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
+        out += '- **%s**: %s; %s. **Default:** %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr, kwarg.default_value)
 
     out += '\nCDRNNBayes\n^^^^^^^^^^\n\n'
 
     for kwarg in CDRNNBAYES_INITIALIZATION_KWARGS:
-        out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
+        out += '- **%s**: %s; %s. **Default:** %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr, kwarg.default_value)
 
 
     out += '\n'
@@ -1582,7 +1582,7 @@ def plot_kwarg_docstring():
     out = "**Plotting options**\n\n"
 
     for kwarg in PLOT_KWARGS_CORE + PLOT_KWARGS_OTHER:
-        out += '- **%s**: %s; %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr)
+        out += '- **%s**: %s; %s. **Default:** %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr, kwarg.default_value)
 
     out += '\n'
 

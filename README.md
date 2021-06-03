@@ -88,7 +88,7 @@ Current reproduction branches are:
  - `cognition21`
  - `acl21`
 
-Thus, to reproduce results from NAACL19, for example, run `git checkout naacl19` from the repository root, and follow instructions in the `README` file.
+Thus, to reproduce results from ACL21, for example, run `git checkout acl21` from the repository root, and follow instructions in the `README` file.
 The reproduction branches are also useful sources of example configuration files to use as templates for setting up your own experiments, although you should consult the docs for full documentation of the structure of CDR experiment configurations.
 
 Published results depend on both (1) datasets and (2) models as defined in experiment-specific configuration files.
@@ -100,8 +100,8 @@ The `cdr` module is cross-platform and therefore CDR models should train regardl
 
 ## Help and support
 
-For questions, concerns, or data requests, contact Cory Shain ([shain.3@osu.edu](shain.3@osu.edu)).
-Bug reports can be logged in the issue tracker on [Github](https://github.com/coryshain/dtsr).
+For questions, concerns, or data requests, contact Cory Shain ([shain.3@osu.edu](cory.shain@osu.edu)).
+Bug reports can be logged in the issue tracker on [Github](https://github.com/coryshain/cdr).
 
 
 ## References
