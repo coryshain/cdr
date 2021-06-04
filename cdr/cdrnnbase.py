@@ -25,11 +25,24 @@ class CDRNN(Model):
         ``CDRNN`` is not a complete implementation and cannot be instantiated.
         Subclasses of ``CDRNN`` must implement the following instance methods:
 
-            * TODO
+            - initialize_input_bias()
+            - initialize_feedforward()
+            - initialize_rnn()
+            - initialize_rnn_h()
+            - initialize_rnn_c()
+            - initialize_h_bias()
+            - initialize_h_normalization()
+            - initialize_intercept_l1_weights()
+            - initialize_intercept_l1_biases()
+            - initialize_intercept_l1_normalization()
+            - initialize_irf_l1_weights()
+            - initialize_irf_l1_biases()
+            - initialize_irf_l1_normalization()
+            - initialize_error_params_biases()
 
         Additionally, if the subclass requires any keyword arguments beyond those provided by ``CDRNN``, it must also implement ``__init__()``, ``_pack_metadata()`` and ``_unpack_metadata()`` to support model initialization, saving, and resumption, respectively.
 
-        Example implementations of each of these methods can be found in the source code for :ref:`psyrnnmle` and :ref:`psyrnnbayes`.
+        Example implementations of each of these methods can be found in the source code for the ``CDRNNMLE`` and ``CDRNNBayes`` classes.
 
     """
     _doc_args = """
@@ -1452,37 +1465,6 @@ class CDRNN(Model):
                     W_int = self.intercept_l1_W
                     b_int = self.intercept_l1_b
 
-                # If plotting, tile out random effects
-                # if plot_mode:
-                #     R = tf.shape(self.gf_y)[0]
-                #     B = tf.shape(X)[0]
-                #     tile_ix = tf.tile(tf.range(R)[..., None], [1, B])
-                #     tile_ix = tf.reshape(tile_ix, [-1])
-                #     W = tf.gather(W, tile_ix, axis=0)
-                #     b = tf.gather(b, tile_ix, axis=0)
-                #     if self.use_coefficient and self.is_mixed_model:
-                #         if not self.direct_irf:
-                #             coef = tf.gather(coef, tile_ix, axis=0)
-                #             if self.heteroskedastic:
-                #                 coef_y_sd = tf.gather(coef_y_sd, tile_ix, axis=0)
-                #                 if self.asymmetric_error:
-                #                     coef_y_skewness = tf.gather(coef_y_skewness, tile_ix, axis=0)
-                #                     coef_y_tailweight = tf.gather(coef_y_tailweight, tile_ix, axis=0)
-                #         coef_irf_in = self.coefficient_irf_in
-                #     h = tf.gather(h, tile_ix, axis=0)
-                #     X = tf.tile(X, [R, 1 ,1])
-                #     if not self.direct_irf:
-                #         X_src = tf.tile(X_src, [R, 1 ,1])
-                #     X = tf.tile(X, [R, 1 ,1])
-                #     time_X = tf.tile(time_X, [R, 1 ,1])
-                #     t_delta = tf.tile(t_delta, [R, 1 ,1])
-                #     if self.heteroskedastic and self.is_mixed_model:
-                #         error_params_b = tf.gather(error_params_b, tile_ix, axis=0)
-                #     if self.nonstationary_intercept:
-                #         tile_ix_int = tf.range(R)
-                #         W_int = tf.gather(W_int, tile_ix_int, axis=0)
-                #         b_int = tf.gather(b_int, tile_ix_int, axis=0)
-
                 if self.use_coefficient: # coefs on inputs to IRF
                     X *= coef_irf_in
 
@@ -1713,12 +1695,6 @@ class CDRNN(Model):
                         ema_rate * c_ema + (1. - ema_rate) * c_mean
                     )
                     self.rnn_c_ema_ops.append(c_ema_op)
-
-                # if self.heteroskedastic:
-                #     y_sd_delta *= self.y_sd_coef
-                #     if self.asymmetric_error:
-                #         y_skewness_delta *= self.y_skewness_coef
-                #         y_tailweight_delta *= self.y_tailweight_coef
 
                 self.y_sd_delta = y_sd_delta
                 self.y_sd_delta_ema = tf.Variable(0., trainable=False, name='y_sd_delta_ema')
