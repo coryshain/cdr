@@ -1,4 +1,5 @@
 # Continuous-Time Deconvolutional Regression (CDR)
+
 In many real world time series, events trigger "ripples" in a dependent variable that unfold slowly and overlap in time (temporal diffusion).
 Recovering the underlying dynamics of temporally diffuse effects is challenging when events and/or responses occur at irregular intervals.
 Continuous-time deconvolutional regression (CDR) is a regression technique for time series that directly models temporal diffusion of effects (Shain & Schuler, 2018, 2021) as a funtion of continuous time.
@@ -14,6 +15,7 @@ CDR models can be trained and evaluated using provided utility executables.
 Help strings for all available utilities can be viewed by running `python -m cdr.bin.help`.
 Full repository documentation, including an API, is provided at the link above.
 
+
 ## Installation
 
 Install [anaconda](https://www.anaconda.com/), then run the following commands from this repository root to create a new conda environment:
@@ -25,6 +27,7 @@ Install [anaconda](https://www.anaconda.com/), then run the following commands f
 The `cdr` environment must first be activated anytime you want to use the CDR codebase:
 
     conda activate cdr
+
 
 ## Basic usage
 
@@ -75,7 +78,7 @@ and learning curves can be inspected in Tensorboard:
 
     python -m tensorboard.main --logdir=<PATH-TO-CDR-OUTPUT>
 
-For more on usage, see the [docs](http://dtsr.readthedocs.io/en/latest/).
+For more on usage, see the [docs](http://cdr.readthedocs.io/en/latest/).
 
 
 ## Reproducing published results
@@ -100,6 +103,7 @@ The datasets used can be provided by email upon request.
 
 Note that some published experiments below also involve fitting LME and GAM models, which require `rpy2` and therefore won't work on Windows systems without some serious hacking.
 The `cdr` module is cross-platform and therefore CDR models should train regardless of operating system.
+
 
 ## Help and support
 
