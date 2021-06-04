@@ -25,7 +25,8 @@ For example, once a config file ``foo.ini`` has been created, the models defined
 
     python -m cdr.bin.train foo.ini
 
-The config file must at minimum contain the sections ``[data]`` (with pointers to training/evaluation data), ``[global_settings]`` (with the location of the output directory) and ``[cdr_settings]`` (with arguments used to construct the model).
+The config file must at minimum contain the sections ``[data]`` (with pointers to training/evaluation data) and ``[global_settings]`` (with the location of the output directory).
+A section ``[cdr_settings]`` can be (optionally) provided to override default settings.
 In addition, the config file should contain at least one model section, consisting of the prefix ``model_CDR_`` (for CDR) or ``model_CDRNN_`` (for CDRNN) followed by a custom name for the model.
 For example, to define a CDR model called ``readingtimes``, use the section heading ``[model_CDR_readingtimes]``.
 The identifier ``CDR_readingtimes`` will then be used by a number of utilities to designate this model
@@ -38,6 +39,11 @@ Experiments involving distinct datasets require distinct config files.
 
 For more details on the available configuration parameters, see :ref:`config`.
 For more details on CDR model formulae, see :ref:`formula`.
+To jump-start a new config file, run::
+
+    python -m cdr.bin.create_config > PATH.ini
+
+Add the flag ``-t cdrnn`` to generate a CDRNN-oriented config, and add the flag ``-a`` to include annotations that can help you fill in the fields correctly.
 
 
 
