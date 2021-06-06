@@ -3227,6 +3227,159 @@ class Model(object):
 
                 return loss
 
+    def convolve_inputs(
+            self,
+            X,
+            y,
+            X_response_aligned_predictor_names=None,
+            X_response_aligned_predictors=None,
+            X_2d_predictor_names=None,
+            X_2d_predictors=None,
+            scaled=False,
+            n_samples=None,
+            algorithm='MAP',
+            standardize_response=False,
+            verbose=True
+    ):
+        """
+        Convolve input data using the fitted CDR(NN) model.
+
+        :param X: list of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+            Each element of **X** must contain the following columns (additional columns are ignored):
+
+            * ``time``: Timestamp associated with each observation in **X**
+
+            Across all elements of **X**, there must be a column for each independent variable in the CDR ``form_str`` provided at initialization.
+
+        :param y: ``pandas`` table; the dependent variable. Must contain the following columns:
+
+            * ``time``: Timestamp associated with each observation in ``y``
+            * ``first_obs``:  Index in the design matrix `X` of the first observation in the time series associated with each entry in ``y``
+            * ``last_obs``:  Index in the design matrix `X` of the immediately preceding observation in the time series associated with each entry in ``y``
+            * A column with the same name as the DV specified in ``form_str``
+            * A column for each random grouping factor in the model specified in ``form_str``.
+
+        :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
+        :param X_response_aligned_predictors: ``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
+        :param X_2d_predictor_names: ``list`` or ``None``; List of column names 2D predictors (predictors whose value depends on properties of the most recent impulse) if applicable, ``None`` otherwise.
+        :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
+        :param standardize_response: ``bool``; Whether to report response using standard units. Ignored unless ``scaled==True`` and model was fitted using ``standardize_response==True``.
+        :param verbose: ``bool``; Report progress and metrics to standard error.
+        :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
+        """
+
+        if verbose:
+            usingGPU = tf.test.is_gpu_available()
+            stderr('Using GPU: %s\n' % usingGPU)
+
+        impulse_names  = self.impulse_names
+
+        y_rangf = y[self.rangf]
+        for i in range(len(self.rangf)):
+            c = self.rangf[i]
+            y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
+
+        first_obs, last_obs = get_first_last_obs_lists(y)
+        time_y = np.array(y.time, dtype=self.FLOAT_NP)
+        gf_y = np.array(y_rangf, dtype=self.INT_NP)
+
+        X_2d, time_X_2d, time_X_mask = build_CDR_impulses(
+            X,
+            first_obs,
+            last_obs,
+            impulse_names,
+            time_y=time_y,
+            history_length=self.history_length,
+            X_response_aligned_predictor_names=X_response_aligned_predictor_names,
+            X_response_aligned_predictors=X_response_aligned_predictors,
+            X_2d_predictor_names=X_2d_predictor_names,
+            X_2d_predictors=X_2d_predictors,
+            int_type=self.int_type,
+            float_type=self.float_type,
+        )
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                self.set_predict_mode(True)
+
+                fd = {
+                    self.time_y: time_y,
+                    self.gf_y: gf_y,
+                    self.X: X_2d,
+                    self.time_X: time_X_2d,
+                    self.time_X_mask: time_X_mask,
+                    self.training: not self.predict_mode
+                }
+
+                fd_minibatch = {
+                    self.X: fd[self.X],
+                    self.time_X: fd[self.time_X],
+                    self.training: not self.predict_mode
+                }
+
+                X_conv = []
+                n_eval_minibatch = math.ceil(len(y) / self.eval_minibatch_size)
+                for i in range(0, len(y), self.eval_minibatch_size):
+                    if verbose:
+                        stderr('\rMinibatch %d/%d' % ((i / self.eval_minibatch_size) + 1, n_eval_minibatch))
+                    fd_minibatch[self.time_y] = time_y[i:i + self.eval_minibatch_size]
+                    fd_minibatch[self.gf_y] = gf_y[i:i + self.eval_minibatch_size]
+                    fd_minibatch[self.X] = X_2d[i:i + self.eval_minibatch_size]
+                    fd_minibatch[self.time_X] = time_X_2d[i:i + self.eval_minibatch_size]
+                    fd_minibatch[self.time_X_mask] = time_X_mask[i:i + self.eval_minibatch_size]
+                    X_conv_cur = self.run_conv_op(
+                        fd_minibatch,
+                        scaled=scaled,
+                        standardize_response=standardize_response,
+                        n_samples=n_samples,
+                        algorithm=algorithm,
+                        verbose=verbose
+                    )
+                    X_conv.append(X_conv_cur)
+                names = []
+                for x in self.terminal_names:
+                    if self.node_table[x].p.irfID is None:
+                        names.append(sn(''.join(x.split('-')[:-1])))
+                    else:
+                        names.append(sn(x))
+                X_conv = np.concatenate(X_conv, axis=0)
+                out = pd.DataFrame(X_conv, columns=names, dtype=self.FLOAT_NP)
+
+                self.set_predict_mode(False)
+
+                convolution_summary = ''
+                corr_conv = out.corr().to_string()
+                convolution_summary += '=' * 50 + '\n'
+                convolution_summary += 'Correlation matrix of convolved predictors:\n\n'
+                convolution_summary += corr_conv + '\n\n'
+
+                select = np.where(np.all(np.isclose(time_X_2d[:,-1], time_y[..., None]), axis=-1))[0]
+
+                X_input = X_2d[:,-1,:][select]
+
+                extra_cols = []
+                for c in y.columns:
+                    if c not in out:
+                        extra_cols.append(c)
+                out = pd.concat([y[extra_cols].reset_index(), out], axis=1)
+
+                if X_input.shape[0] > 0:
+                    out_plus = out
+                    for i in range(len(self.impulse_names)):
+                        c = self.impulse_names[i]
+                        if c not in out_plus:
+                            out_plus[c] = X_2d[:,-1,i]
+                    corr_conv = out_plus.iloc[select].corr().to_string()
+                    convolution_summary += '-' * 50 + '\n'
+                    convolution_summary += 'Full correlation matrix of input and convolved predictors:\n'
+                    convolution_summary += 'Based on %d simultaneously sampled impulse/response pairs (out of %d total data points)\n\n' %(select.shape[0], y.shape[0])
+                    convolution_summary += corr_conv + '\n\n'
+                    convolution_summary += '=' * 50 + '\n'
+
+                return out, convolution_summary
+
     def error_theoretical_quantiles(
             self,
             n_errors
@@ -3341,8 +3494,9 @@ class Model(object):
         :param yres: ``int`` or ``None``; Resolution (number of plot points) on y-axis. If ``None``, inferred.
         :param n_samples: ``int`` or ``None``; Number of plot samples to draw for computing intervals. If ``None``, ``0``, ``1``, or if the model type does not support uncertainty estimation, the maximum likelihood estimate will be returned.
         :param level: ``float``; The confidence level of any intervals (i.e. ``95`` indicates 95% confidence/credible intervals).
-        :return: 5-tuple (plot_axes, mean, lower, upper, samples); Let RX, RY, S, and O respectively be the x-axis resolution, y-axis resolution, number of samples, and number of output dimensions (manipulations). If plot is 2D, ``plot_axes`` is an array with shape ``(RX,)``, ``mean``, ``lower``, and ``upper`` are arrays with shape ``(RX, O)``,  and ``samples is an array with shape ``(S, RX, O)``. If plot is 3D, ``plot_axes`` is a pair of arrays each with shape ``(RX, RY)`` (i.e. a meshgrid), ``mean``, ``lower``, and ``upper`` are arrays with shape ``(RX, RY, O)``, and ``samples`` is an array with shape ``(S, RX, RY, O)``.
+        :return: 5-tuple (plot_axes, mean, lower, upper, samples); Let RX, RY, S, and K respectively be the x-axis resolution, y-axis resolution, number of samples, and number of output dimensions (manipulations). If plot is 2D, ``plot_axes`` is an array with shape ``(RX,)``, ``mean``, ``lower``, and ``upper`` are arrays with shape ``(RX, K)``,  and ``samples is an array with shape ``(S, RX, K)``. If plot is 3D, ``plot_axes`` is a pair of arrays each with shape ``(RX, RY)`` (i.e. a meshgrid), ``mean``, ``lower``, and ``upper`` are arrays with shape ``(RX, RY, K)``, and ``samples`` is an array with shape ``(S, RX, RY, K)``.
         """
+
         assert xvar is not None, 'Value must be provided for xvar'
         assert xvar != yvar, 'Cannot vary two axes along the same variable'
 
@@ -3696,15 +3850,6 @@ class Model(object):
                     self.gf_y: gf_y_ref_in,
                     self.training: not self.predict_mode
                 }
-                
-                # print('X_ref_in')
-                # print(fd_ref[self.X].shape)
-                # print('time_X_ref_in')
-                # print(fd_ref[self.time_X].shape)
-                # print('time_X_mask_ref_in')
-                # print(fd_ref[self.time_X_mask].shape)
-                # print('t_delta_ref_in')
-                # print(fd_ref[self.t_delta].shape)
 
                 # Bring manipulations into 1-1 alignment on the batch dimension
                 if n_manip:
@@ -3721,15 +3866,6 @@ class Model(object):
                         self.gf_y: gf_y,
                         self.training: not self.predict_mode
                     }
-
-                    # print('X_in')
-                    # print(fd_main[self.X].shape)
-                    # print('time_X_in')
-                    # print(fd_main[self.time_X].shape)
-                    # print('time_X_mask_in')
-                    # print(fd_main[self.time_X_mask].shape)
-                    # print('t_delta_in')
-                    # print(fd_main[self.t_delta].shape)
 
                 if resvar == 'y_mean':
                     response = self.y_delta
@@ -3781,6 +3917,37 @@ class Model(object):
                 out = (plot_axes, mean, lower, upper, samples)
 
                 return out
+
+    def irf_rmsd(
+            self,
+            gold_irf_lambda,
+            level=95,
+            **kwargs
+    ):
+        """
+        Compute root mean squared deviation of estimated from true IRFs over some interval(s) of interest.
+        Any plotting configuration available under ``get_plot_data()`` is supported, but **gold_irf_lambda**
+        must accept the same inputs and have the same output dimensionality. See documentation for ``get_plot_data()``
+        for description of available keyword arguments.
+
+        :param gold_irf_lambda: True IRF mapping inputs to outputs.
+        :param **kwargs: Keyword arguments for ``get_plot_data()``.
+        :return: 4-tuple (mean, lower, upper, samples); Let S be the number of samples. ``mean``, ``lower``, and ``upper`` are scalars, and ``samples`` is a vector of size S.
+        """
+
+        plot_axes, _, _, _, samples = self.get_plot_data(level=level, **kwargs)
+
+        gold = gold_irf_lambda(plot_axes)
+
+        axis = list(range(1, len(samples)))
+        alpha = 100 - float(level)
+
+        rmsd_samples = ((gold - samples)**2).mean(axis=axis)
+        rmsd_mean = rmsd_samples.mean()
+        rmsd_lower = rmsd_samples.percentile(alpha / 2)
+        rmsd_upper = rmsd_samples.percentile(100 - (alpha / 2))
+
+        return rmsd_mean, rmsd_lower, rmsd_upper, rmsd_samples
 
     def irf_integrals(self, standardize_response=False, level=95, random=False, n_samples='default', n_time_units=None, n_time_points=1000):
         """

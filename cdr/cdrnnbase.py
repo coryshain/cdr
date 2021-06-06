@@ -1908,7 +1908,6 @@ class CDRNN(Model):
 
                 return out_dict
 
-
     def run_predict_op(self, feed_dict, standardize_response=False, n_samples=None, algorithm='MAP', verbose=True):
         use_MAP_mode =  algorithm in ['map', 'MAP']
         feed_dict[self.use_MAP_mode] = use_MAP_mode
@@ -2001,3 +2000,30 @@ class CDRNN(Model):
 
                 return loss
 
+    def run_conv_op(self, feed_dict, scaled=False, standardize_response=False, n_samples=None, algorithm='MAP', verbose=True):
+        assert scaled, 'CDRNN does not support unscaled input convolution. Re-run with ``scaled=True``.'
+        use_MAP_mode =  algorithm in ['map', 'MAP']
+        feed_dict[self.use_MAP_mode] = use_MAP_mode
+
+        X_conv = self.X_conv
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if use_MAP_mode:
+                    X_conv = self.sess.run(X_conv, feed_dict=feed_dict)
+                else:
+                    if n_samples is None:
+                        n_samples = self.n_samples_eval
+                    if verbose:
+                        pb = tf.contrib.keras.utils.Progbar(n_samples)
+
+                    X_conv = np.zeros((len(feed_dict[self.X]), self.X_conv.shape[-1], n_samples))
+
+                    for i in range(0, n_samples):
+                        X_conv[..., i] = self.sess.run(X_conv, feed_dict=feed_dict)
+                        if verbose:
+                            pb.update(i + 1, force=True)
+
+                    X_conv = X_conv.mean(axis=2)
+
+                return X_conv

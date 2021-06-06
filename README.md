@@ -101,13 +101,13 @@ Published results depend on both (1) datasets and (2) models as defined in exper
 In general, we do not distribute data with this repository.
 The datasets used can be provided by email upon request.
 
-Note that some published experiments below also involve fitting LME and GAM models, which require `rpy2` and therefore won't work on Windows systems without some serious hacking.
+Note that some published experiments also involve fitting LME and GAM models, which require `rpy2` and therefore won't work on Windows systems without some serious hacking.
 The `cdr` module is cross-platform and therefore CDR models should train regardless of operating system.
 
 
 ## Help and support
 
-For questions, concerns, or data requests, contact Cory Shain ([shain.3@osu.edu](cory.shain@osu.edu)).
+For questions, concerns, or data requests, contact Cory Shain ([cory.shain@gmail.com](cory.shain@gmail.com)).
 Bug reports can be logged in the issue tracker on [Github](https://github.com/coryshain/cdr).
 
 
