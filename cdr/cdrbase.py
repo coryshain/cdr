@@ -1,15 +1,9 @@
 import os
-import pandas as pd
-import scipy.stats
-import time as pytime
 
 from .formula import *
 from .kwargs import CDR_INITIALIZATION_KWARGS
 from .util import *
-from .data import build_CDR_impulses, corr_cdr, get_first_last_obs_lists
 from .base import Model
-from .interpolate_spline import interpolate_spline
-from .plot import plot_heatmap
 
 import tensorflow as tf
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -33,6 +27,7 @@ def get_session(session):
 
     return sess
 
+# IRF Lambdas (response dimension is always last)
 
 def empirical_integral(irf, session=None):
     def f(x, irf=irf, n_time_points=1000, session=session):
@@ -52,43 +47,69 @@ def empirical_integral(irf, session=None):
     return f
 
 
-def exponential_irf_lambdas(params, integral_ub=None, epsilon=4 * np.finfo('float32').eps, session=None):
+def exponential_irf_factory(
+        beta,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None
+):
+    """
+    Instantiate an exponential impulse response function (IRF).
+
+    :param beta: TF tensor; beta (rate) parameter (beta > 0).
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :return: ``function``; the IRF
+    """
+
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
-            beta = params[:, 0:1]
-
             def pdf(x, beta=beta):
                 return beta * tf.exp(-beta * x)
 
             def cdf(x, beta=beta):
                 return 1 - tf.exp(-beta * x)
 
-            if integral_ub is None:
+            if support_ub is None:
                 def irf(x, pdf=pdf):
                     return pdf(x)
-
-                def irf_proportion_in_bounds(x, cdf=cdf):
-                    return cdf(x)
             else:
-                norm_const = cdf(integral_ub)
+                norm_const = cdf(support_ub)
 
                 def irf(x, pdf=pdf, norm_const=norm_const, epsilon=epsilon):
+                    # Ensure proper broadcasting
+                    while len(x.shape) > len(norm_const.shape):
+                        norm_const = norm_const[None, ...]
                     return pdf(x) / (norm_const + epsilon)
 
-                def irf_proportion_in_bounds(x, cdf=cdf, norm_const=norm_const, epsilon=epsilon):
-                    return cdf(x) / (norm_const + epsilon)
-
-            return irf, irf_proportion_in_bounds
+            return irf
 
 
-def gamma_irf_lambdas(params, integral_ub=None, session=None, epsilon=4 * np.finfo('float32').eps, validate_irf_args=False):
+def gamma_irf_factory(
+        alpha,
+        beta,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None,
+        validate_irf_args=False
+):
+    """
+    Instantiate a gamma impulse response function (IRF).
+
+    :param alpha: TF tensor; alpha (shape) parameter (alpha > 0).
+    :param beta: TF tensor; beta (rate) parameter (beta > 0).
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :param validate_irf_args: ``bool``; whether to validate any constraints on the IRF parameters.
+    :return: ``function``; the IRF
+    """
+
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
-            alpha = params[:, 0:1]
-            beta = params[:, 1:2]
-            
             dist = tf.contrib.distributions.Gamma(
                 concentration=alpha,
                 rate=beta,
@@ -97,33 +118,47 @@ def gamma_irf_lambdas(params, integral_ub=None, session=None, epsilon=4 * np.fin
             pdf = dist.prob
             cdf = dist.cdf
 
-            if integral_ub is None:
+            if support_ub is None:
                 def irf(x, pdf=pdf, epsilon=epsilon):
                     return pdf(x + epsilon)
 
-                def irf_proportion_in_bounds(x, cdf=cdf, epsilon=epsilon):
-                    return cdf(x + epsilon)
-
             else:
-                norm_const = cdf(integral_ub)
+                norm_const = cdf(support_ub)
 
                 def irf(x, pdf=pdf, norm_const=norm_const, epsilon=epsilon):
+                    # Ensure proper broadcasting
+                    while len(x.shape) > len(norm_const.shape):
+                        norm_const = norm_const[None, ...]
                     return pdf(x + epsilon) / (norm_const + epsilon)
 
-                def irf_proportion_in_bounds(x, cdf=cdf, norm_const=norm_const, epsilon=epsilon):
-                    return cdf(x + epsilon) / (norm_const + epsilon)
-
-            return irf, irf_proportion_in_bounds
+            return irf
 
 
-def shifted_gamma_irf_lambdas(params, integral_ub=None, session=None, epsilon=4 * np.finfo('float32').eps, validate_irf_args=False):
+def shifted_gamma_irf_factory(
+        alpha,
+        beta,
+        delta,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None,
+        validate_irf_args=False
+):
+    """
+    Instantiate a gamma impulse response function (IRF) with an additional shift parameter.
+
+    :param alpha: TF tensor; alpha (shape) parameter (alpha > 0).
+    :param beta: TF tensor; beta (rate) parameter (beta > 0).
+    :param delta: TF tensor; delta (shift) parameter (delta < 0).
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :param validate_irf_args: ``bool``; whether to validate any constraints on the IRF parameters.
+    :return: ``function``; the IRF
+    """
+
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
-            alpha = params[:, 0:1]
-            beta = params[:, 1:2]
-            delta = params[:, 2:3]
-            
             dist = tf.contrib.distributions.Gamma(
                 concentration=alpha,
                 rate=beta,
@@ -134,29 +169,45 @@ def shifted_gamma_irf_lambdas(params, integral_ub=None, session=None, epsilon=4 
             cdf = dist.cdf
             cdf_0 = cdf(-delta)
 
-            if integral_ub is None:
+            if support_ub is None:
                 ub = 1.
             else:
-                ub = cdf(integral_ub - delta)
+                ub = cdf(support_ub - delta)
 
             norm_const = ub - cdf_0
 
             def irf(x, pdf=pdf, delta=delta, norm_const=norm_const, epsilon=epsilon):
+                # Ensure proper broadcasting
+                while len(x.shape) > len(delta.shape):
+                    delta = delta[None, ...]
+                while len(x.shape) > len(norm_const.shape):
+                    norm_const = norm_const[None, ...]
                 return pdf(x - delta) / (norm_const + epsilon)
 
-            def irf_proportion_in_bounds(x, cdf=cdf, cdf_0=cdf_0, delta=delta, norm_const=norm_const, epsilon=epsilon):
-                return (cdf(x - delta) - cdf_0) / (norm_const + epsilon)
-
-            return irf, irf_proportion_in_bounds
+            return irf
 
 
-def normal_irf_lambdas(params, integral_ub=None, epsilon=4 * np.finfo('float32').eps, session=None):
+def normal_irf_factory(
+        mu,
+        sigma,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None
+):
+    """
+    Instantiate a normal impulse response function (IRF).
+
+    :param mu: TF tensor; mu (location) parameter.
+    :param sigma: TF tensor; sigma (scale) parameter (sigma > 0).
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :return: ``function``; the IRF
+    """
+
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
-            mu = params[:, 0:1]
-            sigma = params[:, 1:2]
-
             dist = tf.contrib.distributions.Normal(
                 mu,
                 sigma
@@ -166,188 +217,432 @@ def normal_irf_lambdas(params, integral_ub=None, epsilon=4 * np.finfo('float32')
             cdf = dist.cdf
             cdf_0 = cdf(0.)
 
-            if integral_ub is None:
+            if support_ub is None:
                 ub = 1.
             else:
-                ub = cdf(integral_ub)
+                ub = cdf(support_ub)
 
             norm_const = ub - cdf_0
 
             def irf(x, pdf=pdf, norm_const=norm_const, epsilon=epsilon):
+                # Ensure proper broadcasting
+                while len(x.shape) > len(norm_const.shape):
+                    norm_const = norm_const[None, ...]
                 return pdf(x) / (norm_const + epsilon)
 
-            def irf_proportion_in_bounds(x, cdf=cdf, cdf_0=cdf_0, norm_const=norm_const, epsilon=epsilon):
-                return (cdf(x) - cdf_0) / (norm_const + epsilon)
-                
-            return irf, irf_proportion_in_bounds
+            return irf
 
 
-def skew_normal_irf_lambdas(params, integral_ub, epsilon=4 * np.finfo('float32').eps, session=None):
+def skew_normal_irf_factory(
+        mu,
+        sigma,
+        alpha,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None
+):
+    """
+    Instantiate a skew-normal impulse response function (IRF).
+
+    :param mu: TF tensor; mu (location) parameter.
+    :param sigma: TF tensor; sigma (scale) parameter (sigma > 0).
+    :param alpha: TF tensor; alpha (skew) parameter.
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :return: ``function``; the IRF
+    """
+
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
-            mu = params[:, 0:1]
-            sigma = params[:, 1:2]
-            alpha = params[:, 2:3]
-            
             stdnorm = tf.contrib.distributions.Normal(loc=0., scale=1.)
             stdnorm_pdf = stdnorm.prob
             stdnorm_cdf = stdnorm.cdf
             
             def irf_base(x,  mu=mu, sigma=sigma, alpha=alpha, pdf=stdnorm_pdf, cdf=stdnorm_cdf):
+                # Ensure proper broadcasting
+                while len(x.shape) > len(mu.shape):
+                    mu = mu[None, ...]
+                while len(x.shape) > len(sigma.shape):
+                    sigma = sigma[None, ...]
+                while len(x.shape) > len(alpha.shape):
+                    alpha = alpha[None, ...]
                 return (pdf((x - mu) / (sigma)) * cdf(alpha * (x - mu) / (sigma)))
             
             cdf = empirical_integral(irf_base, session=session)
-            norm_const = cdf(integral_ub)
+            cdf_0 = cdf(0.)
+
+            if support_ub is None:
+                ub = 1.
+            else:
+                ub = cdf(support_ub)
+
+            norm_const = ub - cdf_0
             
             def irf(x, irf_base=irf_base, norm_const=norm_const, epsilon=epsilon):
+                # Ensure proper broadcasting
+                while len(x.shape) > len(norm_const.shape):
+                    norm_const = norm_const[None, ...]
                 return irf_base(x) / (norm_const + epsilon)
 
-            def irf_proportion_in_bounds(x, cdf=cdf, norm_const=norm_const, epsilon=epsilon):
-                return cdf(x) / (norm_const + epsilon)
-
-            return irf, irf_proportion_in_bounds
+            return irf
 
 
-def emg_irf_lambdas(params, integral_ub=None, epsilon=4 * np.finfo('float32').eps, session=None):
+def emg_irf_factory(
+        mu,
+        sigma,
+        beta,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None
+):
+    """
+    Instantiate an exponentially-modified Gaussian (EMG) impulse response function (IRF).
+
+    :param mu: TF tensor; mu (location) parameter.
+    :param sigma: TF tensor; sigma (scale) parameter (sigma > 0).
+    :param beta: TF tensor; beta (rate) parameter (beta > 0).
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :return: ``function``; the IRF
+    """
+
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
-            mu = params[:, 0:1]
-            sigma = params[:, 1:2]
-            L = params[:, 2:3]
-
             def cdf(x):
                 return tf.contrib.distributions.Normal(
                     loc=0.,
-                    scale=L*sigma
-                )(L * (x - mu))
+                    scale=beta * sigma
+                )(beta * (x - mu))
 
-            if integral_ub is None:
+            if support_ub is None:
                 ub = 1.
             else:
-                ub = cdf(integral_ub)
+                ub = cdf(support_ub)
 
             cdf_0 = cdf(0.)
 
-            norm_const = ub - cdf(0)
+            norm_const = ub - cdf_0
 
-            def irf(x, L=L, mu=mu, sigma=sigma, norm_const=norm_const, epsilon=epsilon):
-                return (L / 2 * tf.exp(0.5 * L * (2. * mu + L * sigma ** 2. - 2. * x)) *
-                       tf.erfc((mu + L * sigma ** 2 - x) / (tf.sqrt(2.) * sigma))) / (norm_const + epsilon)
+            def irf(x, mu=mu, sigma=sigma, beta=beta, norm_const=norm_const, epsilon=epsilon):
+                # Ensure proper broadcasting
+                while len(x.shape) > len(mu.shape):
+                    mu = mu[None, ...]
+                while len(x.shape) > len(sigma.shape):
+                    sigma = sigma[None, ...]
+                while len(x.shape) > len(beta.shape):
+                    beta = beta[None, ...]
+                while len(x.shape) > len(norm_const.shape):
+                    norm_const = norm_const[None, ...]
+                return (beta / 2 * tf.exp(0.5 * beta * (2. * mu + beta * sigma ** 2. - 2. * x)) *
+                        tf.erfc((mu + beta * sigma ** 2 - x) / (tf.sqrt(2.) * sigma))) / (norm_const + epsilon)
 
-            def irf_proportion_in_bounds(x, cdf=cdf, norm_const=norm_const, cdf_0=cdf_0, epsilon=epsilon):
-                return (cdf(x) - cdf_0) / (norm_const + epsilon)
-
-            return irf, irf_proportion_in_bounds
+            return irf
 
 
-def beta_prime_irf_lambdas(params, integral_ub=None, session=None, epsilon=4 * np.finfo('float32').eps):
+def beta_prime_irf_factory(
+        alpha,
+        beta,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None
+):
+    """
+    Instantiate a beta-prime impulse response function (IRF).
+
+    :param alpha: TF tensor; alpha (rate) parameter (alpha > 0).
+    :param beta: TF tensor; beta (rate) parameter (beta > 0).
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :return: ``function``; the IRF
+    """
+
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
-            alpha = params[:, 1:2]
-            beta = params[:, 2:3]
-
-            def cdf(x):
+            def cdf(x, alpha=alpha, beta=beta):
+                # Ensure proper broadcasting
+                while len(x.shape) > len(alpha.shape):
+                    alpha = alpha[None, ...]
+                while len(x.shape) > len(beta.shape):
+                    beta = beta[None, ...]
                 return tf.betainc(alpha, beta, x / (1+x)) * tf.exp(tf.lbeta(alpha, beta))
             
-            if integral_ub is None:
+            if support_ub is None:
                 ub = 1
             else:
-                ub = cdf(integral_ub)
+                ub = cdf(support_ub)
 
             cdf_0 = cdf(epsilon)
 
             norm_const = ub - cdf_0
 
             def irf(x, alpha=alpha, beta=beta, norm_const=norm_const, epsilon=epsilon):
+                # Ensure proper broadcasting
+                while len(x.shape) > len(alpha.shape):
+                    alpha = alpha[None, ...]
+                while len(x.shape) > len(beta.shape):
+                    beta = beta[None, ...]
+                while len(x.shape) > len(norm_const.shape):
+                    norm_const = norm_const[None, ...]
                 return ((x + epsilon) ** (alpha - 1.) * (1. + (x + epsilon)) ** (-alpha - beta)) / (norm_const + epsilon)
 
-            def irf_proportion_in_bounds(x, cdf=cdf, cdf_0=cdf_0, norm_const=norm_const, epsilon=epsilon):
-                return (cdf(x) - cdf_0) / (norm_const + epsilon)
-
-            return irf, irf_proportion_in_bounds
+            return irf
 
 
-def shifted_beta_prime_irf_lambdas(params, integral_ub=None, session=None, epsilon=4 * np.finfo('float32').eps):
+def shifted_beta_prime_irf_factory(
+        alpha,
+        beta,
+        delta,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None
+):
+    """
+    Instantiate a beta-prime impulse response function (IRF) with an additional shift parameter.
+
+    :param alpha: TF tensor; alpha (rate) parameter (alpha > 0).
+    :param beta: TF tensor; beta (rate) parameter (beta > 0).
+    :param delta: TF tensor; delta (shift) parameter (delta < 0).
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :return: ``function``; the IRF
+    """
+
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
-            alpha = params[:, 0:1]
-            beta = params[:, 1:2]
-            delta = params[:, 2:3]
-
-            def cdf(x):
+            def cdf(x, alpha=alpha, beta=beta, delta=delta):
+                # Ensure proper broadcasting
+                while len(x.shape) > len(alpha.shape):
+                    alpha = alpha[None, ...]
+                while len(x.shape) > len(beta.shape):
+                    beta = beta[None, ...]
+                while len(x.shape) > len(delta.shape):
+                    delta = delta[None, ...]
                 return tf.betainc(alpha, beta, (x-delta) / (1+x-delta)) * tf.exp(tf.lbeta(alpha, beta))
             
-            if integral_ub is None:
+            if support_ub is None:
                 ub = 1
             else:
-                ub = cdf(integral_ub - delta)
+                ub = cdf(support_ub - delta)
 
             cdf_0 = cdf(-delta)
 
             norm_const = ub - cdf_0
 
             def irf(x, alpha=alpha, beta=beta, delta=delta, norm_const=norm_const, epsilon=epsilon):
+                # Ensure proper broadcasting
+                while len(x.shape) > len(alpha.shape):
+                    alpha = alpha[None, ...]
+                while len(x.shape) > len(beta.shape):
+                    beta = beta[None, ...]
+                while len(x.shape) > len(delta.shape):
+                    delta = delta[None, ...]
+                while len(x.shape) > len(norm_const.shape):
+                    norm_const = norm_const[None, ...]
                 return ((x - delta) ** (alpha - 1) * (1 + (x - delta)) ** (-alpha - beta)) / (norm_const + epsilon)
 
-            def irf_proportion_in_bounds(x, cdf=cdf, cdf_0=cdf_0, delta=delta, norm_const=norm_const, epsilon=epsilon):
-                return (cdf(x - delta) - cdf_0) / (norm_const + epsilon)
-
-            return irf, irf_proportion_in_bounds
+            return irf
 
 
-def double_gamma_1_irf_lambdas(params, integral_ub=None, session=None, epsilon=4 * np.finfo('float32').eps, validate_irf_args=False):
+def double_gamma_1_irf_factory(
+        beta,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None,
+        validate_irf_args=False
+):
+    """
+    Instantiate a double-gamma hemodynamic response function (HRF) for fMRI with one trainable parameter.
+
+    :param beta: TF tensor; beta (rate) parameter (beta > 0).
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :return: ``function``; the IRF
+    """
+
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
             alpha_main = 6.
             alpha_undershoot = 16.
-            beta_main = params[:, 0:1]
-            beta_undershoot = beta_main
+            beta_main = beta
+            beta_undershoot = beta
             c = 1. / 6.
 
-            dist_main = tf.contrib.distributions.Gamma(
-                concentration=alpha_main,
-                rate=beta_main,
-                validate_args=validate_irf_args
+            return double_gamma_5_irf_factory(
+                alpha_main=alpha_main,
+                alpha_undershoot=alpha_undershoot,
+                beta_main=beta_main,
+                beta_undershoot=beta_undershoot,
+                c=c,
+                support_ub=support_ub,
+                epsilon=epsilon,
+                session=session,
+                validate_irf_args=validate_irf_args
             )
-            pdf_main = dist_main.prob
-            cdf_main = dist_main.cdf
-            dist_undershoot = tf.contrib.distributions.Gamma(
-                concentration=alpha_undershoot,
-                rate=beta_undershoot,
-                validate_args=validate_irf_args
-            )
-            pdf_undershoot = dist_undershoot.prob
-            cdf_undershoot = dist_undershoot.cdf
-
-            if integral_ub is None:
-                norm_const = 1 - c
-            else:
-                norm_const = cdf_main(integral_ub) - c * cdf_undershoot(integral_ub)
-
-            def irf(x, pdf_main=pdf_main, pdf_undershoot=pdf_undershoot, norm_const=norm_const, epsilon=epsilon):
-                return (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (norm_const + epsilon)
-
-            def irf_proportion_in_bounds(x, cdf_main=cdf_main, cdf_undershoot=cdf_undershoot, norm_const=norm_const, epsilon=epsilon):
-                return (cdf_main(x + epsilon) - cdf_undershoot(x + epsilon)) / (norm_const + epsilon)
-
-            return irf, irf_proportion_in_bounds
 
 
-def double_gamma_2_irf_lambdas(params, integral_ub=None, session=None, epsilon=4 * np.finfo('float32').eps, validate_irf_args=False):
+def double_gamma_2_irf_factory(
+        alpha,
+        beta,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None,
+        validate_irf_args=False
+):
+    """
+    Instantiate a double-gamma hemodynamic response function (HRF) for fMRI with two trainable parameters.
+
+    :param alpha: TF tensor; alpha (shape) parameter (alpha > 0).
+    :param beta: TF tensor; beta (rate) parameter (beta > 0).
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :return: ``function``; the IRF
+    """
+
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
-            alpha_main = params[:, 0:1]
-            alpha_undershoot = alpha_main + 10.
-            beta_main = params[:, 1:2]
-            beta_undershoot = beta_main
+            alpha_main = alpha
+            alpha_undershoot = alpha + 10.
+            beta_main = beta
+            beta_undershoot = beta
             c = 1. / 6.
 
+            return double_gamma_5_irf_factory(
+                alpha_main=alpha_main,
+                alpha_undershoot=alpha_undershoot,
+                beta_main=beta_main,
+                beta_undershoot=beta_undershoot,
+                c=c,
+                support_ub=support_ub,
+                epsilon=epsilon,
+                session=session,
+                validate_irf_args=validate_irf_args
+            )
+
+
+def double_gamma_3_irf_factory(
+        alpha,
+        beta,
+        c,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None,
+        validate_irf_args=False
+):
+    """
+    Instantiate a double-gamma hemodynamic response function (HRF) for fMRI with three trainable parameters.
+
+    :param alpha: TF tensor; alpha (shape) parameter (alpha > 0).
+    :param beta: TF tensor; beta (rate) parameter (beta > 0).
+    :param c: TF tensor; c parameter (amplitude of undershoot).
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :return: ``function``; the IRF
+    """
+
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            alpha_main = alpha
+            alpha_undershoot = alpha + 10.
+            beta_main = beta
+            beta_undershoot = beta
+
+            return double_gamma_5_irf_factory(
+                alpha_main=alpha_main,
+                alpha_undershoot=alpha_undershoot,
+                beta_main=beta_main,
+                beta_undershoot=beta_undershoot,
+                c=c,
+                support_ub=support_ub,
+                epsilon=epsilon,
+                session=session,
+                validate_irf_args=validate_irf_args
+            )
+
+
+def double_gamma_4_irf_factory(
+        alpha_main,
+        alpha_undershoot,
+        beta,
+        c,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None,
+        validate_irf_args=False
+):
+    """
+    Instantiate a double-gamma hemodynamic response function (HRF) for fMRI with four trainable parameters.
+
+    :param alpha_main: TF tensor; alpha (shape) parameter of peak response (alpha_main > 0).
+    :param alpha_undershoot: TF tensor; alpha (shape) parameter of undershoot component (alpha_undershoot > 0).
+    :param beta: TF tensor; beta (rate) parameter (beta > 0).
+    :param c: TF tensor; c parameter (amplitude of undershoot).
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :return: ``function``; the IRF
+    """
+
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            beta_main = beta
+            beta_undershoot = beta
+
+            return double_gamma_5_irf_factory(
+                alpha_main=alpha_main,
+                alpha_undershoot=alpha_undershoot,
+                beta_main=beta_main,
+                beta_undershoot=beta_undershoot,
+                c=c,
+                support_ub=support_ub,
+                epsilon=epsilon,
+                session=session,
+                validate_irf_args=validate_irf_args
+            )
+
+
+def double_gamma_5_irf_factory(
+        alpha_main,
+        alpha_undershoot,
+        beta_main,
+        beta_undershoot,
+        c,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None,
+        validate_irf_args=False
+):
+    """
+    Instantiate a double-gamma hemodynamic response function (HRF) for fMRI with five trainable parameters.
+
+    :param alpha_main: TF tensor; alpha (shape) parameter of peak response (alpha_main > 0).
+    :param alpha_undershoot: TF tensor; alpha (shape) parameter of undershoot component (alpha_undershoot > 0).
+    :param beta_main: TF tensor; beta (rate) parameter of peak response (beta_main > 0).
+    :param beta_undershoot: TF tensor; beta (rate) parameter of undershoot component (beta_undershoot > 0).
+    :param c: TF tensor; c parameter (amplitude of undershoot).
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :return: ``function``; the IRF
+    """
+
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
             dist_main = tf.contrib.distributions.Gamma(
                 concentration=alpha_main,
                 rate=beta_main,
@@ -363,447 +658,79 @@ def double_gamma_2_irf_lambdas(params, integral_ub=None, session=None, epsilon=4
             pdf_undershoot = dist_undershoot.prob
             cdf_undershoot = dist_undershoot.cdf
 
-            if integral_ub is None:
+            if support_ub is None:
                 norm_const = 1 - c
             else:
-                norm_const = cdf_main(integral_ub) - c * cdf_undershoot(integral_ub)
+                norm_const = cdf_main(support_ub) - c * cdf_undershoot(support_ub)
 
-            def irf(x, pdf_main=pdf_main, pdf_undershoot=pdf_undershoot, norm_const=norm_const, epsilon=epsilon):
+            def irf(x, pdf_main=pdf_main, pdf_undershoot=pdf_undershoot, c=c, norm_const=norm_const, epsilon=epsilon):
+                # Ensure proper broadcasting
+                while len(x.shape) > len(c.shape):
+                    c = c[None, ...]
+                while len(x.shape) > len(norm_const.shape):
+                    norm_const = norm_const[None, ...]
                 return (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (norm_const + epsilon)
 
-            def irf_proportion_in_bounds(x, cdf_main=cdf_main, cdf_undershoot=cdf_undershoot, norm_const=norm_const, epsilon=epsilon):
-                return (cdf_main(x + epsilon) - cdf_undershoot(x + epsilon)) / (norm_const + epsilon)
-
-            return irf, irf_proportion_in_bounds
+            return irf
 
 
-def double_gamma_3_irf_lambdas(params, integral_ub=None, session=None, epsilon=4 * np.finfo('float32').eps, validate_irf_args=False):
+def LCG_irf_factory(
+        bases,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None,
+        **params
+):
+    """
+    Instantiate a linear combination of Gaussians (LCG) impulse response function (IRF).
+
+    :param bases: ``int``; number of basis kernels in LCG.
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :param **params: ``tensors``; the LCG parameters. Must have ``3*bases`` total parameters with the following keyword names: x1, ..., xN, y1, ... yN, s1, ..., sN, where N stands for the value of **bases** and x, y, and s parameters respectively encode location, amplitude, and scale of the corresponding basis kernel.
+    :return: ``function``; the IRF
+    """
+
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
-            alpha_main = params[:, 0:1]
-            alpha_undershoot = alpha_main + 10.
-            beta_main = params[:, 1:2]
-            beta_undershoot = beta_main
-            c = params[:, 2:3]
+            # Build kernel locations
+            c = tf.stack([params['x%s' % i] for i in range(1, bases + 1)], -1)
 
-            dist_main = tf.contrib.distributions.Gamma(
-                concentration=alpha_main,
-                rate=beta_main,
-                validate_args=validate_irf_args
-            )
-            pdf_main = dist_main.prob
-            cdf_main = dist_main.cdf
-            dist_undershoot = tf.contrib.distributions.Gamma(
-                concentration=alpha_undershoot,
-                rate=beta_undershoot,
-                validate_args=validate_irf_args
-            )
-            pdf_undershoot = dist_undershoot.prob
-            cdf_undershoot = dist_undershoot.cdf
+            # Build kernel amplitudes
+            v = tf.stack([params['y%s' % i] for i in range(1, bases + 1)], -1)
 
-            if integral_ub is None:
-                norm_const = 1 - c
-            else:
-                norm_const = cdf_main(integral_ub) - c * cdf_undershoot(integral_ub)
-
-            def irf(x, pdf_main=pdf_main, pdf_undershoot=pdf_undershoot, norm_const=norm_const, epsilon=epsilon):
-                return (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (norm_const + epsilon)
-
-            def irf_proportion_in_bounds(x, cdf_main=cdf_main, cdf_undershoot=cdf_undershoot, norm_const=norm_const, epsilon=epsilon):
-                return (cdf_main(x + epsilon) - cdf_undershoot(x + epsilon)) / (norm_const + epsilon)
-
-            return irf, irf_proportion_in_bounds
-
-
-def double_gamma_4_irf_lambdas(params, integral_ub=None, session=None, epsilon=4 * np.finfo('float32').eps, validate_irf_args=False):
-    session = get_session(session)
-    with session.as_default():
-        with session.graph.as_default():
-            alpha_main = params[:, 0:1]
-            alpha_undershoot = params[:, 1:2]
-            beta_main = params[:, 2:3]
-            beta_undershoot = beta_main
-            c = params[:, 3:4]
-
-            dist_main = tf.contrib.distributions.Gamma(
-                concentration=alpha_main,
-                rate=beta_main,
-                validate_args=validate_irf_args
-            )
-            pdf_main = dist_main.prob
-            cdf_main = dist_main.cdf
-            dist_undershoot = tf.contrib.distributions.Gamma(
-                concentration=alpha_undershoot,
-                rate=beta_undershoot,
-                validate_args=validate_irf_args
-            )
-            pdf_undershoot = dist_undershoot.prob
-            cdf_undershoot = dist_undershoot.cdf
-
-            if integral_ub is None:
-                norm_const = 1 - c
-            else:
-                norm_const = cdf_main(integral_ub) - c * cdf_undershoot(integral_ub)
-
-            def irf(x, pdf_main=pdf_main, pdf_undershoot=pdf_undershoot, norm_const=norm_const, epsilon=epsilon):
-                return (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (norm_const + epsilon)
-
-            def irf_proportion_in_bounds(x, cdf_main=cdf_main, cdf_undershoot=cdf_undershoot, norm_const=norm_const, epsilon=epsilon):
-                return (cdf_main(x + epsilon) - cdf_undershoot(x + epsilon)) / (norm_const + epsilon)
-
-            return irf, irf_proportion_in_bounds
-
-
-def double_gamma_5_irf_lambdas(params, integral_ub=None, session=None, epsilon=4 * np.finfo('float32').eps, validate_irf_args=False):
-    session = get_session(session)
-    with session.as_default():
-        with session.graph.as_default():
-            alpha_main = params[:, 0:1]
-            alpha_undershoot = params[:, 1:2]
-            beta_main = params[:, 2:3]
-            beta_undershoot = params[:, 3:4]
-            c = params[:, 4:5]
-
-            dist_main = tf.contrib.distributions.Gamma(
-                concentration=alpha_main,
-                rate=beta_main,
-                validate_args=validate_irf_args
-            )
-            pdf_main = dist_main.prob
-            cdf_main = dist_main.cdf
-            dist_undershoot = tf.contrib.distributions.Gamma(
-                concentration=alpha_undershoot,
-                rate=beta_undershoot,
-                validate_args=validate_irf_args
-            )
-            pdf_undershoot = dist_undershoot.prob
-            cdf_undershoot = dist_undershoot.cdf
-
-            if integral_ub is None:
-                norm_const = 1 - c
-            else:
-                norm_const = cdf_main(integral_ub) - c * cdf_undershoot(integral_ub)
-
-            def irf(x, pdf_main=pdf_main, pdf_undershoot=pdf_undershoot, norm_const=norm_const, epsilon=epsilon):
-                return (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (norm_const + epsilon)
-
-            def irf_proportion_in_bounds(x, cdf_main=cdf_main, cdf_undershoot=cdf_undershoot, norm_const=norm_const, epsilon=epsilon):
-                return (cdf_main(x + epsilon) - cdf_undershoot(x)) / (norm_const + epsilon)
-
-            return irf, irf_proportion_in_bounds
-
-
-def piecewise_linear_interpolant(c, v, session=None):
-    # c: knot locations, shape=[B, Q, K], B = batch, Q = query points or 1, K = n knots
-    # v: knot values, shape identical to c
-    session = get_session(session)
-    with session.as_default():
-        with session.graph.as_default():
-            if len(c.shape) == 1:
-                # No batch or query dim
-                c = c[None, None, ...]
-            elif len(c.shape) == 2:
-                # No query dim
-                c = tf.expand_dims(c, axis=-2)
-            elif len(c.shape) > 3:
-                # Too many dims
-                raise ValueError('Rank of knot location tensor c to piecewise resampler must be >= 1 and <= 3. Saw "%d"' % len(c.shape))
-            if len(v.shape) == 1:
-                # No batch or query dim
-                v = v[None, None, ...]
-            elif len(v.shape) == 2:
-                # No query dim
-                v = tf.expand_dims(v, axis=-2)
-            elif len(v.shape) > 3:
-                # Too many dims
-                raise ValueError('Rank of knot amplitude tensor c to piecewise resampler must be >= 1 and <= 3. Saw "%d"' % len(v.shape))
-
-            c_t = c[..., 1:]
-            c_tm1 = c[..., :-1]
-            y_t = v[..., 1:]
-            y_tm1 = v[..., :-1]
-
-            # Compute intercepts a_ and slopes b_ of line segments
-            a_ = (y_t - y_tm1) / (c_t - c_tm1)
-            valid = c_t > c_tm1
-            a_ = tf.where(valid, a_, tf.zeros_like(a_))
-            b_ = y_t - a_ * c_t
-
-            # Handle points beyond final knot location (0 response)
-            a_ = tf.concat([a_, tf.zeros_like(a_[..., -1:])], axis=-1)
-            b_ = tf.concat([b_, tf.zeros_like(b_[..., -1:])], axis=-1)
-            c_ = tf.concat([c, tf.ones_like(c[..., -1:]) * np.inf], axis=-1)
-
-            def make_piecewise(a, b, c):
-                def select_segment(x, c):
-                    c_t = c[..., 1:]
-                    c_tm1 = c[..., :-1]
-                    select = tf.cast(tf.logical_and(x >= c_tm1, x < c_t), dtype=self.FLOAT_TF)
-                    return select
-
-                def piecewise(x):
-                    select = select_segment(x, c)
-                    # a_select = tf.reduce_sum(a * select, axis=-1, keepdims=True)
-                    # b_select = tf.reduce_sum(b * select, axis=-1, keepdims=True)
-                    # response = a_select * x + b_select
-                    response = tf.reduce_sum((a * x + b) * select, axis=-1, keepdims=True)
-                    return response
-
-                return piecewise
-
-            out = make_piecewise(a_, b_, c_)
-
-            return out
-
-
-def spline(c, v, dynamic_batch_dim, order, roughness_penalty=0., int_type=None, session=None):
-    session = get_session(session)
-    with session.as_default():
-        with session.graph.as_default():
-            if int_type is None:
-                INT_TF = getattr(tf, 'int32')
-            elif isinstance(int_type, str):
-                INT_TF = getattr(tf, int_type)
-            else:
-                INT_TF = int_type
-
-            def apply_spline(x):
-                x_ = x
-                if len(x_.shape) == 1:
-                    x_ = x_[None, :, None]
-                elif len(x_.shape) == 2:
-                    x_ = x_[None, ...]
-                if len(x_.shape) != 3:
-                    raise ValueError('Query to spline IRF must be exactly rank 3')
-
-                batch_max = tf.reduce_max(tf.stack([tf.shape(x_)[0], dynamic_batch_dim], axis=0))
-
-                x_batch = tf.shape(x_)[0]
-                x_tile = tf.cast(batch_max / x_batch, dtype=INT_TF)
-                x_ = tf.cond(x_tile > 1, lambda: tf.tile(x_, [x_tile, 1, 1]), lambda: x_)
-
-                splines = []
-
-                for i in range(len(c)):
-                    if order == 1:
-                        interp = piecewise_linear_interpolant(c[i], v[i], session=session)(x_)
-                    else:
-                        c_ = c[i]
-                        c_batch = tf.shape(c_)[0]
-                        c_tile = tf.cast(batch_max / c_batch, dtype=INT_TF)
-                        c_ = tf.tile(c_[..., None], [c_tile, 1, 1])
-
-                        v_ = v[i]
-                        y_batch = tf.shape(v_)[0]
-                        y_tile = tf.cast(batch_max / y_batch, dtype=INT_TF)
-                        v_ = tf.tile(v_[..., None], [y_tile, 1, 1])
-
-                        interp = tf.where(
-                            x_ <= c_[:,-1:],
-                            interpolate_spline(
-                                c_,
-                                v_,
-                                x_,
-                                order,
-                                regularization_weight=roughness_penalty
-                            ),
-                            tf.zeros_like(x_)
-                        )
-
-                        # interp = interpolate_spline(
-                        #     c_,
-                        #     y_,
-                        #     x_,
-                        #     order,
-                        #     regularization_weight=roughness_penalty
-                        # )
-
-                    splines.append(interp)
-
-                out = tf.concat(splines, axis=2)
-
-                return out
-
-            out = apply_spline
-
-            return out
-
-
-def kernel_smooth(c, v, b, kernel='gaussian', epsilon=4 * np.finfo('float32').eps, session=None):
-    def f(x, c=c, v=v, b=b, epsilon=epsilon, session=session):
-        session = get_session(session)
-        with session.as_default():
-            with session.graph.as_default():
-                _x = x
-                if len(x.shape) == 1:
-                    _x = _x[None, :, None]
-                elif len(x.shape) == 2:
-                    _x = _x[None, ...]
-                if len(_x.shape) != 3:
-                    raise ValueError('Query to kernel smooth IRF must be exactly rank 3')
-                _x = tf.expand_dims(_x, axis=-2)
-
-                _c = c
-                _b = b
-                _v = v
-
-                while len(_c.shape) < len(x.shape):
-                    _c = _c[None, ...]
-                while len(_b.shape) < len(x.shape):
-                    _b = _b[None, ...]
-                while len(_v.shape) < len(x.shape):
-                    _v = _v[None, ...]
-
-                _c = tf.expand_dims(_c, axis=-3)
-                _b = tf.expand_dims(_b, axis=-3)
-                _v = tf.expand_dims(_v, axis=-3)
-
-                _r = _x - _c
-
-                if kernel.lower() == 'gaussian':
-                    _r = tf.contrib.distributions.Normal(
-                        loc=_c,
-                        scale=_b
-                    ).prob(_r)
-                else:
-                    raise ValueError('Unrecognized smoother kernel "%s".' % kernel)
-
-                num = tf.reduce_sum(_r * _v, axis=-2)
-                denom = tf.reduce_sum(_r, axis=-2)
-
-                out = num / (denom + epsilon)
-
-                return out
-
-    return f
-
-
-def summed_gaussians(c, v, b, integral_ub=None, epsilon=4 * np.finfo('float32').eps, session=None):
-    session = get_session(session)
-    with session.as_default():
-        with session.graph.as_default():
-            _c = c
-            _b = b
-            _v = v
-
-            _c = tf.expand_dims(_c, axis=-3)
-            _b = tf.expand_dims(_b, axis=-3)
-            _v = tf.expand_dims(_v, axis=-3)
-
-            # _v *= _b * np.sqrt(2 * np.pi) # Rescale by Gaussian normalization constant
+            # Build kernel widths
+            b = tf.stack([params['s%s' % i] for i in range(1, bases + 1)], -1)
 
             dist = tf.contrib.distributions.Normal(
-                loc=_c,
-                scale=_b + epsilon,
+                loc=c,
+                scale=b + epsilon,
             )
+            pdf = dist.prob
             cdf = dist.cdf
 
-            if integral_ub is None:
+            if support_ub is None:
                 ub = 1.
             else:
-                ub = cdf(integral_ub)
-                
+                ub = cdf(support_ub)
+
             cdf_0 = cdf(0.)
 
-            norm_const = tf.reduce_sum((ub - cdf_0) * _v, axis=-2)
+            norm_const = tf.reduce_sum((ub - cdf_0) * v, axis=-1)
 
-            def irf(x, _v=_v, norm_const=norm_const, epsilon=epsilon):
-                _x = x
-                if len(x.shape) == 1:
-                    _x = _x[None, :, None]
-                elif len(x.shape) == 2:
-                    _x = _x[None, ...]
-                if len(_x.shape) != 3:
-                    raise ValueError('Query to summed gaussians IRF must be exactly rank 3')
-                _x = _x[..., None]
+            def irf(x, v=v, pdf=pdf, norm_const=norm_const, epsilon=epsilon):
+                # Ensure proper broadcasting
+                x = x[..., None] # Add a summation axis
+                while len(x.shape) > len(v.shape):
+                    v = v[None, ...]
+                while len(x.shape) - 1 > len(norm_const.shape):
+                    norm_const = norm_const[None, ...]
 
-                return tf.reduce_sum(dist.prob(_x) * _v, axis=-2) / (norm_const + epsilon)
-            
-            def irf_proportion_in_bounds(x, cdf=cdf, cdf_0=cdf_0, _v=_v, norm_const=norm_const, epsilon=epsilon):
-                return (tf.reduce_sum((ub - cdf(x)) * _v, axis=-2) - tf.reduce_sum(cdf_0 * _v, axis=-2)) / (norm_const + epsilon)
+                return tf.reduce_sum(pdf(x) * v, axis=-1) / (norm_const + epsilon)
 
-            return irf, irf_proportion_in_bounds
-
-
-def nonparametric_smooth(
-        method,
-        params,
-        bases,
-        integral_ub=None,
-        support=None,
-        epsilon=4 * np.finfo('float32').eps,
-        int_type=None,
-        float_type=None,
-        session=None,
-        **kwargs
-):
-    session = get_session(session)
-    with session.as_default():
-        with session.graph.as_default():
-            if int_type is None:
-                INT_TF = getattr(tf, 'int32')
-            elif isinstance(float_type, str):
-                INT_TF = getattr(tf, int_type)
-            else:
-                INT_TF = int_type
-
-            if float_type is None:
-                FLOAT_TF = getattr(tf, 'float32')
-            elif isinstance(float_type, str):
-                FLOAT_TF = getattr(tf, float_type)
-            else:
-                FLOAT_TF = float_type
-
-            # Build control point locations
-            c = params[:, 0:bases]
-
-            # Build values at control points
-            v = params[:, bases:2 * bases]
-
-            if method.lower() == 'spline': # Pad appropriately
-                # c = tf.cumsum(c, axis=1)
-                c = tf.unstack(c, axis=2)
-                v = tf.unstack(v, axis=2)
-
-                assert len(c) == len(
-                    v), 'c and y coordinates of spline unpacked into lists of different lengths (%s and %s, respectively)' % (
-                    len(c), len(v))
-
-                dynamic_batch_dim = tf.shape(params)[0]
-
-                f = spline(
-                    c,
-                    v,
-                    dynamic_batch_dim,
-                    kwargs['order'],
-                    roughness_penalty=kwargs['roughness_penalty'],
-                    int_type=INT_TF,
-                    session=session
-                )
-
-                assert support is not None, 'Argument ``support`` must be provided for spline IRFs'
-
-                def out(x, f=f, session=session, integral_ub=integral_ub, epsilon=epsilon):
-                    return f(x) / (empirical_integral(integral_ub, session=session) + epsilon), lambda x: empirical_integral(x, session=session)
-
-            else:
-                # Build scales at control points
-                b = params[:, 2 * bases:]
-                if method.lower() == 'kernel_smooth':
-                    f = kernel_smooth(c, v, b, epsilon=epsilon, session=session)
-                    assert support is not None, 'Argument ``support`` must be provided for kernel smooth IRFS'
-
-                    def out(x, f=f, session=session, integral_ub=integral_ub, epsilon=epsilon):
-                        return f(x) / (empirical_integral(integral_ub, session=session) + epsilon), lambda x: empirical_integral(x, session=session)
-
-                elif method.lower() == 'summed_gaussians':
-                    out = summed_gaussians(c, v, b, integral_ub=integral_ub, epsilon=epsilon, session=session)
-
-                else:
-                    raise ValueError('Unrecognized non-parametric IRF type: %s' % method)
-
-            return out
+            return irf
 
 
 class CDR(Model):
@@ -815,10 +742,6 @@ class CDR(Model):
         ``CDR`` is not a complete implementation and cannot be instantiated.
         Subclasses of ``CDR`` must implement the following instance methods:
         
-            * ``initialize_intercept()``
-            * ``initialize_coefficient()``
-            * ``initialize_irf_param_unconstrained()``
-            * ``initialize_joint_distribution()``
             * ``initialize_objective()``
             * ``run_conv_op()``
             * ``run_loglik_op()``
@@ -856,16 +779,96 @@ class CDR(Model):
     #
     ######################################################
 
+    IRF_KERNELS = {
+        'DiracDelta': [],
+        'Exp': [
+            ('beta', {'lb': 0., 'default': 1.})
+        ],
+        'ExpRateGT1': [
+            ('beta', {'lb': 1., 'default': 2.})
+        ],
+        'Gamma': [
+            ('alpha', {'lb': 0., 'default': 1.}),
+            ('beta', {'lb': 0., 'default': 1.})
+        ],
+        'GammaShapeGT1': [
+            ('alpha', {'lb': 1., 'default': 2.}),
+            ('beta', {'lb': 0., 'default': 1.})
+        ],
+        'ShiftedGamma': [
+            ('alpha', {'lb': 0., 'default': 2.}),
+            ('beta', {'lb': 0., 'default': 1.}),
+            ('delta', {'ub': 0., 'default': -1.})
+        ],
+        'ShiftedGammaShapeGT1': [
+            ('alpha', {'lb': 1., 'default': 2.}),
+            ('beta', {'lb': 0., 'default': 1.}),
+            ('delta', {'ub': 0., 'default': -1.})
+        ],
+        'Normal': [
+            ('mu', {'default': 0.}),
+            ('sigma', {'lb': 0., 'default': 1.})
+        ],
+        'SkewNormal': [
+            ('mu', {'default': 0.}),
+            ('sigma', {'lb': 0., 'default': 1.}),
+            ('alpha', {'default': 0.})
+        ],
+        'EMG': [
+            ('mu', {'default': 0.}),
+            ('sigma', {'lb': 0., 'default': 1.}),
+            ('beta', {'lb': 0., 'default': 1.})
+        ],
+        'BetaPrime': [
+            ('alpha', {'lb': 0., 'default': 1.}),
+            ('beta', {'lb': 0., 'default': 1.})
+        ],
+        'ShiftedBetaPrime': [
+            ('alpha', {'lb': 0., 'default': 1.}),
+            ('beta', {'lb': 0., 'default': 1.}),
+            ('delta', {'ub': 0., 'default': -1.})
+        ],
+        'HRFSingleGamma': [
+            ('alpha', {'lb': 1., 'default': 6.}),
+            ('beta', {'lb': 0., 'default': 1.})
+        ],
+        'HRFDoubleGamma1': [
+            ('beta', {'lb': 0., 'default': 1.})
+        ],
+        'HRFDoubleGamma2': [
+            ('alpha', {'lb': 1., 'default': 6.}),
+            ('beta', {'lb': 0., 'default': 1.})
+        ],
+        'HRFDoubleGamma3': [
+            ('alpha', {'lb': 1., 'default': 6.}),
+            ('beta', {'lb': 0., 'default': 1.}),
+            ('c', {'default': 1./6.})
+        ],
+        'HRFDoubleGamma4': [
+            ('alpha_main', {'lb': 1., 'default': 6.}),
+            ('alpha_undershoot', {'lb': 1., 'default': 16.}),
+            ('beta', {'lb': 0., 'default': 1.}),
+            ('c', {'default': 1./6.})
+        ],
+        'HRFDoubleGamma5': [
+            ('alpha_main', {'lb': 1., 'default': 6.}),
+            ('alpha_undershoot', {'lb': 1., 'default': 16.}),
+            ('beta_main', {'lb': 0., 'default': 1.}),
+            ('beta_undershoot', {'lb': 0., 'default': 1.}),
+            ('c', {'default': 1./6.})
+        ],
+    }
+
     def __new__(cls, *args, **kwargs):
         if cls is CDR:
             raise TypeError("CDR is an abstract class and may not be instantiated")
         return object.__new__(cls)
 
-    def __init__(self, form_str, X, y, **kwargs):
+    def __init__(self, form_str, X, Y, **kwargs):
         super(CDR, self).__init__(
             form_str,
             X,
-            y,
+            Y,
             **kwargs
         )
 
@@ -875,33 +878,7 @@ class CDR(Model):
     def _initialize_metadata(self):
         super(CDR, self)._initialize_metadata()
 
-        # Initialize lookup tables of network objects
-        self.irf_lambdas = {}
-        self.irf_params_means = {} # {family: {param_name: mean_vector}}
-        self.irf_params_means_unconstrained = {} # {family: {param_name: mean_init_vector}}
-        self.irf_params_random_means = {} # {rangf: {family: {param_name: mean_vector}}}
-        self.irf_params_lb = {} # {family: {param_name: value}}
-        self.irf_params_ub = {} # {family: {param_name: value}}
-        self.irf_params = {} # {irf_id: param_vector}
-        self.irf_params_summary = {} # {irf_id: param_summary_vector}
-        self.irf_params_fixed = {} # {irf_id: param_vector}
-        self.irf_params_fixed_summary = {} # {irf_id: param_summary_vector}
-        self.irf_params_fixed_base = {}  # {family: {param_name: param_vector}}
-        self.irf_params_fixed_base_summary = {}  # {family: {param_name: param_summary_vector}}
-        self.irf_params_random = {} # {rangf: {irf_id: param_matrix}}
-        self.irf_params_random_summary = {} # {rangf: {irf_id: param_matrix}}
-        self.irf_params_random_base = {}  # {rangf: {family: {irf_id: param_matrix}}
-        self.irf_params_random_base_summary = {}  # {rangf: {family: {irf_id: param_summary_matrix}}
-        self.irf = {}
-        self.irf_proportion_in_bounds = {}
-        self.irf_proportion_in_bounds_mc = {}
-        self.irf_plot = {}
-        self.irf_integral_tensors = {}
-        self.irf_impulses = {}
-        self.convolutions = {}
-
         # Initialize model metadata
-
         self.t = self.form.t
         t = self.t
         self.node_table = t.node_table()
@@ -933,6 +910,8 @@ class CDR(Model):
         self.irf_by_rangf = t.irf_by_rangf()
         self.interactions_list = t.interactions()
 
+        self.irf = {}
+
     def __getstate__(self):
         md = self._pack_metadata()
         return md
@@ -959,18 +938,16 @@ class CDR(Model):
             setattr(self, kwarg.key, md.pop(kwarg.key, kwarg.default_value))
 
 
-
-
     ######################################################
     #
     #  Network Initialization
     #
     ######################################################
 
-    def _initialize_cdr_inputs(self):
+    def _initialize_inputs(self):
+        super(CDR, self)._initialize_inputs()
         with self.sess.as_default():
-                X = self.X_processed
-
+            with self.sess.graph.as_default():
                 self.is_response_aligned = tf.cast(
                     tf.logical_not(
                         tf.cast(self.t_delta[:, -1, :], dtype=tf.bool)
@@ -987,1469 +964,767 @@ class CDR(Model):
     def _initialize_base_params(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-
-                # FIXED EFFECTS
-
-                # Intercept
-                if self.has_intercept[None]:
-                    if not self.covarying_fixef:
-                        self.intercept_fixed_base, self.intercept_fixed_base_summary = self.initialize_intercept()
-                else:
-                    self.intercept_fixed_base = tf.constant(0., dtype=self.FLOAT_TF, name='intercept')
-                self.intercept_random_base = {}
-                self.intercept_random_base_summary = {}
+                super(CDR, self)._initialize_base_params()
 
                 # Coefficients
-                coef_ids = self.fixed_coef_names
-                if len(coef_ids) > 0 and not self.covarying_fixef:
-                    self.coefficient_fixed_base, self.coefficient_fixed_base_summary = self.initialize_coefficient(coef_ids=coef_ids)
-                else:
-                    self.coefficient_fixed_base = []
-                    self.coefficient_fixed_base_summary = []
+                # Key order: response, ?(ran_gf)
+                self.coefficient_fixed_base = {}
+                self.coefficient_fixed_base_summary = {}
                 self.coefficient_random_base = {}
                 self.coefficient_random_base_summary = {}
+                for response in self.response_names:
+                    # Fixed
+                    coef_ids = self.fixed_coef_names
+                    if len(coef_ids) > 0:
+                        _coefficient_fixed_base, _coefficient_fixed_base_summary = self.initialize_coefficient(
+                            response,
+                            coef_ids=coef_ids
+                        )
+                    else:
+                        _coefficient_fixed_base = []
+                        _coefficient_fixed_base_summary = []
+                    self.coefficient_fixed_base[response] = _coefficient_fixed_base
+                    self.coefficient_fixed_base_summary[response] = _coefficient_fixed_base_summary
+
+                    # Random
+                    for gf in self.rangf:
+                        coef_ids = self.coef_by_rangf.get(gf, [])
+                        if len(coef_ids):
+                            _coefficient_random_base, _coefficient_random_base_summary = self.initialize_coefficient(
+                                response,
+                                coef_ids=coef_ids,
+                                ran_gf=gf
+                            )
+                            if response not in self.coefficient_random_base:
+                                self.coefficient_random_base[response] = {}
+                            if response not in self.coefficient_random_base_summary:
+                                self.coefficient_random_base_summary[response] = {}
+                            self.coefficient_random_base[response][gf] = _coefficient_random_base
+                            self.coefficient_random_base_summary[response][gf] = _coefficient_random_base_summary
 
                 # Interactions
-                if len(self.interaction_names) > 0:
-                    interaction_ids = self.fixed_interaction_names
-                    if len(interaction_ids) > 0 and not self.covarying_fixef:
-                        self.interaction_fixed_base, self.interaction_fixed_base_summary = self.initialize_interaction(interaction_ids=interaction_ids)
-                        self.interaction_random_base = {}
-                        self.interaction_random_base_summary = {}
+                # Key order: response, ?(ran_gf)
+                self.interaction_fixed_base = {}
+                self.interaction_fixed_base_summary = {}
+                self.interaction_random_base = {}
+                self.interaction_random_base_summary = {}
+                for response in self.response_names:
+                    if len(self.interaction_names):
+                        interaction_ids = self.fixed_interaction_names
+                        if len(interaction_ids):
+                            # Fixed
+                            _interaction_fixed_base, _interaction_fixed_base_summary = self.initialize_interaction(
+                                response,
+                                interaction_ids=interaction_ids
+                            )
+                            self.interaction_fixed_base[response] = _interaction_fixed_base
+                            self.interaction_fixed_base_summary[response] = _interaction_fixed_base_summary
 
-                # RANDOM EFFECTS
+                        # Random
+                        for gf in self.rangf:
+                            interaction_ids = self.interaction_by_rangf.get(gf, [])
+                            if len(interaction_ids):
+                                _interaction_random_base, _interaction_random_base_summary = self.initialize_interaction(
+                                    response,
+                                    interaction_ids=interaction_ids,
+                                    ran_gf=gf
+                                )
+                                if response not in self.interaction_random_base:
+                                    self.interaction_random_base[response] = {}
+                                if response not in self.interaction_random_base_summary:
+                                    self.interaction_random_base_summary[response] = {}
+                                self.interaction_random_base[response][gf] = _interaction_random_base
+                                self.interaction_random_base_summary[response][gf] = _interaction_random_base_summary
 
-                for i in range(len(self.rangf)):
-                    gf = self.rangf[i]
-
-                    # Intercept
-                    if self.has_intercept[gf]:
-                        if not self.covarying_ranef:
-                            self.intercept_random_base[gf], self.intercept_random_base_summary[gf] = self.initialize_intercept(ran_gf=gf)
-
-                    # Coefficients
-                    coef_ids = self.coef_by_rangf.get(gf, [])
-                    if len(coef_ids) > 0 and not self.covarying_ranef:
-                        self.coefficient_random_base[gf], self.coefficient_random_base_summary[gf] = self.initialize_coefficient(
-                            coef_ids=coef_ids,
-                            ran_gf=gf,
-                        )
-
-                    # Interactions
-                    interaction_ids = self.interaction_by_rangf.get(gf, [])
-                    if len(interaction_ids) > 0 and not self.covarying_ranef:
-                        self.interaction_random_base[gf], self.interaction_random_base_summary[
-                            gf] = self.initialize_interaction(
-                            interaction_ids=interaction_ids,
-                            ran_gf=gf,
-                        )
-
-                # All IRF parameters
+                # IRF parameters
+                # Key order: family, param
+                self.irf_params_means = {}
+                self.irf_params_means_unconstrained = {}
+                self.irf_params_lb = {}
+                self.irf_params_ub = {}
+                self.irf_params_trainable_ix = {}
+                self.irf_params_untrainable_ix = {}
+                # Key order: response, ?(ran_gf,) family, param
+                self.irf_params_fixed_base = {}
+                self.irf_params_fixed_base_summary = {}
+                self.irf_params_random_base = {}
+                self.irf_params_random_base_summary = {}
                 for family in self.atomic_irf_names_by_family:
-                    if family == 'DiracDelta':
-                        continue
+                    # Collect metadata for IRF params
+                    self.irf_params_means[family] = {}
+                    self.irf_params_means_unconstrained[family] = {}
+                    self.irf_params_lb[family] = {}
+                    self.irf_params_ub[family] = {}
+                    self.irf_params_trainable_ix[family] = {}
+                    self.irf_params_untrainable_ix[family] = {}
 
-                    elif family == 'Exp':
-                        self._initialize_base_irf_param('beta', family, lb=0., default=1.)
-
-                    elif family == 'ExpRateGT1':
-                        self._initialize_base_irf_param('beta', family, lb=1., default=2.)
-
-                    elif family == 'Gamma':
-                        self._initialize_base_irf_param('alpha', family, lb=0., default=1.)
-                        self._initialize_base_irf_param('beta', family, lb=0., default=1.)
-
-                    elif family in ['GammaKgt1', 'GammaShapeGT1']:
-                        self._initialize_base_irf_param('alpha', family, lb=1., default=2.)
-                        self._initialize_base_irf_param('beta', family, lb=0., default=1.)
-
-                    elif family == 'ShiftedGamma':
-                        self._initialize_base_irf_param('alpha', family, lb=0., default=2.)
-                        self._initialize_base_irf_param('beta', family, lb=0., default=1.)
-                        self._initialize_base_irf_param('delta', family, ub=0., default=-1.)
-
-                    elif family in ['ShiftedGammaKgt1', 'ShiftedGammaShapeGT1']:
-                        self._initialize_base_irf_param('alpha', family, lb=1., default=2.)
-                        self._initialize_base_irf_param('beta', family, lb=0., default=1.)
-                        self._initialize_base_irf_param('delta', family, ub=0., default=-1.)
-
-                    elif family == 'Normal':
-                        self._initialize_base_irf_param('mu', family, default=0.)
-                        self._initialize_base_irf_param('sigma2', family, lb=0., default=1.)
-
-                    elif family == 'SkewNormal':
-                        self._initialize_base_irf_param('mu', family, default=0.)
-                        self._initialize_base_irf_param('sigma', family, lb=0., default=1.)
-                        self._initialize_base_irf_param('alpha', family, default=1.)
-
-                    elif family == 'EMG':
-                        self._initialize_base_irf_param('mu', family, default=0.)
-                        self._initialize_base_irf_param('sigma', family, lb=0., default=1.)
-                        self._initialize_base_irf_param('beta', family, lb=0., default=1.)
-
-                    elif family == 'BetaPrime':
-                        self._initialize_base_irf_param('alpha', family, lb=0., default=1.)
-                        self._initialize_base_irf_param('beta', family, lb=0., default=1.)
-
-                    elif family == 'ShiftedBetaPrime':
-                        self._initialize_base_irf_param('alpha', family, lb=0., default=1.)
-                        self._initialize_base_irf_param('beta', family, lb=0., default=1.)
-                        self._initialize_base_irf_param('delta', family, ub=0., default=-1.)
-
-                    elif family == 'HRFSingleGamma':
-                        self._initialize_base_irf_param('alpha', family, lb=1., default=6.)
-                        self._initialize_base_irf_param('beta', family, lb=0., default=1.)
-
-                    elif family == 'HRFDoubleGamma1':
-                        self._initialize_base_irf_param('beta', family, lb=0., default=1.)
-
-                    elif family == 'HRFDoubleGamma2':
-                        self._initialize_base_irf_param('alpha', family, lb=1., default=6.)
-                        self._initialize_base_irf_param('beta', family, lb=0., default=1.)
-
-                    elif family == 'HRFDoubleGamma3':
-                        self._initialize_base_irf_param('alpha', family, lb=1., default=6.)
-                        self._initialize_base_irf_param('beta', family, lb=0., default=1.)
-                        self._initialize_base_irf_param('c', family, default=1./6.)
-
-                    elif family == 'HRFDoubleGamma4':
-                        self._initialize_base_irf_param('alpha_main', family, lb=1., default=6.)
-                        self._initialize_base_irf_param('alpha_undershoot', family, lb=1., default=16.)
-                        self._initialize_base_irf_param('beta', family, lb=0., default=1.)
-                        self._initialize_base_irf_param('c', family, default=1./6.)
-
-                    elif family in ['HRFDoubleGamma', 'HRFDoubleGamma5']:
-                        self._initialize_base_irf_param('alpha_main', family, lb=1., default=6.)
-                        self._initialize_base_irf_param('alpha_undershoot', family, lb=1., default=16.)
-                        self._initialize_base_irf_param('beta_main', family, lb=0., default=1.)
-                        self._initialize_base_irf_param('beta_undershoot', family, lb=0., default=1.)
-                        self._initialize_base_irf_param('c', family, default=1./6.)
-
-                    elif family == 'HRFDoubleGammaUnconstrained':
-                        self._initialize_base_irf_param('alpha_main', family, lb=1., default=6.)
-                        self._initialize_base_irf_param('alpha_undershoot', family, lb=0., default=16.)
-                        self._initialize_base_irf_param('beta_main', family, lb=0., default=1.)
-                        self._initialize_base_irf_param('beta_undershoot', family, lb=0., default=1.)
-                        self._initialize_base_irf_param('c', family, default=1./6.)
-
-                    elif Formula.nonparametric_type(family):
-                        np_type = Formula.nonparametric_type(family)
-                        bases = Formula.bases(family)
-                        spacing_power = Formula.spacing_power(family)
-                        if spacing_power == 0:
-                            x_init = np.zeros(bases)
-                        else:
-                            x_init = np.concatenate([[0.], np.cumsum(np.ones(bases-1)) ** spacing_power], axis=0)
-
-                            time_limit = Formula.time_limit(family)
-                            if time_limit is None:
-                                time_limit = self.t_delta_limit
-                            x_init *= time_limit / x_init[-1]
-                            # x_init[1:] -= x_init[:-1]
-
-                        for param_name in Formula.irf_params(family):
-                            if param_name.startswith('x'):
-                                n = int(param_name[1:])
-                                default = x_init[n-1]
-                                lb = None
-                            elif param_name.startswith('y'):
-                                n = int(param_name[1:])
-                                if n == 1:
-                                    default = 1
-                                else:
-                                    default = 0
-                                lb = None
-                            else:
-                                n = int(param_name[1:])
-                                if np_type == 'G':
-                                    default = n
-                                else:
-                                    default = 1
-                                lb = 0
-                            self._initialize_base_irf_param(param_name, family, default=default, lb=lb)
-
+                    param_names = []
+                    param_kwargs = []
+                    if family in self.IRF_KERNELS:
+                        for x in self.IRF_KERNELS[family]:
+                            param_names.append(x[0])
+                            param_kwargs.append(x[1])
+                    elif Formula.is_LCG(family):
+                        _param_names, _param_kwargs = self._get_nonparametric_irf_params(family)
+                        param_names += _param_names
+                        param_kwargs += _param_kwargs
                     else:
                         raise ValueError('Unrecognized IRF kernel family "%s".' % family)
 
-    def _initialize_intercepts_coefficients_interactions(self):
+                    # Process and store metadata for IRF params
+                    for _param_name, _param_kwargs in zip(param_names, param_kwargs):
+                        param_mean, param_mean_unconstrained, param_lb, param_ub, trainable_ix, \
+                            untrainable_ix = self._get_irf_param_metadata(_param_name, family, **_param_kwargs)
+
+                        self.irf_params_means[family][_param_name] = param_mean
+                        self.irf_params_means_unconstrained[family][_param_name] = param_mean_unconstrained
+                        self.irf_params_lb[family][_param_name] = param_lb
+                        self.irf_params_ub[family][_param_name] = param_ub
+                        self.irf_params_trainable_ix[family][_param_name] = trainable_ix
+                        self.irf_params_untrainable_ix[family][_param_name] = untrainable_ix
+
+                    # Initialize IRF params
+                    for response in self.response_names:
+                        for _param_name in param_names:
+                            # Fixed
+                            _param, _param_summary = self.initialize_irf_param(
+                                response,
+                                family,
+                                _param_name
+                            )
+                            if _param is not None:
+                                if response not in self.irf_params_fixed_base:
+                                    self.irf_params_fixed_base[response] = {}
+                                if family not in self.irf_params_fixed_base[response]:
+                                    self.irf_params_fixed_base[response][family] = {}
+                                if response not in self.irf_params_fixed_base_summary:
+                                    self.irf_params_fixed_base_summary[response] = {}
+                                if family not in self.irf_params_fixed_base_summary[response]:
+                                    self.irf_params_fixed_base_summary[response][family] = {}
+                                self.irf_params_fixed_base[response][family][_param_name] = _param
+                                self.irf_params_fixed_base_summary[response][family][_param_name] = _param
+
+                            # Random
+                            for gf in self.irf_by_rangf:
+                                _param, _param_summary = self.initialize_irf_param(
+                                    response,
+                                    family,
+                                    _param_name,
+                                    ran_gf=gf
+                                )
+                                if _param is not None:
+                                    if response not in self.irf_params_random_base:
+                                        self.irf_params_random_base[response] = {}
+                                    if gf not in self.irf_params_random_base[response]:
+                                        self.irf_params_random_base[response][gf] = {}
+                                    if family not in self.irf_params_random_base[response][gf]:
+                                        self.irf_params_random_base[response][gf][family] = {}
+                                    if response not in self.irf_params_random_base_summary:
+                                        self.irf_params_random_base_summary[response] = {}
+                                    if gf not in self.irf_params_random_base_summary[response]:
+                                        self.irf_params_random_base_summary[response][gf] = {}
+                                    if family not in self.irf_params_random_base_summary[response][gf]:
+                                        self.irf_params_random_base_summary[response][gf][family] = {}
+                                    self.irf_params_random_base[response][gf][family][_param_name] = _param
+                                    self.irf_params_random_base_summary[response][gf][family][_param_name] = _param_summary
+
+    def _get_nonparametric_irf_params(self, family):
+        param_names = []
+        param_kwargs = []
+        bases = Formula.bases(family)
+        x_init = np.zeros(bases)
+
+        for _param_name in Formula.irf_params(family):
+            _param_kwargs = {}
+            if _param_name.startswith('x'):
+                n = int(_param_name[1:])
+                _param_kwargs['default'] = x_init[n - 1]
+                _param_kwargs['lb'] = None
+            elif _param_name.startswith('y'):
+                n = int(_param_name[1:])
+                if n == 1:
+                    _param_kwargs['default'] = 1.
+                else:
+                    _param_kwargs['default'] = 0.
+                _param_kwargs['lb'] = None
+            else:
+                n = int(_param_name[1:])
+                _param_kwargs['default'] = n
+                _param_kwargs['lb'] = 0.
+            param_names.append(_param_name)
+            param_kwargs.append(_param_kwargs)
+
+        return param_names, param_kwargs
+
+    def _get_irf_param_metadata(self, param_name, family, lb=None, ub=None, default=0.):
+        irf_ids = self.atomic_irf_names_by_family[family]
+        param_init = self.atomic_irf_param_init_by_family[family]
+        param_trainable = self.atomic_irf_param_trainable_by_family[family]
+
+        # Process and store initial/prior means
+        param_mean = self._get_mean_init_vector(irf_ids, param_name, param_init, default=default)
+        param_mean_unconstrained, param_lb, param_ub = self._process_mean(param_mean, lb=lb, ub=ub)
+
+        # Select out irf IDs for which this param is trainable
+        trainable_ix, untrainable_ix = self._get_trainable_untrainable_ix(
+            param_name,
+            irf_ids,
+            trainable=param_trainable
+        )
+
+        return param_mean, param_mean_unconstrained, param_lb, param_ub, trainable_ix, untrainable_ix
+
+    def _compile_coefficients(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-
-                # FIXED EFFECTS
-
-                # Intercept
-                if self.has_intercept[None]:
-                    self.intercept_fixed = self.intercept_fixed_base
-                    self.intercept_fixed_summary = self.intercept_fixed_base_summary
-                    tf.summary.scalar(
-                        'intercept',
-                        self.intercept_fixed_summary,
-                        collections=['params']
-                    )
-                    self._regularize(self.intercept_fixed, regtype='intercept', var_name='intercept')
-                    if self.convergence_basis.lower() == 'parameters':
-                        self._add_convergence_tracker(self.intercept_fixed_summary, 'intercept_fixed')
-
-                else:
-                    self.intercept_fixed = self.intercept_fixed_base
-
-                self.intercept = self.intercept_fixed
-                self.intercept_summary = self.intercept_fixed_summary
-                self.intercept_random = {}
-                self.intercept_random_summary = {}
-                self.intercept_random_means = {}
-
-
-                # COEFFICIENTS
-                fixef_ix = names2ix(self.fixed_coef_names, self.coef_names)
-                coef_ids = self.coef_names
-                self.coefficient_fixed = self._scatter_along_axis(
-                    fixef_ix,
-                    self.coefficient_fixed_base,
-                    [len(coef_ids)]
-                )
-                self.coefficient_fixed_summary = self._scatter_along_axis(
-                    fixef_ix,
-                    self.coefficient_fixed_base_summary,
-                    [len(coef_ids)]
-                )
-                self._regularize(self.coefficient_fixed_base, regtype='coefficient', var_name='coefficient')
-                if self.convergence_basis.lower() == 'parameters':
-                    self._add_convergence_tracker(self.coefficient_fixed_base_summary, 'coefficient_fixed')
-
-                for i in range(len(self.fixed_coef_names)):
-                    tf.summary.scalar(
-                        'coefficient' + '/%s' % self.fixed_coef_names[i],
-                        self.coefficient_fixed_base_summary[i],
-                        collections=['params']
-                    )
-
-                self.coefficient = self.coefficient_fixed
-                self.coefficient_summary = self.coefficient_fixed_summary
+                self.coefficient = {}
+                self.coefficient_summary = {}
+                self.coefficient_fixed = {}
+                self.coefficient_fixed_summary = {}
                 self.coefficient_random = {}
                 self.coefficient_random_summary = {}
-                self.coefficient_random_means = {}
-                self.coefficient = tf.expand_dims(self.coefficient, 0)
-                self.coefficient_summary = tf.expand_dims(self.coefficient_summary, 0)
+                for response in self.response_names:
+                    response_params = self.predictive_distribution_config[response]['params']
+                    if not self.use_distributional_regression:
+                        response_params = response_params[:1]
+                    nparam = len(response_params)
+                    ndim = self.response_n_dim[response]
+                    fixef_ix = names2ix(self.fixed_coef_names, self.coef_names)
+                    coef_ids = self.coef_names
 
-                # INTERACTIONS
-                fixef_ix = names2ix(self.fixed_interaction_names, self.interaction_names)
-                if len(self.interaction_names) > 0:
-                    interaction_ids = self.interaction_names
-                    self.interaction_fixed = self._scatter_along_axis(
+                    coefficient_fixed = self._scatter_along_axis(
                         fixef_ix,
-                        self.interaction_fixed_base,
-                        [len(interaction_ids)]
+                        self.coefficient_fixed_base[response],
+                        [len(coef_ids), nparam, ndim]
                     )
-                    self.interaction_fixed_summary = self._scatter_along_axis(
+                    coefficient_fixed_summary = self._scatter_along_axis(
                         fixef_ix,
-                        self.interaction_fixed_base_summary,
-                        [len(interaction_ids)]
+                        self.coefficient_fixed_base_summary[response],
+                        [len(coef_ids), nparam, ndim]
                     )
-                    self._regularize(self.interaction_fixed, regtype='coefficient', var_name='interaction')
-                    if self.convergence_basis.lower() == 'parameters':
-                        self._add_convergence_tracker(self.interaction_fixed_summary, 'interaction_fixed')
+                    self._regularize(self.coefficient_fixed_base[response], regtype='coefficient', var_name='coefficient_%s' % response)
 
-                    for i in range(len(self.interaction_names)):
-                        tf.summary.scalar(
-                            sn('interaction' + '/%s' % self.interaction_names[i]),
-                            self.interaction_fixed_summary[i],
-                            collections=['params']
-                        )
-                    self.interaction = self.interaction_fixed
-                    self.interaction_summary = self.interaction_fixed_summary
-                    self.interaction_random = {}
-                    self.interaction_random_summary = {}
-                    self.interaction_random_means = {}
-                    self.interaction = tf.expand_dims(self.interaction, 0)
+                    self.coefficient_fixed[response] = coefficient_fixed
+                    self.coefficient_fixed_summary[response] = coefficient_fixed_summary
 
-                # RANDOM EFFECTS
-                for i in range(len(self.rangf)):
-                    gf = self.rangf[i]
-                    levels_ix = np.arange(self.rangf_n_levels[i] - 1)
+                    coefficient = coefficient_fixed
+                    coefficient_summary = coefficient_fixed_summary
 
-                    # Random intercepts
-                    if self.has_intercept[gf]:
-                        intercept_random = self.intercept_random_base[gf]
-                        intercept_random_summary = self.intercept_random_base_summary[gf]
-
-                        intercept_random_means = tf.reduce_mean(intercept_random, axis=0, keepdims=True)
-                        intercept_random_summary_means = tf.reduce_mean(intercept_random_summary, axis=0, keepdims=True)
-
-                        intercept_random -= intercept_random_means
-                        intercept_random_summary -= intercept_random_summary_means
-
-                        self._regularize(intercept_random, regtype='ranef', var_name='intercept_by_%s' % gf)
-
-                        intercept_random = self._scatter_along_axis(
-                            levels_ix,
-                            intercept_random,
-                            [self.rangf_n_levels[i]]
-                        )
-                        intercept_random_summary = self._scatter_along_axis(
-                            levels_ix,
-                            intercept_random_summary,
-                            [self.rangf_n_levels[i]]
-                        )
-
-                        self.intercept_random[gf] = intercept_random
-                        self.intercept_random_summary[gf] = intercept_random_summary
-                        self.intercept_random_means[gf] = tf.reduce_mean(intercept_random_summary, axis=0)
-
-                        # Create record for convergence tracking
-                        if self.convergence_basis.lower() == 'parameters':
-                            self._add_convergence_tracker(self.intercept_random_summary[gf], 'intercept_by_%s' %gf)
-
-                        self.intercept += tf.gather(intercept_random, self.gf_y[:, i])
-                        self.intercept_summary += tf.gather(intercept_random_summary, self.gf_y[:, i])
-
-                        if self.log_random:
-                            tf.summary.histogram(
-                                sn('by_%s/intercept' % gf),
-                                intercept_random_summary,
-                                collections=['random']
-                            )
-
-                    # Random coefficients
-                    coefs = self.coef_by_rangf.get(gf, [])
-                    if len(coefs) > 0:
-                        nonzero_coef_ix = names2ix(coefs, self.coef_names)
-
-                        coefficient_random = self.coefficient_random_base[gf]
-                        coefficient_random_summary = self.coefficient_random_base_summary[gf]
-
-                        coefficient_random_means = tf.reduce_mean(coefficient_random, axis=0, keepdims=True)
-                        coefficient_random_summary_means = tf.reduce_mean(coefficient_random_summary, axis=0, keepdims=True)
-
-                        coefficient_random -= coefficient_random_means
-                        coefficient_random_summary -= coefficient_random_summary_means
-                        self._regularize(coefficient_random, regtype='ranef', var_name='coefficient_by_%s' % gf)
-
-                        coefficient_random = self._scatter_along_axis(
-                            nonzero_coef_ix,
-                            self._scatter_along_axis(
-                                levels_ix,
-                                coefficient_random,
-                                [self.rangf_n_levels[i], len(coefs)]
-                            ),
-                            [self.rangf_n_levels[i], len(self.coef_names)],
-                            axis=1
-                        )
-                        coefficient_random_summary = self._scatter_along_axis(
-                            nonzero_coef_ix,
-                            self._scatter_along_axis(
-                                levels_ix,
-                                coefficient_random_summary,
-                                [self.rangf_n_levels[i], len(coefs)]
-                            ),
-                            [self.rangf_n_levels[i], len(self.coef_names)],
-                            axis=1
-                        )
-
-                        self.coefficient_random[gf] = coefficient_random
-                        self.coefficient_random_summary[gf] = coefficient_random_summary
-                        self.coefficient_random_means[gf] = tf.reduce_mean(coefficient_random_summary, axis=0)
-
-                        if self.convergence_basis.lower() == 'parameters':
-                            self._add_convergence_tracker(self.coefficient_random_summary[gf], 'coefficient_by_%s' %gf)
-
-                        self.coefficient += tf.gather(coefficient_random, self.gf_y[:, i], axis=0)
-                        self.coefficient_summary += tf.gather(coefficient_random_summary, self.gf_y[:, i], axis=0)
-
-                        if self.log_random:
-                            for j in range(len(coefs)):
-                                coef_name = coefs[j]
-                                ix = nonzero_coef_ix[j]
-                                tf.summary.histogram(
-                                    sn('by_%s/coefficient/%s' % (gf, coef_name)),
-                                    coefficient_random_summary[:, ix],
-                                    collections=['random']
+                    for i, response_param in enumerate(response_params):
+                        for j, coef_name in enumerate(self.coef_names):
+                            dim_names = self._expand_param_name_by_dim(response, response_param)
+                            for k, dim_name in enumerate(dim_names):
+                                tf.summary.scalar(
+                                    'coefficient' + '/%s/%s_%s' % (
+                                        sn(coef_name),
+                                        sn(response),
+                                        sn(dim_name)
+                                    ),
+                                    coefficient_fixed_summary[j, i, k],
+                                    collections=['params']
                                 )
-                                
-                    # Random interactions
-                    if len(self.interaction_names) > 0:
-                        interactions = self.interaction_by_rangf.get(gf, [])
-                        if len(interactions) > 0:
-                            interaction_ix = names2ix(interactions, self.interaction_names)
 
-                            interaction_random = self.interaction_random_base[gf]
-                            interaction_random_summary = self.interaction_random_base_summary[gf]
+                    self.coefficient_random[response] = {}
+                    self.coefficient_random_summary[response] = {}
+                    for i in range(len(self.rangf)):
+                        gf = self.rangf[i]
+                        levels_ix = np.arange(self.rangf_n_levels[i] - 1)
 
-                            interaction_random_means = tf.reduce_mean(interaction_random, axis=0, keepdims=True)
-                            interaction_random_summary_means = tf.reduce_mean(interaction_random_summary, axis=0, keepdims=True)
+                        coefs = self.coef_by_rangf.get(gf, [])
+                        if len(coefs) > 0:
+                            nonzero_coef_ix = names2ix(coefs, self.coef_names)
 
-                            interaction_random -= interaction_random_means
-                            interaction_random_summary -= interaction_random_summary_means
-                            self._regularize(interaction_random, regtype='ranef', var_name='interaction_by_%s' % gf)
+                            coefficient_random = self.coefficient_random_base[response][gf]
+                            coefficient_random_summary = self.coefficient_random_base_summary[response][gf]
 
-                            interaction_random = self._scatter_along_axis(
-                                interaction_ix,
+                            coefficient_random_means = tf.reduce_mean(coefficient_random, axis=0, keepdims=True)
+                            coefficient_random_summary_means = tf.reduce_mean(coefficient_random_summary, axis=0, keepdims=True)
+
+                            coefficient_random -= coefficient_random_means
+                            coefficient_random_summary -= coefficient_random_summary_means
+
+                            self._regularize(coefficient_random, regtype='ranef', var_name='coefficient_%s_by_%s' % (sn(response), sn(gf)))
+
+                            coefficient_random = self._scatter_along_axis(
+                                nonzero_coef_ix,
                                 self._scatter_along_axis(
                                     levels_ix,
-                                    interaction_random,
-                                    [self.rangf_n_levels[i], len(interactions)]
+                                    coefficient_random,
+                                    [self.rangf_n_levels[i], len(coefs), nparam, ndim]
                                 ),
-                                [self.rangf_n_levels[i], len(self.interaction_names)],
+                                [self.rangf_n_levels[i], len(self.coef_names), nparam, ndim],
                                 axis=1
                             )
-                            interaction_random_summary = self._scatter_along_axis(
-                                interaction_ix,
+                            coefficient_random_summary = self._scatter_along_axis(
+                                nonzero_coef_ix,
                                 self._scatter_along_axis(
                                     levels_ix,
-                                    interaction_random_summary,
-                                    [self.rangf_n_levels[i], len(interactions)]
+                                    coefficient_random_summary,
+                                    [self.rangf_n_levels[i], len(coefs), nparam, ndim]
                                 ),
-                                [self.rangf_n_levels[i], len(self.interaction_names)],
+                                [self.rangf_n_levels[i], len(self.coef_names), nparam, ndim],
                                 axis=1
                             )
 
-                            self.interaction_random[gf] = interaction_random
-                            self.interaction_random_summary[gf] = interaction_random_summary
-                            self.interaction_random_means[gf] = tf.reduce_mean(interaction_random_summary, axis=0)
+                            self.coefficient_random[response][gf] = coefficient_random
+                            self.coefficient_random_summary[response][gf] = coefficient_random_summary
 
-                            if self.convergence_basis.lower() == 'parameters':
-                                self._add_convergence_tracker(self.interaction_random_summary[gf], 'interaction_by_%s' % gf)
-
-                            self.interaction += tf.gather(interaction_random, self.gf_y[:, i], axis=0)
-                            self.interaction_summary += tf.gather(interaction_random_summary, self.gf_y[:, i], axis=0)
+                            coefficient = coefficient[None, ...] + tf.gather(coefficient_random, self.Y_gf[:, i], axis=0)
+                            coefficient_summary = coefficient_summary[None, ...] + tf.gather(coefficient_random_summary, self.Y_gf[:, i], axis=0)
 
                             if self.log_random:
-                                for j in range(len(interactions)):
-                                    interaction_name = interactions[j]
-                                    ix = interaction_ix[j]
-                                    tf.summary.histogram(
-                                        sn('by_%s/interaction/%s' % (gf, interaction_name)),
-                                        interaction_random_summary[:, ix],
-                                        collections=['random']
+                                for j, response_param in enumerate(response_params):
+                                    for k, coef_name in enumerate(self.coef_names):
+                                        dim_names = self._expand_param_name_by_dim(response, response_param)
+                                        for l, dim_name in enumerate(dim_names):
+                                            tf.summary.histogram(
+                                                'by_%s/coefficient/%s/%s_%s' % (
+                                                    sn(gf),
+                                                    sn(coef_name),
+                                                    sn(response),
+                                                    sn(dim_name)
+                                                ),
+                                                coefficient_random_summary[:, k, j, l],
+                                                collections=['random']
+                                            )
+
+                    self.coefficient[response] = coefficient
+                    self.coefficient_summary[response] = coefficient_summary
+
+    def _compile_interactions(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                self.interaction = {}
+                self.interaction_summary = {}
+                self.interaction_fixed = {}
+                self.interaction_fixed_summary = {}
+                self.interaction_random = {}
+                self.interaction_random_summary = {}
+                fixef_ix = names2ix(self.fixed_interaction_names, self.interaction_names)
+                if len(self.interaction_names) > 0:
+                    for response in self.response_names:
+                        response_params = self.predictive_distribution_config[response]['params']
+                        if not self.use_distributional_regression:
+                            response_params = response_params[:1]
+                        nparam = len(response_params)
+                        ndim = self.response_n_dim[response]
+                        interaction_ids = self.interaction_names
+
+                        interaction_fixed = self._scatter_along_axis(
+                            fixef_ix,
+                            self.interaction_fixed_base[response],
+                            [len(interaction_ids), nparam, ndim]
+                        )
+                        interaction_fixed_summary = self._scatter_along_axis(
+                            fixef_ix,
+                            self.interaction_fixed_base_summary[response],
+                            [len(interaction_ids), nparam, ndim]
+                        )
+                        self._regularize(self.interaction_fixed_base[response], regtype='interaction', var_name='interaction_%s' % response)
+
+                        self.interaction_fixed[response] = interaction_fixed
+                        self.interaction_fixed_summary[response] = interaction_fixed_summary
+
+                        interaction = interaction_fixed
+                        interaction_summary = interaction_fixed_summary
+
+                        for i, response_param in enumerate(response_params):
+                            for j, interaction_name in enumerate(self.interaction_names):
+                                dim_names = self._expand_param_name_by_dim(response, response_param)
+                                for k, dim_name in enumerate(dim_names):
+                                    tf.summary.scalar(
+                                        'interaction' + '/%s/%s_%s' % (
+                                            sn(interaction_name),
+                                            sn(response),
+                                            sn(dim_name)
+                                        ),
+                                        interaction_fixed_summary[j, i, k],
+                                        collections=['params']
                                     )
 
-    def _initialize_irf_lambdas(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                # integral_ub = self.t_delta_limit.astype(dtype=self.FLOAT_NP)
-                integral_ub = None
+                        self.interaction_random[response] = {}
+                        self.interaction_random_summary[response] = {}
+                        for i in range(len(self.rangf)):
+                            gf = self.rangf[i]
+                            levels_ix = np.arange(self.rangf_n_levels[i] - 1)
 
-                def exponential(params):
-                    return exponential_irf_lambdas(
-                        params,
-                        session=self.sess
-                    )
+                            interactions = self.interaction_by_rangf.get(gf, [])
+                            if len(interactions) > 0:
+                                interaction_ix = names2ix(interactions, self.interaction_names)
 
-                self.irf_lambdas['Exp'] = exponential
-                self.irf_lambdas['ExpRateGT1'] = exponential
+                                interaction_random = self.interaction_random_base[response][gf]
+                                interaction_random_summary = self.interaction_random_base_summary[response][gf]
 
-                def gamma(params):
-                    return gamma_irf_lambdas(
-                        params,
-                        integral_ub=integral_ub,
-                        session=self.sess,
-                        validate_irf_args=self.validate_irf_args
-                    )
+                                interaction_random_means = tf.reduce_mean(interaction_random, axis=0, keepdims=True)
+                                interaction_random_summary_means = tf.reduce_mean(interaction_random_summary, axis=0, keepdims=True)
 
-                self.irf_lambdas['Gamma'] = gamma
-                self.irf_lambdas['SteepGamma'] = gamma
-                self.irf_lambdas['GammaShapeGT1'] = gamma
-                self.irf_lambdas['GammaKgt1'] = gamma
-                self.irf_lambdas['HRFSingleGamma'] = gamma
+                                interaction_random -= interaction_random_means
+                                interaction_random_summary -= interaction_random_summary_means
 
-                def shifted_gamma_lambdas(params):
-                    return shifted_gamma_irf_lambdas(
-                        params,
-                        integral_ub=integral_ub,
-                        session=self.sess,
-                        validate_irf_args=self.validate_irf_args
-                    )
+                                self._regularize(interaction_random, regtype='ranef', var_name='interaction_%s_by_%s' % (sn(response), sn(gf)))
 
-                self.irf_lambdas['ShiftedGamma'] = shifted_gamma_lambdas
-                self.irf_lambdas['ShiftedGammaShapeGT1'] = shifted_gamma_lambdas
-                self.irf_lambdas['ShiftedGammaKgt1'] = shifted_gamma_lambdas
-
-                def normal(params):
-                    return normal_irf_lambdas(
-                        params,
-                        integral_ub=integral_ub,
-                        session=self.sess
-                    )
-
-                self.irf_lambdas['Normal'] = normal
-
-                def skew_normal(params):
-                    return skew_normal_irf_lambdas(
-                        params,
-                        self.t_delta_limit.astype(dtype=self.FLOAT_NP) if integral_ub is None else integral_ub,
-                        session=self.sess
-                    )
-
-                self.irf_lambdas['SkewNormal'] = skew_normal
-
-                def emg(params):
-                    return emg_irf_lambdas(
-                        params,
-                        integral_ub=integral_ub,
-                        session=self.sess
-                    )
-
-                self.irf_lambdas['EMG'] = emg
-
-                def beta_prime(params):
-                    return beta_prime_irf_lambdas(
-                        params,
-                        integral_ub=integral_ub,
-                        session=self.sess
-                    )
-
-                self.irf_lambdas['BetaPrime'] = beta_prime
-
-                def shifted_beta_prime(params):
-                    return shifted_beta_prime_irf_lambdas(
-                        params,
-                        integral_ub=integral_ub,
-                        session=self.sess
-                    )
-
-                self.irf_lambdas['ShiftedBetaPrime'] = shifted_beta_prime
-
-                def double_gamma_1(params):
-                    return double_gamma_1_irf_lambdas(
-                        params,
-                        integral_ub=integral_ub,
-                        session=self.sess,
-                        validate_irf_args=self.validate_irf_args
-                    )
-
-                self.irf_lambdas['HRFDoubleGamma1'] = double_gamma_1
-
-                def double_gamma_2(params):
-                    return double_gamma_2_irf_lambdas(
-                        params,
-                        integral_ub=integral_ub,
-                        session=self.sess,
-                        validate_irf_args=self.validate_irf_args
-                    )
-
-                self.irf_lambdas['HRFDoubleGamma2'] = double_gamma_2
-
-                def double_gamma_3(params):
-                    return double_gamma_3_irf_lambdas(
-                        params,
-                        integral_ub=integral_ub,
-                        session=self.sess,
-                        validate_irf_args=self.validate_irf_args
-                    )
-
-                self.irf_lambdas['HRFDoubleGamma3'] = double_gamma_3
-
-                def double_gamma_4(params):
-                    return double_gamma_4_irf_lambdas(
-                        params,
-                        integral_ub=integral_ub,
-                        session=self.sess,
-                        validate_irf_args=self.validate_irf_args
-                    )
-
-                self.irf_lambdas['HRFDoubleGamma4'] = double_gamma_4
-
-                def double_gamma_5(params):
-                    return double_gamma_5_irf_lambdas(
-                        params,
-                        integral_ub=integral_ub,
-                        session=self.sess,
-                        validate_irf_args=self.validate_irf_args
-                    )
-
-                self.irf_lambdas['HRFDoubleGamma'] = double_gamma_5
-                self.irf_lambdas['HRFDoubleGamma5'] = double_gamma_5
-
-    def _initialize_nonparametric_irf(
-            self,
-            order,
-            bases,
-            method='summed_gaussians',
-            roughness_penalty=0.,
-            support=None
-    ):
-        if support is None:
-            support = self.support
-
-        def f(
-                params,
-                order=order,
-                bases=bases,
-                method=method,
-                roughness_penalty=roughness_penalty,
-                support=support,
-                int_type=self.INT_TF,
-                float_type=self.FLOAT_TF,
-                session=self.sess
-        ):
-            return nonparametric_smooth(
-                method,
-                params,
-                bases,
-                # integral_ub=self.t_delta_limit.astype(dtype=self.FLOAT_NP),
-                order=order,
-                roughness_penalty=roughness_penalty,
-                support=support,
-                int_type=int_type,
-                float_type=float_type,
-                session=session
-            )
-
-        return f
-
-    def _get_irf_lambdas(self, family):
-        if family in self.irf_lambdas:
-            return self.irf_lambdas[family]
-        elif Formula.nonparametric_type(family):
-            order = Formula.order(family)
-            bases = Formula.bases(family)
-            roughness_penalty = Formula.roughness_penalty(family)
-            return self._initialize_nonparametric_irf(
-                order,
-                bases,
-                roughness_penalty=roughness_penalty
-            )
-        else:
-            raise ValueError('No IRF lamdba found for family "%s"' % family)
-
-    def _initialize_irf_params(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                for family in self.atomic_irf_names_by_family:
-                    if family == 'DiracDelta':
-                        continue
-
-                    irf_ids = self.atomic_irf_names_by_family[family]
-
-                    params = []
-                    params_summary = []
-                    params_fixed = []
-                    params_fixed_summary = []
-                    params_random = {}
-                    params_random_summary = {}
-
-                    for param_name in Formula.irf_params(family):
-                        param_vals = self._initialize_irf_param(param_name, family)
-                        params.append(param_vals[0])
-
-                        params_summary.append(param_vals[1])
-                        if param_vals[2] is not None:
-                            params_fixed.append(param_vals[2])
-                        if param_vals[3] is not None:
-                            params_fixed_summary.append(param_vals[3])
-                            if self.convergence_basis.lower() == 'parameters':
-                                self._add_convergence_tracker(param_vals[3], 'irf_%s_%s' % (family, param_name))
-
-                        if param_vals[4] is not None and param_vals[5] is not None:
-                            assert(set(param_vals[4].keys()) == set(param_vals[5].keys()))
-
-                            for gf in param_vals[4].keys():
-                                if gf not in params_random:
-                                    params_random[gf] = []
-                                params_random[gf].append(param_vals[4][gf])
-
-                                if gf not in params_random_summary:
-                                    params_random_summary[gf] = []
-                                params_random_summary[gf].append(param_vals[5][gf])
-                                if self.convergence_basis.lower() == 'parameters':
-                                    self._add_convergence_tracker(param_vals[5][gf], 'irf_%s_%s_by_%s' % (family, param_name, gf))
-
-                    has_random_irf = False
-                    for param in params:
-                        if not param.shape.is_fully_defined():
-                            has_random_irf = True
-                            break
-                    if has_random_irf:
-                        for i in range(len(params)):
-                            param = params[i]
-                            if param.shape.is_fully_defined():
-                                assert param.shape[0] == 1, 'Parameter with shape %s not broadcastable to batch length' %param.shape
-                                params[i] =  tf.tile(param, [tf.shape(self.time_y)[0], 1])
-
-                    params = tf.stack(params, axis=1)
-                    params_summary = tf.stack(params_summary, axis=1)
-                    params_fixed = tf.stack(params_fixed, axis=1)
-                    params_fixed_summary = tf.stack(params_fixed_summary, axis=1)
-                    for gf in params_random:
-                        params_random[gf] = tf.stack(params_random[gf], axis=1)
-
-                    for i in range(len(irf_ids)):
-                        id = irf_ids[i]
-                        ix = names2ix(id, self.atomic_irf_names_by_family[family])
-                        assert id not in self.irf_params, 'Duplicate IRF node name already in self.irf_params'
-                        self.irf_params[id] = tf.gather(params, ix, axis=2)
-                        self.irf_params_summary[id] = tf.gather(params_summary, ix, axis=2)
-                        trainable_param_ix = names2ix(self.atomic_irf_param_trainable_by_family[family][id], Formula.irf_params(family))
-                        if len(trainable_param_ix) > 0:
-                            self.irf_params_fixed[id] = tf.gather(tf.gather(params_fixed, ix, axis=2), trainable_param_ix, axis=1)
-                            self.irf_params_fixed_summary[id] = tf.gather(tf.gather(params_fixed_summary, ix, axis=2), trainable_param_ix, axis=1)
-                            for gf in params_random:
-                                if gf not in self.irf_params_random:
-                                    self.irf_params_random[gf] = {}
-                                self.irf_params_random[gf][id] = tf.gather(tf.gather(params_random[gf], ix, axis=2), trainable_param_ix, axis=1)
-                                if gf not in self.irf_params_random_summary:
-                                    self.irf_params_random_summary[gf] = {}
-                                self.irf_params_random_summary[gf][id] = tf.gather(tf.gather(params_random_summary[gf], ix, axis=2), trainable_param_ix, axis=1)
-
-    def _initialize_irf_param(self, param_name, family):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                irf_ids = self.atomic_irf_names_by_family[family]
-                param_mean = self.irf_params_means[family][param_name]
-                param_lb = self.irf_params_lb[family][param_name]
-                param_ub = self.irf_params_ub[family][param_name]
-                param_mean_unconstrained = self.irf_params_means_unconstrained[family][param_name]
-                trainable = self.atomic_irf_param_trainable_by_family[family]
-
-                trainable_ix, untrainable_ix = self._compute_trainable_untrainable_ix(
-                    param_name,
-                    irf_ids,
-                    trainable=trainable
-                )
-
-                dim = len(trainable_ix)
-                trainable_means = tf.expand_dims(tf.gather(param_mean_unconstrained, trainable_ix), 0)
-
-                # Initialize trainable IRF parameters as trainable variables
-                if dim > 0:
-                    param_fixed = self.irf_params_fixed_base[family][param_name]
-                    param_fixed_summary = self.irf_params_fixed_base_summary[family][param_name]
-                else:
-                    param_fixed = param_fixed_summary = None
-
-                # Initialize untrainable IRF parameters as constants
-                param_untrainable = tf.expand_dims(
-                    tf.gather(
-                        tf.ones((len(irf_ids),), dtype=self.FLOAT_TF) * param_mean,
-                        untrainable_ix)
-                    ,
-                    axis=0
-                )
-
-                param = param_fixed
-                param_summary = param_fixed_summary
-
-                # Process any random IRF parameters
-                irf_by_rangf = {}
-                for id in irf_ids:
-                    for gf in self.irf_by_rangf:
-                        if id in self.irf_by_rangf[gf]:
-                            if gf not in irf_by_rangf:
-                                irf_by_rangf[gf] = []
-                            irf_by_rangf[gf].append(id)
-
-                param_random_by_rangf = {}
-                param_random_summary_by_rangf = {}
-
-                if len(irf_by_rangf) > 0:
-                   for i, gf in enumerate(self.rangf):
-                        if gf in irf_by_rangf:
-                            irf_ids_ran = [x for x in irf_by_rangf[gf] if param_name in trainable[x]]
-                            if len(irf_ids_ran):
-                                irfs_ix = names2ix(irf_by_rangf[gf], irf_ids)
-                                levels_ix = np.arange(self.rangf_n_levels[i] - 1)
-
-                                param_random = self.irf_params_random_base[gf][family][param_name]
-                                param_random_mean = tf.reduce_mean(param_random, axis=0, keepdims=True)
-                                param_random -= param_random_mean
-                                param_random_summary = self.irf_params_random_base_summary[gf][family][param_name]
-                                param_random_summary_mean = tf.reduce_mean(param_random_summary, axis=0, keepdims=True)
-                                param_random_summary -= param_random_summary_mean
-
-                                self._regularize(param_random, regtype='ranef', var_name='%s_by_%s' % (param_name, gf))
-
-                                param_random = self._scatter_along_axis(
-                                    irfs_ix,
+                                interaction_random = self._scatter_along_axis(
+                                    interaction_ix,
                                     self._scatter_along_axis(
                                         levels_ix,
-                                        param_random,
-                                        [self.rangf_n_levels[i], len(irfs_ix)]
+                                        interaction_random,
+                                        [self.rangf_n_levels[i], len(interactions), nparam, ndim]
                                     ),
-                                    [self.rangf_n_levels[i], len(irfs_ix)],
+                                    [self.rangf_n_levels[i], len(self.interaction_names), nparam, ndim],
                                     axis=1
                                 )
-                                param_random_summary = self._scatter_along_axis(
-                                    irfs_ix,
+                                interaction_random_summary = self._scatter_along_axis(
+                                    interaction_ix,
                                     self._scatter_along_axis(
                                         levels_ix,
-                                        param_random_summary,
-                                        [self.rangf_n_levels[i], len(irfs_ix)]
+                                        interaction_random_summary,
+                                        [self.rangf_n_levels[i], len(interactions), nparam, ndim]
                                     ),
-                                    [self.rangf_n_levels[i], len(irfs_ix)],
+                                    [self.rangf_n_levels[i], len(self.interaction_names), nparam, ndim],
                                     axis=1
                                 )
 
-                                if gf not in self.irf_params_random_means:
-                                    self.irf_params_random_means[gf] = {}
-                                if family not in self.irf_params_random_means[gf]:
-                                    self.irf_params_random_means[gf][family] = {}
-                                self.irf_params_random_means[gf][family][param_name] = tf.reduce_mean(param_random_summary, axis=0)
-
-                                param += tf.gather(param_random, self.gf_y[:, i], axis=0)
-                                param_summary += tf.gather(param_random_summary, self.gf_y[:, i], axis=0)
-
-                                param_random_by_rangf[gf] = param_random
-                                param_random_summary_by_rangf[gf] = param_random_summary
+                                self.interaction_random[response][gf] = interaction_random
+                                self.interaction_random_summary[response][gf] = interaction_random_summary
+                                
+                                interaction = interaction[None, ...] + tf.gather(interaction_random, self.Y_gf[:, i], axis=0)
+                                interaction_summary = interaction_summary[None, ...] + tf.gather(interaction_random_summary, self.Y_gf[:, i], axis=0)
 
                                 if self.log_random:
-                                    for j in range(len(irf_by_rangf[gf])):
-                                        irf_name = irf_by_rangf[gf][j]
-                                        ix = irfs_ix[j]
+                                    for j, response_param in enumerate(response_params):
+                                        for k, interaction_name in enumerate(self.interaction_names):
+                                            dim_names = self._expand_param_name_by_dim(response, response_param)
+                                            for l, dim_name in enumerate(dim_names):
+                                                tf.summary.histogram(
+                                                    'by_%s/interaction/%s/%s_%s' % (
+                                                        sn(gf),
+                                                        sn(interaction_name),
+                                                        sn(response),
+                                                        sn(dim_name)
+                                                    ),
+                                                    interaction_random_summary[:, k, j, l],
+                                                    collections=['random']
+                                                )
 
-                                        tf.summary.histogram(
-                                            'by_%s/%s_logit/%s' % (gf, param_name, irf_name),
-                                            param_random_summary[:, ix],
-                                            collections=['random']
-                                        )
+                        self.interaction[response] = interaction
+                        self.interaction_summary[response] = interaction_summary
 
-                # Initialize trainable IRF parameters as trainable variables
-                if dim > 0:
-                    param_fixed = self.irf_params_fixed_base[family][param_name]
-                    param_fixed_summary = self.irf_params_fixed_base_summary[family][param_name]
-
-                    if param_lb is not None and param_ub is None:
-                        param_fixed = param_lb + self.constraint_fn(param_fixed) + self.epsilon
-                        param_fixed_summary = param_lb + self.constraint_fn(param_fixed_summary) + self.epsilon
-                        param = param_lb + self.constraint_fn(param) + self.epsilon
-                        param_summary = param_lb + self.constraint_fn(param_summary) + self.epsilon
-                    elif param_lb is None and param_ub is not None:
-                        param_fixed = param_ub - self.constraint_fn(param_fixed) - self.epsilon
-                        param_fixed_summary = param_ub - self.constraint_fn(param_fixed_summary) - self.epsilon
-                        param = param_ub - self.constraint_fn(param) - self.epsilon
-                        param_summary = param_ub - self.constraint_fn(param_summary) - self.epsilon
-                    elif param_lb is not None and param_ub is not None:
-                        param_fixed = self._softplus_sigmoid(param_fixed, a=param_lb, b=param_ub)
-                        param_fixed_summary = self._softplus_sigmoid(param_fixed_summary, a=param_lb, b=param_ub)
-                        param = self._softplus_sigmoid(param, a=param_lb, b=param_ub)
-                        param_summary = self._softplus_sigmoid(param_summary, a=param_lb, b=param_ub)
-
-                    self._regularize(param_fixed, trainable_means, regtype='irf', var_name=param_name)
-                else:
-                    param_fixed = param_fixed_summary = None
-
-                for i in range(dim):
-                    tf.summary.scalar(
-                        sn('%s/%s' % (param_name, irf_ids[i])),
-                        param_fixed_summary[0, i],
-                        collections=['params']
-                    )
-
-                # Combine trainable and untrainable parameters
-                if len(untrainable_ix) > 0:
-                    if len(trainable_ix) > 0:
-                        param = tf.concat([param, param_untrainable], axis=1)
-                        param_summary = tf.concat([param_summary, param_untrainable], axis=1)
-                    else:
-                        param = param_untrainable
-                        param_summary = param_untrainable
-
-                    param = tf.gather(param, np.concatenate([trainable_ix, untrainable_ix]), axis=1)
-                param_summary = tf.gather(param_summary, np.concatenate([trainable_ix, untrainable_ix]), axis=1)
-
-                return param, param_summary, param_fixed, param_fixed_summary, param_random_by_rangf, param_random_summary_by_rangf
-
-    def _initialize_base_irf_param(self, param_name, family, lb=None, ub=None, default=0.):
+    def _compile_irf_params(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                irf_ids = self.atomic_irf_names_by_family[family]
-                param_init = self.atomic_irf_param_init_by_family[family]
-                param_trainable = self.atomic_irf_param_trainable_by_family[family]
+                # Base IRF params are saved as tensors with shape (nid, npredparam, npreddim),
+                # one for each irf_param of each IRF kernel family.
+                # Here fixed and random IRF params are summed, constraints are applied, and new tensors are stored
+                # with shape (batch, 1, npredparam, npreddim), one for each parameter of each IRF ID for each response variable.
+                # The 1 in the 2nd dim supports broadcasting over the time dimension.
 
-                # Process and store initial/prior means
-                param_mean = self._get_mean_init_vector(irf_ids, param_name, param_init, default=default)
-                param_mean_unconstrained, param_lb, param_ub = self._process_mean(param_mean, lb=lb, ub=ub)
+                # Key order: response, ?(ran_gf), irf_id, irf_param
+                self.irf_params = {}
+                self.irf_params_summary = {}
+                self.irf_params_fixed = {}
+                self.irf_params_fixed_summary = {}
+                self.irf_params_random = {}
+                self.irf_params_random_summary = {}
+                for response in self.response_names:
+                    self.irf_params[response] = {}
+                    self.irf_params_summary[response] = {}
+                    self.irf_params_fixed[response] = {}
+                    self.irf_params_fixed_summary[response] = {}
+                    for family in self.atomic_irf_names_by_family:
+                        if family == 'DiracDelta':
+                            continue
 
-                if family not in self.irf_params_means:
-                    self.irf_params_means[family] = {}
-                self.irf_params_means[family][param_name] = param_mean
+                        irf_ids = self.atomic_irf_names_by_family[family]
+                        trainable = self.atomic_irf_param_trainable_by_family[family]
 
-                if family not in self.irf_params_means_unconstrained:
-                    self.irf_params_means_unconstrained[family] = {}
-                self.irf_params_means_unconstrained[family][param_name] = param_mean_unconstrained
+                        for irf_param_name in Formula.irf_params(family):
+                            response_params = self.predictive_distribution_config[response]['params']
+                            if not self.use_distributional_regression:
+                                response_params = response_params[:1]
+                            nparam_response = len(response_params)  # number of params of predictive dist, not IRF
+                            ndim = self.response_n_dim[response]
+                            irf_param_lb = self.irf_params_lb[family][irf_param_name]
+                            if irf_param_lb is not None:
+                                irf_param_lb = tf.constant(irf_param_lb, dtype=self.FLOAT_TF)
+                            irf_param_ub = self.irf_params_ub[family][irf_param_name]
+                            if irf_param_ub is not None:
+                                irf_param_ub = tf.constant(irf_param_ub, dtype=self.FLOAT_TF)
+                            trainable_ix = self.irf_params_trainable_ix[family][irf_param_name]
+                            untrainable_ix = self.irf_params_untrainable_ix[family][irf_param_name]
 
-                if family not in self.irf_params_lb:
-                    self.irf_params_lb[family] = {}
-                self.irf_params_lb[family][param_name] = param_lb
-
-                if family not in self.irf_params_ub:
-                    self.irf_params_ub[family] = {}
-                self.irf_params_ub[family][param_name] = param_ub
-
-
-                # Select out irf IDs for which this param is trainable
-                trainable_ix, untrainable_ix = self._compute_trainable_untrainable_ix(
-                    param_name,
-                    irf_ids,
-                    trainable=param_trainable
-                )
-                trainable_means = tf.expand_dims(tf.gather(param_mean_unconstrained, trainable_ix), axis=0)
-
-
-                if not self.covarying_fixef:
-                    # Initialize and store fixed params on the unconstrained space
-                    if len(trainable_ix) > 0:
-                        param_fixed_base, param_fixed_base_summary = self.initialize_irf_param_unconstrained(
-                            param_name,
-                            [x for x in irf_ids if param_name in param_trainable[x]],
-                            mean=trainable_means
-                        )
-
-                        if family not in self.irf_params_fixed_base:
-                            self.irf_params_fixed_base[family] = {}
-                        self.irf_params_fixed_base[family][param_name] = param_fixed_base
-
-                        if family not in self.irf_params_fixed_base_summary:
-                            self.irf_params_fixed_base_summary[family] = {}
-                        self.irf_params_fixed_base_summary[family][param_name] = param_fixed_base_summary
-
-
-                if not self.covarying_ranef:
-                    # Initialize and store random params on the unconstrained space
-                    irf_by_rangf = {}
-                    for id in irf_ids:
-                        for gf in self.irf_by_rangf:
-                            if id in self.irf_by_rangf[gf]:
-                                if gf not in irf_by_rangf:
-                                    irf_by_rangf[gf] = []
-                                irf_by_rangf[gf].append(id)
-
-                    for gf in irf_by_rangf:
-                        irf_ids_ran = [x for x in irf_by_rangf[gf] if param_name in param_trainable[x]]
-                        if len(irf_ids_ran) > 0:
-                            param_random_base, param_random_base_summary = self.initialize_irf_param_unconstrained(
-                                param_name,
-                                [x for x in irf_by_rangf[gf] if param_name in param_trainable[x]],
-                                mean=0.,
-                                ran_gf=gf
+                            irf_param_means = self.irf_params_means_unconstrained[family][irf_param_name]
+                            irf_param_trainable_means = tf.constant(
+                                irf_param_means[trainable_ix][..., None, None],
+                                dtype=self.FLOAT_TF
+                            )
+                            irf_param_untrainable_means = tf.constant(
+                                irf_param_means[untrainable_ix][..., None, None],
+                                dtype=self.FLOAT_TF
+                            )
+                            irf_param_untrainable_means = tf.broadcast_to(
+                                irf_param_untrainable_means,
+                                [len(untrainable_ix), nparam_response, ndim]
                             )
 
-                            if gf not in self.irf_params_random_base:
-                                self.irf_params_random_base[gf] = {}
-                            if family not in self.irf_params_random_base[gf]:
-                                self.irf_params_random_base[gf][family] = {}
-                            self.irf_params_random_base[gf][family][param_name] = param_random_base
+                            irf_param_trainable = self._scatter_along_axis(
+                                trainable_ix,
+                                self.irf_params_fixed_base[response][family][irf_param_name],
+                                [len(irf_ids), nparam_response, ndim]
+                            )
+                            irf_param_trainable_summary = self._scatter_along_axis(
+                                trainable_ix,
+                                self.irf_params_fixed_base_summary[response][family][irf_param_name],
+                                [len(irf_ids), nparam_response, ndim]
+                            )
+                            irf_param_untrainable = self._scatter_along_axis(
+                                untrainable_ix,
+                                irf_param_untrainable_means,
+                                [len(irf_ids), nparam_response, ndim]
+                            )
+                            is_trainable = np.zeros(len(irf_ids), dtype=bool)
+                            is_trainable[trainable_ix] = True
 
-                            if gf not in self.irf_params_random_base_summary:
-                                self.irf_params_random_base_summary[gf] = {}
-                            if family not in self.irf_params_random_base_summary[gf]:
-                                self.irf_params_random_base_summary[gf][family] = {}
-                            self.irf_params_random_base_summary[gf][family][param_name] = param_random_base_summary
-
-    def _initialize_joint_distributions(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-
-                # FIXED EFFECTS
-
-                if self.covarying_fixef:
-                    joint_fixed_means = []
-                    joint_fixed_sds = []
-                    joint_fixed_ix = {}
-
-                    i = 0
-
-                    # Intercept
-                    if self.has_intercept[None]:
-                        joint_fixed_means.append(tf.expand_dims(self.intercept_init_tf, axis=0))
-                        joint_fixed_sds.append(tf.expand_dims(self.intercept_joint_sd, axis=0))
-                        joint_fixed_ix['intercept'] = (i, i + 1)
-                        i += 1
-
-                    # Coefficients
-                    coef_ids = self.fixed_coef_names
-                    if len(coef_ids) > 0:
-                        joint_fixed_means.append(tf.zeros((len(coef_ids), ), dtype=self.FLOAT_TF))
-                        joint_fixed_sds.append(tf.ones((len(coef_ids), ), dtype=self.FLOAT_TF) * self.coef_joint_sd)
-                        joint_fixed_ix['coefficient'] = (i, i + len(coef_ids))
-                        i += len(coef_ids)
-
-                    # Interactions
-                    interaction_ids = self.fixed_interaction_names
-                    if len(interaction_ids) > 0:
-                        joint_fixed_means.append(tf.zeros((len(interaction_ids),), dtype=self.FLOAT_TF))
-                        joint_fixed_sds.append(tf.ones((len(interaction_ids),), dtype=self.FLOAT_TF) * self.coef_joint_sd)
-                        joint_fixed_ix['interaction'] = (i, i + len(interaction_ids))
-                        i += len(interaction_ids)
-
-                    # IRF Parameters
-                    for family in sorted(list(self.atomic_irf_names_by_family.keys())):
-                        if family not in joint_fixed_ix:
-                            joint_fixed_ix[family] = {}
-                        for param_name in Formula.irf_params(family):
-                            irf_ids = self.atomic_irf_names_by_family[family]
-                            param_trainable = self.atomic_irf_param_trainable_by_family[family]
-
-                            trainable_ix, untrainable_ix = self._compute_trainable_untrainable_ix(
-                                param_name,
-                                irf_ids,
-                                trainable=param_trainable
+                            irf_param_fixed = tf.where(
+                                is_trainable,
+                                irf_param_trainable,
+                                irf_param_untrainable
+                            )
+                            irf_param_fixed_summary = tf.where(
+                                is_trainable,
+                                irf_param_trainable_summary,
+                                irf_param_untrainable
                             )
 
-                            if len(trainable_ix) > 0:
-                                joint_fixed_means.append(
-                                    tf.gather(
-                                        self.irf_params_means_unconstrained[family][param_name],
-                                        trainable_ix
-                                    )
-                                )
-                                joint_fixed_sds.append(
-                                    tf.ones((len(trainable_ix),), dtype=self.FLOAT_TF) * self.irf_param_joint_sd
-                                )
-                                joint_fixed_ix[family][param_name] = (i,  i + len(trainable_ix))
-                                i += len(trainable_ix)
-                            else:
-                                joint_fixed_ix[family][param_name] = None
+                            self._regularize(
+                                irf_param_fixed,
+                                irf_param_trainable_means,
+                                regtype='irf', var_name='%s_%s' % (irf_param_name, sn(response))
+                            )
 
-                    joint_fixed_means = tf.concat(joint_fixed_means, axis=0)
-                    joint_fixed_sds = tf.concat(joint_fixed_sds, axis=0)
+                            # Add batch dimension
+                            irf_param = irf_param_fixed[None, ...]
+                            irf_param_summary = irf_param_fixed_summary[None, ...]
 
-                    self.joint_fixed, self.joint_fixed_summary = self.initialize_joint_distribution(
-                        joint_fixed_means,
-                        joint_fixed_sds,
-                    )
+                            for i, id in enumerate(irf_ids):
+                                _p = irf_param_fixed[i]
+                                _p_summary = irf_param_fixed_summary[i]
+                                if irf_param_lb is not None and irf_param_ub is None:
+                                    _p = irf_param_lb + self.constraint_fn(_p) + self.epsilon
+                                    _p_summary = irf_param_lb + self.constraint_fn(_p_summary) + self.epsilon
+                                elif irf_param_lb is None and irf_param_ub is not None:
+                                    _p = irf_param_ub - self.constraint_fn(_p) - self.epsilon
+                                    _p_summary = irf_param_ub - self.constraint_fn(_p_summary) - self.epsilon
+                                elif irf_param_lb is not None and irf_param_ub is not None:
+                                    _p = self._sigmoid(_p, a=irf_param_lb, b=irf_param_ub) * (1 - 2 * self.epsilon) + self.epsilon
+                                    _p_summary = self._sigmoid(_p_summary, a=irf_param_lb, b=irf_param_ub) * (1 - 2 * self.epsilon) + self.epsilon
 
-                    self.joint_fixed_ix = joint_fixed_ix
+                                if id not in self.irf_params_fixed[response]:
+                                    self.irf_params_fixed[response][id] = {}
+                                if id not in self.irf_params_fixed_summary[response]:
+                                    self.irf_params_fixed_summary[response][id] = {}
+                                if irf_param_name in trainable[id]:
+                                    self.irf_params_fixed[response][id][irf_param_name] = _p
+                                    self.irf_params_fixed_summary[response][id][irf_param_name] = _p_summary
 
-                # RANDOM EFFECTS
-
-                if self.covarying_ranef:
-                    joint_random = {}
-                    joint_random_summary = {}
-                    joint_random_means = {}
-                    joint_random_sds = {}
-                    joint_random_ix = {}
-
-                    for i, gf in enumerate(self.rangf):
-                        joint_random_means[gf] = []
-                        joint_random_sds[gf] = []
-                        joint_random_ix[gf] = {}
-                        n_levels = self.rangf_n_levels[i] - 1
-
-                        i = 0
-
-                        # Intercepts
-                        if self.has_intercept[gf]:
-                            joint_random_means[gf].append(tf.zeros([n_levels,], dtype=self.FLOAT_TF))
-                            joint_random_sds[gf].append(tf.ones([n_levels,], dtype=self.FLOAT_TF) * self.intercept_joint_sd)
-                            joint_random_ix[gf]['intercept'] = (i, i + n_levels)
-                            i += n_levels
-
-                        # Coefficients
-                        coef_ids = self.coef_by_rangf.get(gf, [])
-                        if len(coef_ids) > 0:
-                            joint_random_means[gf].append(tf.zeros([n_levels * len(coef_ids)], dtype=self.FLOAT_TF))
-                            joint_random_sds[gf].append(tf.ones([n_levels * len(coef_ids)], dtype=self.FLOAT_TF) * self.coef_joint_sd)
-                            joint_random_ix[gf]['coefficient'] = (i, i + n_levels * len(coef_ids))
-                            i += n_levels * len(coef_ids)
-
-                        # Interactions
-                        interaction_ids = self.interaction_by_rangf.get(gf, [])
-                        if len(interaction_ids) > 0:
-                            joint_random_means[gf].append(tf.zeros([n_levels * len(interaction_ids)], dtype=self.FLOAT_TF))
-                            joint_random_sds[gf].append(
-                                tf.ones([n_levels * len(interaction_ids)], dtype=self.FLOAT_TF) * self.coef_joint_sd)
-                            joint_random_ix[gf]['interaction'] = (i, i + n_levels * len(interaction_ids))
-                            i += n_levels * len(interaction_ids)
-
-                        for family in sorted(list(self.atomic_irf_names_by_family.keys())):
-                            for param_name in Formula.irf_params(family):
-                                irf_ids_src = self.atomic_irf_names_by_family[family]
-
-                                irf_ids = []
-                                for id in irf_ids_src:
-                                    if gf in self.irf_by_rangf and id in self.irf_by_rangf[gf]:
-                                        irf_ids.append(id)
-
-                                if len(irf_ids) > 0:
-                                    if family not in joint_random_ix[gf]:
-                                        joint_random_ix[gf][family] = {}
-                                    param_trainable = self.atomic_irf_param_trainable_by_family[family]
-
-                                    trainable_ix, untrainable_ix = self._compute_trainable_untrainable_ix(
-                                        param_name,
-                                        irf_ids,
-                                        trainable=param_trainable
-                                    )
-
-                                    if len(trainable_ix) > 0:
-                                        joint_random_means[gf].append(
-                                            tf.zeros([n_levels * len(trainable_ix)], dtype=self.FLOAT_TF)
+                                for j, response_param in enumerate(response_params):
+                                    dim_names = self._expand_param_name_by_dim(response, response_param)
+                                    for k, dim_name in enumerate(dim_names):
+                                        tf.summary.scalar(
+                                            '%s/%s/%s_%s' % (
+                                                irf_param_name,
+                                                sn(id),
+                                                sn(response),
+                                                sn(dim_name)
+                                            ),
+                                            _p_summary[j, k],
+                                            collections=['params']
                                         )
-                                        joint_random_sds[gf].append(
-                                            tf.ones([n_levels * len(trainable_ix)], dtype=self.FLOAT_TF) * self.irf_param_joint_sd
+
+                            for i, gf in enumerate(self.rangf):
+                                if gf in self.irf_by_rangf:
+                                    irf_ids_ran = [x for x in self.irf_by_rangf[gf] if irf_param_name in trainable[x]]
+                                    if len(irf_ids_ran):
+                                        irfs_ix = names2ix(self.irf_by_rangf[gf], irf_ids)
+                                        levels_ix = np.arange(self.rangf_n_levels[i] - 1)
+
+                                        irf_param_random = self.irf_params_random_base[response][gf][family][irf_param_name]
+                                        irf_param_random_mean = tf.reduce_mean(irf_param_random, axis=0, keepdims=True)
+                                        irf_param_random -= irf_param_random_mean
+                                        irf_param_random_summary = self.irf_params_random_base_summary[response][gf][family][irf_param_name]
+                                        irf_param_random_summary_mean = tf.reduce_mean(irf_param_random_summary, axis=0, keepdims=True)
+                                        irf_param_random_summary -= irf_param_random_summary_mean
+
+                                        self._regularize(irf_param_random, regtype='ranef', var_name='%s_%s_by_%s' % (irf_param_name, sn(response), sn(gf)))
+
+                                        irf_param_random = self._scatter_along_axis(
+                                            irfs_ix,
+                                            self._scatter_along_axis(
+                                                levels_ix,
+                                                irf_param_random,
+                                                [self.rangf_n_levels[i], len(irfs_ix), nparam_response, ndim]
+                                            ),
+                                            [self.rangf_n_levels[i], len(irf_ids), nparam_response, ndim],
+                                            axis=1
                                         )
-                                        joint_random_ix[gf][family][param_name] = (i, i + n_levels * len(trainable_ix))
-                                        i += n_levels * len(trainable_ix)
-                                    else:
-                                        joint_random_ix[gf][family][param_name] = None
+                                        irf_param_random_summary = self._scatter_along_axis(
+                                            irfs_ix,
+                                            self._scatter_along_axis(
+                                                levels_ix,
+                                                irf_param_random_summary,
+                                                [self.rangf_n_levels[i], len(irfs_ix), nparam_response, ndim]
+                                            ),
+                                            [self.rangf_n_levels[i], len(irf_ids), nparam_response, ndim],
+                                            axis=1
+                                        )
 
-                        joint_random_means[gf] = tf.concat(joint_random_means[gf], axis=0)
-                        joint_random_sds[gf] = tf.concat(joint_random_sds[gf], axis=0)
+                                        irf_param = irf_param + tf.gather(irf_param_random, self.Y_gf[:, i], axis=0)
+                                        irf_param_summary = irf_param_summary + tf.gather(irf_param_random_summary, self.Y_gf[:, i], axis=0)
 
-                        joint_random[gf], joint_random_summary[gf] = self.initialize_joint_distribution(
-                            joint_random_means[gf],
-                            joint_random_sds[gf],
-                            ran_gf=gf
-                        )
+                                        if self.log_random:
+                                            for j, response_param in enumerate(response_params):
+                                                for k, irf_name in enumerate(irf_ids):
+                                                    dim_names = self._expand_param_name_by_dim(response, response_param)
+                                                    for l, dim_name in enumerate(dim_names):
+                                                        tf.summary.histogram(
+                                                            'by_%s/%s/%s/%s_%s' % (
+                                                                sn(gf),
+                                                                sn(irf_name),
+                                                                irf_param_name,
+                                                                sn(dim_name),
+                                                                sn(response)
+                                                            ),
+                                                            irf_param_random_summary[:, k, j, l],
+                                                            collections=['random']
+                                                        )
 
-                    self.joint_random = joint_random
-                    self.joint_random_summary = joint_random_summary
-                    self.joint_random_ix = joint_random_ix
+                                        for j, id in enumerate(irf_ids):
+                                            if id in irf_ids_ran:
+                                                if response not in self.irf_params_random:
+                                                    self.irf_params_random[response] = {}
+                                                if gf not in self.irf_params_random[response]:
+                                                    self.irf_params_random[response][gf] = {}
+                                                if id not in self.irf_params_random[response][gf]:
+                                                    self.irf_params_random[response][gf][id] = {}
+                                                if response not in self.irf_params_random_summary:
+                                                    self.irf_params_random_summary[response] = {}
+                                                if gf not in self.irf_params_random_summary[response]:
+                                                    self.irf_params_random_summary[response][gf] = {}
+                                                if id not in self.irf_params_random_summary[response][gf]:
+                                                    self.irf_params_random_summary[response][gf][id] = {}
+                                                self.irf_params_random[response][gf][id][irf_param_name] = irf_param_random[:, j]
+                                                self.irf_params_random_summary[response][gf][id][irf_param_name] = irf_param_random_summary[:, j]
 
-    def _initialize_joint_distribution_slices(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                if self.covarying_fixef:
-                    if self.has_intercept[None]:
-                        s, e = self.joint_fixed_ix['intercept']
-                        self.intercept_fixed_base = self.joint_fixed[s]
-                        self.intercept_fixed_base_summary = self.joint_fixed_summary[s]
+                            if irf_param_lb is not None and irf_param_ub is None:
+                                irf_param = irf_param_lb + self.constraint_fn(irf_param) + self.epsilon
+                                irf_param_summary = irf_param_lb + self.constraint_fn(irf_param_summary) + self.epsilon
+                            elif irf_param_lb is None and irf_param_ub is not None:
+                                irf_param = irf_param_ub - self.constraint_fn(irf_param) - self.epsilon
+                                irf_param_summary = irf_param_ub - self.constraint_fn(irf_param_summary) - self.epsilon
+                            elif irf_param_lb is not None and irf_param_ub is not None:
+                                irf_param = self._sigmoid(irf_param, a=irf_param_lb, b=irf_param_ub) * (1 - 2 * self.epsilon) + self.epsilon
+                                irf_param_summary = self._sigmoid(irf_param_summary, a=irf_param_lb, b=irf_param_ub) * (1 - 2 * self.epsilon) + self.epsilon
 
-                    s, e = self.joint_fixed_ix['coefficient']
-                    self.coefficient_fixed_base = self.joint_fixed[s:e]
-                    self.coefficient_fixed_base_summary = self.joint_fixed_summary[s:e]
-
-                    s, e = self.joint_fixed_ix['interaction']
-                    self.interaction_fixed_base = self.joint_fixed[s:e]
-                    self.interaction_fixed_base_summary = self.joint_fixed_summary[s:e]
-
-                    for family in sorted(list(self.atomic_irf_names_by_family.keys())):
-                        if family not in self.irf_params_fixed_base:
-                            self.irf_params_fixed_base[family] = {}
-                        if family not in self.irf_params_fixed_base_summary:
-                            self.irf_params_fixed_base_summary[family] = {}
-                        for param_name in Formula.irf_params(family):
-                            bounds = self.joint_fixed_ix[family][param_name]
-                            if bounds is not None:
-                                s, e = bounds
-                                self.irf_params_fixed_base[family][param_name] = tf.expand_dims(self.joint_fixed[s:e], axis=0)
-                                self.irf_params_fixed_base_summary[family][param_name] = tf.expand_dims(self.joint_fixed_summary[s:e], axis=0)
-
-                if self.covarying_ranef:
-                    for i, gf in enumerate(self.rangf):
-                        rangf_n_levels = self.rangf_n_levels[i] - 1
-
-                        if self.has_intercept[gf]:
-                            if gf not in self.intercept_random_base:
-                                self.intercept_random_base[gf] = {}
-                            if gf not in self.intercept_random_base_summary:
-                                self.intercept_random_base_summary[gf] = {}
-                            s, e = self.joint_random_ix[gf]['intercept']
-                            self.intercept_random_base[gf] = self.joint_random[gf][s:e]
-                            self.intercept_random_base_summary[gf] = self.joint_random_summary[gf][s:e]
-
-                        coef_ids = self.coef_by_rangf.get(gf, [])
-                        if len(coef_ids) > 0:
-                            if gf not in self.coefficient_random_base:
-                                self.coefficient_random_base[gf] = {}
-                            if gf not in self.coefficient_random_base_summary:
-                                self.coefficient_random_base_summary[gf] = {}
-                            s, e = self.joint_random_ix[gf]['coefficient']
-                            self.coefficient_random_base[gf] = tf.reshape(
-                                self.joint_random[gf][s:e],
-                                [rangf_n_levels, len(coef_ids)]
-                            )
-                            self.coefficient_random_base_summary[gf] = tf.reshape(
-                                self.joint_random_summary[gf][s:e],
-                                [rangf_n_levels, len(coef_ids)]
-                            )
-
-                        interaction_ids = self.interaction_by_rangf.get(gf, [])
-                        if len(interaction_ids) > 0:
-                            if gf not in self.interaction_random_base:
-                                self.interaction_random_base[gf] = {}
-                            if gf not in self.interaction_random_base_summary:
-                                self.interaction_random_base_summary[gf] = {}
-                            s, e = self.joint_random_ix[gf]['interaction']
-                            self.interaction_random_base[gf] = tf.reshape(
-                                self.joint_random[gf][s:e],
-                                [rangf_n_levels, len(interaction_ids)]
-                            )
-                            self.interaction_random_base_summary[gf] = tf.reshape(
-                                self.joint_random_summary[gf][s:e],
-                                [rangf_n_levels, len(interaction_ids)]
-                            )
-
-                        if gf not in self.irf_params_random_base:
-                            self.irf_params_random_base[gf] = {}
-                        if gf not in self.irf_params_random_base_summary:
-                            self.irf_params_random_base_summary[gf] = {}
-
-                        for family in sorted(list(self.atomic_irf_names_by_family.keys())):
-                            irf_ids_src = self.atomic_irf_names_by_family[family]
-
-                            irf_ids = []
-                            for id in irf_ids_src:
-                                if gf in self.irf_by_rangf and id in self.irf_by_rangf[gf]:
-                                    irf_ids.append(id)
-
-                            if len(irf_ids) > 0:
-                                if family not in self.irf_params_random_base[gf]:
-                                    self.irf_params_random_base[gf][family] = {}
-                                if family not in self.irf_params_random_base_summary[gf]:
-                                    self.irf_params_random_base_summary[gf][family] = {}
-                                for param_name in Formula.irf_params(family):
-                                    if gf in self.irf_by_rangf:
-                                        if param_name not in self.irf_params_random_base[gf][family]:
-                                            self.irf_params_random_base[gf][family][param_name] = {}
-                                        if param_name not in self.irf_params_random_base_summary[gf][family]:
-                                            self.irf_params_random_base_summary[gf][family][param_name] = {}
-
-                                        bounds = self.joint_random_ix[gf][family][param_name]
-                                        if bounds is not None:
-                                            s, e = bounds
-                                            self.irf_params_random_base[gf][family][param_name] = tf.reshape(
-                                                self.joint_random[gf][s:e],
-                                                [rangf_n_levels, len(irf_ids)]
-                                            )
-                                            self.irf_params_random_base_summary[gf][family][param_name] = tf.reshape(
-                                                self.joint_random_summary[gf][s:e],
-                                                [rangf_n_levels, len(irf_ids)]
-                                            )
+                            for j, id in enumerate(irf_ids):
+                                if irf_param_name in trainable[id]:
+                                    if id not in self.irf_params[response]:
+                                        self.irf_params[response][id] = {}
+                                    if id not in self.irf_params_summary[response]:
+                                        self.irf_params_summary[response][id] = {}
+                                    # id is -3 dimension
+                                    self.irf_params[response][id][irf_param_name] = irf_param[..., j, :, :]
+                                    self.irf_params_summary[response][id][irf_param_name] = irf_param_summary[..., j, :, :]
 
     def _initialize_parameter_tables(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 super(CDR, self)._initialize_parameter_tables()
-                parameter_table_fixed_keys = []
-                parameter_table_fixed_values = []
-                for coef_name in self.fixed_coef_names:
-                    coef_name_str = 'coefficient_' + coef_name
-                    parameter_table_fixed_keys.append(coef_name_str)
-                parameter_table_fixed_values.append(
-                    tf.gather(self.coefficient_fixed, names2ix(self.fixed_coef_names, self.coef_names))
-                )
-                if len(self.fixed_interaction_names) > 0:
-                    for interaction_name in self.fixed_interaction_names:
-                        interaction_name_str = 'interaction_' + interaction_name
-                        parameter_table_fixed_keys.append(interaction_name_str)
-                    parameter_table_fixed_values.append(
-                        tf.gather(self.interaction_fixed, names2ix(self.fixed_interaction_names, self.interaction_names))
-                    )
-                for irf_id in self.irf_params_fixed:
-                    family = self.atomic_irf_family_by_name[irf_id]
-                    for param in self.atomic_irf_param_trainable_by_family[family][irf_id]:
-                        param_ix = names2ix(param, Formula.irf_params(family))
-                        parameter_table_fixed_keys.append(param + '_' + irf_id)
-                        parameter_table_fixed_values.append(
-                            tf.squeeze(
-                                tf.gather(self.irf_params_fixed[irf_id], param_ix, axis=1),
-                                axis=(0, 2)
-                            )
-                        )
 
-                self.parameter_table_fixed_keys += parameter_table_fixed_keys
-                self.parameter_table_fixed_values = tf.concat(
-                    [self.parameter_table_fixed_values, tf.concat(parameter_table_fixed_values, 0)],
-                    0
-                )
-
-                parameter_table_random_keys = []
-                parameter_table_random_rangf = []
-                parameter_table_random_rangf_levels = []
-                parameter_table_random_values = []
-
-                if len(self.rangf) > 0:
-                    for i in range(len(self.rangf)):
-                        gf = self.rangf[i]
-                        levels = sorted(self.rangf_map_ix_2_levelname[i][:-1])
-                        levels_ix = names2ix([self.rangf_map[i][level] for level in levels], range(self.rangf_n_levels[i]))
-                        if gf in self.coefficient_random:
-                            coef_names = self.coef_by_rangf.get(gf, [])
-                            for coef_name in coef_names:
-                                coef_ix = names2ix(coef_name, self.coef_names)
+                for i, response in enumerate(self.response_names):
+                    response_params = self.predictive_distribution_config[response]['params']
+                    if not self.use_distributional_regression:
+                        response_params = response_params[:1]
+                    for j, response_param in enumerate(response_params):
+                        dim_names = self._expand_param_name_by_dim(response, response_param)
+                        for k, dim_name in enumerate(dim_names):
+                            ix = names2ix(self.fixed_coef_names, self.coef_names)
+                            for l, coef_name in enumerate(self.fixed_coef_names):
                                 coef_name_str = 'coefficient_' + coef_name
-                                for level in levels:
-                                    parameter_table_random_keys.append(coef_name_str)
-                                    parameter_table_random_rangf.append(gf)
-                                    parameter_table_random_rangf_levels.append(level)
-                                parameter_table_random_values.append(
-                                    tf.squeeze(
-                                        tf.gather(
-                                            tf.gather(self.coefficient_random[gf], coef_ix, axis=1),
-                                            levels_ix
-                                        )
-                                    )
+                                self.parameter_table_fixed_types.append(coef_name_str)
+                                self.parameter_table_fixed_responses.append(response)
+                                self.parameter_table_fixed_response_params.append(dim_name)
+                                self.parameter_table_fixed_values.append(
+                                    self.coefficient_fixed[response][ix[l], j, k]
                                 )
-                        if len(self.interaction_names) > 0:
-                            if gf in self.interaction_random:
-                                interaction_names = self.interaction_by_rangf.get(gf, [])
-                                for interaction_name in interaction_names:
-                                    interaction_ix = names2ix(interaction_name, self.interaction_names)
+                            if len(self.fixed_interaction_names) > 0:
+                                ix = names2ix(self.fixed_interaction_names, self.interaction_names)
+                                for l, interaction_name in enumerate(self.fixed_interaction_names):
                                     interaction_name_str = 'interaction_' + interaction_name
-                                    for level in levels:
-                                        parameter_table_random_keys.append(interaction_name_str)
-                                        parameter_table_random_rangf.append(gf)
-                                        parameter_table_random_rangf_levels.append(level)
-                                    parameter_table_random_values.append(
-                                        tf.squeeze(
-                                            tf.gather(
-                                                tf.gather(self.interaction_random[gf], interaction_ix, axis=1),
-                                                levels_ix
-                                            )
-                                        )
+                                    self.parameter_table_fixed_types.append(interaction_name_str)
+                                    self.parameter_table_fixed_responses.append(response)
+                                    self.parameter_table_fixed_response_params.append(dim_name)
+                                    self.parameter_table_fixed_values.append(
+                                        self.interaction_fixed[response][ix[l], j, k]
                                     )
-                        if gf in self.irf_params_random:
-                            for irf_id in self.irf_params_random[gf]:
+                            for irf_id in self.irf_params_fixed[response]:
                                 family = self.atomic_irf_family_by_name[irf_id]
-                                for param in self.atomic_irf_param_trainable_by_family[family][irf_id]:
-                                    param_ix = names2ix(param, Formula.irf_params(family))
-                                    for level in levels:
-                                        parameter_table_random_keys.append(param + '_' + irf_id)
-                                        parameter_table_random_rangf.append(gf)
-                                        parameter_table_random_rangf_levels.append(level)
-                                    parameter_table_random_values.append(
-                                        tf.squeeze(
-                                            tf.gather(
-                                                tf.gather(self.irf_params_random[gf][irf_id], param_ix, axis=1),
-                                                levels_ix,
-                                            )
-                                        )
+                                for irf_param in self.atomic_irf_param_trainable_by_family[family][irf_id]:
+                                    self.parameter_table_fixed_types.append(irf_param + '_' + irf_id)
+                                    self.parameter_table_fixed_responses.append(response)
+                                    self.parameter_table_fixed_response_params.append(dim_name)
+                                    self.parameter_table_fixed_values.append(
+                                        self.irf_params_fixed[response][irf_id][irf_param][j, k]
                                     )
 
-                    if len(parameter_table_random_keys):
-                        self.parameter_table_random_keys += parameter_table_random_keys
-                        self.parameter_table_random_rangf += parameter_table_random_rangf
-                        self.parameter_table_random_rangf_levels += parameter_table_random_rangf_levels
-                        self.parameter_table_random_values = tf.concat(
-                            [self.parameter_table_random_values, tf.concat(parameter_table_random_values, 0)],
-                            0,
-                        )
-
-    def _initialize_random_mean_vector(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                if len(self.rangf) > 0:
-                    means = []
-                    for gf in sorted(list(self.intercept_random_means.keys())):
-                        means.append(tf.expand_dims(self.intercept_random_means[gf], 0))
-                    for gf in sorted(list(self.coefficient_random_means.keys())):
-                        means.append(self.coefficient_random_means[gf])
-                    if len(self.interaction_names) > 0:
-                        for gf in sorted(list(self.interaction_random_means.keys())):
-                            means.append(self.interaction_random_means[gf])
-                    for gf in sorted(list(self.irf_params_random_means.keys())):
-                        for family in sorted(list(self.irf_params_random_means[gf].keys())):
-                            for param_name in sorted(list(self.irf_params_random_means[gf][family].keys())):
-                                means.append(self.irf_params_random_means[gf][family][param_name])
-
-                    self.random_means = tf.concat(means, axis=0)
-
-    def _initialize_irfs(self, t):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                if t.family is None:
-                    self.irf[t.name()] = []
-                elif t.family == 'Terminal':
-                    coef_name = self.node_table[t.name()].coef_id()
-                    coef_ix = names2ix(coef_name, self.coef_names)
-
-                    assert t.name() not in self.irf, 'Duplicate IRF node name already in self.irf'
-                    self.irf[t.name()] = self.irf[t.p.name()][:]
-
-                    assert not t.name() in self.irf_plot, 'Duplicate IRF node name already in self.irf_plot'
-                    self.irf_plot[t.name()] = {
-                        'atomic': {
-                            'scaled': self.irf_plot[t.p.name()]['atomic']['unscaled'] * tf.expand_dims(tf.gather(self.coefficient, coef_ix, axis=1), axis=-1),
-                            'unscaled': self.irf_plot[t.p.name()]['atomic']['unscaled']
-                        },
-                        'composite': {
-                            'scaled': self.irf_plot[t.p.name()]['composite']['unscaled'] * tf.expand_dims(tf.gather(self.coefficient, coef_ix, axis=1), axis=-1),
-                            'unscaled': self.irf_plot[t.p.name()]['composite']['unscaled']
-                        }
-                    }
-
-                    assert not t.name() in self.irf_integral_tensors, 'Duplicate IRF node name already in self.mc_integrals'
-                    if t.p.family == 'DiracDelta':
-                        integral_tensor = tf.gather(self.coefficient, coef_ix, axis=1)[:,0]
-                    else:
-                        integral_tensor = tf.reduce_sum(self.irf_plot[t.name()]['composite']['scaled'], axis=(1,2)) * self.n_time_units / tf.cast(self.n_time_points, dtype=self.FLOAT_TF)
-                    self.irf_integral_tensors[t.name()] = integral_tensor
-
-                elif t.family == 'DiracDelta':
-                    assert t.p.name() == 'ROOT', 'DiracDelta may not be embedded under other IRF in CDR formula strings'
-                    assert not t.impulse == 'rate', '"rate" is a reserved keyword in CDR formula strings and cannot be used under DiracDelta'
-
-                    assert t.name() not in self.irf, 'Duplicate IRF node name already in self.irf'
-                    self.irf[t.name()] = self.irf[t.p.name()][:]
-
-                    assert not t.name() in self.irf_plot, 'Duplicate IRF node name already in self.irf_plot'
-                    self.irf_plot[t.name()] = {
-                        'atomic': {
-                            'scaled': self.dd_support[None, ...],
-                            'unscaled': self.dd_support[None, ...]
-                        },
-                        'composite' : {
-                            'scaled': self.dd_support[None, ...],
-                            'unscaled': self.dd_support[None, ...]
-                        }
-                    }
-
-                else:
-                    params = self.irf_params[t.irf_id()]
-                    params_summary = self.irf_params_summary[t.irf_id()]
-
-                    atomic_irf, atomic_irf_proportion_in_bounds = self._get_irf_lambdas(t.family)(params)
-                    atomic_irf_plot, _ = self._get_irf_lambdas(t.family)(params_summary)
-
-                    if t.p.name() in self.irf:
-                        irf = self.irf[t.p.name()][:] + [atomic_irf]
-                        irf_plot = self.irf[t.p.name()][:] + [atomic_irf_plot]
-                    else:
-                        irf = [atomic_irf]
-                        irf_plot = [atomic_irf_plot]
-
-                    if t.p.name() in self.irf_proportion_in_bounds:
-                        irf_proportion_in_bounds = self.irf_proportion_in_bounds[t.p.name()][:] + [atomic_irf_proportion_in_bounds]
-                    else:
-                        irf_proportion_in_bounds = [atomic_irf_proportion_in_bounds]
-
-                    assert t.name() not in self.irf, 'Duplicate IRF node name already in self.irf'
-                    self.irf[t.name()] = irf
-                    assert t.name() not in self.irf_proportion_in_bounds, 'Duplicate IRF node name already in self.irf_proportion_in_bounds'
-                    self.irf_proportion_in_bounds[t.name()] = irf_proportion_in_bounds
-
-                    atomic_irf_plot = atomic_irf(self.support)
-
-                    if len(irf) > 1:
-                        composite_irf_plot = self._compose_irf(irf)(self.support[None, ...])
-                    else:
-                        composite_irf_plot = atomic_irf_plot
-                    if len(irf_proportion_in_bounds) > 1:
-                        composite_irf_proportion_in_bounds = self._compose_irf(irf_proportion_in_bounds)(self.support[None, ...])
-                    else:
-                        composite_irf_proportion_in_bounds = atomic_irf_proportion_in_bounds
-
-                    assert t.name() not in self.irf_plot, 'Duplicate IRF node name already in self.irf_plot'
-                    self.irf_plot[t.name()] = {
-                        'atomic': {
-                            'unscaled': atomic_irf_plot,
-                            'scaled': atomic_irf_plot
-                        },
-                        'composite': {
-                            'unscaled': composite_irf_plot,
-                            'scaled': composite_irf_plot
-                        }
-                    }
-
-                    assert t.name() not in self.irf_proportion_in_bounds_mc, 'Duplicate IRF node name already in self.irf_proportion_before_mc'
-                    self.irf_proportion_in_bounds_mc[t.name()] = {
-                        'atomic': {
-                            'unscaled': atomic_irf_proportion_in_bounds,
-                            'scaled': atomic_irf_proportion_in_bounds
-                        },
-                        'composite': {
-                            'unscaled': composite_irf_proportion_in_bounds,
-                            'scaled': composite_irf_proportion_in_bounds
-                        }
-                    }
-
-                for c in t.children:
-                    self._initialize_irfs(c)
+                            if len(self.rangf) > 0:
+                                for r, gf in enumerate(self.rangf):
+                                    levels = sorted(self.rangf_map_ix_2_levelname[r][:-1])
+                                    if gf in self.coefficient_random:
+                                        coef_names = self.coef_by_rangf.get(gf, [])
+                                        for coef_name in coef_names:
+                                            ix = self.coef_names.index(coef_name)
+                                            coef_name_str = 'coefficient_' + coef_name
+                                            for l, level in enumerate(levels):
+                                                self.parameter_table_random_types.append(coef_name_str)
+                                                self.parameter_table_random_responses.append(response)
+                                                self.parameter_table_random_response_params.append(dim_name)
+                                                self.parameter_table_random_rangf.append(gf)
+                                                self.parameter_table_random_rangf_levels.append(level)
+                                                self.parameter_table_random_values.append(
+                                                    self.coefficient_random[response][gf][l, ix, j, k]
+                                                )
+                                    if len(self.interaction_names) > 0:
+                                        if gf in self.interaction_random:
+                                            interaction_names = self.interaction_by_rangf.get(gf, [])
+                                            for interaction_name in interaction_names:
+                                                ix = self.interaction_names.index(interaction_name)
+                                                interaction_name_str = 'interaction_' + interaction_name
+                                                for l, level in enumerate(levels):
+                                                    self.parameter_table_random_types.append(interaction_name_str)
+                                                    self.parameter_table_random_responses.append(response)
+                                                    self.parameter_table_random_response_params.append(dim_name)
+                                                    self.parameter_table_random_rangf.append(gf)
+                                                    self.parameter_table_random_rangf_levels.append(level)
+                                                    self.parameter_table_random_values.append(
+                                                        self.interaction_random[response][gf][l, ix, j, k]
+                                                    )
+                                    if gf in self.irf_params_random:
+                                        for irf_id in self.irf_params_random[response][gf]:
+                                            family = self.atomic_irf_family_by_name[irf_id]
+                                            for irf_param in self.atomic_irf_param_trainable_by_family[family][irf_id]:
+                                                for l, level in enumerate(levels):
+                                                    self.parameter_table_random_types.append(irf_param + '_' + irf_id)
+                                                    self.parameter_table_random_responses.append(response)
+                                                    self.parameter_table_random_response_params.append(dim_name)
+                                                    self.parameter_table_random_rangf.append(gf)
+                                                    self.parameter_table_random_rangf_levels.append(level)
+                                                    self.parameter_table_random_values.append(
+                                                        self.irf_params_random[response][gf][irf_id][irf_param][l, j, k]
+                                                    )
 
     def _initialize_impulses(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                self.irf_impulses = {}
                 for name in self.terminal_names:
                     t = self.node_table[name]
                     impulse_name = t.impulse.name()
@@ -2465,187 +1740,489 @@ class CDR(Model):
 
                     self.irf_impulses[name] = impulse
 
+    def _initialize_irf_lambdas(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                self.irf_lambdas = {}
+                support_ub = None
+
+                def exponential(**params):
+                    return exponential_irf_factory(
+                        **params,
+                        session=self.sess
+                    )
+
+                self.irf_lambdas['Exp'] = exponential
+                self.irf_lambdas['ExpRateGT1'] = exponential
+
+                def gamma(**params):
+                    return gamma_irf_factory(
+                        **params,
+                        support_ub=support_ub,
+                        session=self.sess,
+                        validate_irf_args=self.validate_irf_args
+                    )
+
+                self.irf_lambdas['Gamma'] = gamma
+                self.irf_lambdas['SteepGamma'] = gamma
+                self.irf_lambdas['GammaShapeGT1'] = gamma
+                self.irf_lambdas['GammaKgt1'] = gamma
+                self.irf_lambdas['HRFSingleGamma'] = gamma
+
+                def shifted_gamma_lambdas(**params):
+                    return shifted_gamma_irf_factory(
+                        **params,
+                        support_ub=support_ub,
+                        session=self.sess,
+                        validate_irf_args=self.validate_irf_args
+                    )
+
+                self.irf_lambdas['ShiftedGamma'] = shifted_gamma_lambdas
+                self.irf_lambdas['ShiftedGammaShapeGT1'] = shifted_gamma_lambdas
+                self.irf_lambdas['ShiftedGammaKgt1'] = shifted_gamma_lambdas
+
+                def normal(**params):
+                    return normal_irf_factory(
+                        **params,
+                        support_ub=support_ub,
+                        session=self.sess
+                    )
+
+                self.irf_lambdas['Normal'] = normal
+
+                def skew_normal(**params):
+                    return skew_normal_irf_factory(
+                        **params,
+                        support_ub=self.t_delta_limit.astype(dtype=self.FLOAT_NP) if support_ub is None else support_ub,
+                        session=self.sess
+                    )
+
+                self.irf_lambdas['SkewNormal'] = skew_normal
+
+                def emg(**kwargs):
+                    return emg_irf_factory(
+                        **kwargs,
+                        support_ub=support_ub,
+                        session=self.sess
+                    )
+
+                self.irf_lambdas['EMG'] = emg
+
+                def beta_prime(**kwargs):
+                    return beta_prime_irf_factory(
+                        **kwargs,
+                        support_ub=support_ub,
+                        session=self.sess
+                    )
+
+                self.irf_lambdas['BetaPrime'] = beta_prime
+
+                def shifted_beta_prime(**kwargs):
+                    return shifted_beta_prime_irf_factory(
+                        **kwargs,
+                        support_ub=support_ub,
+                        session=self.sess
+                    )
+
+                self.irf_lambdas['ShiftedBetaPrime'] = shifted_beta_prime
+
+                def double_gamma_1(**kwargs):
+                    return double_gamma_1_irf_factory(
+                        **kwargs,
+                        support_ub=support_ub,
+                        session=self.sess,
+                        validate_irf_args=self.validate_irf_args
+                    )
+
+                self.irf_lambdas['HRFDoubleGamma1'] = double_gamma_1
+
+                def double_gamma_2(**kwargs):
+                    return double_gamma_2_irf_factory(
+                        **kwargs,
+                        support_ub=support_ub,
+                        session=self.sess,
+                        validate_irf_args=self.validate_irf_args
+                    )
+
+                self.irf_lambdas['HRFDoubleGamma2'] = double_gamma_2
+
+                def double_gamma_3(**kwargs):
+                    return double_gamma_3_irf_factory(
+                        **kwargs,
+                        support_ub=support_ub,
+                        session=self.sess,
+                        validate_irf_args=self.validate_irf_args
+                    )
+
+                self.irf_lambdas['HRFDoubleGamma3'] = double_gamma_3
+
+                def double_gamma_4(**kwargs):
+                    return double_gamma_4_irf_factory(
+                        **kwargs,
+                        support_ub=support_ub,
+                        session=self.sess,
+                        validate_irf_args=self.validate_irf_args
+                    )
+
+                self.irf_lambdas['HRFDoubleGamma4'] = double_gamma_4
+
+                def double_gamma_5(**kwargs):
+                    return double_gamma_5_irf_factory(
+                        **kwargs,
+                        support_ub=support_ub,
+                        session=self.sess,
+                        validate_irf_args=self.validate_irf_args
+                    )
+
+                self.irf_lambdas['HRFDoubleGamma'] = double_gamma_5
+                self.irf_lambdas['HRFDoubleGamma5'] = double_gamma_5
+
+    def _initialize_LCG_irf(
+            self,
+            bases
+    ):
+        def f(
+                bases=bases,
+                int_type=self.INT_TF,
+                float_type=self.FLOAT_TF,
+                session=self.sess,
+                **params
+        ):
+            return LCG_irf_factory(
+                bases,
+                int_type=int_type,
+                float_type=float_type,
+                session=session,
+                **params
+            )
+
+        return f
+
+    def _get_irf_lambdas(self, family):
+        if family in self.irf_lambdas:
+            return self.irf_lambdas[family]
+        elif Formula.is_LCG(family):
+            bases = Formula.bases(family)
+            return self._initialize_LCG_irf(
+                bases
+            )
+        else:
+            raise ValueError('No IRF lamdba found for family "%s"' % family)
+
+    def _initialize_irfs(self, t, response):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if response not in self.irf:
+                    self.irf[response] = {}
+                if t.family is None:
+                    self.irf[response][t.name()] = []
+                elif t.family == 'Terminal':
+                    assert t.name() not in self.irf, 'Duplicate IRF node name already in self.irf'
+                    self.irf[response][t.name()] = self.irf[response][t.p.name()][:]
+                elif t.family == 'DiracDelta':
+                    assert t.p.name() == 'ROOT', 'DiracDelta may not be embedded under other IRF in CDR formula strings'
+                    assert not t.impulse == 'rate', '"rate" is a reserved keyword in CDR formula strings and cannot be used under DiracDelta'
+                    assert t.name() not in self.irf, 'Duplicate IRF node name already in self.irf'
+                    self.irf[response][t.name()] = self.irf[response][t.p.name()][:]
+                else:
+                    params = self.irf_params[response][t.irf_id()]
+                    atomic_irf = self._get_irf_lambdas(t.family)(**params)
+                    if t.p.name() in self.irf:
+                        irf = self.irf[response][t.p.name()][:] + [atomic_irf]
+                    else:
+                        irf = [atomic_irf]
+                    assert t.name() not in self.irf, 'Duplicate IRF node name already in self.irf'
+                    self.irf[response][t.name()] = irf
+
+                for c in t.children:
+                    self._initialize_irfs(c, response)
+
     def _initialize_convolutions(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                for name in self.terminal_names:
-                    t = self.node_table[name]
-                    impulse_name = self.terminal2impulse[name]
-                    impulse_ix = names2ix(impulse_name, self.impulse_names)[0]
+                self.convolutions = {}
+                for i, response in enumerate(self.response_names):
+                    self.convolutions[response] = {}
+                    for name in self.terminal_names:
+                        t = self.node_table[name]
+                        impulse_name = self.terminal2impulse[name]
+                        impulse_ix = names2ix(impulse_name, self.impulse_names)[0]
 
-                    if t.p.family == 'DiracDelta':
-                        self.convolutions[name] = self.irf_impulses[name]
-                    else:
-                        if t.cont:
-                            # Create a continuous piecewise linear function
-                            # that interpolates between points in the impulse history.
-                            # Reverse because the history contains time offsets in descen   ding order
-                            knot_location = tf.reverse(
-                                tf.transpose(self.t_delta[:,:,impulse_ix:impulse_ix+1], [0, 2, 1]),
-                                axis=[-1]
-                            )
-                            knot_amplitude = tf.reverse(
-                                tf.transpose(self.irf_impulses[name], [0, 2, 1]),
-                                axis=[-1]
-                            )
-                            impulse_resampler = piecewise_linear_interpolant(knot_location, knot_amplitude, session=self.sess)
-                            t_delta = tf.linspace(self.interp_step * (self.history_length-1), 0, self.history_length)[None, ..., None]
-                            t_delta = tf.tile(t_delta, [tf.shape(self.t_delta)[0], 1, 1])
-                            impulse = impulse_resampler(t_delta)
-                            impulse *= self.interp_step
-                        else:
-                            impulse = self.irf_impulses[name]
-                            t_delta = self.t_delta[:,:,impulse_ix:impulse_ix+1]
-
-                        irf = self.irf[name]
-                        if len(irf) > 1:
-                            irf = self._compose_irf(irf)
-                        else:
-                            irf = irf[0]
-
-                        irf_seq = irf(t_delta)
-
-                        self.convolutions[name] = tf.reduce_sum(impulse * irf_seq, axis=1)
-
-    def _initialize_interactions(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                if len(self.interaction_names) > 0:
-                    interaction_ix = np.arange(len(self.interaction_names))
-                    interaction_coefs = tf.gather(self.interaction, interaction_ix, axis=1)
-                    interaction_inputs = []
-                    for i, interaction in enumerate(self.interaction_list):
-                        assert interaction.name() == self.interaction_names[i], 'Mismatched sort order between self.interaction_names and self.interaction_list. This should not have happened, so please report it in issue tracker on Github.'
-                        irf_input_names = [x.name() for x in interaction.irf_responses()]
-
-                        inputs_cur = None
-
-                        if len(irf_input_names) > 0:
-                            irf_input_ix = names2ix(irf_input_names, self.terminal_names)
-                            irf_inputs = tf.gather(self.X_conv, irf_input_ix, axis=1)
-                            inputs_cur = tf.reduce_prod(irf_inputs, axis=1)
-
-                        non_irf_input_names = [x.name() for x in interaction.non_irf_responses()]
-                        if len(non_irf_input_names):
-                            non_irf_input_ix = names2ix(non_irf_input_names, self.impulse_names)
-                            non_irf_inputs = tf.gather(self.X_processed[:,-1,:], non_irf_input_ix, axis=1)
-                            non_irf_inputs = tf.reduce_prod(non_irf_inputs, axis=1)
-                            if inputs_cur is not None:
-                                inputs_cur *= non_irf_inputs
+                        if t.p.family == 'DiracDelta':
+                            if self.use_distributional_regression:
+                                nparam = len(self.predictive_distribution_config['params'])
                             else:
-                                inputs_cur = non_irf_inputs
+                                nparam = 1
+                            ndim = self.response_n_dim[response]
+                            impulse = self.irf_impulses[name][..., None]
+                            impulse = tf.tile(impulse, [1, nparam, ndim])
+                            out = impulse
+                        else:
+                            if t.cont:
+                                # Create a continuous piecewise linear function
+                                # that interpolates between points in the impulse history.
+                                # Reverse because the history contains time offsets in descending order
+                                knot_location = tf.reverse(
+                                    tf.transpose(self.t_delta[:,:,impulse_ix:impulse_ix+1], [0, 2, 1]),
+                                    axis=[-1]
+                                )
+                                knot_amplitude = tf.reverse(
+                                    tf.transpose(self.irf_impulses[name], [0, 2, 1]),
+                                    axis=[-1]
+                                )
+                                impulse_resampler = self._piecewise_linear_interpolant(knot_location, knot_amplitude)
+                                t_delta = tf.linspace(self.interp_step * (self.history_length-1), 0, self.history_length)[None, ...]
+                                t_delta = tf.tile(t_delta, [tf.shape(self.t_delta)[0], 1])
+                                impulse = impulse_resampler(t_delta)
+                                impulse *= self.interp_step
+                            else:
+                                impulse = self.irf_impulses[name]
+                                t_delta = self.t_delta[:,:,impulse_ix]
 
-                        interaction_inputs.append(inputs_cur)
-                    interaction_inputs = tf.stack(interaction_inputs, axis=1)
-                    self.summed_interactions = tf.reduce_sum(interaction_coefs * interaction_inputs, axis=1)
+                            irf = self.irf[response][name]
+                            if len(irf) > 1:
+                                irf = self._compose_irf(irf)
+                            else:
+                                irf = irf[0]
 
-    def _initialize_interaction_plots(self):
+                            # Put batch dim last
+                            t_delta = tf.transpose(t_delta, [1, 0])
+                            # Add broadcasting for response nparam, ndim
+                            t_delta = t_delta[..., None, None]
+                            # Impulse already has an extra dim
+                            impulse = impulse[..., None]
+                            # Apply IRF
+                            irf_seq = irf(t_delta)
+                            # Put batch dim first
+                            irf_seq = tf.transpose(irf_seq, [1, 0, 2, 3])
+
+                            out = tf.reduce_sum(impulse * irf_seq, axis=1)
+
+                        self.convolutions[response][name] = out
+
+    def _sum_interactions(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                for i, interaction in enumerate(self.interaction_names):
-                    interaction_ix = [i]
-                    estimate = self.dd_support * tf.gather(self.interaction_fixed, interaction_ix)
-                    self.irf_plot[interaction] = {
-                        'atomic': {
-                            'scaled': estimate,
-                            'unscaled': estimate
-                        },
-                        'composite': {
-                            'scaled': estimate,
-                            'unscaled': estimate
-                        }
-                    }
-
-    def _construct_network(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                self._initialize_irfs(self.t)
-                self._initialize_impulses()
-                self._initialize_convolutions()
-
-                convolutions = [self.convolutions[x] for x in self.terminal_names]
-                if len(convolutions) > 0:
-                    self.X_conv = tf.concat(convolutions, axis=1)
-                else:
-                    self.X_conv = tf.zeros((1, 1), dtype=self.FLOAT_TF)
-
-                coef_names = [self.node_table[x].coef_id() for x in self.terminal_names]
-                coef_ix = names2ix(coef_names, self.coef_names)
-                coef = tf.gather(self.coefficient, coef_ix, axis=1)
-                self.X_conv_scaled = self.X_conv*coef
-
-                self.y_delta = tf.reduce_sum(self.X_conv_scaled, axis=1)
-
-                out = self.y_delta + self.intercept
-
                 if len(self.interaction_names) > 0:
-                    self._initialize_interactions()
-                    #self._initialize_interaction_plots()
-                    out += self.summed_interactions
+                    self.summed_interactions = {}
+                    for response in self.response_names:
+                        interaction_ix = np.arange(len(self.interaction_names))
+                        interaction_coefs = tf.gather(self.interaction[response], interaction_ix, axis=1)
+                        interaction_inputs = []
+                        for i, interaction in enumerate(self.interaction_list):
+                            assert interaction.name() == self.interaction_names[i], 'Mismatched sort order between self.interaction_names and self.interaction_list. This should not have happened, so please report it in issue tracker on Github.'
+                            irf_input_names = [x.name() for x in interaction.irf_responses()]
 
-                self.out = out
+                            inputs_cur = None
 
-                # Other predictive distribution parameters do not vary in CDR,
-                # defined here for a unified plotting API.
-                self.y_sd_delta = tf.constant(0.)
-                self.y_skewness_delta = tf.constant(0.)
-                self.y_tailweight_delta = tf.constant(0.)
+                            if len(irf_input_names) > 0:
+                                irf_input_ix = names2ix(irf_input_names, self.terminal_names)
+                                irf_inputs = tf.gather(self.X_conv[response], irf_input_ix, axis=1)
+                                inputs_cur = tf.reduce_prod(irf_inputs, axis=1)
 
+                            non_irf_input_names = [x.name() for x in interaction.non_irf_responses()]
+                            if len(non_irf_input_names):
+                                non_irf_input_ix = names2ix(non_irf_input_names, self.impulse_names)
+                                non_irf_inputs = tf.gather(self.X_processed[:,-1,:], non_irf_input_ix, axis=1)
+                                non_irf_inputs = tf.reduce_prod(non_irf_inputs, axis=1)
+                                if inputs_cur is not None:
+                                    inputs_cur *= non_irf_inputs
+                                else:
+                                    inputs_cur = non_irf_inputs
+
+                            interaction_inputs.append(inputs_cur)
+                        interaction_inputs = tf.stack(interaction_inputs, axis=1)
+                        self.summed_interactions[response] = tf.reduce_sum(interaction_coefs * interaction_inputs, axis=1)
 
 
 
 
     ######################################################
     #
-    #  Internal public network initialization methods.
-    #  These must be implemented by all subclasses and
-    #  should only be called at initialization.
+    #  Public network initialization methods.
     #
     ######################################################
 
-    def initialize_interaction(self, interaction_ids=None, ran_gf=None):
+    def initialize_coefficient(self, response_name, coef_ids=None, ran_gf=None):
         """
-        Add (response-level) interactions.
-        This method must be implemented by subclasses of ``CDR`` and should only be called at model initialization.
+        Add coefficients for a given response variable.
+        Must be called for each response variable.
+        This method should only be called at model initialization.
         Correct model behavior is not guaranteed if called at any other time.
 
+        :param response_name: ``str``: name of response variable
+        :param coef_ids: ``list`` of ``str``: List of coefficient IDs
+        :param ran_gf: ``str`` or ``None``: Name of random grouping factor for random coefficient (if ``None``, constructs a fixed coefficient)
+        :return: 2-tuple of ``Tensor`` ``(coefficient, coefficient_summary)``; ``coefficient`` is the coefficient for use by the model. ``coefficient_summary`` is an identically-shaped representation of the current coefficient values for logging and plotting (can be identical to ``coefficient``). For fixed coefficients, should return a vector of ``len(coef_ids)`` trainable weights. For random coefficients, should return batch-length matrix of trainable weights with ``len(coef_ids)`` columns for each input in the batch. Weights should be initialized around 0.
+        """
+
+        if coef_ids is None:
+            coef_ids = self.coef_names
+
+        if self.use_distributional_regression:
+            nparam = len(self.predictive_distribution_config[response_name]['params'])
+        else:
+            nparam = 1
+        ndim = self.response_n_dim[response_name]
+        ncoef = len(coef_ids)
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if ran_gf is None:
+                    coefficient = tf.Variable(
+                        tf.zeros([ncoef, nparam, ndim], dtype=self.FLOAT_TF),
+                        name='coefficient_%s' % sn(response_name)
+                    )
+                    coefficient_summary = coefficient
+                else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+                    coefficient = tf.Variable(
+                        tf.zeros([rangf_n_levels, ncoef, nparam, ndim], dtype=self.FLOAT_TF),
+                        name='coefficient_%s_by_%s' % (sn(response_name), sn(ran_gf))
+                    )
+                    coefficient_summary = coefficient
+
+                # shape: (?rangf_n_levels, ncoef, nparam, ndim)
+
+                return coefficient, coefficient_summary
+
+    def initialize_interaction(self, response_name, interaction_ids=None, ran_gf=None):
+        """
+        Add (response-level) interactions for a given response variable.
+        Must be called for each response variable.
+        This method should only be called at model initialization.
+        Correct model behavior is not guaranteed if called at any other time.
+
+        :param response_name: ``str``: name of response variable
         :param coef_ids: ``list`` of ``str``: List of interaction IDs
         :param ran_gf: ``str`` or ``None``: Name of random grouping factor for random interaction (if ``None``, constructs a fixed interaction)
         :return: 2-tuple of ``Tensor`` ``(interaction, interaction_summary)``; ``interaction`` is the interaction for use by the model. ``interaction_summary`` is an identically-shaped representation of the current interaction values for logging and plotting (can be identical to ``interaction``). For fixed interactions, should return a vector of ``len(interaction_ids)`` trainable weights. For random interactions, should return batch-length matrix of trainable weights with ``len(interaction_ids)`` columns for each input in the batch. Weights should be initialized around 0.
         """
 
-        raise NotImplementedError
+        if interaction_ids is None:
+            interaction_ids = self.interaction_names
 
-    def initialize_irf_param_unconstrained(self, param_name, ids, mean=0, ran_gf=None):
+        if self.use_distributional_regression:
+            nparam = len(self.predictive_distribution_config[response_name]['params'])
+        else:
+            nparam = 1
+        ndim = self.response_n_dim[response_name]
+        ninter = len(interaction_ids)
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if ran_gf is None:
+                    interaction = tf.Variable(
+                        tf.zeros([ninter, nparam, ndim], dtype=self.FLOAT_TF),
+                        name='interaction_%s' % sn(response_name)
+                    )
+                    interaction_summary = interaction
+                else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+                    interaction = tf.Variable(
+                        tf.zeros([rangf_n_levels, ninter, nparam, ndim], dtype=self.FLOAT_TF),
+                        name='interaction_%s_by_%s' % (sn(response_name), sn(ran_gf))
+                    )
+                    interaction_summary = interaction
+
+                # shape: (?rangf_n_levels, ninter, nparam, ndim)
+
+                return interaction, interaction_summary
+
+    def initialize_irf_param(self, response_name, family, param_name, ran_gf=None):
         """
-        Add IRF parameters in the unconstrained space.
+        Add IRF parameters in the unconstrained space for a given response variable.
         CDR will apply appropriate constraint transformations as needed.
-        This method must be implemented by subclasses of ``CDR`` and should only be called at model initialization.
+        This method should only be called at model initialization.
         Correct model behavior is not guaranteed if called at any other time.
 
+        :param response_name: ``str``: name of response variable
+        :param family: ``str``; Name of IRF kernel family (e.g. ``Normal``)
         :param param_name: ``str``; Name of parameter (e.g. ``"alpha"``)
-        :param ids: ``list`` of ``str``; Names of IRF nodes to which this parameter applies
-        :param mean: ``float`` or ``Tensor``; scalar (broadcasted) or 1D tensor (shape = ``(len(ids),)``) of parameter means on the transformed space.
         :param ran_gf: ``str`` or ``None``: Name of random grouping factor for random IRF param (if ``None``, constructs a fixed coefficient)
-        :return: 2-tuple of ``Tensor`` ``(param, param_summary)``; ``param`` is the parameter for use by the model. ``param_summary`` is an identically-shaped representation of the current param values for logging and plotting (can be identical to ``param``). For fixed params, should return a vector of ``len(ids)`` trainable weights. For random params, should return batch-length matrix of trainable weights with ``len(ids)``. Weights should be initialized around **mean** (if fixed) or ``0`` (if random).
+        :return: 2-tuple of ``Tensor`` ``(param, param_summary)``; ``param`` is the parameter for use by the model. ``param_summary`` is an identically-shaped representation of the current param values for logging and plotting (can be identical to ``param``). For fixed params, should return a vector of ``len(trainable_ids)`` trainable weights. For random params, should return batch-length matrix of trainable weights with ``len(trainable_ids)``. Weights should be initialized around **mean** (if fixed) or ``0`` (if random).
         """
 
-        raise NotImplementedError
+        param_mean_unconstrained = self.irf_params_means_unconstrained[family][param_name]
+        trainable_ix = self.irf_params_trainable_ix[family][param_name]
+        mean = param_mean_unconstrained[trainable_ix]
+        irf_ids_all = self.atomic_irf_names_by_family[family]
+        param_trainable = self.atomic_irf_param_trainable_by_family[family]
 
-    def initialize_joint_distribution(self, means, sds, ran_gf=None):
-        """
-        Add a multivariate joint distribution over the parameters represented by **means**, where **means** are on the unconstrained space for bounded params.
-        The variance-covariance matrix is initialized using the square of **sds** as the diagonal.
-        This method is required for multivariate mode and must be implemented by subclasses of ``CDR`` and should only be called at model initialization.
-        Correct model behavior is not guaranteed if called at any other time.
+        if self.use_distributional_regression:
+            nparam = len(self.predictive_distribution_config[response_name]['params']) # number of params of predictive dist, not IRF
+        else:
+            nparam = 1
+        ndim = self.response_n_dim[response_name]
 
-        :param means: ``Tensor``; 1-D tensor as MVN mean parameter.
-        :param sds: ``Tensor``; 1-D tensor used to construct diagonal of MVN variance-covariance parameter.
-        :param ran_gf: ``str`` or ``None``: Name of random grouping factor for random IRF param (if ``None``, constructs a fixed coefficient)
-        :return: 2-tuple of ``Tensor`` ``(joint, join_summary)``; ``joint`` is the random variable for use by the model. ``joint_summary`` is an identically-shaped representation of the current joint for logging and plotting (can be identical to ``joint``). Returns a multivariate normal distribution of dimension len(means) in all cases.
-        """
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if ran_gf is None:
+                    trainable_ids = [x for x in irf_ids_all if param_name in param_trainable[x]]
+                    nirf = len(trainable_ids)
 
-        raise NotImplementedError
+                    if nirf:
+                        param = tf.Variable(
+                            tf.ones([nirf, nparam, ndim], dtype=self.FLOAT_TF) * tf.constant(mean[..., None, None], dtype=self.FLOAT_TF),
+                            name=sn('%s_%s_%s' % (param_name, '-'.join(trainable_ids), sn(response_name)))
+                        )
+                        param_summary = param
+                    else:
+                        param = param_summary = None
+                else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+                    irf_ids_gf = self.irf_by_rangf[ran_gf]
+                    trainable_ids = [x for x in irf_ids_all if (param_name in param_trainable[x] and x in irf_ids_gf)]
+                    nirf = len(trainable_ids)
+
+                    if nirf:
+                        param = tf.Variable(
+                            tf.zeros([rangf_n_levels, nirf, nparam, ndim], dtype=self.FLOAT_TF),
+                            name=sn('%s_%s_%s_by_%s' % (param_name, '-'.join(trainable_ids), sn(response_name), sn(ran_gf)))
+                        )
+                        param_summary = param
+                    else:
+                        param = param_summary = None
+
+                # shape: (?rangf_n_levels, nirf, nparam, ndim)
+
+                return param, param_summary
+
+    def initialize_model(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                self._compile_coefficients()
+                self._compile_interactions()
+                self._compile_irf_params()
+                self._initialize_irf_lambdas()
+                for response in self.response_names:
+                    self._initialize_irfs(self.t, response)
+                self._initialize_impulses()
+                self._initialize_convolutions()
+
+    def compile_network(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                self.X_conv = {}
+                for response in self.response_names:
+                    convolutions = [self.convolutions[response][x] for x in self.terminal_names]
+                    if len(convolutions) > 0:
+                        X_conv = tf.stack(convolutions, axis=1)
+                    else:
+                        X_conv = tf.zeros((1, 1), dtype=self.FLOAT_TF)
+
+
+                    coef_names = [self.node_table[x].coef_id() for x in self.terminal_names]
+                    coef_ix = names2ix(coef_names, self.coef_names)
+                    coef = tf.gather(self.coefficient[response], coef_ix, axis=1)
+                    X_conv = X_conv * coef
+                    self.X_conv[response] = X_conv
+
+                    output = tf.reduce_sum(X_conv, axis=1)
+                    self.output[response] = output
+
+                    if len(self.interaction_names) > 0:
+                        self._sum_interactions()
 
 
 
@@ -2696,31 +2273,6 @@ class CDR(Model):
 
                 return make_composed_irf(f)
 
-    def _apply_pc(self, inputs, src_ix=None, pc_ix=None, inv=False):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                if src_ix is None:
-                    src_ix = np.arange(self.n_pc)
-                if pc_ix is None:
-                    pc_ix = np.arange(self.n_pc)
-
-                e = self.e
-                e = tf.gather(e, src_ix, axis=0)
-                e = tf.gather(e, pc_ix, axis=1)
-                if inv:
-                    X = tf.gather(inputs, pc_ix, axis=-1)
-                    e = tf.transpose(e, [0,1])
-                else:
-                    X = tf.gather(inputs, src_ix, axis=-1)
-                expansions = 0
-                while len(X.shape) < 2:
-                    expansions += 1
-                    X = tf.expand_dims(X, 0)
-                outputs = self._matmul(X, e)
-                if expansions > 0:
-                    outputs = tf.squeeze(outputs, axis=list(range(expansions)))
-                return outputs
-
     def _get_mean_init_vector(self, irf_ids, param_name, irf_param_init, default=0.):
         mean = np.zeros(len(irf_ids))
         for i in range(len(irf_ids)):
@@ -2730,25 +2282,19 @@ class CDR(Model):
     def _process_mean(self, mean, lb=None, ub=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                mean = tf.constant(mean, dtype=self.FLOAT_TF)
-                if lb is not None:
-                    lb = tf.constant(lb, dtype=self.FLOAT_TF)
-                if ub is not None:
-                    ub = tf.constant(ub, dtype=self.FLOAT_TF)
-
                 if lb is not None and ub is None:
                     # Lower-bounded support only
-                    mean = self.constraint_fn_inv(mean - lb - self.epsilon)
+                    mean = self.constraint_fn_inv_np(mean - lb - self.epsilon)
                 elif lb is None and ub is not None:
                     # Upper-bounded support only
-                    mean = self.constraint_fn_inv(-(mean - ub + self.epsilon))
+                    mean = self.constraint_fn_inv_np(-(mean - ub + self.epsilon))
                 elif lb is not None and ub is not None:
                     # Finite-interval bounded support
-                    mean = self._softplus_sigmoid_inverse(mean, lb, ub)
+                    mean = self._logit_np(mean, lb, ub)
 
         return mean, lb, ub
 
-    def _compute_trainable_untrainable_ix(self, param_name, ids, trainable=None):
+    def _get_trainable_untrainable_ix(self, param_name, ids, trainable=None):
         if trainable is None:
             trainable_ix = np.array(list(range(len(ids))), dtype=self.INT_NP)
             untrainable_ix = []
@@ -2766,68 +2312,6 @@ class CDR(Model):
 
         return trainable_ix, untrainable_ix
 
-    def _collect_plots(self):
-        switches = [['atomic', 'composite'], ['scaled', 'unscaled'], ['dirac', 'nodirac']]
-
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                self.plots = {}
-                irf_names = [x for x in self.node_table if x in self.irf_plot and not (len(self.node_table[x].children) == 1 and self.node_table[x].children[0].terminal())]
-                irf_names_nodirac = [x for x in irf_names if not x.startswith('DiracDelta')]
-                irf_names_terminal = [x for x in self.node_table if x in self.irf_plot and self.node_table[x].terminal()]
-                irf_names_terminal_nodirac = [x for x in irf_names_terminal if not x.startswith('DiracDelta')]
-
-                for a in switches[0]:
-                    if a not in self.plots:
-                        self.plots[a] = {}
-                    for b in switches[1]:
-                        self.plots[a][b] = {}
-                        for c in switches[2]:
-                            plot_y = []
-
-                            if b == 'unscaled':
-                                if c == 'dirac':
-                                    names = irf_names
-                                else:
-                                    names = irf_names_nodirac
-                            else:
-                                if c == 'dirac':
-                                    names = irf_names_terminal
-                                else:
-                                    names = irf_names_terminal_nodirac
-
-                            for x in names:
-                                plot_y.append(self.irf_plot[x][a][b])
-
-                            self.plots[a][b][c] = {
-                                'names': names,
-                                'plot': plot_y
-                            }
-
-
-
-    ######################################################
-    #
-    #  Public methods that must be implemented by
-    #  subclasses
-    #
-    ######################################################
-
-    def run_conv_op(self, feed_dict, scaled=False, standardize_response=False, n_samples=None, algorithm='MAP', verbose=True):
-        """
-        Convolve a batch of data in feed_dict with the model's latent IRF.
-        **All CDR subclasses must implement this method.**
-
-        :param feed_dict: ``dict``; A dictionary of predictor variables
-        :param scaled: ``bool``; Whether to scale the outputs using the model's coefficients
-        :param standardize_response: ``bool``; Whether to report response using standard units. Ignored unless ``scaled==True`` and model was fitted using ``standardize_response==True``.
-        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
-        :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
-        :param verbose: ``bool``; Send progress reports to standard error.
-        :return: ``numpy`` array; The convolved inputs
-        """
-
-        raise NotImplementedError
 
 
 
@@ -2837,66 +2321,6 @@ class CDR(Model):
     #  Shared public methods
     #
     ######################################################
-
-    def verify_random_centering(self):
-        """
-        Assert that all random effects are properly centered (means sufficiently close to zero).
-
-        :return: ``None``
-        """
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                if len(self.rangf) > 0:
-                    means = self.random_means.eval(session=self.sess)
-                    centered = np.allclose(means, 0., rtol=1e-3, atol=1e-3)
-                    assert centered, 'Some random parameters are not properly centered\n. Current random parameter means:\n %s' %means
-
-    def build(self, outdir=None, restore=True):
-        """
-        Construct the CDR network and initialize/load model parameters.
-        ``build()`` is called by default at initialization and unpickling, so users generally do not need to call this method.
-        ``build()`` can be used to reinitialize an existing network instance on the fly, but only if (1) no model checkpoint has been saved to the output directory or (2) ``restore`` is set to ``False``.
-
-        :param restore: Restore saved network parameters if model checkpoint exists in the output directory.
-        :param verbose: Report model details after initialization.
-        :return: ``None``
-        """
-
-        if outdir is None:
-            if not hasattr(self, 'outdir'):
-                self.outdir = './cdr_model/'
-        else:
-            self.outdir = outdir
-
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                n_impulse = len(self.impulse_names)
-
-                self._initialize_inputs(n_impulse)
-                self._initialize_cdr_inputs()
-                self._initialize_base_params()
-                self._initialize_joint_distributions()
-                self._initialize_joint_distribution_slices()
-                self._initialize_intercepts_coefficients_interactions()
-                self._initialize_irf_lambdas()
-                self._initialize_irf_params()
-                self._initialize_parameter_tables()
-                self._initialize_random_mean_vector()
-                self._construct_network()
-                self.initialize_objective()
-                self._initialize_logging()
-                self._initialize_ema()
-
-                self.report_uninitialized = tf.report_uninitialized_variables(
-                    var_list=None
-                )
-                self._initialize_saver()
-                self.load(restore=restore)
-
-                self._initialize_convergence_checking()
-                self._collect_plots()
-
-                self.sess.graph.finalize()
 
     def report_settings(self, indent=0):
         out = super(CDR, self).report_settings(indent=indent)
@@ -2920,6 +2344,7 @@ class CDR(Model):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 to_run = [self.train_op, self.ema_op]
+                to_run += [self.response_params_ema_ops[x] for x in self.response_params_ema_ops]
 
                 to_run += [self.loss_func, self.reg_loss]
                 to_run_names = ['loss', 'reg_loss']

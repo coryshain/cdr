@@ -1,5 +1,4 @@
 import argparse
-import sys
 import os
 from cdr.config import Config
 from cdr.util import load_cdr, filter_models, stderr
@@ -12,7 +11,7 @@ if __name__ == '__main__':
     argparser.add_argument('paths', nargs='+', help='Path(s) to config file(s) defining experiments')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of models for which to generate summaries. Regex permitted. If not, generates summaries for all CDR models.')
     argparser.add_argument('-r', '--random', action='store_true', help='Report random effects.')
-    argparser.add_argument('-l', '--level', type=float, default=95., help='Level (in percent) for any credible intervals (CDRBayes only).')
+    argparser.add_argument('-l', '--level', type=float, default=95., help='Level (in percent) for any credible intervals.')
     argparser.add_argument('-n', '--n_samples', default='default', help='Number of MC samples to use for computing statistics. If unspecified, uses model default (**n_samples_eval** parameter).')
     argparser.add_argument('-t', '--timeunits', type=float, default=None, help='Number of time units over which to compute effect size integrals. If unspecified, uses longest timespan attested in training.')
     argparser.add_argument('-T', '--save_table', action='store_true', help='Save CSV table of model parameters.')

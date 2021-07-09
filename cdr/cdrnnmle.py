@@ -30,11 +30,11 @@ class CDRNNMLE(CDRNN):
     #
     ######################################################
 
-    def __init__(self, form_str, X, y, **kwargs):
+    def __init__(self, form_str, X, Y, **kwargs):
         super(CDRNNMLE, self).__init__(
             form_str,
             X,
-            y,
+            Y,
             **kwargs
         )
 
@@ -76,50 +76,27 @@ class CDRNNMLE(CDRNN):
     #
     ######################################################
 
-    def initialize_intercept(self, ran_gf=None):
+    def initialize_intercept(self, response_name, ran_gf=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                init = tf.constant(self.intercept_init[response_name], dtype=self.FLOAT_TF)
+                name = sn(response_name)
                 if ran_gf is None:
                     intercept = tf.Variable(
-                        self.intercept_init_tf,
+                        init,
                         dtype=self.FLOAT_TF,
-                        name='intercept'
+                        name='intercept_%s' % name
                     )
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+                    shape = [rangf_n_levels] + [int(x) for x in init.shape]
                     intercept = tf.Variable(
-                        tf.zeros([rangf_n_levels], dtype=self.FLOAT_TF),
-                        name='intercept_by_%s' % sn(ran_gf)
+                        tf.zeros(shape, dtype=self.FLOAT_TF),
+                        name='intercept_%s_by_%s' % (name, sn(ran_gf))
                     )
                 intercept_summary = intercept
 
                 return intercept, intercept_summary
-
-    def initialize_coefficient(self, coef_ids=None, ran_gf=None, suffix=None):
-        if suffix is None:
-            suffix = ''
-        elif not suffix.startswith('_'):
-            suffix = '_' + suffix
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                units = len(self.impulse_names) + 1
-                if ran_gf is None:
-                    coefficient = tf.Variable(
-                        tf.zeros([1, 1, units]),
-                        # tf.ones([1, 1, units]) * self.epsilon,
-                        dtype=self.FLOAT_TF,
-                        name='coefficient%s' % suffix
-                    )
-                    # coefficient = tf.ones([1, 1, units])
-                else:
-                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
-                    coefficient = tf.Variable(
-                        tf.zeros([rangf_n_levels, units]),
-                        name='coefficient%s_by_%s' % (suffix, sn(ran_gf))
-                    )
-                coefficient_summary = coefficient
-
-                return coefficient, coefficient_summary
 
     def initialize_input_bias(self, ran_gf=None):
         with self.sess.as_default():
@@ -382,194 +359,6 @@ class CDRNNMLE(CDRNN):
 
                 return normalization_layer
 
-    def initialize_objective(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                self.y_sd_base_unconstrained = tf.Variable(
-                    self.y_sd_init_unconstrained,
-                    dtype=self.FLOAT_TF,
-                    name='y_sd_base_unconstrained'
-                )
-                self.y_sd = self.constraint_fn(self.y_sd_base_unconstrained + self.y_sd_delta) + self.epsilon
-                # self.y_sd = tf.Print(self.y_sd, [self.y_sd, tf.reduce_mean(self.y_sd), tf.reduce_min(self.y_sd), tf.reduce_max(self.y_sd)], summarize=1000)
-                self.y_sd_summary = self.constraint_fn(self.y_sd_base_unconstrained + self.y_sd_delta_ema) + self.epsilon
-                tf.summary.scalar(
-                    'error/y_sd',
-                    self.y_sd_summary,
-                    collections=['params']
-                )
-
-                if self.asymmetric_error:
-                    self.y_skewness_base = tf.Variable(
-                        0.,
-                        dtype=self.FLOAT_TF,
-                        name='y_skewness_base'
-                    )
-                    self.y_skewness = self.y_skewness_base + self.y_skewness_delta
-                    self.y_skewness_summary = self.y_skewness_base + self.y_skewness_delta_ema
-                    tf.summary.scalar(
-                        'error/y_skewness',
-                        self.y_skewness_summary,
-                        collections=['params']
-                    )
-
-                    self.y_tailweight_base_unconstrained = tf.Variable(
-                        self.y_tailweight_init_unconstrained,
-                        dtype=self.FLOAT_TF,
-                        name='y_tailweight_base_unconstrained'
-                    )
-                    self.y_tailweight = self.constraint_fn(self.y_tailweight_base_unconstrained + self.y_tailweight_delta) + self.epsilon
-                    self.y_tailweight_summary = self.constraint_fn(self.y_tailweight_base_unconstrained + self.y_tailweight_delta_ema) + self.epsilon
-                    tf.summary.scalar(
-                        'error/y_tailweight',
-                        self.y_tailweight_summary,
-                        collections=['params']
-                    )
-
-                if self.standardize_response:
-                    y_standardized = (self.y - self.y_train_mean) / self.y_train_sd
-
-                    if self.asymmetric_error:
-                        y_dist_standardized = SinhArcsinh(
-                            loc=self.out,
-                            scale=self.y_sd,
-                            skewness=self.y_skewness,
-                            tailweight=self.y_tailweight
-                        )
-                        y_dist = SinhArcsinh(
-                            loc=self.out * self.y_train_sd + self.y_train_mean,
-                            scale=self.y_sd * self.y_train_sd,
-                            skewness=self.y_skewness,
-                            tailweight=self.y_tailweight
-                        )
-
-                        self.err_dist_standardized = SinhArcsinh(
-                            loc=0.,
-                            scale=self.y_sd,
-                            skewness=self.y_skewness,
-                            tailweight=self.y_tailweight
-                        )
-                        self.err_dist = SinhArcsinh(
-                            loc=0.,
-                            scale=self.y_sd * self.y_train_sd,
-                            skewness=self.y_skewness,
-                            tailweight=self.y_tailweight
-                        )
-
-                        self.err_dist_summary_standardized = SinhArcsinh(
-                            loc=0.,
-                            scale=self.y_sd_summary,
-                            skewness=self.y_skewness_summary,
-                            tailweight=self.y_tailweight_summary
-                        )
-                        self.err_dist_summary = SinhArcsinh(
-                            loc=0.,
-                            scale=self.y_sd_summary * self.y_train_sd,
-                            skewness=self.y_skewness_summary,
-                            tailweight=self.y_tailweight_summary
-                        )
-                    else:
-                        y_dist_standardized = Normal(
-                            loc=self.out,
-                            scale=self.y_sd
-                        )
-                        y_dist = Normal(
-                            loc=self.out * self.y_train_sd + self.y_train_mean,
-                            scale=self.y_sd * self.y_train_sd
-                        )
-
-                        self.err_dist_standardized = Normal(
-                            loc=0.,
-                            scale=self.y_sd
-                        )
-                        self.err_dist = Normal(
-                            loc=0.,
-                            scale=self.y_sd * self.y_train_sd
-                        )
-
-                        self.err_dist_summary_standardized = Normal(
-                            loc=0.,
-                            scale=self.y_sd_summary
-                        )
-                        self.err_dist_summary = Normal(
-                            loc=0.,
-                            scale=self.y_sd_summary * self.y_train_sd
-                        )
-
-                    self.ll_standardized = y_dist_standardized.log_prob(y_standardized)
-                    self.ll = y_dist.log_prob(self.y)
-                    ll_objective = self.ll_standardized
-                    # ll_objective = tf.Print(ll_objective, [self.y_sd, ll_objective], summarize=10)
-                else:
-                    if self.asymmetric_error:
-                        y_dist = SinhArcsinh(
-                            loc=self.out,
-                            scale=self.y_sd,
-                            skewness=self.y_skewness,
-                            tailweight=self.y_tailweight
-                        )
-                        self.err_dist = SinhArcsinh(
-                            loc=0.,
-                            scale=self.y_sd,
-                            skewness=self.y_skewness,
-                            tailweight=self.y_tailweight
-                        )
-                        self.err_dist_summary = SinhArcsinh(
-                            loc=0.,
-                            scale=self.y_sd_summary,
-                            skewness=self.y_skewness_summary,
-                            tailweight=self.y_tailweight_summary
-                        )
-                    else:
-                        y_dist = Normal(
-                            loc=self.out,
-                            scale=self.y_sd
-                        )
-                        self.err_dist = Normal(
-                            loc=0.,
-                            scale=self.y_sd
-                        )
-                        self.err_dist_summary = Normal(
-                            loc=0.,
-                            scale=self.y_sd_summary
-                        )
-                    self.ll = y_dist.log_prob(self.y)
-                    ll_objective = self.ll
-
-                self.err_dist_plot = tf.exp(self.err_dist.log_prob(self.support[None,...]))
-                self.err_dist_plot_summary = tf.exp(self.err_dist_summary.log_prob(self.support[None,...]))
-                self.err_dist_lb = self.err_dist_summary.quantile(.025)
-                self.err_dist_ub = self.err_dist_summary.quantile(.975)
-
-                empirical_quantiles = tf.linspace(0., 1., self.n_errors)
-                if self.standardize_response:
-                    self.err_dist_standardized_theoretical_quantiles = self.err_dist_standardized.quantile(empirical_quantiles)
-                    self.err_dist_standardized_theoretical_cdf = self.err_dist_standardized.cdf(self.errors)
-                    self.err_dist_standardized_summary_theoretical_quantiles = self.err_dist_summary_standardized.quantile(empirical_quantiles)
-                    self.err_dist_standardized_summary_theoretical_cdf = self.err_dist_summary_standardized.cdf(self.errors)
-                self.err_dist_theoretical_quantiles = self.err_dist.quantile(empirical_quantiles)
-                self.err_dist_theoretical_cdf = self.err_dist.cdf(self.errors)
-                self.err_dist_summary_theoretical_quantiles = self.err_dist_summary.quantile(empirical_quantiles)
-                self.err_dist_summary_theoretical_cdf = self.err_dist_summary.cdf(self.errors)
-
-                loss_func = -ll_objective
-
-                for l in self.regularizable_layers:
-                    if hasattr(l, 'weights'):
-                        vars = l.weights
-                    else:
-                        vars = [l]
-                    for v in vars:
-                        if 'bias' not in v.name:
-                            self._regularize(v, regtype='nn', var_name=reg_name(v.name))
-
-                self.loss_func, self.reg_loss, self.kl_loss = self._process_objective(loss_func)
-
-                self.optim = self._initialize_optimizer()
-
-                self.train_op = self.optim.minimize(self.loss_func, global_step=self.global_batch_step)
-
-
     def _extract_parameter_values(self, fixed=True, level=95, n_samples=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -585,6 +374,10 @@ class CDRNNMLE(CDRNN):
             out = np.stack([out, out, out], axis=1)
 
             return out
+
+
+
+
 
     ######################################################
     #

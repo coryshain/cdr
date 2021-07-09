@@ -1,21 +1,20 @@
-import os
 import textwrap
 import time as pytime
 import scipy.stats
 import scipy.signal
 import scipy.interpolate
-import pandas as pd
 from collections import defaultdict
+from sklearn.metrics import f1_score
 
-from .kwargs import MODEL_INITIALIZATION_KWARGS
+from .kwargs import MODEL_INITIALIZATION_KWARGS, MODEL_BAYES_INITIALIZATION_KWARGS
 from .formula import *
 from .util import *
-from .data import build_CDR_impulses, corr_cdr, get_first_last_obs_lists
+from .data import build_CDR_data, corr_cdr, get_first_last_obs_lists, get_rangf_array, split_cdr_outputs
 from .opt import *
 from .plot import *
 
-
 import tensorflow as tf
+from tensorflow.contrib.distributions import Normal, SinhArcsinh
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 tf.logging.set_verbosity(tf.logging.ERROR)
@@ -48,26 +47,28 @@ class Model(object):
         ``Model`` is not a complete implementation and cannot be instantiated.
         Subclasses of ``Model`` must implement the following instance methods:
 
-            * ``initialize_objective()``
-            * ``run_loglik_op()``
-            * ``run_predict_op()``
+            * ``initialize_model()``
+            * ``compile_network()``
             * ``run_train_step()``
 
         Additionally, if the subclass requires any keyword arguments beyond those provided by ``Model``, it must also implement ``__init__()``, ``_pack_metadata()`` and ``_unpack_metadata()`` to support model initialization, saving, and resumption, respectively.
     """
     _doc_args = """
         :param form_str: An R-style string representing the model formula.
-        :param X: ``pandas`` table; matrix of independent variables, grouped by series and temporally sorted.
-            ``X`` must contain the following columns (additional columns are ignored):
+        :param X: ``pandas`` table or ``list`` of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+            Often only one table will be used.
+            Support for multiple tables allows simultaneous use of independent variables that are measured at different times (e.g. word features and sound power in Shain, Blank, et al. (2020).
+            Each ``X`` must contain the following columns (additional columns are ignored):
 
             * ``time``: Timestamp associated with each observation in ``X``
             * A column for each independent variable in the ``form_str`` provided at initialization
-        :param y: A 2D pandas tensor representing the dependent variable. Must contain the following columns:
+        :param Y: ``pandas`` table or ``list`` of ``pandas`` tables; matrices of response variables, grouped by series and temporally sorted.
+            Each ``Y`` must contain the following columns:
 
             * ``time``: Timestamp associated with each observation in ``y``
-            * ``first_obs``:  Index in the design matrix `X` of the first observation in the time series associated with each observation in ``y``
-            * ``last_obs``:  Index in the design matrix `X` of the immediately preceding observation in the time series associated with each observation in ``y``
-            * A column with the same name as the DV specified in ``form_str``
+            * ``first_obs(_<K>)``:  Index in the design matrix `X` of the first observation in the time series associated with each observation in ``y``. If multiple ``X``, must be zero-indexed for each of the K dataframes in X.
+            * ``last_obs(_<K>)``:  Index in the design matrix `X` of the immediately preceding observation in the time series associated with each observation in ``y``. If multiple ``X``, must be zero-indexed for each of the K dataframes in X.
+            * A column with the same name as each response variable specified in ``form_str``
             * A column for each random grouping factor in the model specified in ``form_str``
     \n"""
     _doc_kwargs = '\n'.join([' ' * 8 + ':param %s' % x.key + ': ' + '; '.join(
@@ -86,19 +87,50 @@ class Model(object):
     N_QUANTILES = 41
     PLOT_QUANTILE_RANGE = 0.9
     PLOT_QUANTILE_IX = int((1 - PLOT_QUANTILE_RANGE) / 2 * N_QUANTILES)
+    PREDICTIVE_DISTRIBUTIONS = {
+        'normal': {
+            'dist': Normal,
+            'name': 'normal',
+            'params': ('mu', 'sigma'),
+            'support': 'real'
+        },
+        'sinharcsinh': {
+            'dist': SinhArcsinh,
+            'name': 'sinharcsinh',
+            'params': ('mu', 'sigma', 'skewness', 'tailweight'),
+            'support': 'real'
+        },
+        'bernoulli': {
+            'dist': tf.contrib.distributions.Bernoulli,
+            'name': 'bernoulli',
+            'params': ('logit',),
+            'support': 'discrete'
+        },
+        'categorical': {
+            'dist': tf.contrib.distributions.Categorical,
+            'name': 'categorical',
+            'params': ('logit',),
+            'support': 'discrete'
+        }
+    }
 
     def __new__(cls, *args, **kwargs):
         if cls is Model:
             raise TypeError("``Model`` is an abstract class and may not be instantiated")
         return object.__new__(cls)
 
-    def __init__(self, form, X, y, ablated=None, **kwargs):
+    def __init__(self, form, X, Y, ablated=None, **kwargs):
 
         ## Store initialization settings
         for kwarg in Model._INITIALIZATION_KWARGS:
             setattr(self, kwarg.key, kwargs.pop(kwarg.key, kwarg.default_value))
 
         assert self.n_samples == 1, 'n_samples is now deprecated and must be left at its default of 1'
+
+        if not isinstance(X, list):
+            X = [X]
+        if not isinstance(Y, list):
+            Y = [Y]
 
         # Cross validation settings
         self.crossval_factor = kwargs['crossval_factor']
@@ -117,9 +149,43 @@ class Model(object):
         else:
             self.form_str = str(form)
         form = form.categorical_transform(X)
-        form = form.categorical_transform(y)
         self.form = form
-        dv = form.dv
+        responses = form.responses()
+        response_names = [x.name() for x in responses]
+        response_is_categorical = {}
+        response_n_dim = {}
+        response_category_maps = {}
+        for _response in responses:
+            if _response.categorical(Y):
+                is_categorical = True
+                found = False
+                for _Y in Y:
+                    if _response.name() in _Y.columns:
+                        cats = sorted(list(_Y[_response.name()].unique()))
+                        category_map = dict(zip(cats, range(len(cats))))
+                        n_dim = len(cats)
+                        found = True
+                        break
+                assert found, 'Response %s not found in data.' % _response.name()
+            else:
+                is_categorical = False
+                category_map = {}
+                n_dim = 1
+            response_is_categorical[_response.name()] = is_categorical
+            response_n_dim[_response.name()] = n_dim
+            response_category_maps[_response.name()] = category_map
+        response_expanded_bounds = {}
+        s = 0
+        for _response in response_names:
+            n_dim = response_n_dim[_response]
+            e = s + n_dim
+            response_expanded_bounds[_response] = (s, e)
+            s = e
+        self.response_is_categorical = response_is_categorical
+        self.response_n_dim = response_n_dim
+        self.response_category_maps = response_category_maps
+        self.response_expanded_bounds = response_expanded_bounds
+
         rangf = form.rangf
 
         # Store ablation info
@@ -131,15 +197,52 @@ class Model(object):
             self.ablated = set(ablated)
 
         q = np.linspace(0.0, 1, self.N_QUANTILES)
-        q_plot = np.linspace(0.0, 1, 101)
 
-        # Collect stats for response variable
-        self.n_train = len(y)
-        self.y_train_mean = float(y[dv].mean())
-        self.y_train_sd = float(y[dv].std())
-        self.y_train_quantiles = np.quantile(y[dv], q)
+        # Collect stats for response variable(s)
+        self.n_train = 0.
+        Y_all = {x: [] for x in response_names}
+        for i, _Y in enumerate(Y):
+            to_add = True
+            for j, _response in enumerate(response_names):
+                if _response in _Y.columns:
+                    if to_add:
+                        self.n_train += len(_Y)
+                        to_add = False
+                    Y_all[_response].append(_Y[_response])
 
-        # Collect stats for and kernel density estimators for impulses
+        Y_train_means = {}
+        Y_train_sds = {}
+        Y_train_quantiles = {}
+        for _response_name in Y_all:
+            _response = Y_all[_response_name]
+            if len(_response):
+                if response_is_categorical[_response_name]:
+                    _response = pd.concat(_response)
+                    _map = response_category_maps[_response_name]
+                    _response = _response.map(_map).values
+                    # To 1-hot
+                    __response = np.zeros((len(_response), len(_map.values())))
+                    __response[np.arange(len(_response)), _response] = 1
+                    _response = __response
+                else:
+                    _response = np.concatenate(_response, axis=0)[..., None]
+                _mean = _response.mean(axis=0)
+                _sd = _response.std(axis=0)
+                _quantiles = np.quantile(_response, q, axis=0)
+            else:
+                _mean = 0.
+                _sd = 0.
+                _quantiles = np.zeros_like(q)
+
+            Y_train_means[_response_name] = _mean
+            Y_train_sds[_response_name] = _sd
+            Y_train_quantiles[_response_name] = _quantiles
+
+        self.Y_train_means = Y_train_means
+        self.Y_train_sds = Y_train_sds
+        self.Y_train_quantiles = Y_train_quantiles
+
+        # Collect stats for impulses
         impulse_means = {}
         impulse_sds = {}
         impulse_medians = {}
@@ -148,8 +251,6 @@ class Model(object):
         impulse_uq = {}
         impulse_min = {}
         impulse_max = {}
-        # impulse_vectors = {}
-        # densities = {}
 
         impulse_df_ix = []
         for impulse in self.form.t.impulses():
@@ -169,10 +270,9 @@ class Model(object):
                 impulse_min[name] = 1.
                 impulse_max[name] = 1.
             else:
-                for i, df in enumerate(X + [y]):
+                for i, df in enumerate(X + Y):
                     if name in df.columns and not name.lower() == 'rate':
                         column = df[name].values
-                        # impulse_vectors[name] = column
                         impulse_means[name] = column.mean()
                         impulse_sds[name] = column.std()
                         quantiles = np.quantile(column, q)
@@ -182,12 +282,6 @@ class Model(object):
                         impulse_uq[name] = np.quantile(column, 0.9)
                         impulse_min[name] = column.min()
                         impulse_max[name] = column.max()
-                        # if name.lower() != 'rate' and False:
-                        #     kde = scipy.stats.gaussian_kde(column)
-                        #     density_support = np.linspace(quantiles[0], quantiles[-1], 100)
-                        #     density = kde(density_support)
-                        #     spline = scipy.interpolate.UnivariateSpline(density_support, density, ext='zeros', s=0.001)
-                        #     densities[(name,)] = spline
 
                         found = True
                         break
@@ -200,7 +294,6 @@ class Model(object):
                                 break
                         if found:
                             column = df[impulse_names].product(axis=1)
-                            # impulse_vectors[name] = column.values
                             impulse_means[name] = column.mean()
                             impulse_sds[name] = column.std()
                             quantiles = np.quantile(column, q)
@@ -210,36 +303,12 @@ class Model(object):
                             impulse_uq[name] = np.quantile(column, 0.9)
                             impulse_min[name] = column.min()
                             impulse_max[name] = column.max()
-                            # kde = scipy.stats.gaussian_kde(column)
-                            # density_support = np.linspace(quantiles[0], quantiles[-1], 100)
-                            # density = kde(density_support)
-                            # spline = scipy.interpolate.UnivariateSpline(density_support, density, ext='zeros', s=0.001)
-                            # densities[(name,)] = spline
-
             if not found:
                 raise ValueError('Impulse %s was not found in an input file.' % name)
 
             impulse_df_ix.append(i)
         self.impulse_df_ix = impulse_df_ix
         impulse_df_ix_unique = set(self.impulse_df_ix)
-
-        # impulse_vector_names = list(impulse_vectors.keys())
-        # for i in range(len(impulse_vectors)):
-        #     name1 = impulse_vector_names[i]
-        #     column1 = impulse_vectors[name1]
-        #     for j in range(i + 1, len(impulse_vectors)):
-        #         name2 = impulse_vector_names[j]
-        #         column2 = impulse_vectors[name2]
-        #         kde_support = np.stack([column1, column2], axis=0)
-        #         kde = scipy.stats.gaussian_kde(kde_support)
-        #         density_support1 = np.linspace(impulse_quantiles[name1][0], impulse_quantiles[name1][-1], 20)
-        #         density_support2 = np.linspace(impulse_quantiles[name2][0], impulse_quantiles[name2][-1], 20)
-        #         density_support1, density_support2 = np.meshgrid(density_support1, density_support2)
-        #         density_support1 = density_support1.flatten()
-        #         density_support2 = density_support2.flatten()
-        #         density = kde(np.stack([density_support1, density_support2], axis=0))
-        #         spline = scipy.interpolate.SmoothBivariateSpline(density_support1, density_support2, density, s=0.001)
-        #         densities[(name1, name2)] = spline
 
         self.impulse_means = impulse_means
         self.impulse_sds = impulse_sds
@@ -249,40 +318,42 @@ class Model(object):
         self.impulse_uq = impulse_uq
         self.impulse_min = impulse_min
         self.impulse_max = impulse_max
-        # self.impulse_vectors_train = impulse_vectors
-        # self.densities = densities
+
+        self.response_to_df_ix = {}
+        for _response in response_names:
+            self.response_to_df_ix[_response] = []
+            for i, _Y in enumerate(Y):
+                if _response in _Y.columns:
+                    self.response_to_df_ix[_response].append(i)
 
         # Collect stats for temporal features
         t_deltas = []
         t_delta_maxes = []
-        time_X = []
-        first_obs, last_obs = get_first_last_obs_lists(y)
-        y_time = y.time.values
-        for i, cols in enumerate(zip(first_obs, last_obs)):
-            if i in impulse_df_ix_unique or (not impulse_df_ix_unique and i == 0):
-                first_obs_cur, last_obs_cur = cols
-                first_obs_cur = np.array(first_obs_cur, dtype=getattr(np, self.int_type))
-                last_obs_cur = np.array(last_obs_cur, dtype=getattr(np, self.int_type))
-                time_X_cur = np.array(X[i].time, dtype=getattr(np, self.float_type))
-                time_X.append(time_X_cur)
-                for j, (s, e) in enumerate(zip(first_obs_cur, last_obs_cur)):
-                    s = max(s, e - self.history_length)
-                    time_X_slice = time_X_cur[s:e]
-                    t_delta = y_time[j] - time_X_slice
-                    t_deltas.append(t_delta)
-                    t_delta_maxes.append(y_time[j] - time_X_cur[s])
-        time_X = np.concatenate(time_X, axis=0)
+        X_time = []
+        Y_time = []
+        for _Y in Y:
+            first_obs, last_obs = get_first_last_obs_lists(_Y)
+            _Y_time = _Y.time.values
+            Y_time.append(_Y_time)
+            for i, cols in enumerate(zip(first_obs, last_obs)):
+                if i in impulse_df_ix_unique or (not impulse_df_ix_unique and i == 0):
+                    _first_obs, _last_obs = cols
+                    _first_obs = np.array(_first_obs, dtype=getattr(np, self.int_type))
+                    _last_obs = np.array(_last_obs, dtype=getattr(np, self.int_type))
+                    _X_time = np.array(X[i].time, dtype=getattr(np, self.float_type))
+                    X_time.append(_X_time)
+                    for j, (s, e) in enumerate(zip(_first_obs, _last_obs)):
+                        s = max(s, e - self.history_length)
+                        _X_time_slice = _X_time[s:e]
+                        t_delta = _Y_time[j] - _X_time_slice
+                        t_deltas.append(t_delta)
+                        t_delta_maxes.append(_Y_time[j] - _X_time[s])
+        X_time = np.concatenate(X_time, axis=0)
+        Y_time = np.concatenate(Y_time, axis=0)
         t_deltas = np.concatenate(t_deltas, axis=0)
         t_delta_maxes = np.array(t_delta_maxes)
         t_delta_quantiles = np.quantile(t_deltas, q)
 
-        # kde = scipy.stats.gaussian_kde(t_deltas)
-        # density_support = np.linspace(t_delta_quantiles[0], t_delta_quantiles[-1], 100)
-        # density = kde(density_support)
-        # spline = scipy.interpolate.UnivariateSpline(density_support, density, ext='zeros', s=0.001)
-        # self.densities[('t_delta',)] = spline
-
-        # self.t_delta_vector_train = t_deltas
         self.t_delta_limit = np.quantile(t_deltas, 0.75)
         self.t_delta_quantiles = t_delta_quantiles
         self.t_delta_max = t_deltas.max()
@@ -290,29 +361,39 @@ class Model(object):
         self.t_delta_mean = t_deltas.mean()
         self.t_delta_sd = t_deltas.std()
 
-        self.time_X_limit = np.quantile(time_X, 0.75)
-        self.time_X_quantiles = np.quantile(time_X, q)
-        self.time_X_max = time_X.max()
-        self.time_X_mean = time_X.mean()
-        self.time_X_sd = time_X.std()
+        self.X_time_limit = np.quantile(X_time, 0.75)
+        self.X_time_quantiles = np.quantile(X_time, q)
+        self.X_time_max = X_time.max()
+        self.X_time_mean = X_time.mean()
+        self.X_time_sd = X_time.std()
 
-        self.time_y_quantiles = np.quantile(y_time, q)
-        self.time_y_mean = y_time.mean()
-        self.time_y_sd = y_time.std()
+        self.Y_time_quantiles = np.quantile(Y_time, q)
+        self.Y_time_mean = Y_time.mean()
+        self.Y_time_sd = Y_time.std()
 
         ## Set up hash table for random effects lookup
         self.rangf_map_base = []
         self.rangf_n_levels = []
         for i in range(len(rangf)):
-            gf = rangf[i]
-            keys = np.sort(y[gf].astype('str').unique())
-            k, counts = np.unique(y[gf].astype('str'), return_counts=True)
+            rangf_counts = {}
+            for _Y in Y:
+                gf = rangf[i]
+                _rangf_counts = dict(zip(*np.unique(_Y[gf].astype('str'), return_counts=True)))
+                for k in _rangf_counts:
+                    if k in rangf_counts:
+                        rangf_counts[k] += _rangf_counts[k]
+                    else:
+                        rangf_counts[k] = _rangf_counts[k]
+
+            keys = sorted(list(rangf_counts.keys()))
+            counts = np.array([rangf_counts[k] for k in keys])
+
             sd = counts.std()
             if np.isfinite(sd):
                 mu = counts.mean()
                 lb = mu - 2 * sd
                 too_few = []
-                for v, c in zip(k, counts):
+                for v, c in zip(keys, counts):
                     if c < lb:
                         too_few.append((v, c))
                 if len(too_few) > 0:
@@ -348,7 +429,8 @@ class Model(object):
         self.INT_NP = getattr(np, self.int_type)
 
         f = self.form
-        self.dv = f.dv
+        self.responses = f.responses()
+        self.response_names = f.response_names()
         self.has_intercept = f.has_intercept
         self.rangf = f.rangf
         self.ranef_group2ix = {x: i for i, x in enumerate(self.rangf)}
@@ -377,6 +459,10 @@ class Model(object):
         self.interaction_names = t.interaction_names()
         self.fixed_interaction_names = t.fixed_interaction_names()
         self.impulse_names = t.impulse_names(include_interactions=True)
+        self.response_names = self.form.response_names()
+        self.n_impulse = len(self.impulse_names)
+        self.n_response = len(self.response_names)
+        self.n_response_expanded = sum(self.response_n_dim[x] for x in self.response_n_dim)
         self.impulse_names_to_ix = {}
         self.impulse_names_printable = {}
         for i, x in enumerate(self.impulse_names):
@@ -394,6 +480,39 @@ class Model(object):
             self.terminal_names_to_ix[x] = i
             self.terminal_names_printable[x] = ':'.join([get_irf_name(x, self.irf_name_map) for y in x.split(':')])
 
+        # Initialize predictive distribution metadata
+        predictive_distribution = {}
+        predictive_distribution_map = {}
+        if self.predictive_distribution_map is not None:
+            _predictive_distribution_map = self.predictive_distribution_map.split()
+            has_delim = [';' in x for x in _predictive_distribution_map]
+            assert np.all(has_delim) or (not np.any(has_delim) and len(has_delim) == len(self.response_names)), 'predictive_distribution_map must either contain a one-to-one list of distribution names, one per response variable, or a list of ``;``-delimited pairs mapping <response, distribution>.'
+            for i, x in enumerate(_predictive_distribution_map):
+                if has_delim[i]:
+                    _response, _dist = x.split(';')
+                    predictive_distribution_map[_response] = _dist
+                else:
+                    predictive_distribution_map[self.response_names[i]] = x
+
+        for _response in self.response_names:
+            if _response in predictive_distribution_map:
+                predictive_distribution[_response] = predictive_distribution_map[_response]
+            elif self.response_is_categorical[_response]:
+                predictive_distribution[_response] = self.PREDICTIVE_DISTRIBUTIONS['categorical']
+            elif self.asymmetric_error:
+                predictive_distribution[_response] = self.PREDICTIVE_DISTRIBUTIONS['sinharcsinh']
+            else:
+                predictive_distribution[_response] = self.PREDICTIVE_DISTRIBUTIONS['normal']
+        self.predictive_distribution_config = predictive_distribution
+
+        self.response_category_to_ix = self.response_category_maps
+        self.response_ix_to_category = {}
+        for _response in self.response_category_to_ix:
+            self.response_ix_to_category[_response] = {}
+            for _cat in self.response_category_to_ix[_response]:
+                self.response_ix_to_category[_response][self.response_category_to_ix[_response][_cat]] = _cat
+
+        # Initialize random effects metadata
         # Can't pickle defaultdict because it requires a lambda term for the default value,
         # so instead we pickle a normal dictionary (``rangf_map_base``) and compute the defaultdict
         # from it.
@@ -437,21 +556,6 @@ class Model(object):
         self.ranef_group_ix = ranef_group_ix
         self.ranef_level_ix = ranef_level_ix
 
-        if self.intercept_init is None:
-            if self.standardize_response:
-                self.intercept_init = 0.
-            else:
-                self.intercept_init = self.y_train_mean
-        if self.y_sd_init is None:
-            if self.standardize_response:
-                self.y_sd_init = 1.
-            else:
-                self.y_sd_init = self.y_train_sd
-
-        self.output_distr_params = ['loc', 'sd']
-        if self.asymmetric_error:
-            self.output_distr_params += ['skewness', 'tailweight']
-
         if self.impulse_df_ix is None:
             self.impulse_df_ix = np.zeros(len(self.form.t.impulses()))
         self.impulse_df_ix = np.array(self.impulse_df_ix, dtype=self.INT_NP)
@@ -461,6 +565,12 @@ class Model(object):
             arange = np.arange(len(self.form.t.impulses()))
             ix = arange[np.where(self.impulse_df_ix == i)[0]]
             self.impulse_indices.append(ix)
+        if self.response_to_df_ix is None:
+            self.response_to_df_ix = {x: [0] for x in self.response_names}
+        self.n_response_df = 0
+        for _response in self.response_to_df_ix:
+            self.n_response_df = max(self.n_response_df, max(self.response_to_df_ix[_response]))
+        self.n_response_df += 1
 
         self.use_crossval = bool(self.crossval_factor)
 
@@ -527,23 +637,30 @@ class Model(object):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                self.intercept_init_tf = tf.constant(self.intercept_init, dtype=self.FLOAT_TF)
-
-                self.y_sd_init_tf = tf.constant(float(self.y_sd_init))
                 if self.constraint.lower() == 'softplus':
                     self.constraint_fn = tf.nn.softplus
+                    self.constraint_fn_np = lambda x: np.log(np.exp(x) + 1.)
                     self.constraint_fn_inv = tf.contrib.distributions.softplus_inverse
+                    self.constraint_fn_inv_np = lambda x: np.log(np.exp(x) - 1.)
                 elif self.constraint.lower() == 'square':
                     self.constraint_fn = tf.square
+                    self.constraint_fn_np = np.square
                     self.constraint_fn_inv = tf.sqrt
+                    self.constraint_fn_inv_np = np.sqrt
                 elif self.constraint.lower() == 'abs':
                     self.constraint_fn = self._abs
+                    self.constraint_fn_np = np.abs
                     self.constraint_fn_inv = tf.identity
+                    self.constraint_fn_inv_np = lambda x: x
                 else:
                     raise ValueError('Unrecognized constraint function %s' % self.constraint)
-                self.y_sd_init_unconstrained = self.constraint_fn_inv(self.y_sd_init_tf)
-                if self.asymmetric_error:
-                    self.y_tailweight_init_unconstrained = self.constraint_fn_inv(1.)
+
+                self.intercept_init = {}
+                for _response in self.response_names:
+                    self.intercept_init[_response] = self._get_intercept_init(
+                        _response,
+                        has_intercept=self.has_intercept[None]
+                    )
 
                 if self.convergence_n_iterates and self.convergence_alpha is not None:
                     self.d0 = []
@@ -593,10 +710,13 @@ class Model(object):
             'form': self.form,
             'n_train': self.n_train,
             'ablated': self.ablated,
-            'y_train_mean': self.y_train_mean,
-            'y_train_sd': self.y_train_sd,
-            'y_train_quantiles': self.y_train_quantiles,
-            # 't_delta_vector_train': self.t_delta_vector_train,
+            'Y_train_means': self.Y_train_means,
+            'Y_train_sds': self.Y_train_sds,
+            'Y_train_quantiles': self.Y_train_quantiles,
+            'response_is_categorical': self.response_is_categorical,
+            'response_n_dim': self.response_n_dim,
+            'response_category_maps': self.response_category_maps,
+            'response_expanded_bounds': self.response_expanded_bounds,
             't_delta_max': self.t_delta_max,
             't_delta_mean_max': self.t_delta_mean_max,
             't_delta_mean': self.t_delta_mean,
@@ -604,14 +724,15 @@ class Model(object):
             't_delta_quantiles': self.t_delta_quantiles,
             't_delta_limit': self.t_delta_limit,
             'impulse_df_ix': self.impulse_df_ix,
-            'time_X_max': self.time_X_max,
-            'time_X_mean': self.time_X_mean,
-            'time_X_sd': self.time_X_sd,
-            'time_X_quantiles': self.time_X_quantiles,
-            'time_X_limit': self.time_X_limit,
-            'time_y_mean': self.time_y_mean,
-            'time_y_sd': self.time_y_sd,
-            'time_y_quantiles': self.time_y_quantiles,
+            'response_to_df_ix': self.response_to_df_ix,
+            'X_time_max': self.X_time_max,
+            'X_time_mean': self.X_time_mean,
+            'X_time_sd': self.X_time_sd,
+            'X_time_quantiles': self.X_time_quantiles,
+            'X_time_limit': self.X_time_limit,
+            'Y_time_mean': self.Y_time_mean,
+            'Y_time_sd': self.Y_time_sd,
+            'Y_time_quantiles': self.Y_time_quantiles,
             'rangf_map_base': self.rangf_map_base,
             'rangf_n_levels': self.rangf_n_levels,
             'impulse_means': self.impulse_means,
@@ -622,8 +743,6 @@ class Model(object):
             'impulse_uq': self.impulse_uq,
             'impulse_min': self.impulse_min,
             'impulse_max': self.impulse_max,
-            # 'impulse_vectors_train': self.impulse_vectors_train,
-            # 'densities': self.densities
             'outdir': self.outdir,
             'crossval_factor': self.crossval_factor,
             'crossval_fold': self.crossval_fold,
@@ -638,10 +757,13 @@ class Model(object):
         self.form = md.pop('form', Formula(self.form_str))
         self.n_train = md.pop('n_train')
         self.ablated = md.pop('ablated', set())
-        self.y_train_mean = md.pop('y_train_mean')
-        self.y_train_sd = md.pop('y_train_sd')
-        self.y_train_quantiles = md.pop('y_train_quantiles', None)
-        # self.t_delta_vector_train = md.pop('t_delta_vector_train', None)
+        self.Y_train_means = md.pop('Y_train_means', md.pop('y_train_mean', None))
+        self.Y_train_sds = md.pop('Y_train_sds', md.pop('y_train_sd', None))
+        self.Y_train_quantiles = md.pop('Y_train_quantiles', md.pop('y_train_quantiles', None))
+        self.response_is_categorical = md.pop('response_is_categorical', {x: 'False' for x in self.form.response_names()})
+        self.response_n_dim = md.pop('response_n_dim', {x: 1 for x in self.form.response_names()})
+        self.response_category_maps = md.pop('response_category_maps', {x: {} for x in self.form.response_names()})
+        self.response_expanded_bounds = md.pop('response_expanded_bounds', {x: (i, i+1) for i, x in enumerate(self.form.response_names())})
         self.t_delta_max = md.pop('t_delta_max', md.pop('max_tdelta', None))
         self.t_delta_mean_max = md.pop('t_delta_mean_max', self.t_delta_max)
         self.t_delta_sd = md.pop('t_delta_sd', 1.)
@@ -649,14 +771,15 @@ class Model(object):
         self.t_delta_quantiles = md.pop('t_delta_quantiles', None)
         self.t_delta_limit = md.pop('t_delta_limit', self.t_delta_max)
         self.impulse_df_ix = md.pop('impulse_df_ix', None)
-        self.time_X_max = md.pop('time_X_max', md.pop('max_time_X', None))
-        self.time_X_sd = md.pop('time_X_sd', 1.)
-        self.time_X_mean = md.pop('time_X_mean', 1.)
-        self.time_X_quantiles = md.pop('time_X_quantiles', None)
-        self.time_X_limit = md.pop('time_X_limit', self.t_delta_max)
-        self.time_y_mean = md.pop('time_y_mean', 0.)
-        self.time_y_sd = md.pop('time_y_sd', 1.)
-        self.time_y_quantiles = md.pop('time_y_quantiles', None)
+        self.response_to_df_ix = md.pop('response_to_df_ix', None)
+        self.X_time_max = md.pop('X_time_max', md.pop('time_X_max', md.pop('max_time_X', None)))
+        self.X_time_sd = md.pop('X_time_sd', md.pop('time_X_sd', 1.))
+        self.X_time_mean = md.pop('X_time_mean', md.pop('time_X_mean', 1.))
+        self.X_time_quantiles = md.pop('X_time_quantiles', md.pop('time_X_quantiles', None))
+        self.X_time_limit = md.pop('X_time_limit', md.pop('time_X_limit', self.t_delta_max))
+        self.Y_time_mean = md.pop('Y_time_mean', md.pop('time_y_mean', 0.))
+        self.Y_time_sd = md.pop('Y_time_sd', md.pop('time_y_sd', 1.))
+        self.Y_time_quantiles = md.pop('Y_time_quantiles', md.pop('time_y_quantiles', None))
         self.rangf_map_base = md.pop('rangf_map_base')
         self.rangf_n_levels = md.pop('rangf_n_levels')
         self.impulse_means = md.pop('impulse_means', {})
@@ -667,15 +790,26 @@ class Model(object):
         self.impulse_uq = md.pop('impulse_uq', {})
         self.impulse_min = md.pop('impulse_min', {})
         self.impulse_max = md.pop('impulse_max', {})
-        # self.impulse_vectors_train = md.pop('impulse_vectors_train', {})
-        # self.densities = md.pop('densities', {})
         self.outdir = md.pop('outdir', './cdr_model/')
         self.crossval_factor = md.pop('crossval_factor', None)
         self.crossval_fold = md.pop('crossval_fold', [])
         self.irf_name_map = md.pop('irf_name_map', {})
 
+        # Convert response statistics to vectors if needed (for backward compatibility)
+        response_names = [x.name() for x in self.form.responses()]
+        if not isinstance(self.Y_train_means, dict):
+            self.Y_train_means = {x: self.form.self.Y_train_means[x] for x in response_names}
+        if not isinstance(self.Y_train_sds, dict):
+            self.Y_train_sds = {x: self.form.self.Y_train_sds[x] for x in response_names}
+        if not isinstance(self.Y_train_quantiles, dict):
+            self.Y_train_quantiles = {x: self.form.self.Y_train_quantiles[x] for x in response_names}
+
         for kwarg in Model._INITIALIZATION_KWARGS:
             setattr(self, kwarg.key, md.pop(kwarg.key, kwarg.default_value))
+
+    @property
+    def name(self):
+        return os.path.basename(self.outdir)
 
 
     ######################################################
@@ -683,91 +817,72 @@ class Model(object):
     #  Network Initialization
     #
     ######################################################
-    
-    def _initialize_regularizer(self, regularizer_name, regularizer_scale):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                if regularizer_name is None:
-                    regularizer = None
-                elif regularizer_name == 'inherit':
-                    regularizer = self.regularizer
-                else:
-                    scale = regularizer_scale
-                    if isinstance(scale, str):
-                        scale = [float(x) for x in scale.split(';')]
-                    else:
-                        scale = [scale]
-                    if self.scale_regularizer_with_data:
-                        scale = [x * self.minibatch_size * self.minibatch_scale for x in scale]
-                    if regularizer_name == 'l1_l2_regularizer':
-                        if len(scale) == 1:
-                            scale_l1 = scale_l2 = scale[0]
-                        else:
-                            scale_l1 = scale[0]
-                            scale_l2 = scale[1]
-                        regularizer = getattr(tf.contrib.layers, regularizer_name)(
-                            scale_l1,
-                            scale_l2
-                        )
-                    else:
-                        regularizer = getattr(tf.contrib.layers, regularizer_name)(scale[0])
 
-                return regularizer
-
-    def _initialize_inputs(self, n_impulse):
+    def _initialize_inputs(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.training = tf.placeholder_with_default(tf.constant(False, dtype=tf.bool), shape=[], name='training')
 
+                # Impulses
                 self.X = tf.placeholder(
-                    shape=[None, None, n_impulse],
+                    shape=[None, None, self.n_impulse],
                     dtype=self.FLOAT_TF,
                     name='X'
                 )
-                X_batch = tf.shape(self.X)[0]
+                self.X_batch = tf.shape(self.X)[0]
                 X_processed = self.X
-
                 if self.center_inputs:
                     X_processed -= self.impulse_means_arr_expanded
                 if self.rescale_inputs:
                     scale = self.impulse_sds_arr_expanded
                     scale = np.where(np.logical_not(np.isclose(scale, 0.)), scale, 1.)
                     X_processed /= scale
-                # X_processed = tf.Print(X_processed, [X_processed], summarize=100)
                 self.X_processed = X_processed
-
-                self.X_batch = X_batch
-                self.time_X = tf.placeholder_with_default(
-                    tf.zeros([X_batch, self.history_length,  max(n_impulse, 1)], dtype=self.FLOAT_TF),
-                    shape=[None, None, max(n_impulse, 1)],
-                    name='time_X'
+                self.X_time = tf.placeholder_with_default(
+                    tf.zeros([self.X_batch, self.history_length,  max(self.n_impulse, 1)], dtype=self.FLOAT_TF),
+                    shape=[None, None, max(self.n_impulse, 1)],
+                    name='X_time'
+                )
+                self.X_mask = tf.placeholder_with_default(
+                    tf.ones([self.X_batch, self.history_length, max(self.n_impulse, 1)], dtype=self.FLOAT_TF),
+                    shape=[None, None, max(self.n_impulse, 1)],
+                    name='X_mask'
                 )
 
-                self.time_X_mask = tf.placeholder_with_default(
-                    tf.ones([X_batch, self.history_length, max(n_impulse, 1)], dtype=self.FLOAT_TF),
-                    shape=[None, None, max(n_impulse, 1)],
-                    name='time_X_mask'
-                )
-
-                self.y = tf.placeholder(
-                    shape=[None],
+                # Responses
+                self.Y = tf.placeholder(
+                    shape=[None, self.n_response],
                     dtype=self.FLOAT_TF,
-                    name=sn('y')
+                    name=sn('Y')
                 )
-                self.y_batch = tf.shape(self.y)[0]
-                self.time_y = tf.placeholder_with_default(
-                    tf.ones([self.y_batch], dtype=self.FLOAT_TF),
+                self.Y_batch = tf.shape(self.Y)[0]
+                self.Y_time = tf.placeholder_with_default(
+                    tf.ones([self.Y_batch], dtype=self.FLOAT_TF),
                     shape=[None],
-                    name=sn('time_y')
+                    name=sn('Y_time')
+                )
+                self.Y_mask = tf.placeholder_with_default(
+                    tf.ones([self.Y_batch, self.n_response], dtype=self.FLOAT_TF),
+                    shape=[None, self.n_response],
+                    name='Y_mask'
                 )
 
-                # Tensor of temporal offsets with shape (?, history_length, 1)
-                self.t_delta = self.time_y[..., None, None] - self.time_X
+                # Compute tensor of temporal offsets with shape (?, history_length, n_impulse, n_response)
+
+                # shape (B,)
+                _Y_time = self.Y_time
+                # shape (B, 1, 1)
+                _Y_time = _Y_time[..., None, None]
+                # shape (B, T, n_impulse)
+                _X_time = self.X_time
+                # shape (B, T, n_impulse)
+                t_delta = _Y_time - _X_time
+                self.t_delta = t_delta
                 self.gf_defaults = np.expand_dims(np.array(self.rangf_n_levels, dtype=self.INT_NP), 0) - 1
-                self.gf_y = tf.placeholder_with_default(
+                self.Y_gf = tf.placeholder_with_default(
                     tf.cast(self.gf_defaults, dtype=self.INT_TF),
                     shape=[None, len(self.rangf)],
-                    name='gf_y'
+                    name='Y_gf'
                 )
 
                 self.max_tdelta_batch = tf.reduce_max(self.t_delta)
@@ -807,8 +922,20 @@ class Model(object):
                 )
 
                 # Error vector for probability plotting
-                self.errors = tf.placeholder(self.FLOAT_TF, shape=[None], name='errors')
-                self.n_errors = tf.placeholder(self.INT_TF, shape=[], name='n_errors')
+                self.errors = {}
+                self.n_errors = {}
+                for response in self.response_names:
+                    if self.predictive_distribution_config[response]['support'] == 'real':
+                        self.errors[response] = tf.placeholder(
+                            self.FLOAT_TF,
+                            shape=[None],
+                            name='errors_%s' % sn(response)
+                        )
+                        self.n_errors[response] = tf.placeholder(
+                            self.INT_TF,
+                            shape=[],
+                            name='n_errors_%s' % sn(response)
+                        )
 
                 self.global_step = tf.Variable(
                     0,
@@ -862,28 +989,110 @@ class Model(object):
                     self.kl_loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='kl_loss_total')
                 self.n_dropped_in = tf.placeholder(shape=[], dtype=self.INT_TF, name='n_dropped_in')
 
-                self.training_mse_in = tf.placeholder(self.FLOAT_TF, shape=[], name='training_mse_in')
-                self.training_mse = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_mse')
-                self.set_training_mse = tf.assign(self.training_mse, self.training_mse_in)
-                self.training_percent_variance_explained = tf.maximum(
-                    0.,
-                    (1. - self.training_mse / (self.y_train_sd ** 2)) * 100.
+                # Initialize vars for saving training set stats upon completion.
+                # Allows these numbers to be reported in later summaries without access to the training data.
+                self.training_loglik_full_in = tf.placeholder(
+                    self.FLOAT_TF,
+                    shape=[],
+                    name='training_loglik_full_in'
                 )
+                self.training_loglik_full = tf.Variable(
+                    np.nan,
+                    dtype=self.FLOAT_TF,
+                    trainable=False,
+                    name='training_loglik_full'
+                )
+                self.set_training_loglik_full = tf.assign(self.training_loglik_full, self.training_loglik_full_in)
+                self.training_loglik_in = {}
+                self.training_loglik = {}
+                self.set_training_loglik = {}
+                self.training_mse_in = {}
+                self.training_mse = {}
+                self.set_training_mse = {}
+                self.training_percent_variance_explained = {}
+                self.training_rho_in = {}
+                self.training_rho = {}
+                self.set_training_rho = {}
+                for response in self.response_names:
+                    # log likelihood
+                    self.training_loglik_in[response] = []
+                    self.training_loglik[response] = []
+                    self.set_training_loglik[response] = []
 
-                self.training_mae_in = tf.placeholder(self.FLOAT_TF, shape=[], name='training_mae_in')
-                self.training_mae = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_mae')
-                self.set_training_mae = tf.assign(self.training_mae, self.training_mae_in)
+                    file_ix = self.response_to_df_ix[response]
+                    multiple_files = len(file_ix) > 1
+                    for ix in file_ix:
+                        if multiple_files:
+                            name_base = '%s_file%s' % (sn(response), ix + 1)
+                        else:
+                            name_base = sn(response)
+                        self.training_loglik_in[response].append(tf.placeholder(
+                            self.FLOAT_TF,
+                            shape=[],
+                            name='training_loglik_in_%s' % name_base
+                        ))
+                        self.training_loglik[response].append(tf.Variable(
+                            np.nan,
+                            dtype=self.FLOAT_TF,
+                            trainable=False,
+                            name='training_loglik_%s' % name_base
+                        ))
+                        self.set_training_loglik[response].append(tf.assign(
+                            self.training_loglik[response][ix],
+                            self.training_loglik_in[response][ix]
+                        ))
 
-                self.training_loglik_in = tf.placeholder(self.FLOAT_TF, shape=[], name='training_loglik_in')
-                self.training_loglik = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_loglik')
-                self.set_training_loglik = tf.assign(self.training_loglik, self.training_loglik_in)
+                    if self.predictive_distribution_config[response]['support'] == 'real':
+                        self.training_mse_in[response] = []
+                        self.training_mse[response] = []
+                        self.set_training_mse[response] = []
+                        self.training_percent_variance_explained[response] = []
+                        self.training_rho_in[response] = []
+                        self.training_rho[response] = []
+                        self.set_training_rho[response] = []
 
-                self.training_rho_in = tf.placeholder(self.FLOAT_TF, shape=[], name='training_rho_in')
-                self.training_rho = tf.Variable(np.nan, dtype=self.FLOAT_TF, trainable=False, name='training_rho')
-                self.set_training_rho = tf.assign(self.training_rho, self.training_rho_in)
+                        for ix in range(self.n_response_df):
+                            # MSE
+                            self.training_mse_in[response].append(tf.placeholder(
+                                self.FLOAT_TF,
+                                shape=[],
+                                name='training_mse_in_%s' % name_base
+                            ))
+                            self.training_mse[response].append(tf.Variable(
+                                np.nan,
+                                dtype=self.FLOAT_TF,
+                                trainable=False,
+                                name='training_mse_%s' % name_base
+                            ))
+                            self.set_training_mse[response].append(tf.assign(
+                                self.training_mse[response][ix],
+                                self.training_mse_in[response][ix]
+                            ))
 
-                if self.convergence_basis.lower() == 'loss':
-                    self._add_convergence_tracker(self.loss_total, 'loss_total')
+                            # % variance explained
+                            self.training_percent_variance_explained[response].append(tf.maximum(
+                                0.,
+                                (1. - self.training_mse[response][ix] / (self.Y_train_sds[response] ** 2)) * 100.
+                            ))
+
+                            # rho
+                            self.training_rho_in[response].append(tf.placeholder(
+                                self.FLOAT_TF,
+                                shape=[], name='training_rho_in_%s' % name_base
+                            ))
+                            self.training_rho[response].append(tf.Variable(
+                                np.nan,
+                                dtype=self.FLOAT_TF,
+                                trainable=False,
+                                name='training_rho_%s' % name_base
+                            ))
+                            self.set_training_rho[response].append(tf.assign(
+                                self.training_rho[response][ix],
+                                self.training_rho_in[response][ix]
+                            ))
+
+                # convergence
+                self._add_convergence_tracker(self.loss_total, 'loss_total')
                 self.converged_in = tf.placeholder(tf.bool, shape=[], name='converged_in')
                 self.converged = tf.Variable(False, trainable=False, dtype=tf.bool, name='converged')
                 self.set_converged = tf.assign(self.converged, self.converged_in)
@@ -924,100 +1133,377 @@ class Model(object):
                     else:
                         self.ranef_regularizer = getattr(tf.contrib.layers, self.ranef_regularizer_name)(scale[0])
 
-                self.dropout_resample_ops = []
+                self.resample_ops = []
 
-    def _process_objective(self, loss_func):
+                self.use_MAP_mode = tf.placeholder_with_default(tf.logical_not(self.training), shape=[], name='use_MAP_mode')
+
+    def _get_intercept_init(self, response_name, has_intercept=True):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                # Filter
-                if self.loss_filter_n_sds and self.ema_decay:
+                out = []
+                ndim = self.response_n_dim[response_name]
+                for param in self.predictive_distribution_config[response_name]['params']:
+                    if param == 'mu':
+                        if has_intercept and not self.standardize_response:
+                            _out = self.Y_train_means[response_name][None, ...]
+                        else:
+                            _out = np.zeros((1, ndim))
+                    elif param == 'sigma':
+                        if self.standardize_response:
+                            _out = self.constraint_fn_inv_np(np.ones((1, ndim)))
+                        else:
+                            _out = self.constraint_fn_inv_np(self.Y_train_sds[response_name][None, ...])
+                    elif param == 'logit':
+                        if has_intercept:
+                            _out = np.log(self.Y_train_means[response_name][None, ...])
+                        else:
+                            _out = np.zeros((1, ndim))
+                    else:
+                        raise ValueError('Unrecognized predictive distributional parameter %s.' % param)
+
+                    out.append(_out)
+
+                out = np.concatenate(out, axis=0)
+
+                return out
+
+    def _initialize_base_params(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+
+                # Intercept
+                # Key order: response, ?(ran_gf)
+                self.intercept_fixed_base = {}
+                self.intercept_fixed_base_summary = {}
+                self.intercept_random_base = {}
+                self.intercept_random_base_summary = {}
+                for _response in self.response_names:
+                    # Fixed
+                    if self.has_intercept[None]:
+                        intercept_fixed, intercept_fixed_summary = self.initialize_intercept(_response)
+                    else:
+                        intercept_fixed = intercept_fixed_summary = tf.constant(self.intercept_init[_response], dtype=self.FLOAT_TF)
+                    self.intercept_fixed_base[_response] = intercept_fixed
+                    self.intercept_fixed_base_summary[_response] = intercept_fixed_summary
+
+                    # Random
+                    for gf in self.rangf:
+                        if self.has_intercept[gf]:
+                            if _response not in self.intercept_random_base:
+                                self.intercept_random_base[_response] = {}
+                            if _response not in self.intercept_random_base_summary:
+                                self.intercept_random_base_summary[_response] = {}
+                            _intercept_random, _intercept_random_summary = self.initialize_intercept(_response, ran_gf=gf)
+                            self.intercept_random_base[_response][gf] = _intercept_random
+                            self.intercept_random_base_summary[_response][gf] = _intercept_random_summary
+
+    def _compile_intercepts(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                self.intercept = {}
+                self.intercept_summary = {}
+                self.intercept_fixed = {}
+                self.intercept_fixed_summary = {}
+                self.intercept_random = {}
+                self.intercept_random_summary = {}
+                for response in self.response_names:
+                    self.intercept[response] = {}
+                    self.intercept_summary[response] = {}
+                    self.intercept_fixed[response] = {}
+                    self.intercept_fixed_summary[response] = {}
+                    self.intercept_random[response] = {}
+                    self.intercept_random_summary[response] = {}
+
+                    # Fixed
+                    response_params = self.predictive_distribution_config[response]['params']
+                    nparam = len(response_params)
+                    ndim = self.response_n_dim[response]
+
+                    intercept = self.intercept_fixed_base[response]
+                    intercept_summary = self.intercept_fixed_base_summary[response]
+
+                    if self.has_intercept[None]:
+                        for i, response_param in enumerate(response_params):
+                            dim_names = self._expand_param_name_by_dim(response, response_param)
+                            for j, dim_name in enumerate(dim_names):
+                                tf.summary.scalar(
+                                    'intercept/%s_%s' % (sn(response), sn(dim_name)),
+                                    intercept_summary[i, j],
+                                    collections=['params']
+                                )
+                        self._regularize(intercept, regtype='intercept', var_name='intercept_%s' % sn(response))
+
+                    for j, response_param in enumerate(response_params):
+                        val = intercept[j]
+                        val_summary = intercept_summary[j]
+                        if self.standardize_response and self.predictive_distribution_config[response]['support'] == 'real':
+                            if response_param == 'mu':
+                                val = tf.cond(
+                                    self.training,
+                                    lambda: val,
+                                    lambda: val * self.Y_train_sds[response] + self.Y_train_means[response]
+                                )
+                                val_summary = tf.cond(
+                                    self.training,
+                                    lambda: val_summary,
+                                    lambda: val_summary * self.Y_train_sds[response] + self.Y_train_means[response]
+                                )
+                            elif response_param == 'sigma':
+                                val = tf.cond(
+                                    self.training,
+                                    lambda: val,
+                                    lambda: val * self.Y_train_sds[response]
+                                )
+                                val_summary = tf.cond(
+                                    self.training,
+                                    lambda: val_summary,
+                                    lambda: val_summary * self.Y_train_sds[response]
+                                )
+                        if response_param in ['sigma', 'tailweight']:
+                            val = self.constraint_fn(val) + self.epsilon
+                            val_summary = self.constraint_fn(val_summary) + self.epsilon
+
+                        self.intercept_fixed[response][response_param] = val
+                        self.intercept_fixed_summary[response][response_param] = val
+
+                    # Random
+                    for i, gf in enumerate(self.rangf):
+                        # Random intercepts
+                        if self.has_intercept[gf]:
+                            self.intercept_random[response][gf] = {}
+                            self.intercept_random_summary[response][gf] = {}
+
+                            intercept_random = self.intercept_random_base[response][gf]
+                            intercept_random_summary = self.intercept_random_base_summary[response][gf]
+
+                            intercept_random_means = tf.reduce_mean(intercept_random, axis=0, keepdims=True)
+                            intercept_random_summary_means = tf.reduce_mean(intercept_random_summary, axis=0, keepdims=True)
+
+                            intercept_random -= intercept_random_means
+                            intercept_random_summary -= intercept_random_summary_means
+
+                            self._regularize(intercept_random, regtype='ranef', var_name='intercept_%s_by_%s' % (sn(response), sn(gf)))
+
+                            if not self.use_distributional_regression:
+                                # Pad out any unmodeled params of predictive distribution
+                                intercept_random = tf.pad(
+                                    intercept_random,
+                                    # ranef   pred param    pred dim
+                                    [(0, 0), (0, nparam - 1), (0, 0)]
+                                )
+                                intercept_random_summary = tf.pad(
+                                    intercept_random_summary,
+                                    [(0, 0), (0, nparam - 1), (0, 0)]
+                                )
+
+                            # Add final 0 vector for population-level effect
+                            intercept_random = tf.concat(
+                                [
+                                    intercept_random,
+                                    tf.zeros([1, nparam, ndim])
+                                ],
+                                axis=0
+                            )
+                            intercept_random_summary = tf.concat(
+                                [
+                                    intercept_random_summary,
+                                    tf.zeros([1, nparam, ndim])
+                                ],
+                                axis=0
+                            )
+
+                            for j, response_param in enumerate(self.predictive_distribution_config[response]['params']):
+                                self.intercept_random[response][gf][response_param] = intercept_random[:, j]
+                                self.intercept_random_summary[response][gf][response_param] = intercept_random_summary[:, j]
+
+                            intercept = intercept[None, ...] + tf.gather(intercept_random, self.Y_gf[:, i])
+                            intercept_summary = intercept_summary[None, ...] + tf.gather(intercept_random_summary, self.Y_gf[:, i])
+
+                            if self.log_random:
+                                for j, response_param in enumerate(self.predictive_distribution_config[response]['params']):
+                                    dim_names = self._expand_param_name_by_dim(response, response_param)
+                                    for k, dim_name in enumerate(dim_names):
+                                        tf.summary.histogram(
+                                            'by_%s/intercept/%s_%s' % (sn(gf), sn(response), sn(dim_name)),
+                                            intercept_random_summary[:, j, k],
+                                            collections=['random']
+                                        )
+
+                    self.intercept[response] = intercept
+                    self.intercept_summary[response] = intercept_summary
+
+    def _initialize_predictive_distribution(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                self.predictive_distribution = {}
+                self.predictive_distribution_delta = {} # IRF-driven changes in each parameter of the predictive distribution
+                self.prediction = {}
+                self.ll_by_var = {}
+                self.error_distribution = {}
+                self.error_distribution_theoretical_quantiles = {}
+                self.error_distribution_theoretical_cdf = {}
+                self.response_params_ema = {}
+                self.response_params_ema_ops = {}
+
+                for i, response in enumerate(self.response_names):
+                    self.predictive_distribution[response] = {}
+                    self.predictive_distribution_delta[response] = {}
+                    self.ll_by_var[response] = {}
+                    self.error_distribution[response] = {}
+                    self.error_distribution_theoretical_quantiles[response] = {}
+                    self.error_distribution_theoretical_cdf[response] = {}
+                    ndim = self.response_n_dim[response]
+
+                    pred_dist_fn = self.predictive_distribution_config[response]['dist']
+                    response_param_names = self.predictive_distribution_config[response]['params']
+                    response_params = self.intercept[response]
+                    if self.summed_interactions:
+                        response_params = response_params + self.summed_interactions[response]
+                    output = self.output[response]
+                    nparam = int(response_params.shape[-2])
+                    if not self.use_distributional_regression:
+                        # Pad out other predictive params
+                        output = tf.pad(
+                            output,
+                            paddings = [
+                                (0, 0),
+                                (0, nparam - 1),
+                                (0, 0)
+                            ]
+                        )
+
+                    for j, response_param_name in enumerate(response_param_names):
+                        param_delta = output[:, j, :]
+                        if ndim == 1:
+                            param_delta = tf.squeeze(param_delta, axis=-1)
+                        self.predictive_distribution_delta[response][response_param_name] = param_delta
+
+                    response_params = response_params + output
+                    if ndim == 1:
+                        response_params = tf.squeeze(response_params, axis=-1)
+                    response_params = tf.unstack(response_params, axis=1)
+
+                    for j, response_param_name in enumerate(response_param_names):
+                        if self.standardize_response and self.predictive_distribution_config[response]['support'] == 'real':
+                            if response_param_name == 'mu':
+                                response_params[j] = tf.cond(
+                                    self.training,
+                                    lambda: response_params[j],
+                                    lambda: response_params[j] * self.Y_train_sds[response] + self.Y_train_means[response]
+                                )
+                            elif response_param_name == 'sigma':
+                                response_params[j] = tf.cond(
+                                    self.training,
+                                    lambda: response_params[j],
+                                    lambda: response_params[j] * self.Y_train_sds[response]
+                                )
+                        if response_param_name in ['sigma', 'tailweight']:
+                            response_params[j] = self.constraint_fn(response_params[j]) + self.epsilon
+
                     beta = self.ema_decay
-                    ema_warm_up = 0
-                    n_sds = self.loss_filter_n_sds
                     step = tf.cast(self.global_batch_step, self.FLOAT_TF)
-
-                    self.loss_m1_ema = tf.Variable(0., trainable=False, name='loss_m1_ema')
-                    self.loss_m2_ema = tf.Variable(0., trainable=False, name='loss_m2_ema')
-
-                    # Debias
-                    loss_m1_ema = self.loss_m1_ema / (1. - beta ** step )
-                    loss_m2_ema = self.loss_m2_ema / (1. - beta ** step )
-
-                    sd = tf.sqrt(loss_m2_ema - loss_m1_ema**2)
-                    loss_cutoff = loss_m1_ema + n_sds * sd
-                    loss_func_filter = tf.cast(loss_func < loss_cutoff, dtype=self.FLOAT_TF)
-                    loss_func_filtered = loss_func * loss_func_filter
-                    n_batch = tf.cast(tf.shape(loss_func)[0], dtype=self.FLOAT_TF)
-                    n_retained = tf.reduce_sum(loss_func_filter)
-
-                    loss_func, n_retained = tf.cond(
-                        self.global_batch_step > ema_warm_up,
-                        lambda loss_func_filtered=loss_func_filtered, n_retained=n_retained: (loss_func_filtered, n_retained),
-                        lambda loss_func=loss_func: (loss_func, n_batch),
+                    response_params_ema_cur = tf.stack(response_params, axis=1)
+                    if ndim == 1:
+                        response_params_ema_cur = response_params_ema_cur[..., None]
+                    response_params_ema_cur = tf.reduce_mean(response_params_ema_cur, axis=0)
+                    self.response_params_ema[response] = tf.Variable(
+                        tf.zeros((nparam, ndim)),
+                        trainable=False,
+                        name='response_params_ema'
                     )
+                    response_params_ema_prev = self.response_params_ema[response]
+                    response_params_ema_debiased = response_params_ema_prev / (1. - beta ** step)
+                    ema_update = beta * response_params_ema_prev + \
+                                 (1. - beta) * response_params_ema_cur
+                    self.response_params_ema_ops[response] = tf.assign(
+                        self.response_params_ema[response],
+                        ema_update
+                    )
+                    for j, response_param_name in enumerate(response_param_names):
+                        dim_names = self._expand_param_name_by_dim(response, response_param_name)
+                        for k, dim_name in enumerate(dim_names):
+                            tf.summary.scalar(
+                                'ema' + '/%s/%s_%s' % (
+                                    sn(response_param_name),
+                                    sn(response),
+                                    sn(dim_name)
+                                ),
+                                response_params_ema_debiased[j, k],
+                                collections=['params']
+                            )
 
-                    self.n_dropped = n_batch - n_retained
+                    response_dist = pred_dist_fn(*response_params)
+                    self.predictive_distribution[response] = response_dist
 
-                    denom = n_retained + self.epsilon
-                    loss_m1_cur = tf.reduce_sum(loss_func) / denom
-                    loss_m2_cur = tf.reduce_sum(loss_func**2) / denom
+                    dist_name = self.predictive_distribution_config[response]['name']
+                    if dist_name == 'bernoulli':
+                        self.prediction[response] = tf.cast(tf.round(response_params[0]), self.INT_TF)
+                    elif dist_name == 'categorical':
+                        self.prediction[response] = tf.cast(tf.argmax(response_params[0], axis=-1), self.INT_TF)
+                    else: # Treat as continuous regression, use the first (location) parameter
+                        self.prediction[response] = response_params[0]
 
-                    loss_m1_ema_update = beta * self.loss_m1_ema + (1 - beta) * loss_m1_cur
-                    loss_m2_ema_update = beta * self.loss_m2_ema + (1 - beta) * loss_m2_cur
+                    _Y = self.Y[..., i]
+                    _Y_mask = self.Y_mask[..., i]
+                    if self.standardize_response and \
+                            self.predictive_distribution_config[response]['support'] == 'real':
+                        _Yz = (_Y - self.Y_train_means[response]) / self.Y_train_sds[response]
+                        _Y = tf.cond(self.training, lambda: _Yz, lambda: _Y)
 
-                    self.loss_m1_ema_op = tf.assign(self.loss_m1_ema, loss_m1_ema_update)
-                    self.loss_m2_ema_op = tf.assign(self.loss_m2_ema, loss_m2_ema_update)
+                    ll = response_dist.log_prob(_Y)
+                    # Mask out likelihoods of predictions for missing response variables
+                    ll *= _Y_mask
+                    self.ll_by_var[response] = ll
 
-                loss_func = tf.reduce_sum(loss_func)
+                    if self.predictive_distribution_config[response]['support'] == 'real':
+                        empirical_quantiles = tf.linspace(0., 1., self.n_errors[response])
+                        err_dist_params = []
+                        for j, response_param_name in enumerate(response_param_names):
+                            if j:
+                                val = response_params_ema_debiased[j]
+                            else:
+                                val = tf.zeros((1, self.response_n_dim[response]))
+                            err_dist_params.append(val)
+                        if self.response_n_dim[response] == 1:
+                            err_dist_params = [tf.squeeze(x, axis=-1) for x in err_dist_params]
+                        err_dist = pred_dist_fn(*err_dist_params)
+                        err_dist_theoretical_quantiles = err_dist.quantile(empirical_quantiles)
+                        err_dist_theoretical_cdf = err_dist.cdf(self.errors[response])
+                        self.error_distribution[response] = err_dist
+                        self.error_distribution_theoretical_quantiles[response] = err_dist_theoretical_quantiles
+                        self.error_distribution_theoretical_cdf[response] = err_dist_theoretical_cdf
 
-                # Rescale
-                if self.scale_loss_with_data:
-                    loss_func = loss_func * self.minibatch_scale
+                self.ll = tf.add_n([self.ll_by_var[x] for x in self.ll_by_var])
 
-                # Regularize
-                reg_loss = tf.constant(0., dtype=self.FLOAT_TF)
-                # self.reg_loss = tf.Print(self.reg_loss, ['reg'] + self.regularizer_losses)
-                if len(self.regularizer_losses_varnames) > 0:
-                    reg_loss += tf.add_n(self.regularizer_losses)
-                    loss_func += reg_loss
+    def _initialize_regularizer(self, regularizer_name, regularizer_scale):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if regularizer_name is None:
+                    regularizer = None
+                elif regularizer_name == 'inherit':
+                    regularizer = self.regularizer
+                else:
+                    scale = regularizer_scale
+                    if isinstance(scale, str):
+                        scale = [float(x) for x in scale.split(';')]
+                    else:
+                        scale = [scale]
+                    if self.scale_regularizer_with_data:
+                        scale = [x * self.minibatch_size * self.minibatch_scale for x in scale]
+                    if regularizer_name == 'l1_l2_regularizer':
+                        if len(scale) == 1:
+                            scale_l1 = scale_l2 = scale[0]
+                        else:
+                            scale_l1 = scale[0]
+                            scale_l2 = scale[1]
+                        regularizer = getattr(tf.contrib.layers, regularizer_name)(
+                            scale_l1,
+                            scale_l2
+                        )
+                    else:
+                        regularizer = getattr(tf.contrib.layers, regularizer_name)(scale[0])
 
-                kl_loss = tf.constant(0., dtype=self.FLOAT_TF)
-                if self.is_bayesian and len(self.kl_penalties):
-                    kl_loss += tf.reduce_sum([tf.reduce_sum(self.kl_penalties[k]['val']) for k in self.kl_penalties])
-                    loss_func += kl_loss
-
-                return loss_func, reg_loss, kl_loss
-
-    ## Thanks to Keisuke Fujii (https://github.com/blei-lab/edward/issues/708) for this idea
-    def _clipped_optimizer_class(self, base_optimizer):
-        class ClippedOptimizer(base_optimizer):
-            def __init__(self, *args, max_global_norm=None, **kwargs):
-                super(ClippedOptimizer, self).__init__(*args, **kwargs)
-                self.max_global_norm = max_global_norm
-
-            def compute_gradients(self, *args, **kwargs):
-                grads_and_vars = super(ClippedOptimizer, self).compute_gradients(*args, **kwargs)
-                if self.max_global_norm is None:
-                    return grads_and_vars
-                grads = tf.clip_by_global_norm([g for g, _ in grads_and_vars], self.max_global_norm)[0]
-                vars = [v for _, v in grads_and_vars]
-                grads_and_vars = []
-                for grad, var in zip(grads, vars):
-                    grads_and_vars.append((grad, var))
-                return grads_and_vars
-
-            def apply_gradients(self, grads_and_vars, **kwargs):
-                if self.max_global_norm is None:
-                    return grads_and_vars
-                grads = tf.clip_by_global_norm([g for g, _ in grads_and_vars], self.max_global_norm)[0]
-                vars = [v for _, v in grads_and_vars]
-                grads_and_vars = []
-                for grad, var in zip(grads, vars):
-                    grads_and_vars.append((grad, var))
-
-                return super(ClippedOptimizer, self).apply_gradients(grads_and_vars, **kwargs)
-
-        return ClippedOptimizer
+                return regularizer
 
     def _initialize_optimizer(self):
         name = self.optim_name.lower()
@@ -1093,6 +1579,76 @@ class Model(object):
 
                 return optim
 
+    def _initialize_objective(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                loss_func = -self.ll
+
+                # Filter
+                if self.loss_filter_n_sds and self.ema_decay:
+                    beta = self.ema_decay
+                    ema_warm_up = 0
+                    n_sds = self.loss_filter_n_sds
+                    step = tf.cast(self.global_batch_step, self.FLOAT_TF)
+
+                    self.loss_m1_ema = tf.Variable(0., trainable=False, name='loss_m1_ema')
+                    self.loss_m2_ema = tf.Variable(0., trainable=False, name='loss_m2_ema')
+
+                    # Debias
+                    loss_m1_ema = self.loss_m1_ema / (1. - beta ** step)
+                    loss_m2_ema = self.loss_m2_ema / (1. - beta ** step)
+
+                    sd = tf.sqrt(loss_m2_ema - loss_m1_ema**2)
+                    loss_cutoff = loss_m1_ema + n_sds * sd
+                    loss_func_filter = tf.cast(loss_func < loss_cutoff, dtype=self.FLOAT_TF)
+                    loss_func_filtered = loss_func * loss_func_filter
+                    n_batch = tf.cast(tf.shape(loss_func)[0], dtype=self.FLOAT_TF)
+                    n_retained = tf.reduce_sum(loss_func_filter)
+
+                    loss_func, n_retained = tf.cond(
+                        self.global_batch_step > ema_warm_up,
+                        lambda loss_func_filtered=loss_func_filtered, n_retained=n_retained: (loss_func_filtered, n_retained),
+                        lambda loss_func=loss_func: (loss_func, n_batch),
+                    )
+
+                    self.n_dropped = n_batch - n_retained
+
+                    denom = n_retained + self.epsilon
+                    loss_m1_cur = tf.reduce_sum(loss_func) / denom
+                    loss_m2_cur = tf.reduce_sum(loss_func**2) / denom
+
+                    loss_m1_ema_update = beta * self.loss_m1_ema + (1 - beta) * loss_m1_cur
+                    loss_m2_ema_update = beta * self.loss_m2_ema + (1 - beta) * loss_m2_cur
+
+                    self.loss_m1_ema_op = tf.assign(self.loss_m1_ema, loss_m1_ema_update)
+                    self.loss_m2_ema_op = tf.assign(self.loss_m2_ema, loss_m2_ema_update)
+
+                loss_func = tf.reduce_sum(loss_func)
+
+                # Rescale
+                if self.scale_loss_with_data:
+                    loss_func = loss_func * self.minibatch_scale
+
+                # Regularize
+                reg_loss = tf.constant(0., dtype=self.FLOAT_TF)
+                if len(self.regularizer_losses_varnames) > 0:
+                    reg_loss += tf.add_n(self.regularizer_losses)
+                    loss_func += reg_loss
+
+                kl_loss = tf.constant(0., dtype=self.FLOAT_TF)
+                if self.is_bayesian and len(self.kl_penalties):
+                    kl_loss += tf.reduce_sum([tf.reduce_sum(self.kl_penalties[k]['val']) for k in self.kl_penalties])
+                    loss_func += kl_loss
+
+                self.loss_func = loss_func
+                self.reg_loss = reg_loss
+                self.kl_loss = kl_loss
+
+                self.optim = self._initialize_optimizer()
+                assert self.optim_name is not None, 'An optimizer name must be supplied'
+
+                self.train_op = self.optim.minimize(self.loss_func, global_step=self.global_batch_step)
+
     def _initialize_logging(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -1114,40 +1670,46 @@ class Model(object):
     def _initialize_parameter_tables(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                parameter_table_fixed_keys = []
-                parameter_table_fixed_values = []
-                if self.has_intercept[None]:
-                    parameter_table_fixed_keys.append('intercept')
-                    parameter_table_fixed_values.append(
-                        tf.expand_dims(self.intercept_fixed, axis=0)
-                    )
+                # Fixed
+                self.parameter_table_fixed_types = []
+                self.parameter_table_fixed_responses = []
+                self.parameter_table_fixed_response_params = []
+                self.parameter_table_fixed_values = []
+                
+                # Random
+                self.parameter_table_random_types = []
+                self.parameter_table_random_responses = []
+                self.parameter_table_random_response_params = []
+                self.parameter_table_random_rangf = []
+                self.parameter_table_random_rangf_levels = []
+                self.parameter_table_random_values = []
+                
+                for i, response in enumerate(self.response_names):
+                    response_params = self.predictive_distribution_config[response]['params']
+                    for j, response_param in enumerate(response_params):
+                        dim_names = self._expand_param_name_by_dim(response, response_param)
+                        for k, dim_name in enumerate(dim_names):
+                            if self.has_intercept[None]:
+                                self.parameter_table_fixed_types.append('intercept')
+                                self.parameter_table_fixed_responses.append(response)
+                                self.parameter_table_fixed_response_params.append(dim_name)
+                                self.parameter_table_fixed_values.append(
+                                    self.intercept_fixed[response][response_param][k]
+                                )
 
-                self.parameter_table_fixed_keys = parameter_table_fixed_keys
-                self.parameter_table_fixed_values = tf.concat(parameter_table_fixed_values, 0)
-
-                parameter_table_random_keys = []
-                parameter_table_random_rangf = []
-                parameter_table_random_rangf_levels = []
-                parameter_table_random_values = []
-
-                if len(self.rangf) > 0:
-                    for i in range(len(self.rangf)):
-                        gf = self.rangf[i]
-                        levels = sorted(self.rangf_map_ix_2_levelname[i][:-1])
-                        levels_ix = names2ix([self.rangf_map[i][level] for level in levels], range(self.rangf_n_levels[i]))
-                        if self.has_intercept[gf]:
-                            for level in levels:
-                                parameter_table_random_keys.append('intercept')
-                                parameter_table_random_rangf.append(gf)
-                                parameter_table_random_rangf_levels.append(level)
-                            parameter_table_random_values.append(
-                                tf.gather(self.intercept_random[gf], levels_ix)
-                            )
-
-                    self.parameter_table_random_keys = parameter_table_random_keys
-                    self.parameter_table_random_rangf = parameter_table_random_rangf
-                    self.parameter_table_random_rangf_levels = parameter_table_random_rangf_levels
-                    self.parameter_table_random_values = tf.concat(parameter_table_random_values, 0)
+                            if len(self.rangf) > 0:
+                                for r, gf in enumerate(self.rangf):
+                                    levels = sorted(self.rangf_map_ix_2_levelname[r][:-1])
+                                    if self.has_intercept[gf]:
+                                        for l, level in enumerate(levels):
+                                            self.parameter_table_random_types.append('intercept')
+                                            self.parameter_table_random_responses.append(response)
+                                            self.parameter_table_random_response_params.append(dim_name)
+                                            self.parameter_table_random_rangf.append(gf)
+                                            self.parameter_table_random_rangf_levels.append(level)
+                                            self.parameter_table_random_values.append(
+                                                self.intercept_random[response][gf][response_param][l, k]
+                                            )
 
     def _initialize_saver(self):
         with self.sess.as_default():
@@ -1173,15 +1735,8 @@ class Model(object):
                 if self.check_convergence:
                     self.rho_t = tf.placeholder(self.FLOAT_TF, name='rho_t_in')
                     self.p_rho_t = tf.placeholder(self.FLOAT_TF, name='p_rho_t_in')
-                    if self.convergence_basis.lower() == 'parameters':
-                        self.rho_a = tf.placeholder(self.FLOAT_TF, name='rho_a_in')
-                        self.p_rho_a = tf.placeholder(self.FLOAT_TF, name='p_rho_a_in')
-
                     tf.summary.scalar('convergence/rho_t', self.rho_t, collections=['convergence'])
                     tf.summary.scalar('convergence/p_rho_t', self.p_rho_t, collections=['convergence'])
-                    if self.convergence_basis.lower() == 'parameters':
-                        tf.summary.scalar('convergence/rho_a', self.rho_a, collections=['convergence'])
-                        tf.summary.scalar('convergence/p_rho_a', self.p_rho_a, collections=['convergence'])
                     tf.summary.scalar('convergence/proportion_converged', self.proportion_converged, collections=['convergence'])
                     self.summary_convergence = tf.summary.merge_all(key='convergence')
 
@@ -1190,13 +1745,26 @@ class Model(object):
 
     ######################################################
     #
-    #  Math subroutines
+    #  Utility methods
     #
     ######################################################
+
+    def _expand_param_name_by_dim(self, response, response_param):
+        ndim = self.response_n_dim[response]
+        out = []
+        if ndim == 1:
+            out.append(response_param)
+        else:
+            for i in range(ndim):
+                cat = self.response_ix_to_category[response].get(i, i)
+                out.append('%s.%s' % (response_param, cat))
+
+        return out
 
     def _matmul(self, A, B):
         """
         Matmul operation that supports broadcasting of A
+
         :param A: Left tensor (>= 2D)
         :param B: Right tensor (2D)
         :return: Broadcasted matrix multiplication on the last 2 ranks of A and B
@@ -1237,42 +1805,6 @@ class Model(object):
 
                 return out
 
-    def _reduce_interpolated_sum(self, X, time, axis=0):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                assert len(X.shape) > 0, 'A scalar cannot be interpolated'
-
-                if axis < 0:
-                    axis = len(X.shape) + axis
-
-                X_cur_begin = [0] * (len(X.shape) - 1)
-                X_cur_begin.insert(axis, 1)
-                X_cur_end = [-1] * len(X.shape)
-                X_cur = tf.slice(X, X_cur_begin, X_cur_end)
-
-                time_cur_begin = [0] * axis + [1]
-                time_cur_end = [-1] * (axis + 1)
-                time_cur = tf.slice(time, time_cur_begin, time_cur_end)
-
-                ub = tf.shape(X)[axis] - 1
-                X_prev_begin = [0] * len(X.shape)
-                X_prev_end = [-1] * (len(X.shape) - 1)
-                X_prev_end.insert(axis, ub)
-                X_prev = tf.slice(X, X_prev_begin, X_prev_end)
-
-                time_prev_begin = [0] * (axis + 1)
-                time_prev_end = [-1] * axis + [ub]
-                time_prev = tf.slice(time, time_prev_begin, time_prev_end)
-
-                time_diff = time_cur-time_prev
-
-                for _ in range(axis+1, len(X.shape)):
-                    time_diff = tf.expand_dims(time_diff, -1)
-
-                out = tf.reduce_sum((X_prev + X_cur) / 2 * time_diff, axis=axis)
-
-                return out
-
     def _softplus_sigmoid(self, x, a=-1., b=1.):
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -1293,133 +1825,97 @@ class Model(object):
                 g = ln(exp(c) / ( (exp(c) + 1) * exp( -f(c) * (x - a) / c ) - 1) - 1) + a
                 return g
 
-    def _linspace_nd(self, B, A=None, axis=0, n_interp=None):
-        if n_interp is None:
-            n_interp = self.n_interp
-        if axis < 0:
-            axis = len(B.shape) + axis
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                linspace_support = tf.cast(tf.range(n_interp), dtype=self.FLOAT_TF)
-                B = tf.expand_dims(B, axis)
-                rank = len(B.shape)
-                assert axis < rank, 'Tried to perform linspace_nd on axis %s, which exceeds rank %s of tensor' %(axis, rank)
-                expansion = ([None] * axis) + [slice(None)] + ([None] * (rank - axis - 1))
-                linspace_support = linspace_support[expansion]
-
-                if A is None:
-                    out = B * linspace_support / n_interp
-                else:
-                    A = tf.expand_dims(A, axis)
-                    assert A.shape == B.shape, 'A and B must have the same shape, got %s and %s' %(A.shape, B.shape)
-                    out = A + ((B-A) * linspace_support / n_interp)
-                return out
-
-    def _lininterp_fixed_n_points(self, x, n):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                n_input = tf.shape(x)[1]
-                n_output = n_input * (n+1)
-                interp = tf.image.resize_bilinear(tf.expand_dims(tf.expand_dims(x, -1), -1), [n_output, 1])
-                interp = tf.squeeze(tf.squeeze(interp, -1), -1)[..., :-n]
-                return interp
-
-    def _lininterp_fixed_frequency(self, x, time, time_mask, hz=1000):
-        # Performs a linear interpolation at a fixed frequency between impulses that are variably spaced in time.
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                # Reverse arrays so that max time is left-aligned
-                x = tf.reverse(x, axis=[1])
-                x_deltas = x[:, 1:, :] - x[:, :-1, :]
-                time = tf.reverse(time, axis=[1])
-                time_mask = tf.reverse(time_mask, axis=[1])
-                time_mask_int = tf.cast(time_mask, dtype=self.INT_TF)
-
-                # Round timestamps to integers so they can be used to index the interpolated array
-                time_int = tf.cast(tf.round(time * hz), dtype=self.INT_TF)
-
-                # Compute intervals by subtracting the lower bound
-                end_ix = tf.reduce_sum(time_mask_int, axis=1) - 1
-                time_minima = tf.gather_nd(time_int, tf.stack([tf.range(tf.shape(x)[0]), end_ix], axis=1))
-                time_delta_int = time_int - time_minima[..., None]
-
-                # Compute the minimum number of interpolation points needed for each data point
-                impulse_ix_max_batch = tf.reduce_max(time_delta_int, axis=1, keepdims=True)
-
-                # Compute the largest number of interpolation points in the batch, which will be used to compute the length of the interpolation
-                impulse_ix_max = tf.reduce_max(impulse_ix_max_batch)
-
-                # Since events are now temporally reversed, reverse indices by subtracting the max and negating
-                impulse_ix = -(time_delta_int - impulse_ix_max_batch)
-
-                # Rescale the deltas by the number of timesteps over which they will be interpolated
-                n_steps = impulse_ix[:, 1:] - impulse_ix[:, :-1]
-                x_deltas = tf.where(
-                    tf.tile(tf.not_equal(n_steps, 0)[..., None], [1, 1, tf.shape(x)[2]]),
-                    x_deltas / tf.cast(n_steps, dtype=self.FLOAT_TF)[..., None],
-                    tf.zeros_like(x_deltas)
-                )
-
-                # Pad x_deltas
-                x_deltas = tf.concat([x_deltas, tf.zeros([tf.shape(x)[0], 1, tf.shape(x)[2]])], axis=1)
-
-                # Compute a mask for the interpolated output
-                time_mask_interp = tf.cast(tf.range(impulse_ix_max + 1)[None, ...] <= impulse_ix_max_batch, dtype=self.FLOAT_TF)
-
-                # Compute an array of indices for scattering impulses into the interpolation array
-                row_ix = tf.tile(tf.range(tf.shape(x)[0])[..., None], [1, tf.shape(x)[1]])
-                scatter_ix = tf.stack([row_ix, impulse_ix], axis=2)
-
-                # Create an array for use by gather_nd by taking the cumsum of an array with ones at indices with impulses, zeros otherwise
-                gather_ix = tf.cumsum(
-                    tf.scatter_nd(
-                        scatter_ix,
-                        tf.ones_like(impulse_ix, dtype=self.INT_TF) * time_mask_int,
-                        [tf.shape(x)[0], impulse_ix_max + 1]
-                    ),
-                    axis=1
-                ) - 1
-                row_ix = tf.tile(tf.range(tf.shape(x)[0])[..., None], [1, impulse_ix_max + 1])
-                gather_ix = tf.stack([row_ix, gather_ix], axis=2)
-
-                x_interp_base = tf.gather_nd(
-                    x,
-                    gather_ix
-                )
-
-                interp_factor = tf.cast(
-                    tf.range(impulse_ix_max + 1)[None, ...] - tf.gather_nd(
-                        impulse_ix,
-                        gather_ix
-                    ),
-                    dtype=self.FLOAT_TF
-                )
-
-
-                interp_delta = tf.cast(interp_factor, dtype=self.FLOAT_TF)[..., None] * tf.gather_nd(
-                    x_deltas,
-                    gather_ix
-                )
-
-                x_interp = (x_interp_base + interp_delta) * time_mask_interp[..., None]
-
-                x_interp = tf.reverse(x_interp, axis=[1])
-                time_interp = tf.cast(
-                    tf.reverse(
-                        tf.maximum(
-                            (tf.range(0, -impulse_ix_max - 1, delta=-1)[None, ...] + impulse_ix_max_batch),
-                            tf.zeros([impulse_ix_max + 1], dtype=self.INT_TF)
-                        ) + time_minima[..., None],
-                        axis=[1]
-                    ),
-                    dtype=self.FLOAT_TF
-                ) * tf.reverse(time_mask_interp, axis=[1]) / hz
-
-                return x_interp, time_interp
-
     def _abs(self, x):
-        return tf.where(x > 0., x, -x)
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                return tf.where(x > 0., x, -x)
 
+    def _sigmoid(self, x, lb=0., ub=1.):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                return tf.sigmoid(x) * (ub - lb) + lb
+
+    def _sigmoid_np(self, x, lb=0., ub=1.):
+        return (1. / (1. + np.exp(-x))) * (ub - lb) + lb
+
+    def _logit(self, x, lb=0., ub=1.):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                x = (x - lb) / (ub - lb)
+                x = x * (1 - 2 * self.epsilon) + self.epsilon
+                return tf.log(x / (1 - x))
+
+    def _logit_np(self, x, lb=0., ub=1.):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                x = (x - lb) / (ub - lb)
+                x = x * (1 - 2 * self.epsilon) + self.epsilon
+                return np.log(x / (1 - x))
+
+    def _piecewise_linear_interpolant(self, c, v):
+        # c: knot locations, shape=[B, Q, K], B = batch, Q = query points or 1, K = n knots
+        # v: knot values, shape identical to c
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if len(c.shape) == 1:
+                    # No batch or query dim
+                    c = c[None, None, ...]
+                elif len(c.shape) == 2:
+                    # No query dim
+                    c = tf.expand_dims(c, axis=-2)
+                elif len(c.shape) > 3:
+                    # Too many dims
+                    raise ValueError(
+                        'Rank of knot location tensor c to piecewise resampler must be >= 1 and <= 3. Saw "%d"' % len(
+                            c.shape))
+                if len(v.shape) == 1:
+                    # No batch or query dim
+                    v = v[None, None, ...]
+                elif len(v.shape) == 2:
+                    # No query dim
+                    v = tf.expand_dims(v, axis=-2)
+                elif len(v.shape) > 3:
+                    # Too many dims
+                    raise ValueError(
+                        'Rank of knot amplitude tensor c to piecewise resampler must be >= 1 and <= 3. Saw "%d"' % len(
+                            v.shape))
+
+                c_t = c[..., 1:]
+                c_tm1 = c[..., :-1]
+                y_t = v[..., 1:]
+                y_tm1 = v[..., :-1]
+
+                # Compute intercepts a_ and slopes b_ of line segments
+                a_ = (y_t - y_tm1) / (c_t - c_tm1)
+                valid = c_t > c_tm1
+                a_ = tf.where(valid, a_, tf.zeros_like(a_))
+                b_ = y_t - a_ * c_t
+
+                # Handle points beyond final knot location (0 response)
+                a_ = tf.concat([a_, tf.zeros_like(a_[..., -1:])], axis=-1)
+                b_ = tf.concat([b_, tf.zeros_like(b_[..., -1:])], axis=-1)
+                c_ = tf.concat([c, tf.ones_like(c[..., -1:]) * np.inf], axis=-1)
+
+                def make_piecewise(a, b, c):
+                    def select_segment(x, c):
+                        c_t = c[..., 1:]
+                        c_tm1 = c[..., :-1]
+                        select = tf.cast(tf.logical_and(x >= c_tm1, x < c_t), dtype=self.FLOAT_TF)
+                        return select
+
+                    def piecewise(x):
+                        select = select_segment(x, c)
+                        # a_select = tf.reduce_sum(a * select, axis=-1, keepdims=True)
+                        # b_select = tf.reduce_sum(b * select, axis=-1, keepdims=True)
+                        # response = a_select * x + b_select
+                        response = tf.reduce_sum((a * x + b) * select, axis=-1, keepdims=True)
+                        return response
+
+                    return piecewise
+
+                out = make_piecewise(a_, b_, c_)
+
+                return out
 
 
 
@@ -1430,31 +1926,6 @@ class Model(object):
     #  should only be called at initialization.
     #
     ######################################################
-
-    def initialize_intercept(self, ran_gf=None):
-        """
-        Add an intercept.
-        This method must be implemented by subclasses of ``CDR`` and should only be called at model initialization.
-        Correct model behavior is not guaranteed if called at any other time.
-
-        :param ran_gf: ``str`` or ``None``; Name of random grouping factor for random intercept (if ``None``, constructs a fixed intercept)
-        :return: 2-tuple of ``Tensor`` ``(intercept, intercept_summary)``; ``intercept`` is the intercept for use by the model. ``intercept_summary`` is an identically-shaped representation of the current intercept value for logging and plotting (can be identical to ``intercept``). For fixed intercepts, should return a trainable scalar. For random intercepts, should return batch-length vector of trainable weights. Weights should be initialized around 0.
-        """
-        raise NotImplementedError
-
-    def initialize_coefficient(self, coef_ids=None, ran_gf=None, suffix=None):
-        """
-        Add coefficients.
-        This method must be implemented by subclasses of ``CDR`` and should only be called at model initialization.
-        Correct model behavior is not guaranteed if called at any other time.
-
-        :param coef_ids: ``list`` of ``str``: List of coefficient IDs
-        :param ran_gf: ``str`` or ``None``: Name of random grouping factor for random coefficient (if ``None``, constructs a fixed coefficient)
-        :param suffix: ``str`` or ``None``: Suffix to add to coefficient variable name. If ``None``, no suffix.
-        :return: 2-tuple of ``Tensor`` ``(coefficient, coefficient_summary)``; ``coefficient`` is the coefficient for use by the model. ``coefficient_summary`` is an identically-shaped representation of the current coefficient values for logging and plotting (can be identical to ``coefficient``). For fixed coefficients, should return a vector of ``len(coef_ids)`` trainable weights. For random coefficients, should return batch-length matrix of trainable weights with ``len(coef_ids)`` columns for each input in the batch. Weights should be initialized around 0.
-        """
-
-        raise NotImplementedError
 
     def initialize_objective(self):
         """
@@ -1562,7 +2033,7 @@ class Model(object):
                     last_check = self.last_convergence_check.eval(session=self.sess)
                     offset = cur_step % self.convergence_stride
                     update = last_check < cur_step and self.convergence_stride > 0
-                    if update and self.convergence_basis == 'loss' and feed_dict is None:
+                    if update and feed_dict is None:
                         update = False
                         stderr('Skipping convergence history update because no feed_dict provided.\n')
 
@@ -1612,8 +2083,6 @@ class Model(object):
                     if end_of_stride:
                         locally_converged = cur_step > self.convergence_n_iterates and \
                                     (min_p > self.convergence_alpha)
-                        if self.convergence_basis.lower() == 'parameters':
-                            locally_converged &= p_ta_at_min_p > self.convergence_alpha
                         convergence_history = self.convergence_history.eval(session=self.sess)
                         convergence_history[:-1] = convergence_history[1:]
                         convergence_history[-1] = locally_converged
@@ -1624,9 +2093,6 @@ class Model(object):
                                 self.rho_t: rt_at_min_p,
                                 self.p_rho_t: min_p
                             }
-                        if self.convergence_basis.lower() == 'parameters':
-                            fd_convergence[self.rho_a] = ra_at_min_p
-                            fd_convergence[self.p_rho_a] =  p_ta_at_min_p
                         summary_convergence = self.sess.run(
                             self.summary_convergence,
                             feed_dict=fd_convergence
@@ -1642,9 +2108,6 @@ class Model(object):
                     if verbose:
                         stderr('rho_t: %s.\n' % rt_at_min_p)
                         stderr('p of rho_t: %s.\n' % min_p)
-                        if self.convergence_basis.lower() == 'parameters':
-                            stderr('rho_a: %s.\n' % ra_at_min_p)
-                            stderr('p of rho_a: %s.\n' % p_ta_at_min_p)
                         stderr('Location: %s.\n\n' % self.d0_names[min_p_ix])
                         stderr('Iterate meets convergence criteria: %s.\n\n' % converged)
                         stderr('Proportion of recent iterates converged: %s.\n' % proportion_converged)
@@ -1730,6 +2193,63 @@ class Model(object):
     #
     ######################################################
 
+    def initialize_intercept(self, response_name, ran_gf=None):
+        """
+        Initialize intercepts, i.e. bias terms for each parameter of the predictive distribution of a response variable.
+        Must be called separately for each response variable in multivariate models.
+
+        :param response_name: ``str``; name of response variable for which to initialize intercepts
+        :param ran_gf: ``str`` or ``None``; name of random grouping factor for which to initialize intercepts. If ``None``, initialize fixed effects.
+
+        :return: pair of fixed and random intercept ``Variable``; fixed intercept has identical shape to **init**, random intercept has shape ``[rangf_n_levels] + init.shape``.
+        """
+
+        # MLE implementation, overridden by ModelBayes
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                init = self.intercept_init[response_name]
+                name = sn(response_name)
+                if ran_gf is None:
+                    intercept = tf.Variable(
+                        init,
+                        dtype=self.FLOAT_TF,
+                        name='intercept_%s' % name
+                    )
+                    intercept_summary = intercept
+                else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+                    if self.use_distributional_regression:
+                        nparam = len(self.predictive_distribution_config[response_name]['params'])
+                    else:
+                        nparam = 1
+                    ndim = self.response_n_dim[response_name]
+                    shape = [rangf_n_levels, nparam, ndim]
+                    intercept = tf.Variable(
+                        tf.zeros(shape, dtype=self.FLOAT_TF),
+                        name='intercept_%s_by_%s' % (name, sn(ran_gf))
+                    )
+                    intercept_summary = intercept
+
+                return intercept, intercept_summary
+
+    def initialize_model(self):
+        """
+        Initialize all required weight arrays and callables.
+
+        :return: ``None``
+        """
+
+        raise NotImplementedError
+
+    def compile_network(self):
+        """
+        Chain transforms from impulses to response predictions
+
+        :return: ``None``
+        """
+
+        raise NotImplementedError
+
     def run_train_step(self, feed_dict):
         """
         Update the model from a batch of training data.
@@ -1741,35 +2261,207 @@ class Model(object):
 
         raise NotImplementedError
 
-    def run_predict_op(self, feed_dict, standardize_response=False, n_samples=None, algorithm='MAP', verbose=True):
+    def run_predict_op(
+            self,
+            feed_dict,
+            response=None,
+            n_samples=None,
+            algorithm='MAP',
+            return_preds=True,
+            return_loglik=False,
+            verbose=True
+    ):
         """
         Generate predictions from a batch of data.
-        **All CDR subclasses must implement this method.**
 
         :param feed_dict: ``dict``; A dictionary of predictor values.
-        :param standardize_response: ``bool``; Whether to report response using standard units. Ignored unless model was fitted using ``standardize_response==True``.
+        :param response: ``list`` of ``str``, ``str``, or ``None``; Name(s) of response variable(s) to predict. If ``None``, predicts all responses.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
+        :param return_preds: ``bool``; whether to return predictions.
+        :param return_loglik: ``bool``; whether to return elementwise log likelihoods. Requires that **Y** is not ``None``. If multiple response variables are modeled, also returns full model (summed) LL, labeled as ``'AllResponses'``.
         :param verbose: ``bool``; Send progress reports to standard error.
-        :return: ``numpy`` array; Predicted responses, one for each training sample
+        :return: ``dict`` of ``numpy`` arrays; Predicted responses and/or log likelihoods, one for each training sample. Key order: <('preds'|'log_lik'), response>.
         """
-        raise NotImplementedError
+        
+        assert self.Y in feed_dict or not return_loglik, 'Cannot return log likelihood when Y is not provided.'
 
-    def run_loglik_op(self, feed_dict, standardize_response=False, n_samples=None, algorithm='MAP', verbose=True):
+        use_MAP_mode =  algorithm in ['map', 'MAP']
+        feed_dict[self.use_MAP_mode] = use_MAP_mode
+
+        if response is None:
+            response = self.response_names
+        if not isinstance(response, list):
+            response = [response]
+
+        to_run = {}
+        if return_preds:
+            to_run_preds = {x: self.prediction[x] for x in response}
+            to_run['preds'] = to_run_preds
+        if return_loglik:
+            to_run_loglik = {x: self.ll_by_var[x] for x in response}
+            if len(self.response_names) > 1:
+                to_run_loglik['AllResponses'] = self.ll
+            to_run['log_lik'] = to_run_loglik
+
+        if to_run:
+            with self.sess.as_default():
+                with self.sess.graph.as_default():
+                    if use_MAP_mode:
+                        out = self.sess.run(to_run, feed_dict=feed_dict)
+                    else:
+                        feed_dict[self.use_MAP_mode] = False
+                        if n_samples is None:
+                            n_samples = self.n_samples_eval
+
+                        if verbose:
+                            pb = tf.contrib.keras.utils.Progbar(n_samples)
+
+                        out = {}
+                        if return_preds:
+                            out['preds'] = {x: np.zeros((len(feed_dict[self.Y_time]), n_samples)) for x in to_run_preds}
+                        if return_loglik:
+                            out['log_lik'] = {x: np.zeros((len(feed_dict[self.Y_time]), n_samples)) for x in to_run_loglik}
+
+                        for i in range(n_samples):
+                            if self.resample_ops:
+                                self.sess.run(self.resample_ops)
+
+                            _out = self.sess.run(to_run, feed_dict=feed_dict)
+                            if to_run_preds:
+                                _preds = _out['preds']
+                                for _response in _preds:
+                                    out['preds'][_response][:, i] = _preds[_response]
+                            if to_run_loglik:
+                                _log_lik = _out['log_lik']
+                                for _response in _log_lik:
+                                    out['log_lik'][_response][:, i] = _log_lik[_response]
+                            if verbose:
+                                pb.update(i + 1)
+
+                        if return_preds:
+                            for _response in out['preds']:
+                                _preds = out['preds'][_response]
+                                dist_name = self.predictive_distribution_config[_response]['name']
+                                if dist_name == 'bernoulli': # Majority vote
+                                    _preds = np.round(np.mean(_preds, axis=1)).astype('int')
+                                elif dist_name == 'categorical': # Majority vote
+                                    _preds = scipy.stats.mode(_preds, axis=1)
+                                else: # Average
+                                    _preds = _preds.mean(axis=1)
+                                out['preds'][_response] = _preds
+                        if return_loglik:
+                            for _response in out['log_lik']:
+                                out['log_lik'][_response] = out['log_lik'][_response].mean(axis=1)
+
+                    return out
+
+    def run_loss_op(self, feed_dict, n_samples=None, algorithm='MAP', verbose=True):
         """
-        Compute the log-likelihoods of a batch of data.
-        **All CDR subclasses must implement this method.**
+        Compute the elementwise training loss of a batch of data.
 
         :param feed_dict: ``dict``; A dictionary of predictor and response values
-        :param standardize_response: ``bool``; Whether to report response using standard units. Ignored unless model was fitted using ``standardize_response==True``.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
         :param verbose: ``bool``; Send progress reports to standard error.
-        :return: ``numpy`` array; Pointwise log-likelihoods, one for each training sample
+        :return: ``numpy`` array; total training loss for batch
         """
 
-        raise NotImplementedError
+        use_MAP_mode =  algorithm in ['map', 'MAP']
+        feed_dict[self.use_MAP_mode] = use_MAP_mode
 
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if use_MAP_mode:
+                    loss = self.sess.run(self.loss_func, feed_dict=feed_dict)
+                else:
+                    feed_dict[self.use_MAP_mode] = False
+                    if n_samples is None:
+                        n_samples = self.n_samples_eval
+
+                    if verbose:
+                        pb = tf.contrib.keras.utils.Progbar(n_samples)
+
+                    loss = np.zeros((len(feed_dict[self.Y_time]), n_samples))
+
+                    for i in range(n_samples):
+                        if self.resample_ops:
+                            self.sess.run(self.resample_ops)
+                        loss[:, i] = self.sess.run(self.loss_func, feed_dict=feed_dict)
+                        if verbose:
+                            pb.update(i + 1)
+
+                    loss = loss.mean(axis=1)
+
+                return loss
+
+    def run_conv_op(self, feed_dict, response=None, response_param=None, n_samples=None, algorithm='MAP', verbose=True):
+        """
+        Convolve a batch of data in feed_dict with the model's latent IRF.
+
+        :param feed_dict: ``dict``; A dictionary of predictor variables
+        :param response: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to convolve toward. If ``None``, convolves toward all univariate responses. Multivariate convolution (e.g. of categorical responses) is supported but turned off by default to avoid excessive computation. When convolving toward a multivariate response, a set of convolved predictors will be generated for each dimension of the response.
+        :param response_param: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of predictive distribution(s) to convolve toward per response variable. Any param names not used by the predictive distribution for a given response will be ignored. If ``None``, convolves toward the first parameter of each response distribution.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
+        :param verbose: ``bool``; Send progress reports to standard error.
+        :return: ``numpy`` array; The convolved inputs
+        """
+
+        use_MAP_mode =  algorithm in ['map', 'MAP']
+        feed_dict[self.use_MAP_mode] = use_MAP_mode
+
+        if response is None:
+            response = [x for x in self.response_names if self.response_n_dim[x] == 1]
+        if isinstance(response, str):
+            response = [response]
+
+        if response_param is None:
+            response_param = set()
+            for x in response:
+                response_param.add(self.predictive_distribution_config[x]['params'][0])
+            response_param = sorted(list(response_param))
+        if isinstance(response_param, str):
+            response_param = [response_param]
+
+        to_run = {}
+        for _response in response:
+            to_run[_response] = {}
+            for _response_param in response_param:
+                if _response_param in self.predictive_distribution_delta[_response]:
+                    to_run[_response][_response_param] = self.predictive_distribution_delta[_response][_response_param]
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if use_MAP_mode:
+                    X_conv = self.sess.run(to_run, feed_dict=feed_dict)
+                else:
+                    X_conv = {}
+                    for _response in to_run:
+                        X_conv[_response] = {}
+                        for _response_param in X_conv[_response]:
+                            X_conv[_response][_response_param] = np.zeros(
+                                (len(feed_dict[self.Y_time]), len(self.terminal_names), n_samples)
+                            )
+
+                    if n_samples is None:
+                        n_samples = self.n_samples_eval
+                    if verbose:
+                        pb = tf.contrib.keras.utils.Progbar(n_samples)
+
+                    for i in range(0, n_samples):
+                        _X_conv = self.sess.run(to_run, feed_dict=feed_dict)
+                        for _response in _X_conv:
+                            for _response_param in _X_conv[_response]:
+                                X_conv[_response][_response_param][..., i] = _X_conv[_response][_response_param]
+                        if verbose:
+                            pb.update(i + 1, force=True)
+
+                    for _response in X_conv:
+                        for _response_param in X_conv[_response]:
+                            X_conv[_response][_response_param] = X_conv[_response][_response_param].mean(axis=2)
+
+                return X_conv
 
 
 
@@ -1803,12 +2495,53 @@ class Model(object):
     #
     ######################################################
 
+    def build(self, outdir=None, restore=True):
+        """
+        Construct the CDR(NN) network and initialize/load model parameters.
+        ``build()`` is called by default at initialization and unpickling, so users generally do not need to call this method.
+        ``build()`` can be used to reinitialize an existing network instance on the fly, but only if (1) no model checkpoint has been saved to the output directory or (2) ``restore`` is set to ``False``.
+
+        :param outdir: Output directory. If ``None``, inferred.
+        :param restore: Restore saved network parameters if model checkpoint exists in the output directory.
+        :return: ``None``
+        """
+
+        if outdir is None:
+            if not hasattr(self, 'outdir'):
+                self.outdir = './cdr_model/'
+        else:
+            self.outdir = outdir
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                self._initialize_inputs()
+                self._initialize_base_params()
+                self._compile_intercepts()
+                self.initialize_model()
+                self.compile_network()
+                self._initialize_predictive_distribution()
+                self._initialize_objective()
+                self._initialize_parameter_tables()
+                self._initialize_logging()
+                self._initialize_ema()
+
+                self.report_uninitialized = tf.report_uninitialized_variables(
+                    var_list=None
+                )
+                self._initialize_saver()
+                self.load(restore=restore)
+
+                self._initialize_convergence_checking()
+
+                self.sess.graph.finalize()
+
     def check_numerics(self):
         """
         Check that all trainable parameters are finite. Throws an error if not.
 
         :return: ``None``
         """
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 for op in self.check_numerics_ops:
@@ -1820,6 +2553,7 @@ class Model(object):
 
         :return: ``bool``; whether the model has been initialized.
         """
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 uninitialized = self.sess.run(self.report_uninitialized)
@@ -1873,6 +2607,7 @@ class Model(object):
         :param allow_missing: ``bool``; load all weights found in the checkpoint file, allowing those that are missing to remain at their initializations. If ``False``, weights in checkpoint must exactly match those in the model graph, or else an error will be raised. Leaving set to ``True`` is helpful for backward compatibility, setting to ``False`` can be helpful for debugging.
         :return:
         """
+
         if outdir is None:
             outdir = self.outdir
         with self.sess.as_default():
@@ -1891,6 +2626,7 @@ class Model(object):
 
         :return: ``None``
         """
+
         self.sess.close()
 
     def set_predict_mode(self, mode):
@@ -1912,6 +2648,12 @@ class Model(object):
             self.predict_mode = mode
 
     def has_converged(self):
+        """
+        Check whether model has reached its automatic convergence criteria
+
+        :return: ``bool``; whether the model has converged
+        """
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if self.check_convergence:
@@ -1928,6 +2670,7 @@ class Model(object):
         :param status: ``bool``; Target state (``True`` if training is complete, ``False`` otherwise).
         :return: ``None``
         """
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if status:
@@ -1942,6 +2685,7 @@ class Model(object):
         :param indent: ``int``; indentation level
         :return: ``str``; the formula report
         """
+
         out = ' ' * indent + 'MODEL FORMULA:\n'
         form_str = textwrap.wrap(str(self.form), 150)
         for line in form_str:
@@ -1958,6 +2702,7 @@ class Model(object):
         :param indent: ``int``; indentation level
         :return: ``str``; the settings report
         """
+
         out = ' ' * indent + 'MODEL SETTINGS:\n'
         for kwarg in MODEL_INITIALIZATION_KWARGS:
             val = getattr(self, kwarg.key)
@@ -1977,14 +2722,30 @@ class Model(object):
         :param indent: ``int``; indentation level.
         :return: ``str``; the parameter table report
         """
+
         left_justified_formatter = lambda df, col: '{{:<{}s}}'.format(df[col].str.len().max()).format
 
         pd.set_option("display.max_colwidth", 10000)
         out = ' ' * indent + 'FITTED PARAMETER VALUES:\n'
+        out += ' ' * indent + 'NOTE: Fixed effects for bounded parameters are reported on the constrained space, but\n'
+        out += ' ' * indent + '      random effects for bounded parameters are reported on the unconstrained space.\n'
+        out += ' ' * indent + '      Therefore, they cannot be directly added. To obtain parameter estimates\n'
+        out += ' ' * indent + '      for a bounded variable in a given random effects configuration, first invert the\n'
+        out += ' ' * indent + '      bounding transform (e.g. apply inverse softplus), then add random offsets, then\n'
+        out += ' ' * indent + '      re-apply the bounding transform (e.g. apply softplus).\n'
         parameter_table = self.parameter_table(
             fixed=True,
             level=level,
             n_samples=n_samples
+        )
+        key_table = pd.DataFrame({
+            'Parameter': parameter_table['Parameter'] + ' | ' +
+                         parameter_table['Response'] + ' | ' +
+                         parameter_table['Param']
+        })
+        parameter_table = pd.concat(
+            [key_table, parameter_table[self.parameter_table_columns]],
+            axis=1
         )
         formatters = {
             'Parameter': left_justified_formatter(parameter_table, 'Parameter')
@@ -2006,11 +2767,15 @@ class Model(object):
                 level=level,
                 n_samples=n_samples
             )
+            key_table = pd.DataFrame({
+                'Parameter': parameter_table['Parameter'] + ' | ' +
+                             parameter_table['Response'] + ' | ' +
+                             parameter_table['Param'] + ' | ' +
+                             parameter_table['Group'] + ' | ' +
+                             parameter_table['Level']
+            })
             parameter_table = pd.concat(
-                [
-                    pd.DataFrame({'Parameter': parameter_table['Parameter'] + ' | ' + parameter_table['Group'] + ' | ' + parameter_table['Level']}),
-                    parameter_table[self.parameter_table_columns]
-                ],
+                [key_table, parameter_table[self.parameter_table_columns]],
                 axis=1
             )
             formatters = {
@@ -2195,6 +2960,7 @@ class Model(object):
         :param indent: ``int``; indentation level
         :return: ``str``; the num. parameters report
         """
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 n_params = 0
@@ -2218,6 +2984,7 @@ class Model(object):
         :param indent: ``int``; indentation level
         :return: ``str``; the regularization report
         """
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 assert len(self.regularizer_losses) == len(self.regularizer_losses_names) == len(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)), 'Different numbers of regularized variables found in different places'
@@ -2240,96 +3007,12 @@ class Model(object):
 
                 return out
 
-    def report_training_mse(self, indent=0):
-        """
-        Generate a string representation of the model's training MSE.
-
-        :param indent: ``int``; indentation level
-        :return: ``str``; the training MSE report
-        """
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                training_mse = self.training_mse.eval(session=self.sess)
-
-                out = ' ' * indent + 'TRAINING MSE:\n'
-                out += ' ' * (indent + 2) + str(training_mse)
-                out += '\n\n'
-
-                return out
-
-    def report_training_mae(self, indent=0):
-        """
-        Generate a string representation of the model's training MAE.
-
-        :param indent: ``int``; indentation level
-        :return: ``str``; the training MAE report
-        """
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                training_mae = self.training_mae.eval(session=self.sess)
-
-                out = ' ' * indent + 'TRAINING MAE:\n'
-                out += ' ' * (indent + 2) + str(training_mae)
-                out += '\n\n'
-
-                return out
-
-    def report_training_corr(self, indent=0):
-        """
-        Generate a string representation of the model's training prediction/response correlation.
-
-        :param indent: ``int``; indentation level
-        :return: ``str``; the training correlation report
-        """
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                training_rho = self.training_rho.eval(session=self.sess)
-
-                out = ' ' * indent + 'TRAINING R(TRUE, PRED):\n'
-                out += ' ' * (indent + 2) + str(training_rho)
-                out += '\n\n'
-
-                return out
-
-    def report_training_loglik(self, indent=0):
-        """
-        Generate a string representation of the model's training log likelihood.
-
-        :param indent: ``int``; indentation level
-        :return: ``str``; the training log likelihood report
-        """
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                loglik_train = self.training_loglik.eval(session=self.sess)
-
-                out = ' ' * indent + 'TRAINING LOG LIKELIHOOD:\n'
-                out += ' ' * (indent + 2) + str(loglik_train)
-                out += '\n\n'
-
-                return out
-
-    def report_training_percent_variance_explained(self, indent=0):
-        """
-        Generate a string representation of the percent variance explained by the model on training data.
-
-        :param indent: ``int``; indentation level
-        :return: ``str``; the training percent variance explained report
-        """
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                training_percent_variance_explained = self.training_percent_variance_explained.eval(session=self.sess)
-
-                out = ' ' * indent + 'TRAINING PERCENT VARIANCE EXPLAINED:\n'
-                out += ' ' * (indent + 2) + '%.2f' %training_percent_variance_explained + '%'
-                out += '\n\n'
-
-                return out
-
     def report_evaluation(
             self,
             mse=None,
             mae=None,
-            corr=None,
+            f1=None,
+            rho=None,
             loglik=None,
             loss=None,
             percent_variance_explained=None,
@@ -2342,7 +3025,8 @@ class Model(object):
 
         :param mse: ``float`` or ``None``; mean squared error, skipped if ``None``.
         :param mae: ``float`` or ``None``; mean absolute error, skipped if ``None``.
-        :param corr: ``float`` or ``None``; Pearson correlation of predictions with observed response, skipped if ``None``.
+        :param f1: ``float`` or ``None``; macro f1 score, skipped if ``None``.
+        :param rho: ``float`` or ``None``; Pearson correlation of predictions with observed response, skipped if ``None``.
         :param loglik: ``float`` or ``None``; log likelihood, skipped if ``None``.
         :param loss: ``float`` or ``None``; loss per training objective, skipped if ``None``.
         :param true_variance: ``float`` or ``None``; variance of targets, skipped if ``None``.
@@ -2352,21 +3036,24 @@ class Model(object):
         :param indent: ``int``; indentation level
         :return: ``str``; the evaluation report
         """
+
         out = ' ' * indent + 'MODEL EVALUATION STATISTICS:\n'
         if mse is not None:
-            out += ' ' * (indent+2) + 'MSE: %s\n' %mse
+            out += ' ' * (indent+2) + 'MSE:           %s\n' % mse
         if mae is not None:
-            out += ' ' * (indent+2) + 'MAE: %s\n' %mae
-        if corr is not None:
-            out += ' ' * (indent+2) + 'r(true, pred): %s\n' %corr
+            out += ' ' * (indent+2) + 'MAE:           %s\n' % mae
+        if f1 is not None:
+            out += ' ' * (indent+2) + 'Macro F1:      %s\n' % f1
+        if rho is not None:
+            out += ' ' * (indent+2) + 'r(true, pred): %s\n' % rho
         if loglik is not None:
-            out += ' ' * (indent+2) + 'Log likelihood: %s\n' %loglik
+            out += ' ' * (indent+2) + 'Loglik:        %s\n' % loglik
         if loss is not None:
-            out += ' ' * (indent+2) + 'Loss per training objective: %s\n' %loss
+            out += ' ' * (indent+2) + 'Loss:          %s\n' % loss
         if true_variance is not None:
-            out += ' ' * (indent+2) + 'True variance: %s\n' %true_variance
+            out += ' ' * (indent+2) + 'True variance: %s\n' % true_variance
         if percent_variance_explained is not None:
-            out += ' ' * (indent+2) + 'Percent variance explained: %.2f%%\n' %percent_variance_explained
+            out += ' ' * (indent+2) + '%% var expl:    %.2f%%\n' % percent_variance_explained
         if ks_results is not None:
             out += ' ' * (indent+2) + 'Kolmogorov-Smirnov test of goodness of fit of modeled to true error:\n'
             out += ' ' * (indent+4) + 'D value: %s\n' % ks_results[0]
@@ -2420,11 +3107,25 @@ class Model(object):
         out += ' ' * indent + 'TRAINING EVALUATION SUMMARY\n'
         out += ' ' * indent + '---------------------------\n\n'
 
-        out += self.report_training_mse(indent=indent+2)
-        out += self.report_training_mae(indent=indent+2)
-        out += self.report_training_corr(indent=indent+2)
-        out += self.report_training_loglik(indent=indent+2)
-        out += self.report_training_percent_variance_explained(indent=indent+2)
+        if len(self.response_names) > 1:
+            out += ' ' * indent + 'Full loglik: %s\n\n' % self.training_loglik_full.eval(session=self.sess)
+
+        for response in self.response_names:
+            file_ix = self.response_to_df_ix[response]
+            multiple_files = len(file_ix) > 1
+            out += ' ' * indent + 'Response variable: %s\n\n' % response
+            for ix in file_ix:
+                if multiple_files:
+                    out += ' ' * indent + 'File: %s\n\n' % ix
+                out += ' ' * indent + 'MODEL EVALUATION STATISTICS:\n'
+                out += ' ' * indent +     'Loglik:        %s\n' % self.training_loglik[response][ix]
+                if response in self.training_mse:
+                    out += ' ' * indent + 'MSE:           %s\n' % self.training_mse[response][ix]
+                if response in self.training_rho:
+                    out += ' ' * indent + 'r(true, pred): %s\n' % self.training_rho[response][ix]
+                if response in self.training_percent_variance_explained:
+                    out += ' ' * indent + '%% var expl:    %s\n' % self.training_percent_variance_explained[response][ix]
+                out += '\n'
 
         return out
 
@@ -2446,15 +3147,11 @@ class Model(object):
             location = self.d0_names[min_p_ix]
 
             out += ' ' * (indent * 2) + 'Converged: %s\n' % converged
-            out += ' ' * (indent * 2) + 'Convergence basis: %s\n' % self.convergence_basis.lower()
             out += ' ' * (indent * 2) + 'Convergence n iterates: %s\n' % self.convergence_n_iterates
             out += ' ' * (indent * 2) + 'Convergence stride: %s\n' % self.convergence_stride
             out += ' ' * (indent * 2) + 'Convergence alpha: %s\n' % self.convergence_alpha
             out += ' ' * (indent * 2) + 'Convergence min p of rho_t: %s\n' % min_p
             out += ' ' * (indent * 2) + 'Convergence rho_t at min p: %s\n' % rt_at_min_p
-            if self.convergence_basis.lower() == 'parameters':
-                out += ' ' * (indent * 2) + 'Convergence rho_a at min p: %s\n' % ra_at_min_p
-                out += ' ' * (indent * 2) + 'Convergence p of rho_a at min p: %s\n' % p_ta_at_min_p
             out += ' ' * (indent * 2) + 'Proportion converged: %s\n' % proportion_converged
 
             if converged:
@@ -2489,19 +3186,6 @@ class Model(object):
     #
     ######################################################
 
-    def build(self, outdir=None, restore=True):
-        """
-        Construct the CDR network and initialize/load model parameters.
-        ``build()`` is called by default at initialization and unpickling, so users generally do not need to call this method.
-        ``build()`` can be used to reinitialize an existing network instance on the fly, but only if (1) no model checkpoint has been saved to the output directory or (2) ``restore`` is set to ``False``.
-
-        :param restore: Restore saved network parameters if model checkpoint exists in the output directory.
-        :param verbose: Report model details after initialization.
-        :return: ``None``
-        """
-
-        raise NotImplementedError
-
     def is_non_dirac(self, impulse_name):
         """
         Check whether an impulse is associated with a non-Dirac response function
@@ -2514,14 +3198,14 @@ class Model(object):
 
     def fit(self,
             X,
-            y,
+            Y,
             n_iter=100,
             X_response_aligned_predictor_names=None,
             X_response_aligned_predictors=None,
             X_2d_predictor_names=None,
             X_2d_predictors=None,
             force_training_evaluation=True
-            ):
+    ):
         """
         Fit the model.
 
@@ -2532,17 +3216,16 @@ class Model(object):
 
             Across all elements of **X**, there must be a column for each independent variable in the CDR ``form_str`` provided at initialization.
 
-        :param y: ``pandas`` table; the dependent variable. Must contain the following columns:
+        :param Y: ``list`` of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+            Each element of **Y** must contain the following columns (additional columns are ignored):
 
             * ``time``: Timestamp associated with each observation in **y**
             * ``first_obs``:  Index in the design matrix **X** of the first observation in the time series associated with each entry in **y**
             * ``last_obs``:  Index in the design matrix **X** of the immediately preceding observation in the time series associated with each entry in **y**
-            * A column with the same name as the dependent variable specified in the model formula
+            * Columns with a subset of the names of the DVs specified in ``form_str`` (all DVs should be represented somewhere in **y**)
             * A column for each random grouping factor in the model formula
 
-            In general, **y** will be identical to the parameter **y** provided at model initialization.
-            This must hold for MCMC inference, since the number of minibatches is built into the model architecture.
-            However, it is not necessary for variational inference.
+            In general, **Y** will be identical to the parameter **Y** provided at model initialization.
         :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
         :param X_response_aligned_predictors: ``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
         :param X_2d_predictor_names: ``list`` or ``None``; List of column names 2D predictors (predictors whose value depends on properties of the most recent impulse) if applicable, ``None`` otherwise.
@@ -2554,28 +3237,24 @@ class Model(object):
         impulse_names  = self.impulse_names
 
         if not np.isfinite(self.minibatch_size):
-            minibatch_size = len(y)
+            minibatch_size = len(Y)
         else:
             minibatch_size = self.minibatch_size
-        n_minibatch = math.ceil(float(len(y)) / minibatch_size)
 
-        y_rangf = y[self.rangf]
-        for i in range(len(self.rangf)):
-            c = self.rangf[i]
-            y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
-
-        first_obs, last_obs = get_first_last_obs_lists(y)
-        time_y = np.array(y.time, dtype=self.FLOAT_NP)
-        y_dv = np.array(y[self.dv], dtype=self.FLOAT_NP)
-        gf_y = np.array(y_rangf, dtype=self.INT_NP)
-
-        X_2d, time_X_2d, time_X_mask = build_CDR_impulses(
+        # Preprocess data
+        if not isinstance(X, list):
+            X = [X]
+        if Y is not None and not isinstance(Y, list):
+            Y = [Y]
+        if self.use_crossval:
+            Y = [_Y[self.crossval_factor].isin(self.crossval_folds) for _Y in Y]
+        X_2d, X_time_2d, X_mask, Y_dv, Y_time, Y_mask = build_CDR_data(
             X,
-            first_obs,
-            last_obs,
-            impulse_names,
-            time_y=time_y,
+            Y,
+            Y_category_map=self.response_category_to_ix,
             history_length=self.history_length,
+            impulse_names=self.impulse_names,
+            response_names=self.response_names,
             X_response_aligned_predictor_names=X_response_aligned_predictor_names,
             X_response_aligned_predictors=X_response_aligned_predictors,
             X_2d_predictor_names=X_2d_predictor_names,
@@ -2583,21 +3262,9 @@ class Model(object):
             int_type=self.int_type,
             float_type=self.float_type,
         )
-
-        if self.use_crossval:
-            sel = ~y[self.crossval_factor].isin(self.crossval_folds)
-            first_obs = first_obs[sel]
-            last_obs = last_obs[sel]
-            time_y = time_y[sel]
-            y_dv = y_dv[sel]
-            gf_y = gf_y[sel]
-            X_2d = X_2d[sel]
-            time_X_2d = time_X_2d[sel]
-            time_X_mask = time_X_mask[sel]
-
-            n_train = len(y_dv)
-        else:
-            n_train = len(y)
+        Y_gf = get_rangf_array(Y, self.rangf, self.rangf_map)
+        n_train = len(Y_dv)
+        n_minibatch = int(math.ceil(n_train / minibatch_size))
 
         stderr('*' * 100 + '\n' + self.initialization_summary() + '*' * 100 + '\n\n')
         with open(self.outdir + '/initialization_summary.txt', 'w') as i_file:
@@ -2608,7 +3275,7 @@ class Model(object):
 
         stderr('Correlation matrix for input variables:\n')
         impulse_names_2d = [x for x in impulse_names if x in X_2d_predictor_names]
-        rho = corr_cdr(X_2d, impulse_names, impulse_names_2d, time_X_2d, time_X_mask)
+        rho = corr_cdr(X_2d, impulse_names, impulse_names_2d, X_time_2d, X_mask)
         stderr(str(rho) + '\n\n')
 
         if False:
@@ -2661,11 +3328,12 @@ class Model(object):
                             indices = p[j:j+minibatch_size]
                             fd_minibatch = {
                                 self.X: X_2d[indices],
-                                self.time_X: time_X_2d[indices],
-                                self.time_X_mask: time_X_mask[indices],
-                                self.y: y_dv[indices],
-                                self.time_y: time_y[indices],
-                                self.gf_y: gf_y[indices] if len(gf_y > 0) else gf_y,
+                                self.X_time: X_time_2d[indices],
+                                self.X_mask: X_mask[indices],
+                                self.Y: Y_dv[indices],
+                                self.Y_time: Y_time[indices],
+                                self.Y_mask: Y_mask[indices],
+                                self.Y_gf: Y_gf[indices] if len(Y_gf > 0) else Y_gf,
                                 self.training: not self.predict_mode
                             }
 
@@ -2700,9 +3368,6 @@ class Model(object):
                             #     self.make_plots(prefix='plt')
 
                         self.sess.run(self.incr_global_step)
-
-                        if not type(self).__name__.startswith('CDRNN'):
-                            self.verify_random_centering()
 
                         if self.check_convergence:
                             self.run_convergence_check(verbose=False, feed_dict={self.loss_total: loss_total/n_minibatch})
@@ -2749,95 +3414,37 @@ class Model(object):
 
                 if not self.training_complete.eval(session=self.sess) or force_training_evaluation:
                     # Extract and save predictions
-                    preds = self.predict(
+                    metrics, summary = self.evaluate(
                         X,
-                        y.time,
-                        y[self.form.rangf],
-                        first_obs,
-                        last_obs,
-                        X_response_aligned_predictor_names=X_response_aligned_predictor_names,
-                        X_response_aligned_predictors=X_response_aligned_predictors,
-                        X_2d_predictor_names=X_2d_predictor_names,
-                        X_2d_predictors=X_2d_predictors
-                    )
-
-                    with open(self.outdir + '/obs_train.txt', 'w') as o_file:
-                        obs = y[self.dv].values
-                        for i in range(len(obs)):
-                            o_file.write(str(obs[i]) + '\n')
-
-                    with open(self.outdir + '/preds_train.txt', 'w') as p_file:
-                        for i in range(len(preds)):
-                            p_file.write(str(preds[i]) + '\n')
-
-                    # Extract and save losses
-                    training_se = np.array((y[self.dv] - preds) ** 2)
-                    training_mse = training_se.mean()
-                    training_percent_variance_explained = percent_variance_explained(y[self.dv], preds)
-
-                    training_ae = np.array(np.abs(y[self.dv] - preds))
-                    training_mae = training_ae.mean()
-
-                    training_rho = np.corrcoef(y[self.dv], preds)[0,1]
-
-                    with open(self.outdir + '/squared_error_train.txt', 'w') as e_file:
-                        for i in range(len(training_se)):
-                            e_file.write(str(training_se[i]) + '\n')
-
-                    # Extract and save log likelihoods
-                    training_logliks = self.log_lik(
-                        X,
-                        y,
+                        Y,
                         X_response_aligned_predictor_names=X_response_aligned_predictor_names,
                         X_response_aligned_predictors=X_response_aligned_predictors,
                         X_2d_predictor_names=X_2d_predictor_names,
                         X_2d_predictors=X_2d_predictors,
-                    )
-                    with open(self.outdir + '/loglik_train.txt','w') as l_file:
-                        for i in range(len(training_logliks)):
-                            l_file.write(str(training_logliks[i]) + '\n')
-                    training_loglik = training_logliks.sum()
-
-                    # Store training evaluation statistics in the graph
-                    self.sess.run(
-                        [self.set_training_mse, self.set_training_mae],
-                        feed_dict={
-                            self.training_mse_in: training_mse,
-                            self.training_mae_in: training_mae,
-                        }
+                        dump=True,
+                        partition='train'
                     )
 
-                    self.sess.run(
-                        [self.set_training_loglik],
-                        feed_dict={
-                            self.training_loglik_in: training_loglik
-                        }
-                    )
+                    # Extract and save losses
+                    ll_full = sum([_ll for r in self.response_names for _ll in metrics['log_lik'][r]])
+                    self.sess.run(self.set_training_loglik_full, feed_dict={self.training_loglik_full_in: ll_full})
+                    fd = {}
+                    to_run = []
+                    for response in self.training_loglik_in:
+                        for ix, tensor in enumerate(self.training_loglik_in[response]):
+                            fd[tensor] = metrics['log_lik'][response][ix]
+                            to_run.append(self.set_training_loglik[response][ix])
+                    for response in self.training_mse_in:
+                        for ix, tensor in enumerate(self.training_mse_in[response]):
+                            fd[tensor] = metrics['mse'][response][ix]
+                            to_run.append(self.set_training_mse[response][ix])
+                    for response in self.training_rho_in:
+                        for ix, tensor in enumerate(self.training_rho_in[response]):
+                            fd[tensor] = metrics['rho'][response][ix]
+                            to_run.append(self.set_training_rho[response][ix])
 
-                    self.sess.run(
-                        [self.set_training_rho],
-                        feed_dict={
-                            self.training_rho_in: training_rho
-                        }
-                    )
-
+                    self.sess.run(to_run, feed_dict=fd)
                     self.save()
-
-                    with open(self.outdir + '/eval_train.txt', 'w') as e_file:
-                        eval_train = '------------------------\n'
-                        eval_train += 'CDR TRAINING EVALUATION\n'
-                        eval_train += '------------------------\n\n'
-                        eval_train += self.report_formula_string(indent=2)
-                        eval_train += self.report_evaluation(
-                            mse=training_mse,
-                            mae=training_mae,
-                            corr=training_rho,
-                            loglik=training_loglik,
-                            percent_variance_explained=training_percent_variance_explained,
-                            indent=2
-                        )
-
-                        e_file.write(eval_train)
 
                     self.save_parameter_table()
                     self.save_integral_table()
@@ -2849,22 +3456,29 @@ class Model(object):
     def predict(
             self,
             X,
-            y_time,
-            y_rangf,
-            first_obs,
-            last_obs,
+            Y=None,
+            first_obs=None,
+            last_obs=None,
+            Y_time=None,
+            Y_gf=None,
+            response=None,
             X_response_aligned_predictor_names=None,
             X_response_aligned_predictors=None,
             X_2d_predictor_names=None,
             X_2d_predictors=None,
             n_samples=None,
             algorithm='MAP',
-            standardize_response=False,
+            return_preds=True,
+            return_loglik=False,
+            dump=False,
+            extra_cols=False,
+            partition=None,
             verbose=True
     ):
         """
         Predict from the pre-trained CDR model.
         Predictions are averaged over ``self.n_samples_eval`` samples from the predictive posterior for each regression target.
+        Can also be used to generate log likelihoods when targets **Y** are provided (see options below).
 
         :param X: list of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
             Each element of **X** must contain the following columns (additional columns are ignored):
@@ -2873,46 +3487,66 @@ class Model(object):
 
             Across all elements of **X**, there must be a column for each independent variable in the CDR ``form_str`` provided at initialization.
 
-        :param y_time: ``pandas`` ``Series`` or 1D ``numpy`` array; timestamps for the regression targets, grouped by series.
-        :param y_rangf: ``pandas`` ``Series`` or 1D ``numpy`` array; random grouping factor values (if applicable).
+        :param Y: ``list`` of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+            This parameter is optional and responses are not directly used. It simply allows the user to omit the
+            inputs **Y_time**, **Y_gf**, **first_obs**, and **last_obs**, since they can be inferred from **Y**
+            If supplied, each element of **Y** must contain the following columns (additional columns are ignored):
+
+            * ``time``: Timestamp associated with each observation in **y**
+            * ``first_obs``:  Index in the design matrix **X** of the first observation in the time series associated with each entry in **y**
+            * ``last_obs``:  Index in the design matrix **X** of the immediately preceding observation in the time series associated with each entry in **y**
+            * Columns with a subset of the names of the DVs specified in ``form_str`` (all DVs should be represented somewhere in **y**)
+            * A column for each random grouping factor in the model formula
+
+        :param first_obs: ``list`` of ``list`` of index vectors (``list``, ``pandas`` series, or ``numpy`` vector) of first observations; the list contains one element for each response array. Inner lists contain vectors of row indices, one for each element of **X**, of the first impulse in the time series associated with each response. If ``None``, inferred from **Y**.
+            Sort order and number of observations must be identical to that of ``y_time``.
+        :param last_obs: ``list`` of ``list`` of index vectors (``list``, ``pandas`` series, or ``numpy`` vector) of last observations; the list contains one element for each response array. Inner lists contain vectors of row indices, one for each element of **X**, of the last impulse in the time series associated with each response. If ``None``, inferred from **Y**.
+            Sort order and number of observations must be identical to that of ``y_time``.
+        :param Y_time: ``list`` of response timestamp vectors (``list``, ``pandas`` series, or ``numpy`` vector); vector(s) of response timestamps, one for each response array. Needed to timestamp any response-aligned predictors (ignored if none in model).
+        :param Y_gf: ``list`` of random grouping factor values (``list``, ``pandas`` series, or ``numpy`` vector); random grouping factor values (if applicable), one for each response dataframe.
             Can be of type ``str`` or ``int``.
             Sort order and number of observations must be identical to that of ``y_time``.
-        :param first_obs: list of ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the start of the series associated with the current regression target.
-            Sort order and number of observations must be identical to that of ``y_time``.
-        :param last_obs: list of ``pandas`` ``Series`` or 1D ``numpy`` array; row indices in ``X`` of the most recent observation in the series associated with the current regression target.
-            Sort order and number of observations must be identical to that of ``y_time``.
+        :param response: ``list`` of ``str``, ``str``, or ``None``; Name(s) of response(s) to predict. If ``None``, predicts all responses.
         :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
         :param X_response_aligned_predictors: ``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
         :param X_2d_predictor_names: ``list`` or ``None``; List of column names 2D predictors (predictors whose value depends on properties of the most recent impulse) if applicable, ``None`` otherwise.
         :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
-        :param standardize_response: ``bool``; Whether to report response using standard units. Ignored unless model was fitted using ``standardize_response==True``.
+        :param return_preds: ``bool``; whether to return predictions.
+        :param return_loglik: ``bool``; whether to return elementwise log likelihoods. Requires that **Y** is not ``None``. If multiple response variables are modeled, also returns full model (summed) LL, labeled as ``'AllResponses'``.
+        :param dump: ``bool``; whether to save generated predictions (and log likelihood vectors if applicable) to disk.
+        :param extra_cols: ``bool``; whether to include columns from **Y** in output tables. Ignored unless **dump** is ``True``.
+        :param partition: ``str``; name of data partition, used for output file naming. Ignored unless **dump** is ``True``.
         :param verbose: ``bool``; Report progress and metrics to standard error.
         :return: 1D ``numpy`` array; mean network predictions for regression targets (same length and sort order as ``y_time``).
         """
 
+        assert Y is not None or not return_loglik, 'Cannot return log likelihood when Y is not provided.'
+
         if verbose:
             usingGPU = tf.test.is_gpu_available()
             stderr('Using GPU: %s\n' % usingGPU)
-
-        impulse_names  = self.impulse_names
-
-        if verbose:
             stderr('Computing predictions...\n')
 
-        for i in range(len(self.rangf)):
-            c = self.rangf[i]
-            y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
-        time_y = np.array(y_time, dtype=self.FLOAT_NP)
-        gf_y = np.array(y_rangf, dtype=self.INT_NP)
-
-        X_2d, time_X_2d, time_X_mask = build_CDR_impulses(
+        # Preprocess data
+        if not isinstance(X, list):
+            X = [X]
+        if Y is not None and not isinstance(Y, list):
+            Y = [Y]
+        if Y is None:
+            Y_time_in = Y_time
+        else:
+            Y_time_in = [_Y.time for _Y in Y]
+        X_2d, X_time_2d, X_mask, Y_dv, Y_time, Y_mask = build_CDR_data(
             X,
-            first_obs,
-            last_obs,
-            impulse_names,
-            time_y=time_y,
+            Y=Y,
+            first_obs=first_obs,
+            last_obs=last_obs,
+            Y_time=Y_time,
+            Y_category_map=self.response_category_to_ix,
+            impulse_names=self.impulse_names,
+            response_names=self.response_names,
             history_length=self.history_length,
             X_response_aligned_predictor_names=X_response_aligned_predictor_names,
             X_response_aligned_predictors=X_response_aligned_predictors,
@@ -2921,68 +3555,155 @@ class Model(object):
             int_type=self.int_type,
             float_type=self.float_type,
         )
+        if Y_gf is None:
+            Y_gf_in = Y
+        else:
+            Y_gf_in = Y_gf
+        Y_gf = get_rangf_array(Y_gf_in, self.rangf, self.rangf_map)
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                self.set_predict_mode(True)
+        if response is None:
+            response = self.response_names
+        if not isinstance(response, list):
+            response = [response]
 
-                fd = {
-                    self.X: X_2d,
-                    self.time_X: time_X_2d,
-                    self.time_y: time_y,
-                    self.gf_y: gf_y,
-                    self.training: not self.predict_mode
-                }
+        if return_preds or return_loglik:
+            with self.sess.as_default():
+                with self.sess.graph.as_default():
+                    self.set_predict_mode(True)
 
-                if not np.isfinite(self.eval_minibatch_size):
-                    preds = self.run_predict_op(
-                        fd,
-                        standardize_response=standardize_response,
-                        n_samples=n_samples,
-                        algorithm=algorithm,
-                        verbose=verbose
-                    )
-                else:
-                    preds = np.zeros((len(y_time),))
-                    n_eval_minibatch = math.ceil(len(y_time) / self.eval_minibatch_size)
-                    for i in range(0, len(y_time), self.eval_minibatch_size):
-                        if verbose:
-                            stderr('\rMinibatch %d/%d' %((i/self.eval_minibatch_size)+1, n_eval_minibatch))
-                        fd_minibatch = {
-                            self.X: X_2d[i:i + self.eval_minibatch_size],
-                            self.time_X: time_X_2d[i:i + self.eval_minibatch_size],
-                            self.time_X_mask: time_X_mask[i:i + self.eval_minibatch_size],
-                            self.time_y: time_y[i:i + self.eval_minibatch_size],
-                            self.gf_y: gf_y[i:i + self.eval_minibatch_size] if len(gf_y) > 0 else gf_y,
+                    if not np.isfinite(self.eval_minibatch_size):
+                        fd = {
+                            self.X: X_2d,
+                            self.X_time: X_time_2d,
+                            self.Y_time: Y_time,
+                            self.Y_mask: Y_mask,
+                            self.Y_gf: Y_gf,
                             self.training: not self.predict_mode
                         }
-                        preds[i:i + self.eval_minibatch_size] = self.run_predict_op(
-                            fd_minibatch,
-                            standardize_response=standardize_response,
+                        if return_loglik:
+                            fd[self.Y] = Y_dv
+                        out = self.run_predict_op(
+                            fd,
+                            response=response,
                             n_samples=n_samples,
                             algorithm=algorithm,
+                            return_preds=return_preds,
+                            return_loglik=return_loglik,
                             verbose=verbose
                         )
+                    else:
+                        out = {}
+                        if return_preds:
+                            out['preds'] = {}
+                            for _response in response:
+                                if self.predictive_distribution_config[_response]['support'] == 'real':
+                                    dtype = self.FLOAT_NP
+                                else:
+                                    dtype = self.INT_NP
+                                out['preds'][_response] = np.zeros((len(Y_time),), dtype=dtype)
+                        if return_loglik:
+                            out['log_lik'] = {x: np.zeros((len(Y_time),)) for x in response}
+                            if len(self.response_names) > 1:
+                                out['log_lik']['AllResponses'] = np.zeros((len(Y_time),))
+                        n_eval_minibatch = math.ceil(len(Y_time) / self.eval_minibatch_size)
+                        for i in range(0, len(Y_time), self.eval_minibatch_size):
+                            if verbose:
+                                stderr('\rMinibatch %d/%d' %((i/self.eval_minibatch_size)+1, n_eval_minibatch))
+                            fd = {
+                                self.X: X_2d[i:i + self.eval_minibatch_size],
+                                self.X_time: X_time_2d[i:i + self.eval_minibatch_size],
+                                self.X_mask: X_mask[i:i + self.eval_minibatch_size],
+                                self.Y_time: Y_time[i:i + self.eval_minibatch_size],
+                                self.Y_mask: Y_mask[i:i + self.eval_minibatch_size],
+                                self.Y_gf: Y_gf[i:i + self.eval_minibatch_size] if len(Y_gf) > 0 else Y_gf,
+                                self.training: not self.predict_mode
+                            }
+                            if return_loglik:
+                                fd[self.Y] = Y_dv[i:i + self.eval_minibatch_size]
+                            _out = self.run_predict_op(
+                                fd,
+                                response=response,
+                                n_samples=n_samples,
+                                algorithm=algorithm,
+                                return_preds=return_preds,
+                                return_loglik=return_loglik,
+                                verbose=verbose
+                            )
 
-                if verbose:
-                    stderr('\n\n')
+                            if return_preds:
+                                for _response in _out['preds']:
+                                    _preds = _out['preds'][_response]
+                                    out['preds'][_response][i:i + self.eval_minibatch_size] = _preds = _out['preds'][_response]
+                            if return_loglik:
+                                for _response in _out['log_lik']:
+                                    out['log_lik'][_response][i:i + self.eval_minibatch_size] = _out['log_lik'][_response]
 
-                self.set_predict_mode(False)
+                    for _response in out['preds']:
+                        if self.predictive_distribution_config[_response]['support'] != 'real':
+                            mapper = np.vectorize(lambda x: self.response_ix_to_category[_response].get(x, x))
+                            out['preds'][_response] = mapper(out['preds'][_response])
 
-                return preds
+                    # Split into per-file predictions.
+                    # Exclude the length of last file because it will be inferred.
+                    out = split_cdr_outputs(out, [len(_Y) for _Y in Y_time_in[:-1]])
+
+                    if verbose:
+                        stderr('\n\n')
+
+                    self.set_predict_mode(False)
+
+                    if dump:
+                        response_keys = response[:]
+                        if return_loglik and len(self.response_names) > 1:
+                            response_keys.append('AllResponses')
+
+                        if partition:
+                            partition_str = '_' + partition
+                        else:
+                            partition_str = ''
+
+                        for _response in response_keys:
+                            if _response == 'AllResponses':
+                                file_ix = list(range(len(Y_time_in)))
+                            else:
+                                file_ix = self.response_to_df_ix[_response]
+                            multiple_files = len(file_ix) > 1
+                            for ix in file_ix:
+                                df = {}
+                                if return_preds and _response in out['preds']:
+                                    df['CDRpreds'] = out['preds'][_response][ix]
+                                if return_loglik:
+                                    df['CDRloglik'] = out['log_lik'][_response][ix]
+                                if Y is not None and _response in Y[ix]:
+                                    df['CDRobs'] = Y[ix][_response]
+                                df = pd.DataFrame(df)
+                                if extra_cols:
+                                    if Y is None:
+                                        df_new = {x: Y_gf_in[i] for i, x in enumerate(self.rangf)}
+                                        df_new['time'] = Y_time_in[ix]
+                                        df_new = pd.DataFrame(df_new)
+                                    else:
+                                        df_new = Y[ix]
+                                    df = pd.concat([df.reset_index(drop=True), df_new.reset_index(drop=True)], axis=1)
+
+                                if multiple_files:
+                                    name_base = '%s_file%s%s' % (sn(_response), ix, partition_str)
+                                else:
+                                    name_base = '%s%s' % (sn(_response), partition_str)
+                                df.to_csv(self.outdir + '/output_%s.csv' % name_base, sep=' ', na_rep='NaN', index=False)
+        else:
+            out = {}
+
+        return out
 
     def log_lik(
             self,
             X,
-            y,
-            X_response_aligned_predictor_names=None,
-            X_response_aligned_predictors=None,
-            X_2d_predictor_names=None,
-            X_2d_predictors=None,
-            n_samples=None,
-            algorithm='MAP',
-            standardize_response=False,
-            verbose=True
+            Y,
+            dump=False,
+            extra_cols=False,
+            partition=None,
+            **kwargs
     ):
         """
         Compute log-likelihood of data from predictive posterior.
@@ -2994,12 +3715,100 @@ class Model(object):
 
             Across all elements of **X**, there must be a column for each independent variable in the CDR ``form_str`` provided at initialization.
 
-        :param y: ``pandas`` table; the dependent variable. Must contain the following columns:
+        :param Y: ``list`` of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+            Each element of **Y** must contain the following columns (additional columns are ignored):
 
             * ``time``: Timestamp associated with each observation in ``y``
-            * ``first_obs``:  Index in the design matrix `X` of the first observation in the time series associated with each entry in ``y``
-            * ``last_obs``:  Index in the design matrix `X` of the immediately preceding observation in the time series associated with each entry in ``y``
-            * A column with the same name as the DV specified in ``form_str``
+            * ``first_obs_<K>``:  Index in the Kth (zero-indexed) element of `X` of the first observation in the time series associated with each entry in ``y``
+            * ``last_obs_<K>``:  Index in the Kth (zero-indexed) element of `X` of the immediately preceding observation in the time series associated with each entry in ``y``
+            * Columns with a subset of the names of the DVs specified in ``form_str`` (all DVs should be represented somewhere in **y**)
+            * A column for each random grouping factor in the model specified in ``form_str``.
+
+        :param extra_cols: ``bool``; whether to include columns from **Y** in output tables.`
+        :param dump; ``bool``; whether to save generated log likelihood vectors to disk.
+        :param extra_cols: ``bool``; whether to include columns from **Y** in output tables. Ignored unless **dump** is ``True``.
+        :param partition: ``str``; name of data partition, used for output file naming. Ignored unless **dump** is ``True``.
+        :param **kwargs; Any additional keyword arguments accepted by ``predict()`` (see docs for ``predict()`` for details).
+        :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
+        """
+
+        out = self.predict(
+            X,
+            Y=Y,
+            dump=False,
+            return_preds=False,
+            return_loglik=True,
+            **kwargs
+        )['log_lik']
+
+        if dump:
+            response_keys = list(out['log_lik'].keys())
+
+            Y_gf = [_Y[self.rangf] for _Y in Y]
+            Y_time = [_Y.time for _Y in Y]
+
+            if partition:
+                partition_str = '_' + partition
+            else:
+                partition_str = ''
+
+            for _response in response_keys:
+                if _response == 'AllResponses':
+                    file_ix = list(range(len(Y)))
+                else:
+                    file_ix = self.response_to_df_ix[_response]
+                multiple_files = len(file_ix) > 1
+                for ix in file_ix:
+                    df = {'CDRloglik': out[_response][ix]}
+                    if extra_cols:
+                        if Y is None:
+                            df_new = {x: Y_gf[i] for i, x in enumerate(self.rangf)}
+                            df_new['time'] = Y_time[ix]
+                            df_new = pd.DataFrame(df_new)
+                        else:
+                            df_new = Y[ix]
+                        df = pd.concat([df.reset_index(drop=True), df_new.reset_index(drop=True)], axis=1)
+
+                    if multiple_files:
+                        name_base = '%s_file%s%s' % (sn(_response), ix, partition_str)
+                    else:
+                        name_base = '%s%s' % (sn(_response), partition_str)
+                    df.to_csv(self.outdir + '/output_%s.csv' % name_base, sep=' ', na_rep='NaN', index=False)
+
+        return out
+
+    def evaluate(
+            self,
+            X,
+            Y,
+            X_response_aligned_predictor_names=None,
+            X_response_aligned_predictors=None,
+            X_2d_predictor_names=None,
+            X_2d_predictors=None,
+            n_samples=None,
+            algorithm='MAP',
+            dump=False,
+            extra_cols=False,
+            partition=None,
+            verbose=True
+    ):
+        """
+        Compute and evaluate CDR model outputs relative to targets, optionally saving generated data and evaluations to disk.
+
+        :param X: list of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+            Each element of **X** must contain the following columns (additional columns are ignored):
+
+            * ``time``: Timestamp associated with each observation in **X**
+
+            Across all elements of **X**, there must be a column for each independent variable in the CDR ``form_str`` provided at initialization.
+
+        :param Y: ``list`` of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+            Each element of **Y** must contain the following columns (additional columns are ignored):
+
+            * ``time``: Timestamp associated with each observation in ``y``
+            * ``first_obs_<K>``:  Index in the Kth (zero-indexed) element of `X` of the first observation in the time series associated with each entry in ``y``
+            * ``last_obs_<K>``:  Index in the Kth (zero-indexed) element of `X` of the immediately preceding observation in the time series associated with each entry in ``y``
+            * Columns with a subset of the names of the DVs specified in ``form_str`` (all DVs should be represented somewhere in **y**)
             * A column for each random grouping factor in the model specified in ``form_str``.
 
         :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
@@ -3008,100 +3817,200 @@ class Model(object):
         :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
-        :param standardize_response: ``bool``; Whether to report response using standard units. Ignored unless model was fitted using ``standardize_response==True``.
+        :param dump: ``bool``; whether to save generated data and evaluations to disk.
+        :param extra_cols: ``bool``; whether to include columns from **Y** in output tables. Ignored unless **dump** is ``True``.
+        :param partition: ``str``; name of data partition, used for output file naming. Ignored unless **dump** is ``True``.
         :param verbose: ``bool``; Report progress and metrics to standard error.
-        :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
+        :return: ``None``
         """
 
-        if verbose:
-            usingGPU = tf.test.is_gpu_available()
-            stderr('Using GPU: %s\n' % usingGPU)
+        if partition:
+            partition_str = '_' + partition
+        else:
+            partition_str = ''
 
-        impulse_names  = self.impulse_names
-
-        if verbose:
-            stderr('Computing likelihoods...\n')
-
-        y_rangf = y[self.rangf]
-        for i in range(len(self.rangf)):
-            c = self.rangf[i]
-            y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
-
-        first_obs, last_obs = get_first_last_obs_lists(y)
-        time_y = np.array(y.time, dtype=self.FLOAT_NP)
-        y_dv = np.array(y[self.dv], dtype=self.FLOAT_NP)
-        gf_y = np.array(y_rangf, dtype=self.INT_NP)
-
-        X_2d, time_X_2d, time_X_mask = build_CDR_impulses(
+        cdr_out = self.predict(
             X,
-            first_obs,
-            last_obs,
-            impulse_names,
-            time_y=time_y,
-            history_length=self.history_length,
+            Y=Y,
             X_response_aligned_predictor_names=X_response_aligned_predictor_names,
             X_response_aligned_predictors=X_response_aligned_predictors,
             X_2d_predictor_names=X_2d_predictor_names,
             X_2d_predictors=X_2d_predictors,
-            int_type=self.int_type,
-            float_type=self.float_type,
+            n_samples=n_samples,
+            algorithm=algorithm,
+            return_preds=True,
+            return_loglik=True,
+            dump=False,
+            verbose=verbose
         )
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                self.set_predict_mode(True)
+        preds = cdr_out['preds']
+        log_lik = cdr_out['log_lik']
 
-                if not np.isfinite(self.eval_minibatch_size):
-                    fd = {
-                        self.X: X_2d,
-                        self.time_X: time_X_2d,
-                        self.time_X_mask: time_X_mask,
-                        self.time_y: time_y,
-                        self.gf_y: gf_y,
-                        self.y: y_dv,
-                        self.training: not self.predict_mode
-                    }
-                    log_lik = self.run_loglik_op(
-                        fd,
-                        standardize_response=standardize_response,
-                        n_samples=n_samples,
-                        algorithm=algorithm,
-                        verbose=verbose
-                    )
+        metrics = {
+            'mse': {},
+            'rho': {},
+            'f1': {},
+            'log_lik': {},
+            'percent_variance_explained': {},
+            'true_variance': {},
+            'ks_results': {}
+        }
+
+        response_names = self.response_names[:]
+        if len(self.response_names) > 1:
+            response_names = ['AllResponses'] + response_names
+        for _response in response_names:
+
+            metrics['mse'][_response] = []
+            metrics['rho'][_response] = []
+            metrics['f1'][_response] = []
+            metrics['log_lik'][_response] = []
+            metrics['percent_variance_explained'][_response] = []
+            metrics['true_variance'][_response] = []
+            metrics['ks_results'][_response] = []
+
+            if _response == 'AllResponses':
+                file_ix = list(range(len(Y)))
+            else:
+                file_ix = self.response_to_df_ix[_response]
+            multiple_files = len(file_ix) > 1
+
+            for ix in file_ix:
+                metrics['mse'][_response].append(None)
+                metrics['rho'][_response].append(None)
+                metrics['f1'][_response].append(None)
+                metrics['log_lik'][_response].append(None)
+                metrics['percent_variance_explained'][_response].append(None)
+                metrics['true_variance'][_response].append(None)
+                metrics['ks_results'][_response].append(None)
+
+                _Y = Y[ix]
+                if _response in _Y:
+                    _y = _Y[_response]
+
+                    _preds = preds[_response][ix]
+
+                    if self.predictive_distribution_config[_response]['support'] == 'real':
+                        error = np.array(_y - _preds) ** 2
+                        score = error.mean()
+                        resid = np.sort(_y - _preds)
+                        resid_theoretical_q = self.error_theoretical_quantiles(len(resid), _response)
+                        valid = np.isfinite(resid_theoretical_q)
+                        resid = resid[valid]
+                        resid_theoretical_q = resid_theoretical_q[valid]
+                        D, p_value = self.error_ks_test(resid, _response)
+
+                        metrics['mse'][_response][-1] = score
+                        metrics['rho'][_response][-1] = np.corrcoef(_y, _preds, rowvar=False)[0, 1]
+                        metrics['percent_variance_explained'][_response][-1] = percent_variance_explained(_y, _preds)
+                        metrics['true_variance'][_response][-1] = np.std(_y) ** 2
+                        metrics['ks_results'][_response][-1] = (D, p_value)
+                        err_col_name = 'CDRsquarederror'
+                    else:
+                        error = (_y == _preds).astype('int')
+                        score = f1_score(_y, _preds, average='macro')
+
+                        metrics['f1'][_response][-1] = score
+                        err_col_name = 'CDRmacroF1'
                 else:
-                    log_lik = np.zeros((len(time_y),))
-                    n_eval_minibatch = math.ceil(len(y) / self.eval_minibatch_size)
-                    for i in range(0, len(time_y), self.eval_minibatch_size):
-                        if verbose:
-                            stderr('\rMinibatch %d/%d' %((i/self.eval_minibatch_size)+1, n_eval_minibatch))
-                        fd_minibatch = {
-                            self.X: X_2d[i:i + self.eval_minibatch_size],
-                            self.time_X: time_X_2d[i:i + self.eval_minibatch_size],
-                            self.time_X_mask: time_X_mask[i:i + self.eval_minibatch_size],
-                            self.time_y: time_y[i:i + self.eval_minibatch_size],
-                            self.gf_y: gf_y[i:i + self.eval_minibatch_size] if len(gf_y) > 0 else gf_y,
-                            self.y: y_dv[i:i+self.eval_minibatch_size],
-                            self.training: not self.predict_mode
-                        }
-                        log_lik[i:i+self.eval_minibatch_size] = self.run_loglik_op(
-                            fd_minibatch,
-                            standardize_response=standardize_response,
-                            n_samples=n_samples,
-                            algorithm=algorithm,
-                            verbose=verbose
+                    err_col_name = error = _preds = _y = None
+
+                _ll = log_lik[_response][ix]
+                metrics['log_lik'][_response][-1] = _ll.sum()
+
+                if dump:
+                    if multiple_files:
+                        name_base = '%s_file%s%s' % (sn(_response), ix, partition_str)
+                    else:
+                        name_base = '%s%s' % (sn(_response), partition_str)
+
+                    df = {}
+                    if err_col_name is not None and error is not None:
+                        df[err_col_name] = error
+                    if _preds is not None:
+                        df['CDRpreds'] = _preds
+                    if _y is not None:
+                        df['CDRobs'] = _y
+                    df['CDRloglik'] = _ll
+                    df = pd.DataFrame(df)
+
+                    if extra_cols:
+                        df = pd.concat([_Y.reset_index(drop=True), df.reset_index(drop=True)], axis=1)
+
+                    preds_outfile = self.outdir + '/output_%s.csv' % name_base
+                    df.to_csv(preds_outfile, sep=' ', na_rep='NaN', index=False)
+
+                    if _response in  self.predictive_distribution_config and \
+                            self.predictive_distribution_config[_response]['support'] == 'real':
+                        plot_qq(
+                            resid_theoretical_q,
+                            resid,
+                            dir=self.outdir,
+                            filename='error_qq_plot_%s.png' % name_base,
+                            xlab='Theoretical',
+                            ylab='Empirical'
                         )
 
-                if verbose:
-                    stderr('\n\n')
+        summary_header = '=' * 50 + '\n'
+        summary_header += 'CDR regression\n\n'
+        summary_header += 'Model name: %s\n\n' % self.name
+        summary_header += 'Formula:\n'
+        summary_header += '  ' + self.form_str + '\n\n'
+        summary_header += 'Partition: %s\n' % partition
+        summary_header += 'Training iterations completed: %d\n\n' % self.global_step.eval(session=self.sess)
 
-                self.set_predict_mode(False)
+        summary = summary_header
 
-                return log_lik
+        for _response in response_names:
+            if _response == 'AllResponses':
+                file_ix = list(range(len(Y)))
+            else:
+                file_ix = self.response_to_df_ix[_response]
+            multiple_files = len(file_ix) > 1
+            for ix in file_ix:
+                summary += 'Response variable: %s\n\n' % _response
+                if dump:
+                    _summary = summary_header
+                    _summary += 'Response variable: %s\n\n' % _response
+
+                if multiple_files:
+                    summary += 'File index: %s\n\n' % ix
+                    if dump:
+                        name_base = '%s_file%s%s' % (sn(_response), ix, partition_str)
+                        _summary += 'File index: %s\n\n' % ix
+                elif dump:
+                    name_base = '%s%s' % (sn(_response), partition_str)
+                _summary = summary_header
+
+                summary_eval = self.report_evaluation(
+                    mse=metrics['mse'][_response][ix],
+                    f1=metrics['f1'][_response][ix],
+                    rho=metrics['rho'][_response][ix],
+                    loglik=metrics['log_lik'][_response][ix],
+                    percent_variance_explained=metrics['percent_variance_explained'][_response][ix],
+                    true_variance=metrics['true_variance'][_response][ix],
+                    ks_results=metrics['ks_results'][_response][ix]
+                )
+
+                summary += summary_eval
+                if dump:
+                    _summary += summary_eval
+                    _summary += '=' * 50 + '\n'
+                    with open(self.outdir + '/eval_%s.txt' % name_base, 'w') as f_out:
+                        f_out.write(_summary)
+
+        summary += '=' * 50 + '\n'
+        if verbose:
+            stderr(summary)
+            stderr('\n\n')
+
+        return metrics, summary
 
     def loss(
             self,
             X,
-            y,
+            Y,
             X_response_aligned_predictor_names=None,
             X_response_aligned_predictors=None,
             X_2d_predictor_names=None,
@@ -3112,8 +4021,7 @@ class Model(object):
             verbose=True
     ):
         """
-        Compute compute the loss over a dataset using the model's optimization objective.
-        Useful for checking divergence between optimization objective and other evaluation metrics.
+        Compute the elementsize loss over a dataset using the model's optimization objective.
 
         :param X: list of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
             Each element of **X** must contain the following columns (additional columns are ignored):
@@ -3122,12 +4030,13 @@ class Model(object):
 
             Across all elements of **X**, there must be a column for each independent variable in the CDR ``form_str`` provided at initialization.
 
-        :param y: ``pandas`` table; the dependent variable. Must contain the following columns:
+        :param Y: ``list`` of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+            Each element of **Y** must contain the following columns (additional columns are ignored):
 
             * ``time``: Timestamp associated with each observation in ``y``
-            * ``first_obs``:  Index in the design matrix `X` of the first observation in the time series associated with each entry in ``y``
-            * ``last_obs``:  Index in the design matrix `X` of the immediately preceding observation in the time series associated with each entry in ``y``
-            * A column with the same name as the DV specified in ``form_str``
+            * ``first_obs_<K>``:  Index in the Kth (zero-indexed) element of `X` of the first observation in the time series associated with each entry in ``y``
+            * ``last_obs_<K>``:  Index in the Kth (zero-indexed) element of `X` of the immediately preceding observation in the time series associated with each entry in ``y``
+            * Columns with a subset of the names of the DVs specified in ``form_str`` (all DVs should be represented somewhere in **y**)
             * A column for each random grouping factor in the model specified in ``form_str``.
 
         :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
@@ -3136,6 +4045,7 @@ class Model(object):
         :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
+        :param training: ``bool``; Whether to compute loss in training mode.
         :param verbose: ``bool``; Report progress and metrics to standard error.
         :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
         """
@@ -3143,29 +4053,20 @@ class Model(object):
         if verbose:
             usingGPU = tf.test.is_gpu_available()
             stderr('Using GPU: %s\n' % usingGPU)
+            stderr('Computing loss...\n')
 
-        impulse_names  = self.impulse_names
-
-        if verbose:
-            stderr('Computing loss using objective function...\n')
-
-        y_rangf = y[self.rangf]
-        for i in range(len(self.rangf)):
-            c = self.rangf[i]
-            y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
-
-        first_obs, last_obs = get_first_last_obs_lists(y)
-        time_y = np.array(y.time, dtype=self.FLOAT_NP)
-        y_dv = np.array(y[self.dv], dtype=self.FLOAT_NP)
-        gf_y = np.array(y_rangf, dtype=self.INT_NP)
-
-        X_2d, time_X_2d, time_X_mask = build_CDR_impulses(
+        # Preprocess data
+        if not isinstance(X, list):
+            X = [X]
+        if Y is not None and not isinstance(Y, list):
+            Y = [Y]
+        X_2d, X_time_2d, X_mask, Y_dv, Y_time, Y_mask = build_CDR_data(
             X,
-            first_obs,
-            last_obs,
-            impulse_names,
-            time_y=time_y,
+            Y,
+            Y_category_map=self.response_category_to_ix,
             history_length=self.history_length,
+            impulse_names=self.impulse_names,
+            response_names=self.response_names,
             X_response_aligned_predictor_names=X_response_aligned_predictor_names,
             X_response_aligned_predictors=X_response_aligned_predictors,
             X_2d_predictor_names=X_2d_predictor_names,
@@ -3173,6 +4074,7 @@ class Model(object):
             int_type=self.int_type,
             float_type=self.float_type,
         )
+        Y_gf = get_rangf_array(Y, self.rangf, self.rangf_map)
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -3181,14 +4083,15 @@ class Model(object):
                 if training is None:
                     training = not self.predict_mode
 
-                if not np.isfinite(self.minibatch_size):
+                if not np.isfinite(self.eval_minibatch_size):
                     fd = {
                         self.X: X_2d,
-                        self.time_X: time_X_2d,
-                        self.time_X_mask: time_X_mask,
-                        self.time_y: time_y,
-                        self.gf_y: gf_y,
-                        self.y: y_dv,
+                        self.X_time: X_time_2d,
+                        self.X_mask: X_mask,
+                        self.Y_time: Y_time,
+                        self.Y_mask: Y_mask,
+                        self.Y_gf: Y_gf,
+                        self.Y: Y_dv,
                         self.training: training
                     }
                     loss = self.run_loss_op(
@@ -3198,22 +4101,23 @@ class Model(object):
                         verbose=verbose
                     )
                 else:
-                    n_minibatch = math.ceil(len(y) / self.minibatch_size)
-                    loss = np.zeros((n_minibatch,))
-                    for i in range(0, n_minibatch):
+                    n_minibatch = math.ceil(len(Y_time) / self.eval_minibatch_size)
+                    loss = np.zeros((len(Y_time),))
+                    for i in range(0, len(Y_time), self.eval_minibatch_size):
                         if verbose:
                             stderr('\rMinibatch %d/%d' %(i+1, n_minibatch))
-                        fd_minibatch = {
-                            self.X: X_2d[i:i + self.minibatch_size],
-                            self.time_X: time_X_2d[i:i + self.minibatch_size],
-                            self.time_X_mask: time_X_mask[i:i + self.minibatch_size],
-                            self.time_y: time_y[i:i + self.minibatch_size],
-                            self.gf_y: gf_y[i:i + self.minibatch_size] if len(gf_y) > 0 else gf_y,
-                            self.y: y_dv[i:i+self.minibatch_size],
+                        fd = {
+                            self.X: X_2d[i:i + self.eval_minibatch_size],
+                            self.X_time: X_time_2d[i:i + self.eval_minibatch_size],
+                            self.X_mask: X_mask[i:i + self.eval_minibatch_size],
+                            self.Y_time: Y_time[i:i + self.eval_minibatch_size],
+                            self.Y_mask: Y_mask[i:i + self.eval_minibatch_size],
+                            self.Y_gf: Y_gf[i:i + self.eval_minibatch_size] if len(Y_gf) > 0 else Y_gf,
+                            self.Y: Y_dv[i:i + self.eval_minibatch_size],
                             self.training: training
                         }
-                        loss[i] = self.run_loss_op(
-                            fd_minibatch,
+                        loss[i:i + self.eval_minibatch_size] = self.run_loss_op(
+                            fd,
                             n_samples=n_samples,
                             algorithm=algorithm,
                             verbose=verbose
@@ -3230,15 +4134,15 @@ class Model(object):
     def convolve_inputs(
             self,
             X,
-            y,
+            Y,
+            response=None,
+            response_param=None,
             X_response_aligned_predictor_names=None,
             X_response_aligned_predictors=None,
             X_2d_predictor_names=None,
             X_2d_predictors=None,
-            scaled=False,
             n_samples=None,
             algorithm='MAP',
-            standardize_response=False,
             verbose=True
     ):
         """
@@ -3251,21 +4155,23 @@ class Model(object):
 
             Across all elements of **X**, there must be a column for each independent variable in the CDR ``form_str`` provided at initialization.
 
-        :param y: ``pandas`` table; the dependent variable. Must contain the following columns:
+        :param Y: ``list`` of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+            Each element of **Y** must contain the following columns (additional columns are ignored):
 
             * ``time``: Timestamp associated with each observation in ``y``
-            * ``first_obs``:  Index in the design matrix `X` of the first observation in the time series associated with each entry in ``y``
-            * ``last_obs``:  Index in the design matrix `X` of the immediately preceding observation in the time series associated with each entry in ``y``
-            * A column with the same name as the DV specified in ``form_str``
+            * ``first_obs_<K>``:  Index in the Kth (zero-indexed) element of `X` of the first observation in the time series associated with each entry in ``y``
+            * ``last_obs_<K>``:  Index in the Kth (zero-indexed) element of `X` of the immediately preceding observation in the time series associated with each entry in ``y``
+            * Columns with a subset of the names of the DVs specified in ``form_str`` (all DVs should be represented somewhere in **y**)
             * A column for each random grouping factor in the model specified in ``form_str``.
 
+        :param response: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to convolve toward. If ``None``, convolves toward all univariate responses. Multivariate convolution (e.g. of categorical responses) is supported but turned off by default to avoid excessive computation. When convolving toward a multivariate response, a set of convolved predictors will be generated for each dimension of the response.
+        :param response_param: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of predictive distribution(s) to convolve toward per response variable. Any param names not used by the predictive distribution for a given response will be ignored. If ``None``, convolves toward the first parameter of each response distribution.
         :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
         :param X_response_aligned_predictors: ``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
         :param X_2d_predictor_names: ``list`` or ``None``; List of column names 2D predictors (predictors whose value depends on properties of the most recent impulse) if applicable, ``None`` otherwise.
         :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
-        :param standardize_response: ``bool``; Whether to report response using standard units. Ignored unless ``scaled==True`` and model was fitted using ``standardize_response==True``.
         :param verbose: ``bool``; Report progress and metrics to standard error.
         :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
         """
@@ -3273,25 +4179,33 @@ class Model(object):
         if verbose:
             usingGPU = tf.test.is_gpu_available()
             stderr('Using GPU: %s\n' % usingGPU)
+            stderr('Computing convolutions...\n')
 
-        impulse_names  = self.impulse_names
+        if response is None:
+            response = [x for x in self.response_names if self.response_n_dim[x] == 1]
+        if isinstance(response, str):
+            response = [response]
 
-        y_rangf = y[self.rangf]
-        for i in range(len(self.rangf)):
-            c = self.rangf[i]
-            y_rangf[c] = pd.Series(y_rangf[c].astype(str)).map(self.rangf_map[i])
+        if response_param is None:
+            response_param = set()
+            for x in response:
+                response_param.add(self.predictive_distribution_config[x]['params'][0])
+            response_param = sorted(list(response_param))
+        if isinstance(response_param, str):
+            response_param = [response_param]
 
-        first_obs, last_obs = get_first_last_obs_lists(y)
-        time_y = np.array(y.time, dtype=self.FLOAT_NP)
-        gf_y = np.array(y_rangf, dtype=self.INT_NP)
-
-        X_2d, time_X_2d, time_X_mask = build_CDR_impulses(
+        # Preprocess data
+        if not isinstance(X, list):
+            X = [X]
+        if Y is not None and not isinstance(Y, list):
+            Y = [Y]
+        X_2d, X_time_2d, X_mask, Y_dv, Y_time, Y_mask = build_CDR_data(
             X,
-            first_obs,
-            last_obs,
-            impulse_names,
-            time_y=time_y,
+            Y,
+            Y_category_map=self.response_category_to_ix,
             history_length=self.history_length,
+            impulse_names=self.impulse_names,
+            response_names=self.response_names,
             X_response_aligned_predictor_names=X_response_aligned_predictor_names,
             X_response_aligned_predictors=X_response_aligned_predictors,
             X_2d_predictor_names=X_2d_predictor_names,
@@ -3299,52 +4213,73 @@ class Model(object):
             int_type=self.int_type,
             float_type=self.float_type,
         )
+        Y_gf = get_rangf_array(Y, self.rangf, self.rangf_map)
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.set_predict_mode(True)
 
-                fd = {
-                    self.time_y: time_y,
-                    self.gf_y: gf_y,
-                    self.X: X_2d,
-                    self.time_X: time_X_2d,
-                    self.time_X_mask: time_X_mask,
-                    self.training: not self.predict_mode
-                }
-
-                fd_minibatch = {
-                    self.X: fd[self.X],
-                    self.time_X: fd[self.time_X],
-                    self.training: not self.predict_mode
-                }
-
-                X_conv = []
-                n_eval_minibatch = math.ceil(len(y) / self.eval_minibatch_size)
-                for i in range(0, len(y), self.eval_minibatch_size):
-                    if verbose:
-                        stderr('\rMinibatch %d/%d' % ((i / self.eval_minibatch_size) + 1, n_eval_minibatch))
-                    fd_minibatch[self.time_y] = time_y[i:i + self.eval_minibatch_size]
-                    fd_minibatch[self.gf_y] = gf_y[i:i + self.eval_minibatch_size]
-                    fd_minibatch[self.X] = X_2d[i:i + self.eval_minibatch_size]
-                    fd_minibatch[self.time_X] = time_X_2d[i:i + self.eval_minibatch_size]
-                    fd_minibatch[self.time_X_mask] = time_X_mask[i:i + self.eval_minibatch_size]
-                    X_conv_cur = self.run_conv_op(
-                        fd_minibatch,
-                        scaled=scaled,
-                        standardize_response=standardize_response,
+                if not np.isfinite(self.minibatch_size):
+                    fd = {
+                        self.X: X_2d,
+                        self.X_time: X_time_2d,
+                        self.X_mask: X_mask,
+                        self.Y_time: Y_time,
+                        self.Y_mask: Y_mask,
+                        self.Y_gf: Y_gf,
+                        self.training: not self.predict_mode
+                    }
+                    X_conv = self.run_conv_op(
+                        fd,
+                        response=response,
+                        response_param=response_param,
                         n_samples=n_samples,
                         algorithm=algorithm,
                         verbose=verbose
                     )
-                    X_conv.append(X_conv_cur)
+                else:
+                    n_eval_minibatch = math.ceil(len(Y) / self.eval_minibatch_size)
+                    X_conv = {}
+                    for _response in response:
+                        X_conv[_response] = {}
+                        for _response_param in response_param:
+                            if _response_param in self.predictive_distribution_delta[_response]:
+                                X_conv[_response][_response_param] = np.zeros(
+                                    (len(Y_time), len(self.terminal_names))
+                                )
+                    for i in range(0, len(Y), self.eval_minibatch_size):
+                        if verbose:
+                            stderr('\rMinibatch %d/%d' % ((i / self.eval_minibatch_size) + 1, n_eval_minibatch))
+                        fd = {
+                            self.X: X_2d[i:i + self.eval_minibatch_size],
+                            self.X_time: X_time_2d[i:i + self.eval_minibatch_size],
+                            self.X_mask: X_mask[i:i + self.eval_minibatch_size],
+                            self.Y_time: Y_time[i:i + self.eval_minibatch_size],
+                            self.Y_mask: Y_mask[i:i + self.eval_minibatch_size],
+                            self.Y_gf: Y_gf[i:i + self.eval_minibatch_size] if len(Y_gf) > 0 else Y_gf,
+                            self.training: not self.predict_mode
+                        }
+                        if verbose:
+                            stderr('\rMinibatch %d/%d' % ((i / self.eval_minibatch_size) + 1, n_eval_minibatch))
+                        _X_conv = self.run_conv_op(
+                            fd,
+                            response=response,
+                            response_param=response_param,
+                            n_samples=n_samples,
+                            algorithm=algorithm,
+                            verbose=verbose
+                        )
+                        for _response in _X_conv:
+                            for _response_param in _X_conv[_response]:
+                                _X_conv_batch = _X_conv[_response][_response_param]
+                                X_conv[_response][_response_param][i:i + self.eval_minibatch_size] = _X_conv_batch
+
                 names = []
                 for x in self.terminal_names:
                     if self.node_table[x].p.irfID is None:
                         names.append(sn(''.join(x.split('-')[:-1])))
                     else:
                         names.append(sn(x))
-                X_conv = np.concatenate(X_conv, axis=0)
                 out = pd.DataFrame(X_conv, columns=names, dtype=self.FLOAT_NP)
 
                 self.set_predict_mode(False)
@@ -3355,15 +4290,15 @@ class Model(object):
                 convolution_summary += 'Correlation matrix of convolved predictors:\n\n'
                 convolution_summary += corr_conv + '\n\n'
 
-                select = np.where(np.all(np.isclose(time_X_2d[:,-1], time_y[..., None]), axis=-1))[0]
+                select = np.where(np.all(np.isclose(X_time_2d[:,-1], Y_time[..., None]), axis=-1))[0]
 
                 X_input = X_2d[:,-1,:][select]
 
                 extra_cols = []
-                for c in y.columns:
+                for c in Y.columns:
                     if c not in out:
                         extra_cols.append(c)
-                out = pd.concat([y[extra_cols].reset_index(), out], axis=1)
+                out = pd.concat([Y[extra_cols].reset_index(), out], axis=1)
 
                 if X_input.shape[0] > 0:
                     out_plus = out
@@ -3374,7 +4309,7 @@ class Model(object):
                     corr_conv = out_plus.iloc[select].corr().to_string()
                     convolution_summary += '-' * 50 + '\n'
                     convolution_summary += 'Full correlation matrix of input and convolved predictors:\n'
-                    convolution_summary += 'Based on %d simultaneously sampled impulse/response pairs (out of %d total data points)\n\n' %(select.shape[0], y.shape[0])
+                    convolution_summary += 'Based on %d simultaneously sampled impulse/response pairs (out of %d total data points)\n\n' %(select.shape[0], Y.shape[0])
                     convolution_summary += corr_conv + '\n\n'
                     convolution_summary += '=' * 50 + '\n'
 
@@ -3382,41 +4317,44 @@ class Model(object):
 
     def error_theoretical_quantiles(
             self,
-            n_errors
+            n_errors,
+            response
     ):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.set_predict_mode(True)
                 fd = {
-                    self.n_errors: n_errors,
+                    self.n_errors[response]: n_errors,
                     self.training: not self.predict_mode
                 }
-                err_q = self.sess.run(self.err_dist_summary_theoretical_quantiles, feed_dict=fd)
+                err_q = self.sess.run(self.error_distribution_theoretical_quantiles[response], feed_dict=fd)
                 self.set_predict_mode(False)
 
                 return err_q
 
     def error_theoretical_cdf(
             self,
-            errors
+            errors,
+            response
     ):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 fd = {
-                    self.errors: errors,
+                    self.errors[response]: errors,
                     self.training: not self.predict_mode
                 }
-                err_cdf = self.sess.run(self.err_dist_summary_theoretical_cdf, feed_dict=fd)
+                err_cdf = self.sess.run(self.error_distribution_theoretical_cdf[response], feed_dict=fd)
 
                 return err_cdf
 
     def error_ks_test(
             self,
-            errors
+            errors,
+            response
     ):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                err_cdf = self.error_theoretical_cdf(errors)
+                err_cdf = self.error_theoretical_cdf(errors, response)
 
                 D, p_value = scipy.stats.kstest(errors, lambda x: err_cdf)
 
@@ -3426,16 +4364,16 @@ class Model(object):
             self,
             xvar='t_delta',
             yvar=None,
-            resvar='y_mean',
+            response=None,
+            response_param=None,
             X_ref=None,
-            time_X_ref=None,
+            X_time_ref=None,
             t_delta_ref=None,
             gf_y_ref=None,
             ref_varies_with_x=False,
             ref_varies_with_y=False,
             manipulations=None,
             pair_manipulations=False,
-            standardize_response=False,
             reference_type=None,
             xaxis=None,
             xmin=None,
@@ -3473,16 +4411,16 @@ class Model(object):
 
         :param xvar: ``str``; Name of continuous variable for x-axis. Can be a predictor (impulse), ``'rate'``, ``'t_delta'``, or ``'time_X'``.
         :param yvar: ``str``; Name of continuous variable for y-axis in 3D plots. Can be a predictor (impulse), ``'rate'``, ``'t_delta'``, or ``'time_X'``. If ``None``, 2D plot.
-        :param resvar: ``str``; Name of parameter of predictive distribution to plot as response variable. One of ``'y_mean'``, ``'y_sd'``, ``'y_skewness'``, or ``'y_tailweight'``. Only ``'y_mean'`` is interesting for CDR, since the others are assumed scalar. CDRNN fits all predictive parameters via IRFs.
+        :param response: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to plot.
+        :param response_param: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of predictive distribution(s) to plot per response variable. Any param names not used by the predictive distribution for a given response will be ignored.
         :param X_ref: ``dict`` or ``None``; Dictionary mapping impulse names to numeric values for use in constructing the reference. Any impulses not specified here will take default values.
-        :param time_X_ref: ``float`` or ``None``; Timestamp to use for constructing the reference. If ``None``, use default value.
+        :param X_time_ref: ``float`` or ``None``; Timestamp to use for constructing the reference. If ``None``, use default value.
         :param t_delta_ref: ``float`` or ``None``; Delay/offset to use for constructing the reference. If ``None``, use default value.
         :param gf_y_ref: ``dict`` or ``None``; Dictionary mapping random grouping factor names to random grouping factor levels for use in constructing the reference. Any random effects not specified here will take default values.
         :param ref_varies_with_x: ``bool``; Whether the reference varies along the x-axis. If ``False``, use the scalar reference value for the x-axis.
         :param ref_varies_with_y: ``bool``; Whether the reference varies along the y-axis. If ``False``, use the scalar reference value for the y-axis. Ignored if **yvar** is ``None``.
         :param manipulations: ``list`` of ``dict``; A list of manipulations, where each manipulation is constructed as a dictionary mapping a variable name (e.g. ``'predictorX'``, ``'t_delta'``) to either a float offset or a function that transforms the reference value for that variable (e.g. multiplies it by ``2``). Alternatively, the keyword ``'ranef'`` can be used to manipulate random effects. The ``'ranef'`` entry must map to a ``dict`` that itself maps random grouping factor names (e.g. ``'subject'``) to levels (e.g. ``'subjectA'``).
         :param pair_manipulations: ``bool``; Whether to apply the manipulations to the reference input. If ``False``, all manipulations are compared to the same reference. For example, when plotting by-subject IRFs by subject, each subject might have a difference base response. In this case, set **pair_manipulations** to ``True`` in order to match the random effects used to compute the reference response and the response of interest.
-        :param standardize_response: ``bool``; If the model uses implicit response standardization, whether to generate plot data on the standardized scale. If ``False``, plots will be rescaled back to the input scale.
         :param reference_type: ``bool``; Type of reference to use. If ``0``, use a zero-valued reference. If ``'mean'``, use the training set mean for all variables. If ``'default'``, use the default reference vector specified in the model's configuration file.
         :param xaxis: ``list``, ``numpy`` vector, or ``None``; Vector of values to use for the x-axis. If ``None``, inferred.
         :param xmin: ``float`` or ``None``; Minimum value for x-axis (if axis inferred). If ``None``, inferred.
@@ -3494,11 +4432,24 @@ class Model(object):
         :param yres: ``int`` or ``None``; Resolution (number of plot points) on y-axis. If ``None``, inferred.
         :param n_samples: ``int`` or ``None``; Number of plot samples to draw for computing intervals. If ``None``, ``0``, ``1``, or if the model type does not support uncertainty estimation, the maximum likelihood estimate will be returned.
         :param level: ``float``; The confidence level of any intervals (i.e. ``95`` indicates 95% confidence/credible intervals).
-        :return: 5-tuple (plot_axes, mean, lower, upper, samples); Let RX, RY, S, and K respectively be the x-axis resolution, y-axis resolution, number of samples, and number of output dimensions (manipulations). If plot is 2D, ``plot_axes`` is an array with shape ``(RX,)``, ``mean``, ``lower``, and ``upper`` are arrays with shape ``(RX, K)``,  and ``samples is an array with shape ``(S, RX, K)``. If plot is 3D, ``plot_axes`` is a pair of arrays each with shape ``(RX, RY)`` (i.e. a meshgrid), ``mean``, ``lower``, and ``upper`` are arrays with shape ``(RX, RY, K)``, and ``samples`` is an array with shape ``(S, RX, RY, K)``.
+        :return: 5-tuple (plot_axes, mean, lower, upper, samples); Let RX, RY, S, and K respectively be the x-axis resolution, y-axis resolution, number of samples, and number of output dimensions (manipulations). If plot is 2D, ``plot_axes`` is an array with shape ``(RX,)``, ``mean``, ``lower``, and ``upper`` are dictionaries of arrays with shape ``(RX, K)``, one for each **response_param** of each **response**,  and ``samples is a dictionary of arrays with shape ``(S, RX, K)``,  one for each **response_param** of each **response**. If plot is 3D, ``plot_axes`` is a pair of arrays each with shape ``(RX, RY)`` (i.e. a meshgrid), ``mean``, ``lower``, and ``upper`` are dictionaries of arrays with shape ``(RX, RY, K)``, one for each **response_param** of each **response**, and ``samples`` is a dictionary of arrays with shape ``(S, RX, RY, K)``, one for each **response_param** of each **response**.
         """
 
         assert xvar is not None, 'Value must be provided for xvar'
         assert xvar != yvar, 'Cannot vary two axes along the same variable'
+
+        if response is None:
+            response = [x for x in self.response_names if self.response_n_dim[x] == 1]
+        if isinstance(response, str):
+            response = [response]
+
+        if response_param is None:
+            response_param = set()
+            for _response in response:
+                response_param.add(self.predictive_distribution_config[_response]['params'][0])
+            response_param = sorted(list(response_param))
+        if isinstance(response_param, str):
+            response_param = [response_param]
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -3579,11 +4530,11 @@ class Model(object):
                 X_ref = X_ref_arr[None, None, ...]
 
                 # Initialize timestamp reference
-                if time_X_ref is None:
-                    time_X_ref = self.time_X_mean
-                assert np.isscalar(time_X_ref), 'time_X_ref must be a scalar'
-                time_X_ref = np.reshape(time_X_ref, (1, 1, 1))
-                time_X_ref = np.tile(time_X_ref, [1, 1, max(n_impulse, 1)])
+                if X_time_ref is None:
+                    X_time_ref = self.X_time_mean
+                assert np.isscalar(X_time_ref), 'time_X_ref must be a scalar'
+                X_time_ref = np.reshape(X_time_ref, (1, 1, 1))
+                X_time_ref = np.tile(X_time_ref, [1, 1, max(n_impulse, 1)])
 
                 # Initialize offset reference
                 if t_delta_ref is None:
@@ -3655,7 +4606,7 @@ class Model(object):
                     if X_base is None:
                         X_base = np.tile(X_ref, (T, 1, 1))
                     if time_X_base is None:
-                        time_X_base = np.tile(time_X_ref, (T, 1, 1))
+                        time_X_base = np.tile(X_time_ref, (T, 1, 1))
                     if t_delta_base is None:
                         t_delta_base = np.tile(t_delta_ref, (T, 1, 1))
 
@@ -3695,7 +4646,7 @@ class Model(object):
                             if ax_min is None:
                                 ax_min = 0.
                             if ax_max is None:
-                                ax_max = self.time_X_mean + self.time_X_sd
+                                ax_max = self.X_time_mean + self.X_time_sd
                             axis = (base * (ax_max - ax_min) + ax_min)
                         else:
                             axis = np.array(axis)
@@ -3706,7 +4657,7 @@ class Model(object):
                         if is_3d:
                             time_X_base = np.tile(time_X_base, tile_3d).reshape((T, 1, max(n_impulse, 1)))
                         if ref_varies:
-                            time_X_ref = time_X_base
+                            X_time_ref = time_X_base
 
                     if axis_var == 't_delta':
                         if axis is None:
@@ -3740,8 +4691,8 @@ class Model(object):
                 # Bring reference arrays into conformable shape
                 if X_ref.shape[0] == 1 and B_ref > 1:
                     X_ref = np.tile(X_ref, (B_ref, 1, 1))
-                if time_X_ref.shape[0] == 1 and B_ref > 1:
-                    time_X_ref = np.tile(time_X_ref, (B_ref, 1, 1))
+                if X_time_ref.shape[0] == 1 and B_ref > 1:
+                    X_time_ref = np.tile(X_time_ref, (B_ref, 1, 1))
                 if t_delta_ref.shape[0] == 1 and B_ref > 1:
                     t_delta_ref = np.tile(t_delta_ref, (B_ref, 1, 1))
                 if gf_y_ref.shape[0] == 1 and B_ref > 1:
@@ -3753,7 +4704,7 @@ class Model(object):
                     t_delta = []
                     gf_y = []
                     X_ref_in = [X_ref]
-                    time_X_ref_in = [time_X_ref]
+                    time_X_ref_in = [X_time_ref]
                     t_delta_ref_in = [t_delta_ref]
                     gf_y_ref_in = [gf_y_ref]
                 else:
@@ -3763,7 +4714,7 @@ class Model(object):
                     gf_y = [gf_y_base]
                     if pair_manipulations:
                         X_ref_in = [X_ref]
-                        time_X_ref_in = [time_X_ref]
+                        time_X_ref_in = [X_time_ref]
                         t_delta_ref_in = [t_delta_ref]
                         gf_y_ref_in = [gf_y_ref]
 
@@ -3775,7 +4726,7 @@ class Model(object):
 
                     if pair_manipulations:
                         X_ref_cur = None
-                        time_X_ref_cur = time_X_ref
+                        time_X_ref_cur = X_time_ref
                         t_delta_ref_cur = t_delta_ref
                         gf_y_ref_cur = gf_y_ref
 
@@ -3844,10 +4795,10 @@ class Model(object):
 
                 fd_ref = {
                     self.X: X_ref_in,
-                    self.time_X: time_X_ref_in,
-                    self.time_X_mask: np.ones_like(time_X_ref_in),
+                    self.X_time: time_X_ref_in,
+                    self.X_mask: np.ones_like(time_X_ref_in),
                     self.t_delta: t_delta_ref_in,
-                    self.gf_y: gf_y_ref_in,
+                    self.Y_gf: gf_y_ref_in,
                     self.training: not self.predict_mode
                 }
 
@@ -3860,59 +4811,100 @@ class Model(object):
 
                     fd_main = {
                         self.X: X,
-                        self.time_X: time_X,
-                        self.time_X_mask: np.ones_like(time_X),
+                        self.X_time: time_X,
+                        self.X_mask: np.ones_like(time_X),
                         self.t_delta: t_delta,
-                        self.gf_y: gf_y,
+                        self.Y_gf: gf_y,
                         self.training: not self.predict_mode
                     }
-
-                if resvar == 'y_mean':
-                    response = self.y_delta
-                elif resvar == 'y_sd':
-                    response = self.y_sd_delta
-                elif resvar == 'y_skewness':
-                    response = self.y_skewness_delta
-                elif resvar == 'y_tailweight':
-                    response = self.y_tailweight_delta
-                else:
-                    raise ValueError('')
 
                 if resample:
                     fd_ref[self.use_MAP_mode] = False
                     if n_manip:
                         fd_main[self.use_MAP_mode] = False
 
-                samples = []
                 alpha = 100-float(level)
 
+                samples = {}
                 for i in range(n_samples):
-                    self.sess.run(self.dropout_resample_ops)
-                    sample_ref = self.sess.run(response, feed_dict=fd_ref)
-                    sample_ref = np.reshape(sample_ref, ref_shape, 'F')
+                    to_run = {}
+                    for _response in response:
+                        to_run[_response] = {}
+                        for _response_param in response_param:
+                            if _response_param in self.predictive_distribution_delta[_response]:
+                                to_run[_response][_response_param] = self.predictive_distribution_delta[_response][_response_param]
+
+                    if self.resample_ops:
+                        self.sess.run(self.resample_ops)
+                    sample_ref = self.sess.run(to_run, feed_dict=fd_ref)
+                    for _response in to_run:
+                        for _response_param in to_run[_response]:
+                            _sample = sample_ref[_response][_response_param]
+                            param_keys = self._expand_param_name_by_dim(_response, _response_param)
+                            if len(_sample.shape) > 1:
+                                # Break into per-dimension values
+                                for j in range(_sample.shape[-1]):
+                                    sample_ref[_response][param_keys[j]] = np.reshape(_sample[..., j], ref_shape, 'F')
+                                del sample_ref[_response][_response_param]
+                            else:
+                                sample_ref[_response][_response_param] = np.reshape(_sample, ref_shape, 'F')
+
                     if n_manip:
-                        sample_main = self.sess.run(response, feed_dict=fd_main)
-                        sample_main = np.reshape(sample_main, sample_shape, 'F')
-                        sample_main -= sample_ref
-                        if ref_as_manip:
-                            sample = np.concatenate([sample_ref, sample_main], axis=-1)
-                        else:
-                            sample = sample_main
+                        sample = {}
+                        sample_main = self.sess.run(to_run, feed_dict=fd_main)
+                        for _response in to_run:
+                            sample[_response] = {}
+                            for _response_param in to_run[_response]:
+                                _sample = sample_main[_response][_response_param]
+                                if len(_sample.shape) > 1:
+                                    # Break into per-dimension values
+                                    param_keys = self._expand_param_name_by_dim(_response, _response_param)
+                                    for j in range(_sample.shape[-1]):
+                                        sample_main[_response][param_keys[j]] = _sample[..., j]
+                                    del sample_main[_response][_response_param]
+                            for _response_param in sample_main[_response]:
+                                sample_main[_response][_response_param] = np.reshape(sample_main[_response][_response_param], sample_shape, 'F')
+                                sample_main[_response][_response_param] = sample_main[_response][_response_param] - sample_ref[_response][_response_param]
+                                if ref_as_manip:
+                                    sample[_response][_response_param] = np.concatenate(
+                                        [sample_ref[_response][_response_param], sample_main[_response][_response_param]],
+                                        axis=-1
+                                    )
+                                else:
+                                    sample[_response][_response_param] = sample_main[_response][_response_param]
                     else:
                         sample = sample_ref
-                    samples.append(sample)
+                    for _response in sample:
+                        if not _response in samples:
+                            samples[_response] = {}
+                        for _response_param in sample[_response]:
+                            if not _response_param in samples[_response]:
+                                samples[_response][_response_param] = []
+                            samples[_response][_response_param].append(sample[_response][_response_param])
 
-                samples = np.stack(samples, axis=0)
-                if self.standardize_response and not standardize_response:
-                    if resvar in ['y_mean', 'y_sd']:
-                        samples *= self.y_train_sd
-                mean = samples.mean(axis=0)
-                if resample:
-                    lower = np.percentile(samples, alpha / 2, axis=0)
-                    upper = np.percentile(samples, 100 - (alpha / 2), axis=0)
-                else:
-                    lower = upper = mean
-                    samples = mean[None, ...]
+                lower = {}
+                upper = {}
+                mean = {}
+                for _response in samples:
+                    lower[_response] = {}
+                    upper[_response] = {}
+                    mean[_response] = {}
+                    for _response_param in samples[_response]:
+                        _samples = np.stack(samples[_response][_response_param], axis=0)
+                        rescale = self.standardize_response and \
+                                  self.predictive_distribution_config[_response]['support'] == 'real' and \
+                                  _response_param in ['mu', 'sigma']
+                        if rescale:
+                            _samples = _samples * self.Y_train_sds[_response]
+                        samples[_response][_response_param] = np.stack(_samples, axis=0)
+                        _mean = _samples.mean(axis=0)
+                        mean[_response][_response_param] = _mean
+                        if resample:
+                            lower[_response][_response_param] = np.percentile(_samples, alpha / 2, axis=0)
+                            upper[_response][_response_param] = np.percentile(_samples, 100 - (alpha / 2), axis=0)
+                        else:
+                            lower = upper = mean
+                            samples[_response][_response_param] = _mean[None, ...]
 
                 out = (plot_axes, mean, lower, upper, samples)
 
@@ -3935,25 +4927,44 @@ class Model(object):
         :return: 4-tuple (mean, lower, upper, samples); Let S be the number of samples. ``mean``, ``lower``, and ``upper`` are scalars, and ``samples`` is a vector of size S.
         """
 
-        plot_axes, _, _, _, samples = self.get_plot_data(level=level, **kwargs)
+        plot_axes, _, _, _, samples = self.get_plot_data(
+            level=level,
+            **kwargs
+        )
 
         gold = gold_irf_lambda(plot_axes)
 
         axis = list(range(1, len(samples)))
         alpha = 100 - float(level)
 
-        rmsd_samples = ((gold - samples)**2).mean(axis=axis)
-        rmsd_mean = rmsd_samples.mean()
-        rmsd_lower = rmsd_samples.percentile(alpha / 2)
-        rmsd_upper = rmsd_samples.percentile(100 - (alpha / 2))
+        rmsd_mean = {}
+        rmsd_lower = {}
+        rmsd_upper = {}
+        for _response in samples:
+            rmsd_mean[_response] = {}
+            rmsd_lower[_response] = {}
+            rmsd_upper[_response] = {}
+            for _response_param in samples[_response]:
+                rmsd_samples = ((gold - samples[_response][_response_param])**2).mean(axis=axis)
+                rmsd_mean[_response][_response_param] = rmsd_samples.mean()
+                rmsd_lower[_response][_response_param] = rmsd_samples.percentile(alpha / 2)
+                rmsd_upper[_response][_response_param] = rmsd_samples.percentile(100 - (alpha / 2))
 
         return rmsd_mean, rmsd_lower, rmsd_upper, rmsd_samples
 
-    def irf_integrals(self, standardize_response=False, level=95, random=False, n_samples='default', n_time_units=None, n_time_points=1000):
+    def irf_integrals(
+            self,
+            response=None,
+            level=95,
+            random=False,
+            n_samples='default',
+            n_time_units=None,
+            n_time_points=1000
+    ):
         """
         Generate effect size estimates by computing the area under each IRF curve in the model via discrete approximation.
 
-        :param standardize_response: ``bool``; Whether to report response using standard units. Ignored unless model was fitted using ``standardize_response==True``.
+        :param response: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to plot.
         :param level: ``float``; level of the credible interval if Bayesian, ignored otherwise.
         :param random: ``bool``; whether to compute IRF integrals for random effects estimates
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use mean/MLE model.
@@ -3995,11 +5006,15 @@ class Model(object):
 
         out = []
 
+        if response is None:
+            response = self.response_names
+
         for g, gf_y_ref in enumerate(gf_y_refs):
             _, _, _, _, vals = self.get_plot_data(
                 xvar='t_delta',
+                response=response,
                 X_ref=None,
-                time_X_ref=None,
+                X_time_ref=None,
                 t_delta_ref=None,
                 gf_y_ref=gf_y_ref,
                 ref_varies_with_x=True,
@@ -4011,34 +5026,38 @@ class Model(object):
                 xres=n_time_points,
                 n_samples=n_samples,
                 level=level,
-                standardize_response=standardize_response
             )
 
-            if not self.is_cdrnn:
-                vals = vals[..., 1:]
+            for _response in vals:
+                for _response_param in vals[_response]:
+                    _vals = vals[_response][_response_param]
+                    if not self.is_cdrnn:
+                        _vals = _vals[..., 1:]
 
-            integrals = vals.sum(axis=1) * step
+                    integrals = _vals.sum(axis=1) * step
 
-            group_name = list(gf_y_ref.keys())[0]
-            level_name = gf_y_ref[group_name]
+                    group_name = list(gf_y_ref.keys())[0]
+                    level_name = gf_y_ref[group_name]
 
-            out_cur = pd.DataFrame({
-                'IRF': names,
-                'Group': group_name if group_name is not None else '',
-                'Level': level_name if level_name is not None else ''
-            })
+                    out_cur = pd.DataFrame({
+                        'IRF': names,
+                        'Group': group_name if group_name is not None else '',
+                        'Level': level_name if level_name is not None else '',
+                        'Response': _response,
+                        'Param': _response_param
+                    })
 
-            if n_samples:
-                mean = integrals.mean(axis=0)
-                lower = np.percentile(integrals, alpha / 2, axis=0)
-                upper = np.percentile(integrals, 100 - (alpha / 2), axis=0)
+                    if n_samples:
+                        mean = integrals.mean(axis=0)
+                        lower = np.percentile(integrals, alpha / 2, axis=0)
+                        upper = np.percentile(integrals, 100 - (alpha / 2), axis=0)
 
-                out_cur['Mean'] = mean
-                out_cur['%.1f%%' % (alpha / 2)] = lower
-                out_cur['%.1f%%' % (100 - (alpha / 2))] = upper
-            else:
-                out_cur['Estimate'] = integrals[0]
-            out.append(out_cur)
+                        out_cur['Mean'] = mean
+                        out_cur['%.1f%%' % (alpha / 2)] = lower
+                        out_cur['%.1f%%' % (100 - (alpha / 2))] = upper
+                    else:
+                        out_cur['Estimate'] = integrals[0]
+                    out.append(out_cur)
 
         out = pd.concat(out, axis=0).reset_index(drop=True)
         out.sort_values(
@@ -4054,14 +5073,13 @@ class Model(object):
     def make_plots(
             self,
             irf_name_map=None,
-            resvar='y_mean',
-            standardize_response=False,
+            response=None,
+            response_param=None,
             pred_names=None,
             sort_names=True,
             prop_cycle_length=None,
             prop_cycle_map=None,
             plot_dirac=False,
-            plot_interactions=None,
             reference_time=None,
             plot_rangf=False,
             plot_n_time_units=None,
@@ -4102,8 +5120,8 @@ class Model(object):
 
         :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
             If ``None``, IRF tree node string ID's will be used.
-        :param standardize_response: ``bool``; Whether to report response using standard units. Ignored unless model was fitted using ``standardize_response==True``.
-        :param resvar: ``str``; Name of parameter of predictive distribution to plot as response variable. One of ``'y_mean'``, ``'y_sd'``, ``'y_skewness'``, or ``'y_tailweight'``. Only ``'y_mean'`` is interesting for CDR, since the others are assumed scalar. CDRNN fits all predictive parameters via IRFs.
+        :param response: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to plot. If ``None``, plots all univariate responses. Multivariate plotting (e.g. of categorical responses) is supported but turned off by default to avoid excessive computation. When plotting a multivariate response, a set of plots will be generated for each dimension of the response.
+        :param response_param: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of predictive distribution(s) to plot per response variable. Any param names not used by the predictive distribution for a given response will be ignored. If ``None``, plots the first parameter of each response distribution.
         :param summed: ``bool``; whether to plot individual IRFs or their sum.
         :param pred_names: ``list`` or ``None``; list of names of predictors to include in univariate IRF plots. If ``None``, all predictors are plotted.
         :param sort_names: ``bool``; whether to alphabetically sort IRF names.
@@ -4112,7 +5130,6 @@ class Model(object):
         :param prop_cycle_length: ``int`` or ``None``; Length of plotting properties cycle (defines step size in the color map). If ``None``, inferred from **pred_names**.
         :param prop_cycle_map: ``dict``, ``list`` of ``int``, or ``None``; Integer indices to use in the properties cycle for each entry in **pred_names**. If a ``dict``, a map from predictor names to ``int``. If a ``list`` of ``int``, predictors inferred using **pred_names** are aligned to ``int`` indices one-to-one. If ``None``, indices are automatically assigned.
         :param plot_dirac: ``bool``; whether to include any Dirac delta IRF's (stick functions at t=0) in plot.
-        :param plot_interactions: ``list`` of ``str`` or ``None``; List of all implicit interactions to plot. If ``None``, use default setting.
         :param reference_time: ``float`` or ``None``; timepoint at which to plot interactions. If ``None``, use default setting.
         :param plot_rangf: ``bool``; whether to plot all (marginal) random effects.
         :param plot_n_time_units: ``float`` or ``None``; resolution of plot axis (for 3D plots, uses sqrt of this number for each axis). If ``None``, use default setting.
@@ -4141,16 +5158,24 @@ class Model(object):
         :return: ``None``
         """
 
+        if response is None:
+            response = [x for x in self.response_names if self.response_n_dim[x] == 1]
+        if isinstance(response, str):
+            response = [response]
+
+        if response_param is None:
+            response_param = set()
+            for x in response:
+                response_param.add(self.predictive_distribution_config[x]['params'][0])
+            response_param = sorted(list(response_param))
+        if isinstance(response_param, str):
+            response_param = [response_param]
+
         if irf_name_map is None:
             irf_name_map = self.irf_name_map
 
-        if not plot_interactions:
-            plot_interactions = []
-
         mc = bool(n_samples) and (self.is_bayesian or self.has_dropout)
 
-        if plot_interactions is None:
-            plot_interactions = self.plot_interactions
         if reference_time is None:
             reference_time = self.reference_time
         if plot_n_time_units is None:
@@ -4240,28 +5265,6 @@ class Model(object):
 
                 # IRF 1D
                 if generate_univariate_IRF_plots:
-                    plot_name = 'irf_univariate'
-                    if resvar != 'y_mean':
-                        plot_name += '_%s' % resvar
-
-                    if use_horiz_axlab:
-                        xlab = 't_delta'
-                    else:
-                        xlab = None
-                    if use_vert_axlab:
-                        if resvar == 'y_mean':
-                            ylab = self.dv
-                        elif resvar == 'y_sd':
-                            ylab = '%s, SD' % get_irf_name(self.dv, irf_name_map)
-                        elif resvar == 'y_skewness':
-                            ylab = '%s, skewness' % get_irf_name(self.dv, irf_name_map)
-                        elif resvar == 'y_tailweight':
-                            ylab = '%s, tailweight' % get_irf_name(self.dv, irf_name_map)
-                        else:
-                            raise ValueError('Unrecognized resvar %s.' % resvar)
-                    else:
-                        ylab = None
-
                     names = self.impulse_names
                     if not plot_dirac:
                         names = [x for x in names if self.is_non_dirac(x)]
@@ -4304,15 +5307,15 @@ class Model(object):
 
                         plot_x, plot_y, lq, uq, samples = self.get_plot_data(
                             xvar='t_delta',
-                            resvar=resvar,
+                            response=response,
+                            response_param=response_param,
                             X_ref=None,
-                            time_X_ref=None,
+                            X_time_ref=None,
                             t_delta_ref=None,
                             gf_y_ref=gf_y_ref,
                             ref_varies_with_x=True,
                             manipulations=manipulations_cur,
                             pair_manipulations=False,
-                            standardize_response=standardize_response,
                             reference_type=reference_type,
                             xaxis=None,
                             xmin=0,
@@ -4322,45 +5325,72 @@ class Model(object):
                             level=level
                         )
 
-                        filename = prefix + plot_name
+                        for _response in plot_y:
+                            for _response_param in plot_y[_response]:
+                                param_names = self.predictive_distribution_config[_response]['params']
 
-                        if ranef_level_names[g]:
-                            filename += '_' + ranef_level_names[g]
-                        if mc:
-                            filename += '_mc'
-                        filename += '.png'
+                                if _response_param == param_names[0]:
+                                    include_param_name = False
+                                else:
+                                    include_param_name = True
 
-                        if not self.is_cdrnn:
-                            plot_y = plot_y[..., 1:]
-                            if lq is not None:
-                                lq = lq[..., 1:]
-                            if uq is not None:
-                                uq = uq[..., 1:]
+                                plot_name = 'irf_univariate_%s' % sn(_response)
+                                if include_param_name:
+                                    plot_name += '_%s' % _response_param
 
-                        plot_irf(
-                            plot_x,
-                            plot_y,
-                            names_cur,
-                            lq=lq,
-                            uq=uq,
-                            sort_names=sort_names,
-                            prop_cycle_length=prop_cycle_length,
-                            prop_cycle_map=prop_cycle_map,
-                            dir=self.outdir,
-                            filename=filename,
-                            irf_name_map=irf_name_map,
-                            plot_x_inches=plot_x_inches,
-                            plot_y_inches=plot_y_inches,
-                            ylim=ylim,
-                            cmap=cmap,
-                            dpi=dpi,
-                            legend=use_legend,
-                            xlab=xlab,
-                            ylab=ylab,
-                            use_line_markers=use_line_markers,
-                            transparent_background=transparent_background,
-                            dump_source=dump_source
-                        )
+                                if use_horiz_axlab:
+                                    xlab = 't_delta'
+                                else:
+                                    xlab = None
+                                if use_vert_axlab:
+                                    ylab = [get_irf_name(_response, irf_name_map)]
+                                    if include_param_name:
+                                        ylab.append(_response_param)
+                                    ylab = ', '.join(ylab)
+                                else:
+                                    ylab = None
+
+                                filename = prefix + plot_name
+
+                                if ranef_level_names[g]:
+                                    filename += '_' + ranef_level_names[g]
+                                if mc:
+                                    filename += '_mc'
+                                filename += '.png'
+
+                                _plot_y = plot_y[_response][_response_param]
+                                _lq = None if lq is None else lq[_response][_response_param]
+                                _uq = None if uq is None else uq[_response][_response_param]
+
+                                if not self.is_cdrnn:
+                                    _plot_y = _plot_y[..., 1:]
+                                    _lq = None if _lq is None else _lq[..., 1:]
+                                    _uq = None if _uq is None else _uq[..., 1:]
+
+                                plot_irf(
+                                    plot_x,
+                                    _plot_y,
+                                    names_cur,
+                                    lq=_lq,
+                                    uq=_uq,
+                                    sort_names=sort_names,
+                                    prop_cycle_length=prop_cycle_length,
+                                    prop_cycle_map=prop_cycle_map,
+                                    dir=self.outdir,
+                                    filename=filename,
+                                    irf_name_map=irf_name_map,
+                                    plot_x_inches=plot_x_inches,
+                                    plot_y_inches=plot_y_inches,
+                                    ylim=ylim,
+                                    cmap=cmap,
+                                    dpi=dpi,
+                                    legend=use_legend,
+                                    xlab=xlab,
+                                    ylab=ylab,
+                                    use_line_markers=use_line_markers,
+                                    transparent_background=transparent_background,
+                                    dump_source=dump_source
+                                )
 
                 if plot_rangf:
                     manipulations = [{'ranef': {x: y}} for x, y in zip(ranef_group_names[1:], ranef_level_names[1:])]
@@ -4372,90 +5402,83 @@ class Model(object):
                     names = [x for x in self.impulse_names if (self.is_non_dirac(x) and x != 'rate')]
 
                     for name in names:
-                        plot_name = 'curvature'
-
-                        if resvar != 'y_mean':
-                            plot_name += '_%s' % resvar
-
                         plot_x, plot_y, lq, uq, samples = self.get_plot_data(
                             xvar=name,
-                            resvar=resvar,
+                            response=response,
                             t_delta_ref=reference_time,
                             ref_varies_with_x=False,
                             manipulations=manipulations,
                             pair_manipulations=True,
-                            standardize_response=standardize_response,
                             reference_type=reference_type,
                             xres=plot_n_time_points,
                             n_samples=n_samples,
                             level=level
                         )
 
-                        plot_name += '_%s_at_delay%s' % (sn(name), reference_time)
-
-                        for g in range(len(ranef_level_names)):
-                            filename = prefix + plot_name
-                            if ranef_level_names[g]:
-                                filename += '_' + ranef_level_names[g]
-                            if mc:
-                                filename += '_mc'
-                            filename += '.png'
-
-                            if use_horiz_axlab:
-                                xlab = name
-                            else:
-                                xlab = None
-                            if use_vert_axlab:
-                                if resvar == 'y_mean':
-                                    ylab = self.dv
-                                elif resvar == 'y_sd':
-                                    ylab = '%s, SD' % get_irf_name(self.dv, irf_name_map)
-                                elif resvar == 'y_skewness':
-                                    ylab = '%s, skewness' % get_irf_name(self.dv, irf_name_map)
-                                elif resvar == 'y_tailweight':
-                                    ylab = '%s, tailweight' % get_irf_name(self.dv, irf_name_map)
+                        for _response in plot_y:
+                            for _response_param in plot_y[_response]:
+                                param_names = self.predictive_distribution_config[_response]['params']
+                                if _response_param == param_names[0]:
+                                    include_param_name = False
                                 else:
-                                    raise ValueError('Unrecognized resvar %s.' % resvar)
-                            else:
-                                ylab = None
+                                    include_param_name = True
 
-                            plot_irf(
-                                plot_x,
-                                plot_y[:, g:g+1],
-                                [name],
-                                lq=None if lq is None else lq[:, g:g+1],
-                                uq=None if uq is None else uq[:, g:g+1],
-                                dir=self.outdir,
-                                filename=filename,
-                                irf_name_map=irf_name_map,
-                                plot_x_inches=plot_x_inches,
-                                plot_y_inches=plot_y_inches,
-                                cmap=cmap,
-                                dpi=dpi,
-                                legend=False,
-                                xlab=xlab,
-                                ylab=ylab,
-                                use_line_markers=use_line_markers,
-                                transparent_background=transparent_background,
-                                dump_source=dump_source
-                            )
+                                plot_name = 'curvature_%s' % sn(_response)
+                                if include_param_name:
+                                    plot_name += '_%s' % _response_param
+
+                                plot_name += '_%s_at_delay%s' % (sn(name), reference_time)
+
+                                if use_horiz_axlab:
+                                    xlab = name
+                                else:
+                                    xlab = None
+                                if use_vert_axlab:
+                                    ylab = [get_irf_name(_response, irf_name_map)]
+                                    if include_param_name:
+                                        ylab.append(_response_param)
+                                    ylab = ', '.join(ylab)
+                                else:
+                                    ylab = None
+
+                                _plot_y = plot_y[_response][_response_param]
+                                _lq = None if lq is None else lq[_response][_response_param]
+                                _uq = None if uq is None else uq[_response][_response_param]
+
+                                for g in range(len(ranef_level_names)):
+                                    filename = prefix + plot_name
+                                    if ranef_level_names[g]:
+                                        filename += '_' + ranef_level_names[g]
+                                    if mc:
+                                        filename += '_mc'
+                                    filename += '.png'
+
+                                    plot_irf(
+                                        plot_x,
+                                        _plot_y[:, g:g+1],
+                                        [name],
+                                        lq=None if _lq is None else _lq[:, g:g+1],
+                                        uq=None if _uq is None else _uq[:, g:g+1],
+                                        dir=self.outdir,
+                                        filename=filename,
+                                        irf_name_map=irf_name_map,
+                                        plot_x_inches=plot_x_inches,
+                                        plot_y_inches=plot_y_inches,
+                                        cmap=cmap,
+                                        dpi=dpi,
+                                        legend=False,
+                                        xlab=xlab,
+                                        ylab=ylab,
+                                        use_line_markers=use_line_markers,
+                                        transparent_background=transparent_background,
+                                        dump_source=dump_source
+                                    )
 
                 # Surface plots (CDRNN only)
-                for plot_type, run_plot in zip(('irf_surface', 'nonstationarity_surface', 'interaction_surface',), (generate_irf_surface_plots, generate_nonstationarity_surface_plots, generate_interaction_surface_plots)):
-                    if use_vert_axlab:
-                        if resvar == 'y_mean':
-                            zlab = self.dv
-                        elif resvar == 'y_sd':
-                            zlab = '%s, SD' % get_irf_name(self.dv, irf_name_map)
-                        elif resvar == 'y_skewness':
-                            zlab = '%s, skewness' % get_irf_name(self.dv, irf_name_map)
-                        elif resvar == 'y_tailweight':
-                            zlab = '%s, tailweight' % get_irf_name(self.dv, irf_name_map)
-                        else:
-                            raise ValueError('Unrecognized resvar %s.' % resvar)
-                    else:
-                        zlab = None
-
+                for plot_type, run_plot in zip(
+                        ('irf_surface', 'nonstationarity_surface', 'interaction_surface',),
+                        (generate_irf_surface_plots, generate_nonstationarity_surface_plots, generate_interaction_surface_plots)
+                ):
                     if run_plot:
                         if plot_type == 'irf_surface':
                             names = ['t_delta:%s' % x for x in self.impulse_names if (self.is_non_dirac(x) and x != 'rate')]
@@ -4468,10 +5491,6 @@ class Model(object):
                             for name in names:
                                 xvar, yvar = name.split(':')
 
-                                plot_name = 'surface'
-                                if resvar != 'y_mean':
-                                    plot_name += '_%s' % resvar
-
                                 if plot_type in ('nonstationarity_surface', 'interaction_surface'):
                                     ref_varies_with_x = False
                                 else:
@@ -4480,12 +5499,11 @@ class Model(object):
                                 (plot_x, plot_y), plot_z, lq, uq, _ = self.get_plot_data(
                                     xvar=xvar,
                                     yvar=yvar,
-                                    resvar=resvar,
+                                    response=response,
                                     t_delta_ref=reference_time,
                                     ref_varies_with_x=ref_varies_with_x,
                                     manipulations=manipulations,
                                     pair_manipulations=True,
-                                    standardize_response=standardize_response,
                                     reference_type=reference_type,
                                     xres=int(np.ceil(np.sqrt(plot_n_time_points))),
                                     yres=int(np.ceil(np.sqrt(plot_n_time_points))),
@@ -4493,49 +5511,71 @@ class Model(object):
                                     level=level
                                 )
 
-                                for g in range(len(ranef_level_names)):
-                                    filename = prefix + plot_name + '_' + sn(yvar) + '_by_' + sn(xvar)
-                                    if plot_type in ('nonstationarity_surface', 'interaction_surface'):
-                                        filename += '_at_delay%s' % reference_time
-                                    if ranef_level_names[g]:
-                                        filename += '_' + ranef_level_names[g]
-                                    if mc:
-                                        filename += '_mc'
-                                    filename += '.png'
+                                for _response in plot_z:
+                                    for _response_param in plot_z[_response]:
+                                        param_names = self.predictive_distribution_config[_response]['params']
+                                        if _response_param == param_names[0]:
+                                            include_param_name = False
+                                        else:
+                                            include_param_name = True
 
-                                    if use_horiz_axlab:
-                                        xlab = xvar
-                                        ylab = yvar
-                                    else:
-                                        xlab = None
-                                        ylab = None
+                                        plot_name = 'surface_%s' % sn(_response)
+                                        if include_param_name:
+                                            plot_name += '_%s' % _response_param
 
-                                    plot_surface(
-                                        plot_x,
-                                        plot_y,
-                                        plot_z[..., g],
-                                        lq=None if lq is None else lq[..., g],
-                                        uq=None if uq is None else uq[..., g],
-                                        dir=self.outdir,
-                                        filename=filename,
-                                        irf_name_map=irf_name_map,
-                                        plot_x_inches=plot_x_inches,
-                                        plot_y_inches=plot_y_inches,
-                                        xlab=xlab,
-                                        ylab=ylab,
-                                        zlab=zlab,
-                                        transparent_background=transparent_background,
-                                        dpi=dpi,
-                                        dump_source=dump_source
-                                    )
+                                        if use_horiz_axlab:
+                                            xlab = xvar
+                                            ylab = yvar
+                                        else:
+                                            xlab = None
+                                            ylab = None
+                                        if use_vert_axlab:
+                                            zlab = [get_irf_name(_response, irf_name_map)]
+                                            if include_param_name:
+                                                zlab.append(_response_param)
+                                            zlab = ', '.join(zlab)
+                                        else:
+                                            zlab = None
+
+                                        _plot_z = plot_z[_response][_response_param]
+                                        _lq = None if lq is None else lq[_response][_response_param]
+                                        _uq = None if uq is None else uq[_response][_response_param]
+
+                                        for g in range(len(ranef_level_names)):
+                                            filename = prefix + plot_name + '_' + sn(yvar) + '_by_' + sn(xvar)
+                                            if plot_type in ('nonstationarity_surface', 'interaction_surface'):
+                                                filename += '_at_delay%s' % reference_time
+                                            if ranef_level_names[g]:
+                                                filename += '_' + ranef_level_names[g]
+                                            if mc:
+                                                filename += '_mc'
+                                            filename += '.png'
+
+                                            plot_surface(
+                                                plot_x,
+                                                plot_y,
+                                                _plot_z[..., g],
+                                                lq=None if _lq is None else _lq[..., g],
+                                                uq=None if _uq is None else _uq[..., g],
+                                                dir=self.outdir,
+                                                filename=filename,
+                                                irf_name_map=irf_name_map,
+                                                plot_x_inches=plot_x_inches,
+                                                plot_y_inches=plot_y_inches,
+                                                xlab=xlab,
+                                                ylab=ylab,
+                                                zlab=zlab,
+                                                transparent_background=transparent_background,
+                                                dpi=dpi,
+                                                dump_source=dump_source
+                                            )
 
                 self.set_predict_mode(False)
 
-    def parameter_table(self, standardize_response=False, fixed=True, level=95, n_samples='default'):
+    def parameter_table(self, fixed=True, level=95, n_samples='default'):
         """
         Generate a pandas table of parameter names and values.
 
-        :param standardize_response: ``bool``; Whether to report response using standard units. Ignored unless model was fitted using ``standardize_response==True``.
         :param fixed: ``bool``; Return a table of fixed parameters (otherwise returns a table of random parameters).
         :param level: ``float``; significance level for credible intervals if model is Bayesian, ignored otherwise.
         :param n_samples: ``int``, ``'default'``, or ``None``; number of posterior samples to draw. If ``None``, use MLE/MAP estimate. If ``'default'``, use model defaults.
@@ -4553,17 +5593,24 @@ class Model(object):
                 self.set_predict_mode(True)
 
                 if fixed:
-                    keys = self.parameter_table_fixed_keys
+                    types = self.parameter_table_fixed_types
+                    responses = self.parameter_table_fixed_responses
+                    response_params = self.parameter_table_fixed_response_params
                     values = self._extract_parameter_values(
                         fixed=True,
                         level=level,
                         n_samples=n_samples
                     )
 
-                    out = pd.DataFrame({'Parameter': keys})
+                    out = pd.DataFrame({'Parameter': types})
+                    if len(self.response_names) > 1:
+                        out['Response'] = responses
+                    out['Param'] = response_params
 
                 else:
-                    keys = self.parameter_table_random_keys
+                    types = self.parameter_table_random_types
+                    responses = self.parameter_table_random_responses
+                    response_params = self.parameter_table_random_response_params
                     rangf = self.parameter_table_random_rangf
                     rangf_levels = self.parameter_table_random_rangf_levels
                     values = self._extract_parameter_values(
@@ -4572,12 +5619,14 @@ class Model(object):
                         n_samples=n_samples
                     )
 
-                    out = pd.DataFrame({'Parameter': keys, 'Group': rangf, 'Level': rangf_levels}, columns=['Parameter', 'Group', 'Level'])
-
-                if self.standardize_response and not standardize_response:
-                    for i, (k, v) in enumerate(zip(keys, values)):
-                        if 'intercept' in k or 'coefficient' in k or 'interaction' in k:
-                            values[i] = values[i] * self.y_train_sd
+                    out = pd.DataFrame({
+                        'Parameter': types,
+                        'Group': rangf,
+                        'Level': rangf_levels
+                    })
+                    if len(self.response_names) > 1:
+                        out['Response'] = responses
+                    out['Param'] = response_params
 
                 columns = self.parameter_table_columns
                 out = pd.concat([out, pd.DataFrame(values, columns=columns)], axis=1)
@@ -4659,3 +5708,281 @@ class Model(object):
             outname = outfile
 
         irf_integrals.to_csv(outname, index=False)
+
+
+class ModelBayes(Model):
+    _INITIALIZATION_KWARGS = MODEL_BAYES_INITIALIZATION_KWARGS
+
+    _doc_header = """
+        Abstract base class for variational Bayesian deconvolutional models.
+        ``ModelBayes`` is not a complete implementation and cannot be instantiated.
+        Subclasses of ``ModelBayes`` must implement the following instance methods:
+
+            * ``initialize_model()``
+            * ``compile_network()``
+            * ``run_train_step()``
+
+        Additionally, if the subclass requires any keyword arguments beyond those provided by ``Model``, it must also implement ``__init__()``, ``_pack_metadata()`` and ``_unpack_metadata()`` to support model initialization, saving, and resumption, respectively.
+    """
+    _doc_args = """
+        :param form_str: An R-style string representing the model formula.
+        :param X: ``pandas`` table or ``list`` of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+            Often only one table will be used.
+            Support for multiple tables allows simultaneous use of independent variables that are measured at different times (e.g. word features and sound power in Shain, Blank, et al. (2020).
+            Each ``X`` must contain the following columns (additional columns are ignored):
+
+            * ``time``: Timestamp associated with each observation in ``X``
+            * A column for each independent variable in the ``form_str`` provided at initialization
+        :param Y: ``pandas`` table or ``list`` of ``pandas`` tables; matrices of response variables, grouped by series and temporally sorted.
+            Each ``Y`` must contain the following columns:
+
+            * ``time``: Timestamp associated with each observation in ``y``
+            * ``first_obs(_<K>)``:  Index in the design matrix `X` of the first observation in the time series associated with each observation in ``y``. If multiple ``X``, must be zero-indexed for each of the K dataframes in X.
+            * ``last_obs(_<K>)``:  Index in the design matrix `X` of the immediately preceding observation in the time series associated with each observation in ``y``. If multiple ``X``, must be zero-indexed for each of the K dataframes in X.
+            * A column with the same name as each response variable specified in ``form_str``
+            * A column for each random grouping factor in the model specified in ``form_str``
+    \n"""
+    _doc_kwargs = '\n'.join([' ' * 8 + ':param %s' % x.key + ': ' + '; '.join(
+        [x.dtypes_str(), x.descr]) + ' **Default**: ``%s``.' % (
+                                 x.default_value if not isinstance(x.default_value, str) else "'%s'" % x.default_value)
+                             for x in _INITIALIZATION_KWARGS])
+    __doc__ = _doc_header + _doc_args + _doc_kwargs
+
+
+    ######################################################
+    #
+    #  Initialization Methods
+    #
+    ######################################################
+
+    def __new__(cls, *args, **kwargs):
+        if cls is ModelBayes:
+            raise TypeError("``ModelBayes`` is an abstract class and may not be instantiated")
+        return object.__new__(cls)
+
+    def __init__(self, *args, **kwargs):
+        super(ModelBayes, self).__init__(
+            *args,
+            **kwargs
+        )
+
+        ## Store initialization settings
+        for kwarg in ModelBayes._INITIALIZATION_KWARGS:
+            setattr(self, kwarg.key, kwargs.pop(kwarg.key, kwarg.default_value))
+
+    def _pack_metadata(self):
+        md = super(ModelBayes, self)._pack_metadata()
+        for kwarg in ModelBayes._INITIALIZATION_KWARGS:
+            md[kwarg.key] = getattr(self, kwarg.key)
+
+        return md
+
+    def _unpack_metadata(self, md):
+        super(ModelBayes, self)._unpack_metadata(md)
+
+        for kwarg in ModelBayes._INITIALIZATION_KWARGS:
+            setattr(self, kwarg.key, md.pop(kwarg.key, kwarg.default_value))
+
+    def _initialize_metadata(self):
+        super(ModelBayes, self)._initialize_metadata()
+
+        self.is_bayesian = True
+
+        self.parameter_table_columns = ['Mean', '2.5%', '97.5%']
+
+        self.summed_interactions = None
+        self.output = {}
+        self.kl_penalties = {}
+
+        self._intercept_prior_sd, \
+        self._intercept_posterior_sd_init, \
+        self._intercept_ranef_prior_sd, \
+        self._intercept_ranef_posterior_sd_init = self._process_prior_sd(self.intercept_prior_sd)
+
+    def _get_prior_sd(self, response_name):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                out = []
+                ndim = self.response_n_dim[response_name]
+                for param in self.predictive_distribution_config[response_name]['params']:
+                    if param in ['mu', 'sigma']:
+                        if self.standardize_response:
+                            _out = np.ones((1, ndim))
+                        else:
+                            _out = self.Y_train_sds[response_name][None, ...]
+                    else:
+                        _out = np.ones((1, ndim))
+                    out.append(_out)
+
+                out = np.concatenate(out)
+
+                return out
+
+    def _process_prior_sd(self, prior_sd_in):
+        prior_sd = {}
+        if isinstance(prior_sd_in, str):
+            _prior_sd = prior_sd_in.split()
+            for i, x in enumerate(_prior_sd):
+                _response = self.response_names[i]
+                nparam = len(self.predictive_distribution_config[_response]['params'])
+                ndim = self.response_n_dim[_response]
+                _param_sds = x.split(';')
+                assert len(_param_sds) == nparam, 'Expected %d priors for the %s response to variable %s, got %d.' % (nparam, self.predictive_distribution_config[_response]['name'], _response, len(_param_sds))
+                _prior_sd = np.array([float(_param_sd) for _param_sd in _param_sds])
+                _prior_sd = _prior_sd[..., None] * np.ones([1, ndim])
+                prior_sd[_response] = _prior_sd
+        elif isinstance(prior_sd_in, float):
+            for _response in self.response_names:
+                nparam = len(self.predictive_distribution_config[_response]['params'])
+                ndim = self.response_n_dim[_response]
+                prior_sd[_response] = np.ones([nparam, ndim]) * prior_sd_in
+        elif prior_sd_in is None:
+            for _response in self.response_names:
+                prior_sd[_response] = self._get_prior_sd(_response)
+        else:
+            raise ValueError('Unsupported type %s found for prior_sd.' % type(prior_sd_in))
+        for _response in self.response_names:
+            assert _response in prior_sd, 'No entry for response %s provided in prior_sd' % _response
+
+        posterior_sd_init = {x: prior_sd[x] * self.posterior_to_prior_sd_ratio for x in prior_sd}
+        ranef_prior_sd = {x: prior_sd[x] * self.ranef_to_fixef_prior_sd_ratio for x in prior_sd}
+        ranef_posterior_sd_init = {x: posterior_sd_init[x] * self.ranef_to_fixef_prior_sd_ratio for x in posterior_sd_init}
+
+        # Invert constraints
+        for _response in self.response_names:
+            prior_sd[_response] = self.constraint_fn_inv_np(prior_sd[_response])
+            posterior_sd_init[_response] = self.constraint_fn_inv_np(posterior_sd_init[_response])
+            ranef_prior_sd[_response] = self.constraint_fn_inv_np(ranef_prior_sd[_response])
+            ranef_posterior_sd_init[_response] = self.constraint_fn_inv_np(ranef_posterior_sd_init[_response])
+
+        # outputs all have shape [nparam, ndim]
+
+        return prior_sd, posterior_sd_init, ranef_prior_sd, ranef_posterior_sd_init
+
+    def initialize_intercept(self, response_name, ran_gf=None):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                init = self.intercept_init[response_name]
+
+                name = sn(response_name)
+                if ran_gf is None:
+                    prior_sd = self._intercept_prior_sd[response_name]
+                    post_sd = self._intercept_posterior_sd_init[response_name]
+
+                    # Posterior distribution
+                    intercept_q_loc = tf.Variable(
+                        tf.constant(init, self.FLOAT_TF),
+                        name='intercept_%s_q_loc' % name
+                    )
+
+                    intercept_q_scale = tf.Variable(
+                        tf.constant(post_sd, self.FLOAT_TF),
+                        name='intercept_%s_q_scale' % name
+                    )
+
+                    intercept_q_dist = Normal(
+                        loc=intercept_q_loc,
+                        scale=self.constraint_fn(intercept_q_scale) + self.epsilon,
+                        name='intercept_%s_q' % name
+                    )
+
+                    intercept = tf.cond(self.use_MAP_mode, intercept_q_dist.mean, intercept_q_dist.sample)
+
+                    intercept_summary = intercept_q_dist.mean()
+
+                    if self.declare_priors_fixef:
+                        # Prior distribution
+                        intercept_prior_dist = Normal(
+                            loc=tf.constant(init, self.FLOAT_TF),
+                            scale=self.constraint_fn(tf.constant(prior_sd, self.FLOAT_TF)),
+                            name='intercept_%s' % name
+                        )
+                        self.kl_penalties['intercept_%s' % name] = {
+                            'loc': init.flatten(),
+                            'scale': self.constraint_fn_np(prior_sd).flatten(),
+                            'val': intercept_q_dist.kl_divergence(intercept_prior_dist)
+                        }
+
+                else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+                    if self.use_distributional_regression:
+                        nparam = len(self.predictive_distribution_config[response_name]['params'])
+                    else:
+                        nparam = 1
+                    ndim = self.response_n_dim[response_name]
+                    shape = [rangf_n_levels, nparam, ndim]
+
+                    prior_sd = self._intercept_ranef_prior_sd[response_name]
+                    post_sd = self._intercept_ranef_posterior_sd_init[response_name]
+                    if not self.use_distributional_regression:
+                        post_sd = post_sd[:1]
+                    prior_sd = np.ones((rangf_n_levels, 1, 1)) * prior_sd[None, ...]
+                    post_sd = np.ones((rangf_n_levels, 1, 1)) * post_sd[None, ...]
+
+                    # Posterior distribution
+                    intercept_q_loc = tf.Variable(
+                        tf.zeros(shape, dtype=self.FLOAT_TF),
+                        name='intercept_%s_by_%s_q_loc' % (name, sn(ran_gf))
+                    )
+
+                    intercept_q_scale = tf.Variable(
+                        tf.constant(post_sd, self.FLOAT_TF),
+                        name='intercept_%s_by_%s_q_scale' % (name, sn(ran_gf))
+                    )
+
+                    intercept_q_dist = Normal(
+                        loc=intercept_q_loc,
+                        scale=self.constraint_fn(intercept_q_scale) + self.epsilon,
+                        name='intercept_%s_by_%s_q' % (name, sn(ran_gf))
+                    )
+
+                    intercept = tf.cond(self.use_MAP_mode, intercept_q_dist.mean, intercept_q_dist.sample)
+
+                    intercept_summary = intercept_q_dist.mean()
+
+                    if self.declare_priors_ranef:
+                        # Prior distribution
+                        intercept_prior_dist = Normal(
+                            loc=0.,
+                            scale=self.constraint_fn(tf.constant(prior_sd, self.FLOAT_TF)),
+                            name='intercept_%s_by_%s' % (name, sn(ran_gf))
+                        )
+                        self.kl_penalties['intercept_%s_by_%s' % (name, sn(ran_gf))] = {
+                            'loc': 0.,
+                            'scale': self.constraint_fn_np(self._intercept_ranef_prior_sd[response_name]).flatten(),
+                            'val': intercept_q_dist.kl_divergence(intercept_prior_dist)
+                        }
+
+                # shape: (?rangf_n_levels, n_param, n_dim)
+
+                return intercept, intercept_summary
+
+    def _extract_parameter_values(self, fixed=True, level=95, n_samples=None):
+        if n_samples is None:
+            n_samples = self.n_samples_eval
+
+        alpha = 100 - float(level)
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                self.set_predict_mode(True)
+
+                if fixed:
+                    param_vector = self.parameter_table_fixed_values
+                else:
+                    param_vector = self.parameter_table_random_values
+
+                samples = []
+                for i in range(n_samples):
+                    samples.append(self.sess.run(param_vector, feed_dict={self.use_MAP_mode: False}))
+                samples = np.stack(samples, axis=1)
+
+                mean = samples.mean(axis=1)
+                lower = np.percentile(samples, alpha / 2, axis=1)
+                upper = np.percentile(samples, 100 - (alpha / 2), axis=1)
+
+                out = np.stack([mean, lower, upper], axis=1)
+
+                self.set_predict_mode(False)
+
+                return out

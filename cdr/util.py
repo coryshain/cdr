@@ -219,8 +219,8 @@ def filter_models(names, filters, cdr_only=False):
 def get_partition_list(partition):
     if not isinstance(partition, list):
         partition = partition.strip().split()
-    if ';' in partition[0]:
-        partition = partition[0].split(';')
+    if ':' in partition[0]:
+        partition = partition[0].split(':')
     else:
         if len(partition) == 1:
             partition = partition[0].split('-')

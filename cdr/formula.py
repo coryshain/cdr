@@ -1,4 +1,3 @@
-import sys
 import re
 import math
 import ast
@@ -11,7 +10,7 @@ from .util import names2ix, sn, stderr
 interact = re.compile('([^ ]+):([^ ]+)')
 spillover = re.compile('(^.+)S([0-9]+)$')
 split_irf = re.compile('(.+)\(([^(]+)')
-nonparametric = re.compile('([SOG])(o([0-9]+))?(b([0-9]+))?(l([0-9]*\.?[0-9]+))?(p([0-9]+))?(t([0-9]*\.?[0-9]+))?$')
+lcg_re = re.compile('[GS](b([0-9]+))?$')
 starts_numeric = re.compile('^[0-9]')
 non_alphanumeric = re.compile('[^0-9a-zA-Z_]')
 
@@ -85,18 +84,8 @@ class Formula(object):
         'HRFDoubleGamma': ['alpha_main', 'alpha_undershoot', 'beta_main', 'beta_undershoot', 'c']
     }
 
-    NONPARAMETRIC_TYPE_IX = 1
-    NONPARAMETRIC_ORDER_IX = 3
-    NONPARAMETRIC_BASES_IX = 5
-    NONPARAMETRIC_ROUGHNESS_PENALTY_IX = 7
-    NONPARAMETRIC_SPACING_POWER_IX = 9
-    NONPARAMETRIC_TIME_LIMIT_IX = 11
-
-    NONPARAMETRIC_DEFAULT_ORDER = 1
-    NONPARAMETRIC_DEFAULT_BASES = 10
-    NONPARAMETRIC_DEFAULT_ROUGHNESS_PENALTY = 0.
-    NONPARAMETRIC_DEFAULT_SPACING_POWER = 1
-    NONPARAMETRIC_DEFAULT_TIME_LIMIT = None
+    LCG_BASES_IX = 2
+    LCG_DEFAULT_BASES = 10
 
     @staticmethod
     def irf_params(family):
@@ -107,57 +96,26 @@ class Formula(object):
         :return: ``list`` of ``str``; parameter names
         """
 
-        np_type = Formula.nonparametric_type(family)
         if family in Formula.IRF_PARAMS:
             out = Formula.IRF_PARAMS[family]
-        elif np_type:
+        elif Formula.is_LCG(family):
             bs = Formula.bases(family)
-            if np_type == 'S':
-                out = ['x%s' % i for i in range(1, bs + 1)] + ['y%s' % i for i in range(1, bs + 1)]
-            else:
-                out = ['x%s' % i for i in range(1, bs + 1)] + ['y%s' % i for i in range(1, bs + 1)] + ['s%s' % i for i in range(1, bs + 1)]
+            out = ['x%s' % i for i in range(1, bs + 1)] + ['y%s' % i for i in range(1, bs + 1)] + ['s%s' % i for i in range(1, bs + 1)]
         else:
             out = []
 
         return out
 
     @staticmethod
-    def nonparametric_type(family):
+    def is_LCG(family):
         """
-        Check the type of a non-parametric kernel, or return ``None`` if parametric.
+        Check whether a kernel is LCG.
 
         :param family: ``str``; name of IRF family
-        :return: ``str`` or ``None; name of kernel type if non-parametric, else ``None``.
+        :return: ``bool``; whether the kernel is LCG (linear combination of Gaussians)
         """
 
-        out = None
-        if family is not None:
-            match = nonparametric.match(family)
-            if match is not None:
-                out = match.group(Formula.NONPARAMETRIC_TYPE_IX)
-        return out
-
-    @staticmethod
-    def order(family):
-        """
-        Get the order of a spline kernel.
-
-        :param family: ``str``; name of IRF family
-        :return: ``int`` or ``None``; order of spline kernel, or ``None`` if **family** is not a spline.
-        """
-
-        np_type = Formula.nonparametric_type(family)
-        if family is None:
-            out = None
-        else:
-            if np_type:
-                order = nonparametric.match(family).group(Formula.NONPARAMETRIC_ORDER_IX)
-                if order is None:
-                    order = Formula.NONPARAMETRIC_DEFAULT_ORDER
-                out = int(order)
-            else:
-                out = None
-        return out
+        return family is not None and lcg_re.match(family) is not None
 
     @staticmethod
     def bases(family):
@@ -168,89 +126,14 @@ class Formula(object):
         :return: ``int`` or ``None``; number of bases of spline kernel, or ``None`` if **family** is not a spline.
         """
 
-        np_type = Formula.nonparametric_type(family)
         if family is None:
             out = None
         else:
-            if np_type:
-                bases = nonparametric.match(family).group(Formula.NONPARAMETRIC_BASES_IX)
+            if Formula.is_LCG(family):
+                bases = lcg_re.match(family).group(Formula.LCG_BASES_IX)
                 if bases is None:
-                    bases = Formula.NONPARAMETRIC_DEFAULT_BASES
+                    bases = Formula.LCG_DEFAULT_BASES
                 out = int(bases)
-            else:
-                out = None
-        return out
-
-    @staticmethod
-    def roughness_penalty(family):
-        """
-        Get the roughness penalty of a spline kernel.
-
-        :param family: ``str``; name of IRF family
-        :return: ``float`` or ``None``; roughness penalty of spline kernel, or ``None`` if **family** is not a spline.
-        """
-
-        np_type = Formula.nonparametric_type(family)
-        if family is None:
-            out = None
-        else:
-            if np_type:
-                roughness_penalty = nonparametric.match(family).group(Formula.NONPARAMETRIC_ROUGHNESS_PENALTY_IX)
-                if roughness_penalty is None:
-                    out = Formula.NONPARAMETRIC_DEFAULT_ROUGHNESS_PENALTY
-                else:
-                    out = float(roughness_penalty)
-            else:
-                out = None
-        return out
-
-    @staticmethod
-    def spacing_power(family):
-        """
-        Get the spacing power of a spline kernel.
-        Spacing power governs how control points are initially spaced in time.
-        ``1`` means equidistant spacing, ``2`` means quadratic spacing, etc.
-
-        :param family: ``str``; name of IRF family
-        :return: ``int`` or ``None``; spacing power of spline kernel, or ``None`` if **family** is not a spline.
-        """
-
-        np_type = Formula.nonparametric_type(family)
-        if family is None:
-            out = None
-        else:
-            if np_type:
-                spacing_power = nonparametric.match(family).group(Formula.NONPARAMETRIC_SPACING_POWER_IX)
-                if spacing_power is None:
-                    if np_type == 'G':
-                        spacing_power = 0
-                    else:
-                        spacing_power = Formula.NONPARAMETRIC_DEFAULT_SPACING_POWER
-                out = int(spacing_power)
-            else:
-                out = None
-        return out
-
-    @staticmethod
-    def time_limit(family):
-        """
-        Get the maximum time for the initial positions of the first n-1 knots of a spline kernel.
-        The time limit governs the interval over which knots are initialized.
-
-        :param family: ``str``; name of IRF family
-        :return: ``float`` or ``None``; initial time_limit of spline kernel, or ``None`` if set empirically.
-        """
-
-        np_type = Formula.nonparametric_type(family)
-        if family is None:
-            out = None
-        else:
-            if np_type:
-                time_limit = nonparametric.match(family).group(Formula.NONPARAMETRIC_TIME_LIMIT_IX)
-                if time_limit is None:
-                    out = None
-                else:
-                    out = float(time_limit)
             else:
                 out = None
         return out
@@ -303,8 +186,8 @@ class Formula(object):
         dv = ast.parse(Formula.prep_formula_string(lhs))
         dv_term = []
         self.process_ast(dv.body[0].value, terms=dv_term, under_irf=True) # Hack: use under_irf=True to prevent function from transforming DV into Dirac Delta IRF
-        self.dv_term = dv_term[0][0]
-        self.dv = self.dv_term.name()
+        self.dv_term = [x[0] for x in dv_term]
+        self.dv = [x.name() for x in self.dv_term]
 
         self.has_intercept = {None: True}
 
@@ -754,7 +637,7 @@ class Formula(object):
                         new = self.process_irf(t.args[1], input=s, ops=None, rangf=rangf)
                         new_subterms.append(new)
                 terms.append(new_subterms)
-            elif t.func.id in Formula.IRF_PARAMS.keys() or nonparametric.match(t.func.id) is not None:
+            elif t.func.id in Formula.IRF_PARAMS.keys() or lcg_re.match(t.func.id) is not None:
                 raise ValueError('IRF calls can only occur as inputs to C() in CDR formula strings')
             else:
                 # Unary transform
@@ -842,7 +725,7 @@ class Formula(object):
 
         if ops is None:
             ops = []
-        assert t.func.id in Formula.IRF_PARAMS.keys() or Formula.nonparametric_type(t.func.id) is not None, 'Ill-formed model string: process_irf() called on non-IRF node'
+        assert t.func.id in Formula.IRF_PARAMS.keys() or Formula.is_LCG(t.func.id) is not None, 'Ill-formed model string: process_irf() called on non-IRF node'
         irf_id = None
         coef_id = None
         cont = False
@@ -955,6 +838,24 @@ class Formula(object):
 
         return new
 
+    def responses(self):
+        """
+        Get list of modeled response variables.
+
+        :return: ``list`` of ``Impulse``; modeled response variables.
+        """
+
+        return self.dv_term
+
+    def response_names(self):
+        """
+        Get list of names modeled response variables.
+
+        :return: ``list`` of ``str``; names modeled response variables.
+        """
+
+        return [x.name() for x in self.dv_term]
+
     def apply_op(self, op, arr):
         """
         Apply op **op** to array **arr**.
@@ -998,35 +899,35 @@ class Formula(object):
             delistify = False
 
         for i in range(len(X)):
-            X_cur = X[i]
+            _X = X[i]
             ops = impulse.ops
 
             expanded_impulses = None
-            if impulse.id not in X_cur.columns:
+            if impulse.id not in _X.columns:
                 if type(impulse).__name__ == 'ImpulseInteraction':
-                    X_cur, expanded_impulses, expanded_atomic_impulses = impulse.expand_categorical(X_cur)
+                    _X, expanded_impulses, expanded_atomic_impulses = impulse.expand_categorical(_X)
                     for x in expanded_atomic_impulses:
                         for a in x:
-                            X_cur = self.apply_ops(a, X_cur)
+                            _X = self.apply_ops(a, _X)
                     for x in expanded_impulses:
-                        if x.name() not in X_cur.columns:
-                            X_cur[x.id] = X_cur[[y.name() for y in x.atomic_impulses]].product(axis=1)
+                        if x.name() not in _X.columns:
+                            _X[x.id] = _X[[y.name() for y in x.atomic_impulses]].product(axis=1)
             else:
                 if type(impulse).__name__ == 'ImpulseInteraction':
-                    X_cur, expanded_impulses, _ = impulse.expand_categorical(X_cur)
+                    _X, expanded_impulses, _ = impulse.expand_categorical(_X)
                 else:
-                    X_cur, expanded_impulses = impulse.expand_categorical(X_cur)
+                    _X, expanded_impulses = impulse.expand_categorical(_X)
 
             if expanded_impulses is not None:
                 for x in expanded_impulses:
-                    if x.name() not in X_cur.columns:
-                        new_col = X_cur[x.id]
+                    if x.name() not in _X.columns:
+                        new_col = _X[x.id]
                         for j in range(len(ops)):
                             op = ops[j]
                             new_col = self.apply_op(op, new_col)
-                        X_cur[x.name()] = new_col
+                        _X[x.name()] = new_col
 
-            X[i] = X_cur
+            X[i] = _X
 
         if delistify:
             X = X[0]
@@ -1175,7 +1076,7 @@ class Formula(object):
     def apply_formula(
             self,
             X,
-            y,
+            Y,
             X_response_aligned_predictor_names=None,
             X_response_aligned_predictors=None,
             X_2d_predictor_names=None,
@@ -1188,7 +1089,7 @@ class Formula(object):
         Extract all data and compute all transforms required by the model formula.
 
         :param X: list of ``pandas`` tables; impulse data.
-        :param y: ``pandas`` table; response data.
+        :param Y: list of ``pandas`` tables; response data.
         :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
         :param X_response_aligned_predictors: ``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
         :param X_2d_predictor_names: ``list`` or ``None``; List of column names 2D predictors (predictors whose value depends on properties of the most recent impulse) if applicable, ``None`` otherwise.
@@ -1198,11 +1099,20 @@ class Formula(object):
         :param series_ids: ``list`` of ``str`` or ``None``; list of ids to use as grouping factors for lagged effects. If ``None``, lagging will not be attempted.
         :return: 6-tuple; transformed **X**, transformed **y**, transformed response-aligned predictor names, transformed response-aligned predictors, transformed 2D predictor names, transformed 2D predictors
         """
+
         if not isinstance(X, list):
             X = [X]
 
-        if self.dv not in y.columns:
-            y = self.apply_ops(self.dv_term, y)
+        for dv in self.dv_term:
+            found = False
+            for i, _Y in enumerate(Y):
+                if dv.id in _Y.columns:
+                    found = True
+                    if dv.name() not in _Y.columns:
+                        _Y = self.apply_ops(dv, Y)
+                    Y[i] = _Y
+                    break
+            assert found, 'Response variable %s not found in input data.' % dv.name()
         impulses = self.t.impulses(include_interactions=True)
 
         if all_interactions:
@@ -1241,34 +1151,35 @@ class Formula(object):
 
             for x in to_process:
                 if x.is_2d:
-                    if time_mask is None:
-                        time_mask = compute_time_mask(
-                            X.time,
-                            y.first_obs,
-                            y.last_obs,
-                            history_length=history_length
-                        )
-
-                    if x.id not in X_2d_predictor_names:
-                        new_2d_predictor_name, new_2d_predictor = self.compute_2d_predictor(
-                            x.id,
-                            X,
-                            y.first_obs,
-                            y.last_obs,
-                            history_length=history_length
-                        )
-                        X_2d_predictor_names.append(new_2d_predictor_name)
-                        if X_2d_predictors is None:
-                            X_2d_predictors = new_2d_predictor
-                        else:
-                            X_2d_predictors = np.concatenate([X_2d_predictors, new_2d_predictor], axis=2)
-
-                    X_2d_predictor_names, X_2d_predictors = self.apply_ops_2d(
-                        x,
-                        X_2d_predictor_names,
-                        X_2d_predictors,
-                        time_mask,
-                    )
+                    raise ValueError('Support for 2D predictors is currently broken.')
+                    # if time_mask is None:
+                    #     time_mask = compute_time_mask(
+                    #         X.time,
+                    #         Y.first_obs,
+                    #         Y.last_obs,
+                    #         history_length=history_length
+                    #     )
+                    #
+                    # if x.id not in X_2d_predictor_names:
+                    #     new_2d_predictor_name, new_2d_predictor = self.compute_2d_predictor(
+                    #         x.id,
+                    #         X,
+                    #         Y.first_obs,
+                    #         Y.last_obs,
+                    #         history_length=history_length
+                    #     )
+                    #     X_2d_predictor_names.append(new_2d_predictor_name)
+                    #     if X_2d_predictors is None:
+                    #         X_2d_predictors = new_2d_predictor
+                    #     else:
+                    #         X_2d_predictors = np.concatenate([X_2d_predictors, new_2d_predictor], axis=2)
+                    #
+                    # X_2d_predictor_names, X_2d_predictors = self.apply_ops_2d(
+                    #     x,
+                    #     X_2d_predictor_names,
+                    #     X_2d_predictors,
+                    #     time_mask,
+                    # )
 
                 elif x.id not in X_columns:
                     sp = spillover.match(x.id)
@@ -1283,15 +1194,21 @@ class Formula(object):
                                 X[i] = X_cur
                                 break
                     else:
-                        y = self.apply_ops(x, y)
-                        if x.name() not in X_response_aligned_predictor_names:
-                            X_response_aligned_predictor_names.append(x.name())
+                        found = False
+                        for _Y in Y:
+                            if x.id in _Y.columns:
+                                found = True
+                                _Y = self.apply_ops(x, _Y)
+                                if x.name() not in X_response_aligned_predictor_names:
+                                    X_response_aligned_predictor_names.append(x.name())
 
-                            if X_response_aligned_predictors is None:
-                                X_response_aligned_predictors = y[[x.id]]
-                            else:
-                                X_response_aligned_predictors[[x.id]] = y[[x.id]]
-                            X_response_aligned_predictors = self.apply_ops(x, X_response_aligned_predictors)
+                                    if X_response_aligned_predictors is None:
+                                        X_response_aligned_predictors = _Y[[x.id]]
+                                    else:
+                                        X_response_aligned_predictors[[x.id]] = _Y[[x.id]]
+                                    X_response_aligned_predictors = self.apply_ops(x, X_response_aligned_predictors)
+                                break
+                        assert found, 'Impulse %s not found in data.' % x.name()
                 else:
                     for i in range(len(X)):
                         X_cur = X[i]
@@ -1332,12 +1249,13 @@ class Formula(object):
                 X_cur[col] = X_cur[col].fillna(0)
             X[i] = X_cur
 
-        for gf in self.rangf:
-            gf_s = gf.split(':')
-            if len(gf_s) > 1 and gf not in y:
-                y[gf] = y[gf_s].agg(lambda x: '_'.join([str(_x) for _x in x]), axis=1)
+        for _Y in Y:
+            for gf in self.rangf:
+                gf_s = gf.split(':')
+                if len(gf_s) > 1 and gf not in _Y:
+                    _Y[gf] = _Y[gf_s].agg(lambda x: '_'.join([str(_x) for _x in x]), axis=1)
 
-        return X, y, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors
+        return X, Y, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors
 
     def ablate_impulses(self, impulse_ids):
         """
@@ -1412,6 +1330,8 @@ class Formula(object):
         :return: ``str``; the LMER formula string.
         """
 
+        assert len(self.dv_term) == 1, 'Models with multivariate responses cannot be rendered in an LMER formula.'
+
         fixed = []
         random = {}
 
@@ -1452,7 +1372,7 @@ class Formula(object):
                 if gf in x.rangf:
                     random[gf].append(subterm_strings)
 
-        out = str(self.dv_term) + ' ~ '
+        out = str(self.dv_term[0]) + ' ~ '
 
         if not self.has_intercept[None]:
             out += '0 + '
@@ -1553,7 +1473,7 @@ class Formula(object):
         if t == None:
             t = self.t
 
-        out = str(self.dv_term) + ' ~ ' + self._rhs_str(t=t)
+        out = ' + '.join([str(x) for x in self.dv_term]) + ' ~ ' + self._rhs_str(t=t)
 
         return out
 
@@ -1630,9 +1550,11 @@ class Impulse(object):
         if not isinstance(X, list):
             X = [X]
 
-        for X_cur in X:
-            if self.id in X_cur and not np.issubdtype(X_cur[self.id].dtype, np.number):
-                return True
+        for _X in X:
+            if self.id in _X:
+                dtype = _X[self.id].dtype
+                if dtype.name == 'category' or not np.issubdtype(dtype, np.number):
+                    return True
         
         return False
 
@@ -1653,17 +1575,17 @@ class Impulse(object):
         impulses = [self]
 
         for i in range(len(X)):
-            X_cur = X[i]
-            if self.id in X_cur.columns and self.categorical(X):
-                vals = sorted(X_cur[self.id].unique())[1:]
+            _X = X[i]
+            if self.id in _X.columns and self.categorical(X):
+                vals = sorted(_X[self.id].unique())[1:]
                 impulses = [Impulse('_'.join([self.id, pythonize_string(str(val))]), ops=self.ops) for val in vals]
                 expanded_value_names = [str(val) for val in vals]
                 for j in range(len(impulses)):
                     x = impulses[j]
                     val = expanded_value_names[j]
-                    if x.id not in X_cur.columns:
-                        X_cur[x.id] = (X_cur[self.id] == val).astype('float')
-                X[i] = X_cur
+                    if x.id not in _X.columns:
+                        _X[x.id] = (_X[self.id] == val).astype('float')
+                X[i] = _X
                 break
 
         if delistify:
@@ -2204,22 +2126,14 @@ class IRFNode(object):
 
         return self.depth() > 3
 
-    def nonparametric_type(self):
+    def is_LCG(self):
         """
         Check the non-parametric type of a node's kernel, or return ``None`` if parametric.
 
         :param family: ``str``; name of IRF family
         :return: ``str`` or ``None; name of kernel type if non-parametric, else ``None``.
         """
-        return Formula.nonparametric_type(self.family)
-
-    def order(self):
-        """
-        Get the order of node.
-
-        :return: ``int`` or ``None``; order of node, or ``None`` if node is not a spline.
-        """
-        return Formula.order(self.family)
+        return Formula.is_LCG(self.family)
 
     def bases(self):
         """
@@ -2228,37 +2142,6 @@ class IRFNode(object):
         :return: ``int`` or ``None``; number of bases of node, or ``None`` if node is not a spline.
         """
         return Formula.bases(self.family)
-
-    def spacing_power(self):
-        """
-        Get the spacing power of node.
-        Spacing power governs how control points are initially spaced in time.
-        ``1`` means equidistant spacing, ``2`` means quadratic spacing, etc.
-
-        :return: ``int`` or ``None``; spacing power of node, or ``None`` if node is not a spline.
-        """
-
-        return Formula.spacing_power(self.family)
-
-    def time_limit(self):
-        """
-        Get the maximum time for the initial positions of the first n-1 knots of a spline kernel.
-        The time limit governs the interval over which knots are initialized.
-
-        :param family: ``str``; name of IRF family
-        :return: ``float`` or ``None``; initial time_limit of spline kernel, or ``None`` if set empirically.
-        """
-
-        return Formula.time_limit(self.family)
-
-    def roughness_penalty(self):
-        """
-        Get the roughness penalty of node.
-
-        :return: ``float`` or ``None``; roughness penalty of node, or ``None`` if node is not a spline.
-        """
-
-        return Formula.roughness_penalty(self.family)
 
     def impulses(self, include_interactions=False):
         """
@@ -2427,7 +2310,7 @@ class IRFNode(object):
 
         out = []
         if self.terminal():
-            if Formula.nonparametric_type(self.p.family):
+            if Formula.is_LCG(self.p.family):
                 out.append(self.coef_id())
         else:
             for c in self.children:
@@ -2449,7 +2332,7 @@ class IRFNode(object):
 
         out = []
         if self.terminal():
-            if Formula.nonparametric_type(self.p.family):
+            if Formula.is_LCG(self.p.family):
                 child_coefs = set()
                 for c in self.p.children:
                     child_coefs.add(c.coef_id())
@@ -2884,8 +2767,14 @@ class IRFNode(object):
                     if isinstance(response, Impulse):
                         if not response.name() in expansion_map:
                             if response.categorical(X):
-                                vals = sorted(X[response.id].unique()[1:])
-                                expansion = [Impulse('_'.join([response.id, pythonize_string(str(val))]), ops=response.ops) for val in vals]
+                                found = False
+                                for _X in X:
+                                    if response.id in _X.columns:
+                                        found = True
+                                        vals = sorted(_X[response.id].unique()[1:])
+                                        expansion = [Impulse('_'.join([response.id, pythonize_string(str(val))]), ops=response.ops) for val in vals]
+                                        break
+                                assert found, 'Impulse %d not found in data.' % response.id
                             else:
                                 expansion = [response]
                             expansion_map[response.name()] = expansion
@@ -2893,10 +2782,16 @@ class IRFNode(object):
                         for subresponse in response.impulses():
                             if not subresponse.name() in expansion_map:
                                 if subresponse.categorical(X):
-                                    vals = sorted(X[subresponse.id].unique()[1:])
-                                    expansion = [
-                                        Impulse('_'.join([subresponse.id, pythonize_string(str(val))]), ops=subresponse.ops)
-                                        for val in vals]
+                                    found = False
+                                    for _X in X:
+                                        if subresponse.id in _X.columns:
+                                            found = True
+                                            vals = sorted(_X[subresponse.id].unique()[1:])
+                                            expansion = [
+                                                Impulse('_'.join([subresponse.id, pythonize_string(str(val))]), ops=subresponse.ops)
+                                                for val in vals]
+                                            break
+                                    assert found, 'Impulse %d not found in data.' % subresponse.id
                                 else:
                                     expansion = [subresponse]
                                 expansion_map[subresponse.name()] = expansion
@@ -2906,8 +2801,14 @@ class IRFNode(object):
                 for x in self.impulse.impulses():
                     if x.name() not in expansion_map:
                         if x.categorical(X):
-                            vals = sorted(X[x.id].unique()[1:])
-                            expansion = [Impulse('_'.join([x.id, pythonize_string(str(val))]), ops=x.ops) for val in vals]
+                            found = False
+                            for _X in X:
+                                if x.id in _X.columns:
+                                    found = True
+                                    vals = sorted(_X[x.id].unique()[1:])
+                                    expansion = [Impulse('_'.join([x.id, pythonize_string(str(val))]), ops=x.ops) for val in vals]
+                                    break
+                            assert found, 'Impulse %s not found in data.' % x.id
                         else:
                             expansion = [x]
                         expansion_map[x.name()] = expansion
@@ -2920,8 +2821,14 @@ class IRFNode(object):
                 if not self.impulse.name() in expansion_map:
                     if self.impulse.categorical(X):
                         if self.impulse.categorical(X):
-                            vals = sorted(X[self.impulse.id].unique()[1:])
-                            expansion = [Impulse('_'.join([self.impulse.id, pythonize_string(str(val))]), ops=self.impulse.ops) for val in vals]
+                            found = False
+                            for _X in X:
+                                if self.impulse.id in _X.columns:
+                                    found = True
+                                    vals = sorted(_X[self.impulse.id].unique()[1:])
+                                    expansion = [Impulse('_'.join([self.impulse.id, pythonize_string(str(val))]), ops=self.impulse.ops) for val in vals]
+                                    break
+                            assert found, 'Impulse %s not found in data.' % self.impulse.id
                         else:
                             expansion = [self.impulse]
                         expansion_map[self.impulse.name()] = expansion

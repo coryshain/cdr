@@ -3,7 +3,7 @@ import sys
 import os
 import pandas as pd
 from cdr.config import Config
-from cdr.io import read_data
+from cdr.io import read_tabular_data
 from cdr.formula import Formula
 from cdr.data import preprocess_data, filter_invalid_responses
 from cdr.util import load_cdr, filter_models, get_partition_list, paths_from_partition_cliarg, stderr
@@ -17,8 +17,7 @@ if __name__ == '__main__':
     ''')
     argparser.add_argument('config_paths', nargs='+', help='Path(s) to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='Path to configuration (*.ini) file')
-    argparser.add_argument('-d', '--data', nargs='+', default=[], help='Pairs of paths or buffers <predictors, responses>, allowing convolution of arbitrary data. Predictors may consist of ``;``-delimited paths designating files containing predictors with different timestamps. Within each file, timestamps are treated as identical across predictors.')
-    argparser.add_argument('-p', '--partition', nargs='+', default=['dev'], help='Name of partition to use ("train", "dev", "test", or hyphen-delimited subset of these). Ignored if **data** is provided.')
+    argparser.add_argument('-p', '--partition', nargs='+', default=['dev'], help='List of names of partitions to use ("train", "dev", "test", or a hyphen-delimited subset of these, or "PREDICTOR_PATH(;PREDICTOR_PATH):(RESPONSE_PATH;RESPONSE_PATH)").')
     argparser.add_argument('-z', '--standardize_response', action='store_true', help='Standardize (Z-transform) response in plots. Ignored unless model was fitted using setting ``standardize_respose=True``.')
     argparser.add_argument('-n', '--nsamples', type=int, default=None, help='Number of posterior samples to average (only used for CDRBayes)')
     argparser.add_argument('-u', '--unscaled', action='store_true', help='Do not multiply outputs by CDR-fitted coefficients')
@@ -50,60 +49,42 @@ if __name__ == '__main__':
         evaluation_set_names = []
         evaluation_set_paths = []
 
-        for p_name in args.partition:
+        for i, p_name in enumerate(args.partition):
             partitions = get_partition_list(p_name)
-            partition_str = '-'.join(partitions)
-            X_paths, y_paths = paths_from_partition_cliarg(partitions, p)
-            X, y = read_data(
+            if ':' in p_name:
+                partition_str = '%d' % (i + 1)
+                X_paths = partitions[0].split(';')
+                Y_paths = partitions[1].split(';')
+            else:
+                partition_str = '-'.join(partitions)
+                X_paths, Y_paths = paths_from_partition_cliarg(partitions, p)
+            X, Y = read_tabular_data(
                 X_paths,
-                y_paths,
+                Y_paths,
                 p.series_ids,
                 sep=p.sep,
-                categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in cdr_formula_list for v in x.rangf]))
+                categorical_columns=list(
+                    set(p.split_ids + p.series_ids + [v for x in cdr_formula_list for v in x.rangf]))
             )
-            X, y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors = preprocess_data(
+            X, Y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, \
+            X_2d_predictors = preprocess_data(
                 X,
-                y,
+                Y,
                 cdr_formula_list,
                 p.series_ids,
                 filters=p.filters,
                 compute_history=True,
                 history_length=p.history_length
             )
-            evaluation_sets.append((X, y, select, X_response_aligned_predictor_names, X_response_aligned_predictors,
+            evaluation_sets.append((X, Y, select, X_response_aligned_predictor_names, X_response_aligned_predictors,
                                     X_2d_predictor_names, X_2d_predictors))
             evaluation_set_partitions.append(partitions)
             evaluation_set_names.append(partition_str)
-            evaluation_set_paths.append((X_paths, y_paths))
-
-        assert len(args.data) % 2 == 0, 'Argument ``data`` must be a list with an even number of elements.'
-        for i in range(0, len(args.data), 2):
-            partition_str = '%d' % (int(i / 2) + 1)
-            X_paths, y_paths = args.data[i:i + 2]
-            X, y = read_data(
-                X_paths,
-                y_paths,
-                p.series_ids,
-                sep=p.sep,
-                categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in cdr_formula_list for v in x.rangf]))
-            )
-            X, y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors = preprocess_data(
-                X,
-                y,
-                cdr_formula_list,
-                p.series_ids,
-                filters=p.filters,
-                compute_history=True,
-                history_length=p.history_length
-            )
-            evaluation_sets.append((X, y, select, X_response_aligned_predictor_names, X_response_aligned_predictors,
-                                    X_2d_predictor_names, X_2d_predictors))
-            evaluation_set_partitions.append(None)
-            evaluation_set_names.append(partition_str)
-            evaluation_set_paths.append((X_paths, y_paths))
+            evaluation_set_paths.append((X_paths, Y_paths))
 
         for d in range(len(evaluation_sets)):
-            X, y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors = evaluation_sets[d]
+            X, Y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, \
+            X_2d_predictors = evaluation_sets[d]
             partition_str = evaluation_set_names[d]
 
             for m in cdr_models:
@@ -111,7 +92,7 @@ if __name__ == '__main__':
                 m_path = m.replace(':', '+')
 
                 dv = formula.strip().split('~')[0].strip()
-                y_valid, select_y_valid = filter_invalid_responses(y, dv)
+                y_valid, select_y_valid = filter_invalid_responses(Y, dv)
                 X_response_aligned_predictors_valid = X_response_aligned_predictors
                 if X_response_aligned_predictors_valid is not None:
                     X_response_aligned_predictors_valid = X_response_aligned_predictors_valid[select_y_valid]

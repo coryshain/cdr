@@ -1,9 +1,7 @@
 import argparse
 import os
-import sys
 import re
 import pickle
-import numpy as np
 import pandas as pd
 
 pd.options.mode.chained_assignment = None
@@ -12,9 +10,9 @@ from cdr.kwargs import MODEL_INITIALIZATION_KWARGS, \
     CDR_INITIALIZATION_KWARGS, CDRMLE_INITIALIZATION_KWARGS, CDRBAYES_INITIALIZATION_KWARGS, \
     CDRNN_INITIALIZATION_KWARGS, CDRNNMLE_INITIALIZATION_KWARGS, CDRNNBAYES_INITIALIZATION_KWARGS
 from cdr.config import Config
-from cdr.io import read_data
+from cdr.io import read_tabular_data
 from cdr.formula import Formula
-from cdr.data import add_dv, filter_invalid_responses, preprocess_data, compute_splitID, compute_partition
+from cdr.data import filter_invalid_responses, preprocess_data, compute_splitID, compute_partition
 from cdr.util import mse, mae, filter_models, get_partition_list, paths_from_partition_cliarg, stderr
 
 
@@ -62,17 +60,18 @@ if __name__ == '__main__':
     # for m in models:
     #     if m.startswith('CDRNN'):
     #         all_interactions = True
-    X_paths, y_paths = paths_from_partition_cliarg(partitions, p)
-    X, y = read_data(
+    X_paths, Y_paths = paths_from_partition_cliarg(partitions, p)
+    X, Y = read_tabular_data(
         X_paths,
-        y_paths,
+        Y_paths,
         p.series_ids,
         sep=p.sep,
         categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in cdr_formula_list for v in x.rangf]))
     )
-    X, y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors = preprocess_data(
+    X, Y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, \
+    X_2d_predictors = preprocess_data(
         X,
-        y,
+        Y,
         cdr_formula_list,
         p.series_ids,
         filters=p.filters,
@@ -84,7 +83,7 @@ if __name__ == '__main__':
     if run_R:
         # from cdr.baselines import py2ri
         assert len(X) == 1, 'Cannot run baselines on asynchronously sampled predictors'
-        assert len(X) == 1, 'Cannot run baselines on asynchronously sampled predictors'
+        assert len(Y) == 1, 'Cannot run baselines on asynchronously sampled responses'
         X_cur = X[0]
         X_cur['splitID'] = compute_splitID(X_cur, p.split_ids)
         part = compute_partition(X_cur, p.modulus, 3)
@@ -115,12 +114,12 @@ if __name__ == '__main__':
 
         X_baseline = X_baseline[part_select]
         if p.merge_cols is None:
-            merge_cols = sorted(list(set(X_baseline.columns) & set(y.columns)))
+            merge_cols = sorted(list(set(X_baseline.columns) & set(Y[0].columns)))
         else:
             merge_cols = p.merge_cols
-        X_baseline = pd.merge(X_baseline, y, on=merge_cols, how='inner')
+        X_baseline = pd.merge(X_baseline, Y[0], on=merge_cols, how='inner')
 
-    n_train_sample = len(y)
+    n_train_sample = sum(len(_Y) for _Y in Y)
 
     for m in models:
         p.set_model(m)
@@ -144,8 +143,8 @@ if __name__ == '__main__':
                     pickle.dump(lme, m_file)
 
             lme_preds = lme.predict(X_baseline)
-            lme_mse = mse(y[dv], lme_preds)
-            lme_mae = mae(y[dv], lme_preds)
+            lme_mse = mse(Y[dv], lme_preds)
+            lme_mae = mae(Y[dv], lme_preds)
             summary = '=' * 50 + '\n'
             summary += 'LME regression\n\n'
             summary += 'Model name: %s\n\n' %m
@@ -177,8 +176,8 @@ if __name__ == '__main__':
                     pickle.dump(lm, m_file)
 
             lm_preds = lm.predict(X_baseline)
-            lm_mse = mse(y[dv], lm_preds)
-            lm_mae = mae(y[dv], lm_preds)
+            lm_mse = mse(Y[dv], lm_preds)
+            lm_mae = mae(Y[dv], lm_preds)
             summary = '=' * 50 + '\n'
             summary += 'Linear regression\n\n'
             summary += 'Model name: %s\n\n' %m
@@ -221,8 +220,8 @@ if __name__ == '__main__':
                     pickle.dump(gam, m_file)
 
             gam_preds = gam.predict(X_baseline)
-            gam_mse = mse(y[dv], gam_preds)
-            gam_mae = mae(y[dv], gam_preds)
+            gam_mse = mse(Y[dv], gam_preds)
+            gam_mae = mae(Y[dv], gam_preds)
             summary = '=' * 50 + '\n'
             summary += 'GAM regression\n\n'
             summary += 'Model name: %s\n\n' %m
@@ -239,11 +238,11 @@ if __name__ == '__main__':
             stderr('\n\n')
 
         elif m.startswith('CDR') or m.startswith('DTSR'):
-            dv = formula.strip().split('~')[0].strip()
-            y_valid, select_y_valid = filter_invalid_responses(y, dv)
+            dv = [x.strip() for x in formula.strip().split('~')[0].strip().split('+')]
+            Y_valid, select_Y_valid = filter_invalid_responses(Y, dv)
             X_response_aligned_predictors_valid = X_response_aligned_predictors
             if X_response_aligned_predictors_valid is not None:
-                X_response_aligned_predictors_valid = X_response_aligned_predictors_valid[select_y_valid]
+                X_response_aligned_predictors_valid = X_response_aligned_predictors_valid[select_Y_valid]
 
             stderr('\nInitializing model %s...\n\n' % m)
 
@@ -272,7 +271,7 @@ if __name__ == '__main__':
                     cdr_model = CDRNNMLE(
                         formula,
                         X,
-                        y_valid,
+                        Y_valid,
                         ablated=p['ablated'],
                         outdir=p.outdir + '/' + m_path,
                         history_length=p.history_length,
@@ -287,7 +286,7 @@ if __name__ == '__main__':
                     cdr_model = CDRNNBayes(
                         formula,
                         X,
-                        y_valid,
+                        Y_valid,
                         ablated=p['ablated'],
                         outdir=p.outdir + '/' + m_path,
                         history_length=p.history_length,
@@ -308,7 +307,7 @@ if __name__ == '__main__':
                     cdr_model = CDRMLE(
                         formula,
                         X,
-                        y_valid,
+                        Y_valid,
                         ablated=p['ablated'],
                         outdir=p.outdir + '/' + m_path,
                         history_length=p.history_length,
@@ -323,7 +322,7 @@ if __name__ == '__main__':
                     cdr_model = CDRBayes(
                         formula,
                         X,
-                        y_valid,
+                        Y_valid,
                         ablated=p['ablated'],
                         outdir=p.outdir + '/' + m_path,
                         history_length=p.history_length,
@@ -349,7 +348,7 @@ if __name__ == '__main__':
 
             cdr_model.fit(
                 X,
-                y_valid,
+                Y_valid,
                 n_iter=p['n_iter'],
                 X_response_aligned_predictor_names=X_response_aligned_predictor_names,
                 X_response_aligned_predictors=X_response_aligned_predictors_valid,

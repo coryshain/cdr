@@ -551,11 +551,11 @@ class RNNCell(LayerRNNCell):
     def ema_ops(self):
         return []
 
-    def dropout_resample_ops(self):
+    def resample_ops(self):
         out = []
         if self.built:
             for layer in self._kernel_bottomup_layers + self._kernel_recurrent_layers + self._kernel_time_projection_layers:
-                out.append(layer.dropout_resample_ops())
+                out.append(layer.resample_ops())
 
         return out
 
@@ -719,8 +719,8 @@ class RNNLayer(object):
     def ema_ops(self):
         return self.cell.ema_ops()
 
-    def dropout_resample_ops(self):
-        return self.cell.dropout_resample_ops()
+    def resample_ops(self):
+        return self.cell.resample_ops()
 
 
 class RNNCellBayes(RNNCell):
@@ -1331,10 +1331,10 @@ class DenseLayer(object):
 
         return out
 
-    def dropout_resample_ops(self):
+    def resample_ops(self):
         out = []
         if self.use_dropout and self.built:
-            out.append(self.dropout_layer.dropout_resample_ops())
+            out.append(self.dropout_layer.resample_ops())
 
         return out
 
@@ -1696,7 +1696,7 @@ class BatchNormLayer(object):
     def ema_ops(self):
         return [self.moving_mean_op, self.moving_variance_op]
 
-    def dropout_resample_ops(self):
+    def resample_ops(self):
         return []
 
 
@@ -1985,7 +1985,7 @@ class LayerNormLayer(object):
     def ema_ops(self):
         return []
 
-    def dropout_resample_ops(self):
+    def resample_ops(self):
         return []
 
 
@@ -2299,7 +2299,7 @@ class DropoutLayer(object):
 
                 return out
 
-    def dropout_resample_ops(self):
+    def resample_ops(self):
         out = []
         if self.built:
             out.append(self.dropout_mask_eval_resample)

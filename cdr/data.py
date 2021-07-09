@@ -1,4 +1,3 @@
-import sys
 import re
 import numpy as np
 import pandas as pd
@@ -40,45 +39,50 @@ def s(df):
     return df/df.std(axis=0)
 
 
-def add_dv(name, y):
+def add_responses(names, y):
     """
+    Add response variable(s) to a dataframe, applying any preprocessing required by the formula string.
 
-    :param name: ``str``; name of dependent variable
+    :param names: ``str`` or ``list`` of ``str``; name(s) of dependent variable(s)
     :param y: ``pandas`` ``DataFrame``; response data.
-    :return: ``pandas`` ``DataFrame``; response data with any missing ops applied to DV.
+    :return: ``pandas`` ``DataFrame``; response data with any missing ops applied.
     """
 
-    if name in y.columns:
-        return y
+    if isinstance(names, str):
+        names = [names]
 
-    op, var = op_finder.match(name).groups()
+    for name in names:
+        if name in y.columns:
+            return y
 
-    y = add_dv(var, y)
-    arr = y[var]
+        op, var = op_finder.match(name).groups()
 
-    if op in ['c', 'c.']:
-        new_col = c(arr)
-    elif op in ['z', 'z.']:
-        new_col = z(arr)
-    elif op in ['s', 's.']:
-        new_col = s(arr)
-    elif op == 'log':
-        new_col = np.log(arr)
-    elif op == 'log1p':
-        new_col = np.log(arr + 1)
-    elif op == 'exp':
-        new_col = np.exp(arr)
-    else:
-        raise ValueError('Unrecognized op: "%s".' % op)
+        y = add_responses(var, y)
+        arr = y[var]
 
-    y[name] = new_col
+        if op in ['c', 'c.']:
+            new_col = c(arr)
+        elif op in ['z', 'z.']:
+            new_col = z(arr)
+        elif op in ['s', 's.']:
+            new_col = s(arr)
+        elif op == 'log':
+            new_col = np.log(arr)
+        elif op == 'log1p':
+            new_col = np.log(arr + 1)
+        elif op == 'exp':
+            new_col = np.exp(arr)
+        else:
+            raise ValueError('Unrecognized op: "%s".' % op)
+
+        y[name] = new_col
 
     return y
 
 
 def get_first_last_obs_lists(y):
     """
-    Convenience utility to extract out all first_obs and last_obs columns in **y** sorted by file index
+    Convenience utility to extract out all first_obs and last_obs columns in **Y** sorted by file index
 
     :param y: ``pandas`` ``DataFrame``; response data.
     :return: pair of ``list`` of ``str``; first_obs column names and last_obs column names
@@ -96,33 +100,60 @@ def get_first_last_obs_lists(y):
     return first_obs, last_obs
 
 
-def filter_invalid_responses(y, dv, crossval_factor=None, crossval_fold=None):
+def filter_invalid_responses(Y, dv, crossval_factor=None, crossval_fold=None):
     """
     Filter out rows with non-finite responses.
 
-    :param y: ``pandas`` ``DataFrame``; response data.
-    :param dv: ``str``; name of column containing the dependent variable
+    :param Y: ``pandas`` table or ``list`` of ``pandas`` tables; response data.
+    :param dv: ``str`` or ``list`` of ``str``; name(s) of column(s) containing the dependent variable(s)
     :param crossval_factor: ``str`` or ``None``; name of column containing the selection variable for cross validation. If ``None``, no cross validation filtering.
     :param crossval_fold: ``list`` or ``None``; list of valid values for cross-validation selection. Used only if ``crossval_factor`` is not ``None``.
     :return: 2-tuple of ``pandas`` ``DataFrame`` and ``pandas`` ``Series``; valid data and indicator vector used to filter out invalid data.
     """
 
+    df_in = False
+    if not isinstance(Y, list):
+        Y = [Y]
+        df_in = True
+
+    if not isinstance(dv, list):
+        dv = [dv]
+
     if crossval_fold is None:
         crossval_fold = []
 
-    select_y_valid = np.isfinite(y[dv])
-    if crossval_factor:
-        select_y_valid &= y[crossval_factor].isin(crossval_fold)
+    select_Y_valid = []
+    for i, _Y in enumerate(Y):
+        _select_Y_valid = np.ones(len(_Y), dtype=bool)
+        for _dv in dv:
+            if crossval_factor:
+                _select_Y_valid &= _Y[crossval_factor].isin(crossval_fold)
+            dtype = _Y[_dv].dtype
+            if dtype.name != 'category' and np.issubdtype(dtype, np.number):
+                is_numeric = True
+            else:
+                is_numeric = False
+            if _dv in _Y.columns and is_numeric:
+                _select_Y_valid &= np.isfinite(_Y[_dv])
+        select_Y_valid.append(_select_Y_valid)
+        Y[i] = _Y[_select_Y_valid]
+
+    if df_in:
+        Y = Y[0]
+        select_Y_valid = select_Y_valid[0]
     
-    return y[select_y_valid], select_y_valid
+    return Y, select_Y_valid
 
 
-def build_CDR_impulses(
+def build_CDR_data_inner(
         X,
-        first_obs,
-        last_obs,
-        impulse_names,
-        time_y=None,
+        Y=None,
+        first_obs=None,
+        last_obs=None,
+        Y_time=None,
+        Y_category_map=None,
+        impulse_names=None,
+        response_names=None,
         history_length=128,
         X_response_aligned_predictor_names=None,
         X_response_aligned_predictors=None,
@@ -132,13 +163,16 @@ def build_CDR_impulses(
         float_type='float32',
 ):
     """
-    Construct 3D array of shape ``(batch_len, history_length, n_impulses)`` to use as predictor data for CDR fitting.
+    Construct data arrays in the required format for CDR fitting/evaluation for a single response array.
 
-    :param X: list of ``pandas`` ``DataFrame``; impulse (predictor) data.
-    :param first_obs: list of ``pandas`` ``Series``; vector of row indices in **X** of the first impulse in the time series associated with each response.
-    :param last_obs: list of ``pandas`` ``Series``; vector of row indices in **X** of the last preceding impulse in the time series associated with each response.
-    :param impulse_names: ``list`` of ``str``; names of columns in **X** to be used as impulses by the model.
-    :param time_y: ``numpy`` 1D array; vector of response timestamps. Needed to timestamp any response-aligned predictors (ignored if none in model).
+    :param X: ``list`` of ``pandas`` tables; impulse (predictor) data.
+    :param Y: ``pandas`` table; response data. If ``None``, does not return a response array.
+    :param first_obs: ``list`` of index vectors (``list``, ``pandas`` series, or ``numpy`` vector) of first observations; the list contains vectors of row indices, one for each element of **X**, of the first impulse in the time series associated with the response. If ``None``, inferred from **Y**.
+    :param last_obs: ``list`` of index vectors (``list``, ``pandas`` series, or ``numpy`` vector) of last observations; the list contains vectors of row indices, one for each element of **X**, of the last impulse in the time series associated with the response. If ``None``, inferred from **Y**.
+    :param Y_time: `response timestamp vector (``list``, ``pandas`` series, or ``numpy`` vector); vector of response timestamps. Needed to timestamp any response-aligned predictors (ignored if none in model).
+    :param Y_category_map: ``dict`` or ``None``; map from category labels to integers for each categorical response.
+    :param impulse_names: ``list`` of ``str``; names of columns in **X** to be used as impulses by the model. If ``None``, all columns returned.
+    :param response_names: ``list`` of ``str``; names of columns in **Y** to be used as responses by the model. If ``None``, all columns returned.
     :param history_length: ``int``; maximum number of history observations.
     :param X_response_aligned_predictor_names: ``list`` of ``str``; names of predictors measured synchronously with the response rather than the impulses. If ``None``, no such impulses.
     :param X_response_aligned_predictors: ``pandas`` ``DataFrame`` or ``None``; table of predictors measured synchronously with the response rather than the impulses. If ``None``, no such impulses.
@@ -146,15 +180,24 @@ def build_CDR_impulses(
     :param X_2d_predictors: ``pandas`` ``DataFrame`` or ``None``; table of 2D impulses. If ``None``, no such impulses.
     :param int_type: ``str``; name of int type.
     :param float_type: ``str``; name of float type.
-    :return: 3-tuple of ``numpy`` arrays; the expanded impulse array, the expanded timestamp array, and a boolean mask zeroing out locations of non-existent impulses.
+    :return: 6-tuple of ``numpy`` arrays; let N, T, I, R respectively be the number of rows in **Y**, history length, number of impulse dimensions, and number of response dimensions. Outputs are (1) impulses with shape (N, T, I), (2) impulse timestamps with shape (N, T, I), impulse mask with shape (N, T, I), responses with shape (N, R) or ``None`` if **Y** is ``None``, response timestamps with shape (N, R) or ``None`` if **Y** is ``None``, and response masks with shape (N, R) or ``None`` if **Y** is ``None``.
     """
 
-    if not isinstance(X, list):
-        X = [X]
-    if not isinstance(first_obs, list):
-        first_obs = [first_obs]
-    if not isinstance(last_obs, list):
-        last_obs = [last_obs]
+    # Check prerequisites
+    assert isinstance(X, list) and not [_X for _X in X if not isinstance(_X, pd.DataFrame)], "X must be a list of pandas DataFrames"
+    assert Y is None or isinstance(Y, pd.DataFrame), "Y must either be ``None`` or a pandas DataFrame"
+    assert first_obs is None or isinstance(first_obs, list), "first_obs must either be ``None`` or a list"
+    assert last_obs is None or isinstance(last_obs, list), "last_obs must either be ``None`` or a list"
+    assert (Y is not None) or (first_obs is not None and last_obs is not None and Y_time is not None), "If Y is not provided, first_obs, last_obs, and time_y must be provided."
+
+    if first_obs is None:
+        first_obs = [Y['first_obs_%d' % i] for i in range(len(X))]
+
+    if last_obs is None:
+        last_obs = [Y['last_obs_%d' % i] for i in range(len(X))]
+
+    if Y_time is None:
+        Y_time = Y.time
 
     if X_response_aligned_predictor_names is None:
         X_response_aligned_predictor_names = []
@@ -168,40 +211,45 @@ def build_CDR_impulses(
     else:
         intercept_only = False
 
+    if Y_category_map is None:
+        Y_category_map = {}
+
+    # Process impulses
+
     impulse_names_1d = sorted(list(set(impulse_names).difference(set(X_response_aligned_predictor_names)).difference(set(X_2d_predictor_names))))
     impulse_names_1d_todo = set(impulse_names_1d)
     impulse_names_1d_tmp = []
 
     X_2d_from_1d = []
-    time_X_2d = []
-    time_mask = []
+    X_time_2d = []
+    X_mask = []
 
-    for i, X_cur in enumerate(X):
-        impulse_names_1d_cur = impulse_names_1d_todo.intersection(set(X_cur.columns))
+    for i, _X in enumerate(X):
+        impulse_names_1d_cur = impulse_names_1d_todo.intersection(set(_X.columns))
         if len(impulse_names_1d_cur) > 0:
             impulse_names_1d_todo = impulse_names_1d_todo - impulse_names_1d_cur
             impulse_names_1d_cur = sorted(list(impulse_names_1d_cur))
             impulse_names_1d_tmp += impulse_names_1d_cur
-            X_2d_from_1d_cur, time_X_2d_cur, time_mask_cur = expand_history(
-                X_cur[impulse_names_1d_cur],
-                X_cur.time,
+            _X_2d_from_1d, _X_time_2d, _X_mask = expand_history(
+                _X[impulse_names_1d_cur],
+                _X.time,
                 first_obs[i],
                 last_obs[i],
                 history_length,
                 int_type=int_type,
                 float_type=float_type
             )
-            X_2d_from_1d.append(X_2d_from_1d_cur)
-            time_X_2d.append(time_X_2d_cur)
-            time_mask.append(time_mask_cur)
+            X_2d_from_1d.append(_X_2d_from_1d)
+            X_time_2d.append(_X_time_2d)
+            X_mask.append(_X_mask)
 
     assert len(impulse_names_1d_todo) == 0, 'Not all impulses were processed during CDR data array construction. Remaining impulses: %s' % impulse_names_1d_todo
     impulse_names_1d = impulse_names_1d_tmp
 
     X_2d = np.concatenate(X_2d_from_1d, axis=-1)
     X_2d = X_2d[:,:,names2ix(impulse_names_1d, impulse_names_1d_tmp)]
-    time_X_2d = np.concatenate(time_X_2d, axis=-1)
-    time_mask = np.concatenate(time_mask, axis=-1)
+    X_time_2d = np.concatenate(X_time_2d, axis=-1)
+    X_mask = np.concatenate(X_mask, axis=-1)
 
     if X_response_aligned_predictors is not None:
         response_aligned_shape = (X_2d.shape[0], X_2d.shape[1], len(X_response_aligned_predictor_names))
@@ -210,12 +258,12 @@ def build_CDR_impulses(
         X_2d = np.concatenate([X_2d, X_response_aligned_predictors_new], axis=2)
 
         time_X_2d_new = np.zeros(response_aligned_shape)
-        time_X_2d_new[:,-1,:] = time_y[..., None]
-        time_X_2d = np.concatenate([time_X_2d, time_X_2d_new], axis=2)
+        time_X_2d_new[:,-1,:] = Y_time[..., None]
+        X_time_2d = np.concatenate([X_time_2d, time_X_2d_new], axis=2)
 
         time_mask_new = np.zeros(response_aligned_shape)
         time_mask_new[:,-1,:] = 1.
-        time_mask = np.concatenate([time_mask, time_mask_new], axis=2)
+        X_mask = np.concatenate([X_mask, time_mask_new], axis=2)
 
     if X_2d_predictors is not None:
         raise ValueError('2D predictors are currently fatally bugged. Do not use them.')
@@ -225,46 +273,225 @@ def build_CDR_impulses(
     impulse_names_cur = impulse_names_1d + X_response_aligned_predictor_names + X_2d_predictor_names
     ix = names2ix(impulse_names, impulse_names_cur)
     X_2d = X_2d[:,:,ix]
-    time_X_2d = time_X_2d[:,:,ix]
-    time_mask = time_mask[:,:,ix]
+    X_time_2d = X_time_2d[:,:,ix]
+    X_mask = X_mask[:,:,ix]
 
     if intercept_only:
         X_2d = X_2d[..., 0:0]
 
-    return X_2d, time_X_2d, time_mask
+    # Process responses
+
+    if Y is None:
+        Y_out = None
+        Y_mask = None
+    else:
+        Y_out = []
+        Y_mask = []
+
+        if response_names is None:
+            response_names = list(Y.columns)
+        for name in response_names:
+            if name in Y:
+                _Y_dv = Y[name]
+                if name in Y_category_map:
+                    _Y_dv = _Y_dv.map(lambda x: Y_category_map[name].get(x, x))
+                Y_out.append(_Y_dv)
+                Y_mask.append(np.ones(len(Y)))
+            else:
+                Y_out.append(np.zeros(len(Y)))
+                Y_mask.append(np.zeros(len(Y)))
+
+        Y_out = np.stack(Y_out, axis=1)
+        Y_mask = np.stack(Y_mask, axis=1)
+
+    return X_2d, X_time_2d, X_mask, Y_out, Y_mask
 
 
-def compute_history_intervals(X, y, series_ids, verbose=True):
+def build_CDR_data(
+        X,
+        Y=None,
+        first_obs=None,
+        last_obs=None,
+        Y_time=None,
+        Y_category_map=None,
+        impulse_names=None,
+        response_names=None,
+        history_length=128,
+        X_response_aligned_predictor_names=None,
+        X_response_aligned_predictors=None,
+        X_2d_predictor_names=None,
+        X_2d_predictors=None,
+        int_type='int32',
+        float_type='float32',
+):
+    """
+    Construct data arrays in the required format for CDR fitting/evaluation for one or more response arrays.
+
+    :param X: ``list`` of ``pandas`` tables; impulse (predictor) data.
+    :param Y: ``list`` of ``pandas`` tables; response data. If ``None``, does not return a response array.
+    :param first_obs: ``list`` of ``list`` of index vectors (``list``, ``pandas`` series, or ``numpy`` vector) of first observations; the list contains one element for each response array. Inner lists contain vectors of row indices, one for each element of **X**, of the first impulse in the time series associated with each response. If ``None``, inferred from **Y**.
+    :param last_obs: ``list`` of ``list`` of index vectors (``list``, ``pandas`` series, or ``numpy`` vector) of last observations; the list contains one element for each response array. Inner lists contain vectors of row indices, one for each element of **X**, of the last impulse in the time series associated with each response. If ``None``, inferred from **Y**.
+    :param Y_time: ``list`` of response timestamp vectors (``list``, ``pandas`` series, or ``numpy`` vector); vector(s) of response timestamps, one for each response array. Needed to timestamp any response-aligned predictors (ignored if none in model).
+    :param Y_category_map: ``dict`` or ``None``; map from category labels to integers for each categorical response.
+    :param impulse_names: ``list`` of ``str``; names of columns in **X** to be used as impulses by the model. If ``None``, all columns returned.
+    :param response_names: ``list`` of ``str``; names of columns in **Y** to be used as responses by the model. If ``None``, all columns returned.
+    :param history_length: ``int``; maximum number of history observations.
+    :param X_response_aligned_predictor_names: ``list`` of ``str``; names of predictors measured synchronously with the response rather than the impulses. If ``None``, no such impulses.
+    :param X_response_aligned_predictors: ``pandas`` ``DataFrame`` or ``None``; table of predictors measured synchronously with the response rather than the impulses. If ``None``, no such impulses.
+    :param X_2d_predictor_names: ``list`` of ``str``; names of 2D impulses (impulses whose value depends on properties of the most recent impulse). If ``None``, no such impulses.
+    :param X_2d_predictors: ``pandas`` ``DataFrame`` or ``None``; table of 2D impulses. If ``None``, no such impulses.
+    :param int_type: ``str``; name of int type.
+    :param float_type: ``str``; name of float type.
+    :return: 6-tuple of ``numpy`` arrays; let N, T, I, R respectively be the number of rows (total number of rows in **Y**), history length, number of impulse dimensions, and number of response dimensions. Outputs are (1) impulses with shape (N, T, I), (2) impulse timestamps with shape (N, T, I), impulse mask with shape (N, T, I), responses with shape (N, R) or ``None`` if **Y** is ``None``, response timestamps with shape (N, R) or ``None`` if **Y** is ``None``, and response masks with shape (N, R) or ``None`` if **Y** is ``None``.
+    """
+
+    # Check prerequisites
+    assert isinstance(X, list), "X must be a list"
+    assert Y is None or isinstance(Y, list), "Y must either be ``None`` or a list"
+    assert first_obs is None or isinstance(first_obs, list) and not [x for x in first_obs if not isinstance(x, list)], "first_obs must either be ``None`` or a list of lists"
+    assert last_obs is None or isinstance(last_obs, list) and not [x for x in last_obs if not isinstance(x, list)], "last_obs must either be ``None`` or a list of lists"
+    assert Y_time is None or isinstance(Y_time, list), "Y_time must either be ``None`` or a list"
+    assert (Y is not None) or (first_obs is not None and last_obs is not None and Y_time is not None), "If Y is not provided, first_obs, last_obs, and time_y must be provided."
+
+    X_2d = []
+    X_time_2d = []
+    X_mask = []
+
+    if Y is None:
+        Y_out = None
+        Y_time_out = None
+        Y_mask_out = None
+        Y_n_tables = len(first_obs)
+    else:
+        Y_out = []
+        Y_time_out = []
+        Y_mask_out = []
+        Y_n_tables = len(Y)
+
+    for i in range(Y_n_tables):
+        if Y is None:
+            _Y = Y
+        else:
+            _Y = Y[i]
+
+        if first_obs is None:
+            _first_obs = [_Y['first_obs_%d' % j] for j in range(len(X))]
+        else:
+            _first_obs = first_obs[i]
+            
+        if last_obs is None:
+            _last_obs = [_Y['last_obs_%d' % j] for j in range(len(X))]
+        else:
+            _last_obs = last_obs[i]
+    
+        if Y_time is None:
+            _Y_time = _Y.time
+        else:
+            _Y_time = Y_time[i]
+
+        _X_2d, _X_time_2d, _X_mask, _Y_out, _Y_mask = build_CDR_data_inner(
+            X,
+            Y=_Y,
+            first_obs=_first_obs,
+            last_obs=_last_obs,
+            Y_time=_Y_time,
+            Y_category_map=Y_category_map,
+            impulse_names=impulse_names,
+            response_names=response_names,
+            history_length=history_length,
+            X_response_aligned_predictor_names=X_response_aligned_predictor_names,
+            X_response_aligned_predictors=X_response_aligned_predictors,
+            X_2d_predictor_names=X_2d_predictor_names,
+            X_2d_predictors=X_2d_predictors,
+            int_type=int_type,
+            float_type=float_type,
+        )
+
+        X_2d.append(_X_2d)
+        X_time_2d.append(_X_time_2d)
+        X_mask.append(_X_mask)
+
+        if _Y is not None:
+            Y_out.append(_Y_out)
+            Y_time_out.append(_Y_time)
+            Y_mask_out.append(_Y_mask)
+
+    X_2d = np.concatenate(X_2d, axis=0)
+    X_time_2d = np.concatenate(X_time_2d, axis=0)
+    X_mask = np.concatenate(X_mask, axis=0)
+
+    if Y is not None:
+        Y_out = np.concatenate(Y_out, axis=0)
+        Y_time_out = np.concatenate(Y_time_out, axis=0)
+        Y_mask_out = np.concatenate(Y_mask_out, axis=0)
+
+    return X_2d, X_time_2d, X_mask, Y_out, Y_time_out, Y_mask_out
+
+
+def get_rangf_array(
+        Y,
+        rangf_names,
+        rangf_map
+):
+    """
+    Collect random grouping factor indicators as ``numpy`` integer arrays that can be read by Tensorflow.
+    Returns vertical concatenation of GF arrays from each element of **Y**.
+
+    :param Y: ``pandas`` table or ``list`` of ``pandas`` tables; response data.
+    :param rangf_names: ``list`` of ``str``; names of columns containing random grouping factor levels (order is preserved, changing the order will change the resulting array).
+    :param rangf_map: ``list`` of ``dict``; map for each random grouping factor from levels to unique indices.
+    :return:
+    """
+
+    if not isinstance(Y, list):
+        Y = [Y]
+
+    Y_rangf = []
+
+    for _Y in Y:
+        _Y_rangf = _Y[rangf_names]
+        for i in range(len(rangf_names)):
+            c = rangf_names[i]
+            _Y_rangf[c] = pd.Series(_Y_rangf[c].astype(str)).map(rangf_map[i])
+        _Y_rangf = np.array(_Y_rangf, dtype=int)
+        Y_rangf.append(_Y_rangf)
+
+    Y_rangf = np.concatenate(Y_rangf, axis=0)
+
+    return Y_rangf
+
+
+def compute_history_intervals(X, Y, series_ids, verbose=True):
     """
     Compute row indices in **X** of initial and final impulses for each element of **y**.
 
     :param X: ``pandas`` ``DataFrame``; impulse (predictor) data.
-    :param y: ``pandas`` ``DataFrame``; response data.
+    :param Y: ``pandas`` ``DataFrame``; response data.
     :param series_ids: ``list`` of ``str``; column names whose jointly unique values define unique time series.
     :param verbose: ``bool``; whether to report progress to stderr
     :return: 2-tuple of ``numpy`` vectors; first and last impulse observations (respectively) for each response in **y**
     """
 
     m = len(X)
-    n = len(y)
+    n = len(Y)
 
-    time_X = np.array(X.time)
-    time_y = np.array(y.time)
+    X_time = np.array(X.time)
+    Y_time = np.array(Y.time)
 
-    id_vectors_X = []
-    id_vectors_y = []
+    X_id_vectors = []
+    Y_id_vectors = []
 
     for i in range(len(series_ids)):
         col = series_ids[i]
-        id_vectors_X.append(np.array(X[col]))
-        id_vectors_y.append(np.array(y[col]))
-    id_vectors_X = np.stack(id_vectors_X, axis=1)
-    id_vectors_y = np.stack(id_vectors_y, axis=1)
+        X_id_vectors.append(np.array(X[col]))
+        Y_id_vectors.append(np.array(Y[col]))
+    X_id_vectors = np.stack(X_id_vectors, axis=1)
+    Y_id_vectors = np.stack(Y_id_vectors, axis=1)
 
-    y_cur_ids = id_vectors_y[0]
+    Y_id = Y_id_vectors[0]
 
-    first_obs = np.zeros(len(y)).astype('int32')
-    last_obs = np.zeros(len(y)).astype('int32')
+    first_obs = np.zeros(len(Y)).astype('int32')
+    last_obs = np.zeros(len(Y)).astype('int32')
 
     # i iterates y
     i = 0
@@ -278,20 +505,20 @@ def compute_history_intervals(X, y, series_ids, verbose=True):
             stderr('\r%d/%d' %(i+1, n))
 
         # Check if we've entered a new series in y
-        if (id_vectors_y[i] != y_cur_ids).any():
+        if (Y_id_vectors[i] != Y_id).any():
             start = end = j
-            X_cur_ids = id_vectors_X[j]
-            y_cur_ids = id_vectors_y[i]
+            X_cur_ids = X_id_vectors[j]
+            Y_id = Y_id_vectors[i]
 
         # Move the X pointer forward until we are either in the same series as y or at the end of the table.
         # However, if we are already at the end of the current time series, stay put in case there are subsequent observations of the response.
-        if j == 0 or (j > 0 and (id_vectors_X[j-1] != y_cur_ids).any()):
-            while j < m and (id_vectors_X[j] != y_cur_ids).any():
+        if j == 0 or (j > 0 and (X_id_vectors[j-1] != Y_id).any()):
+            while j < m and (X_id_vectors[j] != Y_id).any():
                 j += 1
                 start = end = j
 
         # Move the X pointer forward until we are either at the end of the series or have moved later in time than y
-        while j < m and time_X[j] <= (time_y[i] + epsilon) and (id_vectors_X[j] == y_cur_ids).all():
+        while j < m and X_time[j] <= (Y_time[i] + epsilon) and (X_id_vectors[j] == Y_id).all():
             j += 1
             end = j
 
@@ -349,32 +576,32 @@ def corr_cdr(X_2d, impulse_names, impulse_names_2d, time, time_mask):
     return rho
 
 
-def compute_filters(y, filters=None):
+def compute_filters(Y, filters=None):
     """
     Compute filters given a filter map.
 
-    :param y: ``pandas`` ``DataFrame``; response data.
+    :param Y: ``pandas`` ``DataFrame``; response data.
     :param filters: ``list``; list of key-value pairs mapping column names to filtering criteria for their values.
     :return: ``numpy`` vector; boolean mask to use for ``pandas`` subsetting operations.
     """
 
     if filters is None:
-        return y
-    select = np.ones(len(y), dtype=bool)
+        return Y
+    select = np.ones(len(Y), dtype=bool)
     for f in filters:
         field = f[0]
         cond = f[1]
-        if field in y.columns:
-            select &= compute_filter(y, field, cond)
+        if field in Y.columns:
+            select &= compute_filter(Y, field, cond)
         elif field.lower().endswith('nunique'):
             name = field[:-7]
-            if name in y.columns:
-                vals, counts = np.unique(y[name][select], return_counts=True)
+            if name in Y.columns:
+                vals, counts = np.unique(Y[name][select], return_counts=True)
                 count_map = {}
                 for v, c in zip(vals, counts):
                     count_map[v] = c
-                y[field] = y[name].map(count_map)
-                select &= compute_filter(y, field, cond)
+                Y[field] = Y[name].map(count_map)
+                select &= compute_filter(Y, field, cond)
             else:
                 stderr('Skipping unique-counts filter for column "%s", which was not found in the data...\n' % name)
         else:
@@ -544,7 +771,7 @@ def compute_time_mask(X_time, first_obs, last_obs, history_length, int_type='int
 
 def preprocess_data(
         X,
-        y,
+        Y,
         formula_list,
         series_ids,
         filters=None,
@@ -557,8 +784,8 @@ def preprocess_data(
     """
     Preprocess CDR data.
 
-    :param X: list of ``pandas`` ``DataFrame``; impulse (predictor) data.
-    :param y: ``pandas`` ``DataFrame``; response data.
+    :param X: list of ``pandas`` tables; impulse (predictor) data.
+    :param Y: list of ``pandas`` tables; response data.
     :param formula_list: ``list`` of ``Formula``; CDR formula for which to preprocess data.
     :param series_ids: ``list`` of ``str``; column names whose jointly unique values define unique time series.
     :param filters: ``list``; list of key-value pairs mapping column names to filtering criteria for their values.
@@ -575,12 +802,18 @@ def preprocess_data(
 
     if not isinstance(X, list):
         X = [X]
+    if not isinstance(Y, list):
+        Y = [Y]
 
-    if filters is None:
-        select = np.full((len(y),), True, dtype='bool')
-    else:
-        select = compute_filters(y, filters)
-        y = y[select]
+    select = []
+    for i, _Y in enumerate(Y):
+        if filters is None:
+            _select = np.full((len(_Y),), True, dtype='bool')
+        else:
+            _select = compute_filters(_Y, filters)
+            _Y = _Y[_select]
+        Y[i] = _Y
+        select.append(_select)
 
     X_response_aligned_predictor_names = None
     X_response_aligned_predictors = None
@@ -590,31 +823,35 @@ def preprocess_data(
     if compute_history:
         X_new = []
         for i in range(len(X)):
-            X_cur = X[i]
+            _X = X[i]
             if verbose:
                 stderr('Computing history intervals for each regression target in predictor file %d...\n' % (i+1))
-            first_obs, last_obs = compute_history_intervals(X_cur, y, series_ids)
-            y['first_obs_%d' % i] = first_obs
-            y['last_obs_%d' % i] = last_obs
+            for j, _Y in enumerate(Y):
+                first_obs, last_obs = compute_history_intervals(_X, _Y, series_ids)
+                _Y['first_obs_%d' % i] = first_obs
+                _Y['last_obs_%d' % i] = last_obs
 
-            # Floating point precision issues can allow the response to precede the impulse for simultaneous X/y,
-            # which can break downstream convolution. The correction below to y.time prevents this.
-            y.time = np.where(last_obs > first_obs, np.maximum(np.array(X_cur.time)[last_obs - 1], y.time), y.time)
+                # Floating point precision issues can allow the response to precede the impulse for simultaneous X/y,
+                # which can break downstream convolution. The correction below to y.time prevents this.
+                _Y.time = np.where(last_obs > first_obs, np.maximum(np.array(_X.time)[last_obs - 1], _Y.time), _Y.time)
 
-            if debug:
-                sample = np.random.randint(0, len(y), 10)
-                sample = np.concatenate([np.zeros((1,), dtype='int'), sample, np.ones((1,), dtype='int') * (len(y)-1)], axis=0)
-                for i in sample:
-                    print(i)
-                    row = y.iloc[i]
-                    print(row[['subject', 'docid', 'time']])
-                    print(X_cur[['subject', 'docid', 'word', 'time']][row.first_obs:row.last_obs])
-            X_new.append(X_cur)
+                if debug:
+                    sample = np.random.randint(0, len(_Y), 10)
+                    sample = np.concatenate([np.zeros((1,), dtype='int'), sample, np.ones((1,), dtype='int') * (len(_Y) - 1)], axis=0)
+                    for i in sample:
+                        print(i)
+                        row = _Y.iloc[i]
+                        print(row[['subject', 'docid', 'time']])
+                        print(_X[['subject', 'docid', 'word', 'time']][row.first_obs:row.last_obs])
+
+                Y[j] = _Y
+
+            X_new.append(_X)
 
         for x in formula_list:
-            X_new, y, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors = x.apply_formula(
+            X_new, Y, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors = x.apply_formula(
                 X_new,
-                y,
+                Y,
                 X_2d_predictor_names=X_2d_predictor_names,
                 X_2d_predictors=X_2d_predictors,
                 X_response_aligned_predictor_names=X_response_aligned_predictor_names,
@@ -626,5 +863,26 @@ def preprocess_data(
     else:
         X_new = X
 
-    return X_new, y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors
+    return X_new, Y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors
 
+
+def split_cdr_outputs(outputs, lengths):
+    """
+    Takes a dictionary of arbitrary depth containing CDR outputs with their labels as keys and splits each output into
+    a list of outputs with lengths corresponding to **lengths**. Useful for aligning CDR outputs to response files,
+    since multiple response files can be provided, which are underlyingly concatenated by CDR.
+    Recursively modifies the dict in place.
+
+    :param outputs: ``dict`` of arbitrary depth with ``numpy`` arrays at the leaves; the source CDR outputs
+    :param lengths: array-like vector of lengths to split the outputs into
+    :return: ``dict``; same key-val structure as **outputs** but with each leaf split into a list of ``len(lengths)`` vectors, one for each length value.
+    """
+
+    for k in outputs:
+        if isinstance(outputs[k], dict):
+            split_cdr_outputs(outputs[k], lengths)
+        else:
+            splits = np.cumsum(lengths)
+            outputs[k] = np.split(outputs[k], splits)
+
+    return outputs

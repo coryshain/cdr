@@ -1,9 +1,8 @@
-import math
-import numpy as np
 import pandas as pd
 
 from .kwargs import CDRNNBAYES_INITIALIZATION_KWARGS
 from .backend import DenseLayerBayes, RNNLayerBayes, BatchNormLayerBayes, LayerNormLayerBayes
+from .base import ModelBayes
 from .cdrnnbase import CDRNN
 from .util import get_numerical_sd, sn, reg_name, stderr
 
@@ -13,7 +12,7 @@ from tensorflow.contrib.distributions import Normal, SinhArcsinh
 pd.options.mode.chained_assignment = None
 
 
-class CDRNNBayes(CDRNN):
+class CDRNNBayes(ModelBayes, CDRNN):
     _INITIALIZATION_KWARGS = CDRNNBAYES_INITIALIZATION_KWARGS
 
     _doc_header = """
@@ -30,11 +29,11 @@ class CDRNNBayes(CDRNN):
     #
     ######################################################
 
-    def __init__(self, form_str, X, y, **kwargs):
+    def __init__(self, form_str, X, Y, **kwargs):
         super(CDRNNBayes, self).__init__(
             form_str,
             X,
-            y,
+            Y,
             **kwargs
         )
 
@@ -44,46 +43,6 @@ class CDRNNBayes(CDRNN):
         self._initialize_metadata()
 
         self.build()
-
-    def _initialize_metadata(self):
-        super(CDRNNBayes, self)._initialize_metadata()
-
-        self.is_bayesian = True
-
-        if self.intercept_init is None:
-            if self.standardize_response:
-                self.intercept_init = tf.constant(0., dtype=self.FLOAT_TF)
-            else:
-                self.intercept_init = self.y_train_mean
-        if self.intercept_prior_sd is None:
-            if self.standardize_response:
-                self.intercept_prior_sd = self.prior_sd_scaling_coefficient
-            else:
-                self.intercept_prior_sd = self.y_train_sd * self.prior_sd_scaling_coefficient
-        if self.y_sd_prior_sd is None:
-            if self.standardize_response:
-                self.y_sd_prior_sd = self.y_sd_prior_sd_scaling_coefficient
-            else:
-                self.y_sd_prior_sd = self.y_train_sd * self.y_sd_prior_sd_scaling_coefficient
-
-        self.kl_penalties_base = {}
-
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                # Define initialization constants
-                self.intercept_prior_sd_tf = tf.constant(float(self.intercept_prior_sd), dtype=self.FLOAT_TF)
-                self.intercept_posterior_sd_init = self.intercept_prior_sd_tf * self.posterior_to_prior_sd_ratio
-                self.intercept_ranef_prior_sd_tf = self.intercept_prior_sd_tf * self.ranef_to_fixef_prior_sd_ratio
-                self.intercept_ranef_posterior_sd_init = self.intercept_posterior_sd_init * self.ranef_to_fixef_prior_sd_ratio
-
-                self.y_sd_prior_sd_tf = tf.constant(float(self.y_sd_prior_sd), dtype=self.FLOAT_TF)
-                self.y_sd_posterior_sd_init = self.y_sd_prior_sd_tf * self.posterior_to_prior_sd_ratio
-
-                self.y_skewness_prior_sd_tf = tf.constant(float(self.y_skewness_prior_sd), dtype=self.FLOAT_TF)
-                self.y_skewness_posterior_sd_init = self.y_skewness_prior_sd_tf * self.posterior_to_prior_sd_ratio
-
-                self.y_tailweight_prior_sd_tf = tf.constant(float(self.y_tailweight_prior_sd), dtype=self.FLOAT_TF)
-                self.y_tailweight_posterior_sd_init = self.y_tailweight_prior_sd_tf * self.posterior_to_prior_sd_ratio
 
     def _pack_metadata(self):
         md = super(CDRNNBayes, self)._pack_metadata()
@@ -111,25 +70,27 @@ class CDRNNBayes(CDRNN):
     #
     ######################################################
 
-    def initialize_intercept(self, ran_gf=None):
+    def initialize_intercept(self, response_name, ran_gf=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                init = tf.constant(self.intercept_init[response_name], dtype=self.FLOAT_TF)
+                name = sn(response_name)
                 if ran_gf is None:
                     # Posterior distribution
                     intercept_q_loc = tf.Variable(
-                        self.intercept_init_tf,
-                        name='intercept_q_loc'
+                        init,
+                        name='intercept_%s_q_loc' % name
                     )
 
                     intercept_q_scale = tf.Variable(
-                        self.constraint_fn_inv(self.intercept_posterior_sd_init),
-                        name='intercept_q_scale'
+                        self.constraint_fn_inv(self._intercept_posterior_sd_init),
+                        name='intercept_%s_q_scale' % name
                     )
 
                     intercept_q_dist = Normal(
                         loc=intercept_q_loc,
                         scale=self.constraint_fn(intercept_q_scale) + self.epsilon,
-                        name='intercept_q'
+                        name='intercept_%s_q' % name
                     )
 
                     intercept = tf.cond(self.use_MAP_mode, intercept_q_dist.mean, intercept_q_dist.sample)
@@ -139,34 +100,35 @@ class CDRNNBayes(CDRNN):
                     if self.declare_priors_fixef:
                         # Prior distribution
                         intercept_prior_dist = Normal(
-                            loc=self.intercept_init_tf,
+                            loc=init,
                             scale=self.intercept_prior_sd_tf,
-                            name='intercept'
+                            name='intercept_%s' % name
                         )
-                        self.kl_penalties_base['intercept'] = {
-                            'loc': self.intercept_init,
-                            'scale': self.intercept_prior_sd,
+                        self.kl_penalties_base['intercept_%s' % name] = {
+                            'loc': init,
+                            'scale': self._intercept_prior_sd,
                             'val': intercept_q_dist.kl_divergence(intercept_prior_dist)
                         }
 
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+                    shape = [rangf_n_levels] + [int(x) for x in init.shape]
 
                     # Posterior distribution
                     intercept_q_loc = tf.Variable(
-                        tf.zeros([rangf_n_levels], dtype=self.FLOAT_TF),
-                        name='intercept_q_loc_by_%s' % sn(ran_gf)
+                        tf.zeros(shape, dtype=self.FLOAT_TF),
+                        name='intercept_%s_by_%s_q_loc' % (name, sn(ran_gf))
                     )
 
                     intercept_q_scale = tf.Variable(
-                        tf.ones([rangf_n_levels], dtype=self.FLOAT_TF) * self.constraint_fn_inv(self.intercept_ranef_posterior_sd_init * self.ranef_to_fixef_prior_sd_ratio),
-                        name='intercept_q_scale_by_%s' % sn(ran_gf)
+                        tf.ones(shape, dtype=self.FLOAT_TF) * self.constraint_fn_inv(self._intercept_ranef_posterior_sd_init * self.ranef_to_fixef_prior_sd_ratio),
+                        name='intercept_%s_by_%s_q_scale' % (name, sn(ran_gf))
                     )
 
                     intercept_q_dist = Normal(
                         loc=intercept_q_loc,
                         scale=self.constraint_fn(intercept_q_scale) + self.epsilon,
-                        name='intercept_q_by_%s' % sn(ran_gf)
+                        name='intercept_%s_by_%s_q' % (name, sn(ran_gf))
                     )
 
                     intercept = tf.cond(self.use_MAP_mode, intercept_q_dist.mean, intercept_q_dist.sample)
@@ -178,101 +140,15 @@ class CDRNNBayes(CDRNN):
                         intercept_prior_dist = Normal(
                             loc=0.,
                             scale=self.intercept_prior_sd_tf * self.ranef_to_fixef_prior_sd_ratio,
-                            name='intercept_by_%s' % sn(ran_gf)
+                            name='intercept_%s_by_%s' % (name, sn(ran_gf))
                         )
-                        self.kl_penalties_base['intercept_by_%s' % sn(ran_gf)] = {
+                        self.kl_penalties_base['intercept_%s_by_%s' % (name, sn(ran_gf))] = {
                             'loc': 0.,
-                            'scale': self.intercept_prior_sd * self.ranef_to_fixef_prior_sd_ratio,
+                            'scale': self._intercept_prior_sd * self.ranef_to_fixef_prior_sd_ratio,
                             'val': intercept_q_dist.kl_divergence(intercept_prior_dist)
                         }
 
                 return intercept, intercept_summary
-
-    def initialize_coefficient(self, coef_ids=None, ran_gf=None, suffix=None):
-        if suffix is None:
-            suffix = ''
-        elif not suffix.startswith('_'):
-            suffix = '_' + suffix
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                units = len(self.impulse_names) + 1
-
-                coefficient_sd_prior = get_numerical_sd(self.weight_prior_sd, in_dim=1, out_dim=1)
-                coefficient_sd_posterior = coefficient_sd_prior * self.posterior_to_prior_sd_ratio
-
-                if ran_gf is None:
-                    # Posterior distribution
-                    coefficient_q_loc = tf.Variable(
-                        tf.zeros([1, units]),
-                        name='coefficient%s_q_loc' % suffix
-                    )
-
-                    coefficient_q_scale = tf.Variable(
-                        tf.ones([1, units]) * self.constraint_fn_inv(coefficient_sd_posterior),
-                        name='coefficient%s_q_scale' % suffix
-                    )
-
-                    coefficient_q_dist = Normal(
-                        loc=coefficient_q_loc,
-                        scale=self.constraint_fn(coefficient_q_scale) + self.epsilon,
-                        name='coefficient%s_q' % suffix
-                    )
-
-                    coefficient = tf.cond(self.use_MAP_mode, coefficient_q_dist.mean, coefficient_q_dist.sample)
-
-                    coefficient_summary = coefficient_q_dist.mean()
-
-                    if self.declare_priors_fixef:
-                        # Prior distribution
-                        coefficient_prior_dist = Normal(
-                            loc=0.,
-                            scale=coefficient_sd_prior,
-                            name='coefficient%s' % suffix
-                        )
-                        self.kl_penalties_base['coefficient%s' % suffix] = {
-                            'loc': 0.,
-                            'scale': coefficient_sd_prior,
-                            'val': coefficient_q_dist.kl_divergence(coefficient_prior_dist)
-                        }
-
-                else:
-                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
-
-                    # Posterior distribution
-                    coefficient_q_loc = tf.Variable(
-                        tf.zeros([rangf_n_levels, units], dtype=self.FLOAT_TF),
-                        name='coefficient%s_q_loc_by_%s' % (suffix, sn(ran_gf))
-                    )
-
-                    coefficient_q_scale = tf.Variable(
-                        tf.ones([rangf_n_levels, units], dtype=self.FLOAT_TF) * self.constraint_fn_inv(coefficient_sd_posterior * self.ranef_to_fixef_prior_sd_ratio),
-                        name='coefficient%s_q_scale_by_%s' % (suffix, sn(ran_gf))
-                    )
-
-                    coefficient_q_dist = Normal(
-                        loc=coefficient_q_loc,
-                        scale=self.constraint_fn(coefficient_q_scale) + self.epsilon,
-                        name='coefficient%s_q_by_%s' % (suffix, sn(ran_gf))
-                    )
-
-                    coefficient = tf.cond(self.use_MAP_mode, coefficient_q_dist.mean, coefficient_q_dist.sample)
-
-                    coefficient_summary = coefficient_q_dist.mean()
-
-                    if self.declare_priors_ranef:
-                        # Prior distribution
-                        coefficient_prior_dist = Normal(
-                            loc=0.,
-                            scale=coefficient_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
-                            name='coefficient%s_by_%s' % (suffix, sn(ran_gf))
-                        )
-                        self.kl_penalties_base['coefficient%s_by_%s' % (suffix, sn(ran_gf))] = {
-                            'loc': 0.,
-                            'scale': coefficient_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
-                            'val': coefficient_q_dist.kl_divergence(coefficient_prior_dist)
-                        }
-
-                return coefficient, coefficient_summary
 
     def initialize_feedforward(
             self,
@@ -1134,388 +1010,6 @@ class CDRNNBayes(CDRNN):
 
                 return error_params_b, error_params_b_summary
 
-    def _initialize_output_model(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                if self.y_sd_trainable:
-                    y_sd_init_unconstrained = self.y_sd_init_unconstrained
-
-                    # Posterior distribution
-                    y_sd_loc_q = tf.Variable(
-                        y_sd_init_unconstrained,
-                        name='y_sd_loc_q'
-                    )
-                    y_sd_scale_q = tf.Variable(
-                        self.constraint_fn_inv(self.y_sd_posterior_sd_init),
-                        name='y_sd_scale_q'
-                    )
-                    y_sd_q_dist = Normal(
-                        loc=y_sd_loc_q,
-                        scale=self.constraint_fn(y_sd_scale_q) + self.epsilon,
-                        name='y_sd_q'
-                    )
-
-                    y_sd = tf.cond(self.use_MAP_mode, y_sd_q_dist.mean, y_sd_q_dist.sample) + self.y_sd_delta
-
-                    y_sd_summary = y_sd_q_dist.mean() + self.y_sd_delta_ema
-
-                    if self.declare_priors_fixef:
-                        # Prior distribution
-                        y_sd_prior_dist = Normal(
-                            loc=y_sd_init_unconstrained,
-                            scale=self.y_sd_prior_sd_tf,
-                            name='y_sd'
-                        )
-                        self.kl_penalties_base['y_sd'] = {
-                            'loc': self.y_sd_init,
-                            'scale': self.y_sd_prior_sd,
-                            'val': y_sd_q_dist.kl_divergence(y_sd_prior_dist)
-                        }
-
-                    y_sd = self.constraint_fn(y_sd) + self.epsilon
-                    y_sd_summary = self.constraint_fn(y_sd_summary) + self.epsilon
-
-                    tf.summary.scalar(
-                        'error/y_sd',
-                        y_sd_summary,
-                        collections=['params']
-                    )
-
-                else:
-                    stderr('Fixed y scale: %s\n' % self.y_sd_init)
-                    y_sd = self.y_sd_init_tf
-                    y_sd_summary = y_sd
-
-                self.y_sd = y_sd
-                self.y_sd_summary = y_sd_summary
-
-                if self.asymmetric_error:
-                    # Posterior distributions
-                    y_skewness_loc_q = tf.Variable(
-                        0.,
-                        name='y_skewness_q_loc'
-                    )
-                    y_skewness_scale_q = tf.Variable(
-                        self.constraint_fn_inv(self.y_skewness_posterior_sd_init),
-                        name='y_skewness_q_loc'
-                    )
-                    self.y_skewness_q_dist = Normal(
-                        loc=y_skewness_loc_q,
-                        scale=self.constraint_fn(y_skewness_scale_q) + self.epsilon,
-                        name='y_skewness_q'
-                    )
-
-                    self.y_skewness = tf.cond(self.use_MAP_mode, self.y_skewness_q_dist.mean, self.y_skewness_q_dist.sample) + self.y_skewness_delta
-                    self.y_skewness_summary = self.y_skewness_q_dist.mean() + self.y_skewness_delta_ema
-
-                    tf.summary.scalar(
-                        'error/y_skewness_summary',
-                        self.y_skewness_summary,
-                        collections=['params']
-                    )
-
-                    y_tailweight_loc_q = tf.Variable(
-                        self.constraint_fn_inv(1.),
-                        name='y_tailweight_q_loc'
-                    )
-                    y_tailweight_scale_q = tf.Variable(
-                        self.constraint_fn_inv(self.y_tailweight_posterior_sd_init),
-                        name='y_tailweight_q_scale'
-                    )
-                    self.y_tailweight_q_dist = Normal(
-                        loc=y_tailweight_loc_q,
-                        scale=self.constraint_fn(y_tailweight_scale_q) + self.epsilon,
-                        name='y_tailweight_q'
-                    )
-
-                    self.y_tailweight = tf.cond(self.use_MAP_mode, self.y_tailweight_q_dist.mean, self.y_tailweight_q_dist.sample) + self.y_tailweight_delta
-                    self.y_tailweight_summary = self.y_tailweight_q_dist.mean() + self.y_tailweight_delta_ema
-
-                    tf.summary.scalar(
-                        'error/y_tailweight',
-                        self.constraint_fn(self.y_tailweight_summary) + self.epsilon,
-                        collections=['params']
-                    )
-
-                    if self.declare_priors_fixef:
-                        # Prior distributions
-                        self.y_skewness_prior_dist = Normal(
-                            loc=0.,
-                            scale=self.y_skewness_prior_sd_tf,
-                            name='y_skewness'
-                        )
-                        self.y_tailweight_prior_dist = Normal(
-                            loc=self.constraint_fn_inv(1.),
-                            scale=self.y_tailweight_prior_sd_tf,
-                            name='y_tailweight'
-                        )
-                        self.kl_penalties_base['y_skewness'] = {
-                            'loc': 0.,
-                            'scale': self.y_skewness_prior_dist,
-                            'val': self.y_skewness_q_dist.kl_divergence(self.y_skewness_prior_dist)
-                        }
-                        self.kl_penalties_base['y_tailweight'] = {
-                            'loc': 1.,
-                            'scale': self.y_tailweight_prior_dist,
-                            'val': self.y_tailweight_q_dist.kl_divergence(self.y_tailweight_prior_dist)
-                        }
-
-                    if self.standardize_response:
-                        self.out_standardized_dist = SinhArcsinh(
-                            loc=self.out,
-                            scale=y_sd,
-                            skewness=self.y_skewness,
-                            tailweight=self.constraint_fn(self.y_tailweight) + self.epsilon,
-                            name='output_standardized'
-                        )
-                        self.out_standardized = tf.cond(
-                            self.use_MAP_mode,
-                            lambda: self.out_standardized_dist.loc,
-                            self.out_standardized_dist.sample
-                        )
-                        self.err_dist_standardized = SinhArcsinh(
-                            loc=0.,
-                            scale=y_sd,
-                            skewness=self.y_skewness,
-                            tailweight=self.constraint_fn(self.y_tailweight) + self.epsilon,
-                            name='err_dist_standardized'
-                        )
-                        self.err_dist_standardized_summary = SinhArcsinh(
-                            loc=0.,
-                            scale=y_sd_summary,
-                            skewness=self.y_skewness_summary,
-                            tailweight=self.constraint_fn(self.y_tailweight_summary) + self.epsilon,
-                            name='err_dist_standardized_summary'
-                        )
-
-                        self.out_dist = SinhArcsinh(
-                            loc=self.out * self.y_train_sd + self.y_train_mean,
-                            scale=y_sd * self.y_train_sd,
-                            skewness=self.y_skewness,
-                            tailweight=self.constraint_fn(self.y_tailweight) + self.epsilon,
-                            name='output_dist'
-                        )
-                        self.out = tf.cond(
-                            self.use_MAP_mode,
-                            lambda: self.out_dist.loc,
-                            self.out_dist.sample
-                        )
-
-                        self.err_dist = SinhArcsinh(
-                            loc=0.,
-                            scale=y_sd * self.y_train_sd,
-                            skewness=self.y_skewness,
-                            tailweight=self.constraint_fn(self.y_tailweight) + self.epsilon,
-                            name='err_dist'
-                        )
-                        self.err = tf.cond(
-                            self.use_MAP_mode,
-                            lambda: self.err_dist.loc,
-                            self.err_dist.sample
-                        )
-                        self.err_dist_summary = SinhArcsinh(
-                            loc=0.,
-                            scale=y_sd_summary * self.y_train_sd,
-                            skewness=self.y_skewness_summary,
-                            tailweight=self.constraint_fn(self.y_tailweight_summary) + self.epsilon,
-                            name='err_dist_summary'
-                        )
-                    else:
-                        self.out_dist = SinhArcsinh(
-                            loc=self.out,
-                            scale=y_sd,
-                            skewness=self.y_skewness,
-                            tailweight=self.constraint_fn(self.y_tailweight) + self.epsilon,
-                            name='output_dist'
-                        )
-                        self.out = tf.cond(
-                            self.use_MAP_mode,
-                            lambda: self.out_dist.loc,
-                            self.out_dist.sample
-                        )
-
-                        self.err_dist = SinhArcsinh(
-                            loc=0.,
-                            scale=y_sd,
-                            skewness=self.y_skewness,
-                            tailweight=self.constraint_fn(self.y_tailweight) + self.epsilon,
-                            name='err_dist'
-                        )
-                        self.err = tf.cond(
-                            self.use_MAP_mode,
-                            lambda: self.err_dist.loc,
-                            self.err_dist.sample
-                        )
-                        self.err_dist_summary = SinhArcsinh(
-                            loc=0.,
-                            scale=y_sd_summary,
-                            skewness=self.y_skewness_summary,
-                            tailweight=self.constraint_fn(self.y_tailweight_summary) + self.epsilon,
-                            name='err_dist_summary'
-                        )
-
-                else:
-                    if self.standardize_response:
-                        self.out_standardized_dist = Normal(
-                            loc=self.out,
-                            scale=self.y_sd,
-                            name='output_standardized'
-                        )
-                        self.out_standardized = tf.cond(
-                            self.use_MAP_mode,
-                            self.out_standardized_dist.mean,
-                            self.out_standardized_dist.sample
-                        )
-
-                        self.err_dist_standardized = Normal(
-                            loc=0.,
-                            scale=self.y_sd,
-                            name='err_dist_standardized'
-                        )
-                        self.err_standardized = tf.cond(
-                            self.use_MAP_mode,
-                            self.out_standardized_dist.mean,
-                            self.out_standardized_dist.sample
-                        )
-                        self.err_dist_standardized_summary = Normal(
-                            loc=0.,
-                            scale=self.y_sd_summary,
-                            name='err_dist_standardized_summary'
-                        )
-
-                        self.out_dist = Normal(
-                            loc=self.out * self.y_train_sd + self.y_train_mean,
-                            scale=self.y_sd * self.y_train_sd,
-                            name='output'
-                        )
-                        self.out = tf.cond(
-                            self.use_MAP_mode,
-                            self.out_dist.mean,
-                            self.out_dist.sample
-                        )
-
-                        self.err_dist = Normal(
-                            loc=0.,
-                            scale=self.y_sd * self.y_train_sd,
-                            name='err_dist'
-                        )
-                        self.err = tf.cond(
-                            self.use_MAP_mode,
-                            self.err_dist.mean,
-                            self.err_dist.sample
-                        )
-                        self.err_dist_summary = Normal(
-                            loc=0.,
-                            scale=self.y_sd_summary * self.y_train_sd,
-                            name='err_dist_summary'
-                        )
-                    else:
-                        self.out_dist = Normal(
-                            loc=self.out,
-                            scale=self.y_sd,
-                            name='output'
-                        )
-                        self.out = tf.cond(
-                            self.use_MAP_mode,
-                            self.out_dist.mean,
-                            self.out_dist.sample
-                        )
-
-                        self.err_dist = Normal(
-                            loc=0.,
-                            scale=self.y_sd,
-                            name='err_dist'
-                        )
-                        self.err = tf.cond(
-                            self.use_MAP_mode,
-                            self.err_dist.mean,
-                            self.err_dist.sample
-                        )
-                        self.err_dist_summary = Normal(
-                            loc=0.,
-                            scale=self.y_sd_summary,
-                            name='err_dist_summary'
-                        )
-
-                self.err_dist_plot = tf.exp(self.err_dist.log_prob(self.support[None,...]))
-                self.err_dist_plot_summary = tf.exp(self.err_dist_summary.log_prob(self.support[None,...]))
-                self.err_dist_lb = self.err_dist_summary.quantile(.025)
-                self.err_dist_ub = self.err_dist_summary.quantile(.975)
-
-                empirical_quantiles = tf.linspace(0., 1., self.n_errors)
-                if self.standardize_response:
-                    self.err_dist_standardized_theoretical_quantiles = self.err_dist_standardized.quantile(empirical_quantiles)
-                    self.err_dist_standardized_theoretical_cdf = self.err_dist_standardized.cdf(self.errors)
-                    self.err_dist_standardized_summary_theoretical_quantiles = self.err_dist_standardized_summary.quantile(empirical_quantiles)
-                    self.err_dist_standardized_summary_theoretical_cdf = self.err_dist_standardized_summary.cdf(self.errors)
-                self.err_dist_theoretical_quantiles = self.err_dist.quantile(empirical_quantiles)
-                self.err_dist_theoretical_cdf = self.err_dist.cdf(self.errors)
-                self.err_dist_summary_theoretical_quantiles = self.err_dist_summary.quantile(empirical_quantiles)
-                self.err_dist_summary_theoretical_cdf = self.err_dist_summary.cdf(self.errors)
-
-                self.ll = self.out_dist.log_prob(self.y)
-                if self.standardize_response:
-                    y_standardized = (self.y - self.y_train_mean) / self.y_train_sd
-                    self.ll_standardized = self.out_standardized_dist.log_prob(y_standardized)
-
-    def initialize_objective(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                self._initialize_output_model()
-
-                if self.standardize_response:
-                    loss_func = -self.ll_standardized
-                else:
-                    loss_func = -self.ll
-
-                for l in self.regularizable_layers:
-                    if hasattr(l, 'weights'):
-                        vars = l.weights
-                    else:
-                        vars = [l]
-                    for v in vars:
-                        if 'bias' not in v.name:
-                            self._regularize(v, regtype='nn', var_name=reg_name(v.name))
-
-                kl_penalties = self.kl_penalties_base
-                for layer in self.layers:
-                    kl_penalties.update(layer.kl_penalties())
-                self.kl_penalties = kl_penalties
-
-                self.loss_func, self.reg_loss, self.kl_loss = self._process_objective(loss_func)
-
-                self.optim = self._initialize_optimizer()
-
-                self.train_op = self.optim.minimize(self.loss_func, global_step=self.global_batch_step)
-
-    # Overload this method to perform parameter sampling and compute credible intervals
-    def _extract_parameter_values(self, fixed=True, level=95, n_samples=None):
-        if n_samples is None:
-            n_samples = self.n_samples_eval
-
-        alpha = 100 - float(level)
-
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                self.set_predict_mode(True)
-
-                if fixed:
-                    param_vector = self.parameter_table_fixed_values
-                else:
-                    param_vector = self.parameter_table_random_values
-
-                samples = [self.sess.run(param_vector, feed_dict={self.use_MAP_mode: False}) for _ in range(n_samples)]
-                samples = np.stack(samples, axis=1)
-
-                mean = samples.mean(axis=1)
-                lower = np.percentile(samples, alpha / 2, axis=1)
-                upper = np.percentile(samples, 100 - (alpha / 2), axis=1)
-
-                out = np.stack([mean, lower, upper], axis=1)
-
-                self.set_predict_mode(False)
-
-                return out
 
 
 
