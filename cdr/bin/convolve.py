@@ -18,11 +18,10 @@ if __name__ == '__main__':
     argparser.add_argument('config_paths', nargs='+', help='Path(s) to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='Path to configuration (*.ini) file')
     argparser.add_argument('-p', '--partition', nargs='+', default=['dev'], help='List of names of partitions to use ("train", "dev", "test", or a hyphen-delimited subset of these, or "PREDICTOR_PATH(;PREDICTOR_PATH):(RESPONSE_PATH;RESPONSE_PATH)").')
-    argparser.add_argument('-z', '--standardize_response', action='store_true', help='Standardize (Z-transform) response in plots. Ignored unless model was fitted using setting ``standardize_respose=True``.')
     argparser.add_argument('-n', '--nsamples', type=int, default=None, help='Number of posterior samples to average (only used for CDRBayes)')
-    argparser.add_argument('-u', '--unscaled', action='store_true', help='Do not multiply outputs by CDR-fitted coefficients')
     argparser.add_argument('-a', '--algorithm', type=str, default='MAP', help='Algorithm ("sampling" or "MAP") to use for extracting predictions.')
     argparser.add_argument('-A', '--ablated_models', action='store_true', help='Perform convolution using ablated models. Otherwise only convolves using the full model in each ablation set.')
+    argparser.add_argument('-e', '--extra_cols', action='store_true', help='Whether to include columns from the response dataframe in the outputs.')
     argparser.add_argument('--cpu_only', action='store_true', help='Use CPU implementation even if GPU is available.')
     args, unknown = argparser.parse_known_args()
 
@@ -92,32 +91,28 @@ if __name__ == '__main__':
                 m_path = m.replace(':', '+')
 
                 dv = formula.strip().split('~')[0].strip()
-                y_valid, select_y_valid = filter_invalid_responses(Y, dv)
+                Y_valid, select_Y_valid = filter_invalid_responses(Y, dv)
                 X_response_aligned_predictors_valid = X_response_aligned_predictors
                 if X_response_aligned_predictors_valid is not None:
-                    X_response_aligned_predictors_valid = X_response_aligned_predictors_valid[select_y_valid]
+                    X_response_aligned_predictors_valid = X_response_aligned_predictors_valid[select_Y_valid]
 
                 stderr('Retrieving saved model %s...\n' % m)
                 cdr_model = load_cdr(p.outdir + '/' + m_path)
 
-                X_conv, X_conv_summary = cdr_model.convolve_inputs(
+                stderr('Convolving %s...\n' % m)
+                cdr_model.convolve_inputs(
                     X,
-                    y_valid,
+                    Y_valid,
                     X_response_aligned_predictor_names=X_response_aligned_predictor_names,
                     X_response_aligned_predictors=X_response_aligned_predictors_valid,
                     X_2d_predictor_names=X_2d_predictor_names,
                     X_2d_predictors=X_2d_predictors,
-                    scaled=not args.unscaled,
                     n_samples=args.nsamples,
                     algorithm=args.algorithm,
-                    standardize_response=args.standardize_response
+                    extra_cols=args.extra_cols,
+                    partition=partition_str,
+                    dump=True
                 )
-
-                X_conv.to_csv(p.outdir + '/' + m_path + '/X_conv_%s.csv' %partition_str, sep=' ', index=False, na_rep='nan')
-
-                stderr(X_conv_summary)
-                with open(p.outdir + '/' + m_path + '/X_conv_%s_summary.txt' %partition_str, 'w') as f:
-                    f.write(X_conv_summary)
 
                 cdr_model.finalize()
 

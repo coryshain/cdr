@@ -40,6 +40,7 @@ if __name__ == '__main__':
             stderr('Retrieving saved model %s...\n' % m)
             cdr_model = load_cdr(p.outdir + '/' + m_path)
 
+            stderr('Resampling summary statistics...\n')
             summary = cdr_model.summary(
                 random=args.random,
                 level=args.level,

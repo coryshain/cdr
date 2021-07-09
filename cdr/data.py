@@ -883,6 +883,6 @@ def split_cdr_outputs(outputs, lengths):
             split_cdr_outputs(outputs[k], lengths)
         else:
             splits = np.cumsum(lengths)
-            outputs[k] = np.split(outputs[k], splits)
+            outputs[k] = np.split(outputs[k], splits, axis=0)
 
     return outputs

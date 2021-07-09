@@ -1184,7 +1184,10 @@ class CDR(Model):
                 self.coefficient_random = {}
                 self.coefficient_random_summary = {}
                 for response in self.response_names:
-                    response_params = self.predictive_distribution_config[response]['params']
+                    self.coefficient_fixed[response] = {}
+                    self.coefficient_fixed_summary[response] = {}
+
+                    response_params = self.get_response_params(response)
                     if not self.use_distributional_regression:
                         response_params = response_params[:1]
                     nparam = len(response_params)
@@ -1202,27 +1205,41 @@ class CDR(Model):
                         self.coefficient_fixed_base_summary[response],
                         [len(coef_ids), nparam, ndim]
                     )
-                    self._regularize(self.coefficient_fixed_base[response], regtype='coefficient', var_name='coefficient_%s' % response)
-
-                    self.coefficient_fixed[response] = coefficient_fixed
-                    self.coefficient_fixed_summary[response] = coefficient_fixed_summary
+                    self._regularize(
+                        self.coefficient_fixed_base[response],
+                        regtype='coefficient',
+                        var_name='coefficient_%s' % response
+                    )
 
                     coefficient = coefficient_fixed
                     coefficient_summary = coefficient_fixed_summary
 
-                    for i, response_param in enumerate(response_params):
-                        for j, coef_name in enumerate(self.coef_names):
+                    for i, coef_name in enumerate(self.coef_names):
+                        self.coefficient_fixed[response][coef_name] = {}
+                        self.coefficient_fixed_summary[response][coef_name] = {}
+                        for j, response_param in enumerate(response_params):
+                            _p = coefficient_fixed[:, j]
+                            _p_summary = coefficient_fixed_summary[:, j]
+                            if self.standardize_response and \
+                                    self.is_real(response) and \
+                                    response_param in ['mu', 'sigma']:
+                                _p = _p * self.Y_train_sds[response]
+                                _p_summary = _p_summary * self.Y_train_sds[response]
                             dim_names = self._expand_param_name_by_dim(response, response_param)
                             for k, dim_name in enumerate(dim_names):
+                                val = _p[i, k]
+                                val_summary = _p_summary[i, k]
                                 tf.summary.scalar(
                                     'coefficient' + '/%s/%s_%s' % (
                                         sn(coef_name),
                                         sn(response),
                                         sn(dim_name)
                                     ),
-                                    coefficient_fixed_summary[j, i, k],
+                                    val_summary,
                                     collections=['params']
                                 )
+                                self.coefficient_fixed[response][coef_name][dim_name] = val
+                                self.coefficient_fixed_summary[response][coef_name][dim_name] = val_summary
 
                     self.coefficient_random[response] = {}
                     self.coefficient_random_summary[response] = {}
@@ -1232,6 +1249,9 @@ class CDR(Model):
 
                         coefs = self.coef_by_rangf.get(gf, [])
                         if len(coefs) > 0:
+                            self.coefficient_random[response][gf] = {}
+                            self.coefficient_random_summary[response][gf] = {}
+
                             nonzero_coef_ix = names2ix(coefs, self.coef_names)
 
                             coefficient_random = self.coefficient_random_base[response][gf]
@@ -1243,7 +1263,39 @@ class CDR(Model):
                             coefficient_random -= coefficient_random_means
                             coefficient_random_summary -= coefficient_random_summary_means
 
-                            self._regularize(coefficient_random, regtype='ranef', var_name='coefficient_%s_by_%s' % (sn(response), sn(gf)))
+                            self._regularize(
+                                coefficient_random,
+                                regtype='ranef',
+                                var_name='coefficient_%s_by_%s' % (sn(response),sn(gf))
+                            )
+
+                            for j, coef_name in enumerate(coefs):
+                                self.coefficient_random[response][gf][coef_name] = {}
+                                self.coefficient_random_summary[response][gf][coef_name] = {}
+                                for k, response_param in enumerate(response_params):
+                                    _p = coefficient_random[:, :, k]
+                                    _p_summary = coefficient_random_summary[:, :, k]
+                                    if self.standardize_response and \
+                                            self.is_real(response) and \
+                                            response_param in ['mu', 'sigma']:
+                                        _p = _p * self.Y_train_sds[response]
+                                        _p_summary = _p_summary * self.Y_train_sds[response]
+                                    dim_names = self._expand_param_name_by_dim(response, response_param)
+                                    for l, dim_name in enumerate(dim_names):
+                                        val = _p[:, j, l]
+                                        val_summary = _p_summary[:, j, l]
+                                        tf.summary.histogram(
+                                            'by_%s/coefficient/%s/%s_%s' % (
+                                                sn(gf),
+                                                sn(coef_name),
+                                                sn(response),
+                                                sn(dim_name)
+                                            ),
+                                            val_summary,
+                                            collections=['random']
+                                        )
+                                        self.coefficient_random[response][gf][coef_name][dim_name] = val
+                                        self.coefficient_random_summary[response][gf][coef_name][dim_name] = val_summary
 
                             coefficient_random = self._scatter_along_axis(
                                 nonzero_coef_ix,
@@ -1266,27 +1318,8 @@ class CDR(Model):
                                 axis=1
                             )
 
-                            self.coefficient_random[response][gf] = coefficient_random
-                            self.coefficient_random_summary[response][gf] = coefficient_random_summary
-
                             coefficient = coefficient[None, ...] + tf.gather(coefficient_random, self.Y_gf[:, i], axis=0)
                             coefficient_summary = coefficient_summary[None, ...] + tf.gather(coefficient_random_summary, self.Y_gf[:, i], axis=0)
-
-                            if self.log_random:
-                                for j, response_param in enumerate(response_params):
-                                    for k, coef_name in enumerate(self.coef_names):
-                                        dim_names = self._expand_param_name_by_dim(response, response_param)
-                                        for l, dim_name in enumerate(dim_names):
-                                            tf.summary.histogram(
-                                                'by_%s/coefficient/%s/%s_%s' % (
-                                                    sn(gf),
-                                                    sn(coef_name),
-                                                    sn(response),
-                                                    sn(dim_name)
-                                                ),
-                                                coefficient_random_summary[:, k, j, l],
-                                                collections=['random']
-                                            )
 
                     self.coefficient[response] = coefficient
                     self.coefficient_summary[response] = coefficient_summary
@@ -1303,7 +1336,10 @@ class CDR(Model):
                 fixef_ix = names2ix(self.fixed_interaction_names, self.interaction_names)
                 if len(self.interaction_names) > 0:
                     for response in self.response_names:
-                        response_params = self.predictive_distribution_config[response]['params']
+                        self.interaction_fixed[response] = {}
+                        self.interaction_fixed_summary[response] = {}
+
+                        response_params = self.get_response_params(response)
                         if not self.use_distributional_regression:
                             response_params = response_params[:1]
                         nparam = len(response_params)
@@ -1320,27 +1356,41 @@ class CDR(Model):
                             self.interaction_fixed_base_summary[response],
                             [len(interaction_ids), nparam, ndim]
                         )
-                        self._regularize(self.interaction_fixed_base[response], regtype='interaction', var_name='interaction_%s' % response)
-
-                        self.interaction_fixed[response] = interaction_fixed
-                        self.interaction_fixed_summary[response] = interaction_fixed_summary
+                        self._regularize(
+                            self.interaction_fixed_base[response],
+                            regtype='interaction',
+                            var_name='interaction_%s' % response
+                        )
 
                         interaction = interaction_fixed
                         interaction_summary = interaction_fixed_summary
 
-                        for i, response_param in enumerate(response_params):
-                            for j, interaction_name in enumerate(self.interaction_names):
+                        for i, interaction_name in enumerate(self.interaction_names):
+                            self.interaction_fixed[response][interaction_name] = {}
+                            self.interaction_fixed_summary[response][interaction_name] = {}
+                            for j, response_param in enumerate(response_params):
+                                _p = interaction_fixed[:, j]
+                                _p_summary = interaction_fixed_summary[:, j]
+                                if self.standardize_response and \
+                                        self.is_real(response) and \
+                                        response_param in ['mu', 'sigma']:
+                                    _p = _p * self.Y_train_sds[response]
+                                    _p_summary = _p_summary * self.Y_train_sds[response]
                                 dim_names = self._expand_param_name_by_dim(response, response_param)
                                 for k, dim_name in enumerate(dim_names):
+                                    val = _p[i, k]
+                                    val_summary = _p_summary[i, k]
                                     tf.summary.scalar(
                                         'interaction' + '/%s/%s_%s' % (
                                             sn(interaction_name),
                                             sn(response),
                                             sn(dim_name)
                                         ),
-                                        interaction_fixed_summary[j, i, k],
+                                        val_summary,
                                         collections=['params']
                                     )
+                                    self.interaction_fixed[response][interaction_name][dim_name] = val
+                                    self.interaction_fixed_summary[response][interaction_name][dim_name] = val_summary
 
                         self.interaction_random[response] = {}
                         self.interaction_random_summary[response] = {}
@@ -1361,7 +1411,39 @@ class CDR(Model):
                                 interaction_random -= interaction_random_means
                                 interaction_random_summary -= interaction_random_summary_means
 
-                                self._regularize(interaction_random, regtype='ranef', var_name='interaction_%s_by_%s' % (sn(response), sn(gf)))
+                                self._regularize(
+                                    interaction_random,
+                                    regtype='ranef',
+                                    var_name='interaction_%s_by_%s' % (sn(response), sn(gf))
+                                )
+
+                                for j, interaction_name in enumerate(interactions):
+                                    self.interaction_random[response][gf][interaction_name] = {}
+                                    self.interaction_random_summary[response][gf][interaction_name] = {}
+                                    for k, response_param in enumerate(response_params):
+                                        _p = interaction_random[:, :, k]
+                                        _p_summary = interaction_random_summary[:, :, k]
+                                        if self.standardize_response and \
+                                                self.is_real(response) and \
+                                                response_param in ['mu', 'sigma']:
+                                            _p = _p * self.Y_train_sds[response]
+                                            _p_summary = _p_summary * self.Y_train_sds[response]
+                                        dim_names = self._expand_param_name_by_dim(response, response_param)
+                                        for l, dim_name in enumerate(dim_names):
+                                            val = _p[:, j, l]
+                                            val_summary = _p_summary[:, j, l]
+                                            tf.summary.histogram(
+                                                'by_%s/interaction/%s/%s_%s' % (
+                                                    sn(gf),
+                                                    sn(interaction_name),
+                                                    sn(response),
+                                                    sn(dim_name)
+                                                ),
+                                                val_summary,
+                                                collections=['random']
+                                            )
+                                            self.interaction_random[response][gf][interaction_name][dim_name] = val
+                                            self.interaction_random_summary[response][gf][interaction_name][dim_name] = val_summary
 
                                 interaction_random = self._scatter_along_axis(
                                     interaction_ix,
@@ -1384,27 +1466,8 @@ class CDR(Model):
                                     axis=1
                                 )
 
-                                self.interaction_random[response][gf] = interaction_random
-                                self.interaction_random_summary[response][gf] = interaction_random_summary
-                                
                                 interaction = interaction[None, ...] + tf.gather(interaction_random, self.Y_gf[:, i], axis=0)
                                 interaction_summary = interaction_summary[None, ...] + tf.gather(interaction_random_summary, self.Y_gf[:, i], axis=0)
-
-                                if self.log_random:
-                                    for j, response_param in enumerate(response_params):
-                                        for k, interaction_name in enumerate(self.interaction_names):
-                                            dim_names = self._expand_param_name_by_dim(response, response_param)
-                                            for l, dim_name in enumerate(dim_names):
-                                                tf.summary.histogram(
-                                                    'by_%s/interaction/%s/%s_%s' % (
-                                                        sn(gf),
-                                                        sn(interaction_name),
-                                                        sn(response),
-                                                        sn(dim_name)
-                                                    ),
-                                                    interaction_random_summary[:, k, j, l],
-                                                    collections=['random']
-                                                )
 
                         self.interaction[response] = interaction
                         self.interaction_summary[response] = interaction_summary
@@ -1438,7 +1501,7 @@ class CDR(Model):
                         trainable = self.atomic_irf_param_trainable_by_family[family]
 
                         for irf_param_name in Formula.irf_params(family):
-                            response_params = self.predictive_distribution_config[response]['params']
+                            response_params = self.get_response_params(response)
                             if not self.use_distributional_regression:
                                 response_params = response_params[:1]
                             nparam_response = len(response_params)  # number of params of predictive dist, not IRF
@@ -1457,6 +1520,13 @@ class CDR(Model):
                                 irf_param_means[trainable_ix][..., None, None],
                                 dtype=self.FLOAT_TF
                             )
+
+                            self._regularize(
+                                self.irf_params_fixed_base[response][family][irf_param_name],
+                                irf_param_trainable_means,
+                                regtype='irf', var_name='%s_%s' % (irf_param_name, sn(response))
+                            )
+
                             irf_param_untrainable_means = tf.constant(
                                 irf_param_means[untrainable_ix][..., None, None],
                                 dtype=self.FLOAT_TF
@@ -1495,17 +1565,20 @@ class CDR(Model):
                                 irf_param_untrainable
                             )
 
-                            self._regularize(
-                                irf_param_fixed,
-                                irf_param_trainable_means,
-                                regtype='irf', var_name='%s_%s' % (irf_param_name, sn(response))
-                            )
-
                             # Add batch dimension
                             irf_param = irf_param_fixed[None, ...]
                             irf_param_summary = irf_param_fixed_summary[None, ...]
 
-                            for i, id in enumerate(irf_ids):
+                            for i, irf_id in enumerate(irf_ids):
+                                if irf_id not in self.irf_params_fixed[response]:
+                                    self.irf_params_fixed[response][irf_id] = {}
+                                if irf_param_name not in self.irf_params_fixed[response][irf_id]:
+                                    self.irf_params_fixed[response][irf_id][irf_param_name] = {}
+                                if irf_id not in self.irf_params_fixed_summary[response]:
+                                    self.irf_params_fixed_summary[response][irf_id] = {}
+                                if irf_param_name not in self.irf_params_fixed_summary[response][irf_id]:
+                                    self.irf_params_fixed_summary[response][irf_id][irf_param_name] = {}
+
                                 _p = irf_param_fixed[i]
                                 _p_summary = irf_param_fixed_summary[i]
                                 if irf_param_lb is not None and irf_param_ub is None:
@@ -1518,27 +1591,23 @@ class CDR(Model):
                                     _p = self._sigmoid(_p, a=irf_param_lb, b=irf_param_ub) * (1 - 2 * self.epsilon) + self.epsilon
                                     _p_summary = self._sigmoid(_p_summary, a=irf_param_lb, b=irf_param_ub) * (1 - 2 * self.epsilon) + self.epsilon
 
-                                if id not in self.irf_params_fixed[response]:
-                                    self.irf_params_fixed[response][id] = {}
-                                if id not in self.irf_params_fixed_summary[response]:
-                                    self.irf_params_fixed_summary[response][id] = {}
-                                if irf_param_name in trainable[id]:
-                                    self.irf_params_fixed[response][id][irf_param_name] = _p
-                                    self.irf_params_fixed_summary[response][id][irf_param_name] = _p_summary
-
                                 for j, response_param in enumerate(response_params):
                                     dim_names = self._expand_param_name_by_dim(response, response_param)
                                     for k, dim_name in enumerate(dim_names):
+                                        val = _p[j, k]
+                                        val_summary = _p_summary[j, k]
                                         tf.summary.scalar(
                                             '%s/%s/%s_%s' % (
                                                 irf_param_name,
-                                                sn(id),
+                                                sn(irf_id),
                                                 sn(response),
                                                 sn(dim_name)
                                             ),
-                                            _p_summary[j, k],
+                                            val_summary,
                                             collections=['params']
                                         )
+                                        self.irf_params_fixed[response][irf_id][irf_param_name][dim_name] = val
+                                        self.irf_params_fixed_summary[response][irf_id][irf_param_name][dim_name] = val_summary
 
                             for i, gf in enumerate(self.rangf):
                                 if gf in self.irf_by_rangf:
@@ -1554,7 +1623,49 @@ class CDR(Model):
                                         irf_param_random_summary_mean = tf.reduce_mean(irf_param_random_summary, axis=0, keepdims=True)
                                         irf_param_random_summary -= irf_param_random_summary_mean
 
-                                        self._regularize(irf_param_random, regtype='ranef', var_name='%s_%s_by_%s' % (irf_param_name, sn(response), sn(gf)))
+                                        self._regularize(
+                                            irf_param_random,
+                                            regtype='ranef',
+                                            var_name='%s_%s_by_%s' % (irf_param_name, sn(response), sn(gf))
+                                        )
+
+                                        for j, irf_id in enumerate(irf_ids_ran):
+                                            if irf_id in irf_ids_ran:
+                                                if response not in self.irf_params_random:
+                                                    self.irf_params_random[response] = {}
+                                                if gf not in self.irf_params_random[response]:
+                                                    self.irf_params_random[response][gf] = {}
+                                                if irf_id not in self.irf_params_random[response][gf]:
+                                                    self.irf_params_random[response][gf][irf_id] = {}
+                                                if irf_param_name not in self.irf_params_random[response][gf][irf_id]:
+                                                    self.irf_params_random[response][gf][irf_id][irf_param_name] = {}
+                                                if response not in self.irf_params_random_summary:
+                                                    self.irf_params_random_summary[response] = {}
+                                                if gf not in self.irf_params_random_summary[response]:
+                                                    self.irf_params_random_summary[response][gf] = {}
+                                                if irf_id not in self.irf_params_random_summary[response][gf]:
+                                                    self.irf_params_random_summary[response][gf][irf_id] = {}
+                                                if irf_param_name not in self.irf_params_random_summary[response][gf][irf_id]:
+                                                    self.irf_params_random_summary[response][gf][irf_id][irf_param_name] = {}
+
+                                                for k, response_param in enumerate(response_params):
+                                                    dim_names = self._expand_param_name_by_dim(response, response_param)
+                                                    for l, dim_name in enumerate(dim_names):
+                                                        val = irf_param_random[:, j, k, l]
+                                                        val_summary = irf_param_random_summary[:, j, k, l]
+                                                        tf.summary.histogram(
+                                                            'by_%s/%s/%s/%s_%s' % (
+                                                                sn(gf),
+                                                                sn(irf_id),
+                                                                irf_param_name,
+                                                                sn(dim_name),
+                                                                sn(response)
+                                                            ),
+                                                            val_summary,
+                                                            collections=['random']
+                                                        )
+                                                        self.irf_params_random[response][gf][irf_id][irf_param_name][dim_name] = val
+                                                        self.irf_params_random_summary[response][gf][irf_id][irf_param_name][dim_name] = val_summary
 
                                         irf_param_random = self._scatter_along_axis(
                                             irfs_ix,
@@ -1580,40 +1691,6 @@ class CDR(Model):
                                         irf_param = irf_param + tf.gather(irf_param_random, self.Y_gf[:, i], axis=0)
                                         irf_param_summary = irf_param_summary + tf.gather(irf_param_random_summary, self.Y_gf[:, i], axis=0)
 
-                                        if self.log_random:
-                                            for j, response_param in enumerate(response_params):
-                                                for k, irf_name in enumerate(irf_ids):
-                                                    dim_names = self._expand_param_name_by_dim(response, response_param)
-                                                    for l, dim_name in enumerate(dim_names):
-                                                        tf.summary.histogram(
-                                                            'by_%s/%s/%s/%s_%s' % (
-                                                                sn(gf),
-                                                                sn(irf_name),
-                                                                irf_param_name,
-                                                                sn(dim_name),
-                                                                sn(response)
-                                                            ),
-                                                            irf_param_random_summary[:, k, j, l],
-                                                            collections=['random']
-                                                        )
-
-                                        for j, id in enumerate(irf_ids):
-                                            if id in irf_ids_ran:
-                                                if response not in self.irf_params_random:
-                                                    self.irf_params_random[response] = {}
-                                                if gf not in self.irf_params_random[response]:
-                                                    self.irf_params_random[response][gf] = {}
-                                                if id not in self.irf_params_random[response][gf]:
-                                                    self.irf_params_random[response][gf][id] = {}
-                                                if response not in self.irf_params_random_summary:
-                                                    self.irf_params_random_summary[response] = {}
-                                                if gf not in self.irf_params_random_summary[response]:
-                                                    self.irf_params_random_summary[response][gf] = {}
-                                                if id not in self.irf_params_random_summary[response][gf]:
-                                                    self.irf_params_random_summary[response][gf][id] = {}
-                                                self.irf_params_random[response][gf][id][irf_param_name] = irf_param_random[:, j]
-                                                self.irf_params_random_summary[response][gf][id][irf_param_name] = irf_param_random_summary[:, j]
-
                             if irf_param_lb is not None and irf_param_ub is None:
                                 irf_param = irf_param_lb + self.constraint_fn(irf_param) + self.epsilon
                                 irf_param_summary = irf_param_lb + self.constraint_fn(irf_param_summary) + self.epsilon
@@ -1624,102 +1701,102 @@ class CDR(Model):
                                 irf_param = self._sigmoid(irf_param, a=irf_param_lb, b=irf_param_ub) * (1 - 2 * self.epsilon) + self.epsilon
                                 irf_param_summary = self._sigmoid(irf_param_summary, a=irf_param_lb, b=irf_param_ub) * (1 - 2 * self.epsilon) + self.epsilon
 
-                            for j, id in enumerate(irf_ids):
-                                if irf_param_name in trainable[id]:
-                                    if id not in self.irf_params[response]:
-                                        self.irf_params[response][id] = {}
-                                    if id not in self.irf_params_summary[response]:
-                                        self.irf_params_summary[response][id] = {}
+                            for j, irf_id in enumerate(irf_ids):
+                                if irf_param_name in trainable[irf_id]:
+                                    if irf_id not in self.irf_params[response]:
+                                        self.irf_params[response][irf_id] = {}
+                                    if irf_id not in self.irf_params_summary[response]:
+                                        self.irf_params_summary[response][irf_id] = {}
                                     # id is -3 dimension
-                                    self.irf_params[response][id][irf_param_name] = irf_param[..., j, :, :]
-                                    self.irf_params_summary[response][id][irf_param_name] = irf_param_summary[..., j, :, :]
+                                    self.irf_params[response][irf_id][irf_param_name] = irf_param[..., j, :, :]
+                                    self.irf_params_summary[response][irf_id][irf_param_name] = irf_param_summary[..., j, :, :]
 
     def _initialize_parameter_tables(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 super(CDR, self)._initialize_parameter_tables()
 
-                for i, response in enumerate(self.response_names):
-                    response_params = self.predictive_distribution_config[response]['params']
-                    if not self.use_distributional_regression:
-                        response_params = response_params[:1]
-                    for j, response_param in enumerate(response_params):
-                        dim_names = self._expand_param_name_by_dim(response, response_param)
-                        for k, dim_name in enumerate(dim_names):
-                            ix = names2ix(self.fixed_coef_names, self.coef_names)
-                            for l, coef_name in enumerate(self.fixed_coef_names):
-                                coef_name_str = 'coefficient_' + coef_name
-                                self.parameter_table_fixed_types.append(coef_name_str)
+                # Fixed
+                for response in self.coefficient_fixed:
+                    for coef_name in self.coefficient_fixed[response]:
+                        coef_name_str = 'coefficient_' + coef_name
+                        for dim_name in self.coefficient_fixed[response][coef_name]:
+                            self.parameter_table_fixed_types.append(coef_name_str)
+                            self.parameter_table_fixed_responses.append(response)
+                            self.parameter_table_fixed_response_params.append(dim_name)
+                            self.parameter_table_fixed_values.append(
+                                self.coefficient_fixed[response][coef_name][dim_name]
+                            )
+                for response in self.interaction_fixed:
+                    for interaction_name in self.interaction_fixed[response]:
+                        interaction_name_str = 'interaction_' + interaction_name
+                        for dim_name in self.interaction_fixed[response][interaction_name]:
+                            self.parameter_table_fixed_types.append(interaction_name_str)
+                            self.parameter_table_fixed_responses.append(response)
+                            self.parameter_table_fixed_response_params.append(dim_name)
+                            self.parameter_table_fixed_values.append(
+                                self.interaction_fixed[response][interaction_name][dim_name]
+                            )
+                for response in self.irf_params_fixed:
+                    for irf_id in self.irf_params_fixed[response]:
+                        for irf_param in self.irf_params_fixed[response][irf_id]:
+                            irf_str = irf_param + '_' + irf_id
+                            for dim_name in self.irf_params_fixed[response][irf_id][irf_param]:
+                                self.parameter_table_fixed_types.append(irf_str)
                                 self.parameter_table_fixed_responses.append(response)
                                 self.parameter_table_fixed_response_params.append(dim_name)
                                 self.parameter_table_fixed_values.append(
-                                    self.coefficient_fixed[response][ix[l], j, k]
+                                    self.irf_params_fixed[response][irf_id][irf_param][dim_name]
                                 )
-                            if len(self.fixed_interaction_names) > 0:
-                                ix = names2ix(self.fixed_interaction_names, self.interaction_names)
-                                for l, interaction_name in enumerate(self.fixed_interaction_names):
-                                    interaction_name_str = 'interaction_' + interaction_name
-                                    self.parameter_table_fixed_types.append(interaction_name_str)
-                                    self.parameter_table_fixed_responses.append(response)
-                                    self.parameter_table_fixed_response_params.append(dim_name)
-                                    self.parameter_table_fixed_values.append(
-                                        self.interaction_fixed[response][ix[l], j, k]
-                                    )
-                            for irf_id in self.irf_params_fixed[response]:
-                                family = self.atomic_irf_family_by_name[irf_id]
-                                for irf_param in self.atomic_irf_param_trainable_by_family[family][irf_id]:
-                                    self.parameter_table_fixed_types.append(irf_param + '_' + irf_id)
-                                    self.parameter_table_fixed_responses.append(response)
-                                    self.parameter_table_fixed_response_params.append(dim_name)
-                                    self.parameter_table_fixed_values.append(
-                                        self.irf_params_fixed[response][irf_id][irf_param][j, k]
-                                    )
 
-                            if len(self.rangf) > 0:
-                                for r, gf in enumerate(self.rangf):
-                                    levels = sorted(self.rangf_map_ix_2_levelname[r][:-1])
-                                    if gf in self.coefficient_random:
-                                        coef_names = self.coef_by_rangf.get(gf, [])
-                                        for coef_name in coef_names:
-                                            ix = self.coef_names.index(coef_name)
-                                            coef_name_str = 'coefficient_' + coef_name
-                                            for l, level in enumerate(levels):
-                                                self.parameter_table_random_types.append(coef_name_str)
-                                                self.parameter_table_random_responses.append(response)
-                                                self.parameter_table_random_response_params.append(dim_name)
-                                                self.parameter_table_random_rangf.append(gf)
-                                                self.parameter_table_random_rangf_levels.append(level)
-                                                self.parameter_table_random_values.append(
-                                                    self.coefficient_random[response][gf][l, ix, j, k]
-                                                )
-                                    if len(self.interaction_names) > 0:
-                                        if gf in self.interaction_random:
-                                            interaction_names = self.interaction_by_rangf.get(gf, [])
-                                            for interaction_name in interaction_names:
-                                                ix = self.interaction_names.index(interaction_name)
-                                                interaction_name_str = 'interaction_' + interaction_name
-                                                for l, level in enumerate(levels):
-                                                    self.parameter_table_random_types.append(interaction_name_str)
-                                                    self.parameter_table_random_responses.append(response)
-                                                    self.parameter_table_random_response_params.append(dim_name)
-                                                    self.parameter_table_random_rangf.append(gf)
-                                                    self.parameter_table_random_rangf_levels.append(level)
-                                                    self.parameter_table_random_values.append(
-                                                        self.interaction_random[response][gf][l, ix, j, k]
-                                                    )
-                                    if gf in self.irf_params_random:
-                                        for irf_id in self.irf_params_random[response][gf]:
-                                            family = self.atomic_irf_family_by_name[irf_id]
-                                            for irf_param in self.atomic_irf_param_trainable_by_family[family][irf_id]:
-                                                for l, level in enumerate(levels):
-                                                    self.parameter_table_random_types.append(irf_param + '_' + irf_id)
-                                                    self.parameter_table_random_responses.append(response)
-                                                    self.parameter_table_random_response_params.append(dim_name)
-                                                    self.parameter_table_random_rangf.append(gf)
-                                                    self.parameter_table_random_rangf_levels.append(level)
-                                                    self.parameter_table_random_values.append(
-                                                        self.irf_params_random[response][gf][irf_id][irf_param][l, j, k]
-                                                    )
+                # Random
+                for response in self.coefficient_random:
+                    for r, gf in enumerate(self.rangf):
+                        if gf in self.coefficient_random[response]:
+                            levels = sorted(self.rangf_map_ix_2_levelname[r][:-1])
+                            for coef_name in self.coefficient_random[response][gf]:
+                                coef_name_str = 'coefficient_' + coef_name
+                                for dim_name in self.coefficient_random[response][gf][coef_name]:
+                                    for l, level in enumerate(levels):
+                                        self.parameter_table_random_types.append(coef_name_str)
+                                        self.parameter_table_random_responses.append(response)
+                                        self.parameter_table_random_response_params.append(dim_name)
+                                        self.parameter_table_random_rangf.append(gf)
+                                        self.parameter_table_random_rangf_levels.append(level)
+                                        self.parameter_table_random_values.append(
+                                            self.coefficient_random[response][gf][coef_name][dim_name][l]
+                                        )
+                for response in self.interaction_random:
+                    for r, gf in enumerate(self.rangf):
+                        if gf in self.interaction_random[response]:
+                            levels = sorted(self.rangf_map_ix_2_levelname[r][:-1])
+                            for interaction_name in self.interaction_random[response][gf]:
+                                interaction_name_str = 'interaction_' + interaction_name
+                                for dim_name in self.interaction_random[response][gf][interaction_name]:
+                                    for l, level in enumerate(levels):
+                                        self.parameter_table_random_types.append(interaction_name_str)
+                                        self.parameter_table_random_responses.append(response)
+                                        self.parameter_table_random_response_params.append(dim_name)
+                                        self.parameter_table_random_rangf.append(gf)
+                                        self.parameter_table_random_rangf_levels.append(level)
+                                        self.parameter_table_random_values.append(
+                                            self.interaction_random[response][gf][interaction_name][dim_name][l]
+                                        )
+                for response in self.irf_params_fixed:
+                    for r, gf in enumerate(self.rangf):
+                        if gf in self.irf_params_fixed[response]:
+                            levels = sorted(self.rangf_map_ix_2_levelname[r][:-1])
+                            for irf_id in self.irf_params_fixed[response]:
+                                for irf_param in self.irf_params_fixed[response][irf_id]:
+                                    irf_str = irf_param + '_' + irf_id
+                                    for dim_name in self.irf_params_fixed[response][irf_id][irf_param]:
+                                        for l, level in enumerate(levels):
+                                            self.parameter_table_fixed_types.append(irf_str)
+                                            self.parameter_table_fixed_responses.append(response)
+                                            self.parameter_table_fixed_response_params.append(dim_name)
+                                            self.parameter_table_fixed_values.append(
+                                                self.irf_params_random[response][gf][irf_id][irf_param][dim_name][l]
+                                            )
 
     def _initialize_impulses(self):
         with self.sess.as_default():
@@ -1950,7 +2027,7 @@ class CDR(Model):
 
                         if t.p.family == 'DiracDelta':
                             if self.use_distributional_regression:
-                                nparam = len(self.predictive_distribution_config['params'])
+                                nparam = self.get_response_nparam(response)
                             else:
                                 nparam = 1
                             ndim = self.response_n_dim[response]
@@ -2043,14 +2120,14 @@ class CDR(Model):
     #
     ######################################################
 
-    def initialize_coefficient(self, response_name, coef_ids=None, ran_gf=None):
+    def initialize_coefficient(self, response, coef_ids=None, ran_gf=None):
         """
         Add coefficients for a given response variable.
         Must be called for each response variable.
         This method should only be called at model initialization.
         Correct model behavior is not guaranteed if called at any other time.
 
-        :param response_name: ``str``: name of response variable
+        :param response: ``str``: name of response variable
         :param coef_ids: ``list`` of ``str``: List of coefficient IDs
         :param ran_gf: ``str`` or ``None``: Name of random grouping factor for random coefficient (if ``None``, constructs a fixed coefficient)
         :return: 2-tuple of ``Tensor`` ``(coefficient, coefficient_summary)``; ``coefficient`` is the coefficient for use by the model. ``coefficient_summary`` is an identically-shaped representation of the current coefficient values for logging and plotting (can be identical to ``coefficient``). For fixed coefficients, should return a vector of ``len(coef_ids)`` trainable weights. For random coefficients, should return batch-length matrix of trainable weights with ``len(coef_ids)`` columns for each input in the batch. Weights should be initialized around 0.
@@ -2060,10 +2137,10 @@ class CDR(Model):
             coef_ids = self.coef_names
 
         if self.use_distributional_regression:
-            nparam = len(self.predictive_distribution_config[response_name]['params'])
+            nparam = self.get_response_nparam(response)
         else:
             nparam = 1
-        ndim = self.response_n_dim[response_name]
+        ndim = self.response_n_dim[response]
         ncoef = len(coef_ids)
 
         with self.sess.as_default():
@@ -2071,14 +2148,14 @@ class CDR(Model):
                 if ran_gf is None:
                     coefficient = tf.Variable(
                         tf.zeros([ncoef, nparam, ndim], dtype=self.FLOAT_TF),
-                        name='coefficient_%s' % sn(response_name)
+                        name='coefficient_%s' % sn(response)
                     )
                     coefficient_summary = coefficient
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     coefficient = tf.Variable(
                         tf.zeros([rangf_n_levels, ncoef, nparam, ndim], dtype=self.FLOAT_TF),
-                        name='coefficient_%s_by_%s' % (sn(response_name), sn(ran_gf))
+                        name='coefficient_%s_by_%s' % (sn(response), sn(ran_gf))
                     )
                     coefficient_summary = coefficient
 
@@ -2086,14 +2163,14 @@ class CDR(Model):
 
                 return coefficient, coefficient_summary
 
-    def initialize_interaction(self, response_name, interaction_ids=None, ran_gf=None):
+    def initialize_interaction(self, response, interaction_ids=None, ran_gf=None):
         """
         Add (response-level) interactions for a given response variable.
         Must be called for each response variable.
         This method should only be called at model initialization.
         Correct model behavior is not guaranteed if called at any other time.
 
-        :param response_name: ``str``: name of response variable
+        :param response: ``str``: name of response variable
         :param coef_ids: ``list`` of ``str``: List of interaction IDs
         :param ran_gf: ``str`` or ``None``: Name of random grouping factor for random interaction (if ``None``, constructs a fixed interaction)
         :return: 2-tuple of ``Tensor`` ``(interaction, interaction_summary)``; ``interaction`` is the interaction for use by the model. ``interaction_summary`` is an identically-shaped representation of the current interaction values for logging and plotting (can be identical to ``interaction``). For fixed interactions, should return a vector of ``len(interaction_ids)`` trainable weights. For random interactions, should return batch-length matrix of trainable weights with ``len(interaction_ids)`` columns for each input in the batch. Weights should be initialized around 0.
@@ -2103,10 +2180,10 @@ class CDR(Model):
             interaction_ids = self.interaction_names
 
         if self.use_distributional_regression:
-            nparam = len(self.predictive_distribution_config[response_name]['params'])
+            nparam = self.get_response_nparam(response)
         else:
             nparam = 1
-        ndim = self.response_n_dim[response_name]
+        ndim = self.response_n_dim[response]
         ninter = len(interaction_ids)
 
         with self.sess.as_default():
@@ -2114,14 +2191,14 @@ class CDR(Model):
                 if ran_gf is None:
                     interaction = tf.Variable(
                         tf.zeros([ninter, nparam, ndim], dtype=self.FLOAT_TF),
-                        name='interaction_%s' % sn(response_name)
+                        name='interaction_%s' % sn(response)
                     )
                     interaction_summary = interaction
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     interaction = tf.Variable(
                         tf.zeros([rangf_n_levels, ninter, nparam, ndim], dtype=self.FLOAT_TF),
-                        name='interaction_%s_by_%s' % (sn(response_name), sn(ran_gf))
+                        name='interaction_%s_by_%s' % (sn(response), sn(ran_gf))
                     )
                     interaction_summary = interaction
 
@@ -2129,14 +2206,14 @@ class CDR(Model):
 
                 return interaction, interaction_summary
 
-    def initialize_irf_param(self, response_name, family, param_name, ran_gf=None):
+    def initialize_irf_param(self, response, family, param_name, ran_gf=None):
         """
         Add IRF parameters in the unconstrained space for a given response variable.
         CDR will apply appropriate constraint transformations as needed.
         This method should only be called at model initialization.
         Correct model behavior is not guaranteed if called at any other time.
 
-        :param response_name: ``str``: name of response variable
+        :param response: ``str``: name of response variable
         :param family: ``str``; Name of IRF kernel family (e.g. ``Normal``)
         :param param_name: ``str``; Name of parameter (e.g. ``"alpha"``)
         :param ran_gf: ``str`` or ``None``: Name of random grouping factor for random IRF param (if ``None``, constructs a fixed coefficient)
@@ -2150,10 +2227,10 @@ class CDR(Model):
         param_trainable = self.atomic_irf_param_trainable_by_family[family]
 
         if self.use_distributional_regression:
-            nparam = len(self.predictive_distribution_config[response_name]['params']) # number of params of predictive dist, not IRF
+            response_nparam = self.get_response_nparam(response) # number of params of predictive dist, not IRF
         else:
-            nparam = 1
-        ndim = self.response_n_dim[response_name]
+            response_nparam = 1
+        response_ndim = self.response_n_dim[response]
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -2163,8 +2240,8 @@ class CDR(Model):
 
                     if nirf:
                         param = tf.Variable(
-                            tf.ones([nirf, nparam, ndim], dtype=self.FLOAT_TF) * tf.constant(mean[..., None, None], dtype=self.FLOAT_TF),
-                            name=sn('%s_%s_%s' % (param_name, '-'.join(trainable_ids), sn(response_name)))
+                            tf.ones([nirf, response_nparam, response_ndim], dtype=self.FLOAT_TF) * tf.constant(mean[..., None, None], dtype=self.FLOAT_TF),
+                            name=sn('%s_%s_%s' % (param_name, '-'.join(trainable_ids), sn(response)))
                         )
                         param_summary = param
                     else:
@@ -2177,8 +2254,8 @@ class CDR(Model):
 
                     if nirf:
                         param = tf.Variable(
-                            tf.zeros([rangf_n_levels, nirf, nparam, ndim], dtype=self.FLOAT_TF),
-                            name=sn('%s_%s_%s_by_%s' % (param_name, '-'.join(trainable_ids), sn(response_name), sn(ran_gf)))
+                            tf.zeros([rangf_n_levels, nirf, response_nparam, response_ndim], dtype=self.FLOAT_TF),
+                            name=sn('%s_%s_%s_by_%s' % (param_name, '-'.join(trainable_ids), sn(response), sn(ran_gf)))
                         )
                         param_summary = param
                     else:

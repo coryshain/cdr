@@ -867,8 +867,7 @@ class Model(object):
                     name='Y_mask'
                 )
 
-                # Compute tensor of temporal offsets with shape (?, history_length, n_impulse, n_response)
-
+                # Compute tensor of temporal offsets with shape
                 # shape (B,)
                 _Y_time = self.Y_time
                 # shape (B, 1, 1)
@@ -925,7 +924,7 @@ class Model(object):
                 self.errors = {}
                 self.n_errors = {}
                 for response in self.response_names:
-                    if self.predictive_distribution_config[response]['support'] == 'real':
+                    if self.is_real(response):
                         self.errors[response] = tf.placeholder(
                             self.FLOAT_TF,
                             shape=[None],
@@ -1042,7 +1041,7 @@ class Model(object):
                             self.training_loglik_in[response][ix]
                         ))
 
-                    if self.predictive_distribution_config[response]['support'] == 'real':
+                    if self.is_real(response):
                         self.training_mse_in[response] = []
                         self.training_mse[response] = []
                         self.set_training_mse[response] = []
@@ -1070,9 +1069,12 @@ class Model(object):
                             ))
 
                             # % variance explained
+                            full_variance = self.Y_train_sds[response] ** 2
+                            if self.response_n_dim[response] == 1:
+                                full_variance = np.squeeze(full_variance, axis=-1)
                             self.training_percent_variance_explained[response].append(tf.maximum(
                                 0.,
-                                (1. - self.training_mse[response][ix] / (self.Y_train_sds[response] ** 2)) * 100.
+                                (1. - self.training_mse[response][ix] / full_variance) * 100.
                             ))
 
                             # rho
@@ -1142,7 +1144,7 @@ class Model(object):
             with self.sess.graph.as_default():
                 out = []
                 ndim = self.response_n_dim[response_name]
-                for param in self.predictive_distribution_config[response_name]['params']:
+                for param in self.get_response_params(response_name):
                     if param == 'mu':
                         if has_intercept and not self.standardize_response:
                             _out = self.Y_train_means[response_name][None, ...]
@@ -1215,56 +1217,46 @@ class Model(object):
                     self.intercept_random_summary[response] = {}
 
                     # Fixed
-                    response_params = self.predictive_distribution_config[response]['params']
+                    response_params = self.get_response_params(response)
                     nparam = len(response_params)
                     ndim = self.response_n_dim[response]
 
                     intercept = self.intercept_fixed_base[response]
                     intercept_summary = self.intercept_fixed_base_summary[response]
+                    self._regularize(
+                        intercept,
+                        center=self.intercept_init[response],
+                        regtype='intercept',
+                        var_name='intercept_%s' % sn(response)
+                    )
 
-                    if self.has_intercept[None]:
-                        for i, response_param in enumerate(response_params):
-                            dim_names = self._expand_param_name_by_dim(response, response_param)
-                            for j, dim_name in enumerate(dim_names):
+                    for i, response_param in enumerate(response_params):
+                        dim_names = self._expand_param_name_by_dim(response, response_param)
+                        _p = intercept[i]
+                        _p_summary = intercept_summary[i]
+                        if self.standardize_response and self.is_real(response):
+                            if response_param == 'mu':
+                                _p = _p * self.Y_train_sds[response] + self.Y_train_means[response]
+                                _p_summary = _p_summary * self.Y_train_sds[response] + self.Y_train_means[response]
+                            elif response_param == 'sigma':
+                                _p = self.constraint_fn(_p) + self.epsilon
+                                _p = _p * self.Y_train_sds[response]
+                                _p_summary = self.constraint_fn(_p_summary) + self.epsilon
+                                _p_summary = _p_summary * self.Y_train_sds[response]
+                        if response_param == 'tailweight':
+                            _p = self.constraint_fn(_p) + self.epsilon
+                            _p_summary = self.constraint_fn(_p_summary) + self.epsilon
+                        for j, dim_name in enumerate(dim_names):
+                            val = _p[j]
+                            val_summary = _p_summary[j]
+                            if self.has_intercept[None]:
                                 tf.summary.scalar(
                                     'intercept/%s_%s' % (sn(response), sn(dim_name)),
-                                    intercept_summary[i, j],
+                                    val_summary,
                                     collections=['params']
                                 )
-                        self._regularize(intercept, regtype='intercept', var_name='intercept_%s' % sn(response))
-
-                    for j, response_param in enumerate(response_params):
-                        val = intercept[j]
-                        val_summary = intercept_summary[j]
-                        if self.standardize_response and self.predictive_distribution_config[response]['support'] == 'real':
-                            if response_param == 'mu':
-                                val = tf.cond(
-                                    self.training,
-                                    lambda: val,
-                                    lambda: val * self.Y_train_sds[response] + self.Y_train_means[response]
-                                )
-                                val_summary = tf.cond(
-                                    self.training,
-                                    lambda: val_summary,
-                                    lambda: val_summary * self.Y_train_sds[response] + self.Y_train_means[response]
-                                )
-                            elif response_param == 'sigma':
-                                val = tf.cond(
-                                    self.training,
-                                    lambda: val,
-                                    lambda: val * self.Y_train_sds[response]
-                                )
-                                val_summary = tf.cond(
-                                    self.training,
-                                    lambda: val_summary,
-                                    lambda: val_summary * self.Y_train_sds[response]
-                                )
-                        if response_param in ['sigma', 'tailweight']:
-                            val = self.constraint_fn(val) + self.epsilon
-                            val_summary = self.constraint_fn(val_summary) + self.epsilon
-
-                        self.intercept_fixed[response][response_param] = val
-                        self.intercept_fixed_summary[response][response_param] = val
+                            self.intercept_fixed[response][dim_name] = val
+                            self.intercept_fixed_summary[response][dim_name] = val_summary
 
                     # Random
                     for i, gf in enumerate(self.rangf):
@@ -1282,7 +1274,37 @@ class Model(object):
                             intercept_random -= intercept_random_means
                             intercept_random_summary -= intercept_random_summary_means
 
-                            self._regularize(intercept_random, regtype='ranef', var_name='intercept_%s_by_%s' % (sn(response), sn(gf)))
+                            self._regularize(
+                                intercept_random,
+                                regtype='ranef',
+                                var_name='intercept_%s_by_%s' % (sn(response), sn(gf))
+                            )
+
+                            for j, response_param in enumerate(response_params):
+                                if j == 0 or self.use_distributional_regression:
+                                    _p = intercept_random[:, j]
+                                    _p_summary = intercept_random_summary[:, j]
+                                    if self.standardize_response and self.is_real(response):
+                                        if response_param == 'mu':
+                                            _p = _p * self.Y_train_sds[response] + self.Y_train_means[response]
+                                            _p_summary = _p_summary * self.Y_train_sds[response] + self.Y_train_means[response]
+                                        elif response_param == 'sigma':
+                                            _p = self.constraint_fn(_p) + self.epsilon
+                                            _p = _p * self.Y_train_sds[response]
+                                            _p_summary = self.constraint_fn(_p_summary) + self.epsilon
+                                            _p_summary = _p_summary * self.Y_train_sds[response]
+                                    dim_names = self._expand_param_name_by_dim(response, response_param)
+                                    for k, dim_name in enumerate(dim_names):
+                                        val = _p[:, k]
+                                        val_summary = _p_summary[:, k]
+                                        if self.log_random:
+                                            tf.summary.histogram(
+                                                'by_%s/intercept/%s_%s' % (sn(gf), sn(response), sn(dim_name)),
+                                                val_summary,
+                                                collections=['random']
+                                            )
+                                        self.intercept_random[response][gf][dim_name] = val
+                                        self.intercept_random_summary[response][gf][dim_name] = val_summary
 
                             if not self.use_distributional_regression:
                                 # Pad out any unmodeled params of predictive distribution
@@ -1312,22 +1334,8 @@ class Model(object):
                                 axis=0
                             )
 
-                            for j, response_param in enumerate(self.predictive_distribution_config[response]['params']):
-                                self.intercept_random[response][gf][response_param] = intercept_random[:, j]
-                                self.intercept_random_summary[response][gf][response_param] = intercept_random_summary[:, j]
-
                             intercept = intercept[None, ...] + tf.gather(intercept_random, self.Y_gf[:, i])
                             intercept_summary = intercept_summary[None, ...] + tf.gather(intercept_random_summary, self.Y_gf[:, i])
-
-                            if self.log_random:
-                                for j, response_param in enumerate(self.predictive_distribution_config[response]['params']):
-                                    dim_names = self._expand_param_name_by_dim(response, response_param)
-                                    for k, dim_name in enumerate(dim_names):
-                                        tf.summary.histogram(
-                                            'by_%s/intercept/%s_%s' % (sn(gf), sn(response), sn(dim_name)),
-                                            intercept_random_summary[:, j, k],
-                                            collections=['random']
-                                        )
 
                     self.intercept[response] = intercept
                     self.intercept_summary[response] = intercept_summary
@@ -1354,8 +1362,8 @@ class Model(object):
                     self.error_distribution_theoretical_cdf[response] = {}
                     ndim = self.response_n_dim[response]
 
-                    pred_dist_fn = self.predictive_distribution_config[response]['dist']
-                    response_param_names = self.predictive_distribution_config[response]['params']
+                    pred_dist_fn = self.get_response_dist(response)
+                    response_param_names = self.get_response_params(response)
                     response_params = self.intercept[response]
                     if self.summed_interactions:
                         response_params = response_params + self.summed_interactions[response]
@@ -1373,38 +1381,56 @@ class Model(object):
                         )
 
                     for j, response_param_name in enumerate(response_param_names):
-                        param_delta = output[:, j, :]
-                        if ndim == 1:
-                            param_delta = tf.squeeze(param_delta, axis=-1)
-                        self.predictive_distribution_delta[response][response_param_name] = param_delta
+                        dim_names = self._expand_param_name_by_dim(response, response_param_name)
+                        for k, dim_name in enumerate(dim_names):
+                            self.predictive_distribution_delta[response][dim_name] = output[:, j, k]
 
                     response_params = response_params + output
-                    if ndim == 1:
-                        response_params = tf.squeeze(response_params, axis=-1)
                     response_params = tf.unstack(response_params, axis=1)
 
+                    # Post process response params
                     for j, response_param_name in enumerate(response_param_names):
-                        if self.standardize_response and self.predictive_distribution_config[response]['support'] == 'real':
+                        _response_param = response_params[j]
+                        if self.standardize_response and self.is_real(response):
+                            if response_param_name in ['sigma', 'tailweight']:
+                                _response_param = self.constraint_fn(_response_param) + self.epsilon
                             if response_param_name == 'mu':
-                                response_params[j] = tf.cond(
+                                _response_param = tf.cond(
                                     self.training,
-                                    lambda: response_params[j],
-                                    lambda: response_params[j] * self.Y_train_sds[response] + self.Y_train_means[response]
+                                    lambda: _response_param,
+                                    lambda: _response_param * self.Y_train_sds[response] + self.Y_train_means[response]
                                 )
                             elif response_param_name == 'sigma':
-                                response_params[j] = tf.cond(
+                                _response_param = tf.cond(
                                     self.training,
-                                    lambda: response_params[j],
-                                    lambda: response_params[j] * self.Y_train_sds[response]
+                                    lambda: _response_param,
+                                    lambda: _response_param * self.Y_train_sds[response]
                                 )
-                        if response_param_name in ['sigma', 'tailweight']:
-                            response_params[j] = self.constraint_fn(response_params[j]) + self.epsilon
+                        response_params[j] = _response_param
 
+                    # Define predictive distribution
+                    # Squeeze params if needed
+                    if ndim == 1:
+                        _response_params = [tf.squeeze(x, axis=-1) for x in response_params]
+                    else:
+                        _response_params = response_params
+                    response_dist = pred_dist_fn(*_response_params)
+                    self.predictive_distribution[response] = response_dist
+
+                    # Define EMA
                     beta = self.ema_decay
                     step = tf.cast(self.global_batch_step, self.FLOAT_TF)
-                    response_params_ema_cur = tf.stack(response_params, axis=1)
-                    if ndim == 1:
-                        response_params_ema_cur = response_params_ema_cur[..., None]
+                    response_params_ema_cur = []
+                    # These will only ever be used in training mode, so un-standardize if needed
+                    for j , response_param_name in enumerate(response_param_names):
+                        _response_param = response_params[j]
+                        if self.standardize_response and self.is_real(response):
+                            if response_param_name == 'mu':
+                                _response_param = _response_param * self.Y_train_sds[response] + self.Y_train_means[response]
+                            elif response_param_name == 'sigma':
+                                _response_param = _response_param * self.Y_train_sds[response]
+                        response_params_ema_cur.append(_response_param)
+                    response_params_ema_cur = tf.stack(response_params_ema_cur, axis=1)
                     response_params_ema_cur = tf.reduce_mean(response_params_ema_cur, axis=0)
                     self.response_params_ema[response] = tf.Variable(
                         tf.zeros((nparam, ndim)),
@@ -1432,10 +1458,8 @@ class Model(object):
                                 collections=['params']
                             )
 
-                    response_dist = pred_dist_fn(*response_params)
-                    self.predictive_distribution[response] = response_dist
-
-                    dist_name = self.predictive_distribution_config[response]['name']
+                    # Define prediction tensors
+                    dist_name = self.get_response_dist_name(response)
                     if dist_name == 'bernoulli':
                         self.prediction[response] = tf.cast(tf.round(response_params[0]), self.INT_TF)
                     elif dist_name == 'categorical':
@@ -1443,10 +1467,10 @@ class Model(object):
                     else: # Treat as continuous regression, use the first (location) parameter
                         self.prediction[response] = response_params[0]
 
+                    # Define likelihoods
                     _Y = self.Y[..., i]
                     _Y_mask = self.Y_mask[..., i]
-                    if self.standardize_response and \
-                            self.predictive_distribution_config[response]['support'] == 'real':
+                    if self.standardize_response and self.is_real(response):
                         _Yz = (_Y - self.Y_train_means[response]) / self.Y_train_sds[response]
                         _Y = tf.cond(self.training, lambda: _Yz, lambda: _Y)
 
@@ -1455,7 +1479,8 @@ class Model(object):
                     ll *= _Y_mask
                     self.ll_by_var[response] = ll
 
-                    if self.predictive_distribution_config[response]['support'] == 'real':
+                    # Define error distribution
+                    if self.is_real(response):
                         empirical_quantiles = tf.linspace(0., 1., self.n_errors[response])
                         err_dist_params = []
                         for j, response_param_name in enumerate(response_param_names):
@@ -1675,7 +1700,16 @@ class Model(object):
                 self.parameter_table_fixed_responses = []
                 self.parameter_table_fixed_response_params = []
                 self.parameter_table_fixed_values = []
-                
+                if self.has_intercept[None]:
+                    for response in self.intercept_fixed:
+                        for dim_name in self.intercept_fixed[response]:
+                            self.parameter_table_fixed_types.append('intercept')
+                            self.parameter_table_fixed_responses.append(response)
+                            self.parameter_table_fixed_response_params.append(dim_name)
+                            self.parameter_table_fixed_values.append(
+                                self.intercept_fixed[response][dim_name]
+                            )
+
                 # Random
                 self.parameter_table_random_types = []
                 self.parameter_table_random_responses = []
@@ -1683,33 +1717,21 @@ class Model(object):
                 self.parameter_table_random_rangf = []
                 self.parameter_table_random_rangf_levels = []
                 self.parameter_table_random_values = []
-                
-                for i, response in enumerate(self.response_names):
-                    response_params = self.predictive_distribution_config[response]['params']
-                    for j, response_param in enumerate(response_params):
-                        dim_names = self._expand_param_name_by_dim(response, response_param)
-                        for k, dim_name in enumerate(dim_names):
-                            if self.has_intercept[None]:
-                                self.parameter_table_fixed_types.append('intercept')
-                                self.parameter_table_fixed_responses.append(response)
-                                self.parameter_table_fixed_response_params.append(dim_name)
-                                self.parameter_table_fixed_values.append(
-                                    self.intercept_fixed[response][response_param][k]
-                                )
+                for response in self.intercept_random:
+                    for r, gf in enumerate(self.rangf):
+                        if gf in self.intercept_random[response] and self.has_intercept[gf]:
+                            levels = sorted(self.rangf_map_ix_2_levelname[r][:-1])
+                            for dim_name in self.intercept_random[response][gf]:
+                                for l, level in enumerate(levels):
+                                    self.parameter_table_random_types.append('intercept')
+                                    self.parameter_table_random_responses.append(response)
+                                    self.parameter_table_random_response_params.append(dim_name)
+                                    self.parameter_table_random_rangf.append(gf)
+                                    self.parameter_table_random_rangf_levels.append(level)
+                                    self.parameter_table_random_values.append(
+                                        self.intercept_random[response][gf][dim_name][l]
+                                    )
 
-                            if len(self.rangf) > 0:
-                                for r, gf in enumerate(self.rangf):
-                                    levels = sorted(self.rangf_map_ix_2_levelname[r][:-1])
-                                    if self.has_intercept[gf]:
-                                        for l, level in enumerate(levels):
-                                            self.parameter_table_random_types.append('intercept')
-                                            self.parameter_table_random_responses.append(response)
-                                            self.parameter_table_random_response_params.append(dim_name)
-                                            self.parameter_table_random_rangf.append(gf)
-                                            self.parameter_table_random_rangf_levels.append(level)
-                                            self.parameter_table_random_values.append(
-                                                self.intercept_random[response][gf][response_param][l, k]
-                                            )
 
     def _initialize_saver(self):
         with self.sess.as_default():
@@ -1750,10 +1772,14 @@ class Model(object):
     ######################################################
 
     def _expand_param_name_by_dim(self, response, response_param):
+        # Returns an empty list if the param is not used by the response.
+        # Returns the unmodified param if the response is univariate.
+        # Returns the concatenation "<param_name>.<dim_name>" if the response is multivariate.
         ndim = self.response_n_dim[response]
         out = []
         if ndim == 1:
-            out.append(response_param)
+            if response_param in self.get_response_params(response):
+                out.append(response_param)
         else:
             for i in range(ndim):
                 cat = self.response_ix_to_category[response].get(i, i)
@@ -2186,51 +2212,13 @@ class Model(object):
 
 
 
+
     ######################################################
     #
-    #  Public methods that must be implemented by
-    #  subclasses
+    #  Public initialization methods that must be
+    #  implemented by subclasses
     #
     ######################################################
-
-    def initialize_intercept(self, response_name, ran_gf=None):
-        """
-        Initialize intercepts, i.e. bias terms for each parameter of the predictive distribution of a response variable.
-        Must be called separately for each response variable in multivariate models.
-
-        :param response_name: ``str``; name of response variable for which to initialize intercepts
-        :param ran_gf: ``str`` or ``None``; name of random grouping factor for which to initialize intercepts. If ``None``, initialize fixed effects.
-
-        :return: pair of fixed and random intercept ``Variable``; fixed intercept has identical shape to **init**, random intercept has shape ``[rangf_n_levels] + init.shape``.
-        """
-
-        # MLE implementation, overridden by ModelBayes
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                init = self.intercept_init[response_name]
-                name = sn(response_name)
-                if ran_gf is None:
-                    intercept = tf.Variable(
-                        init,
-                        dtype=self.FLOAT_TF,
-                        name='intercept_%s' % name
-                    )
-                    intercept_summary = intercept
-                else:
-                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
-                    if self.use_distributional_regression:
-                        nparam = len(self.predictive_distribution_config[response_name]['params'])
-                    else:
-                        nparam = 1
-                    ndim = self.response_n_dim[response_name]
-                    shape = [rangf_n_levels, nparam, ndim]
-                    intercept = tf.Variable(
-                        tf.zeros(shape, dtype=self.FLOAT_TF),
-                        name='intercept_%s_by_%s' % (name, sn(ran_gf))
-                    )
-                    intercept_summary = intercept
-
-                return intercept, intercept_summary
 
     def initialize_model(self):
         """
@@ -2261,207 +2249,7 @@ class Model(object):
 
         raise NotImplementedError
 
-    def run_predict_op(
-            self,
-            feed_dict,
-            response=None,
-            n_samples=None,
-            algorithm='MAP',
-            return_preds=True,
-            return_loglik=False,
-            verbose=True
-    ):
-        """
-        Generate predictions from a batch of data.
 
-        :param feed_dict: ``dict``; A dictionary of predictor values.
-        :param response: ``list`` of ``str``, ``str``, or ``None``; Name(s) of response variable(s) to predict. If ``None``, predicts all responses.
-        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
-        :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
-        :param return_preds: ``bool``; whether to return predictions.
-        :param return_loglik: ``bool``; whether to return elementwise log likelihoods. Requires that **Y** is not ``None``. If multiple response variables are modeled, also returns full model (summed) LL, labeled as ``'AllResponses'``.
-        :param verbose: ``bool``; Send progress reports to standard error.
-        :return: ``dict`` of ``numpy`` arrays; Predicted responses and/or log likelihoods, one for each training sample. Key order: <('preds'|'log_lik'), response>.
-        """
-        
-        assert self.Y in feed_dict or not return_loglik, 'Cannot return log likelihood when Y is not provided.'
-
-        use_MAP_mode =  algorithm in ['map', 'MAP']
-        feed_dict[self.use_MAP_mode] = use_MAP_mode
-
-        if response is None:
-            response = self.response_names
-        if not isinstance(response, list):
-            response = [response]
-
-        to_run = {}
-        if return_preds:
-            to_run_preds = {x: self.prediction[x] for x in response}
-            to_run['preds'] = to_run_preds
-        if return_loglik:
-            to_run_loglik = {x: self.ll_by_var[x] for x in response}
-            if len(self.response_names) > 1:
-                to_run_loglik['AllResponses'] = self.ll
-            to_run['log_lik'] = to_run_loglik
-
-        if to_run:
-            with self.sess.as_default():
-                with self.sess.graph.as_default():
-                    if use_MAP_mode:
-                        out = self.sess.run(to_run, feed_dict=feed_dict)
-                    else:
-                        feed_dict[self.use_MAP_mode] = False
-                        if n_samples is None:
-                            n_samples = self.n_samples_eval
-
-                        if verbose:
-                            pb = tf.contrib.keras.utils.Progbar(n_samples)
-
-                        out = {}
-                        if return_preds:
-                            out['preds'] = {x: np.zeros((len(feed_dict[self.Y_time]), n_samples)) for x in to_run_preds}
-                        if return_loglik:
-                            out['log_lik'] = {x: np.zeros((len(feed_dict[self.Y_time]), n_samples)) for x in to_run_loglik}
-
-                        for i in range(n_samples):
-                            if self.resample_ops:
-                                self.sess.run(self.resample_ops)
-
-                            _out = self.sess.run(to_run, feed_dict=feed_dict)
-                            if to_run_preds:
-                                _preds = _out['preds']
-                                for _response in _preds:
-                                    out['preds'][_response][:, i] = _preds[_response]
-                            if to_run_loglik:
-                                _log_lik = _out['log_lik']
-                                for _response in _log_lik:
-                                    out['log_lik'][_response][:, i] = _log_lik[_response]
-                            if verbose:
-                                pb.update(i + 1)
-
-                        if return_preds:
-                            for _response in out['preds']:
-                                _preds = out['preds'][_response]
-                                dist_name = self.predictive_distribution_config[_response]['name']
-                                if dist_name == 'bernoulli': # Majority vote
-                                    _preds = np.round(np.mean(_preds, axis=1)).astype('int')
-                                elif dist_name == 'categorical': # Majority vote
-                                    _preds = scipy.stats.mode(_preds, axis=1)
-                                else: # Average
-                                    _preds = _preds.mean(axis=1)
-                                out['preds'][_response] = _preds
-                        if return_loglik:
-                            for _response in out['log_lik']:
-                                out['log_lik'][_response] = out['log_lik'][_response].mean(axis=1)
-
-                    return out
-
-    def run_loss_op(self, feed_dict, n_samples=None, algorithm='MAP', verbose=True):
-        """
-        Compute the elementwise training loss of a batch of data.
-
-        :param feed_dict: ``dict``; A dictionary of predictor and response values
-        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
-        :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
-        :param verbose: ``bool``; Send progress reports to standard error.
-        :return: ``numpy`` array; total training loss for batch
-        """
-
-        use_MAP_mode =  algorithm in ['map', 'MAP']
-        feed_dict[self.use_MAP_mode] = use_MAP_mode
-
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                if use_MAP_mode:
-                    loss = self.sess.run(self.loss_func, feed_dict=feed_dict)
-                else:
-                    feed_dict[self.use_MAP_mode] = False
-                    if n_samples is None:
-                        n_samples = self.n_samples_eval
-
-                    if verbose:
-                        pb = tf.contrib.keras.utils.Progbar(n_samples)
-
-                    loss = np.zeros((len(feed_dict[self.Y_time]), n_samples))
-
-                    for i in range(n_samples):
-                        if self.resample_ops:
-                            self.sess.run(self.resample_ops)
-                        loss[:, i] = self.sess.run(self.loss_func, feed_dict=feed_dict)
-                        if verbose:
-                            pb.update(i + 1)
-
-                    loss = loss.mean(axis=1)
-
-                return loss
-
-    def run_conv_op(self, feed_dict, response=None, response_param=None, n_samples=None, algorithm='MAP', verbose=True):
-        """
-        Convolve a batch of data in feed_dict with the model's latent IRF.
-
-        :param feed_dict: ``dict``; A dictionary of predictor variables
-        :param response: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to convolve toward. If ``None``, convolves toward all univariate responses. Multivariate convolution (e.g. of categorical responses) is supported but turned off by default to avoid excessive computation. When convolving toward a multivariate response, a set of convolved predictors will be generated for each dimension of the response.
-        :param response_param: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of predictive distribution(s) to convolve toward per response variable. Any param names not used by the predictive distribution for a given response will be ignored. If ``None``, convolves toward the first parameter of each response distribution.
-        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
-        :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
-        :param verbose: ``bool``; Send progress reports to standard error.
-        :return: ``numpy`` array; The convolved inputs
-        """
-
-        use_MAP_mode =  algorithm in ['map', 'MAP']
-        feed_dict[self.use_MAP_mode] = use_MAP_mode
-
-        if response is None:
-            response = [x for x in self.response_names if self.response_n_dim[x] == 1]
-        if isinstance(response, str):
-            response = [response]
-
-        if response_param is None:
-            response_param = set()
-            for x in response:
-                response_param.add(self.predictive_distribution_config[x]['params'][0])
-            response_param = sorted(list(response_param))
-        if isinstance(response_param, str):
-            response_param = [response_param]
-
-        to_run = {}
-        for _response in response:
-            to_run[_response] = {}
-            for _response_param in response_param:
-                if _response_param in self.predictive_distribution_delta[_response]:
-                    to_run[_response][_response_param] = self.predictive_distribution_delta[_response][_response_param]
-
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                if use_MAP_mode:
-                    X_conv = self.sess.run(to_run, feed_dict=feed_dict)
-                else:
-                    X_conv = {}
-                    for _response in to_run:
-                        X_conv[_response] = {}
-                        for _response_param in X_conv[_response]:
-                            X_conv[_response][_response_param] = np.zeros(
-                                (len(feed_dict[self.Y_time]), len(self.terminal_names), n_samples)
-                            )
-
-                    if n_samples is None:
-                        n_samples = self.n_samples_eval
-                    if verbose:
-                        pb = tf.contrib.keras.utils.Progbar(n_samples)
-
-                    for i in range(0, n_samples):
-                        _X_conv = self.sess.run(to_run, feed_dict=feed_dict)
-                        for _response in _X_conv:
-                            for _response_param in _X_conv[_response]:
-                                X_conv[_response][_response_param][..., i] = _X_conv[_response][_response_param]
-                        if verbose:
-                            pb.update(i + 1, force=True)
-
-                    for _response in X_conv:
-                        for _response_param in X_conv[_response]:
-                            X_conv[_response][_response_param] = X_conv[_response][_response_param].mean(axis=2)
-
-                return X_conv
 
 
 
@@ -2494,6 +2282,45 @@ class Model(object):
     #  Shared public methods
     #
     ######################################################
+
+    def initialize_intercept(self, response_name, ran_gf=None):
+        """
+        Initialize intercepts, i.e. bias terms for each parameter of the predictive distribution of a response variable.
+        Must be called separately for each response variable in multivariate models.
+
+        :param response_name: ``str``; name of response variable for which to initialize intercepts
+        :param ran_gf: ``str`` or ``None``; name of random grouping factor for which to initialize intercepts. If ``None``, initialize fixed effects.
+
+        :return: pair of fixed and random intercept ``Variable``; fixed intercept has identical shape to **init**, random intercept has shape ``[rangf_n_levels] + init.shape``.
+        """
+
+        # MLE implementation, overridden by ModelBayes
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                init = self.intercept_init[response_name]
+                name = sn(response_name)
+                if ran_gf is None:
+                    intercept = tf.Variable(
+                        init,
+                        dtype=self.FLOAT_TF,
+                        name='intercept_%s' % name
+                    )
+                    intercept_summary = intercept
+                else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+                    if self.use_distributional_regression:
+                        nparam = self.get_response_nparam(response_name)
+                    else:
+                        nparam = 1
+                    ndim = self.response_n_dim[response_name]
+                    shape = [rangf_n_levels, nparam, ndim]
+                    intercept = tf.Variable(
+                        tf.zeros(shape, dtype=self.FLOAT_TF),
+                        name='intercept_%s_by_%s' % (name, sn(ran_gf))
+                    )
+                    intercept_summary = intercept
+
+                return intercept, intercept_summary
 
     def build(self, outdir=None, restore=True):
         """
@@ -2678,6 +2505,77 @@ class Model(object):
                 else:
                     self.sess.run(self.training_complete_false)
 
+    def get_response_dist(self, response):
+        """
+        Get the TensorFlow distribution class for the predictive distribution assigned to a given response.
+
+        :param response: ``str``; name of response
+        :return: TensorFlow distribution object; class of predictive distribution
+        """
+
+        return self.predictive_distribution_config[response]['dist']
+
+    def get_response_dist_name(self, response):
+        """
+        Get name of the predictive distribution assigned to a given response.
+
+        :param response: ``str``; name of response
+        :return: ``str``; name of predictive distribution
+        """
+
+        return self.predictive_distribution_config[response]['name']
+
+    def get_response_params(self, response):
+        """
+        Get tuple of names of parameters of the predictive distribution for a given response.
+
+        :param response: ``str``; name of response
+        :return: ``tuple`` of ``str``; parameters of predictive distribution
+        """
+
+        return self.predictive_distribution_config[response]['params']
+
+    def get_response_support(self, response):
+        """
+        Get the name of the distributional support of the predictive distribution assigned to a given response
+
+        :param response: ``str``; name of response
+        :return: ``str``; label of distributional support
+        """
+
+        return self.predictive_distribution_config[response]['support']
+
+    def get_response_nparam(self, response):
+        """
+        Get the number of parameters in the predictive distrbution assigned to a given response
+
+        :param response: ``str``; name of response
+        :return: ``int``; number of parameters in the predictive distribution
+        """
+
+        return len(self.get_response_params(response))
+
+    def is_real(self, response):
+        """
+        Check whether a given response name is real-valued
+
+        :param response: ``str``; name of response
+        :return: ``bool``; whether the response is real-valued
+        """
+
+        return self.get_response_support(response) == 'real'
+
+    def has_param(self, response, param):
+        """
+        Check whether a given parameter name is present in the predictive distrbution assigned to a given response
+
+        :param response: ``str``; name of response
+        :param param: ``str``; name of parameter to query
+        :return: ``bool``; whether the parameter is present in the predictive distribution
+        """
+
+        return param in self.predictive_distribution_config[response]['params']
+
     def report_formula_string(self, indent=0):
         """
         Generate a string representation of the model formula.
@@ -2738,11 +2636,19 @@ class Model(object):
             level=level,
             n_samples=n_samples
         )
-        key_table = pd.DataFrame({
-            'Parameter': parameter_table['Parameter'] + ' | ' +
-                         parameter_table['Response'] + ' | ' +
-                         parameter_table['Param']
-        })
+        nresponse = len(self.response_names)
+
+        if nresponse > 1:
+            key_table = pd.DataFrame({
+                'Parameter': parameter_table['Parameter'] + ' | ' +
+                             parameter_table['Response'] + ' | ' +
+                             parameter_table['ResponseParam']
+            })
+        else:
+            key_table = pd.DataFrame({
+                'Parameter': parameter_table['Parameter'] + ' | ' +
+                             parameter_table['ResponseParam']
+            })
         parameter_table = pd.concat(
             [key_table, parameter_table[self.parameter_table_columns]],
             axis=1
@@ -2767,13 +2673,21 @@ class Model(object):
                 level=level,
                 n_samples=n_samples
             )
-            key_table = pd.DataFrame({
-                'Parameter': parameter_table['Parameter'] + ' | ' +
-                             parameter_table['Response'] + ' | ' +
-                             parameter_table['Param'] + ' | ' +
-                             parameter_table['Group'] + ' | ' +
-                             parameter_table['Level']
-            })
+            if nresponse > 1:
+                key_table = pd.DataFrame({
+                    'Parameter': parameter_table['Parameter'] + ' | ' +
+                                 parameter_table['Response'] + ' | ' +
+                                 parameter_table['ResponseParam'] + ' | ' +
+                                 parameter_table['Group'] + ' | ' +
+                                 parameter_table['Level']
+                })
+            else:
+                key_table = pd.DataFrame({
+                    'Parameter': parameter_table['Parameter'] + ' | ' +
+                                 parameter_table['ResponseParam'] + ' | ' +
+                                 parameter_table['Group'] + ' | ' +
+                                 parameter_table['Level']
+                })
             parameter_table = pd.concat(
                 [key_table, parameter_table[self.parameter_table_columns]],
                 axis=1
@@ -3176,16 +3090,6 @@ class Model(object):
 
         return out
 
-
-
-
-    ######################################################
-    #
-    #  High-level methods for training, prediction,
-    #  and plotting
-    #
-    ######################################################
-
     def is_non_dirac(self, impulse_name):
         """
         Check whether an impulse is associated with a non-Dirac response function
@@ -3487,7 +3391,7 @@ class Model(object):
 
             Across all elements of **X**, there must be a column for each independent variable in the CDR ``form_str`` provided at initialization.
 
-        :param Y: ``list`` of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+        :param Y (optional): ``list`` of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
             This parameter is optional and responses are not directly used. It simply allows the user to omit the
             inputs **Y_time**, **Y_gf**, **first_obs**, and **last_obs**, since they can be inferred from **Y**
             If supplied, each element of **Y** must contain the following columns (additional columns are ignored):
@@ -3517,7 +3421,7 @@ class Model(object):
         :param return_loglik: ``bool``; whether to return elementwise log likelihoods. Requires that **Y** is not ``None``. If multiple response variables are modeled, also returns full model (summed) LL, labeled as ``'AllResponses'``.
         :param dump: ``bool``; whether to save generated predictions (and log likelihood vectors if applicable) to disk.
         :param extra_cols: ``bool``; whether to include columns from **Y** in output tables. Ignored unless **dump** is ``True``.
-        :param partition: ``str``; name of data partition, used for output file naming. Ignored unless **dump** is ``True``.
+        :param partition: ``str`` or ``None``; name of data partition (or ``None`` if no partition name), used for output file naming. Ignored unless **dump** is ``True``.
         :param verbose: ``bool``; Report progress and metrics to standard error.
         :return: 1D ``numpy`` array; mean network predictions for regression targets (same length and sort order as ``y_time``).
         """
@@ -3556,6 +3460,7 @@ class Model(object):
             float_type=self.float_type,
         )
         if Y_gf is None:
+            assert Y is not None, 'Either Y or Y_gf must be provided.'
             Y_gf_in = Y
         else:
             Y_gf_in = Y_gf
@@ -3576,12 +3481,12 @@ class Model(object):
                             self.X: X_2d,
                             self.X_time: X_time_2d,
                             self.Y_time: Y_time,
-                            self.Y_mask: Y_mask,
                             self.Y_gf: Y_gf,
                             self.training: not self.predict_mode
                         }
                         if return_loglik:
                             fd[self.Y] = Y_dv
+                            fd[self.Y_mask]: Y_mask
                         out = self.run_predict_op(
                             fd,
                             response=response,
@@ -3596,7 +3501,7 @@ class Model(object):
                         if return_preds:
                             out['preds'] = {}
                             for _response in response:
-                                if self.predictive_distribution_config[_response]['support'] == 'real':
+                                if self.is_real(_response):
                                     dtype = self.FLOAT_NP
                                 else:
                                     dtype = self.INT_NP
@@ -3614,12 +3519,12 @@ class Model(object):
                                 self.X_time: X_time_2d[i:i + self.eval_minibatch_size],
                                 self.X_mask: X_mask[i:i + self.eval_minibatch_size],
                                 self.Y_time: Y_time[i:i + self.eval_minibatch_size],
-                                self.Y_mask: Y_mask[i:i + self.eval_minibatch_size],
                                 self.Y_gf: Y_gf[i:i + self.eval_minibatch_size] if len(Y_gf) > 0 else Y_gf,
                                 self.training: not self.predict_mode
                             }
                             if return_loglik:
                                 fd[self.Y] = Y_dv[i:i + self.eval_minibatch_size]
+                                fd[self.Y_mask]: Y_mask[i:i + self.eval_minibatch_size]
                             _out = self.run_predict_op(
                                 fd,
                                 response=response,
@@ -3639,7 +3544,7 @@ class Model(object):
                                     out['log_lik'][_response][i:i + self.eval_minibatch_size] = _out['log_lik'][_response]
 
                     for _response in out['preds']:
-                        if self.predictive_distribution_config[_response]['support'] != 'real':
+                        if self.is_real(_response):
                             mapper = np.vectorize(lambda x: self.response_ix_to_category[_response].get(x, x))
                             out['preds'][_response] = mapper(out['preds'][_response])
 
@@ -3696,6 +3601,102 @@ class Model(object):
 
         return out
 
+    def run_predict_op(
+            self,
+            feed_dict,
+            response=None,
+            n_samples=None,
+            algorithm='MAP',
+            return_preds=True,
+            return_loglik=False,
+            verbose=True
+    ):
+        """
+        Generate predictions from a batch of data.
+
+        :param feed_dict: ``dict``; A dictionary of predictor values.
+        :param response: ``list`` of ``str``, ``str``, or ``None``; Name(s) of response variable(s) to predict. If ``None``, predicts all responses.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
+        :param return_preds: ``bool``; whether to return predictions.
+        :param return_loglik: ``bool``; whether to return elementwise log likelihoods. Requires that **Y** is not ``None``. If multiple response variables are modeled, also returns full model (summed) LL, labeled as ``'AllResponses'``.
+        :param verbose: ``bool``; Send progress reports to standard error.
+        :return: ``dict`` of ``numpy`` arrays; Predicted responses and/or log likelihoods, one for each training sample. Key order: <('preds'|'log_lik'), response>.
+        """
+
+        assert self.Y in feed_dict or not return_loglik, 'Cannot return log likelihood when Y is not provided.'
+
+        use_MAP_mode = algorithm in ['map', 'MAP']
+        feed_dict[self.use_MAP_mode] = use_MAP_mode
+
+        if response is None:
+            response = self.response_names
+        if not isinstance(response, list):
+            response = [response]
+
+        to_run = {}
+        if return_preds:
+            to_run_preds = {x: self.prediction[x] for x in response}
+            to_run['preds'] = to_run_preds
+        if return_loglik:
+            to_run_loglik = {x: self.ll_by_var[x] for x in response}
+            if len(self.response_names) > 1:
+                to_run_loglik['AllResponses'] = self.ll
+            to_run['log_lik'] = to_run_loglik
+
+        if to_run:
+            with self.sess.as_default():
+                with self.sess.graph.as_default():
+                    if use_MAP_mode:
+                        out = self.sess.run(to_run, feed_dict=feed_dict)
+                    else:
+                        feed_dict[self.use_MAP_mode] = False
+                        if n_samples is None:
+                            n_samples = self.n_samples_eval
+
+                        if verbose:
+                            pb = tf.contrib.keras.utils.Progbar(n_samples)
+
+                        out = {}
+                        if return_preds:
+                            out['preds'] = {x: np.zeros((len(feed_dict[self.Y_time]), n_samples)) for x in to_run_preds}
+                        if return_loglik:
+                            out['log_lik'] = {x: np.zeros((len(feed_dict[self.Y_time]), n_samples)) for x in
+                                              to_run_loglik}
+
+                        for i in range(n_samples):
+                            if self.resample_ops:
+                                self.sess.run(self.resample_ops)
+
+                            _out = self.sess.run(to_run, feed_dict=feed_dict)
+                            if to_run_preds:
+                                _preds = _out['preds']
+                                for _response in _preds:
+                                    out['preds'][_response][:, i] = _preds[_response]
+                            if to_run_loglik:
+                                _log_lik = _out['log_lik']
+                                for _response in _log_lik:
+                                    out['log_lik'][_response][:, i] = _log_lik[_response]
+                            if verbose:
+                                pb.update(i + 1)
+
+                        if return_preds:
+                            for _response in out['preds']:
+                                _preds = out['preds'][_response]
+                                dist_name = self.get_response_dist_name(_response)
+                                if dist_name == 'bernoulli':  # Majority vote
+                                    _preds = np.round(np.mean(_preds, axis=1)).astype('int')
+                                elif dist_name == 'categorical':  # Majority vote
+                                    _preds = scipy.stats.mode(_preds, axis=1)
+                                else:  # Average
+                                    _preds = _preds.mean(axis=1)
+                                out['preds'][_response] = _preds
+                        if return_loglik:
+                            for _response in out['log_lik']:
+                                out['log_lik'][_response] = out['log_lik'][_response].mean(axis=1)
+
+                    return out
+
     def log_lik(
             self,
             X,
@@ -3727,7 +3728,7 @@ class Model(object):
         :param extra_cols: ``bool``; whether to include columns from **Y** in output tables.`
         :param dump; ``bool``; whether to save generated log likelihood vectors to disk.
         :param extra_cols: ``bool``; whether to include columns from **Y** in output tables. Ignored unless **dump** is ``True``.
-        :param partition: ``str``; name of data partition, used for output file naming. Ignored unless **dump** is ``True``.
+        :param partition: ``str`` or ``None``; name of data partition (or ``None`` if no partition name), used for output file naming. Ignored unless **dump** is ``True``.
         :param **kwargs; Any additional keyword arguments accepted by ``predict()`` (see docs for ``predict()`` for details).
         :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
         """
@@ -3819,7 +3820,7 @@ class Model(object):
         :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
         :param dump: ``bool``; whether to save generated data and evaluations to disk.
         :param extra_cols: ``bool``; whether to include columns from **Y** in output tables. Ignored unless **dump** is ``True``.
-        :param partition: ``str``; name of data partition, used for output file naming. Ignored unless **dump** is ``True``.
+        :param partition: ``str`` or ``None``; name of data partition (or ``None`` if no partition name), used for output file naming. Ignored unless **dump** is ``True``.
         :param verbose: ``bool``; Report progress and metrics to standard error.
         :return: ``None``
         """
@@ -3861,7 +3862,6 @@ class Model(object):
         if len(self.response_names) > 1:
             response_names = ['AllResponses'] + response_names
         for _response in response_names:
-
             metrics['mse'][_response] = []
             metrics['rho'][_response] = []
             metrics['f1'][_response] = []
@@ -3891,7 +3891,7 @@ class Model(object):
 
                     _preds = preds[_response][ix]
 
-                    if self.predictive_distribution_config[_response]['support'] == 'real':
+                    if self.is_real(_response):
                         error = np.array(_y - _preds) ** 2
                         score = error.mean()
                         resid = np.sort(_y - _preds)
@@ -3941,8 +3941,7 @@ class Model(object):
                     preds_outfile = self.outdir + '/output_%s.csv' % name_base
                     df.to_csv(preds_outfile, sep=' ', na_rep='NaN', index=False)
 
-                    if _response in  self.predictive_distribution_config and \
-                            self.predictive_distribution_config[_response]['support'] == 'real':
+                    if _response in self.predictive_distribution_config and self.is_real(_response):
                         plot_qq(
                             resid_theoretical_q,
                             resid,
@@ -4131,10 +4130,53 @@ class Model(object):
 
                 return loss
 
+    def run_loss_op(self, feed_dict, n_samples=None, algorithm='MAP', verbose=True):
+        """
+        Compute the elementwise training loss of a batch of data.
+
+        :param feed_dict: ``dict``; A dictionary of predictor and response values
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
+        :param verbose: ``bool``; Send progress reports to standard error.
+        :return: ``numpy`` array; total training loss for batch
+        """
+
+        use_MAP_mode = algorithm in ['map', 'MAP']
+        feed_dict[self.use_MAP_mode] = use_MAP_mode
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if use_MAP_mode:
+                    loss = self.sess.run(self.loss_func, feed_dict=feed_dict)
+                else:
+                    feed_dict[self.use_MAP_mode] = False
+                    if n_samples is None:
+                        n_samples = self.n_samples_eval
+
+                    if verbose:
+                        pb = tf.contrib.keras.utils.Progbar(n_samples)
+
+                    loss = np.zeros((len(feed_dict[self.Y_time]), n_samples))
+
+                    for i in range(n_samples):
+                        if self.resample_ops:
+                            self.sess.run(self.resample_ops)
+                        loss[:, i] = self.sess.run(self.loss_func, feed_dict=feed_dict)
+                        if verbose:
+                            pb.update(i + 1)
+
+                    loss = loss.mean(axis=1)
+
+                return loss
+
     def convolve_inputs(
             self,
             X,
-            Y,
+            Y=None,
+            first_obs=None,
+            last_obs=None,
+            Y_time=None,
+            Y_gf=None,
             response=None,
             response_param=None,
             X_response_aligned_predictor_names=None,
@@ -4143,6 +4185,9 @@ class Model(object):
             X_2d_predictors=None,
             n_samples=None,
             algorithm='MAP',
+            extra_cols=False,
+            dump=False,
+            partition=None,
             verbose=True
     ):
         """
@@ -4155,15 +4200,25 @@ class Model(object):
 
             Across all elements of **X**, there must be a column for each independent variable in the CDR ``form_str`` provided at initialization.
 
-        :param Y: ``list`` of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
-            Each element of **Y** must contain the following columns (additional columns are ignored):
+        :param Y (optional): ``list`` of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+            This parameter is optional and responses are not directly used. It simply allows the user to omit the
+            inputs **Y_time**, **Y_gf**, **first_obs**, and **last_obs**, since they can be inferred from **Y**
+            If supplied, each element of **Y** must contain the following columns (additional columns are ignored):
 
-            * ``time``: Timestamp associated with each observation in ``y``
-            * ``first_obs_<K>``:  Index in the Kth (zero-indexed) element of `X` of the first observation in the time series associated with each entry in ``y``
-            * ``last_obs_<K>``:  Index in the Kth (zero-indexed) element of `X` of the immediately preceding observation in the time series associated with each entry in ``y``
+            * ``time``: Timestamp associated with each observation in **y**
+            * ``first_obs``:  Index in the design matrix **X** of the first observation in the time series associated with each entry in **y**
+            * ``last_obs``:  Index in the design matrix **X** of the immediately preceding observation in the time series associated with each entry in **y**
             * Columns with a subset of the names of the DVs specified in ``form_str`` (all DVs should be represented somewhere in **y**)
-            * A column for each random grouping factor in the model specified in ``form_str``.
+            * A column for each random grouping factor in the model formula
 
+        :param first_obs: ``list`` of ``list`` of index vectors (``list``, ``pandas`` series, or ``numpy`` vector) of first observations; the list contains one element for each response array. Inner lists contain vectors of row indices, one for each element of **X**, of the first impulse in the time series associated with each response. If ``None``, inferred from **Y**.
+            Sort order and number of observations must be identical to that of ``y_time``.
+        :param last_obs: ``list`` of ``list`` of index vectors (``list``, ``pandas`` series, or ``numpy`` vector) of last observations; the list contains one element for each response array. Inner lists contain vectors of row indices, one for each element of **X**, of the last impulse in the time series associated with each response. If ``None``, inferred from **Y**.
+            Sort order and number of observations must be identical to that of ``y_time``.
+        :param Y_time: ``list`` of response timestamp vectors (``list``, ``pandas`` series, or ``numpy`` vector); vector(s) of response timestamps, one for each response array. Needed to timestamp any response-aligned predictors (ignored if none in model).
+        :param Y_gf: ``list`` of random grouping factor values (``list``, ``pandas`` series, or ``numpy`` vector); random grouping factor values (if applicable), one for each response dataframe.
+            Can be of type ``str`` or ``int``.
+            Sort order and number of observations must be identical to that of ``y_time``.
         :param response: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to convolve toward. If ``None``, convolves toward all univariate responses. Multivariate convolution (e.g. of categorical responses) is supported but turned off by default to avoid excessive computation. When convolving toward a multivariate response, a set of convolved predictors will be generated for each dimension of the response.
         :param response_param: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of predictive distribution(s) to convolve toward per response variable. Any param names not used by the predictive distribution for a given response will be ignored. If ``None``, convolves toward the first parameter of each response distribution.
         :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
@@ -4172,6 +4227,9 @@ class Model(object):
         :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
+        :param extra_cols: ``bool``; whether to include columns from **Y** in output tables.
+        :param dump; ``bool``; whether to save generated log likelihood vectors to disk.
+        :param partition: ``str`` or ``None``; name of data partition (or ``None`` if no partition name), used for output file naming. Ignored unless **dump** is ``True``.
         :param verbose: ``bool``; Report progress and metrics to standard error.
         :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
         """
@@ -4181,6 +4239,11 @@ class Model(object):
             stderr('Using GPU: %s\n' % usingGPU)
             stderr('Computing convolutions...\n')
 
+        if partition:
+            partition_str = '_' + partition
+        else:
+            partition_str = ''
+
         if response is None:
             response = [x for x in self.response_names if self.response_n_dim[x] == 1]
         if isinstance(response, str):
@@ -4188,8 +4251,8 @@ class Model(object):
 
         if response_param is None:
             response_param = set()
-            for x in response:
-                response_param.add(self.predictive_distribution_config[x]['params'][0])
+            for _response in response:
+                response_param.add(self.get_response_params(_response)[0])
             response_param = sorted(list(response_param))
         if isinstance(response_param, str):
             response_param = [response_param]
@@ -4199,9 +4262,16 @@ class Model(object):
             X = [X]
         if Y is not None and not isinstance(Y, list):
             Y = [Y]
+        if Y is None:
+            Y_time_in = Y_time
+        else:
+            Y_time_in = [_Y.time for _Y in Y]
         X_2d, X_time_2d, X_mask, Y_dv, Y_time, Y_mask = build_CDR_data(
             X,
             Y,
+            first_obs=first_obs,
+            last_obs=last_obs,
+            Y_time=Y_time,
             Y_category_map=self.response_category_to_ix,
             history_length=self.history_length,
             impulse_names=self.impulse_names,
@@ -4213,7 +4283,12 @@ class Model(object):
             int_type=self.int_type,
             float_type=self.float_type,
         )
-        Y_gf = get_rangf_array(Y, self.rangf, self.rangf_map)
+        if Y_gf is None:
+            assert Y is not None, 'Either Y or Y_gf must be provided.'
+            Y_gf_in = Y
+        else:
+            Y_gf_in = Y_gf
+        Y_gf = get_rangf_array(Y_gf_in, self.rangf, self.rangf_map)
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -4238,16 +4313,17 @@ class Model(object):
                         verbose=verbose
                     )
                 else:
-                    n_eval_minibatch = math.ceil(len(Y) / self.eval_minibatch_size)
+                    n_eval_minibatch = math.ceil(len(Y_time) / self.eval_minibatch_size)
                     X_conv = {}
                     for _response in response:
                         X_conv[_response] = {}
                         for _response_param in response_param:
-                            if _response_param in self.predictive_distribution_delta[_response]:
-                                X_conv[_response][_response_param] = np.zeros(
+                            dim_names = self._expand_param_name_by_dim(_response, _response_param)
+                            for _dim_name in dim_names:
+                                X_conv[_response][_dim_name] = np.zeros(
                                     (len(Y_time), len(self.terminal_names))
                                 )
-                    for i in range(0, len(Y), self.eval_minibatch_size):
+                    for i in range(0, len(Y_time), self.eval_minibatch_size):
                         if verbose:
                             stderr('\rMinibatch %d/%d' % ((i / self.eval_minibatch_size) + 1, n_eval_minibatch))
                         fd = {
@@ -4270,50 +4346,132 @@ class Model(object):
                             verbose=verbose
                         )
                         for _response in _X_conv:
-                            for _response_param in _X_conv[_response]:
-                                _X_conv_batch = _X_conv[_response][_response_param]
-                                X_conv[_response][_response_param][i:i + self.eval_minibatch_size] = _X_conv_batch
+                            for _dim_name in _X_conv[_response]:
+                                _X_conv_batch = _X_conv[_response][_dim_name]
+                                X_conv[_response][_dim_name][i:i + self.eval_minibatch_size] = _X_conv_batch
 
+                # Split into per-file predictions.
+                # Exclude the length of last file because it will be inferred.
+                X_conv = split_cdr_outputs(X_conv, [len(_Y) for _Y in Y_time_in[:-1]])
+
+                if verbose:
+                    stderr('\n\n')
+
+                self.set_predict_mode(False)
+
+                out = {}
                 names = []
                 for x in self.terminal_names:
                     if self.node_table[x].p.irfID is None:
                         names.append(sn(''.join(x.split('-')[:-1])))
                     else:
                         names.append(sn(x))
-                out = pd.DataFrame(X_conv, columns=names, dtype=self.FLOAT_NP)
+                for _response in response:
+                    out[_response] = {}
+                    file_ix = self.response_to_df_ix[_response]
+                    multiple_files = len(file_ix) > 1
+                    for ix in file_ix:
+                        for dim_name in X_conv[_response]:
+                            if dim_name not in out[_response]:
+                                out[_response][dim_name] = []
 
-                self.set_predict_mode(False)
+                            df = pd.DataFrame(X_conv[_response][dim_name][ix], columns=names, dtype=self.FLOAT_NP)
+                            if extra_cols:
+                                if Y is None:
+                                    df_extra = {x: Y_gf_in[i] for i, x in enumerate(self.rangf)}
+                                    df_extra['time'] = Y_time_in[ix]
+                                    df_extra = pd.DataFrame(df_extra)
+                                else:
+                                    new_cols = []
+                                    for c in Y[ix].columns:
+                                        if c not in df:
+                                            new_cols.append(c)
+                                    df_extra = Y[ix][new_cols].reset_index(drop=True)
+                                df = pd.concat([df, df_extra], axis=1)
+                            out[_response][dim_name].append(df)
 
-                convolution_summary = ''
-                corr_conv = out.corr().to_string()
-                convolution_summary += '=' * 50 + '\n'
-                convolution_summary += 'Correlation matrix of convolved predictors:\n\n'
-                convolution_summary += corr_conv + '\n\n'
+                        if dump:
+                            if multiple_files:
+                                name_base = '%s_%s_file%s%s' % (sn(_response), sn(dim_name), ix, partition_str)
+                            else:
+                                name_base = '%s_%s%s' % (sn(_response), sn(dim_name), partition_str)
+                            df.to_csv(self.outdir + '/X_conv_%s.csv' % name_base, sep=' ', na_rep='NaN', index=False)
 
-                select = np.where(np.all(np.isclose(X_time_2d[:,-1], Y_time[..., None]), axis=-1))[0]
+                return out
 
-                X_input = X_2d[:,-1,:][select]
+    def run_conv_op(self, feed_dict, response=None, response_param=None, n_samples=None, algorithm='MAP', verbose=True):
+        """
+        Convolve a batch of data in feed_dict with the model's latent IRF.
 
-                extra_cols = []
-                for c in Y.columns:
-                    if c not in out:
-                        extra_cols.append(c)
-                out = pd.concat([Y[extra_cols].reset_index(), out], axis=1)
+        :param feed_dict: ``dict``; A dictionary of predictor variables
+        :param response: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to convolve toward. If ``None``, convolves toward all univariate responses. Multivariate convolution (e.g. of categorical responses) is supported but turned off by default to avoid excessive computation. When convolving toward a multivariate response, a set of convolved predictors will be generated for each dimension of the response.
+        :param response_param: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of predictive distribution(s) to convolve toward per response variable. Any param names not used by the predictive distribution for a given response will be ignored. If ``None``, convolves toward the first parameter of each response distribution.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
+        :param verbose: ``bool``; Send progress reports to standard error.
+        :return: ``dict`` of ``numpy`` arrays; The convolved inputs, one per **response_param** per **response**. Each element has shape (batch, terminals)
+        """
 
-                if X_input.shape[0] > 0:
-                    out_plus = out
-                    for i in range(len(self.impulse_names)):
-                        c = self.impulse_names[i]
-                        if c not in out_plus:
-                            out_plus[c] = X_2d[:,-1,i]
-                    corr_conv = out_plus.iloc[select].corr().to_string()
-                    convolution_summary += '-' * 50 + '\n'
-                    convolution_summary += 'Full correlation matrix of input and convolved predictors:\n'
-                    convolution_summary += 'Based on %d simultaneously sampled impulse/response pairs (out of %d total data points)\n\n' %(select.shape[0], Y.shape[0])
-                    convolution_summary += corr_conv + '\n\n'
-                    convolution_summary += '=' * 50 + '\n'
+        use_MAP_mode = algorithm in ['map', 'MAP']
+        feed_dict[self.use_MAP_mode] = use_MAP_mode
 
-                return out, convolution_summary
+        if response is None:
+            response = [x for x in self.response_names if self.response_n_dim[x] == 1]
+        if isinstance(response, str):
+            response = [response]
+
+        if response_param is None:
+            response_param = set()
+            for _response in response:
+                response_param.add(self.get_response_params(_response)[0])
+            response_param = sorted(list(response_param))
+        if isinstance(response_param, str):
+            response_param = [response_param]
+
+        to_run = {}
+        for _response in response:
+            to_run[_response] = self.X_conv[_response]
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if use_MAP_mode:
+                    X_conv = self.sess.run(to_run, feed_dict=feed_dict)
+                else:
+                    X_conv = {}
+                    for _response in to_run:
+                        nparam = self.get_response_nparam(_response)
+                        ndim = self.response_n_dim[_response]
+                        X_conv[_response] = np.zeros(
+                            (len(feed_dict[self.Y_time]), len(self.terminal_names), nparam, ndim, n_samples)
+                        )
+
+                    if n_samples is None:
+                        n_samples = self.n_samples_eval
+                    if verbose:
+                        pb = tf.contrib.keras.utils.Progbar(n_samples)
+
+                    for i in range(0, n_samples):
+                        _X_conv = self.sess.run(to_run, feed_dict=feed_dict)
+                        for _response in _X_conv:
+                            X_conv[_response][..., i] = _X_conv[_response]
+                        if verbose:
+                            pb.update(i + 1, force=True)
+
+                    for _response in X_conv:
+                        X_conv[_response] = X_conv[_response].mean(axis=2)
+
+                # Break things out by response dimension
+                out = {}
+                for _response in X_conv:
+                    for i, _response_param in enumerate(response_param):
+                        if self.has_param(_response, _response_param):
+                            dim_names = self._expand_param_name_by_dim(_response, _response_param)
+                            for j, _dim_name in enumerate(dim_names):
+                                if _response not in out:
+                                    out[_response] = {}
+                                out[_response][_dim_name] = X_conv[_response][..., i, j]
+
+                return out
 
     def error_theoretical_quantiles(
             self,
@@ -4446,7 +4604,7 @@ class Model(object):
         if response_param is None:
             response_param = set()
             for _response in response:
-                response_param.add(self.predictive_distribution_config[_response]['params'][0])
+                response_param.add(self.get_response_params(_response)[0])
             response_param = sorted(list(response_param))
         if isinstance(response_param, str):
             response_param = [response_param]
@@ -4831,56 +4989,42 @@ class Model(object):
                     for _response in response:
                         to_run[_response] = {}
                         for _response_param in response_param:
-                            if _response_param in self.predictive_distribution_delta[_response]:
-                                to_run[_response][_response_param] = self.predictive_distribution_delta[_response][_response_param]
+                            dim_names = self._expand_param_name_by_dim(_response, _response_param)
+                            for _dim_name in dim_names:
+                                to_run[_response][_dim_name] = self.predictive_distribution_delta[_response][_dim_name]
 
                     if self.resample_ops:
                         self.sess.run(self.resample_ops)
                     sample_ref = self.sess.run(to_run, feed_dict=fd_ref)
                     for _response in to_run:
-                        for _response_param in to_run[_response]:
-                            _sample = sample_ref[_response][_response_param]
-                            param_keys = self._expand_param_name_by_dim(_response, _response_param)
-                            if len(_sample.shape) > 1:
-                                # Break into per-dimension values
-                                for j in range(_sample.shape[-1]):
-                                    sample_ref[_response][param_keys[j]] = np.reshape(_sample[..., j], ref_shape, 'F')
-                                del sample_ref[_response][_response_param]
-                            else:
-                                sample_ref[_response][_response_param] = np.reshape(_sample, ref_shape, 'F')
+                        for _dim_name in to_run[_response]:
+                            _sample = sample_ref[_response][_dim_name]
+                            sample_ref[_response][_dim_name] = np.reshape(_sample, ref_shape, 'F')
 
                     if n_manip:
                         sample = {}
                         sample_main = self.sess.run(to_run, feed_dict=fd_main)
                         for _response in to_run:
                             sample[_response] = {}
-                            for _response_param in to_run[_response]:
-                                _sample = sample_main[_response][_response_param]
-                                if len(_sample.shape) > 1:
-                                    # Break into per-dimension values
-                                    param_keys = self._expand_param_name_by_dim(_response, _response_param)
-                                    for j in range(_sample.shape[-1]):
-                                        sample_main[_response][param_keys[j]] = _sample[..., j]
-                                    del sample_main[_response][_response_param]
-                            for _response_param in sample_main[_response]:
-                                sample_main[_response][_response_param] = np.reshape(sample_main[_response][_response_param], sample_shape, 'F')
-                                sample_main[_response][_response_param] = sample_main[_response][_response_param] - sample_ref[_response][_response_param]
+                            for _dim_name in sample_main[_response]:
+                                sample_main[_response][_dim_name] = np.reshape(sample_main[_response][_dim_name], sample_shape, 'F')
+                                sample_main[_response][_dim_name] = sample_main[_response][_dim_name] - sample_ref[_response][_dim_name]
                                 if ref_as_manip:
-                                    sample[_response][_response_param] = np.concatenate(
-                                        [sample_ref[_response][_response_param], sample_main[_response][_response_param]],
+                                    sample[_response][_dim_name] = np.concatenate(
+                                        [sample_ref[_response][_dim_name], sample_main[_response][_dim_name]],
                                         axis=-1
                                     )
                                 else:
-                                    sample[_response][_response_param] = sample_main[_response][_response_param]
+                                    sample[_response][_dim_name] = sample_main[_response][_dim_name]
                     else:
                         sample = sample_ref
                     for _response in sample:
                         if not _response in samples:
                             samples[_response] = {}
-                        for _response_param in sample[_response]:
-                            if not _response_param in samples[_response]:
-                                samples[_response][_response_param] = []
-                            samples[_response][_response_param].append(sample[_response][_response_param])
+                        for _dim_name in sample[_response]:
+                            if not _dim_name in samples[_response]:
+                                samples[_response][_dim_name] = []
+                            samples[_response][_dim_name].append(sample[_response][_dim_name])
 
                 lower = {}
                 upper = {}
@@ -4889,22 +5033,22 @@ class Model(object):
                     lower[_response] = {}
                     upper[_response] = {}
                     mean[_response] = {}
-                    for _response_param in samples[_response]:
-                        _samples = np.stack(samples[_response][_response_param], axis=0)
+                    for _dim_name in samples[_response]:
+                        _samples = np.stack(samples[_response][_dim_name], axis=0)
                         rescale = self.standardize_response and \
-                                  self.predictive_distribution_config[_response]['support'] == 'real' and \
-                                  _response_param in ['mu', 'sigma']
+                                  self.is_real(_response) and \
+                                  (_dim_name.startswith('mu') or _dim_name.startswith('sigma'))
                         if rescale:
                             _samples = _samples * self.Y_train_sds[_response]
-                        samples[_response][_response_param] = np.stack(_samples, axis=0)
+                        samples[_response][_dim_name] = np.stack(_samples, axis=0)
                         _mean = _samples.mean(axis=0)
-                        mean[_response][_response_param] = _mean
+                        mean[_response][_dim_name] = _mean
                         if resample:
-                            lower[_response][_response_param] = np.percentile(_samples, alpha / 2, axis=0)
-                            upper[_response][_response_param] = np.percentile(_samples, 100 - (alpha / 2), axis=0)
+                            lower[_response][_dim_name] = np.percentile(_samples, alpha / 2, axis=0)
+                            upper[_response][_dim_name] = np.percentile(_samples, 100 - (alpha / 2), axis=0)
                         else:
                             lower = upper = mean
-                            samples[_response][_response_param] = _mean[None, ...]
+                            samples[_response][_dim_name] = _mean[None, ...]
 
                 out = (plot_axes, mean, lower, upper, samples)
 
@@ -4940,15 +5084,17 @@ class Model(object):
         rmsd_mean = {}
         rmsd_lower = {}
         rmsd_upper = {}
-        for _response in samples:
-            rmsd_mean[_response] = {}
-            rmsd_lower[_response] = {}
-            rmsd_upper[_response] = {}
-            for _response_param in samples[_response]:
-                rmsd_samples = ((gold - samples[_response][_response_param])**2).mean(axis=axis)
-                rmsd_mean[_response][_response_param] = rmsd_samples.mean()
-                rmsd_lower[_response][_response_param] = rmsd_samples.percentile(alpha / 2)
-                rmsd_upper[_response][_response_param] = rmsd_samples.percentile(100 - (alpha / 2))
+        rmsd_samples = {}
+        for response in samples:
+            rmsd_mean[response] = {}
+            rmsd_lower[response] = {}
+            rmsd_upper[response] = {}
+            rmsd_samples[response] = {}
+            for dim_name in samples[response]:
+                rmsd_samples[response] = ((gold - samples[response][dim_name])**2).mean(axis=axis)
+                rmsd_mean[response][dim_name] = rmsd_samples.mean()
+                rmsd_lower[response][dim_name] = rmsd_samples.percentile(alpha / 2)
+                rmsd_upper[response][dim_name] = rmsd_samples.percentile(100 - (alpha / 2))
 
         return rmsd_mean, rmsd_lower, rmsd_upper, rmsd_samples
 
@@ -5029,8 +5175,8 @@ class Model(object):
             )
 
             for _response in vals:
-                for _response_param in vals[_response]:
-                    _vals = vals[_response][_response_param]
+                for _dim_name in vals[_response]:
+                    _vals = vals[_response][_dim_name]
                     if not self.is_cdrnn:
                         _vals = _vals[..., 1:]
 
@@ -5044,7 +5190,7 @@ class Model(object):
                         'Group': group_name if group_name is not None else '',
                         'Level': level_name if level_name is not None else '',
                         'Response': _response,
-                        'Param': _response_param
+                        'ResponseParam': _dim_name
                     })
 
                     if n_samples:
@@ -5165,8 +5311,8 @@ class Model(object):
 
         if response_param is None:
             response_param = set()
-            for x in response:
-                response_param.add(self.predictive_distribution_config[x]['params'][0])
+            for _response in response:
+                response_param.add(self.get_response_params(_response)[0])
             response_param = sorted(list(response_param))
         if isinstance(response_param, str):
             response_param = [response_param]
@@ -5326,17 +5472,17 @@ class Model(object):
                         )
 
                         for _response in plot_y:
-                            for _response_param in plot_y[_response]:
-                                param_names = self.predictive_distribution_config[_response]['params']
+                            for _dim_name in plot_y[_response]:
+                                param_names = self.get_response_params(_response)
 
-                                if _response_param == param_names[0]:
+                                if _dim_name == param_names[0]:
                                     include_param_name = False
                                 else:
                                     include_param_name = True
 
                                 plot_name = 'irf_univariate_%s' % sn(_response)
                                 if include_param_name:
-                                    plot_name += '_%s' % _response_param
+                                    plot_name += '_%s' % _dim_name
 
                                 if use_horiz_axlab:
                                     xlab = 't_delta'
@@ -5345,7 +5491,7 @@ class Model(object):
                                 if use_vert_axlab:
                                     ylab = [get_irf_name(_response, irf_name_map)]
                                     if include_param_name:
-                                        ylab.append(_response_param)
+                                        ylab.append(_dim_name)
                                     ylab = ', '.join(ylab)
                                 else:
                                     ylab = None
@@ -5358,9 +5504,9 @@ class Model(object):
                                     filename += '_mc'
                                 filename += '.png'
 
-                                _plot_y = plot_y[_response][_response_param]
-                                _lq = None if lq is None else lq[_response][_response_param]
-                                _uq = None if uq is None else uq[_response][_response_param]
+                                _plot_y = plot_y[_response][_dim_name]
+                                _lq = None if lq is None else lq[_response][_dim_name]
+                                _uq = None if uq is None else uq[_response][_dim_name]
 
                                 if not self.is_cdrnn:
                                     _plot_y = _plot_y[..., 1:]
@@ -5416,16 +5562,16 @@ class Model(object):
                         )
 
                         for _response in plot_y:
-                            for _response_param in plot_y[_response]:
-                                param_names = self.predictive_distribution_config[_response]['params']
-                                if _response_param == param_names[0]:
+                            for _dim_name in plot_y[_response]:
+                                param_names = self.get_response_params(_response)
+                                if _dim_name == param_names[0]:
                                     include_param_name = False
                                 else:
                                     include_param_name = True
 
                                 plot_name = 'curvature_%s' % sn(_response)
                                 if include_param_name:
-                                    plot_name += '_%s' % _response_param
+                                    plot_name += '_%s' % _dim_name
 
                                 plot_name += '_%s_at_delay%s' % (sn(name), reference_time)
 
@@ -5436,14 +5582,14 @@ class Model(object):
                                 if use_vert_axlab:
                                     ylab = [get_irf_name(_response, irf_name_map)]
                                     if include_param_name:
-                                        ylab.append(_response_param)
+                                        ylab.append(_dim_name)
                                     ylab = ', '.join(ylab)
                                 else:
                                     ylab = None
 
-                                _plot_y = plot_y[_response][_response_param]
-                                _lq = None if lq is None else lq[_response][_response_param]
-                                _uq = None if uq is None else uq[_response][_response_param]
+                                _plot_y = plot_y[_response][_dim_name]
+                                _lq = None if lq is None else lq[_response][_dim_name]
+                                _uq = None if uq is None else uq[_response][_dim_name]
 
                                 for g in range(len(ranef_level_names)):
                                     filename = prefix + plot_name
@@ -5512,16 +5658,16 @@ class Model(object):
                                 )
 
                                 for _response in plot_z:
-                                    for _response_param in plot_z[_response]:
-                                        param_names = self.predictive_distribution_config[_response]['params']
-                                        if _response_param == param_names[0]:
+                                    for _dim_name in plot_z[_response]:
+                                        param_names = self.get_response_params(_response)
+                                        if _dim_name == param_names[0]:
                                             include_param_name = False
                                         else:
                                             include_param_name = True
 
                                         plot_name = 'surface_%s' % sn(_response)
                                         if include_param_name:
-                                            plot_name += '_%s' % _response_param
+                                            plot_name += '_%s' % _dim_name
 
                                         if use_horiz_axlab:
                                             xlab = xvar
@@ -5532,14 +5678,14 @@ class Model(object):
                                         if use_vert_axlab:
                                             zlab = [get_irf_name(_response, irf_name_map)]
                                             if include_param_name:
-                                                zlab.append(_response_param)
+                                                zlab.append(_dim_name)
                                             zlab = ', '.join(zlab)
                                         else:
                                             zlab = None
 
-                                        _plot_z = plot_z[_response][_response_param]
-                                        _lq = None if lq is None else lq[_response][_response_param]
-                                        _uq = None if uq is None else uq[_response][_response_param]
+                                        _plot_z = plot_z[_response][_dim_name]
+                                        _lq = None if lq is None else lq[_response][_dim_name]
+                                        _uq = None if uq is None else uq[_response][_dim_name]
 
                                         for g in range(len(ranef_level_names)):
                                             filename = prefix + plot_name + '_' + sn(yvar) + '_by_' + sn(xvar)
@@ -5605,7 +5751,7 @@ class Model(object):
                     out = pd.DataFrame({'Parameter': types})
                     if len(self.response_names) > 1:
                         out['Response'] = responses
-                    out['Param'] = response_params
+                    out['ResponseParam'] = response_params
 
                 else:
                     types = self.parameter_table_random_types
@@ -5626,7 +5772,7 @@ class Model(object):
                     })
                     if len(self.response_names) > 1:
                         out['Response'] = responses
-                    out['Param'] = response_params
+                    out['ResponseParam'] = response_params
 
                 columns = self.parameter_table_columns
                 out = pd.concat([out, pd.DataFrame(values, columns=columns)], axis=1)
@@ -5804,7 +5950,7 @@ class ModelBayes(Model):
             with self.sess.graph.as_default():
                 out = []
                 ndim = self.response_n_dim[response_name]
-                for param in self.predictive_distribution_config[response_name]['params']:
+                for param in self.get_response_params(response_name):
                     if param in ['mu', 'sigma']:
                         if self.standardize_response:
                             _out = np.ones((1, ndim))
@@ -5824,16 +5970,16 @@ class ModelBayes(Model):
             _prior_sd = prior_sd_in.split()
             for i, x in enumerate(_prior_sd):
                 _response = self.response_names[i]
-                nparam = len(self.predictive_distribution_config[_response]['params'])
+                nparam = self.get_response_nparam(_response)
                 ndim = self.response_n_dim[_response]
                 _param_sds = x.split(';')
-                assert len(_param_sds) == nparam, 'Expected %d priors for the %s response to variable %s, got %d.' % (nparam, self.predictive_distribution_config[_response]['name'], _response, len(_param_sds))
+                assert len(_param_sds) == nparam, 'Expected %d priors for the %s response to variable %s, got %d.' % (nparam, self.get_response_dist_name(_response), _response, len(_param_sds))
                 _prior_sd = np.array([float(_param_sd) for _param_sd in _param_sds])
                 _prior_sd = _prior_sd[..., None] * np.ones([1, ndim])
                 prior_sd[_response] = _prior_sd
         elif isinstance(prior_sd_in, float):
             for _response in self.response_names:
-                nparam = len(self.predictive_distribution_config[_response]['params'])
+                nparam = self.get_response_nparam(_response)
                 ndim = self.response_n_dim[_response]
                 prior_sd[_response] = np.ones([nparam, ndim]) * prior_sd_in
         elif prior_sd_in is None:
@@ -5906,7 +6052,7 @@ class ModelBayes(Model):
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     if self.use_distributional_regression:
-                        nparam = len(self.predictive_distribution_config[response_name]['params'])
+                        nparam = self.get_response_nparam(response_name)
                     else:
                         nparam = 1
                     ndim = self.response_n_dim[response_name]
@@ -5984,5 +6130,35 @@ class ModelBayes(Model):
                 out = np.stack([mean, lower, upper], axis=1)
 
                 self.set_predict_mode(False)
+
+                return out
+
+    def report_regularized_variables(self, indent=0):
+        """
+        Generate a string representation of the model's regularization structure.
+
+        :param indent: ``int``; indentation level
+        :return: ``str``; the regularization report
+        """
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                out = super(ModelBayes, self).report_regularized_variables(indent)
+
+                out += ' ' * indent + 'VARIATIONAL PRIORS:\n'
+                out += ' ' * indent + '  NOTE: If using **standardize_response**, priors are reported\n'
+                out += ' ' * indent + '        on the standardized scale where relevant.\n'
+
+                kl_penalties = self.kl_penalties
+
+                if len(kl_penalties) == 0:
+                    out +=  ' ' * indent + '  No variational priors.\n\n'
+                else:
+                    for name in sorted(list(kl_penalties.keys())):
+                        out += ' ' * indent + '  %s:\n' % name
+                        for k in sorted(list(kl_penalties[name].keys())):
+                            if not k == 'val':
+                                out += ' ' * indent + '    %s: %s\n' % (k, kl_penalties[name][k])
+
+                    out += '\n'
 
                 return out

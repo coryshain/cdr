@@ -92,23 +92,23 @@ class CDRBayes(ModelBayes, CDR):
     #
     ######################################################
 
-    def initialize_coefficient(self, response_name, coef_ids=None, ran_gf=None):
+    def initialize_coefficient(self, response, coef_ids=None, ran_gf=None):
         if coef_ids is None:
             coef_ids = self.coef_names
 
         if self.use_distributional_regression:
-            nparam = len(self.predictive_distribution_config[response_name]['params'])
+            nparam = self.get_response_nparam(response)
         else:
             nparam = 1
 
-        ndim = self.response_n_dim[response_name]
+        ndim = self.response_n_dim[response]
         ncoef = len(coef_ids)
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if ran_gf is None:
-                    prior_sd = self._coef_prior_sd[response_name]
-                    post_sd = self._coef_posterior_sd_init[response_name]
+                    prior_sd = self._coef_prior_sd[response]
+                    post_sd = self._coef_posterior_sd_init[response]
                     if not self.use_distributional_regression:
                         prior_sd = prior_sd[:1]
                         post_sd = post_sd[:1]
@@ -118,18 +118,18 @@ class CDRBayes(ModelBayes, CDR):
                     # Posterior distribution
                     coefficient_q_loc = tf.Variable(
                         tf.zeros([ncoef, nparam, ndim], dtype=self.FLOAT_TF),
-                        name='coefficient_%s_q_loc' % sn(response_name)
+                        name='coefficient_%s_q_loc' % sn(response)
                     )
 
                     coefficient_q_scale = tf.Variable(
                         tf.constant(post_sd, self.FLOAT_TF),
-                        name='coefficient_%s_q_scale' % sn(response_name)
+                        name='coefficient_%s_q_scale' % sn(response)
                     )
 
                     coefficient_q_dist = Normal(
                         loc=coefficient_q_loc,
                         scale=self.constraint_fn(coefficient_q_scale) + self.epsilon,
-                        name='coefficient_%s_q' % sn(response_name)
+                        name='coefficient_%s_q' % sn(response)
                     )
 
                     coefficient = tf.cond(self.use_MAP_mode, coefficient_q_dist.mean, coefficient_q_dist.sample)
@@ -141,18 +141,18 @@ class CDRBayes(ModelBayes, CDR):
                         coefficient_prior_dist = Normal(
                             loc=0.,
                             scale=self.constraint_fn(tf.constant(prior_sd, self.FLOAT_TF)),
-                            name='coefficient_%s' % sn(response_name)
+                            name='coefficient_%s' % sn(response)
                         )
-                        self.kl_penalties['coefficient_%s' % sn(response_name)] = {
+                        self.kl_penalties['coefficient_%s' % sn(response)] = {
                             'loc': 0.,
-                            'scale': self.constraint_fn_np(self._coef_prior_sd[response_name]).flatten(),
+                            'scale': self.constraint_fn_np(self._coef_prior_sd[response]).flatten(),
                             'val': coefficient_q_dist.kl_divergence(coefficient_prior_dist)
                         }
 
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
-                    prior_sd = self._coef_ranef_prior_sd[response_name]
-                    post_sd = self._coef_ranef_posterior_sd_init[response_name]
+                    prior_sd = self._coef_ranef_prior_sd[response]
+                    post_sd = self._coef_ranef_posterior_sd_init[response]
                     if not self.use_distributional_regression:
                         prior_sd = prior_sd[:1]
                         post_sd = post_sd[:1]
@@ -162,18 +162,18 @@ class CDRBayes(ModelBayes, CDR):
                     # Posterior distribution
                     coefficient_q_loc = tf.Variable(
                         tf.zeros([rangf_n_levels, ncoef, nparam, ndim], dtype=self.FLOAT_TF),
-                        name='coefficient_%s_by_%s_q_loc' % (sn(response_name), sn(ran_gf))
+                        name='coefficient_%s_by_%s_q_loc' % (sn(response), sn(ran_gf))
                     )
 
                     coefficient_q_scale = tf.Variable(
                         tf.constant(post_sd, self.FLOAT_TF),
-                        name='coefficient_%s_by_%s_q_scale' % (sn(response_name), sn(ran_gf))
+                        name='coefficient_%s_by_%s_q_scale' % (sn(response), sn(ran_gf))
                     )
 
                     coefficient_q_dist = Normal(
                         loc=coefficient_q_loc,
                         scale=self.constraint_fn(coefficient_q_scale) + self.epsilon,
-                        name='coefficient_%s_by_%s_q' % (sn(response_name), sn(ran_gf))
+                        name='coefficient_%s_by_%s_q' % (sn(response), sn(ran_gf))
                     )
 
                     coefficient = tf.cond(self.use_MAP_mode, coefficient_q_dist.mean, coefficient_q_dist.sample)
@@ -185,11 +185,11 @@ class CDRBayes(ModelBayes, CDR):
                         coefficient_prior_dist = Normal(
                             loc=0.,
                             scale=self.constraint_fn(tf.constant(prior_sd, self.FLOAT_TF)),
-                            name='coefficient_%s_by_%s' % (sn(response_name), sn(ran_gf))
+                            name='coefficient_%s_by_%s' % (sn(response), sn(ran_gf))
                         )
-                        self.kl_penalties['coefficient_%s_by_%s' % (sn(response_name), sn(ran_gf))] = {
+                        self.kl_penalties['coefficient_%s_by_%s' % (sn(response), sn(ran_gf))] = {
                             'loc': 0.,
-                            'scale': self.constraint_fn_np(self._coef_ranef_prior_sd[response_name]).flatten(),
+                            'scale': self.constraint_fn_np(self._coef_ranef_prior_sd[response]).flatten(),
                             'val': coefficient_q_dist.kl_divergence(coefficient_prior_dist)
                         }
 
@@ -197,22 +197,22 @@ class CDRBayes(ModelBayes, CDR):
 
                 return coefficient, coefficient_summary
 
-    def initialize_interaction(self, response_name, interaction_ids=None, ran_gf=None):
+    def initialize_interaction(self, response, interaction_ids=None, ran_gf=None):
         if interaction_ids is None:
             interaction_ids = self.interaction_names
 
         if self.use_distributional_regression:
-            nparam = len(self.predictive_distribution_config[response_name]['params'])
+            nparam = self.get_response_nparam(response)
         else:
             nparam = 1
-        ndim = self.response_n_dim[response_name]
+        ndim = self.response_n_dim[response]
         ninter = len(interaction_ids)
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if ran_gf is None:
-                    prior_sd = self._coef_prior_sd[response_name]
-                    post_sd = self._coef_posterior_sd_init[response_name]
+                    prior_sd = self._coef_prior_sd[response]
+                    post_sd = self._coef_posterior_sd_init[response]
                     if not self.use_distributional_regression:
                         prior_sd = prior_sd[:1]
                         post_sd = post_sd[:1]
@@ -222,18 +222,18 @@ class CDRBayes(ModelBayes, CDR):
                     # Posterior distribution
                     interaction_q_loc = tf.Variable(
                         tf.zeros([ninter, nparam, ndim], dtype=self.FLOAT_TF),
-                        name='interaction_%s_q_loc' % sn(response_name)
+                        name='interaction_%s_q_loc' % sn(response)
                     )
 
                     interaction_q_scale = tf.Variable(
                         tf.constant(post_sd, self.FLOAT_TF),
-                        name='interaction_%s_q_scale' % sn(response_name)
+                        name='interaction_%s_q_scale' % sn(response)
                     )
 
                     interaction_q_dist = Normal(
                         loc=interaction_q_loc,
                         scale=self.constraint_fn(interaction_q_scale) + self.epsilon,
-                        name='interaction_%s_q' % (response_name)
+                        name='interaction_%s_q' % (response)
                     )
 
                     interaction = tf.cond(self.use_MAP_mode, interaction_q_dist.mean, interaction_q_dist.sample)
@@ -245,17 +245,17 @@ class CDRBayes(ModelBayes, CDR):
                         interaction_prior_dist = Normal(
                             loc=0.,
                             scale=self.constraint_fn(tf.constant(prior_sd, self.FLOAT_TF)),
-                            name='interaction_%s' % sn(response_name)
+                            name='interaction_%s' % sn(response)
                         )
-                        self.kl_penalties['interaction_%s' % sn(response_name)] = {
+                        self.kl_penalties['interaction_%s' % sn(response)] = {
                             'loc': 0.,
-                            'scale': self.constraint_fn_np(self._coef_prior_sd[response_name]).flatten(),
+                            'scale': self.constraint_fn_np(self._coef_prior_sd[response]).flatten(),
                             'val': interaction_q_dist.kl_divergence(interaction_prior_dist)
                         }
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
-                    prior_sd = self._coef_ranef_prior_sd[response_name]
-                    post_sd = self._coef_ranef_posterior_sd_init[response_name]
+                    prior_sd = self._coef_ranef_prior_sd[response]
+                    post_sd = self._coef_ranef_posterior_sd_init[response]
                     if not self.use_distributional_regression:
                         prior_sd = prior_sd[:1]
                         post_sd = post_sd[:1]
@@ -265,18 +265,18 @@ class CDRBayes(ModelBayes, CDR):
                     # Posterior distribution
                     interaction_q_loc = tf.Variable(
                         tf.zeros([rangf_n_levels, ninter], dtype=self.FLOAT_TF),
-                        name='interaction_%s_by_%s_q_loc' % (sn(response_name), sn(ran_gf))
+                        name='interaction_%s_by_%s_q_loc' % (sn(response), sn(ran_gf))
                     )
 
                     interaction_q_scale = tf.Variable(
                         tf.constant(post_sd, self.FLOAT_TF),
-                        name='interaction_%s_by_%s_q_scale' % (sn(response_name), sn(ran_gf))
+                        name='interaction_%s_by_%s_q_scale' % (sn(response), sn(ran_gf))
                     )
 
                     interaction_q_dist = Normal(
                         loc=interaction_q_loc,
                         scale=self.constraint_fn(interaction_q_scale) + self.epsilon,
-                        name='interaction_%s_by_%s_q' % (sn(response_name), sn(ran_gf))
+                        name='interaction_%s_by_%s_q' % (sn(response), sn(ran_gf))
                     )
 
                     interaction = tf.cond(self.use_MAP_mode, interaction_q_dist.mean, interaction_q_dist.sample)
@@ -288,11 +288,11 @@ class CDRBayes(ModelBayes, CDR):
                         interaction_prior_dist = Normal(
                             loc=0.,
                             scale=self.constraint_fn(tf.constant(prior_sd, self.FLOAT_TF)),
-                            name='interaction_%s_by_%s' % (sn(response_name), sn(ran_gf))
+                            name='interaction_%s_by_%s' % (sn(response), sn(ran_gf))
                         )
-                        self.kl_penalties['interaction_%s_by_%s' % (sn(response_name), sn(ran_gf))] = {
+                        self.kl_penalties['interaction_%s_by_%s' % (sn(response), sn(ran_gf))] = {
                             'loc': 0.,
-                            'scale': self.constraint_fn_np(self._coef_ranef_prior_sd[response_name]).flatten(),
+                            'scale': self.constraint_fn_np(self._coef_ranef_prior_sd[response]).flatten(),
                             'val': interaction_q_dist.kl_divergence(interaction_prior_dist)
                         }
 
@@ -300,7 +300,7 @@ class CDRBayes(ModelBayes, CDR):
 
                 return interaction, interaction_summary
 
-    def initialize_irf_param(self, response_name, family, param_name, ran_gf=None):
+    def initialize_irf_param(self, response, family, param_name, ran_gf=None):
         param_mean_unconstrained = self.irf_params_means_unconstrained[family][param_name]
         trainable_ix = self.irf_params_trainable_ix[family][param_name]
         mean = param_mean_unconstrained[trainable_ix]
@@ -308,10 +308,10 @@ class CDRBayes(ModelBayes, CDR):
         param_trainable = self.atomic_irf_param_trainable_by_family[family]
 
         if self.use_distributional_regression:
-            nparam = len(self.predictive_distribution_config[response_name]['params']) # number of params of predictive dist, not IRF
+            response_nparam = self.get_response_nparam(response) # number of params of predictive dist, not IRF
         else:
-            nparam = 1
-        ndim = self.response_n_dim[response_name]
+            response_nparam = 1
+        response_ndim = self.response_n_dim[response]
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -320,8 +320,8 @@ class CDRBayes(ModelBayes, CDR):
                     nirf = len(trainable_ids)
 
                     if nirf:
-                        prior_sd = self._irf_param_prior_sd[response_name]
-                        post_sd = self._irf_param_posterior_sd_init[response_name]
+                        prior_sd = self._irf_param_prior_sd[response]
+                        post_sd = self._irf_param_posterior_sd_init[response]
                         if not self.use_distributional_regression:
                             prior_sd = prior_sd[:1]
                             post_sd = post_sd[:1]
@@ -330,19 +330,19 @@ class CDRBayes(ModelBayes, CDR):
 
                         # Posterior distribution
                         param_q_loc = tf.Variable(
-                            tf.ones([nirf, nparam, ndim], dtype=self.FLOAT_TF) * tf.constant(mean[..., None, None], dtype=self.FLOAT_TF),
-                            name='%s_%s_%s_q_loc' % (param_name, sn(response_name), sn('-'.join(trainable_ids)))
+                            tf.ones([nirf, response_nparam, response_ndim], dtype=self.FLOAT_TF) * tf.constant(mean[..., None, None], dtype=self.FLOAT_TF),
+                            name='%s_%s_%s_q_loc' % (param_name, sn(response), sn('-'.join(trainable_ids)))
                         )
 
                         param_q_scale = tf.Variable(
                             tf.constant(post_sd, self.FLOAT_TF),
-                            name='%s_%s_%s_q_scale' % (param_name, sn(response_name), sn('-'.join(trainable_ids)))
+                            name='%s_%s_%s_q_scale' % (param_name, sn(response), sn('-'.join(trainable_ids)))
                         )
 
                         param_q_dist = Normal(
                             loc=param_q_loc,
                             scale=self.constraint_fn(param_q_scale) + self.epsilon,
-                            name='%s_%s_%s_q' % (param_name, sn(response_name), sn('-'.join(trainable_ids)))
+                            name='%s_%s_%s_q' % (param_name, sn(response), sn('-'.join(trainable_ids)))
                         )
 
                         param = tf.cond(self.use_MAP_mode, param_q_dist.mean, param_q_dist.sample)
@@ -354,11 +354,11 @@ class CDRBayes(ModelBayes, CDR):
                             param_prior_dist = Normal(
                                 loc=tf.constant(mean[..., None, None], dtype=self.FLOAT_TF),
                                 scale=self.constraint_fn(tf.constant(prior_sd, self.FLOAT_TF)),
-                                name='%s_%s_%s' % (param_name, sn(response_name), sn('-'.join(trainable_ids)))
+                                name='%s_%s_%s' % (param_name, sn(response), sn('-'.join(trainable_ids)))
                             )
-                            self.kl_penalties['%s_%s_%s' % (param_name, sn(response_name), sn('-'.join(trainable_ids)))] = {
+                            self.kl_penalties['%s_%s_%s' % (param_name, sn(response), sn('-'.join(trainable_ids)))] = {
                                 'loc': mean.flatten(),
-                                'scale': self.constraint_fn_np(self._irf_param_prior_sd[response_name]).flatten(),
+                                'scale': self.constraint_fn_np(self._irf_param_prior_sd[response]).flatten(),
                                 'val': param_q_dist.kl_divergence(param_prior_dist)
                             }
                     else:
@@ -370,8 +370,8 @@ class CDRBayes(ModelBayes, CDR):
                     nirf = len(trainable_ids)
 
                     if nirf:
-                        prior_sd = self._irf_param_ranef_prior_sd[response_name]
-                        post_sd = self._irf_param_ranef_posterior_sd_init[response_name]
+                        prior_sd = self._irf_param_ranef_prior_sd[response]
+                        post_sd = self._irf_param_ranef_posterior_sd_init[response]
                         if not self.use_distributional_regression:
                             prior_sd = prior_sd[:1]
                             post_sd = post_sd[:1]
@@ -380,19 +380,19 @@ class CDRBayes(ModelBayes, CDR):
 
                         # Posterior distribution
                         param_q_loc = tf.Variable(
-                            tf.zeros([rangf_n_levels, nirf, nparam, ndim], dtype=self.FLOAT_TF),
-                            name=sn('%s_%s_%s_by_%s_q_loc' % (param_name, sn(response_name), '-'.join(trainable_ids), sn(ran_gf)))
+                            tf.zeros([rangf_n_levels, nirf, response_nparam, response_ndim], dtype=self.FLOAT_TF),
+                            name=sn('%s_%s_%s_by_%s_q_loc' % (param_name, sn(response), '-'.join(trainable_ids), sn(ran_gf)))
                         )
 
                         param_q_scale = tf.Variable(
                             tf.constant(post_sd, self.FLOAT_TF),
-                            name=sn('%s_%s_%s_by_%s_q_scale' % (param_name, sn(response_name), '-'.join(trainable_ids), sn(ran_gf)))
+                            name=sn('%s_%s_%s_by_%s_q_scale' % (param_name, sn(response), '-'.join(trainable_ids), sn(ran_gf)))
                         )
 
                         param_q_dist = Normal(
                             loc=param_q_loc,
                             scale=self.constraint_fn(param_q_scale) + self.epsilon,
-                            name=sn('%s_%s_%s_by_%s_q' % (param_name, sn(response_name), '-'.join(trainable_ids), sn(ran_gf)))
+                            name=sn('%s_%s_%s_by_%s_q' % (param_name, sn(response), '-'.join(trainable_ids), sn(ran_gf)))
                         )
 
                         param = tf.cond(self.use_MAP_mode, param_q_dist.mean, param_q_dist.sample)
@@ -404,11 +404,11 @@ class CDRBayes(ModelBayes, CDR):
                             param_prior_dist = Normal(
                                 loc=0.,
                                 scale=self.constraint_fn(tf.constant(prior_sd, self.FLOAT_TF)),
-                                name='%s_%s_%s_by_%s' % (param_name, sn(response_name), sn('-'.join(trainable_ids)), sn(ran_gf))
+                                name='%s_%s_%s_by_%s' % (param_name, sn(response), sn('-'.join(trainable_ids)), sn(ran_gf))
                             )
-                            self.kl_penalties['%s_%s_%s_by_%s' % (param_name, sn(response_name), sn('-'.join(trainable_ids)), sn(ran_gf))] = {
+                            self.kl_penalties['%s_%s_%s_by_%s' % (param_name, sn(response), sn('-'.join(trainable_ids)), sn(ran_gf))] = {
                                 'loc': 0.,
-                                'scale': self.constraint_fn_np(self._irf_param_ranef_prior_sd[response_name]).flatten(),
+                                'scale': self.constraint_fn_np(self._irf_param_ranef_prior_sd[response]).flatten(),
                                 'val': param_q_dist.kl_divergence(param_prior_dist)
                             }
                     else:
@@ -436,31 +436,3 @@ class CDRBayes(ModelBayes, CDR):
         out += '\n'
 
         return out
-
-    def report_regularized_variables(self, indent=0):
-        """
-        Generate a string representation of the model's regularization structure.
-
-        :param indent: ``int``; indentation level
-        :return: ``str``; the regularization report
-        """
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                out = super(CDRBayes, self).report_regularized_variables(indent)
-
-                out += ' ' * indent + 'VARIATIONAL PRIORS:\n'
-
-                kl_penalties = self.kl_penalties
-
-                if len(kl_penalties) == 0:
-                    out +=  ' ' * indent + '  No variational priors.\n\n'
-                else:
-                    for name in sorted(list(kl_penalties.keys())):
-                        out += ' ' * indent + '  %s:\n' % name
-                        for k in sorted(list(kl_penalties[name].keys())):
-                            if not k == 'val':
-                                out += ' ' * indent + '    %s: %s\n' % (k, kl_penalties[name][k])
-
-                    out += '\n'
-
-                return out

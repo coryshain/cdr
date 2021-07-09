@@ -1029,32 +1029,3 @@ class CDRNNBayes(ModelBayes, CDRNN):
         out += '\n'
 
         return out
-
-    def report_regularized_variables(self, indent=0):
-        """
-        Generate a string representation of the model's regularization structure.
-
-        :param indent: ``int``; indentation level
-        :return: ``str``; the regularization report
-        """
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                out = super(CDRNNBayes, self).report_regularized_variables(indent)
-
-                out += ' ' * indent + 'VARIATIONAL PRIORS:\n'
-
-                kl_penalties = self.kl_penalties
-
-                if len(kl_penalties) == 0:
-                    out +=  ' ' * indent + '  No variational priors.\n\n'
-                else:
-                    for name in sorted(list(kl_penalties.keys())):
-                        out += ' ' * indent + '  %s:\n' % name
-                        for k in sorted(list(kl_penalties[name].keys())):
-                            if not k == 'val':
-                                out += ' ' * indent + '    %s: %s\n' % (k, kl_penalties[name][k])
-
-                    out += '\n'
-
-                return out
-
