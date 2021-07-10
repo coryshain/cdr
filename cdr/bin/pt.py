@@ -18,7 +18,6 @@ def scale(a, b):
 
 
 if __name__ == '__main__':
-
     argparser = argparse.ArgumentParser('''
         Performs pairwise permutation test for significance of differences in prediction quality between models.
         Can be used for in-sample and out-of-sample evaluation.

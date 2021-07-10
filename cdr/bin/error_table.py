@@ -68,7 +68,6 @@ def results_to_table(results, tasks, systems, baselines=None, indent=4):
 
 
 if __name__ == '__main__':
-
     argparser = argparse.ArgumentParser('''
     Generate a LaTeX table summarizing results from CDR vs. baseline models in some output directory.
     Tasks are defined as sets of experiments within the same config file (because they are constrained to use the same data).

@@ -101,7 +101,7 @@ class CDRBayes(ModelBayes, CDR):
         else:
             nparam = 1
 
-        ndim = self.response_n_dim[response]
+        ndim = self.get_response_ndim(response)
         ncoef = len(coef_ids)
 
         with self.sess.as_default():
@@ -205,7 +205,7 @@ class CDRBayes(ModelBayes, CDR):
             nparam = self.get_response_nparam(response)
         else:
             nparam = 1
-        ndim = self.response_n_dim[response]
+        ndim = self.get_response_ndim(response)
         ninter = len(interaction_ids)
 
         with self.sess.as_default():
@@ -311,7 +311,7 @@ class CDRBayes(ModelBayes, CDR):
             response_nparam = self.get_response_nparam(response) # number of params of predictive dist, not IRF
         else:
             response_nparam = 1
-        response_ndim = self.response_n_dim[response]
+        response_ndim = self.get_response_ndim(response)
 
         with self.sess.as_default():
             with self.sess.graph.as_default():

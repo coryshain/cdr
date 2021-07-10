@@ -4,7 +4,6 @@ from cdr.config import Config
 from cdr.util import load_cdr, filter_models, stderr
 
 if __name__ == '__main__':
-
     argparser = argparse.ArgumentParser('''
         Generate summary of saved model(s)
     ''')

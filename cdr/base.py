@@ -153,7 +153,7 @@ class Model(object):
         responses = form.responses()
         response_names = [x.name() for x in responses]
         response_is_categorical = {}
-        response_n_dim = {}
+        response_ndim = {}
         response_category_maps = {}
         for _response in responses:
             if _response.categorical(Y):
@@ -172,17 +172,17 @@ class Model(object):
                 category_map = {}
                 n_dim = 1
             response_is_categorical[_response.name()] = is_categorical
-            response_n_dim[_response.name()] = n_dim
+            response_ndim[_response.name()] = n_dim
             response_category_maps[_response.name()] = category_map
         response_expanded_bounds = {}
         s = 0
         for _response in response_names:
-            n_dim = response_n_dim[_response]
+            n_dim = response_ndim[_response]
             e = s + n_dim
             response_expanded_bounds[_response] = (s, e)
             s = e
         self.response_is_categorical = response_is_categorical
-        self.response_n_dim = response_n_dim
+        self.response_ndim = response_ndim
         self.response_category_maps = response_category_maps
         self.response_expanded_bounds = response_expanded_bounds
 
@@ -462,7 +462,6 @@ class Model(object):
         self.response_names = self.form.response_names()
         self.n_impulse = len(self.impulse_names)
         self.n_response = len(self.response_names)
-        self.n_response_expanded = sum(self.response_n_dim[x] for x in self.response_n_dim)
         self.impulse_names_to_ix = {}
         self.impulse_names_printable = {}
         for i, x in enumerate(self.impulse_names):
@@ -635,6 +634,8 @@ class Model(object):
         s = np.array([s[x] for x in self.impulse_names])
         self.plot_step_arr = s
 
+        self.summed_interactions = None
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if self.constraint.lower() == 'softplus':
@@ -714,7 +715,7 @@ class Model(object):
             'Y_train_sds': self.Y_train_sds,
             'Y_train_quantiles': self.Y_train_quantiles,
             'response_is_categorical': self.response_is_categorical,
-            'response_n_dim': self.response_n_dim,
+            'response_ndim': self.response_ndim,
             'response_category_maps': self.response_category_maps,
             'response_expanded_bounds': self.response_expanded_bounds,
             't_delta_max': self.t_delta_max,
@@ -761,7 +762,7 @@ class Model(object):
         self.Y_train_sds = md.pop('Y_train_sds', md.pop('y_train_sd', None))
         self.Y_train_quantiles = md.pop('Y_train_quantiles', md.pop('y_train_quantiles', None))
         self.response_is_categorical = md.pop('response_is_categorical', {x: 'False' for x in self.form.response_names()})
-        self.response_n_dim = md.pop('response_n_dim', {x: 1 for x in self.form.response_names()})
+        self.response_ndim = md.pop('response_ndim', md.pop('response_n_dim', {x: 1 for x in self.form.response_names()}))
         self.response_category_maps = md.pop('response_category_maps', {x: {} for x in self.form.response_names()})
         self.response_expanded_bounds = md.pop('response_expanded_bounds', {x: (i, i+1) for i, x in enumerate(self.form.response_names())})
         self.t_delta_max = md.pop('t_delta_max', md.pop('max_tdelta', None))
@@ -829,7 +830,9 @@ class Model(object):
                     dtype=self.FLOAT_TF,
                     name='X'
                 )
-                self.X_batch = tf.shape(self.X)[0]
+                X_shape = tf.shape(self.X)
+                self.X_batch_dim = X_shape[0]
+                self.X_time_dim = X_shape[1]
                 X_processed = self.X
                 if self.center_inputs:
                     X_processed -= self.impulse_means_arr_expanded
@@ -839,12 +842,12 @@ class Model(object):
                     X_processed /= scale
                 self.X_processed = X_processed
                 self.X_time = tf.placeholder_with_default(
-                    tf.zeros([self.X_batch, self.history_length,  max(self.n_impulse, 1)], dtype=self.FLOAT_TF),
+                    tf.zeros([self.X_batch_dim, self.history_length, max(self.n_impulse, 1)], dtype=self.FLOAT_TF),
                     shape=[None, None, max(self.n_impulse, 1)],
                     name='X_time'
                 )
                 self.X_mask = tf.placeholder_with_default(
-                    tf.ones([self.X_batch, self.history_length, max(self.n_impulse, 1)], dtype=self.FLOAT_TF),
+                    tf.ones([self.X_batch_dim, self.history_length, max(self.n_impulse, 1)], dtype=self.FLOAT_TF),
                     shape=[None, None, max(self.n_impulse, 1)],
                     name='X_mask'
                 )
@@ -855,19 +858,20 @@ class Model(object):
                     dtype=self.FLOAT_TF,
                     name=sn('Y')
                 )
-                self.Y_batch = tf.shape(self.Y)[0]
+                Y_shape = tf.shape(self.Y)
+                self.Y_batch_dim = Y_shape[0]
                 self.Y_time = tf.placeholder_with_default(
-                    tf.ones([self.Y_batch], dtype=self.FLOAT_TF),
+                    tf.ones([self.Y_batch_dim], dtype=self.FLOAT_TF),
                     shape=[None],
                     name=sn('Y_time')
                 )
                 self.Y_mask = tf.placeholder_with_default(
-                    tf.ones([self.Y_batch, self.n_response], dtype=self.FLOAT_TF),
+                    tf.ones([self.Y_batch_dim, self.n_response], dtype=self.FLOAT_TF),
                     shape=[None, self.n_response],
                     name='Y_mask'
                 )
 
-                # Compute tensor of temporal offsets with shape
+                # Compute tensor of temporal offsets
                 # shape (B,)
                 _Y_time = self.Y_time
                 # shape (B, 1, 1)
@@ -1070,7 +1074,7 @@ class Model(object):
 
                             # % variance explained
                             full_variance = self.Y_train_sds[response] ** 2
-                            if self.response_n_dim[response] == 1:
+                            if self.get_response_ndim(response) == 1:
                                 full_variance = np.squeeze(full_variance, axis=-1)
                             self.training_percent_variance_explained[response].append(tf.maximum(
                                 0.,
@@ -1143,7 +1147,7 @@ class Model(object):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 out = []
-                ndim = self.response_n_dim[response_name]
+                ndim = self.get_response_ndim(response_name)
                 for param in self.get_response_params(response_name):
                     if param == 'mu':
                         if has_intercept and not self.standardize_response:
@@ -1219,7 +1223,7 @@ class Model(object):
                     # Fixed
                     response_params = self.get_response_params(response)
                     nparam = len(response_params)
-                    ndim = self.response_n_dim[response]
+                    ndim = self.get_response_ndim(response)
 
                     intercept = self.intercept_fixed_base[response]
                     intercept_summary = self.intercept_fixed_base_summary[response]
@@ -1350,6 +1354,9 @@ class Model(object):
                 self.error_distribution = {}
                 self.error_distribution_theoretical_quantiles = {}
                 self.error_distribution_theoretical_cdf = {}
+                self.error_distribution_plot = {}
+                self.error_distribution_plot_lb = {}
+                self.error_distribution_plot_ub = {}
                 self.response_params_ema = {}
                 self.response_params_ema_ops = {}
 
@@ -1360,7 +1367,7 @@ class Model(object):
                     self.error_distribution[response] = {}
                     self.error_distribution_theoretical_quantiles[response] = {}
                     self.error_distribution_theoretical_cdf[response] = {}
-                    ndim = self.response_n_dim[response]
+                    ndim = self.get_response_ndim(response)
 
                     pred_dist_fn = self.get_response_dist(response)
                     response_param_names = self.get_response_params(response)
@@ -1487,16 +1494,24 @@ class Model(object):
                             if j:
                                 val = response_params_ema_debiased[j]
                             else:
-                                val = tf.zeros((1, self.response_n_dim[response]))
+                                val = tf.zeros((1, self.get_response_ndim(response)))
                             err_dist_params.append(val)
-                        if self.response_n_dim[response] == 1:
+                        if self.get_response_ndim(response) == 1:
                             err_dist_params = [tf.squeeze(x, axis=-1) for x in err_dist_params]
                         err_dist = pred_dist_fn(*err_dist_params)
                         err_dist_theoretical_quantiles = err_dist.quantile(empirical_quantiles)
                         err_dist_theoretical_cdf = err_dist.cdf(self.errors[response])
+
+                        err_dist_plot = tf.exp(err_dist.log_prob(self.support[None, ...]))
+                        err_dist_lb = err_dist.quantile(.025)
+                        err_dist_ub = err_dist.quantile(.975)
+
                         self.error_distribution[response] = err_dist
                         self.error_distribution_theoretical_quantiles[response] = err_dist_theoretical_quantiles
                         self.error_distribution_theoretical_cdf[response] = err_dist_theoretical_cdf
+                        self.error_distribution_plot[response] = err_dist_plot
+                        self.error_distribution_plot_lb[response] = err_dist_lb
+                        self.error_distribution_plot_ub[response] = err_dist_ub
 
                 self.ll = tf.add_n([self.ll_by_var[x] for x in self.ll_by_var])
 
@@ -1775,7 +1790,7 @@ class Model(object):
         # Returns an empty list if the param is not used by the response.
         # Returns the unmodified param if the response is univariate.
         # Returns the concatenation "<param_name>.<dim_name>" if the response is multivariate.
-        ndim = self.response_n_dim[response]
+        ndim = self.get_response_ndim(response)
         out = []
         if ndim == 1:
             if response_param in self.get_response_params(response):
@@ -2312,7 +2327,7 @@ class Model(object):
                         nparam = self.get_response_nparam(response_name)
                     else:
                         nparam = 1
-                    ndim = self.response_n_dim[response_name]
+                    ndim = self.get_response_ndim(response_name)
                     shape = [rangf_n_levels, nparam, ndim]
                     intercept = tf.Variable(
                         tf.zeros(shape, dtype=self.FLOAT_TF),
@@ -2554,6 +2569,16 @@ class Model(object):
         """
 
         return len(self.get_response_params(response))
+
+    def get_response_ndim(self, response):
+        """
+        Get the number of dimensions for a given response
+
+        :param response: ``str``; name of response
+        :return: ``int``; number of dimensions in the response
+        """
+
+        return self.response_ndim[response]
 
     def is_real(self, response):
         """
@@ -4245,7 +4270,7 @@ class Model(object):
             partition_str = ''
 
         if response is None:
-            response = [x for x in self.response_names if self.response_n_dim[x] == 1]
+            response = [x for x in self.response_names if self.get_response_ndim(x) == 1]
         if isinstance(response, str):
             response = [response]
 
@@ -4416,7 +4441,7 @@ class Model(object):
         feed_dict[self.use_MAP_mode] = use_MAP_mode
 
         if response is None:
-            response = [x for x in self.response_names if self.response_n_dim[x] == 1]
+            response = [x for x in self.response_names if self.get_response_ndim(x) == 1]
         if isinstance(response, str):
             response = [response]
 
@@ -4440,7 +4465,7 @@ class Model(object):
                     X_conv = {}
                     for _response in to_run:
                         nparam = self.get_response_nparam(_response)
-                        ndim = self.response_n_dim[_response]
+                        ndim = self.get_response_ndim(_response)
                         X_conv[_response] = np.zeros(
                             (len(feed_dict[self.Y_time]), len(self.terminal_names), nparam, ndim, n_samples)
                         )
@@ -4597,7 +4622,7 @@ class Model(object):
         assert xvar != yvar, 'Cannot vary two axes along the same variable'
 
         if response is None:
-            response = [x for x in self.response_names if self.response_n_dim[x] == 1]
+            response = [x for x in self.response_names if self.get_response_ndim(x) == 1]
         if isinstance(response, str):
             response = [response]
 
@@ -5236,6 +5261,7 @@ class Model(object):
             generate_irf_surface_plots=None,
             generate_nonstationarity_surface_plots=None,
             generate_interaction_surface_plots=None,
+            generate_err_dist_plots=None,
             plot_x_inches=None,
             plot_y_inches=None,
             ylim=None,
@@ -5286,6 +5312,7 @@ class Model(object):
         :param generate_irf_surface_plots: ``bool`` or ``None``; whether to plot IRF surfaces.  If ``None``, use default setting.
         :param generate_nonstationarity_surface_plots: ``bool`` or ``None``; whether to plot IRF surfaces showing non-stationarity in the response.  If ``None``, use default setting.
         :param generate_interaction_surface_plots: ``bool`` or ``None``; whether to plot IRF interaction surfaces at time **reference_time**.  If ``None``, use default setting.
+        :param generate_err_dist_plots: ``bool`` or ``None``; whether to plot the average error distribution for real-valued responses.  If ``None``, use default setting.
         :param plot_x_inches: ``float`` or ``None``; width of plot in inches. If ``None``, use default setting.
         :param plot_y_inches: ``float`` or ``None; height of plot in inches. If ``None``, use default setting.
         :param ylim: 2-element ``tuple`` or ``list``; (lower_bound, upper_bound) to use for y axis. If ``None``, automatically inferred.
@@ -5305,7 +5332,7 @@ class Model(object):
         """
 
         if response is None:
-            response = [x for x in self.response_names if self.response_n_dim[x] == 1]
+            response = [x for x in self.response_names if self.get_response_ndim(x) == 1]
         if isinstance(response, str):
             response = [response]
 
@@ -5336,6 +5363,8 @@ class Model(object):
             generate_nonstationarity_surface_plots = self.generate_nonstationarity_surface_plots
         if generate_interaction_surface_plots is None:
             generate_interaction_surface_plots = self.generate_interaction_surface_plots
+        if generate_err_dist_plots is None:
+            generate_err_dist_plots = self.generate_err_dist_plots
         if plot_x_inches is None:
             plot_x_inches = self.plot_x_inches
         if plot_y_inches is None:
@@ -5365,49 +5394,6 @@ class Model(object):
             with self.sess.graph.as_default():
 
                 self.set_predict_mode(True)
-
-                if self.asymmetric_error:
-                    lb = self.sess.run(self.err_dist_lb)
-                    ub = self.sess.run(self.err_dist_ub)
-                    n_time_units = ub - lb
-                    fd = {
-                        self.support_start: lb,
-                        self.n_time_units: n_time_units,
-                        self.n_time_points: plot_n_time_points,
-                        self.training: not self.predict_mode
-                    }
-                    plot_x = self.sess.run(self.support, feed_dict=fd)
-                    if mc:
-                        plot_y, lq, uq, _ = self.ci_curve(
-                            self.err_dist_plot,
-                            level=level,
-                            n_samples=n_samples,
-                            support_start=lb,
-                            n_time_units=n_time_units,
-                            n_time_points=plot_n_time_points,
-                        )
-                        plot_y = plot_y[0, ..., None]
-                        lq = lq[0, ..., None]
-                        uq = uq[0, ..., None]
-                        plot_name = 'mc_error_distribution_%s.png' % self.global_step.eval(sess=self.sess) \
-                            if self.keep_plot_history else 'mc_error_distribution.png'
-                    else:
-                        plot_y = self.sess.run(self.err_dist_plot_summary, feed_dict=fd)[0]
-                        lq = None
-                        uq = None
-                        plot_name = 'error_distribution_%s.png' % self.global_step.eval(sess=self.sess) \
-                            if self.keep_plot_history else 'error_distribution.png'
-
-                    plot_irf(
-                        plot_x,
-                        plot_y,
-                        ['Error Distribution'],
-                        lq=lq,
-                        uq=uq,
-                        dir=self.outdir,
-                        filename=prefix + plot_name,
-                        legend=False,
-                    )
 
                 # IRF 1D
                 if generate_univariate_IRF_plots:
@@ -5716,6 +5702,51 @@ class Model(object):
                                                 dump_source=dump_source
                                             )
 
+                if generate_err_dist_plots:
+                    for _response in self.error_distribution_plot:
+                        lb = self.sess.run(self.error_distribution_plot_lb[_response])
+                        ub = self.sess.run(self.error_distribution_plot_ub[_response])
+                        n_time_units = ub - lb
+                        fd = {
+                            self.support_start: lb,
+                            self.n_time_units: n_time_units,
+                            self.n_time_points: plot_n_time_points,
+                            self.training: not self.predict_mode
+                        }
+                        plot_x = self.sess.run(self.support, feed_dict=fd)
+                        plot_name = 'error_distribution_%s' % sn(_response)
+                        if mc:
+                            alpha = 100 - float(level)
+                            samples = []
+                            for i in range(n_samples):
+                                if self.resample_ops:
+                                    self.sess.run(self.resample_ops)
+                                sample = self.sess.run(self.error_distribution_plot[_response], feed_dict=fd)
+                                samples.append(sample)
+                            samples = np.stack(samples, axis=-1)
+                            plot_y = np.mean(samples, axis=-1)
+                            lq = np.percentile(samples, alpha / 2., axis=-1)
+                            uq = np.percentile(samples, 100 - alpha / 2., axis=-1)
+
+                            plot_name += '_mc'
+                        else:
+                            plot_y = self.sess.run(self.error_distribution_plot[_response], feed_dict=fd)[0]
+                            lq = None
+                            uq = None
+
+                        plot_name += '.png'
+
+                        plot_irf(
+                            plot_x,
+                            plot_y,
+                            ['Error Distribution'],
+                            lq=lq,
+                            uq=uq,
+                            dir=self.outdir,
+                            filename=prefix + plot_name,
+                            legend=False,
+                        )
+
                 self.set_predict_mode(False)
 
     def parameter_table(self, fixed=True, level=95, n_samples='default'):
@@ -5949,7 +5980,7 @@ class ModelBayes(Model):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 out = []
-                ndim = self.response_n_dim[response_name]
+                ndim = self.get_response_ndim(response_name)
                 for param in self.get_response_params(response_name):
                     if param in ['mu', 'sigma']:
                         if self.standardize_response:
@@ -5971,7 +6002,7 @@ class ModelBayes(Model):
             for i, x in enumerate(_prior_sd):
                 _response = self.response_names[i]
                 nparam = self.get_response_nparam(_response)
-                ndim = self.response_n_dim[_response]
+                ndim = self.get_response_ndim(_response)
                 _param_sds = x.split(';')
                 assert len(_param_sds) == nparam, 'Expected %d priors for the %s response to variable %s, got %d.' % (nparam, self.get_response_dist_name(_response), _response, len(_param_sds))
                 _prior_sd = np.array([float(_param_sd) for _param_sd in _param_sds])
@@ -5980,7 +6011,7 @@ class ModelBayes(Model):
         elif isinstance(prior_sd_in, float):
             for _response in self.response_names:
                 nparam = self.get_response_nparam(_response)
-                ndim = self.response_n_dim[_response]
+                ndim = self.get_response_ndim(_response)
                 prior_sd[_response] = np.ones([nparam, ndim]) * prior_sd_in
         elif prior_sd_in is None:
             for _response in self.response_names:
@@ -6055,7 +6086,7 @@ class ModelBayes(Model):
                         nparam = self.get_response_nparam(response_name)
                     else:
                         nparam = 1
-                    ndim = self.response_n_dim[response_name]
+                    ndim = self.get_response_ndim(response_name)
                     shape = [rangf_n_levels, nparam, ndim]
 
                     prior_sd = self._intercept_ranef_prior_sd[response_name]

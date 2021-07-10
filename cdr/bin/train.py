@@ -20,7 +20,6 @@ spillover = re.compile('(z_)?([^ (),]+)S([0-9]+)')
 
 
 if __name__ == '__main__':
-
     argparser = argparse.ArgumentParser('''
         Trains model(s) from formula string(s) given data.
     ''')

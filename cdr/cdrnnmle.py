@@ -76,44 +76,6 @@ class CDRNNMLE(CDRNN):
     #
     ######################################################
 
-    def initialize_intercept(self, response_name, ran_gf=None):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                init = tf.constant(self.intercept_init[response_name], dtype=self.FLOAT_TF)
-                name = sn(response_name)
-                if ran_gf is None:
-                    intercept = tf.Variable(
-                        init,
-                        dtype=self.FLOAT_TF,
-                        name='intercept_%s' % name
-                    )
-                else:
-                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
-                    shape = [rangf_n_levels] + [int(x) for x in init.shape]
-                    intercept = tf.Variable(
-                        tf.zeros(shape, dtype=self.FLOAT_TF),
-                        name='intercept_%s_by_%s' % (name, sn(ran_gf))
-                    )
-                intercept_summary = intercept
-
-                return intercept, intercept_summary
-
-    def initialize_input_bias(self, ran_gf=None):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                units = len(self.impulse_names) + 1
-                if ran_gf is None:
-                    input_bias = tf.zeros([1, 1, units])
-                else:
-                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
-                    input_bias = tf.Variable(
-                        tf.zeros([rangf_n_levels, units]),
-                        name='input_bias_by_%s' % (sn(ran_gf))
-                    )
-                input_bias_summary = input_bias
-
-                return input_bias, input_bias_summary
-
     def initialize_feedforward(
             self,
             units,
@@ -308,27 +270,6 @@ class CDRNNMLE(CDRNN):
                 irf_l1_b_summary = irf_l1_b
 
                 return irf_l1_b, irf_l1_b_summary
-
-    def initialize_error_params_biases(self, ran_gf=None):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                if self.asymmetric_error:
-                    units = 3
-                else:
-                    units = 1
-                if ran_gf is None:
-                    error_params_b = tf.zeros([1, units])
-                else:
-                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
-                    error_params_b = tf.get_variable(
-                        name='error_params_b_by_%s' % (sn(ran_gf)),
-                        initializer=tf.zeros_initializer(),
-                        shape=[rangf_n_levels, units],
-                    )
-
-                error_params_b_summary = error_params_b
-
-                return error_params_b, error_params_b_summary
 
     def initialize_irf_l1_normalization(self):
         with self.sess.as_default():

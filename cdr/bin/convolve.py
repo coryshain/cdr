@@ -18,6 +18,8 @@ if __name__ == '__main__':
     argparser.add_argument('config_paths', nargs='+', help='Path(s) to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='Path to configuration (*.ini) file')
     argparser.add_argument('-p', '--partition', nargs='+', default=['dev'], help='List of names of partitions to use ("train", "dev", "test", or a hyphen-delimited subset of these, or "PREDICTOR_PATH(;PREDICTOR_PATH):(RESPONSE_PATH;RESPONSE_PATH)").')
+    argparser.add_argument('-r', '--response', nargs='+', default=None, help='Names of response variables to convolve toward. If ``None``, convolves toward all variables.')
+    argparser.add_argument('-P', '--response_param', nargs='+', default=None, help='Names of any parameters of predictive distribution(s) to convolve toward. If ``None``, convolves toward the first parameter of the predictive distribution for each resposne.')
     argparser.add_argument('-n', '--nsamples', type=int, default=None, help='Number of posterior samples to average (only used for CDRBayes)')
     argparser.add_argument('-a', '--algorithm', type=str, default='MAP', help='Algorithm ("sampling" or "MAP") to use for extracting predictions.')
     argparser.add_argument('-A', '--ablated_models', action='store_true', help='Perform convolution using ablated models. Otherwise only convolves using the full model in each ablation set.')
@@ -107,6 +109,8 @@ if __name__ == '__main__':
                     X_response_aligned_predictors=X_response_aligned_predictors_valid,
                     X_2d_predictor_names=X_2d_predictor_names,
                     X_2d_predictors=X_2d_predictors,
+                    response=args.response,
+                    response_param=args.response_param,
                     n_samples=args.nsamples,
                     algorithm=args.algorithm,
                     extra_cols=args.extra_cols,
@@ -115,4 +119,3 @@ if __name__ == '__main__':
                 )
 
                 cdr_model.finalize()
-

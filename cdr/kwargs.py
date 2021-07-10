@@ -648,9 +648,15 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'generate_interaction_surface_plots',
-        False,
+        True,
         bool,
         "Whether to plot IRF interaction surfaces at time **reference_time**."
+    ),
+    Kwarg(
+        'generate_err_dist_plots',
+        True,
+        bool,
+        "Whether to plot the average error distribution for real-valued responses."
     ),
     Kwarg(
         'generate_nonstationarity_surface_plots',
@@ -1160,20 +1166,6 @@ CDRNN_INITIALIZATION_KWARGS = [
         suppress=True
     ),
     Kwarg(
-        'direct_irf',
-        False,
-        bool,
-        "Whether to generate the response directly as the output of the IRF (``True``). Otherwise, IRF provides weights on the input dimensions.",
-        suppress=True
-    ),
-    Kwarg(
-        'nonstationary_intercept',
-        False,
-        bool,
-        "Whether to implement a time-varying intercept term, using a feedforward network architecturally matched to the IRF.",
-        suppress=True
-    ),
-    Kwarg(
         'forget_rate',
         None,
         [float, None],
@@ -1341,6 +1333,12 @@ PLOT_KWARGS_CORE = [
         False,
         bool,
         "Whether to plot IRF interaction surfaces at time **reference_time**."
+    ),
+    Kwarg(
+        'generate_err_dist_plots',
+        False,
+        bool,
+        "Whether to plot the average error distribution for real-valued responses."
     ),
     Kwarg(
         'generate_nonstationarity_surface_plots',

@@ -1191,7 +1191,7 @@ class CDR(Model):
                     if not self.use_distributional_regression:
                         response_params = response_params[:1]
                     nparam = len(response_params)
-                    ndim = self.response_n_dim[response]
+                    ndim = self.get_response_ndim(response)
                     fixef_ix = names2ix(self.fixed_coef_names, self.coef_names)
                     coef_ids = self.coef_names
 
@@ -1343,7 +1343,7 @@ class CDR(Model):
                         if not self.use_distributional_regression:
                             response_params = response_params[:1]
                         nparam = len(response_params)
-                        ndim = self.response_n_dim[response]
+                        ndim = self.get_response_ndim(response)
                         interaction_ids = self.interaction_names
 
                         interaction_fixed = self._scatter_along_axis(
@@ -1505,7 +1505,7 @@ class CDR(Model):
                             if not self.use_distributional_regression:
                                 response_params = response_params[:1]
                             nparam_response = len(response_params)  # number of params of predictive dist, not IRF
-                            ndim = self.response_n_dim[response]
+                            ndim = self.get_response_ndim(response)
                             irf_param_lb = self.irf_params_lb[family][irf_param_name]
                             if irf_param_lb is not None:
                                 irf_param_lb = tf.constant(irf_param_lb, dtype=self.FLOAT_TF)
@@ -2030,7 +2030,7 @@ class CDR(Model):
                                 nparam = self.get_response_nparam(response)
                             else:
                                 nparam = 1
-                            ndim = self.response_n_dim[response]
+                            ndim = self.get_response_ndim(response)
                             impulse = self.irf_impulses[name][..., None]
                             impulse = tf.tile(impulse, [1, nparam, ndim])
                             out = impulse
@@ -2140,7 +2140,7 @@ class CDR(Model):
             nparam = self.get_response_nparam(response)
         else:
             nparam = 1
-        ndim = self.response_n_dim[response]
+        ndim = self.get_response_ndim(response)
         ncoef = len(coef_ids)
 
         with self.sess.as_default():
@@ -2183,7 +2183,7 @@ class CDR(Model):
             nparam = self.get_response_nparam(response)
         else:
             nparam = 1
-        ndim = self.response_n_dim[response]
+        ndim = self.get_response_ndim(response)
         ninter = len(interaction_ids)
 
         with self.sess.as_default():
@@ -2230,7 +2230,7 @@ class CDR(Model):
             response_nparam = self.get_response_nparam(response) # number of params of predictive dist, not IRF
         else:
             response_nparam = 1
-        response_ndim = self.response_n_dim[response]
+        response_ndim = self.get_response_ndim(response)
 
         with self.sess.as_default():
             with self.sess.graph.as_default():

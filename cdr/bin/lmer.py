@@ -11,7 +11,6 @@ from cdr.util import mse, mae, filter_models, get_partition_list, stderr
 pd.options.mode.chained_assignment = None
 
 if __name__ == '__main__':
-
     argparser = argparse.ArgumentParser('''
         Run LME follow-up regression on CDR models in config for which convolved input data has been generated. 
     ''')

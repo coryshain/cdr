@@ -35,7 +35,6 @@ def print_table(beta_summaries, names, beta_names):
     print(table_str)
 
 if __name__ == '__main__':
-
     argparser = argparse.ArgumentParser('''
     Generates a LaTeX table of beta summaries for one or more CDR models
     ''')
