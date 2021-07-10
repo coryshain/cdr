@@ -39,6 +39,63 @@ def s(df):
     return df/df.std(axis=0)
 
 
+def corr(A, B):
+    # Assumes A and B are n x a and n x b matrices and computes a x b pairwise correlations
+    A_centered = A - A.mean(axis=0, keepdims=True)
+    B_centered = B - B.mean(axis=0, keepdims=True)
+
+    A_ss = (A_centered ** 2).sum(axis=0)
+    B_ss = (B_centered ** 2).sum(axis=0)
+
+    rho = np.dot(A_centered.T, B_centered) / np.sqrt(np.dot(A_ss[..., None], B_ss[None, ...]))
+    rho = np.clip(rho, -1, 1)
+    return rho
+
+
+def corr_cdr(X_2d, impulse_names, impulse_names_2d, time, time_mask):
+    """
+    Compute correlation matrix, including correlations across time where necessitated by 2D predictors.
+
+    :param X_2d: ``numpy`` array; the impulse data. Must be of shape ``(batch_len, history_length, n_impulses)``, can be computed from sources by ``build_CDR_impulses()``.
+    :param impulse_names: ``list`` of ``str``; names of columns in **X_2d** to be used as impulses by the model.
+    :param impulse_names_2d: ``list`` of ``str``; names of columns in **X_2d** that designate to 2D predictors.
+    :param time: 3D ``numpy`` array; array of timestamps for each event in **X_2d**.
+    :param time_mask: 3D ``numpy`` array; array of masks over padding events in **X_2d**.
+    :return: ``pandas`` ``DataFrame``; the correlation matrix.
+    """
+
+    rho = pd.DataFrame(np.zeros((len(impulse_names), len(impulse_names))), index=impulse_names, columns=impulse_names)
+
+    for i in range(len(impulse_names)):
+        for j in range(i, len(impulse_names)):
+            if impulse_names[i] in impulse_names_2d or impulse_names[j] in impulse_names_2d:
+                x1 = X_2d[..., i]
+                x2 = X_2d[..., j]
+
+                aligned = np.logical_and(np.logical_and(np.isclose(time[:,:,i], time[:,:,j]), time_mask[:,:,i]), time_mask[:,:,j])
+                n = aligned.sum()
+                x1_mean = x1.sum() / n
+                x2_mean = x2.sum() / n
+                cor = ((x1 - x1_mean) * (x2 - x2_mean) * aligned).sum() / \
+                      np.sqrt(((x1 - x1_mean) ** 2 * aligned).sum() * (
+                              (x2 - x2_mean) ** 2 * aligned).sum())
+            else:
+                x1 = X_2d[:, -1, i]
+                x2 = X_2d[:, -1, j]
+
+                n = X_2d.shape[0]
+                x1_mean = x1.sum() / n
+                x2_mean = x2.sum() / n
+                cor = ((x1 - x1_mean) * (x2 - x2_mean)).sum() / \
+                      np.sqrt(((x1 - x1_mean) ** 2).sum() * ((x2 - x2_mean) ** 2).sum())
+
+            rho.loc[impulse_names[i], impulse_names[j]] = cor
+            if i != j:
+                rho.loc[impulse_names[j], impulse_names[i]] = cor
+
+    return rho
+
+
 def add_responses(names, y):
     """
     Add response variable(s) to a dataframe, applying any preprocessing required by the formula string.
@@ -530,50 +587,6 @@ def compute_history_intervals(X, Y, series_ids, verbose=True):
     stderr('\n')
     
     return first_obs, last_obs
-
-
-def corr_cdr(X_2d, impulse_names, impulse_names_2d, time, time_mask):
-    """
-    Compute correlation matrix, including correlations across time where necessitated by 2D predictors.
-
-    :param X_2d: ``numpy`` array; the impulse data. Must be of shape ``(batch_len, history_length, n_impulses)``, can be computed from sources by ``build_CDR_impulses()``.
-    :param impulse_names: ``list`` of ``str``; names of columns in **X_2d** to be used as impulses by the model.
-    :param impulse_names_2d: ``list`` of ``str``; names of columns in **X_2d** that designate to 2D predictors.
-    :param time: 3D ``numpy`` array; array of timestamps for each event in **X_2d**.
-    :param time_mask: 3D ``numpy`` array; array of masks over padding events in **X_2d**.
-    :return: ``pandas`` ``DataFrame``; the correlation matrix.
-    """
-
-    rho = pd.DataFrame(np.zeros((len(impulse_names), len(impulse_names))), index=impulse_names, columns=impulse_names)
-
-    for i in range(len(impulse_names)):
-        for j in range(i, len(impulse_names)):
-            if impulse_names[i] in impulse_names_2d or impulse_names[j] in impulse_names_2d:
-                x1 = X_2d[..., i]
-                x2 = X_2d[..., j]
-
-                aligned = np.logical_and(np.logical_and(np.isclose(time[:,:,i], time[:,:,j]), time_mask[:,:,i]), time_mask[:,:,j])
-                n = aligned.sum()
-                x1_mean = x1.sum() / n
-                x2_mean = x2.sum() / n
-                cor = ((x1 - x1_mean) * (x2 - x2_mean) * aligned).sum() / \
-                      np.sqrt(((x1 - x1_mean) ** 2 * aligned).sum() * (
-                              (x2 - x2_mean) ** 2 * aligned).sum())
-            else:
-                x1 = X_2d[:, -1, i]
-                x2 = X_2d[:, -1, j]
-
-                n = X_2d.shape[0]
-                x1_mean = x1.sum() / n
-                x2_mean = x2.sum() / n
-                cor = ((x1 - x1_mean) * (x2 - x2_mean)).sum() / \
-                      np.sqrt(((x1 - x1_mean) ** 2).sum() * ((x2 - x2_mean) ** 2).sum())
-
-            rho.loc[impulse_names[i], impulse_names[j]] = cor
-            if i != j:
-                rho.loc[impulse_names[j], impulse_names[i]] = cor
-
-    return rho
 
 
 def compute_filters(Y, filters=None):

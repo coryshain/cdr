@@ -9,7 +9,7 @@ from sklearn.metrics import f1_score
 from .kwargs import MODEL_INITIALIZATION_KWARGS, MODEL_BAYES_INITIALIZATION_KWARGS
 from .formula import *
 from .util import *
-from .data import build_CDR_data, corr_cdr, get_first_last_obs_lists, get_rangf_array, split_cdr_outputs
+from .data import build_CDR_data, corr, corr_cdr, get_first_last_obs_lists, get_rangf_array, split_cdr_outputs
 from .opt import *
 from .plot import *
 
@@ -24,19 +24,6 @@ tf_config = tf.ConfigProto()
 tf_config.gpu_options.allow_growth = True
 
 pd.options.mode.chained_assignment = None
-
-
-def corr(A, B):
-    # Assumes A and B are n x a and n x b matrices and computes a x b pairwise correlations
-    A_centered = A - A.mean(axis=0, keepdims=True)
-    B_centered = B - B.mean(axis=0, keepdims=True)
-
-    A_ss = (A_centered ** 2).sum(axis=0)
-    B_ss = (B_centered ** 2).sum(axis=0)
-
-    rho = np.dot(A_centered.T, B_centered) / np.sqrt(np.dot(A_ss[..., None], B_ss[None, ...]))
-    rho = np.clip(rho, -1, 1)
-    return rho
 
 
 class Model(object):
@@ -1494,7 +1481,7 @@ class Model(object):
                             if j:
                                 val = response_params_ema_debiased[j]
                             else:
-                                val = tf.zeros((1, self.get_response_ndim(response)))
+                                val = tf.zeros(self.get_response_ndim(response))
                             err_dist_params.append(val)
                         if self.get_response_ndim(response) == 1:
                             err_dist_params = [tf.squeeze(x, axis=-1) for x in err_dist_params]

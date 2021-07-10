@@ -1305,10 +1305,16 @@ CDRNNBAYES_INITIALIZATION_KWARGS = [
 PLOT_KWARGS_CORE = [
     # PLOT DATA GENERATION
     Kwarg(
-        'resvar',
-        'y_mean',
-        str,
-        "Name of parameter of predictive distribution to plot as response variable. One of ``'y_mean'``, ``'y_sd'``, ``'y_skewness'``, or ``'y_tailweight'``. Only ``'y_mean'`` is interesting for CDR, since the others are assumed scalar. CDRNN fits all predictive parameters via IRFs."
+        'response',
+        None,
+        [str, None],
+        "Name(s) of response variable(s) to plot. If ``None``, plots all univariate responses."
+    ),
+    Kwarg(
+        'response_param',
+        None,
+        [str, None],
+        "Name(s) of parameter(s) of predictive distribution to plot for each response variable. If ``None``, plots the first parameter only. Parameter names not present in a given distribution will be skipped."
     ),
     Kwarg(
         'generate_univariate_IRF_plots',
