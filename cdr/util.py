@@ -44,7 +44,7 @@ def extract_cdr_prediction_files(dirpath):
                 response = 'y'
             filenum = parsed[filenum_ix]
             if filenum is None:
-                filenum = 1
+                filenum = 0
             else:
                 filenum = int(filenum)
             partition = parsed[partition_ix]

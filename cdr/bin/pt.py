@@ -110,7 +110,7 @@ if __name__ == '__main__':
                 model_set = comparison_sets[s]
                 if len(model_set) > 1:
                     if s is not None:
-                        stderr('Comparing models within ablation set "%s"...\n' %s)
+                        stderr('Comparing models within ablation set "%s"...\n' % s)
                     for i in range(len(model_set)):
                         m1 = model_set[i]
                         p.set_model(m1)
@@ -131,7 +131,7 @@ if __name__ == '__main__':
                                     b_model = m2
                                 a_model_path = a_model.replace(':', '+')
                                 b_model_path = b_model.replace(':', '+')
-                                name = '%s_v_%s' %(a_model_path, b_model_path)
+                                name = '%s_v_%s' % (a_model_path, b_model_path)
                                 a_files = extract_cdr_prediction_files(p.outdir + '/' + a_model_path)
                                 b_files = extract_cdr_prediction_files(p.outdir + '/' + b_model_path)
                                 for response in a_files:
@@ -194,10 +194,10 @@ if __name__ == '__main__':
                                                 os.makedirs(outdir)
                                             out_path = outdir + '/' + name_base + '.txt'
                                             with open(out_path, 'w') as f:
-                                                stderr('Saving output to %s...\n' %out_path)
+                                                stderr('Saving output to %s...\n' % out_path)
 
                                                 summary = '='*50 + '\n'
-                                                summary += 'Model comparison: %s vs %s\n' %(a_model, b_model)
+                                                summary += 'Model comparison: %s vs %s\n' % (a_model, b_model)
                                                 if diff > 0:
                                                     summary += '%d NaN rows filtered out (out of %d)\n' % (diff, len(a))
                                                 summary += 'Partition: %s\n' % partition_str
@@ -244,6 +244,10 @@ if __name__ == '__main__':
                                         header=None,
                                         skipinitialspace=True
                                     )
+                                if a not in pooled_data:
+                                    pooled_data[a] = {}
+                                if exp_outdir not in pooled_data[a]:
+                                    pooled_data[a][exp_outdir] = {}
                                 if m not in pooled_data[a][exp_outdir]:
                                     pooled_data[a][exp_outdir][m] = {}
                                 if response not in pooled_data[a][exp_outdir][m]:
@@ -294,7 +298,7 @@ if __name__ == '__main__':
                         for filenum in df1[response]:
                             _df1 = np.concatenate(df1[response][filenum], axis=0)
                             _df2 = np.concatenate(df2[response][filenum], axis=0)
-                            assert len(_df1) == len(_df2), 'Shape mismatch between datasets %s and %s: %s vs. %s' %(
+                            assert len(_df1) == len(_df2), 'Shape mismatch between datasets %s and %s: %s vs. %s' % (
                                 a_name,
                                 b_name,
                                 _df1.shape,
@@ -326,11 +330,11 @@ if __name__ == '__main__':
                                 summary += 'Metric: %s\n' % metric
                                 summary += 'Experiments pooled:\n'
                                 for exp in exps_outdirs:
-                                    summary += '  %s\n' %exp
+                                    summary += '  %s\n' % exp
                                 summary += 'Ablation sets pooled:\n'
                                 for basename in basenames_to_pool:
-                                    summary += '  %s\n' %basename
-                                summary += 'n: %s\n' %_df1.shape[0]
+                                    summary += '  %s\n' % basename
+                                summary += 'n: %s\n' % _df1.shape[0]
                                 summary += 'Difference: %.4f\n' % diff
                                 summary += 'p: %.4e%s\n' % (
                                     p_value,

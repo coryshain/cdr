@@ -42,7 +42,7 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', nested=False, v
 
     hits = 0
     if verbose:
-        stderr('Difference in test statistic: %s\n' %base_diff)
+        stderr('Difference in test statistic: %s\n' % base_diff)
         stderr('Permutation testing...\n')
 
     diffs = np.zeros((n_iter,))
@@ -69,7 +69,7 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', nested=False, v
             if math.fabs(cur_diff) > math.fabs(base_diff):
                 hits += 1
         else:
-            raise ValueError('Invalid bootstrap parameter n_tails: %s. Must be in {1, 2}.' %n_tails)
+            raise ValueError('Invalid bootstrap parameter n_tails: %s. Must be in {1, 2}.' % n_tails)
 
     p = float(hits+1)/(n_iter+1)
 
