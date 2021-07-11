@@ -137,7 +137,7 @@ if __name__ == '__main__':
     for i, p_name in enumerate(args.partition):
         partitions = get_partition_list(p_name)
         if ':' in p_name:
-            partition_str = 'part%d' % (i + 1)
+            partition_str = 'p%d' % (i + 1)
             X_paths = partitions[0].split(';')
             Y_paths = partitions[1].split(';')
         else:

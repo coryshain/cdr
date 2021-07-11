@@ -14,14 +14,14 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', nested=False, v
     :param b: ``numpy`` vector; second error/loss/prediction vector.
     :param n_iter: ``int``; number of resampling iterations.
     :param n_tails: ``int``; number of tails.
-    :param mode: ``str``; one of ``["loss", "loglik"]``, the type of error used (losses are averaged while loglik's are summed).
+    :param mode: ``str``; one of ``["mse", "loglik"]``, the type of error used (SE's are averaged while loglik's are summed).
     :param nested: ``bool``; assume that the second model is nested within the first.
     :param verbose: ``bool``; report progress logs to standard error.
     :return:
     """
 
     err_table = np.stack([a, b], 1)
-    if mode == 'loss':
+    if mode == 'mse':
         base_diff = err_table[:,0].mean() - err_table[:,1].mean()
         if nested and base_diff <= 0:
             return (1.0, base_diff, np.zeros((n_iter,)))
@@ -48,19 +48,17 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', nested=False, v
     diffs = np.zeros((n_iter,))
 
     for i in range(n_iter):
-        if verbose:
+        if verbose and (i == 0 or (i + 1) % 100 == 0):
             stderr('\r%d/%d' %(i+1, n_iter))
         shuffle = (np.random.random((len(err_table))) > 0.5).astype('int')
         m1 = err_table[np.arange(len(err_table)),shuffle]
         m2 = err_table[np.arange(len(err_table)),1-shuffle]
-        if mode == 'loss':
+        if mode == 'mse':
             cur_diff = m1.mean() - m2.mean()
         elif mode == 'loglik':
             cur_diff = m1.sum() - m2.sum()
         elif mode == 'corr':
             cur_diff = (m1.sum() - m2.sum()) / denom
-        else:
-            raise ValueError('Unrecognized metric "%s" in permutation test' %mode)
         diffs[i] = cur_diff
         if n_tails == 1:
             if base_diff < 0 and cur_diff <= base_diff:

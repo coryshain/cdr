@@ -1,15 +1,65 @@
 from __future__ import print_function
 import sys
+import os
 import re
 import math
 import pickle
 import numpy as np
 from scipy import linalg
 
+file_re = re.compile('output_([^_]+)_f(\d+)_([^_]+).csv')
 
 def stderr(s):
     sys.stderr.write(s)
     sys.stderr.flush()
+
+def extract_cdr_prediction_files(dirpath):
+    twostep_ix = 0
+    filetype_ix = 1
+    response_ix = 3
+    filenum_ix = 5
+    partition_ix = 6
+
+    parser = re.compile(
+        '(LM_2STEP_)?'
+        '(CDRpreds|squared_error|losses_mse|mse_losses|loglik|preds|preds_table|obs)'
+        '(_([^_]+))?(_f([0-9]+))?_([^_]*).(csv|txt)'
+    )
+    out = {}
+    for path in os.listdir(dirpath):
+        parsed = parser.match(path)
+        if parsed:
+            parsed = parsed.groups()
+            if parsed[twostep_ix]:
+                pred_type = '2step'
+            else:
+                pred_type = 'direct'
+            filetype = parsed[filetype_ix]
+            if filetype in ['CDRpreds', 'preds_table']:
+                filetype = 'table'
+            elif filetype in ['squared_error', 'losses_mse', 'mse_losses']:
+                filetype = 'mse'
+            response = parsed[response_ix]
+            if response is None:
+                response = 'y'
+            filenum = parsed[filenum_ix]
+            if filenum is None:
+                filenum = 1
+            else:
+                filenum = int(filenum)
+            partition = parsed[partition_ix]
+
+            if response not in out:
+                out[response] = {}
+            if filenum not in out[response]:
+                out[response][filenum] = {}
+            if partition not in out[response][filenum]:
+                out[response][filenum][partition] = {}
+            if filetype not in out[response][filenum][partition]:
+                out[response][filenum][partition][filetype] = {}
+            out[response][filenum][partition][filetype][pred_type] = dirpath + '/' + path
+
+    return out
 
 def names2ix(names, l, dtype=np.int32):
     """

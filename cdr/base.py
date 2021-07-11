@@ -1013,7 +1013,7 @@ class Model(object):
                     multiple_files = len(file_ix) > 1
                     for ix in file_ix:
                         if multiple_files:
-                            name_base = '%s_file%s' % (sn(response), ix + 1)
+                            name_base = '%s_f%s' % (sn(response), ix + 1)
                         else:
                             name_base = sn(response)
                         self.training_loglik_in[response].append(tf.placeholder(
@@ -3574,7 +3574,7 @@ class Model(object):
                         if return_loglik and len(self.response_names) > 1:
                             response_keys.append('AllResponses')
 
-                        if partition:
+                        if partition and not partition.startswith('_'):
                             partition_str = '_' + partition
                         else:
                             partition_str = ''
@@ -3604,10 +3604,10 @@ class Model(object):
                                     df = pd.concat([df.reset_index(drop=True), df_new.reset_index(drop=True)], axis=1)
 
                                 if multiple_files:
-                                    name_base = '%s_file%s%s' % (sn(_response), ix, partition_str)
+                                    name_base = '%s_f%s%s' % (sn(_response), ix, partition_str)
                                 else:
                                     name_base = '%s%s' % (sn(_response), partition_str)
-                                df.to_csv(self.outdir + '/output_%s.csv' % name_base, sep=' ', na_rep='NaN', index=False)
+                                df.to_csv(self.outdir + '/CDRpreds_%s.csv' % name_base, sep=' ', na_rep='NaN', index=False)
         else:
             out = {}
 
@@ -3760,7 +3760,7 @@ class Model(object):
             Y_gf = [_Y[self.rangf] for _Y in Y]
             Y_time = [_Y.time for _Y in Y]
 
-            if partition:
+            if partition and not partition.startswith('_'):
                 partition_str = '_' + partition
             else:
                 partition_str = ''
@@ -3783,7 +3783,7 @@ class Model(object):
                         df = pd.concat([df.reset_index(drop=True), df_new.reset_index(drop=True)], axis=1)
 
                     if multiple_files:
-                        name_base = '%s_file%s%s' % (sn(_response), ix, partition_str)
+                        name_base = '%s_f%s%s' % (sn(_response), ix, partition_str)
                     else:
                         name_base = '%s%s' % (sn(_response), partition_str)
                     df.to_csv(self.outdir + '/output_%s.csv' % name_base, sep=' ', na_rep='NaN', index=False)
@@ -3837,7 +3837,7 @@ class Model(object):
         :return: ``None``
         """
 
-        if partition:
+        if partition and not partition.startswith('_'):
             partition_str = '_' + partition
         else:
             partition_str = ''
@@ -3933,7 +3933,7 @@ class Model(object):
 
                 if dump:
                     if multiple_files:
-                        name_base = '%s_file%s%s' % (sn(_response), ix, partition_str)
+                        name_base = '%s_f%s%s' % (sn(_response), ix, partition_str)
                     else:
                         name_base = '%s%s' % (sn(_response), partition_str)
 
@@ -3988,7 +3988,7 @@ class Model(object):
                 if multiple_files:
                     summary += 'File index: %s\n\n' % ix
                     if dump:
-                        name_base = '%s_file%s%s' % (sn(_response), ix, partition_str)
+                        name_base = '%s_f%s%s' % (sn(_response), ix, partition_str)
                         _summary += 'File index: %s\n\n' % ix
                 elif dump:
                     name_base = '%s%s' % (sn(_response), partition_str)
@@ -4251,7 +4251,7 @@ class Model(object):
             stderr('Using GPU: %s\n' % usingGPU)
             stderr('Computing convolutions...\n')
 
-        if partition:
+        if partition and not partition.startswith('_'):
             partition_str = '_' + partition
         else:
             partition_str = ''
@@ -4404,7 +4404,7 @@ class Model(object):
 
                         if dump:
                             if multiple_files:
-                                name_base = '%s_%s_file%s%s' % (sn(_response), sn(dim_name), ix, partition_str)
+                                name_base = '%s_%s_f%s%s' % (sn(_response), sn(dim_name), ix, partition_str)
                             else:
                                 name_base = '%s_%s%s' % (sn(_response), sn(dim_name), partition_str)
                             df.to_csv(self.outdir + '/X_conv_%s.csv' % name_base, sep=' ', na_rep='NaN', index=False)
