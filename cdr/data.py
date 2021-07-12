@@ -636,8 +636,6 @@ def get_time_windows(
     last_obs = last_obs[Y_ix]
 
     if exclude_instantaneous:
-        print(X_src.shape)
-        print(first_obs.max())
         _first_obs = np.where(first_obs < len(X_src), first_obs, np.maximum(0, first_obs-1))
         shift = np.fabs(X_src.time.values[_first_obs] - Y_src.time.values) <= epsilon
         if forward:

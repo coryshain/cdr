@@ -191,6 +191,7 @@ def normal_irf_factory(
         mu,
         sigma,
         support_ub=None,
+        support_lb=0.,
         epsilon=4 * np.finfo('float32').eps,
         session=None
 ):
@@ -199,7 +200,9 @@ def normal_irf_factory(
 
     :param mu: TF tensor; mu (location) parameter.
     :param sigma: TF tensor; sigma (scale) parameter (sigma > 0).
-    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param causal: ``bool``; whether to assume causality (x >= 0) in the normalization.
+    :param support_lb: ``tensor``, ``float`` or ``None``; lower bound on the IRF's support. If ``None``, lower bound set to 0.
+    :param support_lb: ``tensor``, ``float`` or ``None``; lower bound on the IRF's support. If ``None``, no lower bound.
     :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
     :param session: TF ``session`` object; the graph's TensorFlow session.
     :return: ``function``; the IRF
@@ -215,14 +218,17 @@ def normal_irf_factory(
 
             pdf = dist.prob
             cdf = dist.cdf
-            cdf_0 = cdf(0.)
 
+            if support_lb is None:
+                lb = 0.
+            else:
+                lb = cdf(support_lb)
             if support_ub is None:
                 ub = 1.
             else:
                 ub = cdf(support_ub)
 
-            norm_const = ub - cdf_0
+            norm_const = ub - lb
 
             def irf(x, pdf=pdf, norm_const=norm_const, epsilon=epsilon):
                 # Ensure proper broadcasting
@@ -237,6 +243,7 @@ def skew_normal_irf_factory(
         mu,
         sigma,
         alpha,
+        support_lb=0.,
         support_ub=None,
         epsilon=4 * np.finfo('float32').eps,
         session=None
@@ -247,6 +254,8 @@ def skew_normal_irf_factory(
     :param mu: TF tensor; mu (location) parameter.
     :param sigma: TF tensor; sigma (scale) parameter (sigma > 0).
     :param alpha: TF tensor; alpha (skew) parameter.
+    :param causal: ``bool``; whether to assume causality (x >= 0) in the normalization.
+    :param support_lb: ``tensor``, ``float`` or ``None``; lower bound on the IRF's support. If ``None``, lower bound set to 0.
     :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
     :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
     :param session: TF ``session`` object; the graph's TensorFlow session.
@@ -269,16 +278,19 @@ def skew_normal_irf_factory(
                 while len(x.shape) > len(alpha.shape):
                     alpha = alpha[None, ...]
                 return (pdf((x - mu) / (sigma)) * cdf(alpha * (x - mu) / (sigma)))
-            
-            cdf = empirical_integral(irf_base, session=session)
-            cdf_0 = cdf(0.)
 
+            cdf = empirical_integral(irf_base, session=session)
+
+            if support_lb is None:
+                lb = 0.
+            else:
+                lb = cdf(support_lb)
             if support_ub is None:
                 ub = 1.
             else:
                 ub = cdf(support_ub)
 
-            norm_const = ub - cdf_0
+            norm_const = ub - lb
             
             def irf(x, irf_base=irf_base, norm_const=norm_const, epsilon=epsilon):
                 # Ensure proper broadcasting
@@ -293,6 +305,7 @@ def emg_irf_factory(
         mu,
         sigma,
         beta,
+        support_lb=0.,
         support_ub=None,
         epsilon=4 * np.finfo('float32').eps,
         session=None
@@ -303,6 +316,7 @@ def emg_irf_factory(
     :param mu: TF tensor; mu (location) parameter.
     :param sigma: TF tensor; sigma (scale) parameter (sigma > 0).
     :param beta: TF tensor; beta (rate) parameter (beta > 0).
+    :param support_lb: ``tensor``, ``float`` or ``None``; lower bound on the IRF's support. If ``None``, lower bound set to 0.
     :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
     :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
     :param session: TF ``session`` object; the graph's TensorFlow session.
@@ -318,14 +332,16 @@ def emg_irf_factory(
                     scale=beta * sigma
                 )(beta * (x - mu))
 
+            if support_lb is None:
+                lb = 0.
+            else:
+                lb = cdf(support_lb)
             if support_ub is None:
                 ub = 1.
             else:
                 ub = cdf(support_ub)
 
-            cdf_0 = cdf(0.)
-
-            norm_const = ub - cdf_0
+            norm_const = ub - lb
 
             def irf(x, mu=mu, sigma=sigma, beta=beta, norm_const=norm_const, epsilon=epsilon):
                 # Ensure proper broadcasting
@@ -676,6 +692,7 @@ def double_gamma_5_irf_factory(
 
 def LCG_irf_factory(
         bases,
+        support_lb=0.,
         support_ub=None,
         epsilon=4 * np.finfo('float32').eps,
         session=None,
@@ -685,6 +702,7 @@ def LCG_irf_factory(
     Instantiate a linear combination of Gaussians (LCG) impulse response function (IRF).
 
     :param bases: ``int``; number of basis kernels in LCG.
+    :param support_lb: ``tensor``, ``float`` or ``None``; lower bound on the IRF's support. If ``None``, lower bound set to 0.
     :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
     :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
     :param session: TF ``session`` object; the graph's TensorFlow session.
@@ -711,14 +729,16 @@ def LCG_irf_factory(
             pdf = dist.prob
             cdf = dist.cdf
 
+            if support_lb is None:
+                lb = 0.
+            else:
+                lb = cdf(support_lb)
             if support_ub is None:
                 ub = 1.
             else:
                 ub = cdf(support_ub)
 
-            cdf_0 = cdf(0.)
-
-            norm_const = tf.reduce_sum((ub - cdf_0) * v, axis=-1)
+            norm_const = tf.reduce_sum((ub - lb) * v, axis=-1)
 
             def irf(x, v=v, pdf=pdf, norm_const=norm_const, epsilon=epsilon):
                 # Ensure proper broadcasting
@@ -1821,6 +1841,10 @@ class CDR(Model):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.irf_lambdas = {}
+                if self.future_length: # Non-causal
+                    support_lb = None
+                else: # Causal
+                    support_lb = 0.
                 support_ub = None
 
                 def exponential(**params):
@@ -1861,6 +1885,7 @@ class CDR(Model):
                 def normal(**params):
                     return normal_irf_factory(
                         **params,
+                        support_lb=support_lb,
                         support_ub=support_ub,
                         session=self.sess
                     )
@@ -1870,6 +1895,7 @@ class CDR(Model):
                 def skew_normal(**params):
                     return skew_normal_irf_factory(
                         **params,
+                        support_lb=support_lb,
                         support_ub=self.t_delta_limit.astype(dtype=self.FLOAT_NP) if support_ub is None else support_ub,
                         session=self.sess
                     )
@@ -1879,6 +1905,7 @@ class CDR(Model):
                 def emg(**kwargs):
                     return emg_irf_factory(
                         **kwargs,
+                        support_lb=support_lb,
                         support_ub=support_ub,
                         session=self.sess
                     )
@@ -1958,11 +1985,19 @@ class CDR(Model):
             self,
             bases
     ):
+        if self.future_length: # Non-causal
+            support_lb = None
+        else: # Causal
+            support_lb = 0.
+        support_ub = None
+
         def f(
                 bases=bases,
                 int_type=self.INT_TF,
                 float_type=self.FLOAT_TF,
                 session=self.sess,
+                support_lb=support_lb,
+                support_ub=support_ub,
                 **params
         ):
             return LCG_irf_factory(
@@ -1970,6 +2005,8 @@ class CDR(Model):
                 int_type=int_type,
                 float_type=float_type,
                 session=session,
+                support_lb=support_lb,
+                support_ub=support_ub,
                 **params
             )
 

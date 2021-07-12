@@ -417,6 +417,9 @@ class Model(object):
         self.INT_TF = getattr(tf, self.int_type)
         self.INT_NP = getattr(np, self.int_type)
 
+        self.prop_bwd = self.history_length / (self.history_length + self.future_length)
+        self.prop_fwd = self.future_length / (self.history_length + self.future_length)
+
         f = self.form
         self.responses = f.responses()
         self.response_names = f.response_names()
@@ -5048,10 +5051,11 @@ class Model(object):
 
                     if axis_var == 't_delta':
                         if axis is None:
+                            xinterval = self.plot_n_time_units
                             if ax_min is None:
-                                ax_min = 0
+                                ax_min = -xinterval * self.prop_fwd
                             if ax_max is None:
-                                ax_max = self.plot_n_time_units
+                                ax_min = xinterval * self.prop_bwd
                             axis = (base * (ax_max - ax_min) + ax_min)
                         else:
                             axis = np.array(axis)
@@ -5384,6 +5388,11 @@ class Model(object):
         if response is None:
             response = self.response_names
 
+        if self.future_length:
+            xmin = -n_time_units
+        else:
+            xmin = 0.
+
         for g, gf_y_ref in enumerate(gf_y_refs):
             _, _, _, _, vals = self.get_plot_data(
                 xvar='t_delta',
@@ -5396,7 +5405,7 @@ class Model(object):
                 manipulations=manipulations,
                 pair_manipulations=False,
                 xaxis=None,
-                xmin=0,
+                xmin=xmin,
                 xmax=n_time_units,
                 xres=n_time_points,
                 n_samples=n_samples,
@@ -5633,6 +5642,10 @@ class Model(object):
                         if 'rate' not in names_fixed:
                             names_fixed = ['rate'] + names_fixed
 
+                    xinterval = plot_n_time_units
+                    xmin = -xinterval * self.prop_fwd
+                    xmax = xinterval * self.prop_bwd
+
                     for g, (gf_y_ref, gf_key) in enumerate(zip(gf_y_refs, ranef_level_names)):
                         if gf_key is None:
                             names_cur = names_fixed
@@ -5654,8 +5667,8 @@ class Model(object):
                             pair_manipulations=False,
                             reference_type=reference_type,
                             xaxis=None,
-                            xmin=0,
-                            xmax=plot_n_time_units,
+                            xmin=xmin,
+                            xmax=xmax,
                             xres=plot_n_time_points,
                             n_samples=n_samples,
                             level=level
@@ -5832,6 +5845,14 @@ class Model(object):
                                 else:
                                     ref_varies_with_x = True
 
+                                if plot_type == 'irf_surface':
+                                    xinterval = plot_n_time_units
+                                    xmin = -xinterval * self.prop_fwd
+                                    xmax = xinterval * self.prop_bwd
+                                else:
+                                    xmin = None
+                                    xmax = None
+
                                 (plot_x, plot_y), plot_z, lq, uq, _ = self.get_plot_data(
                                     xvar=xvar,
                                     yvar=yvar,
@@ -5841,6 +5862,8 @@ class Model(object):
                                     manipulations=manipulations,
                                     pair_manipulations=True,
                                     reference_type=reference_type,
+                                    xmin=xmin,
+                                    xmax=xmax,
                                     xres=int(np.ceil(np.sqrt(plot_n_time_points))),
                                     yres=int(np.ceil(np.sqrt(plot_n_time_points))),
                                     n_samples=n_samples,
