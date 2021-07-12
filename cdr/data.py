@@ -56,7 +56,7 @@ def corr_cdr(X_2d, impulse_names, impulse_names_2d, time, time_mask):
     """
     Compute correlation matrix, including correlations across time where necessitated by 2D predictors.
 
-    :param X_2d: ``numpy`` array; the impulse data. Must be of shape ``(batch_len, history_length, n_impulses)``, can be computed from sources by ``build_CDR_impulses()``.
+    :param X_2d: ``numpy`` array; the impulse data. Must be of shape ``(batch_len, history_length+future_length, n_impulses)``, can be computed from sources by ``build_CDR_impulses()``.
     :param impulse_names: ``list`` of ``str``; names of columns in **X_2d** to be used as impulses by the model.
     :param impulse_names_2d: ``list`` of ``str``; names of columns in **X_2d** that designate to 2D predictors.
     :param time: 3D ``numpy`` array; array of timestamps for each event in **X_2d**.
@@ -212,6 +212,7 @@ def build_CDR_data_inner(
         impulse_names=None,
         response_names=None,
         history_length=128,
+        future_length=0,
         X_response_aligned_predictor_names=None,
         X_response_aligned_predictors=None,
         X_2d_predictor_names=None,
@@ -230,7 +231,8 @@ def build_CDR_data_inner(
     :param Y_category_map: ``dict`` or ``None``; map from category labels to integers for each categorical response.
     :param impulse_names: ``list`` of ``str``; names of columns in **X** to be used as impulses by the model. If ``None``, all columns returned.
     :param response_names: ``list`` of ``str``; names of columns in **Y** to be used as responses by the model. If ``None``, all columns returned.
-    :param history_length: ``int``; maximum number of history observations.
+    :param history_length: ``int``; maximum number of history (backward) observations.
+    :param future_length: ``int``; maximum number of future (forward) observations.
     :param X_response_aligned_predictor_names: ``list`` of ``str``; names of predictors measured synchronously with the response rather than the impulses. If ``None``, no such impulses.
     :param X_response_aligned_predictors: ``pandas`` ``DataFrame`` or ``None``; table of predictors measured synchronously with the response rather than the impulses. If ``None``, no such impulses.
     :param X_2d_predictor_names: ``list`` of ``str``; names of 2D impulses (impulses whose value depends on properties of the most recent impulse). If ``None``, no such impulses.
@@ -281,18 +283,20 @@ def build_CDR_data_inner(
     X_time_2d = []
     X_mask = []
 
+    window_length = history_length + future_length
+
     for i, _X in enumerate(X):
         impulse_names_1d_cur = impulse_names_1d_todo.intersection(set(_X.columns))
         if len(impulse_names_1d_cur) > 0:
             impulse_names_1d_todo = impulse_names_1d_todo - impulse_names_1d_cur
             impulse_names_1d_cur = sorted(list(impulse_names_1d_cur))
             impulse_names_1d_tmp += impulse_names_1d_cur
-            _X_2d_from_1d, _X_time_2d, _X_mask = expand_history(
+            _X_2d_from_1d, _X_time_2d, _X_mask = expand_impulse_sequence(
                 _X[impulse_names_1d_cur],
                 _X.time,
                 first_obs[i],
                 last_obs[i],
-                history_length,
+                window_length,
                 int_type=int_type,
                 float_type=float_type
             )
@@ -374,6 +378,7 @@ def build_CDR_data(
         impulse_names=None,
         response_names=None,
         history_length=128,
+        future_length=0,
         X_response_aligned_predictor_names=None,
         X_response_aligned_predictors=None,
         X_2d_predictor_names=None,
@@ -392,7 +397,8 @@ def build_CDR_data(
     :param Y_category_map: ``dict`` or ``None``; map from category labels to integers for each categorical response.
     :param impulse_names: ``list`` of ``str``; names of columns in **X** to be used as impulses by the model. If ``None``, all columns returned.
     :param response_names: ``list`` of ``str``; names of columns in **Y** to be used as responses by the model. If ``None``, all columns returned.
-    :param history_length: ``int``; maximum number of history observations.
+    :param history_length: ``int``; maximum number of history (backward) observations.
+    :param future_length: ``int``; maximum number of future (forward) observations.
     :param X_response_aligned_predictor_names: ``list`` of ``str``; names of predictors measured synchronously with the response rather than the impulses. If ``None``, no such impulses.
     :param X_response_aligned_predictors: ``pandas`` ``DataFrame`` or ``None``; table of predictors measured synchronously with the response rather than the impulses. If ``None``, no such impulses.
     :param X_2d_predictor_names: ``list`` of ``str``; names of 2D impulses (impulses whose value depends on properties of the most recent impulse). If ``None``, no such impulses.
@@ -456,6 +462,7 @@ def build_CDR_data(
             impulse_names=impulse_names,
             response_names=response_names,
             history_length=history_length,
+            future_length=future_length,
             X_response_aligned_predictor_names=X_response_aligned_predictor_names,
             X_response_aligned_predictors=X_response_aligned_predictors,
             X_2d_predictor_names=X_2d_predictor_names,
@@ -518,19 +525,50 @@ def get_rangf_array(
     return Y_rangf
 
 
-def compute_history_intervals(X, Y, series_ids, verbose=True):
+def get_time_windows(
+        X,
+        Y,
+        series_ids,
+        forward=False,
+        window_length=128,
+        exclude_instantaneous=False,
+        verbose=True
+):
     """
     Compute row indices in **X** of initial and final impulses for each element of **y**.
+    Assumes time series are already sorted by **series_ids**.
 
     :param X: ``pandas`` ``DataFrame``; impulse (predictor) data.
     :param Y: ``pandas`` ``DataFrame``; response data.
     :param series_ids: ``list`` of ``str``; column names whose jointly unique values define unique time series.
+    :param forward: ``bool``; whether to compute forward windows (future inputs) or backward windows (past inputs, used if **forward** is ``False``).
+    :param window_length: ``int``; maximum size of time window to consider. If ``np.inf``, no bound on window size.
+    :param exclude_instantaneous: ``bool``; whether to exclude impulses that have the same timestamp as their targets.
     :param verbose: ``bool``; whether to report progress to stderr
     :return: 2-tuple of ``numpy`` vectors; first and last impulse observations (respectively) for each response in **y**
     """
 
+    if window_length is None:
+        window_length = 0
+
     m = len(X)
     n = len(Y)
+
+    X_src = X
+    Y_src = Y
+
+    if forward: # Reverse the time dimension
+        X = X[series_ids + ['time']].reset_index(drop=True)
+        X['time'] = -X['time']
+        X = X.sort_values(series_ids + ['time'])
+        X_ix = np.array(X.index)
+        Y = Y[series_ids + ['time']].reset_index(drop=True)
+        Y['time'] = -Y['time']
+        Y = Y.sort_values(series_ids + ['time'])
+        Y_ix = np.array(Y.index)
+    else:
+        X_ix = np.arange(len(X))
+        Y_ix = np.arange(len(Y))
 
     X_time = np.array(X.time)
     Y_time = np.array(Y.time)
@@ -564,7 +602,6 @@ def compute_history_intervals(X, Y, series_ids, verbose=True):
         # Check if we've entered a new series in y
         if (Y_id_vectors[i] != Y_id).any():
             start = end = j
-            X_cur_ids = X_id_vectors[j]
             Y_id = Y_id_vectors[i]
 
         # Move the X pointer forward until we are either in the same series as y or at the end of the table.
@@ -579,13 +616,39 @@ def compute_history_intervals(X, Y, series_ids, verbose=True):
             j += 1
             end = j
 
-        first_obs[i] = start
-        last_obs[i] = end
+        if forward:
+            # Shift bounds since we're implicitly slicing backwards
+            _start = X_ix[end] + 1
+            _end = X_ix[start] + 1
+            if np.isfinite(window_length):
+                _end = min(_end, _start + window_length)
+        else:
+            _start = X_ix[start]
+            _end = X_ix[end]
+            if np.isfinite(window_length):
+                _start = max(_start, _end - window_length)
+        first_obs[i] = _start
+        last_obs[i] = _end
 
         i += 1
 
+    first_obs = first_obs[Y_ix]
+    last_obs = last_obs[Y_ix]
+
+    if exclude_instantaneous:
+        print(X_src.shape)
+        print(first_obs.max())
+        _first_obs = np.where(first_obs < len(X_src), first_obs, np.maximum(0, first_obs-1))
+        shift = np.fabs(X_src.time.values[_first_obs] - Y_src.time.values) <= epsilon
+        if forward:
+            first_obs += shift
+            last_obs += shift
+        else:
+            first_obs -= shift
+            last_obs -= shift
+
     stderr('\n')
-    
+
     return first_obs, last_obs
 
 
@@ -717,7 +780,8 @@ def compute_partition(y, modulus, n):
     return partition
 
 
-def expand_history(X, X_time, first_obs, last_obs, history_length, int_type='int32', float_type='float32', fill=0.):
+def expand_impulse_sequence(
+        X, X_time, first_obs, last_obs, window_length, int_type='int32', float_type='float32', fill=0.):
     """
     Expand out impulse stream in **X** for each response in the target data.
 
@@ -725,7 +789,7 @@ def expand_history(X, X_time, first_obs, last_obs, history_length, int_type='int
     :param X_time: ``pandas`` ``Series``; timestamps associated with each impulse in **X**.
     :param first_obs: ``pandas`` ``Series``; vector of row indices in **X** of the first impulse in the time series associated with each response.
     :param last_obs: ``pandas`` ``Series``; vector of row indices in **X** of the last preceding impulse in the time series associated with each response.
-    :param history_length: ``int``; maximum number of history observations.
+    :param window_length: ``int``; number of steps in time dimension of output
     :param int_type: ``str``; name of int type.
     :param float_type: ``str``; name of float type.
     :param fill: ``float``; fill value for padding cells.
@@ -735,11 +799,11 @@ def expand_history(X, X_time, first_obs, last_obs, history_length, int_type='int
     INT_NP = getattr(np, int_type)
     FLOAT_NP = getattr(np, float_type)
     last_obs = np.array(last_obs, dtype=INT_NP)
-    first_obs = np.maximum(np.array(first_obs, dtype=INT_NP), last_obs - history_length)
+    first_obs = np.array(first_obs, dtype=INT_NP)
     X_time = np.array(X_time, dtype=FLOAT_NP)
     X = np.array(X)
 
-    X_2d = np.full((first_obs.shape[0], history_length, X.shape[1]), fill, dtype=FLOAT_NP)
+    X_2d = np.full((first_obs.shape[0], window_length, X.shape[1]), fill, dtype=FLOAT_NP)
     time_X_2d = np.zeros_like(X_2d)
     time_mask = np.zeros_like(X_2d)
 
@@ -754,14 +818,23 @@ def expand_history(X, X_time, first_obs, last_obs, history_length, int_type='int
     return X_2d, time_X_2d, time_mask
 
 
-def compute_time_mask(X_time, first_obs, last_obs, history_length, int_type='int32', float_type='float32'):
+def compute_time_mask(
+        X_time,
+        first_obs,
+        last_obs,
+        history_length=128,
+        future_length=0,
+        int_type='int32',
+        float_type='float32'
+):
     """
     Compute mask for expanded impulse data zeroing out non-existent impulses.
 
     :param X_time: ``pandas`` ``Series``; timestamps associated with each impulse in **X**.
     :param first_obs: ``pandas`` ``Series``; vector of row indices in **X** of the first impulse in the time series associated with each response.
     :param last_obs: ``pandas`` ``Series``; vector of row indices in **X** of the last preceding impulse in the time series associated with each response.
-    :param history_length: ``int``; maximum number of history observations.
+    :param history_length: ``int``; maximum number of history (backward) observations.
+    :param future_length: ``int``; maximum number of future (forward) observations.
     :param int_type: ``str``; name of int type.
     :param float_type: ``str``; name of float type.
     :return: ``numpy`` array; boolean impulse mask.
@@ -769,11 +842,11 @@ def compute_time_mask(X_time, first_obs, last_obs, history_length, int_type='int
 
     INT_NP = getattr(np, int_type)
     FLOAT_NP = getattr(np, float_type)
+    first_obs = np.array(first_obs, dtype=INT_NP)
     last_obs = np.array(last_obs, dtype=INT_NP)
-    first_obs = np.maximum(np.array(first_obs, dtype=INT_NP), last_obs - history_length)
     X_time = np.array(X_time, dtype=FLOAT_NP)
 
-    time_mask = np.zeros((first_obs.shape[0], history_length), dtype=FLOAT_NP)
+    time_mask = np.zeros((first_obs.shape[0], history_length + future_length), dtype=FLOAT_NP)
 
     for i, first, last in zip(np.arange(first_obs.shape[0]), first_obs, last_obs):
         sXt = X_time[first:last]
@@ -788,8 +861,8 @@ def preprocess_data(
         formula_list,
         series_ids,
         filters=None,
-        compute_history=True,
         history_length=128,
+        future_length=0,
         all_interactions=False,
         verbose=True,
         debug=False
@@ -802,8 +875,8 @@ def preprocess_data(
     :param formula_list: ``list`` of ``Formula``; CDR formula for which to preprocess data.
     :param series_ids: ``list`` of ``str``; column names whose jointly unique values define unique time series.
     :param filters: ``list``; list of key-value pairs mapping column names to filtering criteria for their values.
-    :param compute_history: ``bool``; compute history intervals for each regression target.
-    :param history_length: ``int``; maximum number of history observations.
+    :param history_length: ``int``; maximum number of history (backward) observations.
+    :param future_length: ``int``; maximum number of future (forward) observations.
     :param all_interactions: ``bool``; add powerset of all conformable interactions.
     :param verbose: ``bool``; whether to report progress to stderr
     :param debug: ``bool``; print debugging information
@@ -833,29 +906,65 @@ def preprocess_data(
     X_2d_predictor_names = None
     X_2d_predictors = None
 
-    if compute_history:
+    if history_length or future_length:
         X_new = []
         for i in range(len(X)):
             _X = X[i]
             if verbose:
-                stderr('Computing history intervals for each regression target in predictor file %d...\n' % (i+1))
+                stderr('Computing time windows for each regression target in predictor file %d...\n' % (i+1))
             for j, _Y in enumerate(Y):
-                first_obs, last_obs = compute_history_intervals(_X, _Y, series_ids)
+                if history_length:
+                    if future_length:
+                        stderr('Backward...\n')
+                    first_obs, last_obs = get_time_windows(
+                        _X,
+                        _Y,
+                        series_ids,
+                        window_length=history_length
+                    )
+                    first_obs_b, last_obs_b = first_obs, last_obs
+                    exclude_instantaneous = True
+                else:
+                    first_obs = last_obs = None
+                    exclude_instantaneous = False
+                if future_length:
+                    if history_length:
+                        stderr('Forward...\n')
+                    _first_obs, last_obs = get_time_windows(
+                        _X,
+                        _Y,
+                        series_ids,
+                        forward=True,
+                        window_length=future_length,
+                        exclude_instantaneous=exclude_instantaneous
+                    )
+                    first_obs_f, last_obs_f = _first_obs, last_obs
+                    if first_obs is None:
+                        first_obs = _first_obs
                 _Y['first_obs_%d' % i] = first_obs
                 _Y['last_obs_%d' % i] = last_obs
-
-                # Floating point precision issues can allow the response to precede the impulse for simultaneous X/y,
-                # which can break downstream convolution. The correction below to y.time prevents this.
-                _Y.time = np.where(last_obs > first_obs, np.maximum(np.array(_X.time)[last_obs - 1], _Y.time), _Y.time)
 
                 if debug:
                     sample = np.random.randint(0, len(_Y), 10)
                     sample = np.concatenate([np.zeros((1,), dtype='int'), sample, np.ones((1,), dtype='int') * (len(_Y) - 1)], axis=0)
-                    for i in sample:
-                        print(i)
-                        row = _Y.iloc[i]
-                        print(row[['subject', 'docid', 'time']])
-                        print(_X[['subject', 'docid', 'word', 'time']][row.first_obs:row.last_obs])
+
+                    for k in sample:
+                        print('Obs ix')
+                        print(k)
+                        row = _Y.iloc[k]
+                        print('First ix')
+                        print(first_obs[k])
+                        print('Last ix')
+                        print(last_obs[k])
+                        print('Target:')
+                        print(_Y[['subject', 'docid', 'word', 'time', 'first_obs_%d' % i, 'last_obs_%d' % i]].iloc[max(0, k-5):k+5])
+                        print('Impulses:')
+                        print(_X[['subject', 'docid', 'word', 'time']][row['first_obs_%d' % i]:row['last_obs_%d' % i]])
+                        print('Impulses (bw):')
+                        print(_X[['subject', 'docid', 'word', 'time']][first_obs_b[k]:last_obs_b[k]])
+                        print('Impulses (fw):')
+                        print(_X[['subject', 'docid', 'word', 'time']][first_obs_f[k]:last_obs_f[k]])
+                        print()
 
                 Y[j] = _Y
 
@@ -870,6 +979,7 @@ def preprocess_data(
                 X_response_aligned_predictor_names=X_response_aligned_predictor_names,
                 X_response_aligned_predictors=X_response_aligned_predictors,
                 history_length=history_length,
+                future_length=future_length,
                 all_interactions=all_interactions,
                 series_ids=series_ids
             )

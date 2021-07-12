@@ -2048,7 +2048,11 @@ class CDR(Model):
                                     axis=[-1]
                                 )
                                 impulse_resampler = self._piecewise_linear_interpolant(knot_location, knot_amplitude)
-                                t_delta = tf.linspace(self.interp_step * (self.history_length-1), 0, self.history_length)[None, ...]
+                                t_delta = tf.linspace(
+                                    self.interp_step * (self.history_length + self.future_length -1),
+                                    0,
+                                    self.history_length + self.future_length
+                                )[None, ...]
                                 t_delta = tf.tile(t_delta, [tf.shape(self.t_delta)[0], 1])
                                 impulse = impulse_resampler(t_delta)
                                 impulse *= self.interp_step

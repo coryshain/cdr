@@ -24,6 +24,7 @@ if __name__ == '__main__':
     argparser.add_argument('-a', '--algorithm', type=str, default='MAP', help='Algorithm ("sampling" or "MAP") to use for extracting predictions.')
     argparser.add_argument('-A', '--ablated_models', action='store_true', help='Perform convolution using ablated models. Otherwise only convolves using the full model in each ablation set.')
     argparser.add_argument('-e', '--extra_cols', action='store_true', help='Whether to include columns from the response dataframe in the outputs.')
+    argparser.add_argument('-O', '--optimize_memory', action='store_true', help="Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).")
     argparser.add_argument('--cpu_only', action='store_true', help='Use CPU implementation even if GPU is available.')
     args, unknown = argparser.parse_known_args()
 
@@ -74,8 +75,8 @@ if __name__ == '__main__':
                 cdr_formula_list,
                 p.series_ids,
                 filters=p.filters,
-                compute_history=True,
-                history_length=p.history_length
+                history_length=p.history_length,
+                future_length=p.future_length
             )
             evaluation_sets.append((X, Y, select, X_response_aligned_predictor_names, X_response_aligned_predictors,
                                     X_2d_predictor_names, X_2d_predictors))
@@ -115,6 +116,7 @@ if __name__ == '__main__':
                     algorithm=args.algorithm,
                     extra_cols=args.extra_cols,
                     partition=partition_str,
+                    optimize_memory=args.optimize_memory,
                     dump=True
                 )
 

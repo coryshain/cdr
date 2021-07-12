@@ -417,7 +417,9 @@ class CDRNN(Model):
                 elif self.context_regularizer_name == 'inherit':
                     self.context_regularizer = self.regularizer
                 else:
-                    scale = self.context_regularizer_scale / (self.history_length * max(1, len(self.impulse_indices))) # Average over time
+                    scale = self.context_regularizer_scale / (
+                        (self.history_length + self.future_length) * max(1, len(self.impulse_indices))
+                    ) # Average over time
                     if self.scale_regularizer_with_data:
                          scale *= self.minibatch_scale # Sum over batch, multiply by n batches
                     else:
@@ -573,7 +575,11 @@ class CDRNN(Model):
                     h_init, h_init_summary = self.initialize_rnn_h(l)
                     rnn_h_init.append(h_init)
 
-                    h_ema_init = tf.Variable(tf.zeros(units), trainable=False, name='rnn_h_ema_l%d' % (l+1))
+                    h_ema_init = tf.Variable(
+                        tf.zeros(units),
+                        trainable=False,
+                        name='rnn_h_ema_l%d' % (l+1)
+                    )
                     rnn_h_ema.append(h_ema_init)
 
                     c_init, c_init_summary = self.initialize_rnn_c(l)
@@ -1148,7 +1154,7 @@ class CDRNN(Model):
                     irf_l1 = get_activation(self.irf_inner_activation, session=self.sess)(irf_l1)
 
                 n_impulse = len(self.impulse_names) + 1
-                stabilizing_constant = 1. / (self.history_length * n_impulse)
+                stabilizing_constant = 1. / ((self.history_length + self.future_length) * n_impulse)
                 irf_out = self.irf(irf_l1) * stabilizing_constant
 
                 # Slice and apply IRF outputs
@@ -1156,15 +1162,17 @@ class CDRNN(Model):
                 self.X_conv = {}
                 self.output = {}
                 if X_mask is not None:
-                    X_mask = X_mask[..., None, None, None] # Pad out for impulses plus nparam, ndim of response distribution(s)
+                    X_mask_out = None
+                else:
+                    X_mask_out = X_mask[..., None, None, None] # Pad out for impulses plus nparam, ndim of response distribution(s)
                 for response in self.response_names:
                     _slice = slices[response]
                     _shape = shapes[response]
 
                     _irf_out = tf.reshape(irf_out[..., _slice], _shape)
                     X_weighted = X_rate * _irf_out
-                    if X_mask is not None:
-                        X_weighted *= X_mask
+                    if X_mask_out is not None:
+                        X_weighted *= X_mask_out
                     X_conv = tf.reduce_sum(X_weighted, axis=1) # Reduce along time dimension
                     output = tf.reduce_sum(X_conv, axis=1) # Reduce along impulse dimension
 

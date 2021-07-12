@@ -108,6 +108,7 @@ if __name__ == '__main__':
     argparser.add_argument('-T', '--training_mode', action='store_true', help='Use training mode for prediction.')
     argparser.add_argument('-A', '--ablated_models', action='store_true', help='For two-step prediction from CDR models, predict from data convolved using the ablated model. Otherwise predict from data convolved using the full model.')
     argparser.add_argument('-e', '--extra_cols', action='store_true', help='For prediction from CDR models, dump prediction outputs and response metadata to a single csv.')
+    argparser.add_argument('-O', '--optimize_memory', action='store_true', help="Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).")
     argparser.add_argument('--cpu_only', action='store_true', help='Use CPU implementation even if GPU is available.')
     args, unknown = argparser.parse_known_args()
 
@@ -157,8 +158,8 @@ if __name__ == '__main__':
             cdr_formula_list,
             p.series_ids,
             filters=p.filters,
-            compute_history=run_cdr,
-            history_length=p.history_length
+            history_length=p.history_length,
+            future_length=p.future_length
         )
         evaluation_sets.append((X, Y, select, X_response_aligned_predictor_names, X_response_aligned_predictors,
                                 X_2d_predictor_names, X_2d_predictors))
@@ -414,7 +415,8 @@ if __name__ == '__main__':
                             algorithm=args.algorithm,
                             extra_cols=args.extra_cols,
                             dump=True,
-                            partition=partition_str
+                            partition=partition_str,
+                            optimize_memory=args.optimize_memory
                         )
                     elif args.mode.startswith('eval'):
                         _cdr_out = _model.evaluate(
@@ -428,7 +430,8 @@ if __name__ == '__main__':
                             algorithm=args.algorithm,
                             extra_cols=args.extra_cols,
                             dump=True,
-                            partition=partition_str
+                            partition=partition_str,
+                            optimize_memory=args.optimize_memory
                         )
                     else:
                         raise ValueError('Unrecognized evaluation mode %s.' % args.mode)

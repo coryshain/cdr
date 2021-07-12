@@ -79,6 +79,7 @@ class Config(object):
         self.filters = filters
 
         self.history_length = data.getint('history_length', 128)
+        self.future_length = data.getint('future_length', 0)
 
         self.merge_cols = data.get('merge_cols', None)
         if self.merge_cols is not None:

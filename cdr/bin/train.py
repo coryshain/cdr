@@ -29,6 +29,7 @@ if __name__ == '__main__':
     argparser.add_argument('-e', '--force_training_evaluation', action='store_true', help='Recompute training evaluation even for models that are already finished.')
     argparser.add_argument('-s', '--save_and_exit', action='store_true', help='Initialize, save, and exit (CDR only). Useful for bringing non-backward compatible trained models up to spec for plotting and evaluation.')
     argparser.add_argument('-S', '--skip_confirmation', action='store_true', help='If running with **-s**, skip interactive confirmation. Useful for batch re-saving many models. Use with caution, since old models will be overwritten without the option to confirm.')
+    argparser.add_argument('-O', '--optimize_memory', action='store_true', help="Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).")
     argparser.add_argument('--cpu_only', action='store_true', help='Use CPU implementation even if GPU is available.')
     args = argparser.parse_args()
 
@@ -74,8 +75,8 @@ if __name__ == '__main__':
         cdr_formula_list,
         p.series_ids,
         filters=p.filters,
-        compute_history=run_cdr,
         history_length=p.history_length,
+        future_length=p.future_length,
         all_interactions=all_interactions
     )
 
@@ -252,7 +253,7 @@ if __name__ == '__main__':
 
             kwargs = {}
             for kwarg in MODEL_INITIALIZATION_KWARGS:
-                if kwarg.key not in ['outdir', 'history_length']:
+                if kwarg.key not in ['outdir', 'history_length', 'future_length']:
                     kwargs[kwarg.key] = p[kwarg.key]
             kwargs['crossval_factor'] = p['crossval_factor']
             kwargs['crossval_fold'] = p['crossval_fold']
@@ -274,6 +275,7 @@ if __name__ == '__main__':
                         ablated=p['ablated'],
                         outdir=p.outdir + '/' + m_path,
                         history_length=p.history_length,
+                        future_length=p.future_length,
                         **kwargs
                     )
                 elif p['network_type'].lower() in ['bbvi', 'bayes', 'bayesian']:
@@ -289,6 +291,7 @@ if __name__ == '__main__':
                         ablated=p['ablated'],
                         outdir=p.outdir + '/' + m_path,
                         history_length=p.history_length,
+                        future_length=p.future_length,
                         **kwargs
                     )
                 else:
@@ -310,6 +313,7 @@ if __name__ == '__main__':
                         ablated=p['ablated'],
                         outdir=p.outdir + '/' + m_path,
                         history_length=p.history_length,
+                        future_length=p.future_length,
                         **kwargs
                     )
                 elif p['network_type'].lower() in ['bbvi', 'bayes', 'bayesian']:
@@ -325,6 +329,7 @@ if __name__ == '__main__':
                         ablated=p['ablated'],
                         outdir=p.outdir + '/' + m_path,
                         history_length=p.history_length,
+                        future_length=p.future_length,
                         **kwargs
                     )
                 else:
@@ -353,7 +358,8 @@ if __name__ == '__main__':
                 X_response_aligned_predictors=X_response_aligned_predictors_valid,
                 X_2d_predictor_names=X_2d_predictor_names,
                 X_2d_predictors=X_2d_predictors,
-                force_training_evaluation=args.force_training_evaluation
+                force_training_evaluation=args.force_training_evaluation,
+                optimize_memory=args.optimize_memory
             )
 
             summary = cdr_model.summary()

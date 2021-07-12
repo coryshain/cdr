@@ -35,7 +35,7 @@ def cdr_kwarg_docstring():
     out += "\nAll CDR models\n^^^^^^^^^^^^^^\n\n"
 
     for kwarg in CDR_INITIALIZATION_KWARGS:
-        if kwarg.key not in ['history_length']:
+        if kwarg.key not in ['history_length', 'future_length']:
             out += docstring_from_kwarg(kwarg)
 
     out += '\nCDRMLE\n^^^^^^\n\n'
@@ -315,9 +315,15 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'history_length',
-        None,
+        128,
         int,
-        "Length of the history window (in timesteps)."
+        "Length of the history (backward) window (in timesteps)."
+    ),
+    Kwarg(
+        'future_length',
+        0,
+        int,
+        "Length of the future (forward) window (in timesteps). Note that causal IRF kernels cannot be used if **future_length** > 0."
     ),
 
     # MODEL DEFINITION

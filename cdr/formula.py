@@ -4,7 +4,7 @@ import ast
 import itertools
 import numpy as np
 
-from .data import z, c, s, compute_time_mask, expand_history
+from .data import z, c, s, compute_time_mask, expand_impulse_sequence
 from .util import names2ix, sn, stderr
 
 interact = re.compile('([^ ]+):([^ ]+)')
@@ -66,9 +66,7 @@ class Formula(object):
         'ExpRateGT1': ['beta'],
         'Gamma': ['alpha', 'beta'],
         'ShiftedGamma': ['alpha', 'beta', 'delta'],
-        'GammaKgt1': ['alpha', 'beta'],
         'GammaShapeGT1': ['alpha', 'beta'],
-        'ShiftedGammaKgt1': ['alpha', 'beta', 'delta'],
         'ShiftedGammaShapeGT1': ['alpha', 'beta', 'delta'],
         'Normal': ['mu', 'sigma2'],
         'SkewNormal': ['mu', 'sigma', 'alpha'],
@@ -81,7 +79,23 @@ class Formula(object):
         'HRFDoubleGamma3': ['alpha', 'beta', 'c'],
         'HRFDoubleGamma4': ['alpha_main', 'alpha_undershoot', 'beta', 'c'],
         'HRFDoubleGamma5': ['alpha_main', 'alpha_undershoot', 'beta_main', 'beta_undershoot', 'c'],
-        'HRFDoubleGamma': ['alpha_main', 'alpha_undershoot', 'beta_main', 'beta_undershoot', 'c']
+    }
+
+    CAUSAL_IRFS = {
+        'Exp',
+        'ExpRateGT1',
+        'Gamma',
+        'ShiftedGamma',
+        'GammaShapeGT1',
+        'ShiftedGammaShapeGT1',
+        'BetaPrime',
+        'ShiftedBetaPrime',
+        'HRFSingleGamma',
+        'HRFDoubleGamma1',
+        'HRFDoubleGamma2',
+        'HRFDoubleGamma3',
+        'HRFDoubleGamma4',
+        'HRFDoubleGamma5',
     }
 
     LCG_BASES_IX = 2
@@ -941,6 +955,7 @@ class Formula(object):
             first_obs,
             last_obs,
             history_length=128,
+            future_length=None,
             minibatch_size=50000
     ):
         """
@@ -961,6 +976,8 @@ class Formula(object):
 
         assert predictor_name in supported, '2D predictor "%s" not currently supported' %predictor_name
 
+        window_length = history_length + future_length
+
         if predictor_name in ['cosdist2D', 'eucldist2D']:
             is_embedding_dimension = re.compile('d([0-9]+)')
 
@@ -979,12 +996,12 @@ class Formula(object):
 
             for i in range(0, len(first_obs), minibatch_size):
                 stderr('\rProcessing batch %d/%d' %(i/minibatch_size + 1, math.ceil(float(len(first_obs))/minibatch_size)))
-                X_embeddings, _, _ = expand_history(
+                X_embeddings, _, _ = expand_impulse_sequence(
                     np.array(X[embedding_colnames]),
                     np.array(X['time']),
                     np.array(first_obs)[i:i+minibatch_size],
                     np.array(last_obs)[i:i+minibatch_size],
-                    history_length,
+                    window_length,
                     fill=np.nan
                 )
                 X_bases = X_embeddings[:, -1:, :]
@@ -1082,6 +1099,7 @@ class Formula(object):
             X_2d_predictor_names=None,
             X_2d_predictors=None,
             history_length=128,
+            future_length=None,
             all_interactions=False,
             series_ids=None
     ):
@@ -1094,7 +1112,8 @@ class Formula(object):
         :param X_response_aligned_predictors: ``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
         :param X_2d_predictor_names: ``list`` or ``None``; List of column names 2D predictors (predictors whose value depends on properties of the most recent impulse) if applicable, ``None`` otherwise.
         :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
-        :param history_length: ``int``; maximum number of timesteps in the history dimension.
+        :param history_length: ``int`` or ``None``; maximum number of history (backward) observations. ``None`` is treated as ``0``.
+        :param future_length: ``int`` or ``None``; maximum number of future (forward) observations. ``None`` is treated as ``0``.
         :param all_interactions: ``bool``; add powerset of all conformable interactions.
         :param series_ids: ``list`` of ``str`` or ``None``; list of ids to use as grouping factors for lagged effects. If ``None``, lagging will not be attempted.
         :return: 6-tuple; transformed **X**, transformed **y**, transformed response-aligned predictor names, transformed response-aligned predictors, transformed 2D predictor names, transformed 2D predictors
@@ -1158,6 +1177,7 @@ class Formula(object):
                     #         Y.first_obs,
                     #         Y.last_obs,
                     #         history_length=history_length
+                    #         future_length=future_length
                     #     )
                     #
                     # if x.id not in X_2d_predictor_names:
@@ -1167,6 +1187,7 @@ class Formula(object):
                     #         Y.first_obs,
                     #         Y.last_obs,
                     #         history_length=history_length
+                    #         future_length=future_length
                     #     )
                     #     X_2d_predictor_names.append(new_2d_predictor_name)
                     #     if X_2d_predictors is None:
@@ -2409,6 +2430,22 @@ class IRFNode(object):
                     for irf in c_id_by_family[f]:
                         if irf not in out[f]:
                             out[f][irf] = c_id_by_family[f][irf]
+        return out
+
+    def supports_non_causal(self):
+        """
+        Check whether model contains only IRF kernels that lack the causality constraint t >= 0.
+
+        :return: ``bool``: whether model contains only IRF kernels that lack the causality constraint t >= 0.
+        """
+
+        out = self.family not in Formula.CAUSAL_IRFS
+        if out:
+            for c in self.children:
+                out &= c.supports_non_causal()
+                if not out:
+                    break
+
         return out
 
     def has_coefficient(self, rangf):
