@@ -243,7 +243,6 @@ if __name__ == '__main__':
             if X_response_aligned_predictors is not None:
                 X_response_aligned_predictors_valid = []
                 for _x, _sel in zip(X_response_aligned_predictors, select_Y_valid):
-                    print(_x, _sel)
                     X_response_aligned_predictors_valid.append(_x[_sel])
             else:
                 X_response_aligned_predictors_valid = None

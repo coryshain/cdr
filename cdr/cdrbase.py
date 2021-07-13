@@ -1231,8 +1231,8 @@ class CDR(Model):
                         var_name='coefficient_%s' % response
                     )
 
-                    coefficient = coefficient_fixed
-                    coefficient_summary = coefficient_fixed_summary
+                    coefficient = coefficient_fixed[None, ...]
+                    coefficient_summary = coefficient_fixed_summary[None, ...]
 
                     for i, coef_name in enumerate(self.coef_names):
                         self.coefficient_fixed[response][coef_name] = {}
@@ -1338,8 +1338,8 @@ class CDR(Model):
                                 axis=1
                             )
 
-                            coefficient = coefficient[None, ...] + tf.gather(coefficient_random, self.Y_gf[:, i], axis=0)
-                            coefficient_summary = coefficient_summary[None, ...] + tf.gather(coefficient_random_summary, self.Y_gf[:, i], axis=0)
+                            coefficient = coefficient + tf.gather(coefficient_random, self.Y_gf[:, i], axis=0)
+                            coefficient_summary = coefficient_summary + tf.gather(coefficient_random_summary, self.Y_gf[:, i], axis=0)
 
                     self.coefficient[response] = coefficient
                     self.coefficient_summary[response] = coefficient_summary
@@ -1382,8 +1382,8 @@ class CDR(Model):
                             var_name='interaction_%s' % response
                         )
 
-                        interaction = interaction_fixed
-                        interaction_summary = interaction_fixed_summary
+                        interaction = interaction_fixed[None, ...]
+                        interaction_summary = interaction_fixed_summary[None, ...]
 
                         for i, interaction_name in enumerate(self.interaction_names):
                             self.interaction_fixed[response][interaction_name] = {}
@@ -1486,8 +1486,8 @@ class CDR(Model):
                                     axis=1
                                 )
 
-                                interaction = interaction[None, ...] + tf.gather(interaction_random, self.Y_gf[:, i], axis=0)
-                                interaction_summary = interaction_summary[None, ...] + tf.gather(interaction_random_summary, self.Y_gf[:, i], axis=0)
+                                interaction = interaction + tf.gather(interaction_random, self.Y_gf[:, i], axis=0)
+                                interaction_summary = interaction_summary + tf.gather(interaction_random_summary, self.Y_gf[:, i], axis=0)
 
                         self.interaction[response] = interaction
                         self.interaction_summary[response] = interaction_summary

@@ -1261,7 +1261,14 @@ class CDRNN(Model):
                         nparam = 1
                     ndim = self.get_response_ndim(response)
                     slices[response] = slice(n, n + n_impulse * nparam * ndim)
-                    shapes[response] = (self.X_batch_dim, self.X_time_dim, n_impulse, nparam, ndim)
+                    shapes[response] = (
+                        self.X_batch_dim,
+                        # Predictor files get tiled out over the time dimension:
+                        self.X_time_dim * len(self.impulse_indices),
+                        n_impulse,
+                        nparam,
+                        ndim
+                    )
                     n += n_impulse * nparam * ndim
 
                 return slices, shapes

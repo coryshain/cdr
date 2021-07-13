@@ -1150,16 +1150,9 @@ class Formula(object):
 
         impulses = sorted(list(set(impulses)), key=lambda x: x.name())
 
-        if X_2d_predictor_names is None:
-            X_2d_predictor_names = []
-        if X_response_aligned_predictor_names is None:
-            X_response_aligned_predictor_names = []
-
-        time_mask = None
-
         X_columns = set()
-        for X_cur in X:
-            for c in X_cur.columns:
+        for _X in X:
+            for c in _X.columns:
                 X_columns.add(c)
 
         for impulse in impulses:
@@ -1202,41 +1195,34 @@ class Formula(object):
                     #     time_mask,
                     # )
 
-                elif x.id not in X_columns:
+                elif x.id in X_columns:
+                    for i in range(len(X)):
+                        _X = X[i]
+                        if x.id in _X.columns:
+                            _X = self.apply_ops(x, _X)
+                            X[i] = _X
+                            break
+                else: # Not in X, so either it's spilled over (legacy from Cognition expts) or it's in Y (response aligned)
                     sp = spillover.match(x.id)
                     if sp and sp.group(1) in X_columns and series_ids is not None:
                         x_id = sp.group(1)
                         n = int(sp.group(2))
                         for i in range(len(X)):
-                            X_cur = X[i]
-                            if x_id in X_cur.columns:
-                                X_cur[x_id] = X_cur.groupby(series_ids)[x_id].shift_activations(n, fill_value=0.)
-                                X_cur = self.apply_ops(x, X_cur)
-                                X[i] = X_cur
+                            _X = X[i]
+                            if x_id in _X.columns:
+                                _X[x_id] = _X.groupby(series_ids)[x_id].shift_activations(n, fill_value=0.)
+                                _X = self.apply_ops(x, _X)
+                                X[i] = _X
                                 break
                     else:
-                        found = False
-                        for _Y in Y:
-                            if x.id in _Y.columns:
-                                found = True
-                                _Y = self.apply_ops(x, _Y)
-                                if x.name() not in X_response_aligned_predictor_names:
-                                    X_response_aligned_predictor_names.append(x.name())
-
-                                    if X_response_aligned_predictors is None:
-                                        X_response_aligned_predictors = _Y[[x.id]]
-                                    else:
-                                        X_response_aligned_predictors[[x.id]] = _Y[[x.id]]
-                                    X_response_aligned_predictors = self.apply_ops(x, X_response_aligned_predictors)
-                                break
-                        assert found, 'Impulse %s not found in data.' % x.name()
-                else:
-                    for i in range(len(X)):
-                        X_cur = X[i]
-                        if x.id in X_cur.columns:
-                            X_cur = self.apply_ops(x, X_cur)
-                            X[i] = X_cur
-                            break
+                        for i, _Y in enumerate(Y):
+                            assert x.id in _Y.columns, 'Impulse %s not found in data. Either it is missing from all of the predictor files X, or (if response aligned) it is missing from at least one of the response files Y.' % x.name()
+                        if X_response_aligned_predictor_names is None:
+                            X_response_aligned_predictor_names = [x.name()]
+                        if X_response_aligned_predictors is None:
+                            X_response_aligned_predictors = [_Y[[x.id]] for _Y in Y]
+                        for i in range(len(X_response_aligned_predictors)):
+                            X_response_aligned_predictors[i] = self.apply_ops(x, X_response_aligned_predictors[i])
 
             if type(impulse).__name__ == 'ImpulseInteraction':
                 response_aligned = False
@@ -1245,40 +1231,42 @@ class Formula(object):
                         response_aligned = True
                         break
                 if response_aligned:
-                    if impulse.name() not in X_response_aligned_predictor_names:
-                        X_response_aligned_predictor_names.append(impulse.name())
-                        X_response_aligned_predictors = self.apply_ops(impulse, X_response_aligned_predictors)
+                    for i, _Y in enumerate(Y):
+                        for _x in impulse.impulses():
+                            assert _x.id in _Y.columns, 'Impulse %s not found in data. Either it is missing from all of the predictor files X, or (if response aligned) it is missing from at least one of the response files Y.' % _x.name()
+                    if X_response_aligned_predictor_names is None:
+                        X_response_aligned_predictor_names = [impulse.name()]
+                    if X_response_aligned_predictors is None:
+                        X_response_aligned_predictors = [_Y[[_x.id for _x in impulse.impulses()]] for _Y in Y]
+                    for i in range(len(X_response_aligned_predictors)):
+                        X_response_aligned_predictors[i] = self.apply_ops(impulse, X_response_aligned_predictors[i])
                 else:
                     found = False
                     for i in range(len(X)):
-                        X_cur = X[i]
+                        _X = X[i]
                         in_X = True
                         for atom in impulse.impulses():
-                            if atom.id not in X_cur.columns:
+                            if atom.id not in _X.columns:
                                 in_X = False
                         if in_X:
-                            X_cur = self.apply_ops(impulse, X_cur)
-                            X[i] = X_cur
+                            _X = self.apply_ops(impulse, _X)
+                            X[i] = _X
                             found = True
                             break
                     if not found:
                         raise ValueError('No single predictor file contains all features in ImpulseInteraction, and interaction across files is not possible because of asynchrony. Consider interacting the responses, rather than the impulses.')
 
         for i in range(len(X)):
-            X_cur = X[i]
-            for col in [x for x in X_cur.columns if spillover.match(x)]:
-                X_cur[col] = X_cur[col].fillna(0)
-            X[i] = X_cur
+            _X = X[i]
+            for col in [x for x in _X.columns if spillover.match(x)]:
+                _X[col] = _X[col].fillna(0)
+            X[i] = _X
 
         for _Y in Y:
             for gf in self.rangf:
                 gf_s = gf.split(':')
                 if len(gf_s) > 1 and gf not in _Y:
                     _Y[gf] = _Y[gf_s].agg(lambda x: '_'.join([str(_x) for _x in x]), axis=1)
-
-
-        print(X_response_aligned_predictor_names)
-        print(X_response_aligned_predictors)
 
         return X, Y, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors
 

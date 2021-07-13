@@ -3,7 +3,7 @@ import pandas as pd
 
 from .util import stderr
 
-def read_tabular_data(X_paths, Y_paths, series_ids, categorical_columns=None, sep=' '):
+def read_tabular_data(X_paths, Y_paths, series_ids, categorical_columns=None, sep=' ', verbose=True):
     """
     Read impulse and response data into pandas dataframes and perform basic pre-processing.
 
@@ -12,6 +12,7 @@ def read_tabular_data(X_paths, Y_paths, series_ids, categorical_columns=None, se
     :param series_ids: ``list`` of ``str``; column names whose jointly unique values define unique time series.
     :param categorical_columns: ``list`` of ``str``; column names that should be treated as categorical.
     :param sep: ``str``; string representation of field delimiter in input data.
+    :param verbose: ``bool``; whether to log progress to stderr.
     :return: 2-tuple of list(``pandas`` DataFrame); (impulse data, response data). X and Y each have one element for each dataset in X_paths/Y_paths, each containing the column-wise concatenation of all column files in the path.
     """
 
@@ -20,7 +21,8 @@ def read_tabular_data(X_paths, Y_paths, series_ids, categorical_columns=None, se
     if not isinstance(Y_paths, list):
         Y_paths = [Y_paths]
 
-    stderr('Loading data...\n')
+    if verbose:
+        stderr('Loading data...\n')
     X = []
     Y = []
 
@@ -66,7 +68,8 @@ def read_tabular_data(X_paths, Y_paths, series_ids, categorical_columns=None, se
 
     # Sort
 
-    stderr('Ensuring sort order...\n')
+    if verbose:
+        stderr('Ensuring sort order...\n')
     for i, x in enumerate(X):
         X[i] = x.sort_values(series_ids + ['time']).reset_index(drop=True)
     for i, y in enumerate(Y):

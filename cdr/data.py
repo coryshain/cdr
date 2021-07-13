@@ -319,7 +319,7 @@ def build_CDR_data_inner(
         X_2d = np.concatenate([X_2d, X_response_aligned_predictors_new], axis=2)
 
         time_X_2d_new = np.zeros(response_aligned_shape)
-        time_X_2d_new[:,-1,:] = Y_time[..., None]
+        time_X_2d_new[:,-1,:] = np.array(Y_time)[..., None]
         X_time_2d = np.concatenate([X_time_2d, time_X_2d_new], axis=2)
 
         time_mask_new = np.zeros(response_aligned_shape)
@@ -327,7 +327,7 @@ def build_CDR_data_inner(
         X_mask = np.concatenate([X_mask, time_mask_new], axis=2)
 
     if X_2d_predictors is not None:
-        raise ValueError('2D predictors are currently fatally bugged. Do not use them.')
+        raise ValueError('2D predictors are currently broken. Do not use them.')
         X_2d = np.concatenate([X_2d, X_2d_predictors], axis=2)
 
     # Ensure that impulses are properly aligned
@@ -464,7 +464,7 @@ def build_CDR_data(
             history_length=history_length,
             future_length=future_length,
             X_response_aligned_predictor_names=X_response_aligned_predictor_names,
-            X_response_aligned_predictors=X_response_aligned_predictors,
+            X_response_aligned_predictors=None if X_response_aligned_predictors is None else X_response_aligned_predictors[i],
             X_2d_predictor_names=X_2d_predictor_names,
             X_2d_predictors=X_2d_predictors,
             int_type=int_type,
@@ -561,7 +561,7 @@ def get_time_windows(
         X = X[series_ids + ['time']].reset_index(drop=True)
         X['time'] = -X['time']
         X = X.sort_values(series_ids + ['time'])
-        X_ix = np.concatenate([np.array(X.index), [len(X)]], axis=1) # Pad 1 to handle final interval
+        X_ix = np.concatenate([np.array(X.index), [len(X)]], axis=0) # Pad 1 to handle final interval
         Y = Y[series_ids + ['time']].reset_index(drop=True)
         Y['time'] = -Y['time']
         Y = Y.sort_values(series_ids + ['time'])
@@ -983,10 +983,6 @@ def preprocess_data(
             )
     else:
         X_new = X
-
-    print('outer')
-    print(X_response_aligned_predictor_names)
-    print(X_response_aligned_predictors)
 
     return X_new, Y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors
 

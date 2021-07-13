@@ -1235,19 +1235,23 @@ class Model(object):
                     nparam = len(response_params)
                     ndim = self.get_response_ndim(response)
 
-                    intercept = self.intercept_fixed_base[response]
-                    intercept_summary = self.intercept_fixed_base_summary[response]
+                    intercept_fixed = self.intercept_fixed_base[response]
+                    intercept_fixed_summary = self.intercept_fixed_base_summary[response]
+
                     self._regularize(
-                        intercept,
+                        intercept_fixed,
                         center=self.intercept_init[response],
                         regtype='intercept',
                         var_name='intercept_%s' % sn(response)
                     )
 
+                    intercept = intercept_fixed[None, ...]
+                    intercept_summary = intercept_fixed_summary[None, ...]
+
                     for i, response_param in enumerate(response_params):
                         dim_names = self._expand_param_name_by_dim(response, response_param)
-                        _p = intercept[i]
-                        _p_summary = intercept_summary[i]
+                        _p = intercept_fixed[i]
+                        _p_summary = intercept_fixed_summary[i]
                         if self.standardize_response and self.is_real(response):
                             if response_param == 'mu':
                                 _p = _p * self.Y_train_sds[response] + self.Y_train_means[response]
@@ -1348,8 +1352,8 @@ class Model(object):
                                 axis=0
                             )
 
-                            intercept = intercept[None, ...] + tf.gather(intercept_random, self.Y_gf[:, i])
-                            intercept_summary = intercept_summary[None, ...] + tf.gather(intercept_random_summary, self.Y_gf[:, i])
+                            intercept = intercept + tf.gather(intercept_random, self.Y_gf[:, i])
+                            intercept_summary = intercept_summary + tf.gather(intercept_random_summary, self.Y_gf[:, i])
 
                     self.intercept[response] = intercept
                     self.intercept_summary[response] = intercept_summary
