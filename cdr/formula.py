@@ -1128,7 +1128,7 @@ class Formula(object):
                 if dv.id in _Y.columns:
                     found = True
                     if dv.name() not in _Y.columns:
-                        _Y = self.apply_ops(dv, Y)
+                        _Y = self.apply_ops(dv, _Y)
                     Y[i] = _Y
                     break
             assert found, 'Response variable %s not found in input data.' % dv.name()
@@ -1275,6 +1275,10 @@ class Formula(object):
                 gf_s = gf.split(':')
                 if len(gf_s) > 1 and gf not in _Y:
                     _Y[gf] = _Y[gf_s].agg(lambda x: '_'.join([str(_x) for _x in x]), axis=1)
+
+
+        print(X_response_aligned_predictor_names)
+        print(X_response_aligned_predictors)
 
         return X, Y, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors
 

@@ -561,13 +561,13 @@ def get_time_windows(
         X = X[series_ids + ['time']].reset_index(drop=True)
         X['time'] = -X['time']
         X = X.sort_values(series_ids + ['time'])
-        X_ix = np.array(X.index)
+        X_ix = np.concatenate([np.array(X.index), [len(X)]], axis=1) # Pad 1 to handle final interval
         Y = Y[series_ids + ['time']].reset_index(drop=True)
         Y['time'] = -Y['time']
         Y = Y.sort_values(series_ids + ['time'])
         Y_ix = np.array(Y.index)
     else:
-        X_ix = np.arange(len(X))
+        X_ix = np.arange(len(X)+1) # Pad 1 to handle final interval
         Y_ix = np.arange(len(Y))
 
     X_time = np.array(X.time)
@@ -983,6 +983,10 @@ def preprocess_data(
             )
     else:
         X_new = X
+
+    print('outer')
+    print(X_response_aligned_predictor_names)
+    print(X_response_aligned_predictors)
 
     return X_new, Y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors
 

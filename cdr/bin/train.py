@@ -240,9 +240,13 @@ if __name__ == '__main__':
         elif m.startswith('CDR') or m.startswith('DTSR'):
             dv = [x.strip() for x in formula.strip().split('~')[0].strip().split('+')]
             Y_valid, select_Y_valid = filter_invalid_responses(Y, dv)
-            X_response_aligned_predictors_valid = X_response_aligned_predictors
-            if X_response_aligned_predictors_valid is not None:
-                X_response_aligned_predictors_valid = X_response_aligned_predictors_valid[select_Y_valid]
+            if X_response_aligned_predictors is not None:
+                X_response_aligned_predictors_valid = []
+                for _x, _sel in zip(X_response_aligned_predictors, select_Y_valid):
+                    print(_x, _sel)
+                    X_response_aligned_predictors_valid.append(_x[_sel])
+            else:
+                X_response_aligned_predictors_valid = None
 
             stderr('\nInitializing model %s...\n\n' % m)
 
