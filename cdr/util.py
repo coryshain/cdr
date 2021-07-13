@@ -290,15 +290,15 @@ def paths_from_partition_cliarg(partition, config):
         'test': config.X_test
     }
 
-    y_map = {
-        'train': config.y_train,
-        'dev': config.y_dev,
-        'test': config.y_test
+    Y_map = {
+        'train': config.Y_train,
+        'dev': config.Y_dev,
+        'test': config.Y_test
     }
 
     for p in partition:
         X_path = X_map[p]
-        y_path = y_map[p]
+        y_path = Y_map[p]
 
         if X_path not in X_paths:
             X_paths.append(X_path)

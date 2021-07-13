@@ -1028,9 +1028,9 @@ class Model(object):
                 self.set_training_rho = {}
                 for response in self.response_names:
                     # log likelihood
-                    self.training_loglik_in[response] = []
-                    self.training_loglik[response] = []
-                    self.set_training_loglik[response] = []
+                    self.training_loglik_in[response] = {}
+                    self.training_loglik[response] = {}
+                    self.set_training_loglik[response] = {}
 
                     file_ix = self.response_to_df_ix[response]
                     multiple_files = len(file_ix) > 1
@@ -1039,73 +1039,73 @@ class Model(object):
                             name_base = '%s_f%s' % (sn(response), ix + 1)
                         else:
                             name_base = sn(response)
-                        self.training_loglik_in[response].append(tf.placeholder(
+                        self.training_loglik_in[response][ix] = tf.placeholder(
                             self.FLOAT_TF,
                             shape=[],
                             name='training_loglik_in_%s' % name_base
-                        ))
-                        self.training_loglik[response].append(tf.Variable(
+                        )
+                        self.training_loglik[response][ix] = tf.Variable(
                             np.nan,
                             dtype=self.FLOAT_TF,
                             trainable=False,
                             name='training_loglik_%s' % name_base
-                        ))
-                        self.set_training_loglik[response].append(tf.assign(
+                        )
+                        self.set_training_loglik[response][ix] = tf.assign(
                             self.training_loglik[response][ix],
                             self.training_loglik_in[response][ix]
-                        ))
+                        )
 
                     if self.is_real(response):
-                        self.training_mse_in[response] = []
-                        self.training_mse[response] = []
-                        self.set_training_mse[response] = []
-                        self.training_percent_variance_explained[response] = []
-                        self.training_rho_in[response] = []
-                        self.training_rho[response] = []
-                        self.set_training_rho[response] = []
+                        self.training_mse_in[response] = {}
+                        self.training_mse[response] = {}
+                        self.set_training_mse[response] = {}
+                        self.training_percent_variance_explained[response] = {}
+                        self.training_rho_in[response] = {}
+                        self.training_rho[response] = {}
+                        self.set_training_rho[response] = {}
 
                         for ix in range(self.n_response_df):
                             # MSE
-                            self.training_mse_in[response].append(tf.placeholder(
+                            self.training_mse_in[response][ix] = tf.placeholder(
                                 self.FLOAT_TF,
                                 shape=[],
                                 name='training_mse_in_%s' % name_base
-                            ))
-                            self.training_mse[response].append(tf.Variable(
+                            )
+                            self.training_mse[response][ix] = tf.Variable(
                                 np.nan,
                                 dtype=self.FLOAT_TF,
                                 trainable=False,
                                 name='training_mse_%s' % name_base
-                            ))
-                            self.set_training_mse[response].append(tf.assign(
+                            )
+                            self.set_training_mse[response][ix] = tf.assign(
                                 self.training_mse[response][ix],
                                 self.training_mse_in[response][ix]
-                            ))
+                            )
 
                             # % variance explained
                             full_variance = self.Y_train_sds[response] ** 2
                             if self.get_response_ndim(response) == 1:
                                 full_variance = np.squeeze(full_variance, axis=-1)
-                            self.training_percent_variance_explained[response].append(tf.maximum(
+                            self.training_percent_variance_explained[response][ix] = tf.maximum(
                                 0.,
                                 (1. - self.training_mse[response][ix] / full_variance) * 100.
-                            ))
+                            )
 
                             # rho
-                            self.training_rho_in[response].append(tf.placeholder(
+                            self.training_rho_in[response][ix] = tf.placeholder(
                                 self.FLOAT_TF,
                                 shape=[], name='training_rho_in_%s' % name_base
-                            ))
-                            self.training_rho[response].append(tf.Variable(
+                            )
+                            self.training_rho[response][ix] = tf.Variable(
                                 np.nan,
                                 dtype=self.FLOAT_TF,
                                 trainable=False,
                                 name='training_rho_%s' % name_base
-                            ))
-                            self.set_training_rho[response].append(tf.assign(
+                            )
+                            self.set_training_rho[response][ix] = tf.assign(
                                 self.training_rho[response][ix],
                                 self.training_rho_in[response][ix]
-                            ))
+                            )
 
                 # convergence
                 self._add_convergence_tracker(self.loss_total, 'loss_total')
@@ -3184,15 +3184,15 @@ class Model(object):
         else:
             minibatch_size = self.minibatch_size
 
-        n_train = len(Y[0])
-        n_minibatch = int(math.ceil(n_train / minibatch_size))
+        n = sum([len(_Y) for _Y in Y])
+        n_minibatch = int(math.ceil(n / minibatch_size))
 
         stderr('*' * 100 + '\n' + self.initialization_summary() + '*' * 100 + '\n\n')
         with open(self.outdir + '/initialization_summary.txt', 'w') as i_file:
             i_file.write(self.initialization_summary())
 
         usingGPU = tf.test.is_gpu_available()
-        stderr('Using GPU: %s\nNumber of training samples: %d\n\n' % (usingGPU, n_train))
+        stderr('Using GPU: %s\nNumber of training samples: %d\n\n' % (usingGPU, n))
 
         # Preprocess data
         if not isinstance(X, list):
@@ -3247,8 +3247,8 @@ class Model(object):
                 #             float_type=self.float_type
                 #     ):
                 #         i = 0
-                #         n_train = len(Y[0])
-                #         p, _ = get_random_permutation(n_train)
+                #         n = sum([len(_Y) for _Y in Y])
+                #         p, _ = get_random_permutation(n)
                 #         _Y_gf = get_rangf_array(Y, self.rangf, self.rangf_map)
                 #         while True:
                 #             _i = p[i]
@@ -3270,9 +3270,9 @@ class Model(object):
                 #             )
                 #             yield _X[0], _X_time[0], _X_mask[0], _Y_dv[0], _Y_time[0], _Y_mask[0], _Y_gf[_i]
                 #             i += 1
-                #             if i > n_train:
+                #             if i > n:
                 #                 i = 0
-                #                 p, _ = get_random_permutation(n_train)
+                #                 p, _ = get_random_permutation(n)
                 #
                 #     dataset = tf.data.Dataset.from_generator(
                 #         data_gen,
@@ -3303,7 +3303,7 @@ class Model(object):
                         self.save()
 
                     while not self.has_converged() and self.global_step.eval(session=self.sess) < n_iter:
-                        p, p_inv = get_random_permutation(n_train)
+                        p, p_inv = get_random_permutation(n)
                         t0_iter = pytime.time()
                         stderr('-' * 50 + '\n')
                         stderr('Iteration %d\n' % int(self.global_step.eval(session=self.sess) + 1))
@@ -3311,7 +3311,7 @@ class Model(object):
                         if self.optim_name is not None and self.lr_decay_family is not None:
                             stderr('Learning rate: %s\n' %self.lr.eval(session=self.sess))
 
-                        pb = tf.contrib.keras.utils.Progbar(self.n_train_minibatch)
+                        pb = tf.contrib.keras.utils.Progbar(n_minibatch)
 
                         loss_total = 0.
                         reg_loss_total = 0.
@@ -3320,7 +3320,7 @@ class Model(object):
                         if self.loss_filter_n_sds:
                             n_dropped = 0.
 
-                        for j in range(0, n_train, minibatch_size):
+                        for j in range(0, n, minibatch_size):
                             indices = p[j:j+minibatch_size]
                             if optimize_memory:
                                 _Y = [_y.iloc[indices] for _y in Y]
@@ -3625,6 +3625,9 @@ class Model(object):
                         )
                     else:
                         out = {}
+
+                        n = sum([len(_Y) for _Y in Y])
+
                         if return_preds:
                             out['preds'] = {}
                             for _response in response:
@@ -3632,13 +3635,15 @@ class Model(object):
                                     dtype = self.FLOAT_NP
                                 else:
                                     dtype = self.INT_NP
-                                out['preds'][_response] = np.zeros((len(Y_time),), dtype=dtype)
+                                out['preds'][_response] = np.zeros((n,), dtype=dtype)
                         if return_loglik:
-                            out['log_lik'] = {x: np.zeros((len(Y_time),)) for x in response}
+                            out['log_lik'] = {x: np.zeros((n,)) for x in response}
                             if len(self.response_names) > 1:
-                                out['log_lik']['AllResponses'] = np.zeros((len(Y_time),))
-                        n_eval_minibatch = math.ceil(len(Y_time) / self.eval_minibatch_size)
-                        for i in range(0, len(Y_time), self.eval_minibatch_size):
+                                out['log_lik']['AllResponses'] = np.zeros((n,))
+
+
+                        n_eval_minibatch = math.ceil(n / self.eval_minibatch_size)
+                        for i in range(0, n, self.eval_minibatch_size):
                             if verbose:
                                 stderr('\rMinibatch %d/%d' %((i/self.eval_minibatch_size)+1, n_eval_minibatch))
                             if optimize_memory:
@@ -4271,9 +4276,10 @@ class Model(object):
                         verbose=verbose
                     )
                 else:
-                    n_minibatch = math.ceil(len(Y_time) / self.eval_minibatch_size)
-                    loss = np.zeros((len(Y_time),))
-                    for i in range(0, len(Y_time), self.eval_minibatch_size):
+                    n = sum([len(_Y) for _Y in Y])
+                    n_minibatch = math.ceil(n / self.eval_minibatch_size)
+                    loss = np.zeros((n,))
+                    for i in range(0, n, self.eval_minibatch_size):
                         if verbose:
                             stderr('\rMinibatch %d/%d' %(i+1, n_minibatch))
                         if optimize_memory:
@@ -4515,7 +4521,8 @@ class Model(object):
                         verbose=verbose
                     )
                 else:
-                    n_eval_minibatch = math.ceil(len(Y_time) / self.eval_minibatch_size)
+                    n = sum([len(_Y) for _Y in Y])
+                    n_eval_minibatch = math.ceil(n / self.eval_minibatch_size)
                     X_conv = {}
                     for _response in response:
                         X_conv[_response] = {}
@@ -4523,9 +4530,9 @@ class Model(object):
                             dim_names = self._expand_param_name_by_dim(_response, _response_param)
                             for _dim_name in dim_names:
                                 X_conv[_response][_dim_name] = np.zeros(
-                                    (len(Y_time), len(self.terminal_names))
+                                    (n, len(self.terminal_names))
                                 )
-                    for i in range(0, len(Y_time), self.eval_minibatch_size):
+                    for i in range(0, n, self.eval_minibatch_size):
                         if verbose:
                             stderr('\rMinibatch %d/%d' % ((i / self.eval_minibatch_size) + 1, n_eval_minibatch))
                         if optimize_memory:

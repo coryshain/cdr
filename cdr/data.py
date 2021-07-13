@@ -182,16 +182,17 @@ def filter_invalid_responses(Y, dv, crossval_factor=None, crossval_fold=None):
     select_Y_valid = []
     for i, _Y in enumerate(Y):
         _select_Y_valid = np.ones(len(_Y), dtype=bool)
+        if crossval_factor:
+            _select_Y_valid &= _Y[crossval_factor].isin(crossval_fold)
         for _dv in dv:
-            if crossval_factor:
-                _select_Y_valid &= _Y[crossval_factor].isin(crossval_fold)
-            dtype = _Y[_dv].dtype
-            if dtype.name != 'category' and np.issubdtype(dtype, np.number):
-                is_numeric = True
-            else:
-                is_numeric = False
-            if _dv in _Y.columns and is_numeric:
-                _select_Y_valid &= np.isfinite(_Y[_dv])
+            if _dv in _Y:
+                dtype = _Y[_dv].dtype
+                if dtype.name != 'category' and np.issubdtype(dtype, np.number):
+                    is_numeric = True
+                else:
+                    is_numeric = False
+                if is_numeric:
+                    _select_Y_valid &= np.isfinite(_Y[_dv])
         select_Y_valid.append(_select_Y_valid)
         Y[i] = _Y[_select_Y_valid]
 
@@ -665,7 +666,7 @@ def compute_filters(Y, filters=None):
     for f in filters:
         field = f[0]
         cond = f[1]
-        if field in Y.columns:
+        if field in Y:
             select &= compute_filter(Y, field, cond)
         elif field.lower().endswith('nunique'):
             name = field[:-7]

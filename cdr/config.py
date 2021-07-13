@@ -52,9 +52,10 @@ class Config(object):
         self.X_dev = data.get('X_dev', None)
         self.X_test = data.get('X_test', None)
 
-        self.y_train = data.get('y_train')
-        self.y_dev = data.get('y_dev', None)
-        self.y_test = data.get('y_test', None)
+        self.Y_train = data.get('Y_train', data.get('y_train', None))
+        assert self.Y_train, 'Y_train must be provided'
+        self.Y_dev = data.get('Y_dev', data.get('y_dev', None))
+        self.Y_test = data.get('Y_test', data.get('y_test', None))
 
         sep = data.get('sep', ' ')
         if sep.lower() in ['', "' '", '" "', 's', 'space']:
