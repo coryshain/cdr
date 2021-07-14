@@ -1385,6 +1385,8 @@ class Model(object):
                     self.error_distribution_theoretical_cdf[response] = {}
                     ndim = self.get_response_ndim(response)
 
+                    _Y_mask = self.Y_mask[..., i]
+
                     pred_dist_fn = self.get_response_dist(response)
                     response_param_names = self.get_response_params(response)
                     response_params = self.intercept[response]
@@ -1484,15 +1486,14 @@ class Model(object):
                     # Define prediction tensors
                     dist_name = self.get_response_dist_name(response)
                     if dist_name == 'bernoulli':
-                        self.prediction[response] = tf.cast(tf.round(response_params[0]), self.INT_TF)
+                        self.prediction[response] = tf.cast(tf.round(_response_params[0]), self.INT_TF) * _Y_mask
                     elif dist_name == 'categorical':
-                        self.prediction[response] = tf.cast(tf.argmax(response_params[0], axis=-1), self.INT_TF)
+                        self.prediction[response] = tf.cast(tf.argmax(_response_params[0], axis=-1), self.INT_TF) * _Y_mask
                     else: # Treat as continuous regression, use the first (location) parameter
-                        self.prediction[response] = response_params[0]
+                        self.prediction[response] = _response_params[0] * _Y_mask
 
                     # Define likelihoods
                     _Y = self.Y[..., i]
-                    _Y_mask = self.Y_mask[..., i]
                     if self.standardize_response and self.is_real(response):
                         _Yz = (_Y - self.Y_train_means[response]) / self.Y_train_sds[response]
                         _Y = tf.cond(self.training, lambda: _Yz, lambda: _Y)
@@ -3157,7 +3158,6 @@ class Model(object):
         :param optimize_memory: ``bool``; Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).
         """
 
-        n = sum([len(_Y) for _Y in Y])
         if not np.isfinite(self.minibatch_size):
             minibatch_size = n
         else:
@@ -3178,6 +3178,8 @@ class Model(object):
             Y = [Y]
         if self.use_crossval:
             Y = [_Y[self.crossval_factor].isin(self.crossval_folds) for _Y in Y]
+        lengths = [len(_Y) for _Y in Y]
+        n = sum(lengths)
         X_in = X
         Y_in = Y
         if X_in_Y_names:
@@ -3424,7 +3426,7 @@ class Model(object):
             last_obs=None,
             Y_time=None,
             Y_gf=None,
-            response=None,
+            responses=None,
             X_in_Y_names=None,
             X_in_Y=None,
             n_samples=None,
@@ -3468,13 +3470,13 @@ class Model(object):
         :param Y_gf: ``list`` of random grouping factor values (``list``, ``pandas`` series, or ``numpy`` vector); random grouping factor values (if applicable), one for each response dataframe.
             Can be of type ``str`` or ``int``.
             Sort order and number of observations must be identical to that of ``y_time``.
-        :param response: ``list`` of ``str``, ``str``, or ``None``; Name(s) of response(s) to predict. If ``None``, predicts all responses.
+        :param responses: ``list`` of ``str``, ``str``, or ``None``; Name(s) of response(s) to predict. If ``None``, predicts all responses.
         :param X_in_Y_names: ``list`` of ``str``; names of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, no such predictors.
         :param X_in_Y: ``list`` of ``pandas`` ``DataFrame`` or ``None``; tables (one per response array) of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, inferred from **Y** and **X_in_Y_names**.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
         :param return_preds: ``bool``; whether to return predictions.
-        :param return_loglik: ``bool``; whether to return elementwise log likelihoods. Requires that **Y** is not ``None``. If multiple response variables are modeled, also returns full model (summed) LL, labeled as ``'AllResponses'``.
+        :param return_loglik: ``bool``; whether to return elementwise log likelihoods. Requires that **Y** is not ``None``.
         :param dump: ``bool``; whether to save generated predictions (and log likelihood vectors if applicable) to disk.
         :param extra_cols: ``bool``; whether to include columns from **Y** in output tables. Ignored unless **dump** is ``True``.
         :param partition: ``str`` or ``None``; name of data partition (or ``None`` if no partition name), used for output file naming. Ignored unless **dump** is ``True``.
@@ -3490,17 +3492,23 @@ class Model(object):
             stderr('Using GPU: %s\n' % usingGPU)
             stderr('Computing predictions...\n')
 
-        if response is None:
-            response = self.response_names
-        if not isinstance(response, list):
-            response = [response]
+        if responses is None:
+            responses = self.response_names
+        if not isinstance(responses, list):
+            responses = [responses]
 
         # Preprocess data
         if not isinstance(X, list):
             X = [X]
         X_in = X
-        if Y is not None and not isinstance(Y, list):
-            Y = [Y]
+        if Y is None:
+            assert Y_time is not None, 'Either Y or Y_time must be provided.'
+            lengths = [len(_Y_time) for _Y_time in Y_time]
+        else:
+            if not isinstance(Y, list):
+                Y = [Y]
+            lengths = [len(_Y) for _Y in Y]
+        n = sum(lengths)
         Y_in = Y
         if Y_time is None:
             Y_time_in = [_Y.time for _Y in Y]
@@ -3529,7 +3537,7 @@ class Model(object):
             gf_map=self.rangf_map
         )
 
-        if not optimize_memory or not np.isfinite(self.eval_minibatch_size):
+        if not optimize_memory:
             X, X_time, X_mask = build_CDR_impulse_data(
                 X_in,
                 first_obs,
@@ -3548,110 +3556,85 @@ class Model(object):
                 with self.sess.graph.as_default():
                     self.set_predict_mode(True)
 
-                    if not np.isfinite(self.eval_minibatch_size):
-                        fd = {
-                            self.X: X,
-                            self.X_time: X_time,
-                            self.Y_time: Y_time,
-                            self.Y_gf: Y_gf,
-                            self.training: not self.predict_mode
-                        }
-                        if return_loglik:
-                            fd[self.Y] = Y
-                            fd[self.Y_mask]: Y_mask
-                        out = self.run_predict_op(
+                    out = {}
+
+                    if return_preds:
+                        out['preds'] = {}
+                        for _response in responses:
+                            if self.is_real(_response):
+                                dtype = self.FLOAT_NP
+                            else:
+                                dtype = self.INT_NP
+                            out['preds'][_response] = np.zeros((n,), dtype=dtype)
+                    if return_loglik:
+                        out['log_lik'] = {x: np.zeros((n,)) for x in responses}
+
+                    B = self.eval_minibatch_size
+                    n_eval_minibatch = math.ceil(n / B)
+                    for i in range(0, n, B):
+                        if verbose:
+                            stderr('\rMinibatch %d/%d' %((i/B)+1, n_eval_minibatch))
+                        if optimize_memory:
+                            _Y = None if Y is None else Y[i:i + B]
+                            _first_obs = [x[i:i + B] for x in first_obs]
+                            _last_obs = [x[i:i + B] for x in last_obs]
+                            _Y_time = Y_time[i:i + B]
+                            _Y_mask = Y_mask[i:i + B]
+                            _Y_gf = None if Y_gf is None else Y_gf[i:i + B]
+                            _X_in_Y = None if X_in_Y is None else X_in_Y[i:i + B]
+
+                            _X, _X_time, _X_mask = build_CDR_impulse_data(
+                                X_in,
+                                _first_obs,
+                                _last_obs,
+                                X_in_Y_names=X_in_Y_names,
+                                X_in_Y=_X_in_Y,
+                                history_length=self.history_length,
+                                future_length=self.future_length,
+                                impulse_names=self.impulse_names,
+                                int_type=self.int_type,
+                                float_type=self.float_type,
+                            )
+                            fd = {
+                                self.X: _X,
+                                self.X_time: _X_time,
+                                self.X_mask: _X_mask,
+                                self.Y_time: _Y_time,
+                                self.Y_mask: _Y_mask,
+                                self.Y_gf: _Y_gf,
+                                self.training: not self.predict_mode
+                            }
+                            if return_loglik:
+                                fd[self.Y] = _Y
+                                fd[self.Y_mask]: _Y_mask
+                        else:
+                            fd = {
+                                self.X: X[i:i + B],
+                                self.X_time: X_time[i:i + B],
+                                self.X_mask: X_mask[i:i + B],
+                                self.Y_time: Y_time[i:i + B],
+                                self.Y_gf: None if Y_gf is None else Y_gf[i:i + B],
+                                self.training: not self.predict_mode
+                            }
+                            if return_loglik:
+                                fd[self.Y] = Y[i:i + B]
+                                fd[self.Y_mask]: Y_mask[i:i + B]
+                        _out = self.run_predict_op(
                             fd,
-                            response=response,
+                            responses=responses,
                             n_samples=n_samples,
                             algorithm=algorithm,
                             return_preds=return_preds,
                             return_loglik=return_loglik,
                             verbose=verbose
                         )
-                    else:
-                        out = {}
-
-                        n = sum([len(_Y) for _Y in Y])
 
                         if return_preds:
-                            out['preds'] = {}
-                            for _response in response:
-                                if self.is_real(_response):
-                                    dtype = self.FLOAT_NP
-                                else:
-                                    dtype = self.INT_NP
-                                out['preds'][_response] = np.zeros((n,), dtype=dtype)
+                            for _response in _out['preds']:
+                                out['preds'][_response][i:i + B] = _out['preds'][_response]
                         if return_loglik:
-                            out['log_lik'] = {x: np.zeros((n,)) for x in response}
-                            if len(self.response_names) > 1:
-                                out['log_lik']['AllResponses'] = np.zeros((n,))
-
-                        n_eval_minibatch = math.ceil(n / self.eval_minibatch_size)
-                        for i in range(0, n, self.eval_minibatch_size):
-                            if verbose:
-                                stderr('\rMinibatch %d/%d' %((i/self.eval_minibatch_size)+1, n_eval_minibatch))
-                            if optimize_memory:
-                                _Y = None if Y is None else Y[i:i + self.eval_minibatch_size]
-                                _first_obs = [x[i:i + self.eval_minibatch_size] for x in first_obs]
-                                _last_obs = [x[i:i + self.eval_minibatch_size] for x in last_obs]
-                                _Y_time = Y_time[i:i + self.eval_minibatch_size]
-                                _Y_mask = Y_mask[i:i + self.eval_minibatch_size]
-                                _Y_gf = None if Y_gf is None else Y_gf[i:i + self.eval_minibatch_size]
-                                _X_in_Y = None if X_in_Y is None else X_in_Y[i:i + self.eval_minibatch_size]
-
-                                _X, _X_time, _X_mask = build_CDR_impulse_data(
-                                    X_in,
-                                    _first_obs,
-                                    _last_obs,
-                                    X_in_Y_names=X_in_Y_names,
-                                    X_in_Y=_X_in_Y,
-                                    history_length=self.history_length,
-                                    future_length=self.future_length,
-                                    impulse_names=self.impulse_names,
-                                    int_type=self.int_type,
-                                    float_type=self.float_type,
-                                )
-                                fd = {
-                                    self.X: _X,
-                                    self.X_time: _X_time,
-                                    self.X_mask: _X_mask,
-                                    self.Y_time: _Y_time,
-                                    self.Y_mask: _Y_mask,
-                                    self.Y_gf: _Y_gf,
-                                    self.training: not self.predict_mode
-                                }
-                                if return_loglik:
-                                    fd[self.Y] = _Y
-                                    fd[self.Y_mask]: _Y_mask
-                            else:
-                                fd = {
-                                    self.X: X[i:i + self.eval_minibatch_size],
-                                    self.X_time: X_time[i:i + self.eval_minibatch_size],
-                                    self.X_mask: X_mask[i:i + self.eval_minibatch_size],
-                                    self.Y_time: Y_time[i:i + self.eval_minibatch_size],
-                                    self.Y_gf: None if Y_gf is None else Y_gf[i:i + self.eval_minibatch_size],
-                                    self.training: not self.predict_mode
-                                }
-                                if return_loglik:
-                                    fd[self.Y] = Y[i:i + self.eval_minibatch_size]
-                                    fd[self.Y_mask]: Y_mask[i:i + self.eval_minibatch_size]
-                            _out = self.run_predict_op(
-                                fd,
-                                response=response,
-                                n_samples=n_samples,
-                                algorithm=algorithm,
-                                return_preds=return_preds,
-                                return_loglik=return_loglik,
-                                verbose=verbose
-                            )
-
-                            if return_preds:
-                                for _response in _out['preds']:
-                                    _preds = _out['preds'][_response]
-                                    out['preds'][_response][i:i + self.eval_minibatch_size] = _preds = _out['preds'][_response]
-                            if return_loglik:
-                                for _response in _out['log_lik']:
-                                    out['log_lik'][_response][i:i + self.eval_minibatch_size] = _out['log_lik'][_response]
+                            for _response in _out['log_lik']:
+                                out['log_lik'][_response][i:i + B] = _out['log_lik'][_response]
 
                     for _response in out['preds']:
                         if self.is_real(_response):
@@ -3668,9 +3651,7 @@ class Model(object):
                     self.set_predict_mode(False)
 
                     if dump:
-                        response_keys = response[:]
-                        if return_loglik and len(self.response_names) > 1:
-                            response_keys.append('AllResponses')
+                        response_keys = responses[:]
 
                         if partition and not partition.startswith('_'):
                             partition_str = '_' + partition
@@ -3678,10 +3659,7 @@ class Model(object):
                             partition_str = ''
 
                         for _response in response_keys:
-                            if _response == 'AllResponses':
-                                file_ix = list(range(len(Y_time_in)))
-                            else:
-                                file_ix = self.response_to_df_ix[_response]
+                            file_ix = self.response_to_df_ix[_response]
                             multiple_files = len(file_ix) > 1
                             for ix in file_ix:
                                 df = {}
@@ -3714,7 +3692,7 @@ class Model(object):
     def run_predict_op(
             self,
             feed_dict,
-            response=None,
+            responses=None,
             n_samples=None,
             algorithm='MAP',
             return_preds=True,
@@ -3725,11 +3703,11 @@ class Model(object):
         Generate predictions from a batch of data.
 
         :param feed_dict: ``dict``; A dictionary of predictor values.
-        :param response: ``list`` of ``str``, ``str``, or ``None``; Name(s) of response variable(s) to predict. If ``None``, predicts all responses.
+        :param responses: ``list`` of ``str``, ``str``, or ``None``; Name(s) of response variable(s) to predict. If ``None``, predicts all responses.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
         :param return_preds: ``bool``; whether to return predictions.
-        :param return_loglik: ``bool``; whether to return elementwise log likelihoods. Requires that **Y** is not ``None``. If multiple response variables are modeled, also returns full model (summed) LL, labeled as ``'AllResponses'``.
+        :param return_loglik: ``bool``; whether to return elementwise log likelihoods. Requires that **Y** is not ``None``.
         :param verbose: ``bool``; Send progress reports to standard error.
         :return: ``dict`` of ``numpy`` arrays; Predicted responses and/or log likelihoods, one for each training sample. Key order: <('preds'|'log_lik'), response>.
         """
@@ -3739,19 +3717,17 @@ class Model(object):
         use_MAP_mode = algorithm in ['map', 'MAP']
         feed_dict[self.use_MAP_mode] = use_MAP_mode
 
-        if response is None:
-            response = self.response_names
-        if not isinstance(response, list):
-            response = [response]
+        if responses is None:
+            responses = self.response_names
+        if not isinstance(responses, list):
+            responses = [responses]
 
         to_run = {}
         if return_preds:
-            to_run_preds = {x: self.prediction[x] for x in response}
+            to_run_preds = {x: self.prediction[x] for x in responses}
             to_run['preds'] = to_run_preds
         if return_loglik:
-            to_run_loglik = {x: self.ll_by_var[x] for x in response}
-            if len(self.response_names) > 1:
-                to_run_loglik['AllResponses'] = self.ll
+            to_run_loglik = {x: self.ll_by_var[x] for x in responses}
             to_run['log_lik'] = to_run_loglik
 
         if to_run:
@@ -3864,10 +3840,7 @@ class Model(object):
                 partition_str = ''
 
             for _response in response_keys:
-                if _response == 'AllResponses':
-                    file_ix = list(range(len(Y)))
-                else:
-                    file_ix = self.response_to_df_ix[_response]
+                file_ix = self.response_to_df_ix[_response]
                 multiple_files = len(file_ix) > 1
                 for ix in file_ix:
                     df = {'CDRloglik': out[_response][ix]}
@@ -3928,7 +3901,7 @@ class Model(object):
         :param partition: ``str`` or ``None``; name of data partition (or ``None`` if no partition name), used for output file naming. Ignored unless **dump** is ``True``.
         :param optimize_memory: ``bool``; Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).
         :param verbose: ``bool``; Report progress and metrics to standard error.
-        :return: ``None``
+        :return: pair of <``dict``, ``str``>; Dictionary of evaluation metrics, human-readable evaluation summary string.
         """
 
         if partition and not partition.startswith('_'):
@@ -3959,12 +3932,11 @@ class Model(object):
             'log_lik': {},
             'percent_variance_explained': {},
             'true_variance': {},
-            'ks_results': {}
+            'ks_results': {},
+            'full_log_lik': 0.
         }
 
         response_names = self.response_names[:]
-        if len(self.response_names) > 1:
-            response_names = ['AllResponses'] + response_names
         for _response in response_names:
             metrics['mse'][_response] = []
             metrics['rho'][_response] = []
@@ -3974,13 +3946,11 @@ class Model(object):
             metrics['true_variance'][_response] = []
             metrics['ks_results'][_response] = []
 
-            if _response == 'AllResponses':
-                file_ix = list(range(len(Y)))
-            else:
-                file_ix = self.response_to_df_ix[_response]
-            multiple_files = len(file_ix) > 1
+            file_ix_all = list(range(len(Y)))
+            file_ix = self.response_to_df_ix[_response]
+            multiple_files = len(file_ix_all) > 1
 
-            for ix in file_ix:
+            for ix in file_ix_all:
                 metrics['mse'][_response].append(None)
                 metrics['rho'][_response].append(None)
                 metrics['f1'][_response].append(None)
@@ -3989,71 +3959,74 @@ class Model(object):
                 metrics['true_variance'][_response].append(None)
                 metrics['ks_results'][_response].append(None)
 
-                _Y = Y[ix]
-                if _response in _Y:
-                    _y = _Y[_response]
+                if ix in file_ix:
+                    _Y = Y[ix]
+                    if _response in _Y:
+                        _y = _Y[_response]
 
-                    _preds = preds[_response][ix]
+                        _preds = preds[_response][ix]
 
-                    if self.is_real(_response):
-                        error = np.array(_y - _preds) ** 2
-                        score = error.mean()
-                        resid = np.sort(_y - _preds)
-                        resid_theoretical_q = self.error_theoretical_quantiles(len(resid), _response)
-                        valid = np.isfinite(resid_theoretical_q)
-                        resid = resid[valid]
-                        resid_theoretical_q = resid_theoretical_q[valid]
-                        D, p_value = self.error_ks_test(resid, _response)
+                        if self.is_real(_response):
+                            error = np.array(_y - _preds) ** 2
+                            score = error.mean()
+                            resid = np.sort(_y - _preds)
+                            resid_theoretical_q = self.error_theoretical_quantiles(len(resid), _response)
+                            valid = np.isfinite(resid_theoretical_q)
+                            resid = resid[valid]
+                            resid_theoretical_q = resid_theoretical_q[valid]
+                            D, p_value = self.error_ks_test(resid, _response)
 
-                        metrics['mse'][_response][-1] = score
-                        metrics['rho'][_response][-1] = np.corrcoef(_y, _preds, rowvar=False)[0, 1]
-                        metrics['percent_variance_explained'][_response][-1] = percent_variance_explained(_y, _preds)
-                        metrics['true_variance'][_response][-1] = np.std(_y) ** 2
-                        metrics['ks_results'][_response][-1] = (D, p_value)
-                        err_col_name = 'CDRsquarederror'
+                            metrics['mse'][_response][-1] = score
+                            metrics['rho'][_response][-1] = np.corrcoef(_y, _preds, rowvar=False)[0, 1]
+                            metrics['percent_variance_explained'][_response][-1] = percent_variance_explained(_y, _preds)
+                            metrics['true_variance'][_response][-1] = np.std(_y) ** 2
+                            metrics['ks_results'][_response][-1] = (D, p_value)
+                            err_col_name = 'CDRsquarederror'
+                        else:
+                            error = (_y == _preds).astype('int')
+                            score = f1_score(_y, _preds, average='macro')
+
+                            metrics['f1'][_response][-1] = score
+                            err_col_name = 'CDRmacroF1'
                     else:
-                        error = (_y == _preds).astype('int')
-                        score = f1_score(_y, _preds, average='macro')
+                        err_col_name = error = _preds = _y = None
 
-                        metrics['f1'][_response][-1] = score
-                        err_col_name = 'CDRmacroF1'
-                else:
-                    err_col_name = error = _preds = _y = None
+                    _ll = log_lik[_response][ix]
+                    _ll_summed = _ll.sum()
+                    metrics['log_lik'][_response][-1] = _ll_summed
+                    metrics['full_log_lik'] += _ll_summed
 
-                _ll = log_lik[_response][ix]
-                metrics['log_lik'][_response][-1] = _ll.sum()
+                    if dump:
+                        if multiple_files:
+                            name_base = '%s_f%s%s' % (sn(_response), ix, partition_str)
+                        else:
+                            name_base = '%s%s' % (sn(_response), partition_str)
 
-                if dump:
-                    if multiple_files:
-                        name_base = '%s_f%s%s' % (sn(_response), ix, partition_str)
-                    else:
-                        name_base = '%s%s' % (sn(_response), partition_str)
+                        df = {}
+                        if err_col_name is not None and error is not None:
+                            df[err_col_name] = error
+                        if _preds is not None:
+                            df['CDRpreds'] = _preds
+                        if _y is not None:
+                            df['CDRobs'] = _y
+                        df['CDRloglik'] = _ll
+                        df = pd.DataFrame(df)
 
-                    df = {}
-                    if err_col_name is not None and error is not None:
-                        df[err_col_name] = error
-                    if _preds is not None:
-                        df['CDRpreds'] = _preds
-                    if _y is not None:
-                        df['CDRobs'] = _y
-                    df['CDRloglik'] = _ll
-                    df = pd.DataFrame(df)
+                        if extra_cols:
+                            df = pd.concat([_Y.reset_index(drop=True), df.reset_index(drop=True)], axis=1)
 
-                    if extra_cols:
-                        df = pd.concat([_Y.reset_index(drop=True), df.reset_index(drop=True)], axis=1)
+                        preds_outfile = self.outdir + '/output_%s.csv' % name_base
+                        df.to_csv(preds_outfile, sep=' ', na_rep='NaN', index=False)
 
-                    preds_outfile = self.outdir + '/output_%s.csv' % name_base
-                    df.to_csv(preds_outfile, sep=' ', na_rep='NaN', index=False)
-
-                    if _response in self.predictive_distribution_config and self.is_real(_response):
-                        plot_qq(
-                            resid_theoretical_q,
-                            resid,
-                            dir=self.outdir,
-                            filename='error_qq_plot_%s.png' % name_base,
-                            xlab='Theoretical',
-                            ylab='Empirical'
-                        )
+                        if _response in self.predictive_distribution_config and self.is_real(_response):
+                            plot_qq(
+                                resid_theoretical_q,
+                                resid,
+                                dir=self.outdir,
+                                filename='error_qq_plot_%s.png' % name_base,
+                                xlab='Theoretical',
+                                ylab='Empirical'
+                            )
 
         summary_header = '=' * 50 + '\n'
         summary_header += 'CDR regression\n\n'
@@ -4062,14 +4035,12 @@ class Model(object):
         summary_header += '  ' + self.form_str + '\n\n'
         summary_header += 'Partition: %s\n' % partition
         summary_header += 'Training iterations completed: %d\n\n' % self.global_step.eval(session=self.sess)
+        summary_header += 'Full log likelihood: %s\n\n' % metrics['full_log_lik']
 
         summary = summary_header
 
         for _response in response_names:
-            if _response == 'AllResponses':
-                file_ix = list(range(len(Y)))
-            else:
-                file_ix = self.response_to_df_ix[_response]
+            file_ix = self.response_to_df_ix[_response]
             multiple_files = len(file_ix) > 1
             for ix in file_ix:
                 summary += 'Response variable: %s\n\n' % _response
@@ -4160,6 +4131,8 @@ class Model(object):
         X_in = X
         if Y is not None and not isinstance(Y, list):
             Y = [Y]
+        lengths = [len(_Y) for _Y in Y]
+        n = sum(lengths)
         Y_in = Y
         if X_in_Y_names:
             X_in_Y_names = [x for x in X_in_Y_names if x in self.impulse_names]
@@ -4174,7 +4147,7 @@ class Model(object):
             gf_map=self.rangf_map
         )
 
-        if not optimize_memory or not np.isfinite(self.eval_minibatch_size):
+        if not optimize_memory:
             X, X_time, X_mask = build_CDR_impulse_data(
                 X_in,
                 first_obs,
@@ -4194,83 +4167,66 @@ class Model(object):
 
                 if training is None:
                     training = not self.predict_mode
+                    
+                B = self.eval_minibatch_size
+                n = sum([len(_Y) for _Y in Y])
+                n_minibatch = math.ceil(n / B)
+                loss = np.zeros((n,))
+                for i in range(0, n, B):
+                    if verbose:
+                        stderr('\rMinibatch %d/%d' %(i+1, n_minibatch))
+                    if optimize_memory:
+                        _Y = Y[i:i + B]
+                        _first_obs = [x[i:i + B] for x in first_obs]
+                        _last_obs = [x[i:i + B] for x in last_obs]
+                        _Y_time = Y_time[i:i + B]
+                        _Y_mask = Y_mask[i:i + B]
+                        _Y_gf = None if Y_gf is None else Y_gf[i:i + B]
+                        _X_in_Y = None if X_in_Y is None else X_in_Y[i:i + B]
 
-                if not np.isfinite(self.eval_minibatch_size):
-                    fd = {
-                        self.X: X,
-                        self.X_time: X_time,
-                        self.X_mask: X_mask,
-                        self.Y_time: Y_time,
-                        self.Y_mask: Y_mask,
-                        self.Y_gf: Y_gf,
-                        self.Y: Y,
-                        self.training: training
-                    }
-                    loss = self.run_loss_op(
+                        _X, _X_time, _X_mask = build_CDR_impulse_data(
+                            X_in,
+                            _first_obs,
+                            _last_obs,
+                            X_in_Y_names=X_in_Y_names,
+                            X_in_Y=_X_in_Y,
+                            history_length=self.history_length,
+                            future_length=self.future_length,
+                            impulse_names=self.impulse_names,
+                            int_type=self.int_type,
+                            float_type=self.float_type,
+                        )
+                        _Y = None if Y is None else [_y[i:i + B] for _y in Y]
+                        _Y_gf = None if Y_gf is None else Y_gf[i:i + B]
+
+                        fd = {
+                            self.X: _X,
+                            self.X_time: _X_time,
+                            self.X_mask: _X_mask,
+                            self.Y: _Y,
+                            self.Y_time: _Y_time,
+                            self.Y_mask: _Y_mask,
+                            self.Y_gf: _Y_gf,
+                            self.training: not self.predict_mode
+                        }
+                    else:
+                        fd = {
+                            self.X: X[i:i + B],
+                            self.X_time: X_time[i:i + B],
+                            self.X_mask: X_mask[i:i + B],
+                            self.Y_time: Y_time[i:i + B],
+                            self.Y_mask: Y_mask[i:i + B],
+                            self.Y_gf: None if Y_gf is None else Y_gf[i:i + B],
+                            self.Y: Y[i:i + B],
+                            self.training: training
+                        }
+                    loss[i:i + B] = self.run_loss_op(
                         fd,
                         n_samples=n_samples,
                         algorithm=algorithm,
                         verbose=verbose
                     )
-                else:
-                    n = sum([len(_Y) for _Y in Y])
-                    n_minibatch = math.ceil(n / self.eval_minibatch_size)
-                    loss = np.zeros((n,))
-                    for i in range(0, n, self.eval_minibatch_size):
-                        if verbose:
-                            stderr('\rMinibatch %d/%d' %(i+1, n_minibatch))
-                        if optimize_memory:
-                            _Y = Y[i:i + self.eval_minibatch_size]
-                            _first_obs = [x[i:i + self.eval_minibatch_size] for x in first_obs]
-                            _last_obs = [x[i:i + self.eval_minibatch_size] for x in last_obs]
-                            _Y_time = Y_time[i:i + self.eval_minibatch_size]
-                            _Y_mask = Y_mask[i:i + self.eval_minibatch_size]
-                            _Y_gf = None if Y_gf is None else Y_gf[i:i + self.eval_minibatch_size]
-                            _X_in_Y = None if X_in_Y is None else X_in_Y[i:i + self.eval_minibatch_size]
-
-                            _X, _X_time, _X_mask = build_CDR_impulse_data(
-                                X_in,
-                                _first_obs,
-                                _last_obs,
-                                X_in_Y_names=X_in_Y_names,
-                                X_in_Y=_X_in_Y,
-                                history_length=self.history_length,
-                                future_length=self.future_length,
-                                impulse_names=self.impulse_names,
-                                int_type=self.int_type,
-                                float_type=self.float_type,
-                            )
-                            _Y = None if Y is None else [_y[i:i + self.eval_minibatch_size] for _y in Y]
-                            _Y_gf = None if Y_gf is None else Y_gf[i:i + self.eval_minibatch_size]
-
-                            fd = {
-                                self.X: _X,
-                                self.X_time: _X_time,
-                                self.X_mask: _X_mask,
-                                self.Y: _Y,
-                                self.Y_time: _Y_time,
-                                self.Y_mask: _Y_mask,
-                                self.Y_gf: _Y_gf,
-                                self.training: not self.predict_mode
-                            }
-                        else:
-                            fd = {
-                                self.X: X[i:i + self.eval_minibatch_size],
-                                self.X_time: X_time[i:i + self.eval_minibatch_size],
-                                self.X_mask: X_mask[i:i + self.eval_minibatch_size],
-                                self.Y_time: Y_time[i:i + self.eval_minibatch_size],
-                                self.Y_mask: Y_mask[i:i + self.eval_minibatch_size],
-                                self.Y_gf: None if Y_gf is None else Y_gf[i:i + self.eval_minibatch_size],
-                                self.Y: Y[i:i + self.eval_minibatch_size],
-                                self.training: training
-                            }
-                        loss[i:i + self.eval_minibatch_size] = self.run_loss_op(
-                            fd,
-                            n_samples=n_samples,
-                            algorithm=algorithm,
-                            verbose=verbose
-                        )
-                    loss = loss.mean()
+                loss = loss.mean()
 
                 if verbose:
                     stderr('\n\n')
@@ -4326,8 +4282,8 @@ class Model(object):
             last_obs=None,
             Y_time=None,
             Y_gf=None,
-            response=None,
-            response_param=None,
+            responses=None,
+            response_params=None,
             X_in_Y_names=None,
             X_in_Y=None,
             n_samples=None,
@@ -4367,8 +4323,8 @@ class Model(object):
         :param Y_gf: ``list`` of random grouping factor values (``list``, ``pandas`` series, or ``numpy`` vector); random grouping factor values (if applicable), one for each response dataframe.
             Can be of type ``str`` or ``int``.
             Sort order and number of observations must be identical to that of ``y_time``.
-        :param response: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to convolve toward. If ``None``, convolves toward all univariate responses. Multivariate convolution (e.g. of categorical responses) is supported but turned off by default to avoid excessive computation. When convolving toward a multivariate response, a set of convolved predictors will be generated for each dimension of the response.
-        :param response_param: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of predictive distribution(s) to convolve toward per response variable. Any param names not used by the predictive distribution for a given response will be ignored. If ``None``, convolves toward the first parameter of each response distribution.
+        :param responses: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to convolve toward. If ``None``, convolves toward all univariate responses. Multivariate convolution (e.g. of categorical responses) is supported but turned off by default to avoid excessive computation. When convolving toward a multivariate response, a set of convolved predictors will be generated for each dimension of the response.
+        :param response_params: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of predictive distribution(s) to convolve toward per response variable. Any param names not used by the predictive distribution for a given response will be ignored. If ``None``, convolves toward the first parameter of each response distribution.
         :param X_in_Y_names: ``list`` of ``str``; names of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, no such predictors.
         :param X_in_Y: ``list`` of ``pandas`` ``DataFrame`` or ``None``; tables (one per response array) of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, inferred from **Y** and **X_in_Y_names**.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
@@ -4391,25 +4347,31 @@ class Model(object):
         else:
             partition_str = ''
 
-        if response is None:
-            response = [x for x in self.response_names if self.get_response_ndim(x) == 1]
-        if isinstance(response, str):
-            response = [response]
+        if responses is None:
+            responses = [x for x in self.response_names if self.get_response_ndim(x) == 1]
+        if isinstance(responses, str):
+            responses = [responses]
 
-        if response_param is None:
-            response_param = set()
-            for _response in response:
-                response_param.add(self.get_response_params(_response)[0])
-            response_param = sorted(list(response_param))
-        if isinstance(response_param, str):
-            response_param = [response_param]
+        if response_params is None:
+            response_params = set()
+            for _response in responses:
+                response_params.add(self.get_response_params(_response)[0])
+            response_params = sorted(list(response_params))
+        if isinstance(response_params, str):
+            response_params = [response_params]
 
         # Preprocess data
         if not isinstance(X, list):
             X = [X]
         X_in = X
-        if Y is not None and not isinstance(Y, list):
-            Y = [Y]
+        if Y is None:
+            assert Y_time is not None, 'Either Y or Y_time must be provided.'
+            lengths = [len(_Y_time) for _Y_time in Y_time]
+        else:
+            if not isinstance(Y, list):
+                Y = [Y]
+            lengths = [len(_Y) for _Y in Y]
+        n = sum(lengths)
         Y_in = Y
         if Y_time is None:
             Y_time_in = [_Y.time for _Y in Y]
@@ -4455,94 +4417,74 @@ class Model(object):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.set_predict_mode(True)
+                B = self.eval_minibatch_size
+                n_eval_minibatch = math.ceil(n / B)
+                X_conv = {}
+                for _response in responses:
+                    X_conv[_response] = {}
+                    for _response_param in response_params:
+                        dim_names = self._expand_param_name_by_dim(_response, _response_param)
+                        for _dim_name in dim_names:
+                            X_conv[_response][_dim_name] = np.zeros(
+                                (n, len(self.terminal_names))
+                            )
+                for i in range(0, n, B):
+                    if verbose:
+                        stderr('\rMinibatch %d/%d' % ((i / B) + 1, n_eval_minibatch))
+                    if optimize_memory:
+                        _Y = None if Y is None else Y[i:i + B]
+                        _first_obs = [x[i:i + B] for x in first_obs]
+                        _last_obs = [x[i:i + B] for x in last_obs]
+                        _Y_time = Y_time[i:i + B]
+                        _Y_mask = Y_mask[i:i + B]
+                        _Y_gf = None if Y_gf is None else Y_gf[i:i + B]
+                        _X_in_Y = None if X_in_Y is None else X_in_Y[i:i + B]
 
-                if not np.isfinite(self.minibatch_size):
-                    fd = {
-                        self.X: X,
-                        self.X_time: X_time,
-                        self.X_mask: X_mask,
-                        self.Y_time: Y_time,
-                        self.Y_mask: Y_mask,
-                        self.Y_gf: Y_gf,
-                        self.training: not self.predict_mode
-                    }
-                    X_conv = self.run_conv_op(
+                        _X, _X_time, _X_mask = build_CDR_impulse_data(
+                            X_in,
+                            _first_obs,
+                            _last_obs,
+                            X_in_Y_names=X_in_Y_names,
+                            X_in_Y=_X_in_Y,
+                            history_length=self.history_length,
+                            future_length=self.future_length,
+                            impulse_names=self.impulse_names,
+                            int_type=self.int_type,
+                            float_type=self.float_type,
+                        )
+                        fd = {
+                            self.X: _X,
+                            self.X_time: _X_time,
+                            self.X_mask: _X_mask,
+                            self.Y_time: _Y_time,
+                            self.Y_mask: _Y_mask,
+                            self.Y_gf: _Y_gf,
+                            self.training: not self.predict_mode
+                        }
+                    else:
+                        fd = {
+                            self.X: X[i:i + B],
+                            self.X_time: X_time[i:i + B],
+                            self.X_mask: X_mask[i:i + B],
+                            self.Y_time: Y_time[i:i + B],
+                            self.Y_mask: Y_mask[i:i + B],
+                            self.Y_gf: None if Y_gf is None else Y_gf[i:i + B],
+                            self.training: not self.predict_mode
+                        }
+                    if verbose:
+                        stderr('\rMinibatch %d/%d' % ((i / B) + 1, n_eval_minibatch))
+                    _X_conv = self.run_conv_op(
                         fd,
-                        response=response,
-                        response_param=response_param,
+                        responses=responses,
+                        response_param=response_params,
                         n_samples=n_samples,
                         algorithm=algorithm,
                         verbose=verbose
                     )
-                else:
-                    n = sum([len(_Y) for _Y in Y])
-                    n_eval_minibatch = math.ceil(n / self.eval_minibatch_size)
-                    X_conv = {}
-                    for _response in response:
-                        X_conv[_response] = {}
-                        for _response_param in response_param:
-                            dim_names = self._expand_param_name_by_dim(_response, _response_param)
-                            for _dim_name in dim_names:
-                                X_conv[_response][_dim_name] = np.zeros(
-                                    (n, len(self.terminal_names))
-                                )
-                    for i in range(0, n, self.eval_minibatch_size):
-                        if verbose:
-                            stderr('\rMinibatch %d/%d' % ((i / self.eval_minibatch_size) + 1, n_eval_minibatch))
-                        if optimize_memory:
-                            _Y = None if Y is None else Y[i:i + self.eval_minibatch_size]
-                            _first_obs = [x[i:i + self.eval_minibatch_size] for x in first_obs]
-                            _last_obs = [x[i:i + self.eval_minibatch_size] for x in last_obs]
-                            _Y_time = Y_time[i:i + self.eval_minibatch_size]
-                            _Y_mask = Y_mask[i:i + self.eval_minibatch_size]
-                            _Y_gf = None if Y_gf is None else Y_gf[i:i + self.eval_minibatch_size]
-                            _X_in_Y = None if X_in_Y is None else X_in_Y[i:i + self.eval_minibatch_size]
-
-                            _X, _X_time, _X_mask = build_CDR_impulse_data(
-                                X_in,
-                                _first_obs,
-                                _last_obs,
-                                X_in_Y_names=X_in_Y_names,
-                                X_in_Y=_X_in_Y,
-                                history_length=self.history_length,
-                                future_length=self.future_length,
-                                impulse_names=self.impulse_names,
-                                int_type=self.int_type,
-                                float_type=self.float_type,
-                            )
-                            fd = {
-                                self.X: _X,
-                                self.X_time: _X_time,
-                                self.X_mask: _X_mask,
-                                self.Y_time: _Y_time,
-                                self.Y_mask: _Y_mask,
-                                self.Y_gf: _Y_gf,
-                                self.training: not self.predict_mode
-                            }
-                        else:
-                            fd = {
-                                self.X: X[i:i + self.eval_minibatch_size],
-                                self.X_time: X_time[i:i + self.eval_minibatch_size],
-                                self.X_mask: X_mask[i:i + self.eval_minibatch_size],
-                                self.Y_time: Y_time[i:i + self.eval_minibatch_size],
-                                self.Y_mask: Y_mask[i:i + self.eval_minibatch_size],
-                                self.Y_gf: None if Y_gf is None else Y_gf[i:i + self.eval_minibatch_size],
-                                self.training: not self.predict_mode
-                            }
-                        if verbose:
-                            stderr('\rMinibatch %d/%d' % ((i / self.eval_minibatch_size) + 1, n_eval_minibatch))
-                        _X_conv = self.run_conv_op(
-                            fd,
-                            response=response,
-                            response_param=response_param,
-                            n_samples=n_samples,
-                            algorithm=algorithm,
-                            verbose=verbose
-                        )
-                        for _response in _X_conv:
-                            for _dim_name in _X_conv[_response]:
-                                _X_conv_batch = _X_conv[_response][_dim_name]
-                                X_conv[_response][_dim_name][i:i + self.eval_minibatch_size] = _X_conv_batch
+                    for _response in _X_conv:
+                        for _dim_name in _X_conv[_response]:
+                            _X_conv_batch = _X_conv[_response][_dim_name]
+                            X_conv[_response][_dim_name][i:i + B] = _X_conv_batch
 
                 # Split into per-file predictions.
                 # Exclude the length of last file because it will be inferred.
@@ -4560,7 +4502,7 @@ class Model(object):
                         names.append(sn(''.join(x.split('-')[:-1])))
                     else:
                         names.append(sn(x))
-                for _response in response:
+                for _response in responses:
                     out[_response] = {}
                     file_ix = self.response_to_df_ix[_response]
                     multiple_files = len(file_ix) > 1
@@ -4593,12 +4535,12 @@ class Model(object):
 
                 return out
 
-    def run_conv_op(self, feed_dict, response=None, response_param=None, n_samples=None, algorithm='MAP', verbose=True):
+    def run_conv_op(self, feed_dict, responses=None, response_param=None, n_samples=None, algorithm='MAP', verbose=True):
         """
         Convolve a batch of data in feed_dict with the model's latent IRF.
 
         :param feed_dict: ``dict``; A dictionary of predictor variables
-        :param response: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to convolve toward. If ``None``, convolves toward all univariate responses. Multivariate convolution (e.g. of categorical responses) is supported but turned off by default to avoid excessive computation. When convolving toward a multivariate response, a set of convolved predictors will be generated for each dimension of the response.
+        :param responses: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to convolve toward. If ``None``, convolves toward all univariate responses. Multivariate convolution (e.g. of categorical responses) is supported but turned off by default to avoid excessive computation. When convolving toward a multivariate response, a set of convolved predictors will be generated for each dimension of the response.
         :param response_param: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of predictive distribution(s) to convolve toward per response variable. Any param names not used by the predictive distribution for a given response will be ignored. If ``None``, convolves toward the first parameter of each response distribution.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
@@ -4609,21 +4551,21 @@ class Model(object):
         use_MAP_mode = algorithm in ['map', 'MAP']
         feed_dict[self.use_MAP_mode] = use_MAP_mode
 
-        if response is None:
-            response = [x for x in self.response_names if self.get_response_ndim(x) == 1]
-        if isinstance(response, str):
-            response = [response]
+        if responses is None:
+            responses = [x for x in self.response_names if self.get_response_ndim(x) == 1]
+        if isinstance(responses, str):
+            responses = [responses]
 
         if response_param is None:
             response_param = set()
-            for _response in response:
+            for _response in responses:
                 response_param.add(self.get_response_params(_response)[0])
             response_param = sorted(list(response_param))
         if isinstance(response_param, str):
             response_param = [response_param]
 
         to_run = {}
-        for _response in response:
+        for _response in responses:
             to_run[_response] = self.X_conv[_response]
 
         with self.sess.as_default():
@@ -4716,8 +4658,8 @@ class Model(object):
             self,
             xvar='t_delta',
             yvar=None,
-            response=None,
-            response_param=None,
+            responses=None,
+            response_params=None,
             X_ref=None,
             X_time_ref=None,
             t_delta_ref=None,
@@ -4763,8 +4705,8 @@ class Model(object):
 
         :param xvar: ``str``; Name of continuous variable for x-axis. Can be a predictor (impulse), ``'rate'``, ``'t_delta'``, or ``'time_X'``.
         :param yvar: ``str``; Name of continuous variable for y-axis in 3D plots. Can be a predictor (impulse), ``'rate'``, ``'t_delta'``, or ``'time_X'``. If ``None``, 2D plot.
-        :param response: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to plot.
-        :param response_param: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of predictive distribution(s) to plot per response variable. Any param names not used by the predictive distribution for a given response will be ignored.
+        :param responses: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to plot.
+        :param response_params: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of predictive distribution(s) to plot per response variable. Any param names not used by the predictive distribution for a given response will be ignored.
         :param X_ref: ``dict`` or ``None``; Dictionary mapping impulse names to numeric values for use in constructing the reference. Any impulses not specified here will take default values.
         :param X_time_ref: ``float`` or ``None``; Timestamp to use for constructing the reference. If ``None``, use default value.
         :param t_delta_ref: ``float`` or ``None``; Delay/offset to use for constructing the reference. If ``None``, use default value.
@@ -4790,18 +4732,18 @@ class Model(object):
         assert xvar is not None, 'Value must be provided for xvar'
         assert xvar != yvar, 'Cannot vary two axes along the same variable'
 
-        if response is None:
-            response = [x for x in self.response_names if self.get_response_ndim(x) == 1]
-        if isinstance(response, str):
-            response = [response]
+        if responses is None:
+            responses = [x for x in self.response_names if self.get_response_ndim(x) == 1]
+        if isinstance(responses, str):
+            responses = [responses]
 
-        if response_param is None:
-            response_param = set()
-            for _response in response:
-                response_param.add(self.get_response_params(_response)[0])
-            response_param = sorted(list(response_param))
-        if isinstance(response_param, str):
-            response_param = [response_param]
+        if response_params is None:
+            response_params = set()
+            for _response in responses:
+                response_params.add(self.get_response_params(_response)[0])
+            response_params = sorted(list(response_params))
+        if isinstance(response_params, str):
+            response_params = [response_params]
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -5181,9 +5123,9 @@ class Model(object):
                 samples = {}
                 for i in range(n_samples):
                     to_run = {}
-                    for _response in response:
+                    for _response in responses:
                         to_run[_response] = {}
-                        for _response_param in response_param:
+                        for _response_param in response_params:
                             dim_names = self._expand_param_name_by_dim(_response, _response_param)
                             for _dim_name in dim_names:
                                 to_run[_response][_dim_name] = self.predictive_distribution_delta[_response][_dim_name]
@@ -5295,7 +5237,8 @@ class Model(object):
 
     def irf_integrals(
             self,
-            response=None,
+            responses=None,
+            response_params=None,
             level=95,
             random=False,
             n_samples='default',
@@ -5305,7 +5248,8 @@ class Model(object):
         """
         Generate effect size estimates by computing the area under each IRF curve in the model via discrete approximation.
 
-        :param response: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to plot.
+        :param responses: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to plot.
+        :param response_params: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of predictive distribution(s) to plot per response variable. Any param names not used by the predictive distribution for a given response will be ignored.
         :param level: ``float``; level of the credible interval if Bayesian, ignored otherwise.
         :param random: ``bool``; whether to compute IRF integrals for random effects estimates
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use mean/MLE model.
@@ -5347,8 +5291,13 @@ class Model(object):
 
         out = []
 
-        if response is None:
-            response = self.response_names
+        if responses is None:
+            responses = self.response_names
+        if response_params is None:
+            response_params = set()
+            for _response in responses:
+                response_params.add(self.get_response_params(_response)[0])
+            response_params = sorted(list(response_params))
 
         if self.future_length:
             xmin = -n_time_units
@@ -5358,7 +5307,8 @@ class Model(object):
         for g, gf_y_ref in enumerate(gf_y_refs):
             _, _, _, _, vals = self.get_plot_data(
                 xvar='t_delta',
-                response=response,
+                responses=responses,
+                response_params=response_params,
                 X_ref=None,
                 X_time_ref=None,
                 t_delta_ref=None,
@@ -5419,8 +5369,8 @@ class Model(object):
     def make_plots(
             self,
             irf_name_map=None,
-            response=None,
-            response_param=None,
+            responses=None,
+            response_params=None,
             pred_names=None,
             sort_names=True,
             prop_cycle_length=None,
@@ -5467,8 +5417,8 @@ class Model(object):
 
         :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
             If ``None``, IRF tree node string ID's will be used.
-        :param response: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to plot. If ``None``, plots all univariate responses. Multivariate plotting (e.g. of categorical responses) is supported but turned off by default to avoid excessive computation. When plotting a multivariate response, a set of plots will be generated for each dimension of the response.
-        :param response_param: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of predictive distribution(s) to plot per response variable. Any param names not used by the predictive distribution for a given response will be ignored. If ``None``, plots the first parameter of each response distribution.
+        :param responses: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to plot. If ``None``, plots all univariate responses. Multivariate plotting (e.g. of categorical responses) is supported but turned off by default to avoid excessive computation. When plotting a multivariate response, a set of plots will be generated for each dimension of the response.
+        :param response_params: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of predictive distribution(s) to plot per response variable. Any param names not used by the predictive distribution for a given response will be ignored. If ``None``, plots the first parameter of each response distribution.
         :param summed: ``bool``; whether to plot individual IRFs or their sum.
         :param pred_names: ``list`` or ``None``; list of names of predictors to include in univariate IRF plots. If ``None``, all predictors are plotted.
         :param sort_names: ``bool``; whether to alphabetically sort IRF names.
@@ -5506,18 +5456,18 @@ class Model(object):
         :return: ``None``
         """
 
-        if response is None:
-            response = [x for x in self.response_names if self.get_response_ndim(x) == 1]
-        if isinstance(response, str):
-            response = [response]
+        if responses is None:
+            responses = [x for x in self.response_names if self.get_response_ndim(x) == 1]
+        if isinstance(responses, str):
+            responses = [responses]
 
-        if response_param is None:
-            response_param = set()
-            for _response in response:
-                response_param.add(self.get_response_params(_response)[0])
-            response_param = sorted(list(response_param))
-        if isinstance(response_param, str):
-            response_param = [response_param]
+        if response_params is None:
+            response_params = set()
+            for _response in responses:
+                response_params.add(self.get_response_params(_response)[0])
+            response_params = sorted(list(response_params))
+        if isinstance(response_params, str):
+            response_params = [response_params]
 
         if irf_name_map is None:
             irf_name_map = self.irf_name_map
@@ -5618,8 +5568,8 @@ class Model(object):
 
                         plot_x, plot_y, lq, uq, samples = self.get_plot_data(
                             xvar='t_delta',
-                            response=response,
-                            response_param=response_param,
+                            responses=responses,
+                            response_params=response_params,
                             X_ref=None,
                             X_time_ref=None,
                             t_delta_ref=None,
@@ -5715,7 +5665,7 @@ class Model(object):
                     for name in names:
                         plot_x, plot_y, lq, uq, samples = self.get_plot_data(
                             xvar=name,
-                            response=response,
+                            responses=responses,
                             t_delta_ref=reference_time,
                             ref_varies_with_x=False,
                             manipulations=manipulations,
@@ -5818,7 +5768,7 @@ class Model(object):
                                 (plot_x, plot_y), plot_z, lq, uq, _ = self.get_plot_data(
                                     xvar=xvar,
                                     yvar=yvar,
-                                    response=response,
+                                    responses=responses,
                                     t_delta_ref=reference_time,
                                     ref_varies_with_x=ref_varies_with_x,
                                     manipulations=manipulations,

@@ -368,8 +368,8 @@ MODEL_INITIALIZATION_KWARGS = [
     Kwarg(
         'eval_minibatch_size',
         10000,
-        [int, None],
-        "Size of minibatches to use for prediction/evaluation (full-batch if ``None``)."
+        int,
+        "Size of minibatches to use for prediction/evaluation."
     ),
     Kwarg(
         'n_samples_eval',
