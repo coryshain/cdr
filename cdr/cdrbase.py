@@ -66,6 +66,8 @@ def exponential_irf_factory(
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
+            beta = tf.convert_to_tensor(beta)
+
             def pdf(x, beta=beta):
                 return beta * tf.exp(-beta * x)
 
@@ -110,6 +112,9 @@ def gamma_irf_factory(
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
+            alpha = tf.convert_to_tensor(alpha)
+            beta = tf.convert_to_tensor(beta)
+
             dist = tf.contrib.distributions.Gamma(
                 concentration=alpha,
                 rate=beta,
@@ -159,6 +164,10 @@ def shifted_gamma_irf_factory(
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
+            alpha = tf.convert_to_tensor(alpha)
+            beta = tf.convert_to_tensor(beta)
+            delta = tf.convert_to_tensor(delta)
+
             dist = tf.contrib.distributions.Gamma(
                 concentration=alpha,
                 rate=beta,
@@ -211,6 +220,9 @@ def normal_irf_factory(
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
+            mu = tf.convert_to_tensor(mu)
+            sigma = tf.convert_to_tensor(sigma)
+
             dist = tf.contrib.distributions.Normal(
                 mu,
                 sigma
@@ -265,6 +277,10 @@ def skew_normal_irf_factory(
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
+            mu = tf.convert_to_tensor(mu)
+            sigma = tf.convert_to_tensor(sigma)
+            alpha = tf.convert_to_tensor(alpha)
+
             stdnorm = tf.contrib.distributions.Normal(loc=0., scale=1.)
             stdnorm_pdf = stdnorm.prob
             stdnorm_cdf = stdnorm.cdf
@@ -326,6 +342,10 @@ def emg_irf_factory(
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
+            mu = tf.convert_to_tensor(mu)
+            sigma = tf.convert_to_tensor(sigma)
+            beta = tf.convert_to_tensor(beta)
+
             def cdf(x):
                 return tf.contrib.distributions.Normal(
                     loc=0.,
@@ -380,6 +400,9 @@ def beta_prime_irf_factory(
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
+            alpha = tf.convert_to_tensor(alpha)
+            beta = tf.convert_to_tensor(beta)
+
             def cdf(x, alpha=alpha, beta=beta):
                 # Ensure proper broadcasting
                 while len(x.shape) > len(alpha.shape):
@@ -433,6 +456,10 @@ def shifted_beta_prime_irf_factory(
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
+            alpha = tf.convert_to_tensor(alpha)
+            beta = tf.convert_to_tensor(beta)
+            delta = tf.convert_to_tensor(delta)
+
             def cdf(x, alpha=alpha, beta=beta, delta=delta):
                 # Ensure proper broadcasting
                 while len(x.shape) > len(alpha.shape):
@@ -659,6 +686,12 @@ def double_gamma_5_irf_factory(
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
+            alpha_main = tf.convert_to_tensor(alpha_main)
+            alpha_undershoot = tf.convert_to_tensor(alpha_undershoot)
+            beta_main = tf.convert_to_tensor(beta_main)
+            beta_undershoot = tf.convert_to_tensor(beta_undershoot)
+            c = tf.convert_to_tensor(c)
+
             dist_main = tf.contrib.distributions.Gamma(
                 concentration=alpha_main,
                 rate=beta_main,
@@ -674,7 +707,6 @@ def double_gamma_5_irf_factory(
             pdf_undershoot = dist_undershoot.prob
             cdf_undershoot = dist_undershoot.cdf
 
-            c = tf.convert_to_tensor(c)
 
             if support_ub is None:
                 norm_const = 1 - c
@@ -716,6 +748,7 @@ def LCG_irf_factory(
     with session.as_default():
         with session.graph.as_default():
             # Build kernel locations
+            params = {x: tf.convert_to_tensor(params[x]) for x in params}
             c = tf.stack([params['x%s' % i] for i in range(1, bases + 1)], -1)
 
             # Build kernel amplitudes
