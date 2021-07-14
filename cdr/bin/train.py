@@ -68,8 +68,7 @@ if __name__ == '__main__':
         sep=p.sep,
         categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in cdr_formula_list for v in x.rangf]))
     )
-    X, Y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, \
-    X_2d_predictors = preprocess_data(
+    X, Y, select, X_in_Y_names = preprocess_data(
         X,
         Y,
         cdr_formula_list,
@@ -240,12 +239,6 @@ if __name__ == '__main__':
         elif m.startswith('CDR') or m.startswith('DTSR'):
             dv = [x.strip() for x in formula.strip().split('~')[0].strip().split('+')]
             Y_valid, select_Y_valid = filter_invalid_responses(Y, dv)
-            if X_response_aligned_predictors is not None:
-                X_response_aligned_predictors_valid = []
-                for _x, _sel in zip(X_response_aligned_predictors, select_Y_valid):
-                    X_response_aligned_predictors_valid.append(_x[_sel])
-            else:
-                X_response_aligned_predictors_valid = None
 
             stderr('\nInitializing model %s...\n\n' % m)
 
@@ -271,32 +264,14 @@ if __name__ == '__main__':
                     for kwarg in CDRNNMLE_INITIALIZATION_KWARGS:
                         kwargs[kwarg.key] = p[kwarg.key]
 
-                    cdr_model = CDRNNMLE(
-                        formula,
-                        X,
-                        Y_valid,
-                        ablated=p['ablated'],
-                        outdir=p.outdir + '/' + m_path,
-                        history_length=p.history_length,
-                        future_length=p.future_length,
-                        **kwargs
-                    )
+                    CDRModel = CDRNNMLE
                 elif p['network_type'].lower() in ['bbvi', 'bayes', 'bayesian']:
                     from cdr.cdrnnbayes import CDRNNBayes
 
                     for kwarg in CDRNNBAYES_INITIALIZATION_KWARGS:
                         kwargs[kwarg.key] = p[kwarg.key]
 
-                    cdr_model = CDRNNBayes(
-                        formula,
-                        X,
-                        Y_valid,
-                        ablated=p['ablated'],
-                        outdir=p.outdir + '/' + m_path,
-                        history_length=p.history_length,
-                        future_length=p.future_length,
-                        **kwargs
-                    )
+                    CDRModel = CDRNNBayes
                 else:
                     raise ValueError('Unrecognized network type %s.' % p['network_type'])
             else:
@@ -309,34 +284,27 @@ if __name__ == '__main__':
                     for kwarg in CDRMLE_INITIALIZATION_KWARGS:
                         kwargs[kwarg.key] = p[kwarg.key]
 
-                    cdr_model = CDRMLE(
-                        formula,
-                        X,
-                        Y_valid,
-                        ablated=p['ablated'],
-                        outdir=p.outdir + '/' + m_path,
-                        history_length=p.history_length,
-                        future_length=p.future_length,
-                        **kwargs
-                    )
+                    CDRModel = CDRMLE
                 elif p['network_type'].lower() in ['bbvi', 'bayes', 'bayesian']:
                     from cdr.cdrbayes import CDRBayes
 
                     for kwarg in CDRBAYES_INITIALIZATION_KWARGS:
                         kwargs[kwarg.key] = p[kwarg.key]
 
-                    cdr_model = CDRBayes(
-                        formula,
-                        X,
-                        Y_valid,
-                        ablated=p['ablated'],
-                        outdir=p.outdir + '/' + m_path,
-                        history_length=p.history_length,
-                        future_length=p.future_length,
-                        **kwargs
-                    )
+                    CDRModel = CDRBayes
                 else:
                     raise ValueError('Unrecognized network type %s.' % p['network_type'])
+
+            cdr_model = CDRModel(
+                formula,
+                X,
+                Y_valid,
+                ablated=p['ablated'],
+                outdir=p.outdir + '/' + m_path,
+                history_length=p.history_length,
+                future_length=p.future_length,
+                **kwargs
+            )
 
             if args.save_and_exit:
                 save = True
@@ -357,10 +325,7 @@ if __name__ == '__main__':
                 X,
                 Y_valid,
                 n_iter=p['n_iter'],
-                X_response_aligned_predictor_names=X_response_aligned_predictor_names,
-                X_response_aligned_predictors=X_response_aligned_predictors_valid,
-                X_2d_predictor_names=X_2d_predictor_names,
-                X_2d_predictors=X_2d_predictors,
+                X_in_Y_names=X_in_Y_names,
                 force_training_evaluation=args.force_training_evaluation,
                 optimize_memory=args.optimize_memory
             )

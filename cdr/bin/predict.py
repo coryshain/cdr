@@ -151,8 +151,7 @@ if __name__ == '__main__':
             sep=p.sep,
             categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in cdr_formula_list for v in x.rangf]))
         )
-        X, Y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, \
-        X_2d_predictors = preprocess_data(
+        X, Y, select, X_in_Y_names = preprocess_data(
             X,
             Y,
             cdr_formula_list,
@@ -161,8 +160,7 @@ if __name__ == '__main__':
             history_length=p.history_length,
             future_length=p.future_length
         )
-        evaluation_sets.append((X, Y, select, X_response_aligned_predictor_names, X_response_aligned_predictors,
-                                X_2d_predictor_names, X_2d_predictors))
+        evaluation_sets.append((X, Y, select, X_in_Y_names))
         evaluation_set_partitions.append(partitions)
         evaluation_set_names.append(partition_str)
         evaluation_set_paths.append((X_paths, Y_paths))
@@ -228,8 +226,7 @@ if __name__ == '__main__':
             evaluation_set_baselines.append(X_baseline)
 
     for d in range(len(evaluation_sets)):
-        X, Y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, \
-        X_2d_predictors = evaluation_sets[d]
+        X, Y, select, X_in_Y_names = evaluation_sets[d]
         partition_str = evaluation_set_names[d]
         if run_baseline:
             X_baseline = evaluation_set_baselines[d]
@@ -326,9 +323,6 @@ if __name__ == '__main__':
                     crossval_factor = None
                     crossval_fold = None
                 Y_valid, select_Y_valid = filter_invalid_responses(Y, dv)
-                X_response_aligned_predictors_valid = X_response_aligned_predictors
-                if X_response_aligned_predictors_valid is not None:
-                    X_response_aligned_predictors_valid = X_response_aligned_predictors_valid[select_Y_valid]
 
                 if args.twostep:
                     from cdr.baselines import py2ri
@@ -407,10 +401,7 @@ if __name__ == '__main__':
                         _model.predict(
                             X,
                             Y_valid,
-                            X_response_aligned_predictor_names=X_response_aligned_predictor_names,
-                            X_response_aligned_predictors=X_response_aligned_predictors_valid,
-                            X_2d_predictor_names=X_2d_predictor_names,
-                            X_2d_predictors=X_2d_predictors,
+                            X_in_Y_names=X_in_Y_names,
                             n_samples=args.nsamples,
                             algorithm=args.algorithm,
                             extra_cols=args.extra_cols,
@@ -422,10 +413,7 @@ if __name__ == '__main__':
                         _cdr_out = _model.evaluate(
                             X,
                             Y_valid,
-                            X_response_aligned_predictor_names=X_response_aligned_predictor_names,
-                            X_response_aligned_predictors=X_response_aligned_predictors_valid,
-                            X_2d_predictor_names=X_2d_predictor_names,
-                            X_2d_predictors=X_2d_predictors,
+                            X_in_Y_names=X_in_Y_names,
                             n_samples=args.nsamples,
                             algorithm=args.algorithm,
                             extra_cols=args.extra_cols,

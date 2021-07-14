@@ -68,8 +68,7 @@ if __name__ == '__main__':
                 categorical_columns=list(
                     set(p.split_ids + p.series_ids + [v for x in cdr_formula_list for v in x.rangf]))
             )
-            X, Y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, \
-            X_2d_predictors = preprocess_data(
+            X, Y, select, X_in_Y_names = preprocess_data(
                 X,
                 Y,
                 cdr_formula_list,
@@ -78,15 +77,13 @@ if __name__ == '__main__':
                 history_length=p.history_length,
                 future_length=p.future_length
             )
-            evaluation_sets.append((X, Y, select, X_response_aligned_predictor_names, X_response_aligned_predictors,
-                                    X_2d_predictor_names, X_2d_predictors))
+            evaluation_sets.append((X, Y, select, X_in_Y_names))
             evaluation_set_partitions.append(partitions)
             evaluation_set_names.append(partition_str)
             evaluation_set_paths.append((X_paths, Y_paths))
 
         for d in range(len(evaluation_sets)):
-            X, Y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, \
-            X_2d_predictors = evaluation_sets[d]
+            X, Y, select, X_in_Y_names = evaluation_sets[d]
             partition_str = evaluation_set_names[d]
 
             for m in cdr_models:
@@ -95,9 +92,6 @@ if __name__ == '__main__':
 
                 dv = formula.strip().split('~')[0].strip()
                 Y_valid, select_Y_valid = filter_invalid_responses(Y, dv)
-                X_response_aligned_predictors_valid = X_response_aligned_predictors
-                if X_response_aligned_predictors_valid is not None:
-                    X_response_aligned_predictors_valid = X_response_aligned_predictors_valid[select_Y_valid]
 
                 stderr('Retrieving saved model %s...\n' % m)
                 cdr_model = load_cdr(p.outdir + '/' + m_path)
@@ -106,10 +100,7 @@ if __name__ == '__main__':
                 cdr_model.convolve_inputs(
                     X,
                     Y_valid,
-                    X_response_aligned_predictor_names=X_response_aligned_predictor_names,
-                    X_response_aligned_predictors=X_response_aligned_predictors_valid,
-                    X_2d_predictor_names=X_2d_predictor_names,
-                    X_2d_predictors=X_2d_predictors,
+                    X_in_Y_names=X_in_Y_names,
                     response=args.response,
                     response_param=args.response_param,
                     n_samples=args.nsamples,

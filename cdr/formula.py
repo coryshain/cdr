@@ -1094,12 +1094,7 @@ class Formula(object):
             self,
             X,
             Y,
-            X_response_aligned_predictor_names=None,
-            X_response_aligned_predictors=None,
-            X_2d_predictor_names=None,
-            X_2d_predictors=None,
-            history_length=128,
-            future_length=None,
+            X_in_Y_names=None,
             all_interactions=False,
             series_ids=None
     ):
@@ -1108,15 +1103,10 @@ class Formula(object):
 
         :param X: list of ``pandas`` tables; impulse data.
         :param Y: list of ``pandas`` tables; response data.
-        :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
-        :param X_response_aligned_predictors: ``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
-        :param X_2d_predictor_names: ``list`` or ``None``; List of column names 2D predictors (predictors whose value depends on properties of the most recent impulse) if applicable, ``None`` otherwise.
-        :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
-        :param history_length: ``int`` or ``None``; maximum number of history (backward) observations. ``None`` is treated as ``0``.
-        :param future_length: ``int`` or ``None``; maximum number of future (forward) observations. ``None`` is treated as ``0``.
+        :param X_in_Y_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
         :param all_interactions: ``bool``; add powerset of all conformable interactions.
         :param series_ids: ``list`` of ``str`` or ``None``; list of ids to use as grouping factors for lagged effects. If ``None``, lagging will not be attempted.
-        :return: 6-tuple; transformed **X**, transformed **y**, transformed response-aligned predictor names, transformed response-aligned predictors, transformed 2D predictor names, transformed 2D predictors
+        :return: triple; transformed **X**, transformed **y**, response-aligned predictor names
         """
 
         if not isinstance(X, list):
@@ -1162,40 +1152,7 @@ class Formula(object):
                 to_process = [impulse]
 
             for x in to_process:
-                if x.is_2d:
-                    raise ValueError('Support for 2D predictors is currently broken.')
-                    # if time_mask is None:
-                    #     time_mask = compute_time_mask(
-                    #         X.time,
-                    #         Y.first_obs,
-                    #         Y.last_obs,
-                    #         history_length=history_length
-                    #         future_length=future_length
-                    #     )
-                    #
-                    # if x.id not in X_2d_predictor_names:
-                    #     new_2d_predictor_name, new_2d_predictor = self.compute_2d_predictor(
-                    #         x.id,
-                    #         X,
-                    #         Y.first_obs,
-                    #         Y.last_obs,
-                    #         history_length=history_length
-                    #         future_length=future_length
-                    #     )
-                    #     X_2d_predictor_names.append(new_2d_predictor_name)
-                    #     if X_2d_predictors is None:
-                    #         X_2d_predictors = new_2d_predictor
-                    #     else:
-                    #         X_2d_predictors = np.concatenate([X_2d_predictors, new_2d_predictor], axis=2)
-                    #
-                    # X_2d_predictor_names, X_2d_predictors = self.apply_ops_2d(
-                    #     x,
-                    #     X_2d_predictor_names,
-                    #     X_2d_predictors,
-                    #     time_mask,
-                    # )
-
-                elif x.id in X_columns:
+                if x.id in X_columns:
                     for i in range(len(X)):
                         _X = X[i]
                         if x.id in _X.columns:
@@ -1214,15 +1171,13 @@ class Formula(object):
                                 _X = self.apply_ops(x, _X)
                                 X[i] = _X
                                 break
-                    else:
+                    else: # Response aligned
                         for i, _Y in enumerate(Y):
                             assert x.id in _Y.columns, 'Impulse %s not found in data. Either it is missing from all of the predictor files X, or (if response aligned) it is missing from at least one of the response files Y.' % x.name()
-                        if X_response_aligned_predictor_names is None:
-                            X_response_aligned_predictor_names = [x.name()]
-                        if X_response_aligned_predictors is None:
-                            X_response_aligned_predictors = [_Y[[x.id]] for _Y in Y]
-                        for i in range(len(X_response_aligned_predictors)):
-                            X_response_aligned_predictors[i] = self.apply_ops(x, X_response_aligned_predictors[i])
+                            Y[i] = self.apply_ops(x, _Y)
+                        if X_in_Y_names is None:
+                            X_in_Y_names = []
+                        X_in_Y_names.append(x.name())
 
             if type(impulse).__name__ == 'ImpulseInteraction':
                 response_aligned = False
@@ -1232,14 +1187,10 @@ class Formula(object):
                         break
                 if response_aligned:
                     for i, _Y in enumerate(Y):
-                        for _x in impulse.impulses():
-                            assert _x.id in _Y.columns, 'Impulse %s not found in data. Either it is missing from all of the predictor files X, or (if response aligned) it is missing from at least one of the response files Y.' % _x.name()
-                    if X_response_aligned_predictor_names is None:
-                        X_response_aligned_predictor_names = [impulse.name()]
-                    if X_response_aligned_predictors is None:
-                        X_response_aligned_predictors = [_Y[[_x.id for _x in impulse.impulses()]] for _Y in Y]
-                    for i in range(len(X_response_aligned_predictors)):
-                        X_response_aligned_predictors[i] = self.apply_ops(impulse, X_response_aligned_predictors[i])
+                        Y[i] = self.apply_ops(impulse, _Y)
+                    if X_in_Y_names is None:
+                        X_in_Y_names = []
+                    X_in_Y_names.append(impulse.name())
                 else:
                     found = False
                     for i in range(len(X)):
@@ -1268,7 +1219,7 @@ class Formula(object):
                 if len(gf_s) > 1 and gf not in _Y:
                     _Y[gf] = _Y[gf_s].agg(lambda x: '_'.join([str(_x) for _x in x]), axis=1)
 
-        return X, Y, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors
+        return X, Y, X_in_Y_names
 
     def ablate_impulses(self, impulse_ids):
         """
@@ -1538,7 +1489,6 @@ class Impulse(object):
         for op in self.ops:
             self.name_str = op + '(' + self.name_str + ')'
         self.id = name
-        self.is_2d = name.endswith('2D')
 
     def __str__(self):
         return self.name_str

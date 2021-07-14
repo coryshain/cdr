@@ -56,7 +56,7 @@ def corr_cdr(X_2d, impulse_names, impulse_names_2d, time, time_mask):
     """
     Compute correlation matrix, including correlations across time where necessitated by 2D predictors.
 
-    :param X_2d: ``numpy`` array; the impulse data. Must be of shape ``(batch_len, history_length+future_length, n_impulses)``, can be computed from sources by ``build_CDR_impulses()``.
+    :param X_2d: ``numpy`` array; the impulse data. Must be of shape ``(batch_len, history_length+future_length, n_impulses)``, can be computed from sources by ``build_CDR_impulse_data()``.
     :param impulse_names: ``list`` of ``str``; names of columns in **X_2d** to be used as impulses by the model.
     :param impulse_names_2d: ``list`` of ``str``; names of columns in **X_2d** that designate to 2D predictors.
     :param time: 3D ``numpy`` array; array of timestamps for each event in **X_2d**.
@@ -210,6 +210,8 @@ def build_CDR_response_data(
         last_obs=None,
         Y_time=None,
         Y_gf=None,
+        X_in_Y_names=None,
+        X_in_Y=None,
         Y_category_map=None,
         response_to_df_ix=None,
         gf_names=None,
@@ -223,11 +225,14 @@ def build_CDR_response_data(
     :param first_obs: ``list`` of ``list`` of index vectors (``list``, ``pandas`` series, or ``numpy`` vector) of first observations, or ``None``; the list contains one element for each response array. Inner lists contain vectors of row indices, one for each element of **X**, of the first impulse in the time series associated with each response. If ``None``, inferred from **Y**.
     :param last_obs: ``list`` of ``list`` of index vectors (``list``, ``pandas`` series, or ``numpy`` vector) of last observations, or ``None``; the list contains one element for each response array. Inner lists contain vectors of row indices, one for each element of **X**, of the last impulse in the time series associated with each response. If ``None``, inferred from **Y**.
     :param Y_time: ``list`` of response timestamp vectors (``list``, ``pandas`` series, or ``numpy`` vector), or ``None``; vector(s) of response timestamps, one for each response array. Needed to timestamp any response-aligned predictors (ignored if none in model).
+    :param Y_gf: ``list`` of ``pandas`` ``DataFrame``, or ``None``; vector(s) of response timestamps, one for each response array. Data frames containing random grouping factor levels, if applicable.
+    :param X_in_Y_names: ``list`` of ``str``; names of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, no such predictors.
+    :param X_in_Y: ``list`` of ``pandas`` ``DataFrame`` or ``None``; tables (one per response array) of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, no such predictors.
     :param Y_category_map: ``dict`` or ``None``; map from category labels to integers for each categorical response.
     :param response_to_df_ix: ``dict`` or ``None``; map from response names to lists of indices of the response files that contain them.
     :param gf_names: ``list`` or ``None``; list of names of random grouping factor variables. If ``None`` and **Y_gf** provided, will use all columns of **Y_gf**.
     :param gf_map: ``list`` of ``dict`` or ``None``; list maps from random grouping factor levels to their indices, one map per grouping factor variable in **gf_names**.
-    :return: 6-tuple of ``numpy`` arrays; let N, R, XF, YF, and Z respectively be the number of rows (sum total number of rows in **Y**), number of response dimensions, number of distinct predictor files (X), number of distinct response files (Y), and number of random grouping factor variables. Outputs are (1) responses with shape (N, R) or ``None`` if **Y** is ``None``, (2) an XF-tuple of first observation vectors indexing start indices for each entry in X, (3) a YF-tuple of first observation vectors indexing end indices for each entry in X, (4) response timestamps with shape (N,), (5) response masks (masking out any missing response variables per row) with shape (N, R), and (6) random grouping factor matrix with shape (N, Z), or ``None`` if no random grouping factors provided.
+    :return: 7-tuple of ``numpy`` arrays; let N, R, XF, YF, Z, and K respectively be the number of rows (sum total number of rows in **Y**), number of response dimensions, number of distinct predictor files (X), number of distinct response files (Y), number of random grouping factor variables, and number of response_aligned predictors. Outputs are (1) responses with shape (N, R) or ``None`` if **Y** is ``None``, (2) an XF-tuple of first observation vectors indexing start indices for each entry in X, (3) a YF-tuple of first observation vectors indexing end indices for each entry in X, (4) response timestamps with shape (N,), (5) response masks (masking out any missing response variables per row) with shape (N, R), (6) random grouping factor matrix with shape (N, Z), or ``None`` if no random grouping factors provided, and (7) response-aligned predictors with shape (N, K).
     """
 
     # Check prerequisites
@@ -238,7 +243,6 @@ def build_CDR_response_data(
     assert last_obs is None or isinstance(last_obs, list) and not [x for x in last_obs if not isinstance(x, list)], "last_obs must either be ``None`` or a list of lists. Outer dim is number of response dataframes (Y). Inner dim is number of impulse dataframes (X)."
     assert Y_time is None or isinstance(Y_time, list), "Y_time must either be ``None`` or a list with length equal to the number of response dataframes"
     assert (Y is not None) or (first_obs is not None and last_obs is not None and Y_time is not None), "If Y is not provided, first_obs, last_obs, and time_y must be provided."
-
 
     if Y is None:
         Y_out = None
@@ -260,6 +264,10 @@ def build_CDR_response_data(
         Y_gf_out = []
     else:
         Y_gf_out = None
+    if X_in_Y_names or X_in_Y is not None:
+        X_in_Y_out = []
+    else:
+        X_in_Y_out = None
 
     for i in range(n_response_df):
         # Y
@@ -351,7 +359,7 @@ def build_CDR_response_data(
                 else:
                     _Y_gf = Y_gf[i][gf_names]
             if gf_names is None:
-                _gf_names = _Y_gf.columns
+                _gf_names = list(_Y_gf.columns)
             else:
                 _gf_names = gf_names
             _Y_gf = _Y_gf[_gf_names]
@@ -359,6 +367,23 @@ def build_CDR_response_data(
                 for j, col in enumerate(_gf_names):
                     _Y_gf[col] = pd.Series(_Y_gf[col].astype(str)).map(gf_map[j])
             Y_gf_out.append(_Y_gf)
+
+        # X_in_Y
+        if X_in_Y_out is not None:
+            if X_in_Y is None:  # X_in_Y_names was provided
+                assert Y is not None, 'Could not compute response-aligned predictors %s because neither Y nor X_in_Y were provided.' % (X_in_Y_names)
+                _X_in_Y = Y[i][X_in_Y_names]
+            else:
+                if X_in_Y_names is None:
+                    _X_in_Y = X_in_Y[i]
+                else:
+                    _X_in_Y = X_in_Y[i][X_in_Y_names]
+            if X_in_Y_names is None:
+                _X_in_Y_names = list(_X_in_Y.columns)
+            else:
+                _X_in_Y_names = X_in_Y_names
+            _X_in_Y = _X_in_Y[_X_in_Y_names]
+            X_in_Y_out.append(_X_in_Y)
 
     if Y_out is not None:
         Y_out = np.concatenate(Y_out, axis=0)
@@ -370,21 +395,21 @@ def build_CDR_response_data(
     Y_mask_out = np.concatenate(Y_mask_out, axis=0)
     if Y_gf_out is not None:
         Y_gf_out = np.concatenate(Y_gf_out, axis=0)
+    if X_in_Y_out is not None:
+        X_in_Y_out = np.concatenate(X_in_Y_out, axis=0)
 
-    return Y_out, first_obs_out, last_obs_out, Y_time_out, Y_mask_out, Y_gf_out
+    return Y_out, first_obs_out, last_obs_out, Y_time_out, Y_mask_out, Y_gf_out, X_in_Y_out
 
 
 def build_CDR_impulse_data(
         X,
         first_obs,
         last_obs,
+        X_in_Y_names=None,
+        X_in_Y=None,
         impulse_names=None,
         history_length=128,
         future_length=0,
-        X_response_aligned_predictor_names=None,
-        X_response_aligned_predictors=None,
-        X_2d_predictor_names=None,
-        X_2d_predictors=None,
         int_type='int32',
         float_type='float32',
 ):
@@ -394,13 +419,11 @@ def build_CDR_impulse_data(
     :param X: ``list`` of ``pandas`` tables; impulse (predictor) data.
     :param first_obs: ``list`` of index vectors (``list``, ``pandas`` series, or ``numpy`` vector) of first observations; the list contains vectors of row indices, one for each element of **X**, of the first impulse in the time series associated with the response. If ``None``, inferred from **Y**.
     :param last_obs: ``list`` of index vectors (``list``, ``pandas`` series, or ``numpy`` vector) of last observations; the list contains vectors of row indices, one for each element of **X**, of the last impulse in the time series associated with the response. If ``None``, inferred from **Y**.
+    :param X_in_Y_names: ``list`` of ``str``; names of predictors contained in **Y** rather than **X**. If ``None``, no such predictors.
+    :param X_in_Y: ``pandas`` ``DataFrame`` or ``None``; table of predictors contained in **Y** rather than **X**. If ``None``, no such predictors.
     :param impulse_names: ``list`` of ``str``; names of columns in **X** to be used as impulses by the model. If ``None``, all columns returned.
     :param history_length: ``int``; maximum number of history (backward) observations.
     :param future_length: ``int``; maximum number of future (forward) observations.
-    :param X_response_aligned_predictor_names: ``list`` of ``str``; names of predictors measured synchronously with the response rather than the impulses. If ``None``, no such impulses.
-    :param X_response_aligned_predictors: ``pandas`` ``DataFrame`` or ``None``; table of predictors measured synchronously with the response rather than the impulses. If ``None``, no such impulses.
-    :param X_2d_predictor_names: ``list`` of ``str``; names of 2D impulses (impulses whose value depends on properties of the most recent impulse). If ``None``, no such impulses.
-    :param X_2d_predictors: ``pandas`` ``DataFrame`` or ``None``; table of 2D impulses. If ``None``, no such impulses.
     :param int_type: ``str``; name of int type.
     :param float_type: ``str``; name of float type.
     :return: triple of ``numpy`` arrays; let N, T, I, R respectively be the number of rows in **Y**, history length, number of impulse dimensions, and number of response dimensions. Outputs are (1) impulses with shape (N, T, I), (2) impulse timestamps with shape (N, T, I), and impulse mask with shape (N, T, I).
@@ -411,36 +434,30 @@ def build_CDR_impulse_data(
     # assert isinstance(first_obs, list), "first_obs must be a list"
     # assert isinstance(last_obs, list), "last_obs must be a list"
 
-    if X_response_aligned_predictor_names is None:
-        X_response_aligned_predictor_names = []
-
-    # 2D predictors currently broken
-    # assert (X_2d_predictors is None and (X_2d_predictor_names is None or len(X_2d_predictor_names) == 0)) or (X_2d_predictors.shape[-1] == len(X_2d_predictor_names)), 'Shape mismatch between X_2d_predictors and X_2d_predictor_names'
-    if X_2d_predictor_names is None:
-        X_2d_predictor_names = []
-
     if not (impulse_names):  # Empty (intercept-only) model
         impulse_names = ['time']
 
     # Process impulses
 
-    impulse_names_1d = sorted(list(set(impulse_names).difference(set(X_response_aligned_predictor_names)).difference(set(X_2d_predictor_names))))
-    impulse_names_1d_todo = set(impulse_names_1d)
-    impulse_names_1d_tmp = []
+    if X_in_Y_names is None:
+        X_in_Y_names = []
+    impulse_names_X = sorted(list(set(impulse_names).difference(set(X_in_Y_names))))
+    impulse_names_X_todo = set(impulse_names_X)
+    impulse_names_X_tmp = []
 
-    X_2d_from_1d = []
+    X_2d = []
     X_time_out = []
     X_mask_out = []
 
     window_length = history_length + future_length
 
     for i, _X in enumerate(X):
-        impulse_names_1d_cur = impulse_names_1d_todo.intersection(set(_X.columns))
+        impulse_names_1d_cur = impulse_names_X_todo.intersection(set(_X.columns))
         if len(impulse_names_1d_cur) > 0:
-            impulse_names_1d_todo = impulse_names_1d_todo - impulse_names_1d_cur
+            impulse_names_X_todo = impulse_names_X_todo - impulse_names_1d_cur
             impulse_names_1d_cur = sorted(list(impulse_names_1d_cur))
-            impulse_names_1d_tmp += impulse_names_1d_cur
-            _X_2d_from_1d, _X_time_2d, _X_mask = expand_impulse_sequence(
+            impulse_names_X_tmp += impulse_names_1d_cur
+            _X_2d, _X_time_2d, _X_mask = expand_impulse_sequence(
                 _X[impulse_names_1d_cur],
                 _X.time,
                 first_obs[i],
@@ -449,37 +466,33 @@ def build_CDR_impulse_data(
                 int_type=int_type,
                 float_type=float_type
             )
-            X_2d_from_1d.append(_X_2d_from_1d)
+            X_2d.append(_X_2d)
             X_time_out.append(_X_time_2d)
             X_mask_out.append(_X_mask)
 
-    assert len(impulse_names_1d_todo) == 0, 'Not all impulses were processed during CDR data array construction. Remaining impulses: %s' % impulse_names_1d_todo
-    impulse_names_1d = impulse_names_1d_tmp
+    assert len(impulse_names_X_todo) == 0, 'Not all impulses were processed during CDR data array construction. Remaining impulses: %s' % impulse_names_X_todo
+    impulse_names_X = impulse_names_X_tmp
 
-    X_out = np.concatenate(X_2d_from_1d, axis=-1)
-    X_out = X_out[:,:,names2ix(impulse_names_1d, impulse_names_1d_tmp)]
+    X_out = np.concatenate(X_2d, axis=-1)
+    X_out = X_out[:,:,names2ix(impulse_names_X, impulse_names_X_tmp)]
     X_time_out = np.concatenate(X_time_out, axis=-1)
     X_mask_out = np.concatenate(X_mask_out, axis=-1)
 
-    if X_response_aligned_predictors is not None:
-        response_aligned_shape = (X_out.shape[0], X_out.shape[1], len(X_response_aligned_predictor_names))
-        X_response_aligned_predictors_new = np.zeros(response_aligned_shape)
-        X_response_aligned_predictors_new[:, -1, :] = X_response_aligned_predictors[X_response_aligned_predictor_names]
-        X_out = np.concatenate([X_out, X_response_aligned_predictors_new], axis=2)
+    if X_in_Y_names:
+        X_in_Y_shape = (X_out.shape[0], X_out.shape[1], len(X_in_Y_names))
+        _X_in_Y = np.zeros(X_in_Y_shape)
+        _X_in_Y[:, -1, :] = X_in_Y
+        X_out = np.concatenate([X_out, _X_in_Y], axis=2)
 
-        time_X_2d_new = np.zeros(response_aligned_shape)
+        time_X_2d_new = np.zeros(X_in_Y_shape)
         X_time_out = np.concatenate([X_time_out, time_X_2d_new], axis=2)
 
-        time_mask_new = np.zeros(response_aligned_shape)
+        time_mask_new = np.zeros(X_in_Y_shape)
         time_mask_new[:,-1,:] = 1.
         X_mask_out = np.concatenate([X_mask_out, time_mask_new], axis=2)
 
-    # if X_2d_predictors is not None:
-    #     raise ValueError('2D predictors are currently broken. Do not use them.')
-    #     X_out = np.concatenate([X_out, X_2d_predictors], axis=2)
-
     # Ensure that impulses are properly aligned
-    impulse_names_cur = impulse_names_1d + X_response_aligned_predictor_names + X_2d_predictor_names
+    impulse_names_cur = impulse_names_X + X_in_Y_names
     ix = names2ix(impulse_names, impulse_names_cur)
     X_out = X_out[:,:,ix]
     X_time_out = X_time_out[:,:,ix]
@@ -487,8 +500,8 @@ def build_CDR_impulse_data(
 
     return X_out, X_time_out, X_mask_out
 
-
-def build_CDR_data_inner_obsolete(
+# Do not use, kept for testing
+def _build_CDR_data_inner_obsolete(
         X,
         Y=None,
         first_obs=None,
@@ -654,7 +667,8 @@ def build_CDR_data_inner_obsolete(
     return X_2d, X_time_2d, X_mask, Y_out, Y_mask
 
 
-def build_CDR_data_obsolete(
+# Do not use, kept for testing
+def _build_CDR_data_obsolete(
         X,
         Y=None,
         first_obs=None,
@@ -738,7 +752,7 @@ def build_CDR_data_obsolete(
         else:
             _Y_time = Y_time[i]
 
-        _X_2d, _X_time_2d, _X_mask, _Y_out, _Y_mask = build_CDR_data_inner_obsolete(
+        _X_2d, _X_time_2d, _X_mask, _Y_out, _Y_mask = _build_CDR_data_inner_obsolete(
             X,
             Y=_Y,
             first_obs=_first_obs,
@@ -1185,10 +1199,7 @@ def preprocess_data(
         Y[i] = _Y
         select.append(_select)
 
-    X_response_aligned_predictor_names = None
-    X_response_aligned_predictors = None
-    X_2d_predictor_names = None
-    X_2d_predictors = None
+    X_in_Y_names = None
 
     if history_length or future_length:
         X_new = []
@@ -1255,22 +1266,17 @@ def preprocess_data(
             X_new.append(_X)
 
         for x in formula_list:
-            X_new, Y, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors = x.apply_formula(
+            X_new, Y, X_in_Y_names = x.apply_formula(
                 X_new,
                 Y,
-                X_2d_predictor_names=X_2d_predictor_names,
-                X_2d_predictors=X_2d_predictors,
-                X_response_aligned_predictor_names=X_response_aligned_predictor_names,
-                X_response_aligned_predictors=X_response_aligned_predictors,
-                history_length=history_length,
-                future_length=future_length,
+                X_in_Y_names=X_in_Y_names,
                 all_interactions=all_interactions,
                 series_ids=series_ids
             )
     else:
         X_new = X
 
-    return X_new, Y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors
+    return X_new, Y, select, X_in_Y_names
 
 
 def split_cdr_outputs(outputs, lengths):

@@ -3126,14 +3126,11 @@ class Model(object):
     def fit(self,
             X,
             Y,
-            X_response_aligned_predictor_names=None,
-            X_response_aligned_predictors=None,
-            X_2d_predictor_names=None,
-            X_2d_predictors=None,
+            X_in_Y_names=None,
             n_iter=10000,
             force_training_evaluation=True,
             optimize_memory=False
-    ):
+            ):
         """
         Fit the model.
 
@@ -3154,10 +3151,7 @@ class Model(object):
             * A column for each random grouping factor in the model formula
 
             In general, **Y** will be identical to the parameter **Y** provided at model initialization.
-        :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
-        :param X_response_aligned_predictors: ``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
-        :param X_2d_predictor_names: ``list`` or ``None``; List of column names 2D predictors (predictors whose value depends on properties of the most recent impulse) if applicable, ``None`` otherwise.
-        :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
+        :param X_in_Y_names: ``list`` of ``str``; names of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, no such predictors.
         :param n_iter: ``int``; maximum number of training iterations. Training will stop either at convergence or **n_iter**, whichever happens first.
         :param force_training_evaluation: ``bool``; (Re-)run post-fitting evaluation, even if resuming a model whose training is already complete.
         :param optimize_memory: ``bool``; Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).
@@ -3186,10 +3180,13 @@ class Model(object):
             Y = [_Y[self.crossval_factor].isin(self.crossval_folds) for _Y in Y]
         X_in = X
         Y_in = Y
+        if X_in_Y_names:
+            X_in_Y_names = [x for x in X_in_Y_names if x in self.impulse_names]
 
-        Y, first_obs, last_obs, Y_time, Y_mask, Y_gf = build_CDR_response_data(
+        Y, first_obs, last_obs, Y_time, Y_mask, Y_gf, X_in_Y = build_CDR_response_data(
             self.response_names,
             Y=Y_in,
+            X_in_Y_names=X_in_Y_names,
             Y_category_map=self.response_category_to_ix,
             response_to_df_ix=self.response_to_df_ix,
             gf_names=self.rangf,
@@ -3201,13 +3198,11 @@ class Model(object):
                 X_in,
                 first_obs,
                 last_obs,
+                X_in_Y_names=X_in_Y_names,
+                X_in_Y=X_in_Y,
                 history_length=self.history_length,
                 future_length=self.future_length,
                 impulse_names=self.impulse_names,
-                X_response_aligned_predictor_names=X_response_aligned_predictor_names,
-                X_response_aligned_predictors=X_response_aligned_predictors,
-                X_2d_predictor_names=X_2d_predictor_names,
-                X_2d_predictors=X_2d_predictors,
                 int_type=self.int_type,
                 float_type=self.float_type,
             )
@@ -3223,55 +3218,6 @@ class Model(object):
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                # if optimize_memory:
-                #     def data_gen(
-                #             X=X,
-                #             Y=Y,
-                #             Y_category_map=self.response_category_to_ix,
-                #             history_length=self.history_length,
-                #             future_length=self.future_length,
-                #             impulse_names=self.impulse_names,
-                #             response_names=self.response_names,
-                #             X_response_aligned_predictor_names=X_response_aligned_predictor_names,
-                #             X_response_aligned_predictors=X_response_aligned_predictors,
-                #             X_2d_predictor_names=X_2d_predictor_names,
-                #             X_2d_predictors=X_2d_predictors,
-                #             int_type=self.int_type,
-                #             float_type=self.float_type
-                #     ):
-                #         i = 0
-                #         n = sum([len(_Y) for _Y in Y])
-                #         p, _ = get_random_permutation(n)
-                #         _Y_gf = get_rangf_array(Y, self.rangf, self.rangf_map)
-                #         while True:
-                #             _i = p[i]
-                #             _Y = [_y.iloc[_i:_i + 1] for _y in Y]
-                #             _X, _X_time, _X_mask, _Y_dv, _Y_time, _Y_mask = build_CDR_data(
-                #                 X,
-                #                 _Y,
-                #                 Y_category_map=Y_category_map,
-                #                 history_length=history_length,
-                #                 future_length=future_length,
-                #                 impulse_names=impulse_names,
-                #                 response_names=response_names,
-                #                 X_response_aligned_predictor_names=X_response_aligned_predictor_names,
-                #                 X_response_aligned_predictors=X_response_aligned_predictors,
-                #                 X_2d_predictor_names=X_2d_predictor_names,
-                #                 X_2d_predictors=X_2d_predictors,
-                #                 int_type=int_type,
-                #                 float_type=float_type,
-                #             )
-                #             yield _X[0], _X_time[0], _X_mask[0], _Y_dv[0], _Y_time[0], _Y_mask[0], _Y_gf[_i]
-                #             i += 1
-                #             if i > n:
-                #                 i = 0
-                #                 p, _ = get_random_permutation(n)
-                #
-                #     dataset = tf.data.Dataset.from_generator(
-                #         data_gen,
-                #         output_types=(self.FLOAT_TF,) * 6 + (self.INT_TF,)
-                #     ).batch(self.minibatch_size).prefetch(10).make_one_shot_iterator()
-
                 self.run_convergence_check(verbose=False)
 
                 if (self.global_step.eval(session=self.sess) < n_iter) and not self.has_converged():
@@ -3321,23 +3267,20 @@ class Model(object):
                                 _last_obs = [x[indices] for x in last_obs]
                                 _Y_time = Y_time[indices]
                                 _Y_mask = Y_mask[indices]
-                                _Y_gf = Y_gf[indices] if len(Y_gf > 0) else Y_gf
+                                _Y_gf = None if Y_gf is None else Y_gf[indices]
+                                _X_in_Y = None if X_in_Y is None else X_in_Y[indices]
                                 _X, _X_time, _X_mask = build_CDR_impulse_data(
                                     X_in,
                                     _first_obs,
                                     _last_obs,
+                                    X_in_Y_names=X_in_Y_names,
+                                    X_in_Y=_X_in_Y,
                                     history_length=self.history_length,
                                     future_length=self.future_length,
                                     impulse_names=self.impulse_names,
-                                    X_response_aligned_predictor_names=X_response_aligned_predictor_names,
-                                    X_response_aligned_predictors=X_response_aligned_predictors,
-                                    X_2d_predictor_names=X_2d_predictor_names,
-                                    X_2d_predictors=X_2d_predictors,
                                     int_type=self.int_type,
                                     float_type=self.float_type,
                                 )
-                                # _input = dataset.get_next()
-                                # _X, _X_time, _X_mask, _Y_dv, _Y_time, _Y_mask, _Y_gf = self.sess.run(_input)
                                 fd = {
                                     self.X: _X,
                                     self.X_time: _X_time,
@@ -3356,7 +3299,7 @@ class Model(object):
                                     self.Y: Y[indices],
                                     self.Y_time: Y_time[indices],
                                     self.Y_mask: Y_mask[indices],
-                                    self.Y_gf: Y_gf[indices] if len(Y_gf > 0) else Y_gf,
+                                    self.Y_gf: None if Y_gf is None else Y_gf[indices],
                                     self.training: not self.predict_mode
                                 }
 
@@ -3440,10 +3383,7 @@ class Model(object):
                     metrics, summary = self.evaluate(
                         X_in,
                         Y_in,
-                        X_response_aligned_predictor_names=X_response_aligned_predictor_names,
-                        X_response_aligned_predictors=X_response_aligned_predictors,
-                        X_2d_predictor_names=X_2d_predictor_names,
-                        X_2d_predictors=X_2d_predictors,
+                        X_in_Y_names=X_in_Y_names,
                         dump=True,
                         partition='train'
                     )
@@ -3485,10 +3425,8 @@ class Model(object):
             Y_time=None,
             Y_gf=None,
             response=None,
-            X_response_aligned_predictor_names=None,
-            X_response_aligned_predictors=None,
-            X_2d_predictor_names=None,
-            X_2d_predictors=None,
+            X_in_Y_names=None,
+            X_in_Y=None,
             n_samples=None,
             algorithm='MAP',
             return_preds=True,
@@ -3531,10 +3469,8 @@ class Model(object):
             Can be of type ``str`` or ``int``.
             Sort order and number of observations must be identical to that of ``y_time``.
         :param response: ``list`` of ``str``, ``str``, or ``None``; Name(s) of response(s) to predict. If ``None``, predicts all responses.
-        :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
-        :param X_response_aligned_predictors: ``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
-        :param X_2d_predictor_names: ``list`` or ``None``; List of column names 2D predictors (predictors whose value depends on properties of the most recent impulse) if applicable, ``None`` otherwise.
-        :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
+        :param X_in_Y_names: ``list`` of ``str``; names of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, no such predictors.
+        :param X_in_Y: ``list`` of ``pandas`` ``DataFrame`` or ``None``; tables (one per response array) of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, inferred from **Y** and **X_in_Y_names**.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
         :param return_preds: ``bool``; whether to return predictions.
@@ -3575,13 +3511,18 @@ class Model(object):
             Y_gf_in = Y
         else:
             Y_gf_in = Y_gf
+        if X_in_Y_names:
+            X_in_Y_names = [x for x in X_in_Y_names if x in self.impulse_names]
+        X_in_Y_in = X_in_Y
 
-        Y, first_obs, last_obs, Y_time, Y_mask, Y_gf = build_CDR_response_data(
+        Y, first_obs, last_obs, Y_time, Y_mask, Y_gf, X_in_Y = build_CDR_response_data(
             self.response_names,
             Y=Y_in,
             first_obs=first_obs,
             last_obs=last_obs,
             Y_gf=Y_gf_in,
+            X_in_Y_names=X_in_Y_names,
+            X_in_Y=X_in_Y_in,
             Y_category_map=self.response_category_to_ix,
             response_to_df_ix=self.response_to_df_ix,
             gf_names=self.rangf,
@@ -3593,13 +3534,11 @@ class Model(object):
                 X_in,
                 first_obs,
                 last_obs,
+                X_in_Y_names=X_in_Y_names,
+                X_in_Y=X_in_Y,
                 history_length=self.history_length,
                 future_length=self.future_length,
                 impulse_names=self.impulse_names,
-                X_response_aligned_predictor_names=X_response_aligned_predictor_names,
-                X_response_aligned_predictors=X_response_aligned_predictors,
-                X_2d_predictor_names=X_2d_predictor_names,
-                X_2d_predictors=X_2d_predictors,
                 int_type=self.int_type,
                 float_type=self.float_type,
             )
@@ -3657,19 +3596,18 @@ class Model(object):
                                 _last_obs = [x[i:i + self.eval_minibatch_size] for x in last_obs]
                                 _Y_time = Y_time[i:i + self.eval_minibatch_size]
                                 _Y_mask = Y_mask[i:i + self.eval_minibatch_size]
-                                _Y_gf = Y_gf[i:i + self.eval_minibatch_size] if len(Y_gf > 0) else Y_gf
+                                _Y_gf = None if Y_gf is None else Y_gf[i:i + self.eval_minibatch_size]
+                                _X_in_Y = None if X_in_Y is None else X_in_Y[i:i + self.eval_minibatch_size]
 
                                 _X, _X_time, _X_mask = build_CDR_impulse_data(
                                     X_in,
                                     _first_obs,
                                     _last_obs,
+                                    X_in_Y_names=X_in_Y_names,
+                                    X_in_Y=_X_in_Y,
                                     history_length=self.history_length,
                                     future_length=self.future_length,
                                     impulse_names=self.impulse_names,
-                                    X_response_aligned_predictor_names=X_response_aligned_predictor_names,
-                                    X_response_aligned_predictors=X_response_aligned_predictors,
-                                    X_2d_predictor_names=X_2d_predictor_names,
-                                    X_2d_predictors=X_2d_predictors,
                                     int_type=self.int_type,
                                     float_type=self.float_type,
                                 )
@@ -3691,7 +3629,7 @@ class Model(object):
                                     self.X_time: X_time[i:i + self.eval_minibatch_size],
                                     self.X_mask: X_mask[i:i + self.eval_minibatch_size],
                                     self.Y_time: Y_time[i:i + self.eval_minibatch_size],
-                                    self.Y_gf: Y_gf[i:i + self.eval_minibatch_size] if len(Y_gf) > 0 else Y_gf,
+                                    self.Y_gf: None if Y_gf is None else Y_gf[i:i + self.eval_minibatch_size],
                                     self.training: not self.predict_mode
                                 }
                                 if return_loglik:
@@ -3954,10 +3892,7 @@ class Model(object):
             self,
             X,
             Y,
-            X_response_aligned_predictor_names=None,
-            X_response_aligned_predictors=None,
-            X_2d_predictor_names=None,
-            X_2d_predictors=None,
+            X_in_Y_names=None,
             n_samples=None,
             algorithm='MAP',
             dump=False,
@@ -3985,10 +3920,7 @@ class Model(object):
             * Columns with a subset of the names of the DVs specified in ``form_str`` (all DVs should be represented somewhere in **y**)
             * A column for each random grouping factor in the model specified in ``form_str``.
 
-        :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
-        :param X_response_aligned_predictors: ``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
-        :param X_2d_predictor_names: ``list`` or ``None``; List of column names 2D predictors (predictors whose value depends on properties of the most recent impulse) if applicable, ``None`` otherwise.
-        :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
+        :param X_in_Y_names: ``list`` of ``str``; names of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, no such predictors.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
         :param dump: ``bool``; whether to save generated data and evaluations to disk.
@@ -4007,8 +3939,8 @@ class Model(object):
         cdr_out = self.predict(
             X,
             Y=Y,
-            X_response_aligned_predictor_names=X_response_aligned_predictor_names,
-            X_response_aligned_predictors=X_response_aligned_predictors,
+            X_in_Y_names=X_in_Y_names,
+            X_in_Y=X_in_Y,
             X_2d_predictor_names=X_2d_predictor_names,
             X_2d_predictors=X_2d_predictors,
             n_samples=n_samples,
@@ -4185,10 +4117,7 @@ class Model(object):
             self,
             X,
             Y,
-            X_response_aligned_predictor_names=None,
-            X_response_aligned_predictors=None,
-            X_2d_predictor_names=None,
-            X_2d_predictors=None,
+            X_in_Y_names=None,
             n_samples=None,
             algorithm='MAP',
             training=None,
@@ -4214,10 +4143,7 @@ class Model(object):
             * Columns with a subset of the names of the DVs specified in ``form_str`` (all DVs should be represented somewhere in **y**)
             * A column for each random grouping factor in the model specified in ``form_str``.
 
-        :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
-        :param X_response_aligned_predictors: ``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
-        :param X_2d_predictor_names: ``list`` or ``None``; List of column names 2D predictors (predictors whose value depends on properties of the most recent impulse) if applicable, ``None`` otherwise.
-        :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
+        :param X_in_Y_names: ``list`` of ``str``; names of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, no such predictors.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
         :param training: ``bool``; Whether to compute loss in training mode.
@@ -4238,10 +4164,13 @@ class Model(object):
         if Y is not None and not isinstance(Y, list):
             Y = [Y]
         Y_in = Y
+        if X_in_Y_names:
+            X_in_Y_names = [x for x in X_in_Y_names if x in self.impulse_names]
 
-        Y, first_obs, last_obs, Y_time, Y_mask, Y_gf = build_CDR_response_data(
+        Y, first_obs, last_obs, Y_time, Y_mask, Y_gf, X_in_Y = build_CDR_response_data(
             self.response_names,
             Y=Y_in,
+            X_in_Y_names=X_in_Y_names,
             Y_category_map=self.response_category_to_ix,
             response_to_df_ix=self.response_to_df_ix,
             gf_names=self.rangf,
@@ -4253,13 +4182,11 @@ class Model(object):
                 X_in,
                 first_obs,
                 last_obs,
+                X_in_Y_names=X_in_Y_names,
+                X_in_Y=X_in_Y,
                 history_length=self.history_length,
                 future_length=self.future_length,
                 impulse_names=self.impulse_names,
-                X_response_aligned_predictor_names=X_response_aligned_predictor_names,
-                X_response_aligned_predictors=X_response_aligned_predictors,
-                X_2d_predictor_names=X_2d_predictor_names,
-                X_2d_predictors=X_2d_predictors,
                 int_type=self.int_type,
                 float_type=self.float_type,
             )
@@ -4301,24 +4228,23 @@ class Model(object):
                             _last_obs = [x[i:i + self.eval_minibatch_size] for x in last_obs]
                             _Y_time = Y_time[i:i + self.eval_minibatch_size]
                             _Y_mask = Y_mask[i:i + self.eval_minibatch_size]
-                            _Y_gf = Y_gf[i:i + self.eval_minibatch_size] if len(Y_gf > 0) else Y_gf
+                            _Y_gf = None if Y_gf is None else Y_gf[i:i + self.eval_minibatch_size]
+                            _X_in_Y = None if X_in_Y is None else X_in_Y[i:i + self.eval_minibatch_size]
 
                             _X, _X_time, _X_mask = build_CDR_impulse_data(
                                 X_in,
                                 _first_obs,
                                 _last_obs,
+                                X_in_Y_names=X_in_Y_names,
+                                X_in_Y=_X_in_Y,
                                 history_length=self.history_length,
                                 future_length=self.future_length,
                                 impulse_names=self.impulse_names,
-                                X_response_aligned_predictor_names=X_response_aligned_predictor_names,
-                                X_response_aligned_predictors=X_response_aligned_predictors,
-                                X_2d_predictor_names=X_2d_predictor_names,
-                                X_2d_predictors=X_2d_predictors,
                                 int_type=self.int_type,
                                 float_type=self.float_type,
                             )
                             _Y = None if Y is None else [_y[i:i + self.eval_minibatch_size] for _y in Y]
-                            _Y_gf = Y_gf[i:i + self.eval_minibatch_size] if len(Y_gf > 0) else Y_gf
+                            _Y_gf = None if Y_gf is None else Y_gf[i:i + self.eval_minibatch_size]
 
                             fd = {
                                 self.X: _X,
@@ -4337,7 +4263,7 @@ class Model(object):
                                 self.X_mask: X_mask[i:i + self.eval_minibatch_size],
                                 self.Y_time: Y_time[i:i + self.eval_minibatch_size],
                                 self.Y_mask: Y_mask[i:i + self.eval_minibatch_size],
-                                self.Y_gf: Y_gf[i:i + self.eval_minibatch_size] if len(Y_gf) > 0 else Y_gf,
+                                self.Y_gf: None if Y_gf is None else Y_gf[i:i + self.eval_minibatch_size],
                                 self.Y: Y[i:i + self.eval_minibatch_size],
                                 self.training: training
                             }
@@ -4405,10 +4331,8 @@ class Model(object):
             Y_gf=None,
             response=None,
             response_param=None,
-            X_response_aligned_predictor_names=None,
-            X_response_aligned_predictors=None,
-            X_2d_predictor_names=None,
-            X_2d_predictors=None,
+            X_in_Y_names=None,
+            X_in_Y=None,
             n_samples=None,
             algorithm='MAP',
             extra_cols=False,
@@ -4448,10 +4372,8 @@ class Model(object):
             Sort order and number of observations must be identical to that of ``y_time``.
         :param response: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to convolve toward. If ``None``, convolves toward all univariate responses. Multivariate convolution (e.g. of categorical responses) is supported but turned off by default to avoid excessive computation. When convolving toward a multivariate response, a set of convolved predictors will be generated for each dimension of the response.
         :param response_param: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of predictive distribution(s) to convolve toward per response variable. Any param names not used by the predictive distribution for a given response will be ignored. If ``None``, convolves toward the first parameter of each response distribution.
-        :param X_response_aligned_predictor_names: ``list`` or ``None``; List of column names for response-aligned predictors (predictors measured for every response rather than for every input) if applicable, ``None`` otherwise.
-        :param X_response_aligned_predictors: ``pandas`` table; Response-aligned predictors if applicable, ``None`` otherwise.
-        :param X_2d_predictor_names: ``list`` or ``None``; List of column names 2D predictors (predictors whose value depends on properties of the most recent impulse) if applicable, ``None`` otherwise.
-        :param X_2d_predictors: ``pandas`` table; 2D predictors if applicable, ``None`` otherwise.
+        :param X_in_Y_names: ``list`` of ``str``; names of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, no such predictors.
+        :param X_in_Y: ``list`` of ``pandas`` ``DataFrame`` or ``None``; tables (one per response array) of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, inferred from **Y** and **X_in_Y_names**.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
         :param extra_cols: ``bool``; whether to include columns from **Y** in output tables.
@@ -4501,13 +4423,18 @@ class Model(object):
             Y_gf_in = Y
         else:
             Y_gf_in = Y_gf
+        if X_in_Y_names:
+            X_in_Y_names = [x for x in X_in_Y_names if x in self.impulse_names]
+        X_in_Y_in = X_in_Y
 
-        Y, first_obs, last_obs, Y_time, Y_mask, Y_gf = build_CDR_response_data(
+        Y, first_obs, last_obs, Y_time, Y_mask, Y_gf, X_in_Y = build_CDR_response_data(
             self.response_names,
             Y=Y_in,
             first_obs=first_obs,
             last_obs=last_obs,
             Y_gf=Y_gf_in,
+            X_in_Y_names=X_in_Y_names,
+            X_in_Y=X_in_Y_in,
             Y_category_map=self.response_category_to_ix,
             response_to_df_ix=self.response_to_df_ix,
             gf_names=self.rangf,
@@ -4519,13 +4446,11 @@ class Model(object):
                 X_in,
                 first_obs,
                 last_obs,
+                X_in_Y_names=X_in_Y_names,
+                X_in_Y=X_in_Y,
                 history_length=self.history_length,
                 future_length=self.future_length,
                 impulse_names=self.impulse_names,
-                X_response_aligned_predictor_names=X_response_aligned_predictor_names,
-                X_response_aligned_predictors=X_response_aligned_predictors,
-                X_2d_predictor_names=X_2d_predictor_names,
-                X_2d_predictors=X_2d_predictors,
                 int_type=self.int_type,
                 float_type=self.float_type,
             )
@@ -4573,19 +4498,18 @@ class Model(object):
                             _last_obs = [x[i:i + self.eval_minibatch_size] for x in last_obs]
                             _Y_time = Y_time[i:i + self.eval_minibatch_size]
                             _Y_mask = Y_mask[i:i + self.eval_minibatch_size]
-                            _Y_gf = Y_gf[i:i + self.eval_minibatch_size] if len(Y_gf > 0) else Y_gf
+                            _Y_gf = None if Y_gf is None else Y_gf[i:i + self.eval_minibatch_size]
+                            _X_in_Y = None if X_in_Y is None else X_in_Y[i:i + self.eval_minibatch_size]
 
                             _X, _X_time, _X_mask = build_CDR_impulse_data(
                                 X_in,
                                 _first_obs,
                                 _last_obs,
+                                X_in_Y_names=X_in_Y_names,
+                                X_in_Y=_X_in_Y,
                                 history_length=self.history_length,
                                 future_length=self.future_length,
                                 impulse_names=self.impulse_names,
-                                X_response_aligned_predictor_names=X_response_aligned_predictor_names,
-                                X_response_aligned_predictors=X_response_aligned_predictors,
-                                X_2d_predictor_names=X_2d_predictor_names,
-                                X_2d_predictors=X_2d_predictors,
                                 int_type=self.int_type,
                                 float_type=self.float_type,
                             )
@@ -4605,7 +4529,7 @@ class Model(object):
                                 self.X_mask: X_mask[i:i + self.eval_minibatch_size],
                                 self.Y_time: Y_time[i:i + self.eval_minibatch_size],
                                 self.Y_mask: Y_mask[i:i + self.eval_minibatch_size],
-                                self.Y_gf: Y_gf[i:i + self.eval_minibatch_size] if len(Y_gf) > 0 else Y_gf,
+                                self.Y_gf: None if Y_gf is None else Y_gf[i:i + self.eval_minibatch_size],
                                 self.training: not self.predict_mode
                             }
                         if verbose:
