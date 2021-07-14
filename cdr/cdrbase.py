@@ -681,6 +681,7 @@ def double_gamma_5_irf_factory(
 
             def irf(x, pdf_main=pdf_main, pdf_undershoot=pdf_undershoot, c=c, norm_const=norm_const, epsilon=epsilon):
                 # Ensure proper broadcasting
+                c = tf.constant(c)
                 while len(x.shape) > len(c.shape):
                     c = c[None, ...]
                 while len(x.shape) > len(norm_const.shape):
