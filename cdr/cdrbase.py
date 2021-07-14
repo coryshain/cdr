@@ -969,9 +969,7 @@ class CDR(Model):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.is_response_aligned = tf.cast(
-                    tf.logical_not(
-                        tf.cast(self.t_delta[:, -1, :], dtype=tf.bool)
-                    ),
+                    tf.abs(self.t_delta[:, -1, :]) < self.epsilon,
                     self.FLOAT_TF
                 )
 

@@ -9,7 +9,8 @@ from sklearn.metrics import f1_score
 from .kwargs import MODEL_INITIALIZATION_KWARGS, MODEL_BAYES_INITIALIZATION_KWARGS
 from .formula import *
 from .util import *
-from .data import build_CDR_data, corr, corr_cdr, get_first_last_obs_lists, get_rangf_array, split_cdr_outputs
+from .data import build_CDR_impulse_data, build_CDR_response_data, corr, corr_cdr, get_first_last_obs_lists, \
+                  split_cdr_outputs
 from .opt import *
 from .plot import *
 
@@ -551,8 +552,9 @@ class Model(object):
             self.impulse_df_ix = np.zeros(len(self.form.t.impulses()))
         self.impulse_df_ix = np.array(self.impulse_df_ix, dtype=self.INT_NP)
         self.impulse_df_ix_unique = sorted(list(set(self.impulse_df_ix)))
+        self.n_impulse_df = len(self.impulse_df_ix_unique)
         self.impulse_indices = []
-        for i in range(len(self.impulse_df_ix_unique)):
+        for i in range(self.n_impulse_df):
             arange = np.arange(len(self.form.t.impulses()))
             ix = arange[np.where(self.impulse_df_ix == i)[0]]
             self.impulse_indices.append(ix)
@@ -1974,24 +1976,6 @@ class Model(object):
 
 
 
-    ######################################################
-    #
-    #  Internal public network initialization methods.
-    #  These must be implemented by all subclasses and
-    #  should only be called at initialization.
-    #
-    ######################################################
-
-    def initialize_objective(self):
-        """
-        Add an objective function to the CDR model.
-
-        :return: ``None``
-        """
-
-        raise NotImplementedError
-
-
 
 
     ######################################################
@@ -3179,12 +3163,11 @@ class Model(object):
         :param optimize_memory: ``bool``; Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).
         """
 
+        n = sum([len(_Y) for _Y in Y])
         if not np.isfinite(self.minibatch_size):
-            minibatch_size = len(Y)
+            minibatch_size = n
         else:
             minibatch_size = self.minibatch_size
-
-        n = sum([len(_Y) for _Y in Y])
         n_minibatch = int(math.ceil(n / minibatch_size))
 
         stderr('*' * 100 + '\n' + self.initialization_summary() + '*' * 100 + '\n\n')
@@ -3201,16 +3184,26 @@ class Model(object):
             Y = [Y]
         if self.use_crossval:
             Y = [_Y[self.crossval_factor].isin(self.crossval_folds) for _Y in Y]
-        Y_gf = get_rangf_array(Y, self.rangf, self.rangf_map)
+        X_in = X
+        Y_in = Y
+
+        Y, first_obs, last_obs, Y_time, Y_mask, Y_gf = build_CDR_response_data(
+            self.response_names,
+            Y=Y_in,
+            Y_category_map=self.response_category_to_ix,
+            response_to_df_ix=self.response_to_df_ix,
+            gf_names=self.rangf,
+            gf_map=self.rangf_map
+        )
+
         if not optimize_memory:
-            X_2d, X_time_2d, X_mask, Y_dv, Y_time, Y_mask = build_CDR_data(
-                X,
-                Y,
-                Y_category_map=self.response_category_to_ix,
+            X, X_time, X_mask = build_CDR_impulse_data(
+                X_in,
+                first_obs,
+                last_obs,
                 history_length=self.history_length,
                 future_length=self.future_length,
                 impulse_names=self.impulse_names,
-                response_names=self.response_names,
                 X_response_aligned_predictor_names=X_response_aligned_predictor_names,
                 X_response_aligned_predictors=X_response_aligned_predictors,
                 X_2d_predictor_names=X_2d_predictor_names,
@@ -3222,7 +3215,7 @@ class Model(object):
             # impulse_names = self.impulse_names
             # stderr('Correlation matrix for input variables:\n')
             # impulse_names_2d = [x for x in impulse_names if x in X_2d_predictor_names]
-            # rho = corr_cdr(X_2d, impulse_names, impulse_names_2d, X_time_2d, X_mask)
+            # rho = corr_cdr(X, impulse_names, impulse_names_2d, X_time, X_mask)
             # stderr(str(rho) + '\n\n')
 
         if False:
@@ -3320,19 +3313,22 @@ class Model(object):
                         if self.loss_filter_n_sds:
                             n_dropped = 0.
 
-                        for j in range(0, n, minibatch_size):
-                            indices = p[j:j+minibatch_size]
+                        for i in range(0, n, minibatch_size):
+                            indices = p[i:i+minibatch_size]
                             if optimize_memory:
-                                _Y = [_y.iloc[indices] for _y in Y]
+                                _Y = Y[indices]
+                                _first_obs = [x[indices] for x in first_obs]
+                                _last_obs = [x[indices] for x in last_obs]
+                                _Y_time = Y_time[indices]
+                                _Y_mask = Y_mask[indices]
                                 _Y_gf = Y_gf[indices] if len(Y_gf > 0) else Y_gf
-                                _X, _X_time, _X_mask, _Y_dv, _Y_time, _Y_mask = build_CDR_data(
-                                    X,
-                                    _Y,
-                                    Y_category_map=self.response_category_to_ix,
+                                _X, _X_time, _X_mask = build_CDR_impulse_data(
+                                    X_in,
+                                    _first_obs,
+                                    _last_obs,
                                     history_length=self.history_length,
                                     future_length=self.future_length,
                                     impulse_names=self.impulse_names,
-                                    response_names=self.response_names,
                                     X_response_aligned_predictor_names=X_response_aligned_predictor_names,
                                     X_response_aligned_predictors=X_response_aligned_predictors,
                                     X_2d_predictor_names=X_2d_predictor_names,
@@ -3346,7 +3342,7 @@ class Model(object):
                                     self.X: _X,
                                     self.X_time: _X_time,
                                     self.X_mask: _X_mask,
-                                    self.Y: _Y_dv,
+                                    self.Y: _Y,
                                     self.Y_time: _Y_time,
                                     self.Y_mask: _Y_mask,
                                     self.Y_gf: _Y_gf,
@@ -3354,10 +3350,10 @@ class Model(object):
                                 }
                             else:
                                 fd = {
-                                    self.X: X_2d[indices],
-                                    self.X_time: X_time_2d[indices],
+                                    self.X: X[indices],
+                                    self.X_time: X_time[indices],
                                     self.X_mask: X_mask[indices],
-                                    self.Y: Y_dv[indices],
+                                    self.Y: Y[indices],
                                     self.Y_time: Y_time[indices],
                                     self.Y_mask: Y_mask[indices],
                                     self.Y_gf: Y_gf[indices] if len(Y_gf > 0) else Y_gf,
@@ -3388,7 +3384,7 @@ class Model(object):
                                 kl_loss_total += kl_loss_cur
                                 pb_update.append(('kl', kl_loss_cur))
 
-                            pb.update((j/minibatch_size)+1, values=pb_update)
+                            pb.update((i/minibatch_size)+1, values=pb_update)
 
                             # if self.global_batch_step.eval(session=self.sess) % 1000 == 0:
                             #     self.save()
@@ -3442,8 +3438,8 @@ class Model(object):
                 if not self.training_complete.eval(session=self.sess) or force_training_evaluation:
                     # Extract and save predictions
                     metrics, summary = self.evaluate(
-                        X,
-                        Y,
+                        X_in,
+                        Y_in,
                         X_response_aligned_predictor_names=X_response_aligned_predictor_names,
                         X_response_aligned_predictors=X_response_aligned_predictors,
                         X_2d_predictor_names=X_2d_predictor_names,
@@ -3558,33 +3554,48 @@ class Model(object):
             stderr('Using GPU: %s\n' % usingGPU)
             stderr('Computing predictions...\n')
 
+        if response is None:
+            response = self.response_names
+        if not isinstance(response, list):
+            response = [response]
+
         # Preprocess data
         if not isinstance(X, list):
             X = [X]
+        X_in = X
         if Y is not None and not isinstance(Y, list):
             Y = [Y]
-        if Y is None:
-            Y_time_in = Y_time
-        else:
+        Y_in = Y
+        if Y_time is None:
             Y_time_in = [_Y.time for _Y in Y]
+        else:
+            Y_time_in = Y_time
         if Y_gf is None:
             assert Y is not None, 'Either Y or Y_gf must be provided.'
             Y_gf_in = Y
         else:
             Y_gf_in = Y_gf
-        Y_gf = get_rangf_array(Y_gf_in, self.rangf, self.rangf_map)
-        if not optimize_memory:
-            X_2d, X_time_2d, X_mask, Y_dv, Y_time, Y_mask = build_CDR_data(
-                X,
-                Y=Y,
-                first_obs=first_obs,
-                last_obs=last_obs,
-                Y_time=Y_time,
-                Y_category_map=self.response_category_to_ix,
-                impulse_names=self.impulse_names,
-                response_names=self.response_names,
+
+        Y, first_obs, last_obs, Y_time, Y_mask, Y_gf = build_CDR_response_data(
+            self.response_names,
+            Y=Y_in,
+            first_obs=first_obs,
+            last_obs=last_obs,
+            Y_gf=Y_gf_in,
+            Y_category_map=self.response_category_to_ix,
+            response_to_df_ix=self.response_to_df_ix,
+            gf_names=self.rangf,
+            gf_map=self.rangf_map
+        )
+
+        if not optimize_memory or not np.isfinite(self.eval_minibatch_size):
+            X, X_time, X_mask = build_CDR_impulse_data(
+                X_in,
+                first_obs,
+                last_obs,
                 history_length=self.history_length,
                 future_length=self.future_length,
+                impulse_names=self.impulse_names,
                 X_response_aligned_predictor_names=X_response_aligned_predictor_names,
                 X_response_aligned_predictors=X_response_aligned_predictors,
                 X_2d_predictor_names=X_2d_predictor_names,
@@ -3593,11 +3604,6 @@ class Model(object):
                 float_type=self.float_type,
             )
 
-        if response is None:
-            response = self.response_names
-        if not isinstance(response, list):
-            response = [response]
-
         if return_preds or return_loglik:
             with self.sess.as_default():
                 with self.sess.graph.as_default():
@@ -3605,14 +3611,14 @@ class Model(object):
 
                     if not np.isfinite(self.eval_minibatch_size):
                         fd = {
-                            self.X: X_2d,
-                            self.X_time: X_time_2d,
+                            self.X: X,
+                            self.X_time: X_time,
                             self.Y_time: Y_time,
                             self.Y_gf: Y_gf,
                             self.training: not self.predict_mode
                         }
                         if return_loglik:
-                            fd[self.Y] = Y_dv
+                            fd[self.Y] = Y
                             fd[self.Y_mask]: Y_mask
                         out = self.run_predict_op(
                             fd,
@@ -3641,28 +3647,25 @@ class Model(object):
                             if len(self.response_names) > 1:
                                 out['log_lik']['AllResponses'] = np.zeros((n,))
 
-
                         n_eval_minibatch = math.ceil(n / self.eval_minibatch_size)
                         for i in range(0, n, self.eval_minibatch_size):
                             if verbose:
                                 stderr('\rMinibatch %d/%d' %((i/self.eval_minibatch_size)+1, n_eval_minibatch))
                             if optimize_memory:
-                                _Y = None if Y is None else [_y[i:i + self.eval_minibatch_size] for _y in Y]
+                                _Y = None if Y is None else Y[i:i + self.eval_minibatch_size]
+                                _first_obs = [x[i:i + self.eval_minibatch_size] for x in first_obs]
+                                _last_obs = [x[i:i + self.eval_minibatch_size] for x in last_obs]
+                                _Y_time = Y_time[i:i + self.eval_minibatch_size]
+                                _Y_mask = Y_mask[i:i + self.eval_minibatch_size]
                                 _Y_gf = Y_gf[i:i + self.eval_minibatch_size] if len(Y_gf > 0) else Y_gf
-                                _first_obs = None if first_obs is None else [_y[i:i + self.eval_minibatch_size] for _y in first_obs]
-                                _last_obs = None if last_obs is None else [_y[i:i + self.eval_minibatch_size] for _y in last_obs]
-                                _Y_time = None if Y_time is None else [_y[i:i + self.eval_minibatch_size] for _y in Y_time]
-                                _X, _X_time, _X_mask, _Y_dv, _Y_time, _Y_mask = build_CDR_data(
-                                    X,
-                                    _Y,
-                                    first_obs=_first_obs,
-                                    last_obs=_last_obs,
-                                    Y_time=_Y_time,
-                                    Y_category_map=self.response_category_to_ix,
+
+                                _X, _X_time, _X_mask = build_CDR_impulse_data(
+                                    X_in,
+                                    _first_obs,
+                                    _last_obs,
                                     history_length=self.history_length,
                                     future_length=self.future_length,
                                     impulse_names=self.impulse_names,
-                                    response_names=self.response_names,
                                     X_response_aligned_predictor_names=X_response_aligned_predictor_names,
                                     X_response_aligned_predictors=X_response_aligned_predictors,
                                     X_2d_predictor_names=X_2d_predictor_names,
@@ -3680,19 +3683,19 @@ class Model(object):
                                     self.training: not self.predict_mode
                                 }
                                 if return_loglik:
-                                    fd[self.Y] = _Y_dv
+                                    fd[self.Y] = _Y
                                     fd[self.Y_mask]: _Y_mask
                             else:
                                 fd = {
-                                    self.X: X_2d[i:i + self.eval_minibatch_size],
-                                    self.X_time: X_time_2d[i:i + self.eval_minibatch_size],
+                                    self.X: X[i:i + self.eval_minibatch_size],
+                                    self.X_time: X_time[i:i + self.eval_minibatch_size],
                                     self.X_mask: X_mask[i:i + self.eval_minibatch_size],
                                     self.Y_time: Y_time[i:i + self.eval_minibatch_size],
                                     self.Y_gf: Y_gf[i:i + self.eval_minibatch_size] if len(Y_gf) > 0 else Y_gf,
                                     self.training: not self.predict_mode
                                 }
                                 if return_loglik:
-                                    fd[self.Y] = Y_dv[i:i + self.eval_minibatch_size]
+                                    fd[self.Y] = Y[i:i + self.eval_minibatch_size]
                                     fd[self.Y_mask]: Y_mask[i:i + self.eval_minibatch_size]
                             _out = self.run_predict_op(
                                 fd,
@@ -4231,18 +4234,28 @@ class Model(object):
         # Preprocess data
         if not isinstance(X, list):
             X = [X]
+        X_in = X
         if Y is not None and not isinstance(Y, list):
             Y = [Y]
-        Y_gf = get_rangf_array(Y, self.rangf, self.rangf_map)
-        if not optimize_memory:
-            X_2d, X_time_2d, X_mask, Y_dv, Y_time, Y_mask = build_CDR_data(
-                X,
-                Y,
-                Y_category_map=self.response_category_to_ix,
+        Y_in = Y
+
+        Y, first_obs, last_obs, Y_time, Y_mask, Y_gf = build_CDR_response_data(
+            self.response_names,
+            Y=Y_in,
+            Y_category_map=self.response_category_to_ix,
+            response_to_df_ix=self.response_to_df_ix,
+            gf_names=self.rangf,
+            gf_map=self.rangf_map
+        )
+
+        if not optimize_memory or not np.isfinite(self.eval_minibatch_size):
+            X, X_time, X_mask = build_CDR_impulse_data(
+                X_in,
+                first_obs,
+                last_obs,
                 history_length=self.history_length,
                 future_length=self.future_length,
                 impulse_names=self.impulse_names,
-                response_names=self.response_names,
                 X_response_aligned_predictor_names=X_response_aligned_predictor_names,
                 X_response_aligned_predictors=X_response_aligned_predictors,
                 X_2d_predictor_names=X_2d_predictor_names,
@@ -4260,13 +4273,13 @@ class Model(object):
 
                 if not np.isfinite(self.eval_minibatch_size):
                     fd = {
-                        self.X: X_2d,
-                        self.X_time: X_time_2d,
+                        self.X: X,
+                        self.X_time: X_time,
                         self.X_mask: X_mask,
                         self.Y_time: Y_time,
                         self.Y_mask: Y_mask,
                         self.Y_gf: Y_gf,
-                        self.Y: Y_dv,
+                        self.Y: Y,
                         self.training: training
                     }
                     loss = self.run_loss_op(
@@ -4283,16 +4296,20 @@ class Model(object):
                         if verbose:
                             stderr('\rMinibatch %d/%d' %(i+1, n_minibatch))
                         if optimize_memory:
-                            _Y = None if Y is None else [_y[i:i + self.eval_minibatch_size] for _y in Y]
+                            _Y = Y[i:i + self.eval_minibatch_size]
+                            _first_obs = [x[i:i + self.eval_minibatch_size] for x in first_obs]
+                            _last_obs = [x[i:i + self.eval_minibatch_size] for x in last_obs]
+                            _Y_time = Y_time[i:i + self.eval_minibatch_size]
+                            _Y_mask = Y_mask[i:i + self.eval_minibatch_size]
                             _Y_gf = Y_gf[i:i + self.eval_minibatch_size] if len(Y_gf > 0) else Y_gf
-                            _X, _X_time, _X_mask, _Y_dv, _Y_time, _Y_mask = build_CDR_data(
-                                X,
-                                _Y,
-                                Y_category_map=self.response_category_to_ix,
+
+                            _X, _X_time, _X_mask = build_CDR_impulse_data(
+                                X_in,
+                                _first_obs,
+                                _last_obs,
                                 history_length=self.history_length,
                                 future_length=self.future_length,
                                 impulse_names=self.impulse_names,
-                                response_names=self.response_names,
                                 X_response_aligned_predictor_names=X_response_aligned_predictor_names,
                                 X_response_aligned_predictors=X_response_aligned_predictors,
                                 X_2d_predictor_names=X_2d_predictor_names,
@@ -4300,11 +4317,14 @@ class Model(object):
                                 int_type=self.int_type,
                                 float_type=self.float_type,
                             )
+                            _Y = None if Y is None else [_y[i:i + self.eval_minibatch_size] for _y in Y]
+                            _Y_gf = Y_gf[i:i + self.eval_minibatch_size] if len(Y_gf > 0) else Y_gf
+
                             fd = {
                                 self.X: _X,
                                 self.X_time: _X_time,
                                 self.X_mask: _X_mask,
-                                self.Y: _Y_dv,
+                                self.Y: _Y,
                                 self.Y_time: _Y_time,
                                 self.Y_mask: _Y_mask,
                                 self.Y_gf: _Y_gf,
@@ -4312,13 +4332,13 @@ class Model(object):
                             }
                         else:
                             fd = {
-                                self.X: X_2d[i:i + self.eval_minibatch_size],
-                                self.X_time: X_time_2d[i:i + self.eval_minibatch_size],
+                                self.X: X[i:i + self.eval_minibatch_size],
+                                self.X_time: X_time[i:i + self.eval_minibatch_size],
                                 self.X_mask: X_mask[i:i + self.eval_minibatch_size],
                                 self.Y_time: Y_time[i:i + self.eval_minibatch_size],
                                 self.Y_mask: Y_mask[i:i + self.eval_minibatch_size],
                                 self.Y_gf: Y_gf[i:i + self.eval_minibatch_size] if len(Y_gf) > 0 else Y_gf,
-                                self.Y: Y_dv[i:i + self.eval_minibatch_size],
+                                self.Y: Y[i:i + self.eval_minibatch_size],
                                 self.training: training
                             }
                         loss[i:i + self.eval_minibatch_size] = self.run_loss_op(
@@ -4468,28 +4488,40 @@ class Model(object):
         # Preprocess data
         if not isinstance(X, list):
             X = [X]
+        X_in = X
         if Y is not None and not isinstance(Y, list):
             Y = [Y]
-        if Y is None:
-            Y_time_in = Y_time
-        else:
+        Y_in = Y
+        if Y_time is None:
             Y_time_in = [_Y.time for _Y in Y]
+        else:
+            Y_time_in = Y_time
         if Y_gf is None:
             assert Y is not None, 'Either Y or Y_gf must be provided.'
             Y_gf_in = Y
         else:
             Y_gf_in = Y_gf
-        Y_gf = get_rangf_array(Y_gf_in, self.rangf, self.rangf_map)
-        if not optimize_memory:
-            X_2d, X_time_2d, X_mask, Y_dv, Y_time, Y_mask = build_CDR_data(
-                X,
-                Y=Y,
-                first_obs=first_obs,
-                last_obs=last_obs,
-                Y_time=Y_time,
-                Y_category_map=self.response_category_to_ix,
+
+        Y, first_obs, last_obs, Y_time, Y_mask, Y_gf = build_CDR_response_data(
+            self.response_names,
+            Y=Y_in,
+            first_obs=first_obs,
+            last_obs=last_obs,
+            Y_gf=Y_gf_in,
+            Y_category_map=self.response_category_to_ix,
+            response_to_df_ix=self.response_to_df_ix,
+            gf_names=self.rangf,
+            gf_map=self.rangf_map
+        )
+
+        if not optimize_memory or not np.isfinite(self.minibatch_size):
+            X, X_time, X_mask = build_CDR_impulse_data(
+                X_in,
+                first_obs,
+                last_obs,
+                history_length=self.history_length,
+                future_length=self.future_length,
                 impulse_names=self.impulse_names,
-                response_names=self.response_names,
                 X_response_aligned_predictor_names=X_response_aligned_predictor_names,
                 X_response_aligned_predictors=X_response_aligned_predictors,
                 X_2d_predictor_names=X_2d_predictor_names,
@@ -4504,8 +4536,8 @@ class Model(object):
 
                 if not np.isfinite(self.minibatch_size):
                     fd = {
-                        self.X: X_2d,
-                        self.X_time: X_time_2d,
+                        self.X: X,
+                        self.X_time: X_time,
                         self.X_mask: X_mask,
                         self.Y_time: Y_time,
                         self.Y_mask: Y_mask,
@@ -4536,22 +4568,20 @@ class Model(object):
                         if verbose:
                             stderr('\rMinibatch %d/%d' % ((i / self.eval_minibatch_size) + 1, n_eval_minibatch))
                         if optimize_memory:
-                            _Y = None if Y is None else [_y[i:i + self.eval_minibatch_size] for _y in Y]
+                            _Y = None if Y is None else Y[i:i + self.eval_minibatch_size]
+                            _first_obs = [x[i:i + self.eval_minibatch_size] for x in first_obs]
+                            _last_obs = [x[i:i + self.eval_minibatch_size] for x in last_obs]
+                            _Y_time = Y_time[i:i + self.eval_minibatch_size]
+                            _Y_mask = Y_mask[i:i + self.eval_minibatch_size]
                             _Y_gf = Y_gf[i:i + self.eval_minibatch_size] if len(Y_gf > 0) else Y_gf
-                            _first_obs = None if first_obs is None else [_y[i:i + self.eval_minibatch_size] for _y in first_obs]
-                            _last_obs = None if last_obs is None else [_y[i:i + self.eval_minibatch_size] for _y in last_obs]
-                            _Y_time = None if Y_time is None else [_y[i:i + self.eval_minibatch_size] for _y in Y_time]
-                            _X, _X_time, _X_mask, _Y_dv, _Y_time, _Y_mask = build_CDR_data(
-                                X,
-                                _Y,
-                                first_obs=_first_obs,
-                                last_obs=_last_obs,
-                                Y_time=_Y_time,
-                                Y_category_map=self.response_category_to_ix,
+
+                            _X, _X_time, _X_mask = build_CDR_impulse_data(
+                                X_in,
+                                _first_obs,
+                                _last_obs,
                                 history_length=self.history_length,
                                 future_length=self.future_length,
                                 impulse_names=self.impulse_names,
-                                response_names=self.response_names,
                                 X_response_aligned_predictor_names=X_response_aligned_predictor_names,
                                 X_response_aligned_predictors=X_response_aligned_predictors,
                                 X_2d_predictor_names=X_2d_predictor_names,
@@ -4570,8 +4600,8 @@ class Model(object):
                             }
                         else:
                             fd = {
-                                self.X: X_2d[i:i + self.eval_minibatch_size],
-                                self.X_time: X_time_2d[i:i + self.eval_minibatch_size],
+                                self.X: X[i:i + self.eval_minibatch_size],
+                                self.X_time: X_time[i:i + self.eval_minibatch_size],
                                 self.X_mask: X_mask[i:i + self.eval_minibatch_size],
                                 self.Y_time: Y_time[i:i + self.eval_minibatch_size],
                                 self.Y_mask: Y_mask[i:i + self.eval_minibatch_size],
