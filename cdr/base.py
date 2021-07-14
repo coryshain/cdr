@@ -3158,6 +3158,8 @@ class Model(object):
         :param optimize_memory: ``bool``; Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).
         """
 
+        lengths = [len(_Y) for _Y in Y]
+        n = sum(lengths)
         if not np.isfinite(self.minibatch_size):
             minibatch_size = n
         else:
@@ -3178,8 +3180,6 @@ class Model(object):
             Y = [Y]
         if self.use_crossval:
             Y = [_Y[self.crossval_factor].isin(self.crossval_folds) for _Y in Y]
-        lengths = [len(_Y) for _Y in Y]
-        n = sum(lengths)
         X_in = X
         Y_in = Y
         if X_in_Y_names:
@@ -3643,7 +3643,7 @@ class Model(object):
 
                     # Split into per-file predictions.
                     # Exclude the length of last file because it will be inferred.
-                    out = split_cdr_outputs(out, [len(_Y) for _Y in Y_time_in[:-1]])
+                    out = split_cdr_outputs(out, [x for x in lengths[:-1]])
 
                     if verbose:
                         stderr('\n\n')
@@ -4488,7 +4488,7 @@ class Model(object):
 
                 # Split into per-file predictions.
                 # Exclude the length of last file because it will be inferred.
-                X_conv = split_cdr_outputs(X_conv, [len(_Y) for _Y in Y_time_in[:-1]])
+                X_conv = split_cdr_outputs(X_conv, [x for x in lengths[:-1]])
 
                 if verbose:
                     stderr('\n\n')
