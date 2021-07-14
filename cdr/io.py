@@ -81,18 +81,18 @@ def read_tabular_data(X_paths, Y_paths, series_ids, categorical_columns=None, se
         for t in categorical_columns:
             for col in t.split(':'):
                 for _X in X:
-                    if col in _X.columns:
+                    if col in _X:
                         _X[col] = _X[col].astype('category')
                 for _Y in Y:
-                    if col in _Y.columns:
+                    if col in _Y:
                         _Y[col] = _Y[col].astype('category')
 
     # Add columns to X
 
     for _X in X:
-        assert not 'rate' in _X.columns, '"rate" is a reserved column name in CDR. Rename your input column...'
+        assert not 'rate' in _X, '"rate" is a reserved column name in CDR. Rename your input column...'
         _X['rate'] = 1.
-        if 'trial' not in _X.columns:
+        if 'trial' not in _X:
             _X['trial'] = _X.groupby(series_ids).rate.cumsum()
 
     return X, Y

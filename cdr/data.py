@@ -109,7 +109,7 @@ def add_responses(names, y):
         names = [names]
 
     for name in names:
-        if name in y.columns:
+        if name in y:
             return y
 
         op, var = op_finder.match(name).groups()
@@ -969,7 +969,7 @@ def compute_filters(Y, filters=None):
             select &= compute_filter(Y, field, cond)
         elif field.lower().endswith('nunique'):
             name = field[:-7]
-            if name in Y.columns:
+            if name in Y:
                 vals, counts = np.unique(Y[name][select], return_counts=True)
                 count_map = {}
                 for v, c in zip(vals, counts):

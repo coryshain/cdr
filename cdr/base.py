@@ -151,7 +151,7 @@ class Model(object):
                 is_categorical = True
                 found = False
                 for _Y in Y:
-                    if _response.name() in _Y.columns:
+                    if _response.name() in _Y:
                         cats = sorted(list(_Y[_response.name()].unique()))
                         category_map = dict(zip(cats, range(len(cats))))
                         n_dim = len(cats)
@@ -195,7 +195,7 @@ class Model(object):
         for i, _Y in enumerate(Y):
             to_add = True
             for j, _response in enumerate(response_names):
-                if _response in _Y.columns:
+                if _response in _Y:
                     if to_add:
                         self.n_train += len(_Y)
                         to_add = False
@@ -262,7 +262,7 @@ class Model(object):
                 impulse_max[name] = 1.
             else:
                 for i, df in enumerate(X + Y):
-                    if name in df.columns and not name.lower() == 'rate':
+                    if name in df and not name.lower() == 'rate':
                         column = df[name].values
                         impulse_means[name] = column.mean()
                         impulse_sds[name] = column.std()
@@ -280,7 +280,7 @@ class Model(object):
                         found = True
                         impulse_names = [x.name() for x in impulse.impulses()]
                         for x in impulse.impulses():
-                            if not x.name() in df.columns:
+                            if not x.name() in df:
                                 found = False
                                 break
                         if found:
@@ -314,7 +314,7 @@ class Model(object):
         for _response in response_names:
             self.response_to_df_ix[_response] = []
             for i, _Y in enumerate(Y):
-                if _response in _Y.columns:
+                if _response in _Y:
                     self.response_to_df_ix[_response].append(i)
 
         # Collect stats for temporal features
@@ -3940,9 +3940,6 @@ class Model(object):
             X,
             Y=Y,
             X_in_Y_names=X_in_Y_names,
-            X_in_Y=X_in_Y,
-            X_2d_predictor_names=X_2d_predictor_names,
-            X_2d_predictors=X_2d_predictors,
             n_samples=n_samples,
             algorithm=algorithm,
             return_preds=True,

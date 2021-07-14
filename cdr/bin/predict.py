@@ -189,11 +189,11 @@ if __name__ == '__main__':
                     preds = rhs.split('+')
                     for pred in preds:
                         sp = spillover.search(pred)
-                        if sp and sp.group(2) in X_baseline.columns:
+                        if sp and sp.group(2) in X_baseline:
                             x_id = sp.group(2)
                             n = int(sp.group(3))
                             x_id_sp = x_id + 'S' + str(n)
-                            if x_id_sp not in X_baseline.columns:
+                            if x_id_sp not in X_baseline:
                                 X_baseline[x_id_sp] = X_baseline.groupby(p.series_ids)[x_id].shift_activations(n, fill_value=0.)
 
             if partitions is not None:
@@ -215,7 +215,7 @@ if __name__ == '__main__':
                     form = p['formula']
                     dv = form.split('~')[0].strip()
                     Y = add_responses(dv, Y)
-                    if not dv in X_baseline.columns:
+                    if not dv in X_baseline:
                         X_baseline[dv] = Y[dv]
 
             for c in X_baseline.columns:

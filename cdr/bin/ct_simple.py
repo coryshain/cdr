@@ -37,9 +37,9 @@ if __name__ == '__main__':
     else:
         df = pd.read_csv(df1_path, sep=' ', skipinitialspace=True)
         a = scale(df.CDRpreds)
-        if 'y' in df.columns:
+        if 'y' in df:
             y = scale(df.y)
-        elif 'yStandardized' in df.columns:
+        elif 'yStandardized' in df:
             y = scale(df.yStandardized)
         else:
             y = scale(df.CDRobs)

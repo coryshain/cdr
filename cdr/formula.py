@@ -917,14 +917,14 @@ class Formula(object):
             ops = impulse.ops
 
             expanded_impulses = None
-            if impulse.id not in _X.columns:
+            if impulse.id not in _X:
                 if type(impulse).__name__ == 'ImpulseInteraction':
                     _X, expanded_impulses, expanded_atomic_impulses = impulse.expand_categorical(_X)
                     for x in expanded_atomic_impulses:
                         for a in x:
                             _X = self.apply_ops(a, _X)
                     for x in expanded_impulses:
-                        if x.name() not in _X.columns:
+                        if x.name() not in _X:
                             _X[x.id] = _X[[y.name() for y in x.atomic_impulses]].product(axis=1)
             else:
                 if type(impulse).__name__ == 'ImpulseInteraction':
@@ -934,7 +934,7 @@ class Formula(object):
 
             if expanded_impulses is not None:
                 for x in expanded_impulses:
-                    if x.name() not in _X.columns:
+                    if x.name() not in _X:
                         new_col = _X[x.id]
                         for j in range(len(ops)):
                             op = ops[j]
@@ -1115,9 +1115,9 @@ class Formula(object):
         for dv in self.dv_term:
             found = False
             for i, _Y in enumerate(Y):
-                if dv.id in _Y.columns:
+                if dv.id in _Y:
                     found = True
-                    if dv.name() not in _Y.columns:
+                    if dv.name() not in _Y:
                         _Y = self.apply_ops(dv, _Y)
                     Y[i] = _Y
                     break
@@ -1155,7 +1155,7 @@ class Formula(object):
                 if x.id in X_columns:
                     for i in range(len(X)):
                         _X = X[i]
-                        if x.id in _X.columns:
+                        if x.id in _X:
                             _X = self.apply_ops(x, _X)
                             X[i] = _X
                             break
@@ -1166,14 +1166,14 @@ class Formula(object):
                         n = int(sp.group(2))
                         for i in range(len(X)):
                             _X = X[i]
-                            if x_id in _X.columns:
+                            if x_id in _X:
                                 _X[x_id] = _X.groupby(series_ids)[x_id].shift_activations(n, fill_value=0.)
                                 _X = self.apply_ops(x, _X)
                                 X[i] = _X
                                 break
                     else: # Response aligned
                         for i, _Y in enumerate(Y):
-                            assert x.id in _Y.columns, 'Impulse %s not found in data. Either it is missing from all of the predictor files X, or (if response aligned) it is missing from at least one of the response files Y.' % x.name()
+                            assert x.id in _Y, 'Impulse %s not found in data. Either it is missing from all of the predictor files X, or (if response aligned) it is missing from at least one of the response files Y.' % x.name()
                             Y[i] = self.apply_ops(x, _Y)
                         if X_in_Y_names is None:
                             X_in_Y_names = []
@@ -1197,7 +1197,7 @@ class Formula(object):
                         _X = X[i]
                         in_X = True
                         for atom in impulse.impulses():
-                            if atom.id not in _X.columns:
+                            if atom.id not in _X:
                                 in_X = False
                         if in_X:
                             _X = self.apply_ops(impulse, _X)
@@ -1539,14 +1539,14 @@ class Impulse(object):
 
         for i in range(len(X)):
             _X = X[i]
-            if self.id in _X.columns and self.categorical(X):
+            if self.id in _X and self.categorical(X):
                 vals = sorted(_X[self.id].unique())[1:]
                 impulses = [Impulse('_'.join([self.id, pythonize_string(str(val))]), ops=self.ops) for val in vals]
                 expanded_value_names = [str(val) for val in vals]
                 for j in range(len(impulses)):
                     x = impulses[j]
                     val = expanded_value_names[j]
-                    if x.id not in _X.columns:
+                    if x.id not in _:
                         _X[x.id] = (_X[self.id] == val).astype('float')
                 X[i] = _X
                 break
@@ -2748,7 +2748,7 @@ class IRFNode(object):
                             if response.categorical(X):
                                 found = False
                                 for _X in X:
-                                    if response.id in _X.columns:
+                                    if response.id in _X:
                                         found = True
                                         vals = sorted(_X[response.id].unique()[1:])
                                         expansion = [Impulse('_'.join([response.id, pythonize_string(str(val))]), ops=response.ops) for val in vals]
@@ -2763,7 +2763,7 @@ class IRFNode(object):
                                 if subresponse.categorical(X):
                                     found = False
                                     for _X in X:
-                                        if subresponse.id in _X.columns:
+                                        if subresponse.id in _X:
                                             found = True
                                             vals = sorted(_X[subresponse.id].unique()[1:])
                                             expansion = [
@@ -2782,7 +2782,7 @@ class IRFNode(object):
                         if x.categorical(X):
                             found = False
                             for _X in X:
-                                if x.id in _X.columns:
+                                if x.id in _X:
                                     found = True
                                     vals = sorted(_X[x.id].unique()[1:])
                                     expansion = [Impulse('_'.join([x.id, pythonize_string(str(val))]), ops=x.ops) for val in vals]
@@ -2802,7 +2802,7 @@ class IRFNode(object):
                         if self.impulse.categorical(X):
                             found = False
                             for _X in X:
-                                if self.impulse.id in _X.columns:
+                                if self.impulse.id in _X:
                                     found = True
                                     vals = sorted(_X[self.impulse.id].unique()[1:])
                                     expansion = [Impulse('_'.join([self.impulse.id, pythonize_string(str(val))]), ops=self.impulse.ops) for val in vals]
