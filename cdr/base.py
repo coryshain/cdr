@@ -2660,30 +2660,13 @@ class Model(object):
             level=level,
             n_samples=n_samples
         )
-        nresponse = len(self.response_names)
-
-        if nresponse > 1:
-            key_table = pd.DataFrame({
-                'Parameter': parameter_table['Parameter'] + ' | ' +
-                             parameter_table['Response'] + ' | ' +
-                             parameter_table['ResponseParam']
-            })
-        else:
-            key_table = pd.DataFrame({
-                'Parameter': parameter_table['Parameter'] + ' | ' +
-                             parameter_table['ResponseParam']
-            })
-        parameter_table = pd.concat(
-            [key_table, parameter_table[self.parameter_table_columns]],
-            axis=1
-        )
         formatters = {
             'Parameter': left_justified_formatter(parameter_table, 'Parameter')
         }
         parameter_table_str = parameter_table.to_string(
             index=False,
             justify='left',
-            formatters = formatters
+            formatters=formatters
         )
 
         out += ' ' * (indent + 2) + 'Fixed:\n'
@@ -2697,32 +2680,13 @@ class Model(object):
                 level=level,
                 n_samples=n_samples
             )
-            if nresponse > 1:
-                key_table = pd.DataFrame({
-                    'Parameter': parameter_table['Parameter'] + ' | ' +
-                                 parameter_table['Response'] + ' | ' +
-                                 parameter_table['ResponseParam'] + ' | ' +
-                                 parameter_table['Group'] + ' | ' +
-                                 parameter_table['Level']
-                })
-            else:
-                key_table = pd.DataFrame({
-                    'Parameter': parameter_table['Parameter'] + ' | ' +
-                                 parameter_table['ResponseParam'] + ' | ' +
-                                 parameter_table['Group'] + ' | ' +
-                                 parameter_table['Level']
-                })
-            parameter_table = pd.concat(
-                [key_table, parameter_table[self.parameter_table_columns]],
-                axis=1
-            )
             formatters = {
                 'Parameter': left_justified_formatter(parameter_table, 'Parameter')
             }
             parameter_table_str = parameter_table.to_string(
                 index=False,
                 justify='left',
-                formatters = formatters
+                formatters=formatters
             )
 
             out += ' ' * (indent + 2) + 'Random:\n'
@@ -3396,17 +3360,25 @@ class Model(object):
                     fd = {}
                     to_run = []
                     for response in self.training_loglik_in:
-                        for ix, tensor in enumerate(self.training_loglik_in[response]):
+                        for ix in self.training_loglik_in[response]:
+                            tensor = self.training_loglik_in[response][ix]
                             fd[tensor] = metrics['log_lik'][response][ix]
                             to_run.append(self.set_training_loglik[response][ix])
                     for response in self.training_mse_in:
-                        for ix, tensor in enumerate(self.training_mse_in[response]):
-                            fd[tensor] = metrics['mse'][response][ix]
-                            to_run.append(self.set_training_mse[response][ix])
+                        if self.is_real(response):
+                            for ix in self.training_mse_in[response]:
+                                tensor = self.training_mse_in[response][ix]
+                                fd[tensor] = metrics['mse'][response][ix]
+                                to_run.append(self.set_training_mse[response][ix])
                     for response in self.training_rho_in:
-                        for ix, tensor in enumerate(self.training_rho_in[response]):
-                            fd[tensor] = metrics['rho'][response][ix]
-                            to_run.append(self.set_training_rho[response][ix])
+                        if self.is_real(response):
+                            for ix in self.training_rho_in[response]:
+                                tensor = self.training_rho_in[response][ix]
+                                fd[tensor] = metrics['rho'][response][ix]
+                                to_run.append(self.set_training_rho[response][ix])
+
+                    print(to_run)
+                    print(fd)
 
                     self.sess.run(to_run, feed_dict=fd)
                     self.save()
