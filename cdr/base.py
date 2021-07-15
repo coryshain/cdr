@@ -3377,9 +3377,6 @@ class Model(object):
                                 fd[tensor] = metrics['rho'][response][ix]
                                 to_run.append(self.set_training_rho[response][ix])
 
-                    print(to_run)
-                    print(fd)
-
                     self.sess.run(to_run, feed_dict=fd)
                     self.save()
 
