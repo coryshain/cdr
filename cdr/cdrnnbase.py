@@ -94,17 +94,6 @@ class CDRNN(Model):
             setattr(self, kwarg.key, kwargs.pop(kwarg.key, kwarg.default_value))
 
     def _initialize_metadata(self):
-        self.is_cdrnn = True
-
-        self.has_dropout = self.input_projection_dropout_rate or \
-                           self.rnn_h_dropout_rate or \
-                           self.rnn_c_dropout_rate or \
-                           self.h_in_dropout_rate or \
-                           self.h_rnn_dropout_rate or \
-                           self.rnn_dropout_rate or \
-                           self.irf_dropout_rate or \
-                           self.ranef_dropout_rate
-
         super(CDRNN, self)._initialize_metadata()
 
         self.use_batch_normalization = bool(self.batch_normalization_decay)
@@ -234,8 +223,6 @@ class CDRNN(Model):
 
         if self.n_units_rnn and self.n_units_rnn[-1] == 'inherit':
             self.n_units_rnn = [self.n_units_hidden_state]
-
-        self.layers = []
 
     def _pack_metadata(self):
         md = super(CDRNN, self)._pack_metadata()
@@ -1157,8 +1144,6 @@ class CDRNN(Model):
 
                 # Slice and apply IRF outputs
                 slices, shapes = self.get_irf_output_slice_and_shape()
-                self.X_conv = {}
-                self.output = {}
                 if X_mask is not None:
                     X_mask_out = None
                 else:
@@ -1277,10 +1262,11 @@ class CDRNN(Model):
     ######################################################
     #
     #  Internal public network initialization methods.
-    #  These must be implemented by all subclasses and
-    #  should only be called at initialization.
+    #  These should only be called at initialization.
     #
     ######################################################
+
+    # TODO: Document these
 
     def initialize_feedforward(
             self,
@@ -1294,66 +1280,217 @@ class CDRNN(Model):
             final=False,
             name=None
     ):
-        raise NotImplementedError
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                projection = DenseLayer(
+                    training=self.training,
+                    use_MAP_mode=self.use_MAP_mode,
+                    units=units,
+                    use_bias=use_bias,
+                    activation=activation,
+                    dropout=dropout,
+                    maxnorm=maxnorm,
+                    batch_normalization_decay=batch_normalization_decay,
+                    layer_normalization_type=layer_normalization_type,
+                    normalize_after_activation=self.normalize_after_activation,
+                    normalization_use_gamma=self.normalization_use_gamma,
+                    kernel_sd_init=self.weight_sd_init,
+                    epsilon=self.epsilon,
+                    session=self.sess,
+                    name=name
+                )
 
-    def initialize_rnn(
-            self,
-            l
-    ):
-        raise NotImplementedError
+                return projection
 
-    def initialize_rnn_h(
-            self,
-            l,
-            ran_gf=None
-    ):
-        raise NotImplementedError
+    def initialize_rnn(self, l):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                units = self.n_units_rnn[l]
+                rnn = RNNLayer(
+                    training=self.training,
+                    use_MAP_mode=self.use_MAP_mode,
+                    units=units,
+                    time_projection_depth=self.n_layers_irf + 1,
+                    activation=self.rnn_activation,
+                    recurrent_activation=self.recurrent_activation,
+                    time_projection_inner_activation=self.irf_inner_activation,
+                    bottomup_kernel_sd_init=self.weight_sd_init,
+                    recurrent_kernel_sd_init=self.weight_sd_init,
+                    bottomup_dropout=self.input_projection_dropout_rate,
+                    h_dropout=self.rnn_h_dropout_rate,
+                    c_dropout=self.rnn_c_dropout_rate,
+                    forget_rate=self.forget_rate,
+                    return_sequences=True,
+                    name='rnn_l%d' % (l + 1),
+                    epsilon=self.epsilon,
+                    session=self.sess
+                )
 
-    def initialize_rnn_c(
-            self,
-            l,
-            ran_gf=None
-    ):
-        raise NotImplementedError
+                return rnn
 
-    def initialize_h_bias(
-            self,
-            ran_gf=None
-    ):
-        raise NotImplementedError
+    def initialize_rnn_h(self, l, ran_gf=None):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                units = self.n_units_rnn[l]
+                if ran_gf is None:
+                    rnn_h = tf.Variable(tf.zeros([1, units]), name='rnn_h_l%d' % (l + 1))
+                else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+                    rnn_h = tf.Variable(
+                        tf.zeros([rangf_n_levels, self.n_units_rnn[l]]),
+                        name='rnn_h_ran_l%d_by_%s' % (l + 1, sn(ran_gf))
+                    )
+                rnn_h_summary = rnn_h
+
+                return rnn_h, rnn_h_summary
+
+    def initialize_rnn_c(self, l, ran_gf=None):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                units = self.n_units_rnn[l]
+                if ran_gf is None:
+                    rnn_c = tf.Variable(tf.zeros([1, units]), name='rnn_c_l%d' % (l + 1))
+                else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+                    rnn_c = tf.Variable(
+                        tf.zeros([rangf_n_levels, units]),
+                        name='rnn_c_ran_l%d_by_%s' % (l + 1, sn(ran_gf))
+                    )
+                rnn_c_summary = rnn_c
+
+                return rnn_c, rnn_c_summary
+
+    def initialize_h_bias(self, ran_gf=None):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                units = self.n_units_hidden_state
+                if ran_gf is None:
+                    h_bias = tf.Variable(tf.zeros([1, 1, units]), name='h_bias')
+                else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+                    h_bias = tf.Variable(
+                        tf.zeros([rangf_n_levels, units]),
+                        name='h_bias_by_%s' % (sn(ran_gf))
+                    )
+                h_bias_summary = h_bias
+
+                return h_bias, h_bias_summary
 
     def initialize_h_normalization(self):
-        raise NotImplementedError
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if self.use_batch_normalization:
+                    normalization_layer = BatchNormLayer(
+                        decay=self.batch_normalization_decay,
+                        shift_activations=True,
+                        rescale_activations=self.normalization_use_gamma,
+                        axis=-1,
+                        training=self.training,
+                        epsilon=self.epsilon,
+                        session=self.sess,
+                        name='h'
+                    )
+                elif self.use_layer_normalization:
+                    normalization_layer = LayerNormLayer(
+                        normalization_type=self.layer_normalization_type,
+                        shift_activations=True,
+                        rescale_activations=self.normalization_use_gamma,
+                        axis=-1,
+                        epsilon=self.epsilon,
+                        session=self.sess,
+                        name='h'
+                    )
+                else:
+                    normalization_layer = lambda x: x
 
-    def initialize_intercept_l1_weights(
-            self,
-            ran_gf=None
-    ):
-        raise NotImplementedError
+                return normalization_layer
 
-    def initialize_intercept_l1_biases(
-            self,
-            ran_gf=None
-    ):
-        raise NotImplementedError
+    def initialize_irf_l1_weights(self, ran_gf=None):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                units = self.n_units_irf_l1
+                if ran_gf is None:
+                    if isinstance(self.weight_sd_init, str):
+                        if self.weight_sd_init.lower() in ['xavier', 'glorot']:
+                            sd = math.sqrt(2 / (1 + self.n_units_irf_l1))
+                        elif self.weight_sd_init.lower() == 'he':
+                            sd = math.sqrt(2)
+                        else:
+                            sd = float(self.weight_sd_init)
+                    else:
+                        sd = self.weight_sd_init
 
-    def initialize_intercept_l1_normalization(self):
-        raise NotImplementedError
+                    kernel_init = get_initializer(
+                        'random_normal_initializer_mean=0-stddev=%s' % sd,
+                        session=self.sess
+                    )
+                    irf_l1_W = tf.get_variable(
+                        name='irf_l1_W',
+                        initializer=kernel_init,
+                        shape=[1, 1, units]
+                    )
+                else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+                    irf_l1_W = tf.get_variable(
+                        name='irf_l1_W_by_%s' % (sn(ran_gf)),
+                        initializer=tf.zeros_initializer(),
+                        shape=[rangf_n_levels, units],
+                    )
 
-    def initialize_irf_l1_weights(
-            self,
-            ran_gf=None
-    ):
-        raise NotImplementedError
+                irf_l1_W_summary = irf_l1_W
 
-    def initialize_irf_l1_biases(
-            self,
-            ran_gf=None
-    ):
-        raise NotImplementedError
+                return irf_l1_W, irf_l1_W_summary
+
+    def initialize_irf_l1_biases(self, ran_gf=None):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                units = self.n_units_irf_l1
+                if ran_gf is None:
+                    irf_l1_b = tf.get_variable(
+                        name='irf_l1_b',
+                        initializer=tf.zeros_initializer(),
+                        shape=[1, 1, units]
+                    )
+                else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+                    irf_l1_b = tf.get_variable(
+                        name='irf_l1_b_by_%s' % (sn(ran_gf)),
+                        initializer=tf.zeros_initializer(),
+                        shape=[rangf_n_levels, units],
+                    )
+
+                irf_l1_b_summary = irf_l1_b
+
+                return irf_l1_b, irf_l1_b_summary
 
     def initialize_irf_l1_normalization(self):
-        raise NotImplementedError
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if self.use_batch_normalization:
+                    normalization_layer = BatchNormLayer(
+                        decay=self.batch_normalization_decay,
+                        shift_activations=True,
+                        rescale_activations=self.normalization_use_gamma,
+                        axis=-1,
+                        training=self.training,
+                        epsilon=self.epsilon,
+                        session=self.sess,
+                        name='irf_l1'
+                    )
+                elif self.use_layer_normalization:
+                    normalization_layer = LayerNormLayer(
+                        normalization_type=self.layer_normalization_type,
+                        shift_activations=True,
+                        rescale_activations=self.normalization_use_gamma,
+                        axis=-1,
+                        epsilon=self.epsilon,
+                        session=self.sess,
+                        name='irf_l1'
+                    )
+                else:
+                    normalization_layer = lambda x: x
+
+                return normalization_layer
 
 
 
@@ -1364,6 +1501,21 @@ class CDRNN(Model):
     #  Shared public methods
     #
     ######################################################
+
+    @property
+    def is_cdrnn(self):
+        return True
+
+    @property
+    def has_dropout(self):
+        return bool(self.input_projection_dropout_rate or \
+                    self.rnn_h_dropout_rate or \
+                    self.rnn_c_dropout_rate or \
+                    self.h_in_dropout_rate or \
+                    self.h_rnn_dropout_rate or \
+                    self.rnn_dropout_rate or \
+                    self.irf_dropout_rate or \
+                    self.ranef_dropout_rate)
 
     def initialize_model(self):
         self._initialize_nn()

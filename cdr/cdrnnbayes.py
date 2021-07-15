@@ -200,7 +200,7 @@ class CDRNNBayes(ModelBayes, CDRNN):
                             scale=rnn_h_sd_prior,
                             name='rnn_h'
                         )
-                        self.kl_penalties_base['rnn_h'] = {
+                        self.kl_penalties['rnn_h'] = {
                             'loc': 0.,
                             'scale': rnn_h_sd_prior,
                             'val': rnn_h_q_dist.kl_divergence(rnn_h_prior_dist)
@@ -237,7 +237,7 @@ class CDRNNBayes(ModelBayes, CDRNN):
                             scale=rnn_h_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
                             name='rnn_h_by_%s' % sn(ran_gf)
                         )
-                        self.kl_penalties_base['rnn_h_by_%s' % sn(ran_gf)] = {
+                        self.kl_penalties['rnn_h_by_%s' % sn(ran_gf)] = {
                             'loc': 0.,
                             'scale': rnn_h_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
                             'val': rnn_h_q_dist.kl_divergence(rnn_h_prior_dist)
@@ -282,7 +282,7 @@ class CDRNNBayes(ModelBayes, CDRNN):
                             scale=rnn_c_sd_prior,
                             name='rnn_c'
                         )
-                        self.kl_penalties_base['rnn_c'] = {
+                        self.kl_penalties['rnn_c'] = {
                             'loc': 0.,
                             'scale': rnn_c_sd_prior,
                             'val': rnn_c_q_dist.kl_divergence(rnn_c_prior_dist)
@@ -319,7 +319,7 @@ class CDRNNBayes(ModelBayes, CDRNN):
                             scale=rnn_c_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
                             name='rnn_c_by_%s' % sn(ran_gf)
                         )
-                        self.kl_penalties_base['rnn_c_by_%s' % sn(ran_gf)] = {
+                        self.kl_penalties['rnn_c_by_%s' % sn(ran_gf)] = {
                             'loc': 0.,
                             'scale': rnn_c_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
                             'val': rnn_c_q_dist.kl_divergence(rnn_c_prior_dist)
@@ -364,7 +364,7 @@ class CDRNNBayes(ModelBayes, CDRNN):
                             scale=h_bias_sd_prior,
                             name='h_bias'
                         )
-                        self.kl_penalties_base['h_bias'] = {
+                        self.kl_penalties['h_bias'] = {
                             'loc': 0.,
                             'scale': h_bias_sd_prior,
                             'val': h_bias_q_dist.kl_divergence(h_bias_prior_dist)
@@ -401,7 +401,7 @@ class CDRNNBayes(ModelBayes, CDRNN):
                             scale=h_bias_sd_prior * h_bias_sd_prior,
                             name='h_bias_by_%s' % sn(ran_gf)
                         )
-                        self.kl_penalties_base['h_bias_by_%s' % sn(ran_gf)] = {
+                        self.kl_penalties['h_bias_by_%s' % sn(ran_gf)] = {
                             'loc': 0.,
                             'scale': h_bias_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
                             'val': h_bias_q_dist.kl_divergence(h_bias_prior_dist)
@@ -456,216 +456,6 @@ class CDRNNBayes(ModelBayes, CDRNN):
 
                 return normalization_layer
 
-    def initialize_intercept_l1_weights(self, ran_gf=None):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                units = self.n_units_irf_l1
-                
-                intercept_l1_W_sd_prior = get_numerical_sd(self.weight_prior_sd, in_dim=1, out_dim=units)
-                intercept_l1_W_sd_posterior = intercept_l1_W_sd_prior * self.posterior_to_prior_sd_ratio
-
-                if ran_gf is None:
-                    # Posterior distribution
-                    intercept_l1_W_q_loc = tf.Variable(
-                        tf.zeros([1, units]),
-                        name='intercept_l1_W_q_loc'
-                    )
-
-                    intercept_l1_W_q_scale = tf.Variable(
-                        tf.zeros([1, units]) * self.constraint_fn_inv(intercept_l1_W_sd_posterior),
-                        name='intercept_l1_W_q_scale'
-                    )
-
-                    intercept_l1_W_q_dist = Normal(
-                        loc=intercept_l1_W_q_loc,
-                        scale=self.constraint_fn(intercept_l1_W_q_scale) + self.epsilon,
-                        name='intercept_l1_W_q'
-                    )
-
-                    intercept_l1_W = tf.cond(self.use_MAP_mode, intercept_l1_W_q_dist.mean, intercept_l1_W_q_dist.sample)
-
-                    intercept_l1_W_summary = intercept_l1_W_q_dist.mean()
-
-                    if self.declare_priors_weights:
-                        # Prior distribution
-                        intercept_l1_W_prior_dist = Normal(
-                            loc=0.,
-                            scale=intercept_l1_W_sd_prior,
-                            name='intercept_l1_W'
-                        )
-                        self.kl_penalties_base['intercept_l1_W'] = {
-                            'loc': 0.,
-                            'scale': intercept_l1_W_sd_prior,
-                            'val': intercept_l1_W_q_dist.kl_divergence(intercept_l1_W_prior_dist)
-                        }
-
-                else:
-                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
-
-                    # Posterior distribution
-                    intercept_l1_W_q_loc = tf.Variable(
-                        tf.zeros([rangf_n_levels, units], dtype=self.FLOAT_TF),
-                        name='intercept_l1_W_q_loc_by_%s' % sn(ran_gf)
-                    )
-
-                    intercept_l1_W_q_scale = tf.Variable(
-                        tf.ones([rangf_n_levels, units], dtype=self.FLOAT_TF) * self.constraint_fn_inv(intercept_l1_W_sd_posterior * self.ranef_to_fixef_prior_sd_ratio),
-                        name='intercept_l1_W_q_scale_by_%s' % sn(ran_gf)
-                    )
-
-                    intercept_l1_W_q_dist = Normal(
-                        loc=intercept_l1_W_q_loc,
-                        scale=self.constraint_fn(intercept_l1_W_q_scale) + self.epsilon,
-                        name='intercept_l1_W_q_by_%s' % sn(ran_gf)
-                    )
-
-                    intercept_l1_W = tf.cond(self.use_MAP_mode, intercept_l1_W_q_dist.mean, intercept_l1_W_q_dist.sample)
-
-                    intercept_l1_W_summary = intercept_l1_W_q_dist.mean()
-
-                    if self.declare_priors_ranef:
-                        # Prior distribution
-                        intercept_l1_W_prior_dist = Normal(
-                            loc=0.,
-                            scale=intercept_l1_W_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
-                            name='intercept_l1_W_by_%s' % sn(ran_gf)
-                        )
-                        self.kl_penalties_base['intercept_l1_W_by_%s' % sn(ran_gf)] = {
-                            'loc': 0.,
-                            'scale': intercept_l1_W_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
-                            'val': intercept_l1_W_q_dist.kl_divergence(intercept_l1_W_prior_dist)
-                        }
-
-                return intercept_l1_W, intercept_l1_W_summary
-            
-    def initialize_intercept_l1_biases(self, ran_gf=None):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                units = self.n_units_irf_l1
-                intercept_l1_b_sd_prior = get_numerical_sd(self.bias_prior_sd, in_dim=1, out_dim=1)
-                intercept_l1_b_sd_posterior = intercept_l1_b_sd_prior * self.posterior_to_prior_sd_ratio
-
-                if ran_gf is None:
-                    # Posterior distribution
-                    intercept_l1_b_q_loc = tf.Variable(
-                        tf.zeros([1, units]),
-                        name='intercept_l1_b_q_loc'
-                    )
-
-                    intercept_l1_b_q_scale = tf.Variable(
-                        tf.zeros([1, units]) * self.constraint_fn_inv(intercept_l1_b_sd_posterior),
-                        name='intercept_l1_b_q_scale'
-                    )
-
-                    intercept_l1_b_q_dist = Normal(
-                        loc=intercept_l1_b_q_loc,
-                        scale=self.constraint_fn(intercept_l1_b_q_scale) + self.epsilon,
-                        name='intercept_l1_b_q'
-                    )
-
-                    intercept_l1_b = tf.cond(self.use_MAP_mode, intercept_l1_b_q_dist.mean, intercept_l1_b_q_dist.sample)
-
-                    intercept_l1_b_summary = intercept_l1_b_q_dist.mean()
-
-                    if self.declare_priors_biases:
-                        # Prior distribution
-                        intercept_l1_b_prior_dist = Normal(
-                            loc=0.,
-                            scale=intercept_l1_b_sd_prior,
-                            name='intercept_l1_b'
-                        )
-                        self.kl_penalties_base['intercept_l1_b'] = {
-                            'loc': 0.,
-                            'scale': intercept_l1_b_sd_prior,
-                            'val': intercept_l1_b_q_dist.kl_divergence(intercept_l1_b_prior_dist)
-                        }
-
-                else:
-                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
-
-                    # Posterior distribution
-                    intercept_l1_b_q_loc = tf.Variable(
-                        tf.zeros([rangf_n_levels, units], dtype=self.FLOAT_TF),
-                        name='intercept_l1_b_q_loc_by_%s' % sn(ran_gf)
-                    )
-
-                    intercept_l1_b_q_scale = tf.Variable(
-                        tf.ones([rangf_n_levels, units], dtype=self.FLOAT_TF) * self.constraint_fn_inv(intercept_l1_b_sd_posterior * self.ranef_to_fixef_prior_sd_ratio),
-                        name='intercept_l1_b_q_scale_by_%s' % sn(ran_gf)
-                    )
-
-                    intercept_l1_b_q_dist = Normal(
-                        loc=intercept_l1_b_q_loc,
-                        scale=self.constraint_fn(intercept_l1_b_q_scale) + self.epsilon,
-                        name='intercept_l1_b_q_by_%s' % sn(ran_gf)
-                    )
-
-                    intercept_l1_b = tf.cond(self.use_MAP_mode, intercept_l1_b_q_dist.mean, intercept_l1_b_q_dist.sample)
-
-                    intercept_l1_b_summary = intercept_l1_b_q_dist.mean()
-
-                    if self.declare_priors_ranef:
-                        # Prior distribution
-                        intercept_l1_b_prior_dist = Normal(
-                            loc=0.,
-                            scale=intercept_l1_b_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
-                            name='intercept_l1_b_by_%s' % sn(ran_gf)
-                        )
-                        self.kl_penalties_base['intercept_l1_b_by_%s' % sn(ran_gf)] = {
-                            'loc': 0.,
-                            'scale': intercept_l1_b_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
-                            'val': intercept_l1_b_q_dist.kl_divergence(intercept_l1_b_prior_dist)
-                        }
-
-                return intercept_l1_b, intercept_l1_b_summary
-
-    def initialize_intercept_l1_normalization(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                if self.use_batch_normalization:
-                    normalization_layer = BatchNormLayerBayes(
-                        decay=self.batch_normalization_decay,
-                        shift_activations=True,
-                        rescale_activations=self.normalization_use_gamma,
-                        axis=-1,
-                        use_MAP_mode=self.use_MAP_mode,
-                        declare_priors_scale=self.declare_priors_gamma,
-                        declare_priors_shift=self.declare_priors_biases,
-                        scale_sd_prior=self.bias_prior_sd,
-                        scale_sd_init=self.bias_sd_init,
-                        shift_sd_prior=self.bias_prior_sd,
-                        shift_sd_init=self.bias_prior_sd,
-                        posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
-                        constraint=self.constraint,
-                        training=self.training,
-                        epsilon=self.epsilon,
-                        session=self.sess,
-                        name='intercept_l1'
-                    )
-                elif self.use_layer_normalization:
-                    normalization_layer = LayerNormLayerBayes(
-                        normalization_type=self.layer_normalization_type,
-                        shift_activations=True,
-                        rescale_activations=self.normalization_use_gamma,
-                        axis=-1,
-                        use_MAP_mode=self.use_MAP_mode,
-                        declare_priors_scale=self.declare_priors_gamma,
-                        declare_priors_shift=self.declare_priors_biases,
-                        scale_sd_prior=self.bias_prior_sd,
-                        scale_sd_init=self.bias_sd_init,
-                        shift_sd_prior=self.bias_prior_sd,
-                        shift_sd_init=self.bias_prior_sd,
-                        posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
-                        constraint=self.constraint,
-                        epsilon=self.epsilon,
-                        session=self.sess,
-                        name='intercept_l1'
-                    )
-                else:
-                    normalization_layer = lambda x: x
-
-                return normalization_layer
-
     def initialize_irf_l1_weights(self, ran_gf=None):
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -703,7 +493,7 @@ class CDRNNBayes(ModelBayes, CDRNN):
                             scale=irf_l1_W_sd_prior,
                             name='irf_l1_W'
                         )
-                        self.kl_penalties_base['irf_l1_W'] = {
+                        self.kl_penalties['irf_l1_W'] = {
                             'loc': 0.,
                             'scale': irf_l1_W_sd_prior,
                             'val': irf_l1_W_q_dist.kl_divergence(irf_l1_W_prior_dist)
@@ -740,7 +530,7 @@ class CDRNNBayes(ModelBayes, CDRNN):
                             scale=irf_l1_W_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
                             name='irf_l1_W_by_%s' % sn(ran_gf)
                         )
-                        self.kl_penalties_base['irf_l1_W_by_%s' % sn(ran_gf)] = {
+                        self.kl_penalties['irf_l1_W_by_%s' % sn(ran_gf)] = {
                             'loc': 0.,
                             'scale': irf_l1_W_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
                             'val': irf_l1_W_q_dist.kl_divergence(irf_l1_W_prior_dist)
@@ -784,7 +574,7 @@ class CDRNNBayes(ModelBayes, CDRNN):
                             scale=irf_l1_b_sd_prior,
                             name='irf_l1_b'
                         )
-                        self.kl_penalties_base['irf_l1_b'] = {
+                        self.kl_penalties['irf_l1_b'] = {
                             'loc': 0.,
                             'scale': irf_l1_b_sd_prior,
                             'val': irf_l1_b_q_dist.kl_divergence(irf_l1_b_prior_dist)
@@ -821,7 +611,7 @@ class CDRNNBayes(ModelBayes, CDRNN):
                             scale=irf_l1_b_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
                             name='irf_l1_b_by_%s' % sn(ran_gf)
                         )
-                        self.kl_penalties_base['irf_l1_b_by_%s' % sn(ran_gf)] = {
+                        self.kl_penalties['irf_l1_b_by_%s' % sn(ran_gf)] = {
                             'loc': 0.,
                             'scale': irf_l1_b_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
                             'val': irf_l1_b_q_dist.kl_divergence(irf_l1_b_prior_dist)

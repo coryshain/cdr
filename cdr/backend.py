@@ -1340,7 +1340,6 @@ class DenseLayer(object):
 
 
 class DenseLayerBayes(DenseLayer):
-
     def __init__(
             self,
             training=False,
@@ -1515,6 +1514,9 @@ class DenseLayerBayes(DenseLayer):
                                 self.bias_q_dist.mean,
                                 self.bias_q_dist.sample
                             )
+
+                        if self.use_dropout:
+                            self.dropout_layer.build([x for x in inputs_shape[:-1]] + [out_dim])
 
                         if self.use_batch_normalization:
                             self.normalization_layer = BatchNormLayerBayes(

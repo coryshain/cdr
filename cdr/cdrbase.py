@@ -1296,8 +1296,7 @@ class CDR(Model):
 
                     self.coefficient_random[response] = {}
                     self.coefficient_random_summary[response] = {}
-                    for i in range(len(self.rangf)):
-                        gf = self.rangf[i]
+                    for i, gf in enumerate(self.rangf):
                         levels_ix = np.arange(self.rangf_n_levels[i] - 1)
 
                         coefs = self.coef_by_rangf.get(gf, [])
@@ -1447,8 +1446,7 @@ class CDR(Model):
 
                         self.interaction_random[response] = {}
                         self.interaction_random_summary[response] = {}
-                        for i in range(len(self.rangf)):
-                            gf = self.rangf[i]
+                        for i, gf in enumerate(self.rangf):
                             levels_ix = np.arange(self.rangf_n_levels[i] - 1)
 
                             interactions = self.interaction_by_rangf.get(gf, [])
@@ -2351,14 +2349,12 @@ class CDR(Model):
     def compile_network(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                self.X_conv = {}
                 for response in self.response_names:
                     convolutions = [self.convolutions[response][x] for x in self.terminal_names]
                     if len(convolutions) > 0:
                         X_conv = tf.stack(convolutions, axis=1)
                     else:
                         X_conv = tf.zeros((1, 1), dtype=self.FLOAT_TF)
-
 
                     coef_names = [self.node_table[x].coef_id() for x in self.terminal_names]
                     coef_ix = names2ix(coef_names, self.coef_names)

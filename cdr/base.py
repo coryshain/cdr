@@ -364,10 +364,9 @@ class Model(object):
         ## Set up hash table for random effects lookup
         self.rangf_map_base = []
         self.rangf_n_levels = []
-        for i in range(len(rangf)):
+        for i, gf in enumerate(rangf):
             rangf_counts = {}
             for _Y in Y:
-                gf = rangf[i]
                 _rangf_counts = dict(zip(*np.unique(_Y[gf].astype('str'), return_counts=True)))
                 for k in _rangf_counts:
                     if k in rangf_counts:
@@ -406,13 +405,8 @@ class Model(object):
         self.sess = tf.Session(graph=self.g, config=tf_config)
 
     def _initialize_metadata(self):
-        if not hasattr(self, 'is_bayesian'):
-            self.is_bayesian = False
-        if not hasattr(self, 'is_cdrnn'):
-            self.is_cdrnn = False
-            self.has_dropout = False
-
         ## Compute secondary data from intialization settings
+
         self.FLOAT_TF = getattr(tf, self.float_type)
         self.FLOAT_NP = getattr(np, self.float_type)
         self.INT_TF = getattr(tf, self.int_type)
@@ -427,7 +421,12 @@ class Model(object):
         self.has_intercept = f.has_intercept
         self.rangf = f.rangf
         self.ranef_group2ix = {x: i for i, x in enumerate(self.rangf)}
-        self.is_mixed_model = len(self.rangf) > 0
+
+        self.summed_interactions = None
+        self.output = {} # Key order: <response>; Value: nbatch x nparam x ndim tensor of predictive distribution parameters for the response
+        self.X_conv = {} # Key order: <response>;
+        self.layers = [] # CDRNN only, list of DNN layers
+        self.kl_penalties = {} # Key order: <variable>; Value: scalar KL divergence
 
         if np.isfinite(self.minibatch_size):
             self.n_train_minibatch = math.ceil(float(self.n_train) / self.minibatch_size)
@@ -1703,6 +1702,8 @@ class Model(object):
 
                 kl_loss = tf.constant(0., dtype=self.FLOAT_TF)
                 if self.is_bayesian and len(self.kl_penalties):
+                    for layer in self.layers:
+                        self.kl_penalties.update(layer.kl_penalties())
                     kl_loss += tf.reduce_sum([tf.reduce_sum(self.kl_penalties[k]['val']) for k in self.kl_penalties])
                     loss_func += kl_loss
 
@@ -2322,6 +2323,46 @@ class Model(object):
     #  Shared public methods
     #
     ######################################################
+
+    @property
+    def is_bayesian(self):
+        """
+        Whether the model is defined using variational Bayes.
+
+        :return: ``bool``; whether the model is defined using variational Bayes.
+        """
+
+        return False
+
+    @property
+    def is_cdrnn(self):
+        """
+        Whether the model is a subtype of CDRNN.
+
+        :return: ``bool``; whether the model is a subtype of CDRNN.
+        """
+
+        return False
+
+    @property
+    def has_dropout(self):
+        """
+        Whether the model uses dropout (CDRNN only).
+
+        :return: ``bool``; whether the model uses dropout.
+        """
+
+        return False
+
+    @property
+    def is_mixed_model(self):
+        """
+        Whether the model is mixed (i.e. has any random effects).
+
+        :return: ``bool``; whether the model is mixed.
+        """
+
+        return len(self.rangf) > 0
 
     def initialize_intercept(self, response_name, ran_gf=None):
         """
@@ -3222,7 +3263,7 @@ class Model(object):
                         if not type(self).__name__.startswith('CDRNN'):
                             summary_params = self.sess.run(self.summary_params)
                             self.writer.add_summary(summary_params, self.global_step.eval(session=self.sess))
-                            if self.log_random and len(self.rangf) > 0:
+                            if self.log_random and self.is_mixed_model:
                                 summary_random = self.sess.run(self.summary_random)
                                 self.writer.add_summary(summary_random, self.global_step.eval(session=self.sess))
                             self.writer.flush()
@@ -3343,7 +3384,7 @@ class Model(object):
                             self.writer.add_summary(summary_train_loss, self.global_step.eval(session=self.sess))
                             summary_params = self.sess.run(self.summary_params)
                             self.writer.add_summary(summary_params, self.global_step.eval(session=self.sess))
-                            if self.log_random and len(self.rangf) > 0:
+                            if self.log_random and self.is_mixed_model:
                                 summary_random = self.sess.run(self.summary_random)
                                 self.writer.add_summary(summary_random, self.global_step.eval(session=self.sess))
                             self.writer.flush()
@@ -5883,7 +5924,7 @@ class Model(object):
         :return: ``pandas`` ``DataFrame``; The parameter table.
         """
 
-        assert fixed or len(self.rangf) > 0, 'Attempted to generate a random effects parameter table in a fixed-effects-only model'
+        assert fixed or self.is_mixed_model, 'Attempted to generate a random effects parameter table in a fixed-effects-only model'
 
         if n_samples == 'default':
             if self.is_bayesian or self.has_dropout:
@@ -5956,7 +5997,7 @@ class Model(object):
             level=level,
             n_samples=n_samples
         )
-        if random and len(self.rangf) > 0:
+        if random and self.is_mixed_model:
             parameter_table = pd.concat(
                 [
                     parameter_table,
@@ -6087,13 +6128,7 @@ class ModelBayes(Model):
     def _initialize_metadata(self):
         super(ModelBayes, self)._initialize_metadata()
 
-        self.is_bayesian = True
-
         self.parameter_table_columns = ['Mean', '2.5%', '97.5%']
-
-        self.summed_interactions = None
-        self.output = {}
-        self.kl_penalties = {}
 
         self._intercept_prior_sd, \
         self._intercept_posterior_sd_init, \
@@ -6159,6 +6194,10 @@ class ModelBayes(Model):
         # outputs all have shape [nparam, ndim]
 
         return prior_sd, posterior_sd_init, ranef_prior_sd, ranef_posterior_sd_init
+
+    @property
+    def is_bayesian(self):
+        return True
 
     def initialize_intercept(self, response_name, ran_gf=None):
         with self.sess.as_default():
