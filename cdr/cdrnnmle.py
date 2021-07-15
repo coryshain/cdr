@@ -300,22 +300,6 @@ class CDRNNMLE(CDRNN):
 
                 return normalization_layer
 
-    def _extract_parameter_values(self, fixed=True, level=95, n_samples=None):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                self.set_predict_mode(True)
-
-                if fixed:
-                    out = self.parameter_table_fixed_values.eval(session=self.sess)
-                else:
-                    out = self.parameter_table_random_values.eval(session=self.sess)
-
-                self.set_predict_mode(False)
-
-            out = np.stack([out, out, out], axis=1)
-
-            return out
-
 
 
 

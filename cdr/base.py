@@ -2273,20 +2273,37 @@ class Model(object):
     #
     ######################################################
 
-
     def _extract_parameter_values(self, fixed=True, level=95, n_samples=None):
+        if n_samples is None:
+            n_samples = self.n_samples_eval
+
+        alpha = 100 - float(level)
+
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self.set_predict_mode(True)
 
                 if fixed:
-                    out = self.parameter_table_fixed_values.eval(session=self.sess)
+                    param_vector = self.parameter_table_fixed_values
                 else:
-                    out = self.parameter_table_random_values.eval(session=self.sess)
+                    param_vector = self.parameter_table_random_values
+
+                samples = []
+                for i in range(n_samples):
+                    if self.resample_ops:
+                        self.sess.run(self.resample_ops)
+                    samples.append(self.sess.run(param_vector, feed_dict={self.use_MAP_mode: False}))
+                samples = np.stack(samples, axis=1)
+
+                mean = samples.mean(axis=1)
+                lower = np.percentile(samples, alpha / 2, axis=1)
+                upper = np.percentile(samples, 100 - (alpha / 2), axis=1)
+
+                out = np.stack([mean, lower, upper], axis=1)
 
                 self.set_predict_mode(False)
 
-            return out
+                return out
 
 
 
@@ -3020,13 +3037,13 @@ class Model(object):
                 if multiple_files:
                     out += ' ' * indent + 'File: %s\n\n' % ix
                 out += ' ' * indent + 'MODEL EVALUATION STATISTICS:\n'
-                out += ' ' * indent +     'Loglik:        %s\n' % self.training_loglik[response][ix]
+                out += ' ' * indent +     'Loglik:        %s\n' % self.training_loglik[response][ix].eval(session=self.sess)
                 if response in self.training_mse:
-                    out += ' ' * indent + 'MSE:           %s\n' % self.training_mse[response][ix]
+                    out += ' ' * indent + 'MSE:           %s\n' % self.training_mse[response][ix].eval(session=self.sess)
                 if response in self.training_rho:
-                    out += ' ' * indent + 'r(true, pred): %s\n' % self.training_rho[response][ix]
+                    out += ' ' * indent + 'r(true, pred): %s\n' % self.training_rho[response][ix].eval(session=self.sess)
                 if response in self.training_percent_variance_explained:
-                    out += ' ' * indent + '%% var expl:    %s\n' % self.training_percent_variance_explained[response][ix]
+                    out += ' ' * indent + '%% var expl:    %s\n' % self.training_percent_variance_explained[response][ix].eval(session=self.sess)
                 out += '\n'
 
         return out
@@ -5246,9 +5263,17 @@ class Model(object):
             return x
 
         manipulations = []
+        is_non_dirac = []
         for x in self.impulse_names:
+            if self.is_non_dirac(x):
+                is_non_dirac.append(1.)
+            else:
+                is_non_dirac.append(0.)
             delta = self.plot_step_map[x]
             manipulations.append({x: delta})
+        is_non_dirac = np.array(is_non_dirac)[None, ...] # Add sample dim
+        step = np.where(is_non_dirac, step, 1.)
+        print(step)
 
         if random:
             ranef_group_names = self.ranef_group_names
@@ -6225,36 +6250,6 @@ class ModelBayes(Model):
                 # shape: (?rangf_n_levels, n_param, n_dim)
 
                 return intercept, intercept_summary
-
-    def _extract_parameter_values(self, fixed=True, level=95, n_samples=None):
-        if n_samples is None:
-            n_samples = self.n_samples_eval
-
-        alpha = 100 - float(level)
-
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                self.set_predict_mode(True)
-
-                if fixed:
-                    param_vector = self.parameter_table_fixed_values
-                else:
-                    param_vector = self.parameter_table_random_values
-
-                samples = []
-                for i in range(n_samples):
-                    samples.append(self.sess.run(param_vector, feed_dict={self.use_MAP_mode: False}))
-                samples = np.stack(samples, axis=1)
-
-                mean = samples.mean(axis=1)
-                lower = np.percentile(samples, alpha / 2, axis=1)
-                upper = np.percentile(samples, 100 - (alpha / 2), axis=1)
-
-                out = np.stack([mean, lower, upper], axis=1)
-
-                self.set_predict_mode(False)
-
-                return out
 
     def report_regularized_variables(self, indent=0):
         """
