@@ -98,8 +98,21 @@ class Formula(object):
         'HRFDoubleGamma5',
     }
 
+    IRF_ALIASES = {
+        'HRF1': 'HRFDoubleGamma1',
+        'HRF2': 'HRFDoubleGamma2',
+        'HRF3': 'HRFDoubleGamma3',
+        'HRF4': 'HRFDoubleGamma4',
+        'HRF5': 'HRFDoubleGamma5',
+        'HRF': 'HRFDoubleGamma5',
+    }
+
     LCG_BASES_IX = 2
     LCG_DEFAULT_BASES = 10
+
+    @staticmethod
+    def normalize_irf_family(family):
+        return Formula.IRF_ALIASES.get(family, family)
 
     @staticmethod
     def irf_params(family):
@@ -109,6 +122,8 @@ class Formula(object):
         :param family: ``str``; name of IRF family
         :return: ``list`` of ``str``; parameter names
         """
+
+        family = Formula.normalize_irf_family(family)
 
         if family in Formula.IRF_PARAMS:
             out = Formula.IRF_PARAMS[family]
@@ -129,6 +144,8 @@ class Formula(object):
         :return: ``bool``; whether the kernel is LCG (linear combination of Gaussians)
         """
 
+        family = Formula.normalize_irf_family(family)
+
         return family is not None and lcg_re.match(family) is not None
 
     @staticmethod
@@ -140,6 +157,8 @@ class Formula(object):
         :return: ``int`` or ``None``; number of bases of spline kernel, or ``None`` if **family** is not a spline.
         """
 
+        family = Formula.normalize_irf_family(family)
+
         if family is None:
             out = None
         else:
@@ -150,6 +169,7 @@ class Formula(object):
                 out = int(bases)
             else:
                 out = None
+
         return out
 
     @staticmethod
@@ -651,7 +671,7 @@ class Formula(object):
                         new = self.process_irf(t.args[1], input=s, ops=None, rangf=rangf)
                         new_subterms.append(new)
                 terms.append(new_subterms)
-            elif t.func.id in Formula.IRF_PARAMS.keys() or lcg_re.match(t.func.id) is not None:
+            elif Formula.normalize_irf_family(t.func.id) in Formula.IRF_PARAMS.keys() or lcg_re.match(t.func.id) is not None:
                 raise ValueError('IRF calls can only occur as inputs to C() in CDR formula strings')
             else:
                 # Unary transform
@@ -1768,6 +1788,7 @@ class IRFNode(object):
             param_init=None,
             trainable=None
     ):
+        family = Formula.normalize_irf_family(family)
         if family is None or family in ['Terminal', 'DiracDelta']:
             assert irfID is None, 'Attempted to tie parameters (irf_id=%s) on parameter-free IRF node (family=%s)' % (irfID, family)
         if family != 'Terminal':
@@ -2096,6 +2117,7 @@ class IRFNode(object):
         :param family: ``str``; name of IRF family
         :return: ``str`` or ``None; name of kernel type if non-parametric, else ``None``.
         """
+
         return Formula.is_LCG(self.family)
 
     def bases(self):
@@ -2104,6 +2126,7 @@ class IRFNode(object):
 
         :return: ``int`` or ``None``; number of bases of node, or ``None`` if node is not a spline.
         """
+
         return Formula.bases(self.family)
 
     def impulses(self, include_interactions=False):

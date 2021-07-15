@@ -1519,7 +1519,7 @@ class Model(object):
                         err_dist_theoretical_quantiles = err_dist.quantile(empirical_quantiles)
                         err_dist_theoretical_cdf = err_dist.cdf(self.errors[response])
 
-                        err_dist_plot = tf.exp(err_dist.log_prob(self.support[None, ...]))
+                        err_dist_plot = tf.exp(err_dist.log_prob(self.support))
                         err_dist_lb = err_dist.quantile(.025)
                         err_dist_ub = err_dist.quantile(.975)
 
@@ -5853,27 +5853,11 @@ class Model(object):
                             self.training: not self.predict_mode
                         }
                         plot_x = self.sess.run(self.support, feed_dict=fd)
-                        plot_name = 'error_distribution_%s' % sn(_response)
-                        if mc:
-                            alpha = 100 - float(level)
-                            samples = []
-                            for i in range(n_samples):
-                                if self.resample_ops:
-                                    self.sess.run(self.resample_ops)
-                                sample = self.sess.run(self.error_distribution_plot[_response], feed_dict=fd)
-                                samples.append(sample)
-                            samples = np.stack(samples, axis=-1)
-                            plot_y = np.mean(samples, axis=-1)
-                            lq = np.percentile(samples, alpha / 2., axis=-1)
-                            uq = np.percentile(samples, 100 - alpha / 2., axis=-1)
+                        plot_name = 'error_distribution_%s.png' % sn(_response)
 
-                            plot_name += '_mc'
-                        else:
-                            plot_y = self.sess.run(self.error_distribution_plot[_response], feed_dict=fd)[0]
-                            lq = None
-                            uq = None
-
-                        plot_name += '.png'
+                        plot_y = self.sess.run(self.error_distribution_plot[_response], feed_dict=fd)
+                        lq = None
+                        uq = None
 
                         plot_irf(
                             plot_x,
@@ -5883,7 +5867,7 @@ class Model(object):
                             uq=uq,
                             dir=self.outdir,
                             filename=prefix + plot_name,
-                            legend=False,
+                                legend=False,
                         )
 
                 self.set_predict_mode(False)

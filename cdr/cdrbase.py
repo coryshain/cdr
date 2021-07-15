@@ -1898,9 +1898,7 @@ class CDR(Model):
                     )
 
                 self.irf_lambdas['Gamma'] = gamma
-                self.irf_lambdas['SteepGamma'] = gamma
                 self.irf_lambdas['GammaShapeGT1'] = gamma
-                self.irf_lambdas['GammaKgt1'] = gamma
                 self.irf_lambdas['HRFSingleGamma'] = gamma
 
                 def shifted_gamma_lambdas(**params):
@@ -1913,7 +1911,6 @@ class CDR(Model):
 
                 self.irf_lambdas['ShiftedGamma'] = shifted_gamma_lambdas
                 self.irf_lambdas['ShiftedGammaShapeGT1'] = shifted_gamma_lambdas
-                self.irf_lambdas['ShiftedGammaKgt1'] = shifted_gamma_lambdas
 
                 def normal(**params):
                     return normal_irf_factory(
