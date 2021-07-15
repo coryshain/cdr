@@ -4979,25 +4979,22 @@ class Model(object):
                 if gf_y_ref.shape[0] == 1 and B_ref > 1:
                     gf_y_ref = np.tile(gf_y_ref, (B_ref, 1))
 
-                if ref_as_manip:
+                # The reference will contain 1 entry if not pair_manipulations and len(manipulations) + 1 entries otherwise
+                X_ref_in = [X_ref]
+                time_X_ref_in = [X_time_ref]
+                t_delta_ref_in = [t_delta_ref]
+                gf_y_ref_in = [gf_y_ref]
+
+                if ref_as_manip: # Entails not pair_manipulations
                     X = []
                     time_X = []
                     t_delta = []
                     gf_y = []
-                    X_ref_in = [X_ref]
-                    time_X_ref_in = [X_time_ref]
-                    t_delta_ref_in = [t_delta_ref]
-                    gf_y_ref_in = [gf_y_ref]
-                else:
+                else: # Ref doesn't vary along all axes, so *_base contains full variation along all axes and is returned as the first manip
                     X = [X_base]
                     time_X = [time_X_base]
                     t_delta = [t_delta_base]
                     gf_y = [gf_y_base]
-                    if pair_manipulations:
-                        X_ref_in = [X_ref]
-                        time_X_ref_in = [X_time_ref]
-                        t_delta_ref_in = [t_delta_ref]
-                        gf_y_ref_in = [gf_y_ref]
 
                 for manipulation in manipulations:
                     X_cur = None
