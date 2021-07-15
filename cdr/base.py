@@ -1151,7 +1151,8 @@ class Model(object):
                     else:
                         self.ranef_regularizer = getattr(tf.contrib.layers, self.ranef_regularizer_name)(scale[0])
 
-                self.resample_ops = []
+                self.resample_ops = [] # Only used by CDRNN, defined here for global API
+                self.regularizable_layers = [] # Only used by CDRNN, defined here for global API
 
                 self.use_MAP_mode = tf.placeholder_with_default(tf.logical_not(self.training), shape=[], name='use_MAP_mode')
 
@@ -1687,6 +1688,14 @@ class Model(object):
                     loss_func = loss_func * self.minibatch_scale
 
                 # Regularize
+                for l in self.regularizable_layers: # CDRNN only
+                    if hasattr(l, 'weights'):
+                        vars = l.weights
+                    else:
+                        vars = [l]
+                    for v in vars:
+                        if 'bias' not in v.name:
+                            self._regularize(v, regtype='nn', var_name=reg_name(v.name))
                 reg_loss = tf.constant(0., dtype=self.FLOAT_TF)
                 if len(self.regularizer_losses_varnames) > 0:
                     reg_loss += tf.add_n(self.regularizer_losses)

@@ -432,8 +432,6 @@ class CDRNN(Model):
                     else:
                         self.context_regularizer = getattr(tf.contrib.layers, self.context_regularizer_name)(scale)
 
-                self.regularizable_layers = []
-
     def _initialize_base_params(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
