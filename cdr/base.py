@@ -5272,7 +5272,6 @@ class Model(object):
             manipulations.append({x: delta})
         is_non_dirac = np.array(is_non_dirac)[None, ...] # Add sample dim
         step = np.where(is_non_dirac, step, 1.)
-        print(step)
 
         if random:
             ranef_group_names = self.ranef_group_names
