@@ -5264,6 +5264,8 @@ class Model(object):
 
         manipulations = []
         is_non_dirac = []
+        if self.is_cdrnn:
+            is_non_dirac.append(1.)
         for x in self.impulse_names:
             if self.is_non_dirac(x):
                 is_non_dirac.append(1.)
