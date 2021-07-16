@@ -1110,36 +1110,33 @@ CDRNN_INITIALIZATION_KWARGS = [
         'rnn_h_dropout_rate',
         None,
         [float, None],
-        "Rate at which to drop neurons of RNN hidden state.",
-        # aliases=['dropout_rate']
+        "Rate at which to drop neurons of RNN hidden state."
     ),
     Kwarg(
         'rnn_c_dropout_rate',
         None,
         [float, None],
-        "Rate at which to drop neurons of RNN cell state.",
-        # aliases=['dropout_rate']
+        "Rate at which to drop neurons of RNN cell state."
     ),
     Kwarg(
         'h_in_dropout_rate',
         0.2,
         [float, None],
         "Rate at which to drop neurons of h_in.",
-        # aliases=['dropout_rate']
+        aliases=['dropout_rate']
     ),
     Kwarg(
         'h_rnn_dropout_rate',
         0.2,
         [float, None],
         "Rate at which to drop neurons of h_rnn.",
-        # aliases=['dropout_rate']
+        aliases=['dropout_rate']
     ),
     Kwarg(
         'h_dropout_rate',
         None,
         [float, None],
-        "Rate at which to drop neurons of h.",
-        aliases=['dropout_rate']
+        "Rate at which to drop neurons of h."
     ),
     Kwarg(
         'rnn_dropout_rate',

@@ -1,4 +1,5 @@
 import sys
+import os
 import argparse
 import pandas as pd
 from cdr.data import compute_splitID, compute_partition
@@ -31,7 +32,9 @@ if __name__ == '__main__':
 
     if args.partition is None:
         for i in range(len(names)):
-            df[select[i]].to_csv(args.path + '.' + names[i], sep=' ', index=False, na_rep='nan', columns=cols)
+            outpath, ext = os.path.splitext(args.path)
+            outpath += '_' + names[i] + ext
+            df[select[i]].to_csv(outpath, sep=' ', index=False, na_rep='nan', columns=cols)
     else:
         try:
             i = int(args.partition)

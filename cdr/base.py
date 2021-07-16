@@ -4,7 +4,7 @@ import scipy.stats
 import scipy.signal
 import scipy.interpolate
 from collections import defaultdict
-from sklearn.metrics import f1_score
+from sklearn.metrics import accuracy_score, f1_score
 
 from .kwargs import MODEL_INITIALIZATION_KWARGS, MODEL_BAYES_INITIALIZATION_KWARGS
 from .formula import *
@@ -831,7 +831,7 @@ class Model(object):
                     X_processed -= self.impulse_means_arr_expanded
                 if self.rescale_inputs:
                     scale = self.impulse_sds_arr_expanded
-                    scale = np.where(np.logical_not(np.isclose(scale, 0.)), scale, 1.)
+                    scale = np.where(scale != 0, scale, 1.)
                     X_processed /= scale
                 self.X_processed = X_processed
                 self.X_time = tf.placeholder_with_default(
@@ -1486,9 +1486,9 @@ class Model(object):
                     # Define prediction tensors
                     dist_name = self.get_response_dist_name(response)
                     if dist_name == 'bernoulli':
-                        self.prediction[response] = tf.cast(tf.round(_response_params[0]), self.INT_TF) * _Y_mask
+                        self.prediction[response] = tf.cast(tf.round(_response_params[0]), self.INT_TF) * tf.cast(_Y_mask, self.INT_TF)
                     elif dist_name == 'categorical':
-                        self.prediction[response] = tf.cast(tf.argmax(_response_params[0], axis=-1), self.INT_TF) * _Y_mask
+                        self.prediction[response] = tf.cast(tf.argmax(_response_params[0], axis=-1), self.INT_TF) * tf.cast(_Y_mask, self.INT_TF)
                     else: # Treat as continuous regression, use the first (location) parameter
                         self.prediction[response] = _response_params[0] * _Y_mask
 
@@ -2656,6 +2656,26 @@ class Model(object):
 
         return self.get_response_support(response) == 'real'
 
+    def is_categorical(self, response):
+        """
+        Check whether a given response name has a (multiclass) categorical distribution
+
+        :param response: ``str``; name of response
+        :return: ``bool``; whether the response has a categorical distribution
+        """
+
+        return self.get_response_dist_name(response) == 'categorical'
+
+    def is_binary(self, response):
+        """
+        Check whether a given response name is binary (has a Bernoulli distribution)
+
+        :param response: ``str``; name of response
+        :return: ``bool``; whether the response has a categorical distribution
+        """
+
+        return self.get_response_dist_name(response) == 'bernoulli'
+
     def has_param(self, response, param):
         """
         Check whether a given parameter name is present in the predictive distrbution assigned to a given response
@@ -2981,6 +3001,9 @@ class Model(object):
             mse=None,
             mae=None,
             f1=None,
+            f1_baseline=None,
+            acc=None,
+            acc_baseline=None,
             rho=None,
             loglik=None,
             loss=None,
@@ -2995,6 +3018,9 @@ class Model(object):
         :param mse: ``float`` or ``None``; mean squared error, skipped if ``None``.
         :param mae: ``float`` or ``None``; mean absolute error, skipped if ``None``.
         :param f1: ``float`` or ``None``; macro f1 score, skipped if ``None``.
+        :param f1_baseline: ``float`` or ``None``; macro f1 score of a baseline (e.g. chance), skipped if ``None``.
+        :param acc: ``float`` or ``None``; acuracy, skipped if ``None``.
+        :param acc_baseline: ``float`` or ``None``; acuracy of a baseline (e.g. chance), skipped if ``None``.
         :param rho: ``float`` or ``None``; Pearson correlation of predictions with observed response, skipped if ``None``.
         :param loglik: ``float`` or ``None``; log likelihood, skipped if ``None``.
         :param loss: ``float`` or ``None``; loss per training objective, skipped if ``None``.
@@ -3007,20 +3033,26 @@ class Model(object):
         """
 
         out = ' ' * indent + 'MODEL EVALUATION STATISTICS:\n'
-        if mse is not None:
-            out += ' ' * (indent+2) + 'MSE:           %s\n' % mse
-        if mae is not None:
-            out += ' ' * (indent+2) + 'MAE:           %s\n' % mae
-        if f1 is not None:
-            out += ' ' * (indent+2) + 'Macro F1:      %s\n' % f1
-        if rho is not None:
-            out += ' ' * (indent+2) + 'r(true, pred): %s\n' % rho
         if loglik is not None:
-            out += ' ' * (indent+2) + 'Loglik:        %s\n' % loglik
+            out += ' ' * (indent+2) + 'Loglik:              %s\n' % loglik
+        if f1 is not None:
+            out += ' ' * (indent+2) + 'Macro F1:            %s\n' % f1
+        if f1_baseline is not None:
+            out += ' ' * (indent+2) + 'Macro F1 (baseline): %s\n' % f1_baseline
+        if acc is not None:
+            out += ' ' * (indent+2) + 'Accuracy:            %s\n' % acc
+        if acc_baseline is not None:
+            out += ' ' * (indent+2) + 'Accuracy (baseline): %s\n' % acc_baseline
+        if mse is not None:
+            out += ' ' * (indent+2) + 'MSE:                 %s\n' % mse
+        if mae is not None:
+            out += ' ' * (indent+2) + 'MAE:                 %s\n' % mae
+        if rho is not None:
+            out += ' ' * (indent+2) + 'r(true, pred):       %s\n' % rho
         if loss is not None:
-            out += ' ' * (indent+2) + 'Loss:          %s\n' % loss
+            out += ' ' * (indent+2) + 'Loss:                %s\n' % loss
         if true_variance is not None:
-            out += ' ' * (indent+2) + 'True variance: %s\n' % true_variance
+            out += ' ' * (indent+2) + 'True variance:       %s\n' % true_variance
         if percent_variance_explained is not None:
             out += ' ' * (indent+2) + '%% var expl:    %.2f%%\n' % percent_variance_explained
         if ks_results is not None:
@@ -3672,8 +3704,9 @@ class Model(object):
                             for _response in _out['log_lik']:
                                 out['log_lik'][_response][i:i + B] = _out['log_lik'][_response]
 
+                    # Convert predictions to category labels, if applicable
                     for _response in out['preds']:
-                        if self.is_real(_response):
+                        if self.is_categorical(_response):
                             mapper = np.vectorize(lambda x: self.response_ix_to_category[_response].get(x, x))
                             out['preds'][_response] = mapper(out['preds'][_response])
 
@@ -3965,6 +3998,9 @@ class Model(object):
             'mse': {},
             'rho': {},
             'f1': {},
+            'f1_baseline': {},
+            'acc': {},
+            'acc_baseline': {},
             'log_lik': {},
             'percent_variance_explained': {},
             'true_variance': {},
@@ -3977,6 +4013,9 @@ class Model(object):
             metrics['mse'][_response] = []
             metrics['rho'][_response] = []
             metrics['f1'][_response] = []
+            metrics['f1_baseline'][_response] = []
+            metrics['acc'][_response] = []
+            metrics['acc_baseline'][_response] = []
             metrics['log_lik'][_response] = []
             metrics['percent_variance_explained'][_response] = []
             metrics['true_variance'][_response] = []
@@ -3990,6 +4029,9 @@ class Model(object):
                 metrics['mse'][_response].append(None)
                 metrics['rho'][_response].append(None)
                 metrics['f1'][_response].append(None)
+                metrics['f1_baseline'][_response].append(None)
+                metrics['acc'][_response].append(None)
+                metrics['acc_baseline'][_response].append(None)
                 metrics['log_lik'][_response].append(None)
                 metrics['percent_variance_explained'][_response].append(None)
                 metrics['true_variance'][_response].append(None)
@@ -4002,7 +4044,24 @@ class Model(object):
 
                         _preds = preds[_response][ix]
 
-                        if self.is_real(_response):
+                        if self.is_binary(_response):
+                            error = (_y == _preds).astype('int')
+                            metrics['f1'][_response][-1] = f1_score(_y, _preds, average='binary')
+                            metrics['f1_baseline'][_response][-1] = f1_score(_y, baseline, average='binary')
+                            metrics['acc'][_response][-1] = accuracy_score(_y, _preds)
+                            metrics['acc_baseline'][_response][-1] = accuracy_score(_y, baseline)
+                            err_col_name = 'CDRcorrect'
+                        elif self.is_categorical(_response):
+                            error = (_y == _preds).astype('int')
+                            classes, counts = np.unique(_y, return_counts=True)
+                            majority = classes[np.argmax(counts)]
+                            baseline = [majority] * len(_y)
+                            metrics['f1'][_response][-1] = f1_score(_y, _preds, average='macro')
+                            metrics['f1_baseline'][_response][-1] = f1_score(_y, baseline, average='macro')
+                            metrics['acc'][_response][-1] = accuracy_score(_y, _preds)
+                            metrics['acc_baseline'][_response][-1] = accuracy_score(_y, baseline)
+                            err_col_name = 'CDRcorrect'
+                        else:
                             error = np.array(_y - _preds) ** 2
                             score = error.mean()
                             resid = np.sort(_y - _preds)
@@ -4018,12 +4077,6 @@ class Model(object):
                             metrics['true_variance'][_response][-1] = np.std(_y) ** 2
                             metrics['ks_results'][_response][-1] = (D, p_value)
                             err_col_name = 'CDRsquarederror'
-                        else:
-                            error = (_y == _preds).astype('int')
-                            score = f1_score(_y, _preds, average='macro')
-
-                            metrics['f1'][_response][-1] = score
-                            err_col_name = 'CDRmacroF1'
                     else:
                         err_col_name = error = _preds = _y = None
 
@@ -4096,6 +4149,9 @@ class Model(object):
                 summary_eval = self.report_evaluation(
                     mse=metrics['mse'][_response][ix],
                     f1=metrics['f1'][_response][ix],
+                    f1_baseline=metrics['f1_baseline'][_response][ix],
+                    acc=metrics['acc'][_response][ix],
+                    acc_baseline=metrics['acc_baseline'][_response][ix],
                     rho=metrics['rho'][_response][ix],
                     loglik=metrics['log_lik'][_response][ix],
                     percent_variance_explained=metrics['percent_variance_explained'][_response][ix],
@@ -5885,32 +5941,33 @@ class Model(object):
 
                 if generate_err_dist_plots:
                     for _response in self.error_distribution_plot:
-                        lb = self.sess.run(self.error_distribution_plot_lb[_response])
-                        ub = self.sess.run(self.error_distribution_plot_ub[_response])
-                        n_time_units = ub - lb
-                        fd = {
-                            self.support_start: lb,
-                            self.n_time_units: n_time_units,
-                            self.n_time_points: plot_n_time_points,
-                            self.training: not self.predict_mode
-                        }
-                        plot_x = self.sess.run(self.support, feed_dict=fd)
-                        plot_name = 'error_distribution_%s.png' % sn(_response)
+                        if self.is_real(_response):
+                            lb = self.sess.run(self.error_distribution_plot_lb[_response])
+                            ub = self.sess.run(self.error_distribution_plot_ub[_response])
+                            n_time_units = ub - lb
+                            fd = {
+                                self.support_start: lb,
+                                self.n_time_units: n_time_units,
+                                self.n_time_points: plot_n_time_points,
+                                self.training: not self.predict_mode
+                            }
+                            plot_x = self.sess.run(self.support, feed_dict=fd)
+                            plot_name = 'error_distribution_%s.png' % sn(_response)
 
-                        plot_y = self.sess.run(self.error_distribution_plot[_response], feed_dict=fd)
-                        lq = None
-                        uq = None
+                            plot_y = self.sess.run(self.error_distribution_plot[_response], feed_dict=fd)
+                            lq = None
+                            uq = None
 
-                        plot_irf(
-                            plot_x,
-                            plot_y,
-                            ['Error Distribution'],
-                            lq=lq,
-                            uq=uq,
-                            dir=self.outdir,
-                            filename=prefix + plot_name,
-                                legend=False,
-                        )
+                            plot_irf(
+                                plot_x,
+                                plot_y,
+                                ['Error Distribution'],
+                                lq=lq,
+                                uq=uq,
+                                dir=self.outdir,
+                                filename=prefix + plot_name,
+                                    legend=False,
+                            )
 
                 self.set_predict_mode(False)
 
