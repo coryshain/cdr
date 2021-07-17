@@ -262,7 +262,7 @@ class CDRNN(Model):
                         rangf_1hot = tf.concat(rangf_1hot, axis=-1)
                     else:
                         rangf_1hot = tf.zeros(
-                            [tf.shape(self.Y_gf)[0], 0],
+                            tf.convert_to_tensor([tf.shape(self.Y_gf)[0], 0]),
                             dtype=self.FLOAT_TF
                         )
                     self.rangf_1hot = rangf_1hot
@@ -937,7 +937,7 @@ class CDRNN(Model):
                         h_init = tf.tile(self.rnn_h_init[l], tile_dims)
                         c_init = tf.tile(self.rnn_c_init[l], tile_dims)
 
-                    t_init = tf.zeros([b, 1], dtype=self.FLOAT_TF)
+                    t_init = tf.zeros(tf.convert_to_tensor([b, 1]), dtype=self.FLOAT_TF)
                     initial_state = CDRNNStateTuple(c=c_init, h=h_init, t=t_init)
 
                     layer = self.rnn_layers[l]
@@ -966,6 +966,7 @@ class CDRNN(Model):
                             s = X_shape[j]
                         time_X_shape.append(s)
                     time_X_shape.append(1)
+                    time_X_shape = tf.convert_to_tensor(time_X_shape)
                     X_time = tf.ones(time_X_shape, dtype=self.FLOAT_TF)
                     time_X_mean = self.X_time_mean
                     X_time *= time_X_mean
@@ -1240,14 +1241,14 @@ class CDRNN(Model):
                         nparam = 1
                     ndim = self.get_response_ndim(response)
                     slices[response] = slice(n, n + n_impulse * nparam * ndim)
-                    shapes[response] = (
+                    shapes[response] = tf.convert_to_tensor((
                         self.X_batch_dim,
                         # Predictor files get tiled out over the time dimension:
                         self.X_time_dim * self.n_impulse_df,
                         n_impulse,
                         nparam,
                         ndim
-                    )
+                    ))
                     n += n_impulse * nparam * ndim
 
                 return slices, shapes

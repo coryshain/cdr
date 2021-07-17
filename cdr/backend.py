@@ -1775,6 +1775,7 @@ class BatchNormLayerBayes(BatchNormLayer):
                     shape.append(1)
                 else:
                     shape.append(inputs_shape[i])
+            shape = tf.convert_to_tensor(shape)
 
             if not self.name:
                 name = ''
@@ -2064,6 +2065,7 @@ class LayerNormLayerBayes(LayerNormLayer):
                     shape.append(inputs_shape[i])
                 else:
                     shape.append(1)
+            shape = tf.convert_to_tensor(shape)
 
             if not self.name:
                 name = ''

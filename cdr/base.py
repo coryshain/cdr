@@ -837,11 +837,11 @@ class Model(object):
                 self.X_processed = X_processed
                 self.X_time = tf.placeholder_with_default(
                     tf.zeros(
-                        [
+                        tf.convert_to_tensor([
                             self.X_batch_dim,
                             self.history_length + self.future_length,
                             max(self.n_impulse, 1)
-                        ],
+                        ]),
                         dtype=self.FLOAT_TF
                     ),
                     shape=[None, None, max(self.n_impulse, 1)],
@@ -849,11 +849,11 @@ class Model(object):
                 )
                 self.X_mask = tf.placeholder_with_default(
                     tf.ones(
-                        [
+                        tf.convert_to_tensor([
                             self.X_batch_dim,
                             self.history_length + self.future_length,
                             max(self.n_impulse, 1)
-                        ],
+                        ]),
                         dtype=self.FLOAT_TF
                     ),
                     shape=[None, None, max(self.n_impulse, 1)],
@@ -869,12 +869,12 @@ class Model(object):
                 Y_shape = tf.shape(self.Y)
                 self.Y_batch_dim = Y_shape[0]
                 self.Y_time = tf.placeholder_with_default(
-                    tf.ones([self.Y_batch_dim], dtype=self.FLOAT_TF),
+                    tf.ones(tf.convert_to_tensor([self.Y_batch_dim]), dtype=self.FLOAT_TF),
                     shape=[None],
                     name=sn('Y_time')
                 )
                 self.Y_mask = tf.placeholder_with_default(
-                    tf.ones([self.Y_batch_dim, self.n_response], dtype=self.FLOAT_TF),
+                    tf.ones(tf.convert_to_tensor([self.Y_batch_dim, self.n_response]), dtype=self.FLOAT_TF),
                     shape=[None, self.n_response],
                     name='Y_mask'
                 )
@@ -1806,7 +1806,6 @@ class Model(object):
                                     self.parameter_table_random_values.append(
                                         self.intercept_random[response][gf][dim_name][l]
                                     )
-
 
     def _initialize_saver(self):
         with self.sess.as_default():
