@@ -416,7 +416,7 @@ class PlotConfig(object):
         for kwarg in PLOT_KWARGS_CORE:
             if kwarg.in_settings(settings):
                 val = kwarg.kwarg_from_config(settings)
-                if kwarg.key in ['response', 'response_params', 'pred_names'] and val is not None:
+                if kwarg.key in ['responses', 'response_params', 'pred_names'] and val is not None:
                     val = val.split()
                 elif kwarg.key == 'prop_cycle_map' and val is not None:
                     val = val.split()

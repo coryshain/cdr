@@ -1311,7 +1311,7 @@ CDRNNBAYES_INITIALIZATION_KWARGS = [
 PLOT_KWARGS_CORE = [
     # PLOT DATA GENERATION
     Kwarg(
-        'response',
+        'responses',
         None,
         [str, None],
         "Name(s) of response variable(s) to plot. If ``None``, plots all univariate responses."
@@ -1323,10 +1323,11 @@ PLOT_KWARGS_CORE = [
         "Name(s) of parameter(s) of predictive distribution to plot for each response variable. If ``None``, plots the first parameter only. Parameter names not present in a given distribution will be skipped."
     ),
     Kwarg(
-        'generate_univariate_IRF_plots',
+        'generate_univariate_irf_plots',
         True,
         bool,
-        "Whether to plot univariate IRFs over time."
+        "Whether to plot univariate IRFs over time.",
+        aliases=['generate_univariate_IRF_plots']
     ),
     Kwarg(
         'generate_curvature_plots',
@@ -1338,7 +1339,8 @@ PLOT_KWARGS_CORE = [
         'generate_irf_surface_plots',
         True,
         bool,
-        "Whether to plot IRF surfaces."
+        "Whether to plot IRF surfaces.",
+        aliases=['generate_IRF_surface_plots']
     ),
     Kwarg(
         'generate_interaction_surface_plots',

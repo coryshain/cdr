@@ -1497,8 +1497,6 @@ class Model(object):
                         _X_conv = tf.reduce_mean(_X_conv, axis=0)
                         dim_names = self._expand_param_name_by_dim(response, response_param_name)
                         for k, dim_name in enumerate(dim_names):
-                            print(self.X_conv[response])
-                            print(_X_conv)
                             X_conv_ema_cur = _X_conv[:, k]
                             self.X_conv_ema[response][dim_name] = tf.Variable(
                                 tf.zeros_like(X_conv_ema_cur),
@@ -4875,14 +4873,17 @@ class Model(object):
         assert xvar != yvar, 'Cannot vary two axes along the same variable'
 
         if responses is None:
-            responses = [x for x in self.response_names if self.get_response_ndim(x) == 1]
+            if self.n_response == 1:
+                responses = self.response_names
+            else:
+                responses = [x for x in self.response_names if self.get_response_ndim(x) == 1]
         if isinstance(responses, str):
             responses = [responses]
 
         if response_params is None:
             response_params = set()
-            for _response in responses:
-                response_params.add(self.get_response_params(_response)[0])
+            for response in responses:
+                response_params.add(self.get_response_params(response)[0])
             response_params = sorted(list(response_params))
         if isinstance(response_params, str):
             response_params = [response_params]
@@ -5262,69 +5263,69 @@ class Model(object):
                 samples = {}
                 for i in range(n_samples):
                     to_run = {}
-                    for _response in responses:
-                        to_run[_response] = {}
-                        for _response_param in response_params:
-                            dim_names = self._expand_param_name_by_dim(_response, _response_param)
-                            for _dim_name in dim_names:
-                                to_run[_response][_dim_name] = self.predictive_distribution_delta[_response][_dim_name]
+                    for response in responses:
+                        to_run[response] = {}
+                        for response_param in response_params:
+                            dim_names = self._expand_param_name_by_dim(response, response_param)
+                            for dim_name in dim_names:
+                                to_run[response][dim_name] = self.predictive_distribution_delta[response][dim_name]
 
                     if self.resample_ops:
                         self.sess.run(self.resample_ops)
                     sample_ref = self.sess.run(to_run, feed_dict=fd_ref)
-                    for _response in to_run:
-                        for _dim_name in to_run[_response]:
-                            _sample = sample_ref[_response][_dim_name]
-                            sample_ref[_response][_dim_name] = np.reshape(_sample, ref_shape, 'F')
+                    for response in to_run:
+                        for dim_name in to_run[response]:
+                            _sample = sample_ref[response][dim_name]
+                            sample_ref[response][dim_name] = np.reshape(_sample, ref_shape, 'F')
 
                     if n_manip:
                         sample = {}
                         sample_main = self.sess.run(to_run, feed_dict=fd_main)
-                        for _response in to_run:
-                            sample[_response] = {}
-                            for _dim_name in sample_main[_response]:
-                                sample_main[_response][_dim_name] = np.reshape(sample_main[_response][_dim_name], sample_shape, 'F')
-                                sample_main[_response][_dim_name] = sample_main[_response][_dim_name] - sample_ref[_response][_dim_name]
+                        for response in to_run:
+                            sample[response] = {}
+                            for dim_name in sample_main[response]:
+                                sample_main[response][dim_name] = np.reshape(sample_main[response][dim_name], sample_shape, 'F')
+                                sample_main[response][dim_name] = sample_main[response][dim_name] - sample_ref[response][dim_name]
                                 if ref_as_manip:
-                                    sample[_response][_dim_name] = np.concatenate(
-                                        [sample_ref[_response][_dim_name], sample_main[_response][_dim_name]],
+                                    sample[response][dim_name] = np.concatenate(
+                                        [sample_ref[response][dim_name], sample_main[response][dim_name]],
                                         axis=-1
                                     )
                                 else:
-                                    sample[_response][_dim_name] = sample_main[_response][_dim_name]
+                                    sample[response][dim_name] = sample_main[response][dim_name]
                     else:
                         sample = sample_ref
-                    for _response in sample:
-                        if not _response in samples:
-                            samples[_response] = {}
-                        for _dim_name in sample[_response]:
-                            if not _dim_name in samples[_response]:
-                                samples[_response][_dim_name] = []
-                            samples[_response][_dim_name].append(sample[_response][_dim_name])
+                    for response in sample:
+                        if not response in samples:
+                            samples[response] = {}
+                        for dim_name in sample[response]:
+                            if not dim_name in samples[response]:
+                                samples[response][dim_name] = []
+                            samples[response][dim_name].append(sample[response][dim_name])
 
                 lower = {}
                 upper = {}
                 mean = {}
-                for _response in samples:
-                    lower[_response] = {}
-                    upper[_response] = {}
-                    mean[_response] = {}
-                    for _dim_name in samples[_response]:
-                        _samples = np.stack(samples[_response][_dim_name], axis=0)
+                for response in samples:
+                    lower[response] = {}
+                    upper[response] = {}
+                    mean[response] = {}
+                    for dim_name in samples[response]:
+                        _samples = np.stack(samples[response][dim_name], axis=0)
                         rescale = self.standardize_response and \
-                                  self.is_real(_response) and \
-                                  (_dim_name.startswith('mu') or _dim_name.startswith('sigma'))
+                                  self.is_real(response) and \
+                                  (dim_name.startswith('mu') or dim_name.startswith('sigma'))
                         if rescale:
-                            _samples = _samples * self.Y_train_sds[_response]
-                        samples[_response][_dim_name] = np.stack(_samples, axis=0)
+                            _samples = _samples * self.Y_train_sds[response]
+                        samples[response][dim_name] = np.stack(_samples, axis=0)
                         _mean = _samples.mean(axis=0)
-                        mean[_response][_dim_name] = _mean
+                        mean[response][dim_name] = _mean
                         if resample:
-                            lower[_response][_dim_name] = np.percentile(_samples, alpha / 2, axis=0)
-                            upper[_response][_dim_name] = np.percentile(_samples, 100 - (alpha / 2), axis=0)
+                            lower[response][dim_name] = np.percentile(_samples, alpha / 2, axis=0)
+                            upper[response][dim_name] = np.percentile(_samples, 100 - (alpha / 2), axis=0)
                         else:
                             lower = upper = mean
-                            samples[_response][_dim_name] = _mean[None, ...]
+                            samples[response][dim_name] = _mean[None, ...]
 
                 out = (plot_axes, mean, lower, upper, samples)
 
@@ -5529,7 +5530,7 @@ class Model(object):
             plot_n_time_units=None,
             plot_n_time_points=None,
             reference_type=None,
-            generate_univariate_IRF_plots=True,
+            generate_univariate_irf_plots=True,
             generate_curvature_plots=None,
             generate_irf_surface_plots=None,
             generate_nonstationarity_surface_plots=None,
@@ -5580,7 +5581,7 @@ class Model(object):
         :param plot_n_time_units: ``float`` or ``None``; resolution of plot axis (for 3D plots, uses sqrt of this number for each axis). If ``None``, use default setting.
         :param plot_support_start: ``float`` or ``None``; start time for IRF plots. If ``None``, use default setting.
         :param reference_type: ``bool``; whether to use the predictor means as baseline reference (otherwise use zero).
-        :param generate_univariate_IRF_plots: ``bool``; whether to plot univariate IRFs over time.
+        :param generate_univariate_irf_plots: ``bool``; whether to plot univariate IRFs over time.
         :param generate_curvature_plots: ``bool`` or ``None``; whether to plot IRF curvature at time **reference_time**. If ``None``, use default setting.
         :param generate_irf_surface_plots: ``bool`` or ``None``; whether to plot IRF surfaces.  If ``None``, use default setting.
         :param generate_nonstationarity_surface_plots: ``bool`` or ``None``; whether to plot IRF surfaces showing non-stationarity in the response.  If ``None``, use default setting.
@@ -5604,19 +5605,6 @@ class Model(object):
         :return: ``None``
         """
 
-        if responses is None:
-            responses = [x for x in self.response_names if self.get_response_ndim(x) == 1]
-        if isinstance(responses, str):
-            responses = [responses]
-
-        if response_params is None:
-            response_params = set()
-            for _response in responses:
-                response_params.add(self.get_response_params(_response)[0])
-            response_params = sorted(list(response_params))
-        if isinstance(response_params, str):
-            response_params = [response_params]
-
         if irf_name_map is None:
             irf_name_map = self.irf_name_map
 
@@ -5628,6 +5616,8 @@ class Model(object):
             plot_n_time_units = self.plot_n_time_units
         if plot_n_time_points is None:
             plot_n_time_points = self.plot_n_time_points
+        if generate_univariate_irf_plots is None:
+            generate_univariate_irf_plots = self.generate_univariate_irf_plots
         if generate_curvature_plots is None:
             generate_curvature_plots = self.generate_curvature_plots
         if generate_irf_surface_plots is None:
@@ -5669,7 +5659,7 @@ class Model(object):
                 self.set_predict_mode(True)
 
                 # IRF 1D
-                if generate_univariate_IRF_plots:
+                if generate_univariate_irf_plots:
                     names = self.impulse_names
                     if not plot_dirac:
                         names = [x for x in names if self.is_non_dirac(x)]
