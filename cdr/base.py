@@ -427,6 +427,7 @@ class Model(object):
         self.X_conv = {} # Key order: <response>;
         self.layers = [] # CDRNN only, list of DNN layers
         self.kl_penalties = {} # Key order: <variable>; Value: scalar KL divergence
+        self.ema_ops = [] # Container for any exponential moving average updates to run at each training step
 
         if np.isfinite(self.minibatch_size):
             self.n_train_minibatch = math.ceil(float(self.n_train) / self.minibatch_size)
@@ -1374,7 +1375,8 @@ class Model(object):
                 self.error_distribution_plot_lb = {}
                 self.error_distribution_plot_ub = {}
                 self.response_params_ema = {}
-                self.response_params_ema_ops = {}
+                self.X_conv_ema = {}
+                self.X_conv_ema_debiased = {}
 
                 for i, response in enumerate(self.response_names):
                     self.predictive_distribution[response] = {}
@@ -1442,7 +1444,7 @@ class Model(object):
                     response_dist = pred_dist_fn(*_response_params)
                     self.predictive_distribution[response] = response_dist
 
-                    # Define EMA
+                    # Define EMA over predictive distribution
                     beta = self.ema_decay
                     step = tf.cast(self.global_batch_step, self.FLOAT_TF)
                     response_params_ema_cur = []
@@ -1460,16 +1462,17 @@ class Model(object):
                     self.response_params_ema[response] = tf.Variable(
                         tf.zeros((nparam, ndim)),
                         trainable=False,
-                        name='response_params_ema'
+                        name='response_params_ema_%s' % response
                     )
                     response_params_ema_prev = self.response_params_ema[response]
                     response_params_ema_debiased = response_params_ema_prev / (1. - beta ** step)
                     ema_update = beta * response_params_ema_prev + \
                                  (1. - beta) * response_params_ema_cur
-                    self.response_params_ema_ops[response] = tf.assign(
+                    response_params_ema_op = tf.assign(
                         self.response_params_ema[response],
                         ema_update
                     )
+                    self.ema_ops.append(response_params_ema_op)
                     for j, response_param_name in enumerate(response_param_names):
                         dim_names = self._expand_param_name_by_dim(response, response_param_name)
                         for k, dim_name in enumerate(dim_names):
@@ -1482,6 +1485,36 @@ class Model(object):
                                 response_params_ema_debiased[j, k],
                                 collections=['params']
                             )
+
+                    # Define EMA over X_conv
+                    X_conv = tf.unstack(self.X_conv[response], axis=2) # X_conv is (batch, impulse, param, dim)
+                    self.X_conv_ema[response] = {}
+                    self.X_conv_ema_debiased[response] = {}
+                    for j, response_param_name in enumerate(response_param_names):
+                        _X_conv = X_conv[j]
+                        if self.standardize_response and self.is_real(response) and response_param_name in ['mu', 'sigma']:
+                            _X_conv = _X_conv * self.Y_train_sds[response]
+                        _X_conv = tf.reduce_mean(_X_conv, axis=0)
+                        dim_names = self._expand_param_name_by_dim(response, response_param_name)
+                        for k, dim_name in enumerate(dim_names):
+                            print(self.X_conv[response])
+                            print(_X_conv)
+                            X_conv_ema_cur = _X_conv[:, k]
+                            self.X_conv_ema[response][dim_name] = tf.Variable(
+                                tf.zeros_like(X_conv_ema_cur),
+                                trainable=False,
+                                name='response_params_ema_%s_%s' % (response, dim_name)
+                            )
+                            X_conv_ema_prev = self.X_conv_ema[response][dim_name]
+                            X_conv_ema_debiased = X_conv_ema_prev / (1. - beta ** step)
+                            self.X_conv_ema_debiased[response][dim_name] = X_conv_ema_debiased
+                            ema_update = beta * X_conv_ema_prev + \
+                                         (1. - beta) * X_conv_ema_cur
+                            X_conv_ema_op = tf.assign(
+                                self.X_conv_ema[response][dim_name],
+                                ema_update
+                            )
+                            self.ema_ops.append(X_conv_ema_op)
 
                     # Define prediction tensors
                     dist_name = self.get_response_dist_name(response)
@@ -1677,8 +1710,10 @@ class Model(object):
                     loss_m1_ema_update = beta * self.loss_m1_ema + (1 - beta) * loss_m1_cur
                     loss_m2_ema_update = beta * self.loss_m2_ema + (1 - beta) * loss_m2_cur
 
-                    self.loss_m1_ema_op = tf.assign(self.loss_m1_ema, loss_m1_ema_update)
-                    self.loss_m2_ema_op = tf.assign(self.loss_m2_ema, loss_m2_ema_update)
+                    loss_m1_ema_op = tf.assign(self.loss_m1_ema, loss_m1_ema_update)
+                    loss_m2_ema_op = tf.assign(self.loss_m2_ema, loss_m2_ema_update)
+
+                    self.ema_ops += [loss_m1_ema_op, loss_m2_ema_op]
 
                 loss_func = tf.reduce_sum(loss_func)
 
@@ -1787,7 +1822,8 @@ class Model(object):
             with self.sess.graph.as_default():
                 self.ema_vars = tf.get_collection('trainable_variables')
                 self.ema = tf.train.ExponentialMovingAverage(decay=self.ema_decay if self.ema_decay else 0.)
-                self.ema_op = self.ema.apply(self.ema_vars)
+                ema_op = self.ema.apply(self.ema_vars)
+                self.ema_ops.append(ema_op)
                 self.ema_map = {}
                 for v in self.ema_vars:
                     self.ema_map[self.ema.average_name(v)] = v
@@ -2173,66 +2209,6 @@ class Model(object):
 
                 return min_p_ix, min_p, rt_at_min_p, ra_at_min_p, p_ta_at_min_p, proportion_converged, converged
 
-    # Thanks to Ralph Mao (https://github.com/RalphMao) for this workaround
-    def _restore_inner(self, path, predict=False, allow_missing=False):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                try:
-                    self.saver.restore(self.sess, path)
-                    if predict and self.ema_decay:
-                        self.ema_saver.restore(self.sess, path)
-                except tf.errors.DataLossError:
-                    stderr('Read failure during load. Trying from backup...\n')
-                    self.saver.restore(self.sess, path[:-5] + '_backup.ckpt')
-                    if predict:
-                        self.ema_saver.restore(self.sess, path[:-5] + '_backup.ckpt')
-                except tf.errors.NotFoundError as err:  # Model contains variables that are missing in checkpoint, special handling needed
-                    if allow_missing:
-                        reader = tf.train.NewCheckpointReader(path)
-                        saved_shapes = reader.get_variable_to_shape_map()
-                        model_var_names = sorted([(var.name, var.name.split(':')[0]) for var in tf.global_variables()])
-                        ckpt_var_names = sorted([(var.name, var.name.split(':')[0]) for var in tf.global_variables()
-                                                 if var.name.split(':')[0] in saved_shapes])
-
-                        model_var_names_set = set([x[1] for x in model_var_names])
-                        ckpt_var_names_set = set([x[1] for x in ckpt_var_names])
-
-                        missing_in_ckpt = model_var_names_set - ckpt_var_names_set
-                        if len(missing_in_ckpt) > 0:
-                            stderr(
-                                'Checkpoint file lacked the variables below. They will be left at their initializations.\n%s.\n\n' % (
-                                sorted(list(missing_in_ckpt))))
-                        missing_in_model = ckpt_var_names_set - model_var_names_set
-                        if len(missing_in_model) > 0:
-                            stderr(
-                                'Checkpoint file contained the variables below which do not exist in the current model. They will be ignored.\n%s.\n\n' % (
-                                sorted(list(missing_in_ckpt))))
-
-                        restore_vars = []
-                        name2var = dict(
-                            zip(map(lambda x: x.name.split(':')[0], tf.global_variables()), tf.global_variables()))
-
-                        with tf.variable_scope('', reuse=True):
-                            for var_name, saved_var_name in ckpt_var_names:
-                                curr_var = name2var[saved_var_name]
-                                var_shape = curr_var.get_shape().as_list()
-                                if var_shape == saved_shapes[saved_var_name]:
-                                    restore_vars.append(curr_var)
-
-                        saver_tmp = tf.train.Saver(restore_vars)
-                        saver_tmp.restore(self.sess, path)
-
-                        if predict:
-                            self.ema_map = {}
-                            for v in restore_vars:
-                                self.ema_map[self.ema.average_name(v)] = v
-                            saver_tmp = tf.train.Saver(self.ema_map)
-                            saver_tmp.restore(self.sess, path)
-
-                    else:
-                        raise err
-
-
 
 
 
@@ -2265,17 +2241,35 @@ class Model(object):
     def run_train_step(self, feed_dict):
         """
         Update the model from a batch of training data.
-        **All subclasses must implement this method.**
 
         :param feed_dict: ``dict``; A dictionary of predictor and response values
         :return: ``numpy`` array; Predicted responses, one for each training sample
         """
 
-        raise NotImplementedError
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                to_run = [self.train_op]
+                to_run += self.ema_ops
 
+                to_run += [self.loss_func, self.reg_loss]
+                to_run_names = ['loss', 'reg_loss']
 
+                if self.loss_filter_n_sds:
+                    to_run_names.append('n_dropped')
+                    to_run.append(self.n_dropped)
 
+                if self.is_bayesian:
+                    to_run_names.append('kl_loss')
+                    to_run.append(self.kl_loss)
 
+                out = self.sess.run(
+                    to_run,
+                    feed_dict=feed_dict
+                )
+
+                out_dict = {x: y for x, y in zip(to_run_names, out[-len(to_run_names):])}
+
+                return out_dict
 
     ######################################################
     #
@@ -2523,7 +2517,65 @@ class Model(object):
                 if not self.initialized():
                     self.sess.run(tf.global_variables_initializer())
                 if restore and os.path.exists(outdir + '/checkpoint'):
-                    self._restore_inner(outdir + '/model.ckpt', predict=predict, allow_missing=allow_missing)
+                    # Thanks to Ralph Mao (https://github.com/RalphMao) for this workaround for missing vars
+                    path = outdir + '/model.ckpt'
+                    try:
+                        self.saver.restore(self.sess, path)
+                        if predict and self.ema_decay:
+                            self.ema_saver.restore(self.sess, path)
+                    except tf.errors.DataLossError:
+                        stderr('Read failure during load. Trying from backup...\n')
+                        self.saver.restore(self.sess, path[:-5] + '_backup.ckpt')
+                        if predict:
+                            self.ema_saver.restore(self.sess, path[:-5] + '_backup.ckpt')
+                    except tf.errors.NotFoundError as err:  # Model contains variables that are missing in checkpoint, special handling needed
+                        if allow_missing:
+                            reader = tf.train.NewCheckpointReader(path)
+                            saved_shapes = reader.get_variable_to_shape_map()
+                            model_var_names = sorted(
+                                [(var.name, var.name.split(':')[0]) for var in tf.global_variables()])
+                            ckpt_var_names = sorted(
+                                [(var.name, var.name.split(':')[0]) for var in tf.global_variables()
+                                 if var.name.split(':')[0] in saved_shapes])
+
+                            model_var_names_set = set([x[1] for x in model_var_names])
+                            ckpt_var_names_set = set([x[1] for x in ckpt_var_names])
+
+                            missing_in_ckpt = model_var_names_set - ckpt_var_names_set
+                            if len(missing_in_ckpt) > 0:
+                                stderr(
+                                    'Checkpoint file lacked the variables below. They will be left at their initializations.\n%s.\n\n' % (
+                                        sorted(list(missing_in_ckpt))))
+                            missing_in_model = ckpt_var_names_set - model_var_names_set
+                            if len(missing_in_model) > 0:
+                                stderr(
+                                    'Checkpoint file contained the variables below which do not exist in the current model. They will be ignored.\n%s.\n\n' % (
+                                        sorted(list(missing_in_ckpt))))
+
+                            restore_vars = []
+                            name2var = dict(
+                                zip(map(lambda x: x.name.split(':')[0], tf.global_variables()),
+                                    tf.global_variables()))
+
+                            with tf.variable_scope('', reuse=True):
+                                for var_name, saved_var_name in ckpt_var_names:
+                                    curr_var = name2var[saved_var_name]
+                                    var_shape = curr_var.get_shape().as_list()
+                                    if var_shape == saved_shapes[saved_var_name]:
+                                        restore_vars.append(curr_var)
+
+                            saver_tmp = tf.train.Saver(restore_vars)
+                            saver_tmp.restore(self.sess, path)
+
+                            if predict:
+                                self.ema_map = {}
+                                for v in restore_vars:
+                                    self.ema_map[self.ema.average_name(v)] = v
+                                saver_tmp = tf.train.Saver(self.ema_map)
+                                saver_tmp.restore(self.sess, path)
+
+                        else:
+                            raise err
                 else:
                     if predict:
                         stderr('No EMA checkpoint available. Leaving internal variables unchanged.\n')
@@ -3376,8 +3428,6 @@ class Model(object):
                                 n_dropped += info_dict['n_dropped']
 
                             loss_cur = info_dict['loss']
-                            if self.ema_decay:
-                                self.sess.run(self.ema_op)
                             if not np.isfinite(loss_cur):
                                 loss_cur = 0
                             loss_total += loss_cur

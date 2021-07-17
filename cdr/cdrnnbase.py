@@ -1166,9 +1166,6 @@ class CDRNN(Model):
                 if ema_rate is None:
                     ema_rate = 0.
 
-                self.rnn_h_ema_ops = []
-                self.rnn_c_ema_ops = []
-
                 mask = X_mask[..., None]
                 denom = tf.reduce_sum(mask)
 
@@ -1186,7 +1183,7 @@ class CDRNN(Model):
                         h_ema,
                         ema_rate * h_ema + (1. - ema_rate) * h_mean
                     )
-                    self.rnn_h_ema_ops.append(h_ema_op)
+                    self.ema_ops.append(h_ema_op)
 
                     c_sum = tf.reduce_sum(rnn_cell[l] * mask, axis=reduction_axes)
                     c_mean = c_sum / (denom + self.epsilon)
@@ -1195,9 +1192,8 @@ class CDRNN(Model):
                         c_ema,
                         ema_rate * c_ema + (1. - ema_rate) * c_mean
                     )
-                    self.rnn_c_ema_ops.append(c_ema_op)
+                    self.ema_ops.append(c_ema_op)
 
-                self.batch_norm_ema_ops = []
                 if self.input_dropout_rate:
                     self.resample_ops += self.input_dropout_layer.resample_ops() + self.time_X_dropout_layer.resample_ops()
                 if self.ranef_dropout_rate:
@@ -1205,7 +1201,7 @@ class CDRNN(Model):
                 if self.rnn_dropout_rate:
                     self.resample_ops += self.rnn_dropout_layer.resample_ops()
                 for x in self.layers:
-                    self.batch_norm_ema_ops += x.ema_ops()
+                    self.ema_ops += x.ema_ops()
                     self.resample_ops += x.resample_ops()
 
 
@@ -1528,26 +1524,3 @@ class CDRNN(Model):
             out += ' ' * indent + '  %s: %s\n' % (kwarg.key, "\"%s\"" % val if isinstance(val, str) else val)
 
         return out
-
-    def run_train_step(self, feed_dict, verbose=True):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                to_run_names = []
-                to_run = []
-                to_run += [self.train_op, self.ema_op] + self.batch_norm_ema_ops
-                to_run += [self.response_params_ema_ops[x] for x in self.response_params_ema_ops]
-                if self.n_layers_rnn:
-                    to_run += self.rnn_h_ema_ops + self.rnn_c_ema_ops
-                if self.loss_filter_n_sds:
-                    to_run_names.append('n_dropped')
-                    to_run += [self.loss_m1_ema_op, self.loss_m2_ema_op, self.n_dropped]
-                to_run_names += ['loss', 'reg_loss']
-                to_run += [self.loss_func, self.reg_loss]
-                if self.is_bayesian:
-                    to_run.append(self.kl_loss)
-                    to_run_names.append('kl_loss')
-                out = self.sess.run(to_run, feed_dict=feed_dict)
-
-                out_dict = {x: y for x, y in zip(to_run_names, out[-len(to_run_names):])}
-
-                return out_dict

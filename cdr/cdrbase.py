@@ -2473,34 +2473,3 @@ class CDR(Model):
             out += ' ' * indent + '  %s: %s\n' %(kwarg.key, "\"%s\"" %val if isinstance(val, str) else val)
 
         return out
-
-
-
-    ######################################################
-    #
-    #  High-level methods for training, prediction,
-    #  and plotting
-    #
-    ######################################################
-
-
-    def run_train_step(self, feed_dict, verbose=True):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                to_run = [self.train_op, self.ema_op]
-                to_run += [self.response_params_ema_ops[x] for x in self.response_params_ema_ops]
-
-                to_run += [self.loss_func, self.reg_loss]
-                to_run_names = ['loss', 'reg_loss']
-                if self.is_bayesian:
-                    to_run.append(self.kl_loss)
-                    to_run_names.append('kl_loss')
-
-                out = self.sess.run(
-                    to_run,
-                    feed_dict=feed_dict
-                )
-
-                out_dict = {x: y for x, y in zip(to_run_names, out[-len(to_run_names):])}
-
-                return out_dict

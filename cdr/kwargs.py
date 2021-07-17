@@ -882,13 +882,15 @@ CDRNN_INITIALIZATION_KWARGS = [
         'n_layers_input_projection',
         2,
         [int, None],
-        "Number of hidden layers in input projection. If ``None``, inferred from length of **n_units_input_projection**."
+        "Number of hidden layers in input projection. If ``None``, inferred from length of **n_units_input_projection**.",
+        aliases=['n_layers']
     ),
     Kwarg(
         'n_units_input_projection',
         32,
         [int, str, None],
-        "Number of units per input projection hidden layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_rnn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers in input projection."
+        "Number of units per input projection hidden layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_rnn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers in input projection.",
+        aliases=['n_units']
     ),
     Kwarg(
         'n_layers_rnn',
@@ -918,21 +920,22 @@ CDRNN_INITIALIZATION_KWARGS = [
         'n_units_hidden_state',
         32,
         [int, str],
-        "Number of units in CDRNN hidden state. Must be an ``int``."
+        "Number of units in CDRNN hidden state. Must be an ``int``.",
+        aliases=['n_units']
     ),
     Kwarg(
         'n_layers_irf',
         2,
         [int, None],
         "Number of IRF hidden layers. If ``None``, inferred from length of **n_units_irf**.",
-        aliases=['n_layers_decoder']
+        aliases=['n_layers', 'n_layers_decoder']
     ),
     Kwarg(
         'n_units_irf',
         32,
         [int, str, None],
         "Number of units per hidden layer in IRF. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_units_irf** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers.",
-        aliases=['n_units_decoder']
+        aliases=['n_units', 'n_units_decoder']
     ),
 
     # ACTIVATION FUNCTIONS
