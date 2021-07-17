@@ -1470,7 +1470,8 @@ PLOT_KWARGS_CORE = [
         'use_legend',
         True,
         bool,
-        "Whether to add legend to univariate IRF plots."
+        "Whether to add legend to univariate IRF plots.",
+        aliases=['legend']
     ),
     Kwarg(
         'use_line_markers',

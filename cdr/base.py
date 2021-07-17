@@ -931,7 +931,7 @@ class Model(object):
                 self.dd_support = tf.concat(
                     [
                         tf.ones((1, 1), dtype=self.FLOAT_TF),
-                        tf.zeros((tf.shape(self.support)[0] - 1, 1), dtype=self.FLOAT_TF)
+                        tf.zeros(tf.convert_to_tensor([tf.shape(self.support)[0] - 1, 1]), dtype=self.FLOAT_TF)
                     ],
                     axis=0
                 )
