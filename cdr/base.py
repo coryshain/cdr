@@ -1462,7 +1462,7 @@ class Model(object):
                     self.response_params_ema[response] = tf.Variable(
                         tf.zeros((nparam, ndim)),
                         trainable=False,
-                        name='response_params_ema_%s' % response
+                        name='response_params_ema_%s' % sn(response)
                     )
                     response_params_ema_prev = self.response_params_ema[response]
                     response_params_ema_debiased = response_params_ema_prev / (1. - beta ** step)
@@ -1501,7 +1501,7 @@ class Model(object):
                             self.X_conv_ema[response][dim_name] = tf.Variable(
                                 tf.zeros_like(X_conv_ema_cur),
                                 trainable=False,
-                                name='response_params_ema_%s_%s' % (response, dim_name)
+                                name='response_params_ema_%s_%s' % (sn(response), sn(dim_name))
                             )
                             X_conv_ema_prev = self.X_conv_ema[response][dim_name]
                             X_conv_ema_debiased = X_conv_ema_prev / (1. - beta ** step)

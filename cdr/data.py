@@ -831,7 +831,6 @@ def get_time_windows(
         series_ids,
         forward=False,
         window_length=128,
-        exclude_instantaneous=False,
         verbose=True
 ):
     """
@@ -843,7 +842,6 @@ def get_time_windows(
     :param series_ids: ``list`` of ``str``; column names whose jointly unique values define unique time series.
     :param forward: ``bool``; whether to compute forward windows (future inputs) or backward windows (past inputs, used if **forward** is ``False``).
     :param window_length: ``int``; maximum size of time window to consider. If ``np.inf``, no bound on window size.
-    :param exclude_instantaneous: ``bool``; whether to exclude impulses that have the same timestamp as their targets.
     :param verbose: ``bool``; whether to report progress to stderr
     :return: 2-tuple of ``numpy`` vectors; first and last impulse observations (respectively) for each response in **y**
     """
@@ -854,21 +852,15 @@ def get_time_windows(
     m = len(X)
     n = len(Y)
 
-    X_src = X
-    Y_src = Y
+    Y = Y.reset_index(drop=True)
 
     if forward: # Reverse the time dimension
-        X = X[series_ids + ['time']].reset_index(drop=True)
+        X = X.copy()
         X['time'] = -X['time']
         X = X.sort_values(series_ids + ['time'])
-        X_ix = np.concatenate([np.array(X.index), [len(X)]], axis=0) # Pad 1 to handle final interval
-        Y = Y[series_ids + ['time']].reset_index(drop=True)
+        Y = Y.copy()
         Y['time'] = -Y['time']
         Y = Y.sort_values(series_ids + ['time'])
-        Y_ix = np.array(Y.index)
-    else:
-        X_ix = np.arange(len(X)+1) # Pad 1 to handle final interval
-        Y_ix = np.arange(len(Y))
 
     X_time = np.array(X.time)
     Y_time = np.array(Y.time)
@@ -906,44 +898,46 @@ def get_time_windows(
 
         # Move the X pointer forward until we are either in the same series as y or at the end of the table.
         # However, if we are already at the end of the current time series, stay put in case there are subsequent observations of the response.
-        if j == 0 or (j > 0 and (X_id_vectors[j-1] != Y_id).any()):
+        if j == 0 or (X_id_vectors[j-1] != Y_id).any():
             while j < m and (X_id_vectors[j] != Y_id).any():
                 j += 1
                 start = end = j
 
         # Move the X pointer forward until we are either at the end of the series or have moved later in time than y
-        while j < m and X_time[j] <= (Y_time[i] + epsilon) and (X_id_vectors[j] == Y_id).all():
+        while (j < m) and \
+                (X_time[j] <= Y_time[i] + epsilon) and \
+                (X_id_vectors[j] == Y_id).all():
             j += 1
             end = j
 
         if forward:
-            # Shift bounds since we're implicitly slicing backwards
-            _start = X_ix[end] + 1
-            _end = X_ix[start] + 1
-            if np.isfinite(window_length):
-                _end = min(_end, _start + window_length)
+            # We're slicing backward so first_obs is an included bound,
+            # need to shift it along the sorted X axis
+            # but make sure it doesn't go past the start index
+            first_obs[i] = max(end - 1, start)
+            last_obs[i] = start
         else:
-            _start = X_ix[start]
-            _end = X_ix[end]
-            if np.isfinite(window_length):
-                _start = max(_start, _end - window_length)
-        first_obs[i] = _start
-        last_obs[i] = _end
+            first_obs[i] = start
+            last_obs[i] = end
 
         i += 1
 
-    first_obs = first_obs[Y_ix]
-    last_obs = last_obs[Y_ix]
+    # Unsort X indices
+    first_obs = X.index[first_obs]
+    last_obs = X.index[last_obs]
 
-    if exclude_instantaneous:
-        _first_obs = np.where(first_obs < len(X_src), first_obs, np.maximum(0, first_obs-1))
-        shift = np.fabs(X_src.time.values[_first_obs] - Y_src.time.values) <= epsilon
-        if forward:
-            first_obs += shift
-            last_obs += shift
-        else:
-            first_obs -= shift
-            last_obs -= shift
+    # Unsort Y indices
+    first_obs = first_obs[Y.index]
+    last_obs = last_obs[Y.index]
+
+    if forward:
+        # We're slicing backward so last_obs is an excluded bound,
+        # need to shift it along the source X axis
+        last_obs += 1
+        if np.isfinite(window_length):
+            last_obs = np.minimum(last_obs, first_obs + window_length)
+    elif np.isfinite(window_length): # Backward with finite window length
+        first_obs = np.maximum(first_obs, last_obs - window_length)
 
     stderr('\n')
 
@@ -1218,10 +1212,8 @@ def preprocess_data(
                         window_length=history_length
                     )
                     first_obs_b, last_obs_b = first_obs, last_obs
-                    exclude_instantaneous = True
                 else:
                     first_obs = last_obs = None
-                    exclude_instantaneous = False
                 if future_length:
                     if history_length:
                         stderr('Forward...\n')
@@ -1230,8 +1222,7 @@ def preprocess_data(
                         _Y,
                         series_ids,
                         forward=True,
-                        window_length=future_length,
-                        exclude_instantaneous=exclude_instantaneous
+                        window_length=future_length
                     )
                     first_obs_f, last_obs_f = _first_obs, last_obs
                     if first_obs is None:
