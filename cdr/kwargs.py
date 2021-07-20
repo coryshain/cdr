@@ -876,6 +876,12 @@ CDRNN_INITIALIZATION_KWARGS = [
         "Whether to rescale time offset values by their training SD under the hood. Offsets are automatically reconverted back to the source scale for plotting and model criticism.",
         aliases=['rescale_time', 'rescale_tdelta']
     ),
+    Kwarg(
+        'nonstationary',
+        True,
+        bool,
+        "Whether to model non-stationarity by feeding impulse timestamps as input."
+    ),
 
     # MODEL SIZE
     Kwarg(

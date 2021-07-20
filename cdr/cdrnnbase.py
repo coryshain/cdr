@@ -1069,7 +1069,8 @@ class CDRNN(Model):
 
                 X_rate = tf.pad(X, [(0,0), (0,0), (1,0)], constant_values=1.)
                 X_rate = X_rate[..., None, None] # Pad out for nparam, ndim of response distribution(s)
-                X = tf.concat([X, X_time], axis=-1)
+                if self.nonstationary:
+                    X = tf.concat([X, X_time], axis=-1)
 
                 # Compute hidden state
                 h = self.h_bias
