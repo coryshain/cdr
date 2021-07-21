@@ -56,7 +56,7 @@ if __name__ == '__main__':
             with open(filename, 'w') as f:
                 f.write(base % (job_name, job_name, time, memory, n_cores))
                 if use_gpu:
-                    f.write('#SBATCH --gres=gpu:1\n' % use_gpu)
+                    f.write('#SBATCH --gres=gpu:1\n')
                 if slurm_partition:
                     f.write('#SBATCH --partition=%s\n' % slurm_partition)
                 f.write('\n')
