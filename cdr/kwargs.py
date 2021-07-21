@@ -853,7 +853,7 @@ CDRNN_INITIALIZATION_KWARGS = [
         False,
         bool,
         "Whether to center time values as inputs under the hood. Times are automatically shifted back to the source location for plotting and model criticism.",
-        aliases=['center_time']
+        aliases=['center_time', 'center_time_X']
     ),
     Kwarg(
         'center_t_delta',
