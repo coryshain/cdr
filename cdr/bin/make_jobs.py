@@ -22,7 +22,7 @@ if __name__ == '__main__':
     argparser.add_argument('-p', '--partition', nargs='+', help='Partition(s) over which to predict/evaluate')
     argparser.add_argument('-t', '--time', type=int, default=48, help='Maximum number of hours to train models')
     argparser.add_argument('-n', '--n_cores', type=int, default=8, help='Number of cores to request')
-    argparser.add_argument('-g', '--n_gpus', type=int, default=0, help='Number of GPUs to request')
+    argparser.add_argument('-g', '--use_gpu', action='store_true', help='Whether to request a GPU node')
     argparser.add_argument('-m', '--memory', type=int, default=64, help='Number of GB of memory to request')
     argparser.add_argument('-P', '--slurm_partition', default=None, help='Value for SLURM --partition setting, if applicable')
     argparser.add_argument('-c', '--cli_args', default='', help='Command line arguments to pass into call')
@@ -34,7 +34,7 @@ if __name__ == '__main__':
     partitions = args.partition
     time = args.time
     n_cores = args.n_cores
-    n_gpus = args.n_gpus
+    use_gpu = args.use_gpu
     memory = args.memory
     slurm_partition = args.slurm_partition
     cli_args = args.cli_args
@@ -55,8 +55,8 @@ if __name__ == '__main__':
             filename = outdir + '/' + job_name + '.pbs'
             with open(filename, 'w') as f:
                 f.write(base % (job_name, job_name, time, memory, n_cores))
-                if n_gpus:
-                    f.write('#SBATCH --gpus=%s\n' % n_gpus)
+                if use_gpu:
+                    f.write('#SBATCH --gres=gpu:1\n' % use_gpu)
                 if slurm_partition:
                     f.write('#SBATCH --partition=%s\n' % slurm_partition)
                 f.write('\n')
