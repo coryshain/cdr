@@ -1390,12 +1390,6 @@ PLOT_KWARGS_CORE = [
         float,
         "Timepoint at which to plot interactions."
     ),
-    Kwarg(
-        'standardize_response',
-        False,
-        bool,
-        "Whether to report response using standard units. Ignored unless model was fitted using ``standardize_response==True``."
-    ),
 
     # CONTROLS FOR UNIVARIATE IRF PLOTS
     Kwarg(
