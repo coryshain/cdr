@@ -1227,6 +1227,11 @@ def preprocess_data(
                     first_obs_f, last_obs_f = _first_obs, last_obs
                     if first_obs is None:
                         first_obs = _first_obs
+
+                # Ensure that time window doesn't exceed maximum, which can happen for high temporal res
+                # impulses or responses due to numerical imprecision.
+                last_obs = np.minimum(last_obs, first_obs + history_length + future_length)
+
                 _Y['first_obs_%d' % i] = first_obs
                 _Y['last_obs_%d' % i] = last_obs
 

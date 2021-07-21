@@ -1566,7 +1566,7 @@ class Impulse(object):
                 for j in range(len(impulses)):
                     x = impulses[j]
                     val = expanded_value_names[j]
-                    if x.id not in _:
+                    if x.id not in _X:
                         _X[x.id] = (_X[self.id] == val).astype('float')
                 X[i] = _X
                 break
@@ -2773,7 +2773,7 @@ class IRFNode(object):
                                 for _X in X:
                                     if response.id in _X:
                                         found = True
-                                        vals = sorted(_X[response.id].unique()[1:])
+                                        vals = sorted(_X[response.id].unique())[1:]
                                         expansion = [Impulse('_'.join([response.id, pythonize_string(str(val))]), ops=response.ops) for val in vals]
                                         break
                                 assert found, 'Impulse %d not found in data.' % response.id
@@ -2788,7 +2788,7 @@ class IRFNode(object):
                                     for _X in X:
                                         if subresponse.id in _X:
                                             found = True
-                                            vals = sorted(_X[subresponse.id].unique()[1:])
+                                            vals = sorted(_X[subresponse.id].unique())[1:]
                                             expansion = [
                                                 Impulse('_'.join([subresponse.id, pythonize_string(str(val))]), ops=subresponse.ops)
                                                 for val in vals]
@@ -2807,7 +2807,7 @@ class IRFNode(object):
                             for _X in X:
                                 if x.id in _X:
                                     found = True
-                                    vals = sorted(_X[x.id].unique()[1:])
+                                    vals = sorted(_X[x.id].unique())[1:]
                                     expansion = [Impulse('_'.join([x.id, pythonize_string(str(val))]), ops=x.ops) for val in vals]
                                     break
                             assert found, 'Impulse %s not found in data.' % x.id
@@ -2827,7 +2827,7 @@ class IRFNode(object):
                             for _X in X:
                                 if self.impulse.id in _X:
                                     found = True
-                                    vals = sorted(_X[self.impulse.id].unique()[1:])
+                                    vals = sorted(_X[self.impulse.id].unique())[1:]
                                     expansion = [Impulse('_'.join([self.impulse.id, pythonize_string(str(val))]), ops=self.impulse.ops) for val in vals]
                                     break
                             assert found, 'Impulse %s not found in data.' % self.impulse.id
