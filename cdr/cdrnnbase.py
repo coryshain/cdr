@@ -491,12 +491,12 @@ class CDRNN(Model):
                         name='input_dropout',
                         session=self.sess
                     )
-                    self.time_X_dropout_layer = get_dropout(
+                    self.X_time_dropout_layer = get_dropout(
                         self.input_dropout_rate,
                         training=self.training,
                         use_MAP_mode=self.use_MAP_mode,
                         rescale=False,
-                        name='time_X_dropout',
+                        name='X_time_dropout',
                         session=self.sess
                     )
 
@@ -957,26 +957,26 @@ class CDRNN(Model):
 
                 if X_time is None:
                     X_shape = tf.shape(X)
-                    time_X_shape = []
+                    X_time_shape = []
                     for j in range(len(X.shape) - 1):
                         s = X.shape[j]
                         try:
                             s = int(s)
                         except TypeError:
                             s = X_shape[j]
-                        time_X_shape.append(s)
-                    time_X_shape.append(1)
-                    time_X_shape = tf.convert_to_tensor(time_X_shape)
-                    X_time = tf.ones(time_X_shape, dtype=self.FLOAT_TF)
-                    time_X_mean = self.X_time_mean
-                    X_time *= time_X_mean
+                        X_time_shape.append(s)
+                    X_time_shape.append(1)
+                    X_time_shape = tf.convert_to_tensor(X_time_shape)
+                    X_time = tf.ones(X_time_shape, dtype=self.FLOAT_TF)
+                    X_time_mean = self.X_time_mean
+                    X_time *= X_time_mean
 
-                if self.center_time_X:
+                if self.center_X_time:
                     X_time -= self.X_time_mean
                 if self.center_t_delta:
                     t_delta -= self.t_delta_mean
 
-                if self.rescale_time_X:
+                if self.rescale_X_time:
                     X_time /= self.X_time_sd
                 if self.rescale_t_delta:
                     t_delta /= self.t_delta_sd
@@ -986,8 +986,8 @@ class CDRNN(Model):
                 if self.n_impulse_df > 1:
                     X_cdrnn = []
                     t_delta_cdrnn = []
-                    time_X_cdrnn = []
-                    time_X_mask_cdrnn = []
+                    X_time_cdrnn = []
+                    X_mask_cdrnn = []
 
                     X_shape = tf.shape(X)
                     B = X_shape[0]
@@ -1006,28 +1006,28 @@ class CDRNN(Model):
                             t_delta_cur = t_delta
 
                         if X_time.shape[-1] > 1:
-                            time_X_cur = X_time[..., ix[0]:ix[0]+1]
+                            _X_time = X_time[..., ix[0]:ix[0]+1]
                         else:
-                            time_X_cur = X_time
+                            _X_time = X_time
 
                         if X_mask is not None and X_mask.shape[-1] > 1:
-                            time_X_mask_cur = X_mask[..., ix[0]]
+                            _X_mask = X_mask[..., ix[0]]
                         else:
-                            time_X_mask_cur = X_mask
+                            _X_mask = X_mask
 
                         X_cdrnn.append(X_cur)
                         t_delta_cdrnn.append(t_delta_cur)
-                        time_X_cdrnn.append(time_X_cur)
+                        X_time_cdrnn.append(_X_time)
                         if X_mask is not None:
-                            time_X_mask_cdrnn.append(time_X_mask_cur)
+                            X_mask_cdrnn.append(_X_mask)
 
                     X_cdrnn = tf.concat(X_cdrnn, axis=1)
                     t_delta_cdrnn = tf.concat(t_delta_cdrnn, axis=1)
-                    time_X_cdrnn = tf.concat(time_X_cdrnn, axis=1)
+                    X_time_cdrnn = tf.concat(X_time_cdrnn, axis=1)
                     if X_mask is not None:
-                        time_X_mask_cdrnn = tf.concat(time_X_mask_cdrnn, axis=1)
+                        X_mask_cdrnn = tf.concat(X_mask_cdrnn, axis=1)
 
-                    sort_ix = tf.contrib.framework.argsort(tf.squeeze(time_X_cdrnn, axis=-1), axis=1)
+                    sort_ix = tf.contrib.framework.argsort(tf.squeeze(X_time_cdrnn, axis=-1), axis=1)
                     B_ix = tf.tile(
                         tf.range(B)[..., None],
                         [1, T * self.n_impulse_df]
@@ -1036,9 +1036,9 @@ class CDRNN(Model):
 
                     X = tf.gather_nd(X_cdrnn, gather_ix)
                     t_delta = tf.gather_nd(t_delta_cdrnn, gather_ix)
-                    X_time = tf.gather_nd(time_X_cdrnn, gather_ix)
+                    X_time = tf.gather_nd(X_time_cdrnn, gather_ix)
                     if X_mask is not None:
-                        X_mask = tf.gather_nd(time_X_mask_cdrnn, gather_ix)
+                        X_mask = tf.gather_nd(X_mask_cdrnn, gather_ix)
                 else:
                     t_delta = t_delta[..., :1]
                     X_time = X_time[..., :1]
@@ -1065,7 +1065,7 @@ class CDRNN(Model):
 
                 if self.input_dropout_rate:
                     X = self.input_dropout_layer(X)
-                    X_time = self.time_X_dropout_layer(X_time)
+                    X_time = self.X_time_dropout_layer(X_time)
 
                 X_rate = tf.pad(X, [(0,0), (0,0), (1,0)], constant_values=1.)
                 X_rate = X_rate[..., None, None] # Pad out for nparam, ndim of response distribution(s)
@@ -1197,7 +1197,7 @@ class CDRNN(Model):
                     self.ema_ops.append(c_ema_op)
 
                 if self.input_dropout_rate:
-                    self.resample_ops += self.input_dropout_layer.resample_ops() + self.time_X_dropout_layer.resample_ops()
+                    self.resample_ops += self.input_dropout_layer.resample_ops() + self.X_time_dropout_layer.resample_ops()
                 if self.ranef_dropout_rate:
                     self.resample_ops += self.ranef_dropout_layer.resample_ops()
                 if self.rnn_dropout_rate:

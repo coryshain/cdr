@@ -4831,7 +4831,7 @@ class Model(object):
         final dimension will be the responses to manipulations, in the order provided.
 
         This method supports a large space of queries. Any continuous input variable can be provided as an axis,
-        including all predictors (impulses), as well as ``'rate'``, ``'time_X'``, and ``'t_delta'``, respectively the
+        including all predictors (impulses), as well as ``'rate'``, ``'X_time'``, and ``'t_delta'``, respectively the
         deconvolutional intercept, the stimulus timestamp, and the delay from stimulus onset (i.e. the input to the
         IRF). The **manipulations** parameter supports arbitrary lambda functions on any combination of these variables,
         as well as on the random effects levels. Values for all of these variables can also be set for the reference
@@ -4842,8 +4842,8 @@ class Model(object):
         setting ``xvar = 't_delta'``, using a zero-vectored reference, and constructing a list of manipulations that
         adds ``1`` to each of the predictors independently.
 
-        :param xvar: ``str``; Name of continuous variable for x-axis. Can be a predictor (impulse), ``'rate'``, ``'t_delta'``, or ``'time_X'``.
-        :param yvar: ``str``; Name of continuous variable for y-axis in 3D plots. Can be a predictor (impulse), ``'rate'``, ``'t_delta'``, or ``'time_X'``. If ``None``, 2D plot.
+        :param xvar: ``str``; Name of continuous variable for x-axis. Can be a predictor (impulse), ``'rate'``, ``'t_delta'``, or ``'X_time'``.
+        :param yvar: ``str``; Name of continuous variable for y-axis in 3D plots. Can be a predictor (impulse), ``'rate'``, ``'t_delta'``, or ``'X_time'``. If ``None``, 2D plot.
         :param responses: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to plot.
         :param response_params: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of predictive distribution(s) to plot per response variable. Any param names not used by the predictive distribution for a given response will be ignored.
         :param X_ref: ``dict`` or ``None``; Dictionary mapping impulse names to numeric values for use in constructing the reference. Any impulses not specified here will take default values.
@@ -4968,7 +4968,7 @@ class Model(object):
                 # Initialize timestamp reference
                 if X_time_ref is None:
                     X_time_ref = self.X_time_mean
-                assert np.isscalar(X_time_ref), 'time_X_ref must be a scalar'
+                assert np.isscalar(X_time_ref), 'X_time_ref must be a scalar'
                 X_time_ref = np.reshape(X_time_ref, (1, 1, 1))
                 X_time_ref = np.tile(X_time_ref, [1, 1, max(n_impulse, 1)])
 
@@ -5026,7 +5026,7 @@ class Model(object):
                 plot_axes = []
 
                 X_base = None
-                time_X_base = None
+                X_time_base = None
                 t_delta_base = None
 
                 for par in params:
@@ -5041,8 +5041,8 @@ class Model(object):
 
                     if X_base is None:
                         X_base = np.tile(X_ref, (T, 1, 1))
-                    if time_X_base is None:
-                        time_X_base = np.tile(X_time_ref, (T, 1, 1))
+                    if X_time_base is None:
+                        X_time_base = np.tile(X_time_ref, (T, 1, 1))
                     if t_delta_base is None:
                         t_delta_base = np.tile(t_delta_ref, (T, 1, 1))
 
@@ -5077,7 +5077,7 @@ class Model(object):
                         if ref_varies:
                             X_ref = X_ref + X_delta
 
-                    if axis_var == 'time_X':
+                    if axis_var == 'X_time':
                         if axis is None:
                             if ax_min is None:
                                 ax_min = 0.
@@ -5089,11 +5089,11 @@ class Model(object):
                         assert len(axis.shape) == 1, 'axis must be a (1D) vector. Got a tensor of rank %d.' % len(axis.shape)
                         plot_axis = axis
                         plot_axes.append(axis)
-                        time_X_base = np.tile(axis[..., None, None], (1, 1, max(n_impulse, 1)))
+                        X_time_base = np.tile(axis[..., None, None], (1, 1, max(n_impulse, 1)))
                         if is_3d:
-                            time_X_base = np.tile(time_X_base, tile_3d).reshape((T, 1, max(n_impulse, 1)))
+                            X_time_base = np.tile(X_time_base, tile_3d).reshape((T, 1, max(n_impulse, 1)))
                         if ref_varies:
-                            X_time_ref = time_X_base
+                            X_time_ref = X_time_base
 
                     if axis_var == 't_delta':
                         if axis is None:
@@ -5137,30 +5137,30 @@ class Model(object):
 
                 # The reference will contain 1 entry if not pair_manipulations and len(manipulations) + 1 entries otherwise
                 X_ref_in = [X_ref]
-                time_X_ref_in = [X_time_ref]
+                X_time_ref_in = [X_time_ref]
                 t_delta_ref_in = [t_delta_ref]
                 gf_y_ref_in = [gf_y_ref]
 
                 if ref_as_manip: # Entails not pair_manipulations
                     X = []
-                    time_X = []
+                    X_time = []
                     t_delta = []
                     gf_y = []
                 else: # Ref doesn't vary along all axes, so *_base contains full variation along all axes and is returned as the first manip
                     X = [X_base]
-                    time_X = [time_X_base]
+                    X_time = [X_time_base]
                     t_delta = [t_delta_base]
                     gf_y = [gf_y_base]
 
                 for manipulation in manipulations:
                     X_cur = None
-                    time_X_cur = time_X_base
+                    X_time_cur = X_time_base
                     t_delta_cur = t_delta_base
                     gf_y_cur = gf_y_base
 
                     if pair_manipulations:
                         X_ref_cur = None
-                        time_X_ref_cur = X_time_ref
+                        X_time_ref_cur = X_time_ref
                         t_delta_ref_cur = t_delta_ref
                         gf_y_ref_cur = gf_y_ref
 
@@ -5178,10 +5178,10 @@ class Model(object):
                                 if X_ref_cur is None:
                                     X_ref_cur = np.copy(X_ref)
                                 X_ref_cur[..., ix] = manip(X_ref_cur[..., ix])
-                        elif k == 'time_X':
-                            time_X_cur = manip(time_X_cur)
+                        elif k == 'X_time':
+                            X_time_cur = manip(X_time_cur)
                             if pair_manipulations:
-                                time_X_ref_cur = time_X_cur
+                                X_time_ref_cur = X_time_cur
                         elif k == 't_delta':
                             t_delta_cur = manip(t_delta_cur)
                             if pair_manipulations:
@@ -5210,7 +5210,7 @@ class Model(object):
                     if X_cur is None:
                         X_cur = X_base
                     X.append(X_cur)
-                    time_X.append(time_X_cur)
+                    X_time.append(X_time_cur)
                     t_delta.append(t_delta_cur)
                     gf_y.append(gf_y_cur)
 
@@ -5218,19 +5218,19 @@ class Model(object):
                         if X_ref_cur is None:
                             X_ref_cur = X_ref
                         X_ref_in.append(X_ref_cur)
-                        time_X_ref_in.append(time_X_ref_cur)
+                        X_time_ref_in.append(X_time_ref_cur)
                         t_delta_ref_in.append(t_delta_ref_cur)
                         gf_y_ref_in.append(gf_y_ref_cur)
 
                 X_ref_in = np.concatenate(X_ref_in, axis=0)
-                time_X_ref_in = np.concatenate(time_X_ref_in, axis=0)
+                X_time_ref_in = np.concatenate(X_time_ref_in, axis=0)
                 t_delta_ref_in = np.concatenate(t_delta_ref_in, axis=0)
                 gf_y_ref_in = np.concatenate(gf_y_ref_in, axis=0)
 
                 fd_ref = {
                     self.X: X_ref_in,
-                    self.X_time: time_X_ref_in,
-                    self.X_mask: np.ones_like(time_X_ref_in),
+                    self.X_time: X_time_ref_in,
+                    self.X_mask: np.ones_like(X_time_ref_in),
                     self.t_delta: t_delta_ref_in,
                     self.Y_gf: gf_y_ref_in,
                     self.training: not self.predict_mode
@@ -5239,14 +5239,14 @@ class Model(object):
                 # Bring manipulations into 1-1 alignment on the batch dimension
                 if n_manip:
                     X = np.concatenate(X, axis=0)
-                    time_X = np.concatenate(time_X, axis=0)
+                    X_time = np.concatenate(X_time, axis=0)
                     t_delta = np.concatenate(t_delta, axis=0)
                     gf_y = np.concatenate(gf_y, axis=0)
 
                     fd_main = {
                         self.X: X,
-                        self.X_time: time_X,
-                        self.X_mask: np.ones_like(time_X),
+                        self.X_time: X_time,
+                        self.X_mask: np.ones_like(X_time),
                         self.t_delta: t_delta,
                         self.Y_gf: gf_y,
                         self.training: not self.predict_mode
@@ -5881,7 +5881,7 @@ class Model(object):
                         if plot_type == 'irf_surface':
                             names = ['t_delta:%s' % x for x in self.impulse_names if (self.is_non_dirac(x) and x != 'rate')]
                         elif plot_type == 'nonstationarity_surface':
-                            names = ['time_X:%s' % x for x in self.impulse_names if (self.is_non_dirac(x) and x != 'rate')]
+                            names = ['X_time:%s' % x for x in self.impulse_names if (self.is_non_dirac(x) and x != 'rate')]
                         else: # plot_type == 'interaction_surface'
                             names_src = [x for x in self.impulse_names if (self.is_non_dirac(x) and x != 'rate')]
                             names = [':'.join(x) for x in itertools.combinations(names_src, 2)]

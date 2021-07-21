@@ -849,7 +849,7 @@ CDRBAYES_INITIALIZATION_KWARGS = [
 CDRNN_INITIALIZATION_KWARGS = [
     # DATA SETTINGS
     Kwarg(
-        'center_time_X',
+        'center_X_time',
         False,
         bool,
         "Whether to center time values as inputs under the hood. Times are automatically shifted back to the source location for plotting and model criticism.",
@@ -863,11 +863,11 @@ CDRNN_INITIALIZATION_KWARGS = [
         aliases=['center_time', 'center_tdelta']
     ),
     Kwarg(
-        'rescale_time_X',
+        'rescale_X_time',
         True,
         bool,
         "Whether to rescale time values as inputs by their training SD under the hood. Times are automatically reconverted back to the source scale for plotting and model criticism.",
-        aliases=['rescale_time']
+        aliases=['rescale_time', 'rescale_X_time']
     ),
     Kwarg(
         'rescale_t_delta',
