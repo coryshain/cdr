@@ -54,7 +54,7 @@ if __name__ == '__main__':
             job_name = '_'.join([basename, ''.join(job_types)])
             filename = outdir + '/' + job_name + '.pbs'
             with open(filename, 'w') as f:
-                f.write(base % (job_name, job_name, time, n_cores, memory))
+                f.write(base % (job_name, job_name, time, memory, n_cores))
                 if n_gpus:
                     f.write('#SBATCH --gpus=%s\n' % n_gpus)
                 if slurm_partition:
