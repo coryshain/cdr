@@ -551,11 +551,11 @@ class RNNCell(LayerRNNCell):
     def ema_ops(self):
         return []
 
-    def dropout_resample_ops(self):
+    def resample_ops(self):
         out = []
         if self.built:
             for layer in self._kernel_bottomup_layers + self._kernel_recurrent_layers + self._kernel_time_projection_layers:
-                out.append(layer.dropout_resample_ops())
+                out.append(layer.resample_ops())
 
         return out
 
@@ -719,8 +719,8 @@ class RNNLayer(object):
     def ema_ops(self):
         return self.cell.ema_ops()
 
-    def dropout_resample_ops(self):
-        return self.cell.dropout_resample_ops()
+    def resample_ops(self):
+        return self.cell.resample_ops()
 
 
 class RNNCellBayes(RNNCell):
@@ -1331,16 +1331,15 @@ class DenseLayer(object):
 
         return out
 
-    def dropout_resample_ops(self):
+    def resample_ops(self):
         out = []
         if self.use_dropout and self.built:
-            out.append(self.dropout_layer.dropout_resample_ops())
+            out.append(self.dropout_layer.resample_ops())
 
         return out
 
 
 class DenseLayerBayes(DenseLayer):
-
     def __init__(
             self,
             training=False,
@@ -1515,6 +1514,9 @@ class DenseLayerBayes(DenseLayer):
                                 self.bias_q_dist.mean,
                                 self.bias_q_dist.sample
                             )
+
+                        if self.use_dropout:
+                            self.dropout_layer.build([x for x in inputs_shape[:-1]] + [out_dim])
 
                         if self.use_batch_normalization:
                             self.normalization_layer = BatchNormLayerBayes(
@@ -1696,7 +1698,7 @@ class BatchNormLayer(object):
     def ema_ops(self):
         return [self.moving_mean_op, self.moving_variance_op]
 
-    def dropout_resample_ops(self):
+    def resample_ops(self):
         return []
 
 
@@ -1773,6 +1775,7 @@ class BatchNormLayerBayes(BatchNormLayer):
                     shape.append(1)
                 else:
                     shape.append(inputs_shape[i])
+            shape = tf.convert_to_tensor(shape)
 
             if not self.name:
                 name = ''
@@ -1985,7 +1988,7 @@ class LayerNormLayer(object):
     def ema_ops(self):
         return []
 
-    def dropout_resample_ops(self):
+    def resample_ops(self):
         return []
 
 
@@ -2062,6 +2065,7 @@ class LayerNormLayerBayes(LayerNormLayer):
                     shape.append(inputs_shape[i])
                 else:
                     shape.append(1)
+            shape = tf.convert_to_tensor(shape)
 
             if not self.name:
                 name = ''
@@ -2299,7 +2303,7 @@ class DropoutLayer(object):
 
                 return out
 
-    def dropout_resample_ops(self):
+    def resample_ops(self):
         out = []
         if self.built:
             out.append(self.dropout_mask_eval_resample)

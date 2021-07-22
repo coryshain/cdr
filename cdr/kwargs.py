@@ -35,7 +35,7 @@ def cdr_kwarg_docstring():
     out += "\nAll CDR models\n^^^^^^^^^^^^^^\n\n"
 
     for kwarg in CDR_INITIALIZATION_KWARGS:
-        if kwarg.key not in ['history_length']:
+        if kwarg.key not in ['history_length', 'future_length']:
             out += docstring_from_kwarg(kwarg)
 
     out += '\nCDRMLE\n^^^^^^\n\n'
@@ -280,6 +280,20 @@ MODEL_INITIALIZATION_KWARGS = [
         "Path to output directory, where logs and model parameters are saved."
     ),
     Kwarg(
+        'use_distributional_regression',
+        False,
+        bool,
+        "Whether to model all parameters of the predictive distribution as dependent on IRFs of the impulses (distributional regression). If ``False``, only the mean depends on the predictors (other parameters of the predictive distribution are treated as constant).",
+        aliases=['heteroskedastic'],
+        default_value_cdrnn=True
+    ),
+    Kwarg(
+        'predictive_distribution_map',
+        None,
+        [str, None],
+        "Map defining predictive distribution. Can be a space-delimited list of distribution names (one per response variable), a space-delimited list of ';'-delimited tuples matching response variables to distribution names (e.g. ``response;Bernoulli``), or ``None``, in which case the predictive distribution will be inferred as ``Normal`` for continuous variables and ``Categorical`` for categorical variables."
+    ),
+    Kwarg(
         'center_inputs',
         False,
         bool,
@@ -297,13 +311,19 @@ MODEL_INITIALIZATION_KWARGS = [
         'standardize_response',
         True,
         bool,
-        "Standardize (Z-transform) the response variable using training set mean and variance. Can improve convergence speed and reduce vulnerability to local optima. Only affects fitting -- prediction, likelihood computation, and plotting are reported on the source values."
+        "Standardize (Z-transform) the response variable implicitly during training using training set mean and variance. Can improve convergence speed and reduce vulnerability to local optima. Only affects fitting -- prediction, likelihood computation, and plotting are reported on the source values."
     ),
     Kwarg(
         'history_length',
-        None,
+        128,
         int,
-        "Length of the history window (in timesteps)."
+        "Length of the history (backward) window (in timesteps)."
+    ),
+    Kwarg(
+        'future_length',
+        0,
+        int,
+        "Length of the future (forward) window (in timesteps). Note that causal IRF kernels cannot be used if **future_length** > 0."
     ),
 
     # MODEL DEFINITION
@@ -311,7 +331,7 @@ MODEL_INITIALIZATION_KWARGS = [
         'asymmetric_error',
         False,
         bool,
-        "Allow an asymmetric error distribution by fitting a SinArcsinh transform of the normal error, adding trainable skewness and tailweight parameters."
+        "Whether to model numeric responses by default with an (asymmetric) SinhArcshin transform of the Normal distribution. Otherwise, defaults to a Normal distribution. Only affects response variables whose distributions have not been explicitly specified using **predictive_distribution_map**."
     ),
     Kwarg(
         'constraint',
@@ -347,10 +367,9 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'eval_minibatch_size',
-        100000,
-        [int, None],
-        "Size of minibatches to use for prediction/evaluation (full-batch if ``None``).",
-        default_value_cdrnn=10000
+        10000,
+        int,
+        "Size of minibatches to use for prediction/evaluation."
     ),
     Kwarg(
         'n_samples_eval',
@@ -382,9 +401,10 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'epsilon',
-        1e-2,
+        1e-5,
         float,
-        "Epsilon parameter to use for numerical stability in bounded parameter estimation."
+        "Epsilon parameter to use for numerical stability in bounded parameter estimation.",
+        default_value_cdrnn=1e-2,
     ),
     Kwarg(
         'optim_epsilon',
@@ -462,12 +482,6 @@ MODEL_INITIALIZATION_KWARGS = [
         1,
         int,
         "Stride (in iterations) over which to compute convergence. If larger than 1, iterations within a stride are averaged with the most recently saved value. Larger values increase the receptive field of the slope estimates, making convergence diagnosis less vulnerable to local perturbations but also increasing the number of post-convergence iterations necessary in order to identify convergence."
-    ),
-    Kwarg(
-        'convergence_basis',
-        'loss',
-        str,
-        "Basis of convergence diagnostic, one of ``['parameters', 'loss']``. If ``parameters``, slopes of all parameters with respect to time must be within the tolerance of 0. If ``loss``, slope of loss with respect to time must be within the tolerance of 0 (even if parameters are still moving). The loss-based criterion is less stringent."
     ),
     Kwarg(
         'convergence_alpha',
@@ -589,12 +603,6 @@ MODEL_INITIALIZATION_KWARGS = [
         "Default size of step to take above reference in univariate IRF plots, if not specified in **plot_step**. Either a float or the string ``'sd'``, which indicates training sample standard deviation."
     ),
     Kwarg(
-        'plot_interactions',
-        '',
-        str,
-        "Space-delimited list of all implicit interactions to plot."
-    ),
-    Kwarg(
         'reference_time',
         0.,
         float,
@@ -646,9 +654,15 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'generate_interaction_surface_plots',
-        False,
+        True,
         bool,
         "Whether to plot IRF interaction surfaces at time **reference_time**."
+    ),
+    Kwarg(
+        'generate_err_dist_plots',
+        True,
+        bool,
+        "Whether to plot the average error distribution for real-valued responses."
     ),
     Kwarg(
         'generate_nonstationarity_surface_plots',
@@ -692,21 +706,6 @@ MODEL_INITIALIZATION_KWARGS = [
         suppress=True
     ),
     Kwarg(
-        'intercept_init',
-        None,
-        [float, None],
-        "Initial value to use for the intercept (if ``None``, use mean response in training data).",
-        suppress=True
-    ),
-    Kwarg(
-        'y_sd_init',
-        None,
-        [float, None],
-        "Initial value for the standard deviation of the output model. If ``None``, inferred as the empirical standard deviation of the response on the training set.",
-        aliases=['y_scale_init'],
-        suppress=True
-    ),
-    Kwarg(
         'n_interp',
         1000,
         int,
@@ -743,93 +742,7 @@ MODEL_INITIALIZATION_KWARGS = [
     )
 ]
 
-
-CDR_INITIALIZATION_KWARGS = [
-    # REGULARIZATION
-    Kwarg(
-        'irf_regularizer_name',
-        'inherit',
-        [str, 'inherit', None],
-        "Name of IRF parameter regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
-    ),
-    Kwarg(
-        'irf_regularizer_scale',
-        'inherit',
-        [str, float, 'inherit'],
-        "Scale of IRF parameter regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
-    ),
-
-    # DEPRECATED OR RARELY USED
-    Kwarg(
-        'covarying_fixef',
-        False,
-        bool,
-        "Use multivariate model that fits covariances between fixed parameters. Experimental, not thoroughly tested. If ``False``, fixed parameter distributions are treated as independent.",
-        aliases=['mv'],
-        suppress=True
-    ),
-    Kwarg(
-        'covarying_ranef',
-        False,
-        bool,
-        "Use multivariate model that fits covariances between random parameters within a random grouping factor. Experimental, not thoroughly tested. If ``False``, random parameter distributions are treated as independent.",
-        aliases=['mv_ran'],
-        suppress=True
-    ),
-    Kwarg(
-        'validate_irf_args',
-        True,
-        bool,
-        "Check whether inputs and parameters to IRF obey constraints. Imposes a small performance cost but helps catch and report bugs in the model.",
-        suppress=True
-    )
-]
-
-CDRMLE_INITIALIZATION_KWARGS = [
-    # DEPRECATED OR RARELY USED
-    Kwarg(
-        'intercept_joint_sd',
-        None,
-        [float, None],
-        "Square root of variance of intercept in initial variance-covariance matrix of joint distributions. Used only if either **covarying_fixef** or **covarying_ranef** is ``True``, otherwise ignored. If ``None``, inferred as **joint_sd_scaling_coefficient** times the empirical variance of the response on the training set.",
-        aliases=['intercept_prior_sd', 'prior_sd'],
-        suppress=True
-    ),
-    Kwarg(
-        'coef_joint_sd',
-        None,
-        [float, None],
-        "Square root of variance of coefficients in initial variance-covariance matrix of joint distributions. Used only if either **covarying_fixef** or **covarying_ranef** is ``True``, otherwise ignored. If ``None``, inferred as **joint_sd_scaling_coefficient** times the empirical variance of the response on the training set.",
-        aliases=['coef_prior_sd', 'prior_sd'],
-        suppress=True
-    ),
-    Kwarg(
-        'irf_param_joint_sd',
-        1.,
-        float,
-        "Square root of variance of intercept in initial variance-covariance matrix of joint distributions. Used only if either **covarying_fixef** or **covarying_ranef** is ``True``, otherwise ignored.",
-        aliases=['irf_param_prior_sd', 'conv_param_joint_sd', 'conv_prior_sd', 'prior_sd'],
-        suppress=True
-    ),
-    Kwarg(
-        'joint_sd_scaling_coefficient',
-        1.,
-        float,
-        "Factor by which to multiply square roots of variances on intercepts and coefficients if inferred from the empirical variance of the data (i.e. if **intercept_joint_sd** or **coef_joint_sd** is ``None``). Ignored for any prior widths that are explicitly specified.",
-        aliases=['prior_sd_scaling_coefficient'],
-        suppress=True
-    ),
-    Kwarg(
-        'ranef_to_fixef_joint_sd_ratio',
-        0.1,
-        float,
-        "Ratio of widths of random to fixed effects root-variances in joint distributions. I.e. if less than 1, random effects have tighter distributions. Used only if either **covarying_fixef** or **covarying_ranef** is ``True``, otherwise ignored.",
-        aliases=['ranef_to_fixef_prior_sd_ratio'],
-        suppress=True
-    )
-]
-
-CDRBAYES_INITIALIZATION_KWARGS = [
+MODEL_BAYES_INITIALIZATION_KWARGS = [
     # PRIORS
     Kwarg(
         'declare_priors_fixef',
@@ -848,22 +761,53 @@ CDRBAYES_INITIALIZATION_KWARGS = [
     Kwarg(
         'intercept_prior_sd',
         None,
-        [float, None],
-        "Standard deviation of prior on fixed intercept. If ``None``, inferred as **prior_sd_scaling_coefficient** times the empirical variance of the response on the training set.",
+        [str, float, None],
+        "Standard deviation of prior on fixed intercept. Can be a space-delimited list of ``;``-delimited floats (one per distributional parameter per response variable), a ``float`` (applied to all responses), or ``None``, in which case the prior is inferred from **prior_sd_scaling_coefficient** and the empirical variance of the response on the training set.",
         aliases=['prior_sd']
+    )
+]
+
+CDR_INITIALIZATION_KWARGS = [
+    # REGULARIZATION
+    Kwarg(
+        'irf_regularizer_name',
+        'inherit',
+        [str, 'inherit', None],
+        "Name of IRF parameter regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
     ),
+    Kwarg(
+        'irf_regularizer_scale',
+        'inherit',
+        [str, float, 'inherit'],
+        "Scale of IRF parameter regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
+    ),
+
+    # DEPRECATED OR RARELY USED
+    Kwarg(
+        'validate_irf_args',
+        True,
+        bool,
+        "Check whether inputs and parameters to IRF obey constraints. Imposes a small performance cost but helps catch and report bugs in the model.",
+        suppress=True
+    )
+]
+
+CDRMLE_INITIALIZATION_KWARGS = []
+
+CDRBAYES_INITIALIZATION_KWARGS = [
+    # PRIORS
     Kwarg(
         'coef_prior_sd',
         None,
-        [float, None],
-        "Standard deviation of prior on fixed coefficients. If ``None``, inferred as **prior_sd_scaling_coefficient** times the empirical variance of the response on the training set.",
+        [str, float, None],
+        "Standard deviation of prior on fixed coefficients. Can be a space-delimited list of ``;``-delimited floats (one per distributional parameter per response variable), a ``float`` (applied to all responses), or ``None``, in which case the prior is inferred from **prior_sd_scaling_coefficient** and the empirical variance of the response on the training set.",
         aliases=['coefficient_prior_sd', 'prior_sd']
     ),
     Kwarg(
         'irf_param_prior_sd',
         1.,
-        float,
-        "Standard deviation of prior on convolutional IRF parameters",
+        [str, float],
+        "Standard deviation of prior on convolutional IRF parameters. Can be either a space-delimited list of ``;``-delimited floats (one per distributional parameter per response variable) or a ``float`` (applied to all responses)",
         aliases=['conv_prior_sd', 'prior_sd']
     ),
     Kwarg(
@@ -872,20 +816,6 @@ CDRBAYES_INITIALIZATION_KWARGS = [
         [float, None],
         "Standard deviation of prior on standard deviation of output model. If ``None``, inferred as **y_sd_prior_sd_scaling_coefficient** times the empirical variance of the response on the training set.",
         aliases=['y_scale_prior_sd', 'prior_sd']
-    ),
-    Kwarg(
-        'y_skewness_prior_sd',
-        1,
-        float,
-        "Standard deviation of prior on skewness parameter of output model. Only used if ``asymmetric_error == True``, otherwise ignored.",
-        aliases=['prior_sd']
-    ),
-    Kwarg(
-        'y_tailweight_prior_sd',
-        1,
-        float,
-        "Standard deviation of prior on tailweight parameter of output model. Only used if ``asymmetric_error == True``, otherwise ignored.",
-        aliases=['prior_sd']
     ),
     Kwarg(
         'prior_sd_scaling_coefficient',
@@ -913,27 +843,17 @@ CDRBAYES_INITIALIZATION_KWARGS = [
         0.01,
         float,
         "Ratio of posterior initialization SD to prior SD. Low values are often beneficial to stability, convergence speed, and quality of final fit by avoiding erratic sampling and divergent behavior early in training."
-    ),
-
-    # DEPRECATED OR RARELY USED
-    Kwarg(
-        'y_sd_trainable',
-        True,
-        bool,
-        "Tune the standard deviation of the output model during training. If ``False``, remains fixed at ``y_sd_init``.",
-        aliases=['y_scale_trainable'],
-        suppress=True
-    ),
+    )
 ]
 
 CDRNN_INITIALIZATION_KWARGS = [
     # DATA SETTINGS
     Kwarg(
-        'center_time_X',
+        'center_X_time',
         False,
         bool,
         "Whether to center time values as inputs under the hood. Times are automatically shifted back to the source location for plotting and model criticism.",
-        aliases=['center_time']
+        aliases=['center_time', 'center_time_X']
     ),
     Kwarg(
         'center_t_delta',
@@ -943,11 +863,11 @@ CDRNN_INITIALIZATION_KWARGS = [
         aliases=['center_time', 'center_tdelta']
     ),
     Kwarg(
-        'rescale_time_X',
+        'rescale_X_time',
         True,
         bool,
         "Whether to rescale time values as inputs by their training SD under the hood. Times are automatically reconverted back to the source scale for plotting and model criticism.",
-        aliases=['rescale_time']
+        aliases=['rescale_time', 'rescale_X_time']
     ),
     Kwarg(
         'rescale_t_delta',
@@ -956,13 +876,11 @@ CDRNN_INITIALIZATION_KWARGS = [
         "Whether to rescale time offset values by their training SD under the hood. Offsets are automatically reconverted back to the source scale for plotting and model criticism.",
         aliases=['rescale_time', 'rescale_tdelta']
     ),
-
-    # MODEL DEFINITION
     Kwarg(
-        'heteroskedastic',
+        'nonstationary',
         True,
         bool,
-        "Whether to parameterize the error distribution using a neural net. Otherwise, constant error parameters are used."
+        "Whether to model non-stationarity by feeding impulse timestamps as input."
     ),
 
     # MODEL SIZE
@@ -970,13 +888,15 @@ CDRNN_INITIALIZATION_KWARGS = [
         'n_layers_input_projection',
         2,
         [int, None],
-        "Number of hidden layers in input projection. If ``None``, inferred from length of **n_units_input_projection**."
+        "Number of hidden layers in input projection. If ``None``, inferred from length of **n_units_input_projection**.",
+        aliases=['n_layers']
     ),
     Kwarg(
         'n_units_input_projection',
         32,
         [int, str, None],
-        "Number of units per input projection hidden layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_rnn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers in input projection."
+        "Number of units per input projection hidden layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_rnn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers in input projection.",
+        aliases=['n_units']
     ),
     Kwarg(
         'n_layers_rnn',
@@ -1006,21 +926,22 @@ CDRNN_INITIALIZATION_KWARGS = [
         'n_units_hidden_state',
         32,
         [int, str],
-        "Number of units in CDRNN hidden state. Must be an ``int``."
+        "Number of units in CDRNN hidden state. Must be an ``int``.",
+        aliases=['n_units']
     ),
     Kwarg(
         'n_layers_irf',
         2,
         [int, None],
         "Number of IRF hidden layers. If ``None``, inferred from length of **n_units_irf**.",
-        aliases=['n_layers_decoder']
+        aliases=['n_layers', 'n_layers_decoder']
     ),
     Kwarg(
         'n_units_irf',
         32,
         [int, str, None],
         "Number of units per hidden layer in IRF. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_units_irf** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers.",
-        aliases=['n_units_decoder']
+        aliases=['n_units', 'n_units_decoder']
     ),
 
     # ACTIVATION FUNCTIONS
@@ -1198,36 +1119,33 @@ CDRNN_INITIALIZATION_KWARGS = [
         'rnn_h_dropout_rate',
         None,
         [float, None],
-        "Rate at which to drop neurons of RNN hidden state.",
-        # aliases=['dropout_rate']
+        "Rate at which to drop neurons of RNN hidden state."
     ),
     Kwarg(
         'rnn_c_dropout_rate',
         None,
         [float, None],
-        "Rate at which to drop neurons of RNN cell state.",
-        # aliases=['dropout_rate']
+        "Rate at which to drop neurons of RNN cell state."
     ),
     Kwarg(
         'h_in_dropout_rate',
         0.2,
         [float, None],
         "Rate at which to drop neurons of h_in.",
-        # aliases=['dropout_rate']
+        aliases=['dropout_rate']
     ),
     Kwarg(
         'h_rnn_dropout_rate',
         0.2,
         [float, None],
         "Rate at which to drop neurons of h_rnn.",
-        # aliases=['dropout_rate']
+        aliases=['dropout_rate']
     ),
     Kwarg(
         'h_dropout_rate',
         None,
         [float, None],
-        "Rate at which to drop neurons of h.",
-        aliases=['dropout_rate']
+        "Rate at which to drop neurons of h."
     ),
     Kwarg(
         'rnn_dropout_rate',
@@ -1257,27 +1175,6 @@ CDRNN_INITIALIZATION_KWARGS = [
         'LSTM',
         str,
         "**DEPRECATED** (only LSTM is supported).",
-        suppress=True
-    ),
-    Kwarg(
-        'direct_irf',
-        False,
-        bool,
-        "Whether to generate the response directly as the output of the IRF (``True``). Otherwise, IRF provides weights on the input dimensions.",
-        suppress=True
-    ),
-    Kwarg(
-        'use_coefficient',
-        False,
-        bool,
-        "Whether to apply a trainable coefficient vector to the input dimensions.",
-        suppress=True
-    ),
-    Kwarg(
-        'nonstationary_intercept',
-        False,
-        bool,
-        "Whether to implement a time-varying intercept term, using a feedforward network architecturally matched to the IRF.",
         suppress=True
     ),
     Kwarg(
@@ -1323,13 +1220,6 @@ CDRNNMLE_INITIALIZATION_KWARGS = [
 CDRNNBAYES_INITIALIZATION_KWARGS = [
     # PRIORS
     Kwarg(
-        'declare_priors_fixef',
-        True,
-        bool,
-        "Specify Gaussian priors for all fixed model parameters (if ``False``, use implicit improper uniform priors).",
-        aliases=['declare_priors']
-    ),
-    Kwarg(
         'declare_priors_weights',
         True,
         bool,
@@ -1348,20 +1238,6 @@ CDRNNBAYES_INITIALIZATION_KWARGS = [
         bool,
         "Specify Gaussian priors for gamma parameters of any batch normalization layers (if ``False``, use implicit improper uniform priors).",
         aliases=['declare_priors']
-    ),
-    Kwarg(
-        'declare_priors_ranef',
-        True,
-        bool,
-        "Specify Gaussian priors for all random model parameters (if ``False``, use implicit improper uniform priors).",
-        aliases=['declare_priors']
-    ),
-    Kwarg(
-        'intercept_prior_sd',
-        None,
-        [float, None],
-        "Standard deviation of prior on fixed intercept. If ``None``, inferred as **prior_sd_scaling_coefficient** times the empirical variance of the response on the training set.",
-        aliases=['prior_sd']
     ),
     Kwarg(
         'weight_prior_sd',
@@ -1390,20 +1266,6 @@ CDRNNBAYES_INITIALIZATION_KWARGS = [
         [float, None],
         "Standard deviation of prior on standard deviation of output model. If ``None``, inferred as **y_sd_prior_sd_scaling_coefficient** times the empirical variance of the response on the training set.",
         aliases=['y_scale_prior_sd', 'prior_sd']
-    ),
-    Kwarg(
-        'y_skewness_prior_sd',
-        1,
-        float,
-        "Standard deviation of prior on skewness parameter of output model. Only used if ``asymmetric_error == True``, otherwise ignored.",
-        aliases=['prior_sd']
-    ),
-    Kwarg(
-        'y_tailweight_prior_sd',
-        1,
-        float,
-        "Standard deviation of prior on tailweight parameter of output model. Only used if ``asymmetric_error == True``, otherwise ignored.",
-        aliases=['prior_sd']
     ),
     Kwarg(
         'prior_sd_scaling_coefficient',
@@ -1449,32 +1311,29 @@ CDRNNBAYES_INITIALIZATION_KWARGS = [
         0.01,
         float,
         "Ratio of posterior initialization SD to prior SD. Low values are often beneficial to stability, convergence speed, and quality of final fit by avoiding erratic sampling and divergent behavior early in training."
-    ),
-
-    # DEPRECATED OR LITTLE USED
-    Kwarg(
-        'y_sd_trainable',
-        True,
-        bool,
-        "Tune the standard deviation of the output model during training. If ``False``, remains fixed at ``y_sd_init``.",
-        aliases=['y_scale_trainable'],
-        suppress=True
     )
 ]
 
 PLOT_KWARGS_CORE = [
     # PLOT DATA GENERATION
     Kwarg(
-        'resvar',
-        'y_mean',
-        str,
-        "Name of parameter of predictive distribution to plot as response variable. One of ``'y_mean'``, ``'y_sd'``, ``'y_skewness'``, or ``'y_tailweight'``. Only ``'y_mean'`` is interesting for CDR, since the others are assumed scalar. CDRNN fits all predictive parameters via IRFs."
+        'responses',
+        None,
+        [str, None],
+        "Name(s) of response variable(s) to plot. If ``None``, plots all univariate responses."
     ),
     Kwarg(
-        'generate_univariate_IRF_plots',
+        'response_param',
+        None,
+        [str, None],
+        "Name(s) of parameter(s) of predictive distribution to plot for each response variable. If ``None``, plots the first parameter only. Parameter names not present in a given distribution will be skipped."
+    ),
+    Kwarg(
+        'generate_univariate_irf_plots',
         True,
         bool,
-        "Whether to plot univariate IRFs over time."
+        "Whether to plot univariate IRFs over time.",
+        aliases=['generate_univariate_IRF_plots']
     ),
     Kwarg(
         'generate_curvature_plots',
@@ -1486,13 +1345,20 @@ PLOT_KWARGS_CORE = [
         'generate_irf_surface_plots',
         True,
         bool,
-        "Whether to plot IRF surfaces."
+        "Whether to plot IRF surfaces.",
+        aliases=['generate_IRF_surface_plots']
     ),
     Kwarg(
         'generate_interaction_surface_plots',
         False,
         bool,
         "Whether to plot IRF interaction surfaces at time **reference_time**."
+    ),
+    Kwarg(
+        'generate_err_dist_plots',
+        False,
+        bool,
+        "Whether to plot the average error distribution for real-valued responses."
     ),
     Kwarg(
         'generate_nonstationarity_surface_plots',
@@ -1523,12 +1389,6 @@ PLOT_KWARGS_CORE = [
         0.,
         float,
         "Timepoint at which to plot interactions."
-    ),
-    Kwarg(
-        'standardize_response',
-        False,
-        bool,
-        "Whether to report response using standard units. Ignored unless model was fitted using ``standardize_response==True``."
     ),
 
     # CONTROLS FOR UNIVARIATE IRF PLOTS
@@ -1610,7 +1470,8 @@ PLOT_KWARGS_CORE = [
         'use_legend',
         True,
         bool,
-        "Whether to add legend to univariate IRF plots."
+        "Whether to add legend to univariate IRF plots.",
+        aliases=['legend']
     ),
     Kwarg(
         'use_line_markers',

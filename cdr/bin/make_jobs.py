@@ -8,8 +8,8 @@ base = """#!/bin/bash
 #SBATCH --job-name=%s
 #SBATCH --output="%s-%%j.out"
 #SBATCH --time=%d:00:00
-#SBATCH --ntasks=%d
 #SBATCH --mem=%dgb
+#SBATCH --ntasks=%d
 """
 
  
@@ -22,6 +22,7 @@ if __name__ == '__main__':
     argparser.add_argument('-p', '--partition', nargs='+', help='Partition(s) over which to predict/evaluate')
     argparser.add_argument('-t', '--time', type=int, default=48, help='Maximum number of hours to train models')
     argparser.add_argument('-n', '--n_cores', type=int, default=8, help='Number of cores to request')
+    argparser.add_argument('-g', '--use_gpu', action='store_true', help='Whether to request a GPU node')
     argparser.add_argument('-m', '--memory', type=int, default=64, help='Number of GB of memory to request')
     argparser.add_argument('-P', '--slurm_partition', default=None, help='Value for SLURM --partition setting, if applicable')
     argparser.add_argument('-c', '--cli_args', default='', help='Command line arguments to pass into call')
@@ -33,6 +34,7 @@ if __name__ == '__main__':
     partitions = args.partition
     time = args.time
     n_cores = args.n_cores
+    use_gpu = args.use_gpu
     memory = args.memory
     slurm_partition = args.slurm_partition
     cli_args = args.cli_args
@@ -52,7 +54,9 @@ if __name__ == '__main__':
             job_name = '_'.join([basename, ''.join(job_types)])
             filename = outdir + '/' + job_name + '.pbs'
             with open(filename, 'w') as f:
-                f.write(base % (job_name, job_name, time, n_cores, memory))
+                f.write(base % (job_name, job_name, time, memory, n_cores))
+                if use_gpu:
+                    f.write('#SBATCH --gres=gpu:1\n')
                 if slurm_partition:
                     f.write('#SBATCH --partition=%s\n' % slurm_partition)
                 f.write('\n')

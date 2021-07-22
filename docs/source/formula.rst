@@ -480,9 +480,9 @@ The disadvantage is that fitting them is slower because they involve more parame
 The kernels themselves have a number of free parameters which are specified by the name of the kernel in the IRF call of the model formula.
 The syntax for an LCG IRF kernel is as follows::
 
-    G(b([0-9]+))?
+    LCG(b([0-9]+))?
 
-This is a string representation of a function call ``G`` with optional keyword argument ``b``.
+This is a string representation of a function call ``LCG`` with optional keyword argument ``b``.
 
 The keyword argument is defined as follows:
 

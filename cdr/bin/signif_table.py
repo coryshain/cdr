@@ -86,9 +86,7 @@ def pretty_table(row_collection, key_list, field_sep=' '):
             for row in row_collection])
 
 
-
 if __name__ == '__main__':
-
     argparser = argparse.ArgumentParser('''
         Generates table of significances of ablative model comparisons
     ''')

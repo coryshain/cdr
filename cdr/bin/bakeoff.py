@@ -19,7 +19,6 @@ def scale(a, b):
 
 
 if __name__ == '__main__':
-
     argparser = argparse.ArgumentParser('''
         Performs pairwise permutation test for significance of differences in prediction quality between arbitrary models.
         Used to compare CDR to other kinds of statistical models trained on the same data.

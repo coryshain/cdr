@@ -3,36 +3,44 @@ import pandas as pd
 
 from .util import stderr
 
-def read_data(X_paths, y_paths, series_ids, categorical_columns=None, sep=' '):
+def read_tabular_data(X_paths, Y_paths, series_ids, categorical_columns=None, sep=' ', verbose=True):
     """
     Read impulse and response data into pandas dataframes and perform basic pre-processing.
 
     :param X_paths: ``str`` or ``list`` of ``str``; path(s) to impulse (predictor) data (multiple tables are concatenated). Each path may also be a ``;``-delimited list of paths to files containing predictors with different timestamps, where the predictors in each file all share the same set of timestamps.
-    :param y_paths: ``str`` or ``list`` of ``str``; path(s) to response data (multiple tables are concatenated).
+    :param Y_paths: ``str`` or ``list`` of ``str``; path(s) to response data (multiple tables are concatenated). Each path may also be a ``;``-delimited list of paths to files containing different response variables with different timestamps, where the response variables in each file all share the same set of timestamps.
     :param series_ids: ``list`` of ``str``; column names whose jointly unique values define unique time series.
     :param categorical_columns: ``list`` of ``str``; column names that should be treated as categorical.
     :param sep: ``str``; string representation of field delimiter in input data.
-    :return: (list(``pandas`` DataFrame), ``pandas`` DataFrame); (impulse data, response data). Impulse data has one element for each dataset in X_paths, each containing the column-wise concatenation of all column files in the path.
+    :param verbose: ``bool``; whether to log progress to stderr.
+    :return: 2-tuple of list(``pandas`` DataFrame); (impulse data, response data). X and Y each have one element for each dataset in X_paths/Y_paths, each containing the column-wise concatenation of all column files in the path.
     """
 
     if not isinstance(X_paths, list):
         X_paths = [X_paths]
-    if not isinstance(y_paths, list):
-        y_paths = [y_paths]
+    if not isinstance(Y_paths, list):
+        Y_paths = [Y_paths]
 
-    stderr('Loading data...\n')
+    if verbose:
+        stderr('Loading data...\n')
     X = []
-    y = []
+    Y = []
 
     for path in X_paths:
-        x_paths = []
+        _X = []
         for x in path.split(';'):
-            x_paths.append(pd.read_csv(x, sep=sep, skipinitialspace=True))
-        X.append(x_paths)
+            _X.append(pd.read_csv(x, sep=sep, skipinitialspace=True))
+        X.append(_X)
 
-    for path in y_paths:
-        y.append(pd.read_csv(path, sep=sep, skipinitialspace=True))
+    for path in Y_paths:
+        _Y = []
+        for y in path.split(';'):
+            _Y.append(pd.read_csv(y, sep=sep, skipinitialspace=True))
+        Y.append(_Y)
 
+    # Regroup by column
+    
+    # Stimuli
     X_new = []
     # Loop through datasets
     for i in range(len(X)):
@@ -44,31 +52,47 @@ def read_data(X_paths, y_paths, series_ids, categorical_columns=None, sep=' '):
     # Loop through column files
     for x in X_new:
         X.append(pd.concat(x, axis=0))
-    y = pd.concat(y, axis=0)
+        
+    # Responses
+    Y_new = []
+    # Loop through datasets
+    for i in range(len(Y)):
+        for j in range(len(Y[i])):
+            while j >= len(Y_new):
+                Y_new.append([])
+            Y_new[j].append(Y[i][j])
+    Y = []
+    # Loop through column files
+    for x in Y_new:
+        Y.append(pd.concat(x, axis=0))
 
-    stderr('Ensuring sort order...\n')
+    # Sort
+
+    if verbose:
+        stderr('Ensuring sort order...\n')
     for i, x in enumerate(X):
         X[i] = x.sort_values(series_ids + ['time']).reset_index(drop=True)
-    y = y.sort_values(series_ids + ['time']).reset_index(drop=True)
+    for i, y in enumerate(Y):
+        Y[i] = y.sort_values(series_ids + ['time']).reset_index(drop=True)
+
+    # Process categorical
 
     if categorical_columns is not None:
         for t in categorical_columns:
             for col in t.split(':'):
-                for x in X:
-                    if col in x.columns:
-                        x[col] = x[col].astype('category')
-                if col in y.columns:
-                    y[col] = y[col].astype('category')
+                for _X in X:
+                    if col in _X:
+                        _X[col] = _X[col].astype('category')
+                for _Y in Y:
+                    if col in _Y:
+                        _Y[col] = _Y[col].astype('category')
 
-    for x in X:
-        assert not 'rate' in x.columns, '"rate" is a reserved column name in CDR. Rename your input column...'
-        x['rate'] = 1.
-        if 'trial' not in x.columns:
-            x['trial'] = x.groupby(series_ids).rate.cumsum()
-    # X_groups = X.groupby(series_ids)
-    # X['percentTrialsComplete'] = X_groups['trial'].apply(lambda x: x / max(x))
-    # X['percentTimeComplete'] = X_groups['time'].apply(lambda x: x / max(x))
-    # X_groups = X.groupby(series_ids + ['sentid'])
-    # X['percentSentComplete'] = X_groups['sentpos'].apply(lambda x: x / max(x))
-    # X._get_numeric_data().fillna(value=0, inplace=True)
-    return X, y
+    # Add columns to X
+
+    for _X in X:
+        assert not 'rate' in _X, '"rate" is a reserved column name in CDR. Rename your input column...'
+        _X['rate'] = 1.
+        if 'trial' not in _X:
+            _X['trial'] = _X.groupby(series_ids).rate.cumsum()
+
+    return X, Y

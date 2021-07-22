@@ -7,7 +7,6 @@ from cdr.config import Config
 from cdr.util import nested, filter_models, get_partition_list, stderr
 
 if __name__ == '__main__':
-
     argparser = argparse.ArgumentParser('''
             Performs pairwise likelihood ratio test for significance of differences in prediction quality between LME models fitted to data convolved using CDR ("2-step" hypothesis test).
             Can be used for in-sample and out-of-sample evaluation.

@@ -129,7 +129,6 @@ def plot_irf(
         ax_d.spines['right'].set_visible(False)
         ax_d.spines['bottom'].set_visible(False)
         ax_d.spines['left'].set_visible(False)
-        # ax_d.tick_params(top='off', bottom='off', left='off', right='off', labelleft='off', labelbottom='off')
         ax_d.set_ylabel('Density')
         ax_d.plot(plot_x, density, lw=2, alpha=0.2, color='k', linestyle='dotted', solid_capstyle='butt')
         ax_d.fill_between(plot_x, np.zeros_like(density), density, color='k', alpha=0.05)
@@ -137,18 +136,8 @@ def plot_irf(
         ax.patch.set_visible(False)
 
     for i in range(len(sort_ix)):
-        # c = cm(color_cycle[i])
-        # if density is None:
-        #     c = c[:3] + (0.8,)
-        # else:
-        #     c = np.concatenate([np.ones((len(density), 3)), density[..., None]], axis=1)
-        #     print(c.shape)
-        #     print(plot_x.shape)
-        if plot_y[1:,sort_ix[i]].sum() == 0:
-            ax.plot(plot_x[:2], plot_y[:2,sort_ix[i]], label=irf_names_processed[sort_ix[i]], lw=2, alpha=0.8, linestyle='-', solid_capstyle='butt')
-        else:
-            markevery = int(len(plot_y) / 10)
-            ax.plot(plot_x, plot_y[:,sort_ix[i]], label=irf_names_processed[sort_ix[i]], lw=2, alpha=0.8, linestyle='-', markevery=markevery, markersize=12, solid_capstyle='butt')
+        markevery = int(len(plot_y) / 10)
+        ax.plot(plot_x, plot_y[:,sort_ix[i]], label=irf_names_processed[sort_ix[i]], lw=2, alpha=0.8, linestyle='-', markevery=markevery, markersize=12, solid_capstyle='butt')
         if uq is not None and lq is not None:
             ax.fill_between(plot_x, lq[:,sort_ix[i]], uq[:,sort_ix[i]], alpha=0.25)
 

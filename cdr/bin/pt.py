@@ -1,4 +1,5 @@
 import sys
+import os
 import argparse
 import numpy as np
 import pandas as pd
@@ -9,16 +10,15 @@ import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 
-from cdr.util import stderr
+from cdr.util import stderr, extract_cdr_prediction_files
+
 
 def scale(a, b):
     df = np.stack([np.array(a), np.array(b)], axis=1)
     scaling_factor = df.std()
     return a/scaling_factor, b/scaling_factor
 
-
 if __name__ == '__main__':
-
     argparser = argparse.ArgumentParser('''
         Performs pairwise permutation test for significance of differences in prediction quality between models.
         Can be used for in-sample and out-of-sample evaluation.
@@ -30,12 +30,17 @@ if __name__ == '__main__':
     argparser.add_argument('-a', '--ablation', action='store_true', help='Only compare models within an ablation set (those defined using the "ablate" param in the config file)')
     argparser.add_argument('-A', '--ablation_components', type=str, nargs='*', help='Names of variables to consider in ablative tests. Useful for excluding some ablated models from consideration')
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
-    argparser.add_argument('-M', '--metric', type=str, default='err', help='Metric to use for comparison (either "err" or "loglik")')
+    argparser.add_argument('-M', '--metric', type=str, default='mse', help='Metric to use for comparison (either "mse" or "loglik")')
     argparser.add_argument('-t', '--twostep', action='store_true', help='For DTSR models, compare predictions from fitted LME model from two-step hypothesis test.')
     argparser.add_argument('-T', '--tails', type=int, default=2, help='Number of tails (1 or 2)')
+    argparser.add_argument('-r', '--response', nargs='*', default=None, help='Name(s) of response(s) to test. If left unspecified, tests all responses.')
+    argparser.add_argument('-o', '--outdir', default=None, help='Output directory. If ``None``, placed in same directory as the config.')
     args, unknown = argparser.parse_known_args()
 
-    assert args.metric in ['err', 'loglik'], 'Metric must be one of ["err", "loglik"].'
+    metric = args.metric
+    if metric == 'err':
+        metric = 'mse'
+    assert metric in ['mse', 'loglik'], 'Metric must be one of ["err", "loglik"].'
 
     if args.pool:
         args.ablation = True
@@ -45,21 +50,14 @@ if __name__ == '__main__':
 
     ablation_components = args.ablation_components
 
+    partitions = get_partition_list(args.partition)
+    partition_str = '-'.join(partitions)
+
     for path in args.config_paths:
         p = Config(path)
 
         models = filter_models(p.model_list, args.models)
         cdr_models = [x for x in models if (x.startswith('CDR') or x.startswith('DTSR'))]
-
-        partitions = get_partition_list(args.partition)
-        partition_str = '-'.join(partitions)
-
-        if args.metric == 'err':
-            file_name = 'squared_error_%s.txt' % partition_str
-        else:
-            file_name = 'loglik_%s.txt' % partition_str
-        if args.twostep:
-            file_name = 'LM_2STEP_' + file_name 
 
         if args.ablation:
             comparison_sets = {}
@@ -112,7 +110,7 @@ if __name__ == '__main__':
                 model_set = comparison_sets[s]
                 if len(model_set) > 1:
                     if s is not None:
-                        stderr('Comparing models within ablation set "%s"...\n' %s)
+                        stderr('Comparing models within ablation set "%s"...\n' % s)
                     for i in range(len(model_set)):
                         m1 = model_set[i]
                         p.set_model(m1)
@@ -133,33 +131,88 @@ if __name__ == '__main__':
                                     b_model = m2
                                 a_model_path = a_model.replace(':', '+')
                                 b_model_path = b_model.replace(':', '+')
-                                name = '%s_v_%s' %(a_model_path, b_model_path)
-                                a = pd.read_csv(p.outdir + '/' + a_model_path + '/' + file_name, sep=' ', header=None, skipinitialspace=True)
-                                b = pd.read_csv(p.outdir + '/' + b_model_path + '/' + file_name, sep=' ', header=None, skipinitialspace=True)
-                                select = np.logical_and(np.isfinite(np.array(a)), np.isfinite(np.array(b)))
-                                diff = float(len(a) - select.sum())
-                                p_value, base_diff, diffs = permutation_test(a[select], b[select], n_iter=10000, n_tails=args.tails, mode=args.metric, nested=is_nested)
-                                stderr('\n')
-                                out_path = p.outdir + '/' + name + '_PT_' + partition_str + '.txt'
-                                with open(out_path, 'w') as f:
-                                    stderr('Saving output to %s...\n' %out_path)
+                                name = '%s_v_%s' % (a_model_path, b_model_path)
+                                a_files = extract_cdr_prediction_files(p.outdir + '/' + a_model_path)
+                                b_files = extract_cdr_prediction_files(p.outdir + '/' + b_model_path)
+                                for response in a_files:
+                                    for filenum in a_files[response]:
+                                        if partition_str in a_files[response][filenum] and \
+                                                partition_str in b_files[response][filenum] and \
+                                                (args.response is None or response in args.response):
+                                            if 'table' in a_files[response][filenum][partition_str]:
+                                                a = pd.read_csv(
+                                                    a_files[response][filenum][partition_str]['table']['direct'],
+                                                    sep=' ',
+                                                    skipinitialspace=True
+                                                )
+                                                if metric == 'mse':
+                                                    a = (a['CDRobs'] - a['CDRpreds'])**2
+                                                else:
+                                                    a = a['CDRloglik']
+                                            else:
+                                                a = pd.read_csv(
+                                                    a_files[response][filenum][partition_str][metric]['direct'],
+                                                    sep=' ',
+                                                    header=None,
+                                                    skipinitialspace=True
+                                                )
+                                            if 'table' in b_files[response][filenum][partition_str]:
+                                                b = pd.read_csv(
+                                                    b_files[response][filenum][partition_str]['table']['direct'],
+                                                    sep=' ',
+                                                    skipinitialspace=True
+                                                )
+                                                if metric == 'mse':
+                                                    b = (b['CDRobs'] - b['CDRpreds'])**2
+                                                else:
+                                                    b = b['CDRloglik']
+                                            else:
+                                                b = pd.read_csv(
+                                                    b_files[response][filenum][partition_str][metric]['direct'],
+                                                    sep=' ',
+                                                    header=None,
+                                                    skipinitialspace=True
+                                                )
 
-                                    summary = '='*50 + '\n'
-                                    summary += 'Model comparison: %s vs %s\n' %(a_model, b_model)
-                                    if diff > 0:
-                                        summary += '%d NaN rows filtered out (out of %d)\n' % (diff, len(a))
-                                    summary += 'Partition: %s\n' % partition_str
-                                    summary += 'Metric: %s\n' % args.metric
-                                    summary += 'Difference: %.4f\n' % base_diff
-                                    summary += 'p: %.4e%s\n' % (p_value, '' if p_value > 0.05 else '*' if p_value > 0.01 else '**' if p_value > 0.001 else '***')
-                                    summary += '='*50 + '\n'
+                                            select = np.logical_and(np.isfinite(np.array(a)), np.isfinite(np.array(b)))
+                                            diff = float(len(a) - select.sum())
+                                            p_value, base_diff, diffs = permutation_test(
+                                                a[select],
+                                                b[select],
+                                                n_iter=10000,
+                                                n_tails=args.tails,
+                                                mode=metric,
+                                                nested=is_nested
+                                            )
+                                            stderr('\n')
 
-                                    f.write(summary)
-                                    sys.stdout.write(summary)
+                                            name_base = '%s_PT_%s_f%s_%s.png' % (name, response, filenum, partition_str)
+                                            outdir = args.outdir
+                                            if outdir is None:
+                                                outdir = p.outdir
+                                            if not os.path.exists(outdir):
+                                                os.makedirs(outdir)
+                                            out_path = outdir + '/' + name_base + '.txt'
+                                            with open(out_path, 'w') as f:
+                                                stderr('Saving output to %s...\n' % out_path)
 
-                                plt.hist(diffs, bins=1000)
-                                plt.savefig(p.outdir + '/' + name + '_PT_' + partition_str + '.png')
-                                plt.close('all')
+                                                summary = '='*50 + '\n'
+                                                summary += 'Model comparison: %s vs %s\n' % (a_model, b_model)
+                                                if diff > 0:
+                                                    summary += '%d NaN rows filtered out (out of %d)\n' % (diff, len(a))
+                                                summary += 'Partition: %s\n' % partition_str
+                                                summary += 'Metric: %s\n' % metric
+                                                summary += 'Difference: %.4f\n' % base_diff
+                                                summary += 'p: %.4e%s\n' % (p_value, '' if p_value > 0.05 \
+                                                    else '*' if p_value > 0.01 else '**' if p_value > 0.001 else '***')
+                                                summary += '='*50 + '\n'
+
+                                                f.write(summary)
+                                                sys.stdout.write(summary)
+
+                                            plt.hist(diffs, bins=1000)
+                                            plt.savefig(outdir + '/' + name_base + '.png')
+                                            plt.close('all')
 
     if args.pool:
         pooled_data = {}
@@ -169,7 +222,37 @@ if __name__ == '__main__':
                 pooled_data[a][exp_outdir] = {}
                 for m in basenames_to_pool:
                     m_name = '!'.join([m] + list(a)).replace(':', '+')
-                    pooled_data[a][exp_outdir][m] = pd.read_csv(exp_outdir + '/' + m_name + '/' + file_name, sep=' ', header=None, skipinitialspace=True)
+                    m_files = extract_cdr_prediction_files(exp_outdir + '/' + m_name)
+                    for response in m_files:
+                        for filenum in m_files[response]:
+                            if partition_str in m_files[response][filenum] and \
+                                    (args.response is None or response in args.response):
+                                if 'table' in m_files[response][filenum][partition_str]:
+                                    v = pd.read_csv(
+                                        m_files[response][filenum][partition_str]['table']['direct'],
+                                        sep=' ',
+                                        skipinitialspace=True
+                                    )
+                                    if metric == 'mse':
+                                        v = (v['CDRobs'] - v['CDRpreds']) ** 2
+                                    else:
+                                        v = v['CDRloglik']
+                                else:
+                                    v = pd.read_csv(
+                                        m_files[response][filenum][partition_str][metric]['direct'],
+                                        sep=' ',
+                                        header=None,
+                                        skipinitialspace=True
+                                    )
+                                if a not in pooled_data:
+                                    pooled_data[a] = {}
+                                if exp_outdir not in pooled_data[a]:
+                                    pooled_data[a][exp_outdir] = {}
+                                if m not in pooled_data[a][exp_outdir]:
+                                    pooled_data[a][exp_outdir][m] = {}
+                                if response not in pooled_data[a][exp_outdir][m]:
+                                    pooled_data[a][exp_outdir][m][response] = {}
+                                pooled_data[a][exp_outdir][m][response][filenum] = v
 
         for i in range(len(ablations)):
             a1 = ablations[i]
@@ -191,48 +274,78 @@ if __name__ == '__main__':
                         b_model = a1
                         a_name = 'FULL' if m1 == '' else '!' + m1
                         b_name = 'FULL' if m2 == '' else '!' + m2
-                    df1 = []
-                    df2 = []
+                    df1 = {}
+                    df2 = {}
                     for exp in exps_outdirs:
                         for m in basenames_to_pool:
-                            a, b = scale(pooled_data[a_model][exp][m], pooled_data[b_model][exp][m])
-                            df1.append(a)
-                            df2.append(b)
-                    df1 = np.concatenate(df1, axis=0)
-                    df2 = np.concatenate(df2, axis=0)
-                    assert len(df1) == len(df2), 'Shape mismatch between datasets %s and %s: %s vs. %s' %(
-                        a_name,
-                        b_name,
-                        df1.shape,
-                        df2.shape
-                    )
-                    p_value, diff, diffs = permutation_test(df1, df2, n_iter=10000, n_tails=args.tails, mode=args.metric)
-                    stderr('\n')
-                    name = '%s_v_%s' % (a_name.replace(':', '+'), b_name.replace(':', '+'))
-                    out_path = p.outdir + '/' + name + '_PT_pooled_' + partition_str + '.txt'
-                    with open(out_path, 'w') as f:
-                        stderr('Saving output to %s...\n' % out_path)
+                            for response in pooled_data[a_model][exp][m]:
+                                for filenum in pooled_data[a_model][exp][m][response]:
+                                    if response not in df1:
+                                        df1[response] = {}
+                                    if filenum not in df1[response]:
+                                        df1[response][filenum] = []
+                                    if response not in df2:
+                                        df2[response] = {}
+                                    if filenum not in df2[response]:
+                                        df2[response][filenum] = []
+                                    a, b = scale(
+                                        pooled_data[a_model][exp][m][response][filenum],
+                                        pooled_data[b_model][exp][m][response][filenum]
+                                    )
+                                    df1[response][filenum].append(a)
+                                    df2[response][filenum].append(b)
+                    for response in df1:
+                        for filenum in df1[response]:
+                            _df1 = np.concatenate(df1[response][filenum], axis=0)
+                            _df2 = np.concatenate(df2[response][filenum], axis=0)
+                            assert len(_df1) == len(_df2), 'Shape mismatch between datasets %s and %s: %s vs. %s' % (
+                                a_name,
+                                b_name,
+                                _df1.shape,
+                                _df2.shape
+                            )
+                            p_value, diff, diffs = permutation_test(
+                                _df1,
+                                _df2,
+                                n_iter=10000,
+                                n_tails=args.tails,
+                                mode=metric,
+                                nested=is_nested
+                            )
+                            stderr('\n')
+                            name = '%s_v_%s' % (a_name.replace(':', '+'), b_name.replace(':', '+'))
+                            name_base = '%s_PT_pooled_%s_f%s_%s.png' % (name, response, filenum, partition_str)
+                            outdir = args.outdir
+                            if outdir is None:
+                                outdir = p.outdir
+                            if not os.path.exists(outdir):
+                                os.makedirs(outdir)
+                            out_path = outdir + '/' + name_base + '.txt'
+                            with open(out_path, 'w') as f:
+                                stderr('Saving output to %s...\n' % out_path)
 
-                        summary = '=' * 50 + '\n'
-                        summary += 'Model comparison: %s vs %s\n' % (a_name, b_name)
-                        summary += 'Partition: %s\n' % partition_str
-                        summary += 'Metric: %s\n' % args.metric
-                        summary += 'Experiments pooled:\n'
-                        for exp in exps_outdirs:
-                            summary += '  %s\n' %exp
-                        summary += 'Ablation sets pooled:\n'
-                        for basename in basenames_to_pool:
-                            summary += '  %s\n' %basename
-                        summary += 'n: %s\n' %df1.shape[0]
-                        summary += 'Difference: %.4f\n' % diff
-                        summary += 'p: %.4e%s\n' % (
-                            p_value,
-                            '' if p_value > 0.05 else '*' if p_value > 0.01 else '**' if p_value > 0.001 else '***')
-                        summary += '=' * 50 + '\n'
+                                summary = '=' * 50 + '\n'
+                                summary += 'Model comparison: %s vs %s\n' % (a_name, b_name)
+                                summary += 'Partition: %s\n' % partition_str
+                                summary += 'Metric: %s\n' % metric
+                                summary += 'Experiments pooled:\n'
+                                for exp in exps_outdirs:
+                                    summary += '  %s\n' % exp
+                                summary += 'Ablation sets pooled:\n'
+                                for basename in basenames_to_pool:
+                                    summary += '  %s\n' % basename
+                                summary += 'n: %s\n' % _df1.shape[0]
+                                summary += 'Difference: %.4f\n' % diff
+                                summary += 'p: %.4e%s\n' % (
+                                    p_value,
+                                    '' if p_value > 0.05 else '*' if p_value > 0.01
+                                    else '**' if p_value > 0.001 else '***'
+                                )
+                                summary += '=' * 50 + '\n'
 
-                        f.write(summary)
-                        sys.stdout.write(summary)
+                                f.write(summary)
+                                sys.stdout.write(summary)
 
-                    plt.hist(diffs, bins=1000)
-                    plt.savefig(p.outdir + '/' + name + '_PT_pooled_' + partition_str + '.png')
-                    plt.close('all')
+                            plt.hist(diffs, bins=1000)
+                            plt.savefig(outdir + '/' + name_base + '.png')
+                            plt.close('all')

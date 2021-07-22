@@ -11,7 +11,6 @@ from cdr.util import load_cdr, filter_models, stderr
 from cdr.plot import plot_irf, plot_qq
 
 if __name__ == '__main__':
-
     argparser = argparse.ArgumentParser('''
         Plot estimates from saved model(s).
         

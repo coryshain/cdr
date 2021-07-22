@@ -1,9 +1,7 @@
 import argparse
 import os
-import sys
 import re
 import pickle
-import numpy as np
 import pandas as pd
 
 pd.options.mode.chained_assignment = None
@@ -12,9 +10,9 @@ from cdr.kwargs import MODEL_INITIALIZATION_KWARGS, \
     CDR_INITIALIZATION_KWARGS, CDRMLE_INITIALIZATION_KWARGS, CDRBAYES_INITIALIZATION_KWARGS, \
     CDRNN_INITIALIZATION_KWARGS, CDRNNMLE_INITIALIZATION_KWARGS, CDRNNBAYES_INITIALIZATION_KWARGS
 from cdr.config import Config
-from cdr.io import read_data
+from cdr.io import read_tabular_data
 from cdr.formula import Formula
-from cdr.data import add_dv, filter_invalid_responses, preprocess_data, compute_splitID, compute_partition
+from cdr.data import filter_invalid_responses, preprocess_data, compute_splitID, compute_partition
 from cdr.util import mse, mae, filter_models, get_partition_list, paths_from_partition_cliarg, stderr
 
 
@@ -22,7 +20,6 @@ spillover = re.compile('(z_)?([^ (),]+)S([0-9]+)')
 
 
 if __name__ == '__main__':
-
     argparser = argparse.ArgumentParser('''
         Trains model(s) from formula string(s) given data.
     ''')
@@ -32,6 +29,7 @@ if __name__ == '__main__':
     argparser.add_argument('-e', '--force_training_evaluation', action='store_true', help='Recompute training evaluation even for models that are already finished.')
     argparser.add_argument('-s', '--save_and_exit', action='store_true', help='Initialize, save, and exit (CDR only). Useful for bringing non-backward compatible trained models up to spec for plotting and evaluation.')
     argparser.add_argument('-S', '--skip_confirmation', action='store_true', help='If running with **-s**, skip interactive confirmation. Useful for batch re-saving many models. Use with caution, since old models will be overwritten without the option to confirm.')
+    argparser.add_argument('-O', '--optimize_memory', action='store_true', help="Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).")
     argparser.add_argument('--cpu_only', action='store_true', help='Use CPU implementation even if GPU is available.')
     args = argparser.parse_args()
 
@@ -62,29 +60,29 @@ if __name__ == '__main__':
     # for m in models:
     #     if m.startswith('CDRNN'):
     #         all_interactions = True
-    X_paths, y_paths = paths_from_partition_cliarg(partitions, p)
-    X, y = read_data(
+    X_paths, Y_paths = paths_from_partition_cliarg(partitions, p)
+    X, Y = read_tabular_data(
         X_paths,
-        y_paths,
+        Y_paths,
         p.series_ids,
         sep=p.sep,
         categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in cdr_formula_list for v in x.rangf]))
     )
-    X, y, select, X_response_aligned_predictor_names, X_response_aligned_predictors, X_2d_predictor_names, X_2d_predictors = preprocess_data(
+    X, Y, select, X_in_Y_names = preprocess_data(
         X,
-        y,
+        Y,
         cdr_formula_list,
         p.series_ids,
         filters=p.filters,
-        compute_history=run_cdr,
         history_length=p.history_length,
+        future_length=p.future_length,
         all_interactions=all_interactions
     )
 
     if run_R:
         # from cdr.baselines import py2ri
         assert len(X) == 1, 'Cannot run baselines on asynchronously sampled predictors'
-        assert len(X) == 1, 'Cannot run baselines on asynchronously sampled predictors'
+        assert len(Y) == 1, 'Cannot run baselines on asynchronously sampled responses'
         X_cur = X[0]
         X_cur['splitID'] = compute_splitID(X_cur, p.split_ids)
         part = compute_partition(X_cur, p.modulus, 3)
@@ -106,21 +104,21 @@ if __name__ == '__main__':
                 preds = rhs.split('+')
                 for pred in preds:
                     sp = spillover.search(pred)
-                    if sp and sp.group(2) in X_baseline.columns:
+                    if sp and sp.group(2) in X_baseline:
                         x_id = sp.group(2)
                         n = int(sp.group(3))
                         x_id_sp = x_id + 'S' + str(n)
-                        if x_id_sp not in X_baseline.columns:
+                        if x_id_sp not in X_baseline:
                             X_baseline[x_id_sp] = X_baseline.groupby(p.series_ids)[x_id].shift_activations(n, fill_value=0.)
 
         X_baseline = X_baseline[part_select]
         if p.merge_cols is None:
-            merge_cols = sorted(list(set(X_baseline.columns) & set(y.columns)))
+            merge_cols = sorted(list(set(X_baseline.columns) & set(Y[0].columns)))
         else:
             merge_cols = p.merge_cols
-        X_baseline = pd.merge(X_baseline, y, on=merge_cols, how='inner')
+        X_baseline = pd.merge(X_baseline, Y[0], on=merge_cols, how='inner')
 
-    n_train_sample = len(y)
+    n_train_sample = sum(len(_Y) for _Y in Y)
 
     for m in models:
         p.set_model(m)
@@ -144,8 +142,8 @@ if __name__ == '__main__':
                     pickle.dump(lme, m_file)
 
             lme_preds = lme.predict(X_baseline)
-            lme_mse = mse(y[dv], lme_preds)
-            lme_mae = mae(y[dv], lme_preds)
+            lme_mse = mse(Y[dv], lme_preds)
+            lme_mae = mae(Y[dv], lme_preds)
             summary = '=' * 50 + '\n'
             summary += 'LME regression\n\n'
             summary += 'Model name: %s\n\n' %m
@@ -177,8 +175,8 @@ if __name__ == '__main__':
                     pickle.dump(lm, m_file)
 
             lm_preds = lm.predict(X_baseline)
-            lm_mse = mse(y[dv], lm_preds)
-            lm_mae = mae(y[dv], lm_preds)
+            lm_mse = mse(Y[dv], lm_preds)
+            lm_mae = mae(Y[dv], lm_preds)
             summary = '=' * 50 + '\n'
             summary += 'Linear regression\n\n'
             summary += 'Model name: %s\n\n' %m
@@ -221,8 +219,8 @@ if __name__ == '__main__':
                     pickle.dump(gam, m_file)
 
             gam_preds = gam.predict(X_baseline)
-            gam_mse = mse(y[dv], gam_preds)
-            gam_mae = mae(y[dv], gam_preds)
+            gam_mse = mse(Y[dv], gam_preds)
+            gam_mae = mae(Y[dv], gam_preds)
             summary = '=' * 50 + '\n'
             summary += 'GAM regression\n\n'
             summary += 'Model name: %s\n\n' %m
@@ -239,11 +237,8 @@ if __name__ == '__main__':
             stderr('\n\n')
 
         elif m.startswith('CDR') or m.startswith('DTSR'):
-            dv = formula.strip().split('~')[0].strip()
-            y_valid, select_y_valid = filter_invalid_responses(y, dv)
-            X_response_aligned_predictors_valid = X_response_aligned_predictors
-            if X_response_aligned_predictors_valid is not None:
-                X_response_aligned_predictors_valid = X_response_aligned_predictors_valid[select_y_valid]
+            dv = [x.strip() for x in formula.strip().split('~')[0].strip().split('+')]
+            Y_valid, select_Y_valid = filter_invalid_responses(Y, dv)
 
             stderr('\nInitializing model %s...\n\n' % m)
 
@@ -254,7 +249,7 @@ if __name__ == '__main__':
 
             kwargs = {}
             for kwarg in MODEL_INITIALIZATION_KWARGS:
-                if kwarg.key not in ['outdir', 'history_length']:
+                if kwarg.key not in ['outdir', 'history_length', 'future_length']:
                     kwargs[kwarg.key] = p[kwarg.key]
             kwargs['crossval_factor'] = p['crossval_factor']
             kwargs['crossval_fold'] = p['crossval_fold']
@@ -269,30 +264,14 @@ if __name__ == '__main__':
                     for kwarg in CDRNNMLE_INITIALIZATION_KWARGS:
                         kwargs[kwarg.key] = p[kwarg.key]
 
-                    cdr_model = CDRNNMLE(
-                        formula,
-                        X,
-                        y_valid,
-                        ablated=p['ablated'],
-                        outdir=p.outdir + '/' + m_path,
-                        history_length=p.history_length,
-                        **kwargs
-                    )
+                    CDRModel = CDRNNMLE
                 elif p['network_type'].lower() in ['bbvi', 'bayes', 'bayesian']:
                     from cdr.cdrnnbayes import CDRNNBayes
 
                     for kwarg in CDRNNBAYES_INITIALIZATION_KWARGS:
                         kwargs[kwarg.key] = p[kwarg.key]
 
-                    cdr_model = CDRNNBayes(
-                        formula,
-                        X,
-                        y_valid,
-                        ablated=p['ablated'],
-                        outdir=p.outdir + '/' + m_path,
-                        history_length=p.history_length,
-                        **kwargs
-                    )
+                    CDRModel = CDRNNBayes
                 else:
                     raise ValueError('Unrecognized network type %s.' % p['network_type'])
             else:
@@ -305,32 +284,27 @@ if __name__ == '__main__':
                     for kwarg in CDRMLE_INITIALIZATION_KWARGS:
                         kwargs[kwarg.key] = p[kwarg.key]
 
-                    cdr_model = CDRMLE(
-                        formula,
-                        X,
-                        y_valid,
-                        ablated=p['ablated'],
-                        outdir=p.outdir + '/' + m_path,
-                        history_length=p.history_length,
-                        **kwargs
-                    )
+                    CDRModel = CDRMLE
                 elif p['network_type'].lower() in ['bbvi', 'bayes', 'bayesian']:
                     from cdr.cdrbayes import CDRBayes
 
                     for kwarg in CDRBAYES_INITIALIZATION_KWARGS:
                         kwargs[kwarg.key] = p[kwarg.key]
 
-                    cdr_model = CDRBayes(
-                        formula,
-                        X,
-                        y_valid,
-                        ablated=p['ablated'],
-                        outdir=p.outdir + '/' + m_path,
-                        history_length=p.history_length,
-                        **kwargs
-                    )
+                    CDRModel = CDRBayes
                 else:
                     raise ValueError('Unrecognized network type %s.' % p['network_type'])
+
+            cdr_model = CDRModel(
+                formula,
+                X,
+                Y_valid,
+                ablated=p['ablated'],
+                outdir=p.outdir + '/' + m_path,
+                history_length=p.history_length,
+                future_length=p.future_length,
+                **kwargs
+            )
 
             if args.save_and_exit:
                 save = True
@@ -349,13 +323,11 @@ if __name__ == '__main__':
 
             cdr_model.fit(
                 X,
-                y_valid,
+                Y_valid,
                 n_iter=p['n_iter'],
-                X_response_aligned_predictor_names=X_response_aligned_predictor_names,
-                X_response_aligned_predictors=X_response_aligned_predictors_valid,
-                X_2d_predictor_names=X_2d_predictor_names,
-                X_2d_predictors=X_2d_predictors,
-                force_training_evaluation=args.force_training_evaluation
+                X_in_Y_names=X_in_Y_names,
+                force_training_evaluation=args.force_training_evaluation,
+                optimize_memory=args.optimize_memory
             )
 
             summary = cdr_model.summary()
