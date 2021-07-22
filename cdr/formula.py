@@ -10,7 +10,7 @@ from .util import names2ix, sn, stderr
 interact = re.compile('([^ ]+):([^ ]+)')
 spillover = re.compile('(^.+)S([0-9]+)$')
 split_irf = re.compile('(.+)\(([^(]+)')
-lcg_re = re.compile('[GS](b([0-9]+))?$')
+lcg_re = re.compile('(G|S|LCG)(b([0-9]+))?$')
 starts_numeric = re.compile('^[0-9]')
 non_alphanumeric = re.compile('[^0-9a-zA-Z_]')
 
@@ -107,7 +107,7 @@ class Formula(object):
         'HRF': 'HRFDoubleGamma5',
     }
 
-    LCG_BASES_IX = 2
+    LCG_BASES_IX = 3
     LCG_DEFAULT_BASES = 10
 
     @staticmethod

@@ -16,7 +16,7 @@ if __name__ == '__main__':
 
     if args.type.lower() == 'cdr':
         src_path = 'cdr_model_template.ini'
-    if args.type.lower() == 'plot':
+    elif args.type.lower() == 'plot':
         src_path = 'cdr_plot_template.ini'
     else:
         src_path = 'cdrnn_model_template.ini'
