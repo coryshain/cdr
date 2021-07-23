@@ -1003,8 +1003,8 @@ class CDR(Model):
         super(CDR, self)._initialize_inputs()
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                self.is_response_aligned = tf.cast(
-                    tf.abs(self.t_delta[:, -1, :]) < self.epsilon,
+                self.dirac_delta_mask = tf.cast(
+                    tf.abs(self.t_delta) < self.epsilon,
                     self.FLOAT_TF
                 )
 
@@ -1859,10 +1859,10 @@ class CDR(Model):
                     impulse_ix = names2ix(impulse_name, self.impulse_names)
 
                     if t.p.family == 'DiracDelta':
-                        impulse = tf.gather(self.X_processed, impulse_ix, axis=2)[:, -1, :]
+                        impulse = tf.gather(self.X_processed, impulse_ix, axis=2)
 
                         # Zero-out impulses to DiracDelta that are not response-aligned
-                        impulse *= self.is_response_aligned[:, impulse_ix[0]:impulse_ix[0]+1]
+                        impulse *= self.dirac_delta_mask[..., impulse_ix[0]:impulse_ix[0] + 1]
                     else:
                         impulse = tf.gather(self.X_processed, impulse_ix, axis=2)
 
@@ -2079,12 +2079,12 @@ class CDR(Model):
                 for c in t.children:
                     self._initialize_irfs(c, response)
 
-    def _initialize_convolutions(self):
+    def _initialize_X_weighted_by_impulse(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                self.convolutions = {}
+                self.X_weighted_by_impulse = {}
                 for i, response in enumerate(self.response_names):
-                    self.convolutions[response] = {}
+                    self.X_weighted_by_impulse[response] = {}
                     for name in self.terminal_names:
                         t = self.node_table[name]
                         impulse_name = self.terminal2impulse[name]
@@ -2097,7 +2097,7 @@ class CDR(Model):
                                 nparam = 1
                             ndim = self.get_response_ndim(response)
                             impulse = self.irf_impulses[name][..., None]
-                            impulse = tf.tile(impulse, [1, nparam, ndim])
+                            impulse = tf.tile(impulse, [1, 1, nparam, ndim])
                             out = impulse
                         else:
                             if t.cont:
@@ -2142,11 +2142,12 @@ class CDR(Model):
                             # Put batch dim first
                             irf_seq = tf.transpose(irf_seq, [1, 0, 2, 3])
 
-                            out = tf.reduce_sum(impulse * irf_seq, axis=1)
+                            out = impulse * irf_seq
 
-                        self.convolutions[response][name] = out
+                        self.X_weighted_by_impulse[response][name] = out
 
     def _sum_interactions(self):
+        raise NotImplementedError('Post-IRF interactions are currently disabled. Please raise an issue on Github if you need this feature.')
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 if len(self.interaction_names) > 0:
@@ -2344,29 +2345,27 @@ class CDR(Model):
                 for response in self.response_names:
                     self._initialize_irfs(self.t, response)
                 self._initialize_impulses()
-                self._initialize_convolutions()
+                self._initialize_X_weighted_by_impulse()
+                if len(self.interaction_names) > 0:
+                    self._sum_interactions()
 
     def compile_network(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 for response in self.response_names:
-                    convolutions = [self.convolutions[response][x] for x in self.terminal_names]
-                    if len(convolutions) > 0:
-                        X_conv = tf.stack(convolutions, axis=1)
+                    X_weighted_by_impulse = [self.X_weighted_by_impulse[response][x] for x in self.terminal_names]
+                    if len(X_weighted_by_impulse) > 0:
+                        X_weighted = tf.stack(X_weighted_by_impulse, axis=2)
                     else:
-                        X_conv = tf.zeros((1, 1), dtype=self.FLOAT_TF)
+                        X_weighted = tf.zeros((1, 1, 1, 1, 1), dtype=self.FLOAT_TF)
+
 
                     coef_names = [self.node_table[x].coef_id() for x in self.terminal_names]
                     coef_ix = names2ix(coef_names, self.coef_names)
                     coef = tf.gather(self.coefficient[response], coef_ix, axis=1)
-                    X_conv = X_conv * coef
-                    self.X_conv[response] = X_conv
-
-                    output = tf.reduce_sum(X_conv, axis=1)
-                    self.output[response] = output
-
-                    if len(self.interaction_names) > 0:
-                        self._sum_interactions()
+                    coef = tf.expand_dims(coef, axis=1)
+                    X_weighted = X_weighted * coef * self.X_mask[..., None, None]
+                    self.X_weighted[response] = X_weighted
 
 
 

@@ -3,7 +3,7 @@ from setuptools import setup
 from setuptools import find_packages
 
 setup(name='CDR',
-      version='0.4.1',
+      version='0.4.3',
       description='A toolkit for continuous-time deconvolutional regression (CDR)',
       author='Cory Shain',
       author_email='cory.shain@gmail.com',

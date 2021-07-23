@@ -1210,8 +1210,6 @@ class DenseLayer(object):
         out = []
         if self.built:
             out.append(self.kernel)
-        if self.normalize_activations and self.built:
-            out.append(self.normalization_layer.gamma)
         return out
 
     def build(self, inputs_shape):
@@ -1265,7 +1263,7 @@ class DenseLayer(object):
                                 reuse=self.reuse,
                                 name=self.name
                             )
-                        elif self.use_batch_normalization:
+                        elif self.use_layer_normalization:
                             self.normalization_layer = LayerNormLayer(
                                 normalization_type=self.layer_normalization_type,
                                 shift_activations=self.use_bias,
@@ -1607,12 +1605,13 @@ class BatchNormLayer(object):
 
             self.reduction_axes = sorted(list(set(range(len(inputs_shape))) - {axis}))
 
+            # Train gains and biases along axis/axes not being reduced
             shape = []
             for i in range(len(inputs_shape)):
                 if i in self.reduction_axes:
                     shape.append(1)
                 else:
-                    shape.append(inputs_shape[i])
+                    shape.append(int(inputs_shape[i]))
 
             if not self.name:
                 name = ''
@@ -1677,8 +1676,8 @@ class BatchNormLayer(object):
 
                 mean, variance = tf.cond(self.training, train_fn, eval_fn)
 
-                sd = tf.sqrt(variance)
-                out = ((inputs - mean) / (sd + self.epsilon)) * self.gamma + self.beta
+                sd = tf.sqrt(variance + self.epsilon)
+                out = ((inputs - mean) / sd) * self.gamma + self.beta
 
                 if self.moving_mean_op is None:
                     self.moving_mean_op = tf.assign(
@@ -1933,12 +1932,13 @@ class LayerNormLayer(object):
 
             self.reduction_axes = axis
 
+            # Train gains and biases along axis/axes being reduced
             shape = []
             for i in range(len(inputs_shape)):
                 if i in self.reduction_axes:
-                    shape.append(1)
+                    shape.append(int(inputs_shape[i]))
                 else:
-                    shape.append(inputs_shape[i])
+                    shape.append(1)
 
             if not self.name:
                 name = ''
@@ -1974,10 +1974,10 @@ class LayerNormLayer(object):
 
         with self.session.as_default():
             with self.session.graph.as_default():
-                if self.normalization_type == 'z':
+                if self.normalization_type == 'z': # ordinary layer normalization
                     mean, variance = tf.nn.moments(inputs, self.reduction_axes, keep_dims=True)
-                    sd = tf.sqrt(variance)
-                    out = ((inputs - mean) / (sd + self.epsilon))
+                    sd = tf.sqrt(variance + self.epsilon)
+                    out = (inputs - mean) / sd
                 else: # length normalization
                     out = tf.nn.l2_normalize(inputs, axis=self.reduction_axes, epsilon=self.epsilon)
 
@@ -2288,7 +2288,6 @@ class DropoutLayer(object):
                 else:
                     defaults = tf.ones_like(inputs) * self.constant
                     out = tf.where(dropout_mask, inputs, defaults)
-                    # out = tf.Print(out, ['in', inputs, 'mask', dropout_mask, 'defaults', defaults, 'output', out], summarize=100)
 
                 if self.rescale:
                     def rescale(x=out, rate=self.rate):

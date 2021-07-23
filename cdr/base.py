@@ -80,24 +80,28 @@ class Model(object):
             'dist': Normal,
             'name': 'normal',
             'params': ('mu', 'sigma'),
+            'params_tf': ('loc', 'scale'),
             'support': 'real'
         },
         'sinharcsinh': {
             'dist': SinhArcsinh,
             'name': 'sinharcsinh',
             'params': ('mu', 'sigma', 'skewness', 'tailweight'),
+            'params_tf': ('loc', 'scale', 'skewness', 'tailweight'),
             'support': 'real'
         },
         'bernoulli': {
             'dist': tf.contrib.distributions.Bernoulli,
             'name': 'bernoulli',
             'params': ('logit',),
+            'params_tf': ('logits',),
             'support': 'discrete'
         },
         'categorical': {
             'dist': tf.contrib.distributions.Categorical,
             'name': 'categorical',
             'params': ('logit',),
+            'params_tf': ('logits',),
             'support': 'discrete'
         }
     }
@@ -423,8 +427,7 @@ class Model(object):
         self.ranef_group2ix = {x: i for i, x in enumerate(self.rangf)}
 
         self.summed_interactions = None
-        self.output = {} # Key order: <response>; Value: nbatch x nparam x ndim tensor of predictive distribution parameters for the response
-        self.X_conv = {} # Key order: <response>;
+        self.X_weighted = {}  # Key order: <response>; Value: nbatch x ntime x ncoef x nparam x ndim tensor of IRF-weighted values at each timepoint of each predictor for each predictive distribution parameter of the response
         self.layers = [] # CDRNN only, list of DNN layers
         self.kl_penalties = {} # Key order: <variable>; Value: scalar KL divergence
         self.ema_ops = [] # Container for any exponential moving average updates to run at each training step
@@ -816,7 +819,11 @@ class Model(object):
     def _initialize_inputs(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                # Boolean switches
                 self.training = tf.placeholder_with_default(tf.constant(False, dtype=tf.bool), shape=[], name='training')
+                self.use_MAP_mode = tf.placeholder_with_default(tf.logical_not(self.training), shape=[], name='use_MAP_mode')
+                self.sum_outputs_along_T = tf.placeholder_with_default(tf.constant(True, dtype=tf.bool), shape=[], name='reduce_preds_along_T')
+                self.sum_outputs_along_K = tf.placeholder_with_default(tf.constant(True, dtype=tf.bool), shape=[], name='reduce_preds_along_K')
 
                 # Impulses
                 self.X = tf.placeholder(
@@ -1154,7 +1161,6 @@ class Model(object):
                 self.resample_ops = [] # Only used by CDRNN, defined here for global API
                 self.regularizable_layers = [] # Only used by CDRNN, defined here for global API
 
-                self.use_MAP_mode = tf.placeholder_with_default(tf.logical_not(self.training), shape=[], name='use_MAP_mode')
 
     def _get_intercept_init(self, response_name, has_intercept=True):
         with self.sess.as_default():
@@ -1364,9 +1370,12 @@ class Model(object):
     def _initialize_predictive_distribution(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
+                self.output_delta = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of stimulus-driven offsets at predictive distribution parameter of the response (summing over predictors and time)
+                self.output = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of predictoins at predictive distribution parameter of the response (summing over predictors and time)
                 self.predictive_distribution = {}
                 self.predictive_distribution_delta = {} # IRF-driven changes in each parameter of the predictive distribution
                 self.prediction = {}
+                self.prediction_over_time = {}
                 self.ll_by_var = {}
                 self.error_distribution = {}
                 self.error_distribution_theoretical_quantiles = {}
@@ -1379,6 +1388,7 @@ class Model(object):
                 self.X_conv_ema_debiased = {}
 
                 for i, response in enumerate(self.response_names):
+                    self.output_delta[response] = {}
                     self.predictive_distribution[response] = {}
                     self.predictive_distribution_delta[response] = {}
                     self.ll_by_var[response] = {}
@@ -1387,33 +1397,98 @@ class Model(object):
                     self.error_distribution_theoretical_cdf[response] = {}
                     ndim = self.get_response_ndim(response)
 
-                    _Y_mask = self.Y_mask[..., i]
-
                     pred_dist_fn = self.get_response_dist(response)
                     response_param_names = self.get_response_params(response)
-                    response_params = self.intercept[response]
+                    response_params = self.intercept[response] # (batch, param, dim)
                     if self.summed_interactions:
                         response_params = response_params + self.summed_interactions[response]
-                    output = self.output[response]
+
+                    # Base output deltas
+                    X_weighted_delta = self.X_weighted[response] # (batch, time, impulse, param, dim)
                     nparam = int(response_params.shape[-2])
                     if not self.use_distributional_regression:
                         # Pad out other predictive params
-                        output = tf.pad(
-                            output,
+                        X_weighted_delta = tf.pad(
+                            X_weighted_delta,
                             paddings = [
+                                (0, 0),
+                                (0, 0),
                                 (0, 0),
                                 (0, nparam - 1),
                                 (0, 0)
                             ]
                         )
+                    output_delta = X_weighted_delta
+
+                    # Prediction targets
+                    Y = self.Y[..., i]
+                    Y_mask = self.Y_mask[..., i]
+                    if self.standardize_response and self.is_real(response):
+                        Yz = (Y - self.Y_train_means[response]) / self.Y_train_sds[response]
+                        Y = tf.cond(self.training, lambda: Yz, lambda: Y)
+
+                    # Conditionally reduce along T (time, axis 1)
+                    output_delta = tf.cond(
+                        self.sum_outputs_along_T,
+                        lambda: tf.reduce_sum(output_delta, axis=1),
+                        lambda: output_delta
+                    )
+                    response_params = tf.cond(
+                        self.sum_outputs_along_T,
+                        lambda: response_params,
+                        lambda: tf.expand_dims(response_params, axis=1)
+                    )
+                    tile_shape = [1, self.history_length + self.future_length]
+                    Y = tf.cond(
+                        self.sum_outputs_along_T,
+                        lambda: Y,
+                        lambda: tf.tile(Y[..., None], tile_shape)
+                    )
+                    Y_mask = tf.cond(
+                        self.sum_outputs_along_T,
+                        lambda: Y_mask,
+                        lambda: tf.tile(Y_mask[..., None], tile_shape)
+                    )
+
+                    # Conditionally reduce along K (impulses, axis -3)
+                    output_delta = tf.cond(
+                        self.sum_outputs_along_K,
+                        lambda: tf.reduce_sum(output_delta, axis=-3),
+                        lambda: output_delta
+                    )
+                    response_params = tf.cond(
+                        self.sum_outputs_along_K,
+                        lambda: response_params,
+                        lambda: tf.expand_dims(response_params, axis=-3)
+                    )
+                    n_impulse = self.n_impulse + int(self.is_cdrnn) # CDRNN has an extra output dim for rate
+                    tile_shape = tf.cond(
+                        self.sum_outputs_along_T,
+                        lambda: tf.convert_to_tensor([1, n_impulse]),
+                        lambda: tf.convert_to_tensor([1, 1, n_impulse]),
+                    )
+                    Y = tf.cond(
+                        self.sum_outputs_along_K,
+                        lambda: Y,
+                        lambda: tf.tile(Y[..., None], tile_shape)
+                    )
+                    Y_mask = tf.cond(
+                        self.sum_outputs_along_K,
+                        lambda: Y_mask,
+                        lambda: tf.tile(Y_mask[..., None], tile_shape)
+                    )
+
+                    response_params = response_params + output_delta
+
+                    self.output_delta[response] = output_delta
+                    self.output[response] = response_params
 
                     for j, response_param_name in enumerate(response_param_names):
                         dim_names = self._expand_param_name_by_dim(response, response_param_name)
                         for k, dim_name in enumerate(dim_names):
-                            self.predictive_distribution_delta[response][dim_name] = output[:, j, k]
+                            self.predictive_distribution_delta[response][dim_name] = output_delta[:, j, k]
 
-                    response_params = response_params + output
-                    response_params = tf.unstack(response_params, axis=1)
+                    response_params = [response_params[..., j, :] for j in range(nparam)]
 
                     # Post process response params
                     for j, response_param_name in enumerate(response_param_names):
@@ -1443,6 +1518,20 @@ class Model(object):
                         _response_params = response_params
                     response_dist = pred_dist_fn(*_response_params)
                     self.predictive_distribution[response] = response_dist
+
+                    # Define prediction tensors
+                    dist_name = self.get_response_dist_name(response)
+                    mode = response_dist.mode()
+                    if dist_name in ['bernoulli', 'categorical']:
+                        self.prediction[response] = tf.cast(mode, self.INT_TF) * \
+                                                    tf.cast(Y_mask, self.INT_TF)
+                    else: # Treat as continuous regression, use the first (location) parameter
+                        self.prediction[response] = mode * Y_mask
+
+                    ll = response_dist.log_prob(Y)
+                    # Mask out likelihoods of predictions for missing response variables
+                    ll *= Y_mask
+                    self.ll_by_var[response] = ll
 
                     # Define EMA over predictive distribution
                     beta = self.ema_decay
@@ -1486,53 +1575,36 @@ class Model(object):
                                 collections=['params']
                             )
 
-                    # Define EMA over X_conv
-                    X_conv = tf.unstack(self.X_conv[response], axis=2) # X_conv is (batch, impulse, param, dim)
-                    self.X_conv_ema[response] = {}
-                    self.X_conv_ema_debiased[response] = {}
-                    for j, response_param_name in enumerate(response_param_names):
-                        _X_conv = X_conv[j]
-                        if self.standardize_response and self.is_real(response) and response_param_name in ['mu', 'sigma']:
-                            _X_conv = _X_conv * self.Y_train_sds[response]
-                        _X_conv = tf.reduce_mean(_X_conv, axis=0)
-                        dim_names = self._expand_param_name_by_dim(response, response_param_name)
-                        for k, dim_name in enumerate(dim_names):
-                            X_conv_ema_cur = _X_conv[:, k]
-                            self.X_conv_ema[response][dim_name] = tf.Variable(
-                                tf.zeros_like(X_conv_ema_cur),
-                                trainable=False,
-                                name='response_params_ema_%s_%s' % (sn(response), sn(dim_name))
-                            )
-                            X_conv_ema_prev = self.X_conv_ema[response][dim_name]
-                            X_conv_ema_debiased = X_conv_ema_prev / (1. - beta ** step)
-                            self.X_conv_ema_debiased[response][dim_name] = X_conv_ema_debiased
-                            ema_update = beta * X_conv_ema_prev + \
-                                         (1. - beta) * X_conv_ema_cur
-                            X_conv_ema_op = tf.assign(
-                                self.X_conv_ema[response][dim_name],
-                                ema_update
-                            )
-                            self.ema_ops.append(X_conv_ema_op)
-
-                    # Define prediction tensors
-                    dist_name = self.get_response_dist_name(response)
-                    if dist_name == 'bernoulli':
-                        self.prediction[response] = tf.cast(tf.round(_response_params[0]), self.INT_TF) * tf.cast(_Y_mask, self.INT_TF)
-                    elif dist_name == 'categorical':
-                        self.prediction[response] = tf.cast(tf.argmax(_response_params[0], axis=-1), self.INT_TF) * tf.cast(_Y_mask, self.INT_TF)
-                    else: # Treat as continuous regression, use the first (location) parameter
-                        self.prediction[response] = _response_params[0] * _Y_mask
-
-                    # Define likelihoods
-                    _Y = self.Y[..., i]
-                    if self.standardize_response and self.is_real(response):
-                        _Yz = (_Y - self.Y_train_means[response]) / self.Y_train_sds[response]
-                        _Y = tf.cond(self.training, lambda: _Yz, lambda: _Y)
-
-                    ll = response_dist.log_prob(_Y)
-                    # Mask out likelihoods of predictions for missing response variables
-                    ll *= _Y_mask
-                    self.ll_by_var[response] = ll
+                    # # Define EMA over X_conv
+                    # X_conv = tf.unstack(self.X_conv[response], axis=2) # X_conv is (batch, impulse, param, dim)
+                    # self.X_conv_ema[response] = {}
+                    # self.X_conv_ema_debiased[response] = {}
+                    # X_conv_response_param_names = response_param_names
+                    # if not self.use_distributional_regression:
+                    #     X_conv_response_param_names = response_param_names[:1]
+                    # for j, response_param_name in enumerate(X_conv_response_param_names):
+                    #     _X_conv = X_conv[j]
+                    #     if self.standardize_response and self.is_real(response) and response_param_name in ['mu', 'sigma']:
+                    #         _X_conv = _X_conv * self.Y_train_sds[response]
+                    #     _X_conv = tf.reduce_mean(_X_conv, axis=0)
+                    #     dim_names = self._expand_param_name_by_dim(response, response_param_name)
+                    #     for k, dim_name in enumerate(dim_names):
+                    #         X_conv_ema_cur = _X_conv[:, k]
+                    #         self.X_conv_ema[response][dim_name] = tf.Variable(
+                    #             tf.zeros_like(X_conv_ema_cur),
+                    #             trainable=False,
+                    #             name='response_params_ema_%s_%s' % (sn(response), sn(dim_name))
+                    #         )
+                    #         X_conv_ema_prev = self.X_conv_ema[response][dim_name]
+                    #         X_conv_ema_debiased = X_conv_ema_prev / (1. - beta ** step)
+                    #         self.X_conv_ema_debiased[response][dim_name] = X_conv_ema_debiased
+                    #         ema_update = beta * X_conv_ema_prev + \
+                    #                      (1. - beta) * X_conv_ema_cur
+                    #         X_conv_ema_op = tf.assign(
+                    #             self.X_conv_ema[response][dim_name],
+                    #             ema_update
+                    #         )
+                    #         self.ema_ops.append(X_conv_ema_op)
 
                     # Define error distribution
                     if self.is_real(response):
@@ -2665,6 +2737,16 @@ class Model(object):
 
         return self.predictive_distribution_config[response]['params']
 
+    def get_response_params_tf(self, response):
+        """
+        Get tuple of TensorFlow-internal names of parameters of the predictive distribution for a given response.
+
+        :param response: ``str``; name of response
+        :return: ``tuple`` of ``str``; parameters of predictive distribution
+        """
+
+        return self.predictive_distribution_config[response]['params_tf']
+
     def get_response_support(self, response):
         """
         Get the name of the distributional support of the predictive distribution assigned to a given response
@@ -3083,31 +3165,31 @@ class Model(object):
 
         out = ' ' * indent + 'MODEL EVALUATION STATISTICS:\n'
         if loglik is not None:
-            out += ' ' * (indent+2) + 'Loglik:              %s\n' % loglik
+            out += ' ' * (indent+2) + 'Loglik:              %s\n' % np.squeeze(loglik)
         if f1 is not None:
-            out += ' ' * (indent+2) + 'Macro F1:            %s\n' % f1
+            out += ' ' * (indent+2) + 'Macro F1:            %s\n' % np.squeeze(f1)
         if f1_baseline is not None:
-            out += ' ' * (indent+2) + 'Macro F1 (baseline): %s\n' % f1_baseline
+            out += ' ' * (indent+2) + 'Macro F1 (baseline): %s\n' % np.squeeze(f1_baseline)
         if acc is not None:
-            out += ' ' * (indent+2) + 'Accuracy:            %s\n' % acc
+            out += ' ' * (indent+2) + 'Accuracy:            %s\n' % np.squeeze(acc)
         if acc_baseline is not None:
-            out += ' ' * (indent+2) + 'Accuracy (baseline): %s\n' % acc_baseline
+            out += ' ' * (indent+2) + 'Accuracy (baseline): %s\n' % np.squeeze(acc_baseline)
         if mse is not None:
-            out += ' ' * (indent+2) + 'MSE:                 %s\n' % mse
+            out += ' ' * (indent+2) + 'MSE:                 %s\n' % np.squeeze(mse)
         if mae is not None:
-            out += ' ' * (indent+2) + 'MAE:                 %s\n' % mae
+            out += ' ' * (indent+2) + 'MAE:                 %s\n' % np.squeeze(mae)
         if rho is not None:
-            out += ' ' * (indent+2) + 'r(true, pred):       %s\n' % rho
+            out += ' ' * (indent+2) + 'r(true, pred):       %s\n' % np.squeeze(rho)
         if loss is not None:
-            out += ' ' * (indent+2) + 'Loss:                %s\n' % loss
+            out += ' ' * (indent+2) + 'Loss:                %s\n' % np.squeeze(loss)
         if true_variance is not None:
-            out += ' ' * (indent+2) + 'True variance:       %s\n' % true_variance
+            out += ' ' * (indent+2) + 'True variance:       %s\n' % np.squeeze(true_variance)
         if percent_variance_explained is not None:
-            out += ' ' * (indent+2) + '%% var expl:    %.2f%%\n' % percent_variance_explained
+            out += ' ' * (indent+2) + '%% var expl:          %.2f%%\n' % np.squeeze(percent_variance_explained)
         if ks_results is not None:
             out += ' ' * (indent+2) + 'Kolmogorov-Smirnov test of goodness of fit of modeled to true error:\n'
-            out += ' ' * (indent+4) + 'D value: %s\n' % ks_results[0]
-            out += ' ' * (indent+4) + 'p value: %s\n' % ks_results[1]
+            out += ' ' * (indent+4) + 'D value: %s\n' % np.squeeze(ks_results[0])
+            out += ' ' * (indent+4) + 'p value: %s\n' % np.squeeze(ks_results[1])
             if ks_results[1] < 0.05:
                 out += '\n'
                 out += ' ' * (indent+4) + 'NOTE: KS tests will likely reject on large datasets.\n'
@@ -3548,6 +3630,8 @@ class Model(object):
             algorithm='MAP',
             return_preds=True,
             return_loglik=False,
+            sum_outputs_along_T=True,
+            sum_outputs_along_K=True,
             dump=False,
             extra_cols=False,
             partition=None,
@@ -3592,6 +3676,8 @@ class Model(object):
         :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
         :param return_preds: ``bool``; whether to return predictions.
         :param return_loglik: ``bool``; whether to return elementwise log likelihoods. Requires that **Y** is not ``None``.
+        :param sum_outputs_along_T: ``bool``; whether to sum IRF-weighted predictors along the time dimension. Must be ``True`` for valid convolution. Setting to ``False`` is useful for timestep-specific evaluation.
+        :param sum_outputs_along_K: ``bool``; whether to sum IRF-weighted predictors along the predictor dimension. Must be ``True`` for valid convolution. Setting to ``False`` is useful for impulse-specific evaluation.
         :param dump: ``bool``; whether to save generated predictions (and log likelihood vectors if applicable) to disk.
         :param extra_cols: ``bool``; whether to include columns from **Y** in output tables. Ignored unless **dump** is ``True``.
         :param partition: ``str`` or ``None``; name of data partition (or ``None`` if no partition name), used for output file naming. Ignored unless **dump** is ``True``.
@@ -3601,6 +3687,7 @@ class Model(object):
         """
 
         assert Y is not None or not return_loglik, 'Cannot return log likelihood when Y is not provided.'
+        assert not dump or (sum_outputs_along_T and sum_outputs_along_K), 'dump=True is only supported if sum_outputs_along_T=True and sum_outputs_along_K=True'
 
         if verbose:
             usingGPU = tf.test.is_gpu_available()
@@ -3672,6 +3759,12 @@ class Model(object):
                     self.set_predict_mode(True)
 
                     out = {}
+                    out_shape = (n,)
+                    if not sum_outputs_along_T:
+                        out_shape = out_shape + (self.history_length + self.future_length,)
+                    if not sum_outputs_along_K:
+                        n_impulse = self.n_impulse + int(self.is_cdrnn) # CDRNN has an extra output dim for rate
+                        out_shape = out_shape + (n_impulse,)
 
                     if return_preds:
                         out['preds'] = {}
@@ -3680,9 +3773,9 @@ class Model(object):
                                 dtype = self.FLOAT_NP
                             else:
                                 dtype = self.INT_NP
-                            out['preds'][_response] = np.zeros((n,), dtype=dtype)
+                            out['preds'][_response] = np.zeros(out_shape, dtype=dtype)
                     if return_loglik:
-                        out['log_lik'] = {x: np.zeros((n,)) for x in responses}
+                        out['log_lik'] = {x: np.zeros(out_shape) for x in responses}
 
                     B = self.eval_minibatch_size
                     n_eval_minibatch = math.ceil(n / B)
@@ -3717,7 +3810,9 @@ class Model(object):
                                 self.Y_time: _Y_time,
                                 self.Y_mask: _Y_mask,
                                 self.Y_gf: _Y_gf,
-                                self.training: not self.predict_mode
+                                self.training: not self.predict_mode,
+                                self.sum_outputs_along_T: sum_outputs_along_T,
+                                self.sum_outputs_along_K: sum_outputs_along_K
                             }
                             if return_loglik:
                                 fd[self.Y] = _Y
@@ -3729,7 +3824,9 @@ class Model(object):
                                 self.X_mask: X_mask[i:i + B],
                                 self.Y_time: Y_time[i:i + B],
                                 self.Y_gf: None if Y_gf is None else Y_gf[i:i + B],
-                                self.training: not self.predict_mode
+                                self.training: not self.predict_mode,
+                                self.sum_outputs_along_T: sum_outputs_along_T,
+                                self.sum_outputs_along_K: sum_outputs_along_K
                             }
                             if return_loglik:
                                 fd[self.Y] = Y[i:i + B]
@@ -3893,6 +3990,7 @@ class Model(object):
                                 else:  # Average
                                     _preds = _preds.mean(axis=1)
                                 out['preds'][_response] = _preds
+
                         if return_loglik:
                             for _response in out['log_lik']:
                                 out['log_lik'][_response] = out['log_lik'][_response].mean(axis=1)
@@ -3903,6 +4001,8 @@ class Model(object):
             self,
             X,
             Y,
+            sum_outputs_along_T=True,
+            sum_outputs_along_K=True,
             dump=False,
             extra_cols=False,
             partition=None,
@@ -3928,6 +4028,8 @@ class Model(object):
             * A column for each random grouping factor in the model specified in ``form_str``.
 
         :param extra_cols: ``bool``; whether to include columns from **Y** in output tables.`
+        :param sum_outputs_along_T: ``bool``; whether to sum IRF-weighted predictors along the time dimension. Must be ``True`` for valid convolution. Setting to ``False`` is useful for timestep-specific evaluation.
+        :param sum_outputs_along_K: ``bool``; whether to sum IRF-weighted predictors along the predictor dimension. Must be ``True`` for valid convolution. Setting to ``False`` is useful for impulse-specific evaluation.
         :param dump; ``bool``; whether to save generated log likelihood vectors to disk.
         :param extra_cols: ``bool``; whether to include columns from **Y** in output tables. Ignored unless **dump** is ``True``.
         :param partition: ``str`` or ``None``; name of data partition (or ``None`` if no partition name), used for output file naming. Ignored unless **dump** is ``True``.
@@ -3935,12 +4037,16 @@ class Model(object):
         :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
         """
 
+        assert not dump or (sum_outputs_along_T and sum_outputs_along_K), 'dump=True is only supported if sum_outputs_along_T=True and sum_outputs_along_K=True'
+
         out = self.predict(
             X,
             Y=Y,
-            dump=False,
             return_preds=False,
             return_loglik=True,
+            sum_outputs_along_T=sum_outputs_along_T,
+            sum_outputs_along_K=sum_outputs_along_K,
+            dump=False,
             **kwargs
         )['log_lik']
 
@@ -3984,6 +4090,8 @@ class Model(object):
             X_in_Y_names=None,
             n_samples=None,
             algorithm='MAP',
+            sum_outputs_along_T=True,
+            sum_outputs_along_K=True,
             dump=False,
             extra_cols=False,
             partition=None,
@@ -4012,6 +4120,8 @@ class Model(object):
         :param X_in_Y_names: ``list`` of ``str``; names of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, no such predictors.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
+        :param sum_outputs_along_T: ``bool``; whether to sum IRF-weighted predictors along the time dimension. Must be ``True`` for valid convolution. Setting to ``False`` is useful for timestep-specific evaluation.
+        :param sum_outputs_along_K: ``bool``; whether to sum IRF-weighted predictors along the predictor dimension. Must be ``True`` for valid convolution. Setting to ``False`` is useful for impulse-specific evaluation.
         :param dump: ``bool``; whether to save generated data and evaluations to disk.
         :param extra_cols: ``bool``; whether to include columns from **Y** in output tables. Ignored unless **dump** is ``True``.
         :param partition: ``str`` or ``None``; name of data partition (or ``None`` if no partition name), used for output file naming. Ignored unless **dump** is ``True``.
@@ -4019,6 +4129,8 @@ class Model(object):
         :param verbose: ``bool``; Report progress and metrics to standard error.
         :return: pair of <``dict``, ``str``>; Dictionary of evaluation metrics, human-readable evaluation summary string.
         """
+
+        assert not dump or (sum_outputs_along_T and sum_outputs_along_K), 'dump=True is only supported if sum_outputs_along_T=True and sum_outputs_along_K=True'
 
         if partition and not partition.startswith('_'):
             partition_str = '_' + partition
@@ -4033,6 +4145,8 @@ class Model(object):
             algorithm=algorithm,
             return_preds=True,
             return_loglik=True,
+            sum_outputs_along_T=sum_outputs_along_T,
+            sum_outputs_along_K=sum_outputs_along_K,
             dump=False,
             optimize_memory=optimize_memory,
             verbose=verbose
@@ -4040,6 +4154,30 @@ class Model(object):
 
         preds = cdr_out['preds']
         log_lik = cdr_out['log_lik']
+
+        # Expand arrays to be B x T x K
+        for response in preds:
+            for ix in preds[response]:
+                arr = preds[response][ix]
+                while len(arr.shape) < 3:
+                    arr = arr[..., None]
+                preds[response][ix] = arr
+        for response in log_lik:
+            for ix in log_lik[response]:
+                arr = log_lik[response][ix]
+                while len(arr.shape) < 3:
+                    arr = arr[..., None]
+                log_lik[response][ix] = arr
+
+        if sum_outputs_along_T:
+            T = 1
+        else:
+            T = self.history_length + self.future_length
+
+        if sum_outputs_along_K:
+            K = 1
+        else:
+            K = self.n_impulse + int(self.is_cdrnn)
 
         metrics = {
             'mse': {},
@@ -4057,32 +4195,32 @@ class Model(object):
 
         response_names = self.response_names[:]
         for _response in response_names:
-            metrics['mse'][_response] = []
-            metrics['rho'][_response] = []
-            metrics['f1'][_response] = []
-            metrics['f1_baseline'][_response] = []
-            metrics['acc'][_response] = []
-            metrics['acc_baseline'][_response] = []
-            metrics['log_lik'][_response] = []
-            metrics['percent_variance_explained'][_response] = []
-            metrics['true_variance'][_response] = []
-            metrics['ks_results'][_response] = []
+            metrics['mse'][_response] = {}
+            metrics['rho'][_response] = {}
+            metrics['f1'][_response] = {}
+            metrics['f1_baseline'][_response] = {}
+            metrics['acc'][_response] = {}
+            metrics['acc_baseline'][_response] = {}
+            metrics['log_lik'][_response] = {}
+            metrics['percent_variance_explained'][_response] = {}
+            metrics['true_variance'][_response] = {}
+            metrics['ks_results'][_response] = {}
 
             file_ix_all = list(range(len(Y)))
             file_ix = self.response_to_df_ix[_response]
             multiple_files = len(file_ix_all) > 1
 
             for ix in file_ix_all:
-                metrics['mse'][_response].append(None)
-                metrics['rho'][_response].append(None)
-                metrics['f1'][_response].append(None)
-                metrics['f1_baseline'][_response].append(None)
-                metrics['acc'][_response].append(None)
-                metrics['acc_baseline'][_response].append(None)
-                metrics['log_lik'][_response].append(None)
-                metrics['percent_variance_explained'][_response].append(None)
-                metrics['true_variance'][_response].append(None)
-                metrics['ks_results'][_response].append(None)
+                metrics['mse'][_response][ix] = None
+                metrics['rho'][_response][ix] = None
+                metrics['f1'][_response][ix] = None
+                metrics['f1_baseline'][_response][ix] = None
+                metrics['acc'][_response][ix] = None
+                metrics['acc_baseline'][_response][ix] = None
+                metrics['log_lik'][_response][ix] = None
+                metrics['percent_variance_explained'][_response][ix] = None
+                metrics['true_variance'][_response][ix] = None
+                metrics['ks_results'][_response][ix] = None
 
                 if ix in file_ix:
                     _Y = Y[ix]
@@ -4092,44 +4230,71 @@ class Model(object):
                         _preds = preds[_response][ix]
 
                         if self.is_binary(_response):
-                            error = (_y == _preds).astype('int')
-                            metrics['f1'][_response][-1] = f1_score(_y, _preds, average='binary')
-                            metrics['f1_baseline'][_response][-1] = f1_score(_y, baseline, average='binary')
-                            metrics['acc'][_response][-1] = accuracy_score(_y, _preds)
-                            metrics['acc_baseline'][_response][-1] = accuracy_score(_y, baseline)
+                            baseline = np.ones((len(_y),))
+                            metrics['f1_baseline'][_response][ix] = f1_score(_y, baseline, average='binary')
+                            metrics['acc_baseline'][_response][ix] = accuracy_score(_y, baseline)
                             err_col_name = 'CDRcorrect'
+                            for t in range(T):
+                                for k in range(K):
+                                    __preds = _preds[:,t,k]
+                                    error = (_y == __preds).astype('int')
+                                    if metrics['f1'][_response][ix] is None:
+                                        metrics['f1'][_response][ix] = np.zeros((T, K))
+                                    metrics['f1'][_response][ix][t,k] = f1_score(_y, __preds, average='binary')
+                                    if metrics['acc'][_response][ix] is None:
+                                        metrics['acc'][_response][ix] = np.zeros((T, K))
+                                    metrics['acc'][_response][ix][t,k] = accuracy_score(_y, __preds)
                         elif self.is_categorical(_response):
-                            error = (_y == _preds).astype('int')
                             classes, counts = np.unique(_y, return_counts=True)
                             majority = classes[np.argmax(counts)]
                             baseline = [majority] * len(_y)
-                            metrics['f1'][_response][-1] = f1_score(_y, _preds, average='macro')
-                            metrics['f1_baseline'][_response][-1] = f1_score(_y, baseline, average='macro')
-                            metrics['acc'][_response][-1] = accuracy_score(_y, _preds)
-                            metrics['acc_baseline'][_response][-1] = accuracy_score(_y, baseline)
+                            metrics['f1_baseline'][_response][ix] = f1_score(_y, baseline, average='macro')
+                            metrics['acc_baseline'][_response][ix] = accuracy_score(_y, baseline)
                             err_col_name = 'CDRcorrect'
+                            for t in range(T):
+                                for k in range(K):
+                                    __preds = _preds[:,t,k]
+                                    error = (_y == __preds).astype('int')
+                                    if metrics['f1'][_response][ix] is None:
+                                        metrics['f1'][_response][ix] = np.zeros((T, K))
+                                    metrics['f1'][_response][ix][t,k] = f1_score(_y, __preds, average='macro')
+                                    if metrics['acc'][_response][ix] is None:
+                                        metrics['acc'][_response][ix] = np.zeros((T, K))
+                                    metrics['acc'][_response][ix][t,k] = accuracy_score(_y, __preds)
                         else:
-                            error = np.array(_y - _preds) ** 2
-                            score = error.mean()
-                            resid = np.sort(_y - _preds)
-                            resid_theoretical_q = self.error_theoretical_quantiles(len(resid), _response)
-                            valid = np.isfinite(resid_theoretical_q)
-                            resid = resid[valid]
-                            resid_theoretical_q = resid_theoretical_q[valid]
-                            D, p_value = self.error_ks_test(resid, _response)
-
-                            metrics['mse'][_response][-1] = score
-                            metrics['rho'][_response][-1] = np.corrcoef(_y, _preds, rowvar=False)[0, 1]
-                            metrics['percent_variance_explained'][_response][-1] = percent_variance_explained(_y, _preds)
-                            metrics['true_variance'][_response][-1] = np.std(_y) ** 2
-                            metrics['ks_results'][_response][-1] = (D, p_value)
                             err_col_name = 'CDRsquarederror'
+                            metrics['true_variance'][_response][ix] = np.std(_y) ** 2
+                            for t in range(T):
+                                for k in range(K):
+                                    __preds = _preds[:,t,k]
+                                    error = np.array(_y - __preds) ** 2
+                                    score = error.mean()
+                                    resid = np.sort(_y - __preds)
+                                    resid_theoretical_q = self.error_theoretical_quantiles(len(resid), _response)
+                                    valid = np.isfinite(resid_theoretical_q)
+                                    resid = resid[valid]
+                                    resid_theoretical_q = resid_theoretical_q[valid]
+                                    D, p_value = self.error_ks_test(resid, _response)
+
+                                    if metrics['mse'][_response][ix] is None:
+                                        metrics['mse'][_response][ix] = np.zeros((T, K))
+                                    metrics['mse'][_response][ix][t,k] = score
+                                    if metrics['rho'][_response][ix] is None:
+                                        metrics['rho'][_response][ix] = np.zeros((T, K))
+                                    metrics['rho'][_response][ix][t,k] = np.corrcoef(_y, __preds, rowvar=False)[0, 1]
+                                    if metrics['percent_variance_explained'][_response][ix] is None:
+                                        metrics['percent_variance_explained'][_response][ix] = np.zeros((T, K))
+                                    metrics['percent_variance_explained'][_response][ix][t,k] = percent_variance_explained(_y, __preds)
+                                    if metrics['ks_results'][_response][ix] is None:
+                                        metrics['ks_results'][_response][ix] = (np.zeros((T, K)), np.zeros((T, K)))
+                                    metrics['ks_results'][_response][ix][0][t,k] = D
+                                    metrics['ks_results'][_response][ix][1][t,k] = p_value
                     else:
-                        err_col_name = error = _preds = _y = None
+                        err_col_name = error = __preds = _y = None
 
                     _ll = log_lik[_response][ix]
-                    _ll_summed = _ll.sum()
-                    metrics['log_lik'][_response][-1] = _ll_summed
+                    _ll_summed = _ll.sum(axis=0)
+                    metrics['log_lik'][_response][ix] = _ll_summed
                     metrics['full_log_lik'] += _ll_summed
 
                     if dump:
@@ -4141,11 +4306,11 @@ class Model(object):
                         df = {}
                         if err_col_name is not None and error is not None:
                             df[err_col_name] = error
-                        if _preds is not None:
-                            df['CDRpreds'] = _preds
+                        if __preds is not None:
+                            df['CDRpreds'] = __preds
                         if _y is not None:
                             df['CDRobs'] = _y
-                        df['CDRloglik'] = _ll
+                        df['CDRloglik'] = np.squeeze(_ll)
                         df = pd.DataFrame(df)
 
                         if extra_cols:
@@ -4164,59 +4329,61 @@ class Model(object):
                                 ylab='Empirical'
                             )
 
-        summary_header = '=' * 50 + '\n'
-        summary_header += 'CDR regression\n\n'
-        summary_header += 'Model name: %s\n\n' % self.name
-        summary_header += 'Formula:\n'
-        summary_header += '  ' + self.form_str + '\n\n'
-        summary_header += 'Partition: %s\n' % partition
-        summary_header += 'Training iterations completed: %d\n\n' % self.global_step.eval(session=self.sess)
-        summary_header += 'Full log likelihood: %s\n\n' % metrics['full_log_lik']
+        summary = ''
+        if sum_outputs_along_T and sum_outputs_along_K:
+            summary_header = '=' * 50 + '\n'
+            summary_header += 'CDR regression\n\n'
+            summary_header += 'Model name: %s\n\n' % self.name
+            summary_header += 'Formula:\n'
+            summary_header += '  ' + self.form_str + '\n\n'
+            summary_header += 'Partition: %s\n' % partition
+            summary_header += 'Training iterations completed: %d\n\n' % self.global_step.eval(session=self.sess)
+            summary_header += 'Full log likelihood: %s\n\n' % np.squeeze(metrics['full_log_lik'])
 
-        summary = summary_header
+            summary += summary_header
 
-        for _response in response_names:
-            file_ix = self.response_to_df_ix[_response]
-            multiple_files = len(file_ix) > 1
-            for ix in file_ix:
-                summary += 'Response variable: %s\n\n' % _response
-                if dump:
-                    _summary = summary_header
-                    _summary += 'Response variable: %s\n\n' % _response
-
-                if multiple_files:
-                    summary += 'File index: %s\n\n' % ix
+            for _response in response_names:
+                file_ix = self.response_to_df_ix[_response]
+                multiple_files = len(file_ix) > 1
+                for ix in file_ix:
+                    summary += 'Response variable: %s\n\n' % _response
                     if dump:
-                        name_base = '%s_f%s%s' % (sn(_response), ix, partition_str)
-                        _summary += 'File index: %s\n\n' % ix
-                elif dump:
-                    name_base = '%s%s' % (sn(_response), partition_str)
-                _summary = summary_header
+                        _summary = summary_header
+                        _summary += 'Response variable: %s\n\n' % _response
 
-                summary_eval = self.report_evaluation(
-                    mse=metrics['mse'][_response][ix],
-                    f1=metrics['f1'][_response][ix],
-                    f1_baseline=metrics['f1_baseline'][_response][ix],
-                    acc=metrics['acc'][_response][ix],
-                    acc_baseline=metrics['acc_baseline'][_response][ix],
-                    rho=metrics['rho'][_response][ix],
-                    loglik=metrics['log_lik'][_response][ix],
-                    percent_variance_explained=metrics['percent_variance_explained'][_response][ix],
-                    true_variance=metrics['true_variance'][_response][ix],
-                    ks_results=metrics['ks_results'][_response][ix]
-                )
+                    if multiple_files:
+                        summary += 'File index: %s\n\n' % ix
+                        if dump:
+                            name_base = '%s_f%s%s' % (sn(_response), ix, partition_str)
+                            _summary += 'File index: %s\n\n' % ix
+                    elif dump:
+                        name_base = '%s%s' % (sn(_response), partition_str)
+                    _summary = summary_header
 
-                summary += summary_eval
-                if dump:
-                    _summary += summary_eval
-                    _summary += '=' * 50 + '\n'
-                    with open(self.outdir + '/eval_%s.txt' % name_base, 'w') as f_out:
-                        f_out.write(_summary)
+                    summary_eval = self.report_evaluation(
+                        mse=metrics['mse'][_response][ix],
+                        f1=metrics['f1'][_response][ix],
+                        f1_baseline=metrics['f1_baseline'][_response][ix],
+                        acc=metrics['acc'][_response][ix],
+                        acc_baseline=metrics['acc_baseline'][_response][ix],
+                        rho=metrics['rho'][_response][ix],
+                        loglik=metrics['log_lik'][_response][ix],
+                        percent_variance_explained=metrics['percent_variance_explained'][_response][ix],
+                        true_variance=metrics['true_variance'][_response][ix],
+                        ks_results=metrics['ks_results'][_response][ix]
+                    )
 
-        summary += '=' * 50 + '\n'
-        if verbose:
-            stderr(summary)
-            stderr('\n\n')
+                    summary += summary_eval
+                    if dump:
+                        _summary += summary_eval
+                        _summary += '=' * 50 + '\n'
+                        with open(self.outdir + '/eval_%s.txt' % name_base, 'w') as f_out:
+                            f_out.write(_summary)
+
+            summary += '=' * 50 + '\n'
+            if verbose:
+                stderr(summary)
+                stderr('\n\n')
 
         return metrics, summary
 
@@ -4705,7 +4872,7 @@ class Model(object):
 
         to_run = {}
         for _response in responses:
-            to_run[_response] = self.X_conv[_response]
+            to_run[_response] = self.X_conv_delta[_response]
 
         with self.sess.as_default():
             with self.sess.graph.as_default():

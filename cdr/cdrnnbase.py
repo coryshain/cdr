@@ -685,6 +685,8 @@ class CDRNN(Model):
                     activation=None,
                     dropout=self.irf_dropout_rate,
                     maxnorm=self.maxnorm,
+                    # batch_normalization_decay=self.batch_normalization_decay,
+                    # layer_normalization_type=self.layer_normalization_type,
                     name='hidden_state_to_irf_l1'
                 )
                 self.layers.append(hidden_state_to_irf_l1)
@@ -1158,12 +1160,9 @@ class CDRNN(Model):
                     X_weighted = X_rate * _irf_out
                     if X_mask_out is not None:
                         X_weighted *= X_mask_out
-                    X_conv = tf.reduce_sum(X_weighted, axis=1) # Reduce along time dimension
-                    output = tf.reduce_sum(X_conv, axis=1) # Reduce along impulse dimension
+                    self.X_weighted[response] = X_weighted
 
-                    self.X_conv[response] = X_conv
-                    self.output[response] = output
-
+                # Set up EMA for RNN
                 ema_rate = self.ema_decay
                 if ema_rate is None:
                     ema_rate = 0.

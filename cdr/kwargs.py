@@ -1039,13 +1039,13 @@ CDRNN_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'normalize_irf_l1',
-        False,
+        True,
         bool,
         "Whether to apply normalization (if applicable) to the first IRF layer.",
     ),
     Kwarg(
         'normalize_irf',
-        False,
+        True,
         bool,
         "Whether to apply normalization (if applicable) to non-initial internal IRF layers.",
     ),

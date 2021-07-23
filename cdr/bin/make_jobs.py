@@ -74,4 +74,3 @@ if __name__ == '__main__':
                     else:
                         raise ValueError('Unrecognized job type: %s.' % job_type)
 
-    
