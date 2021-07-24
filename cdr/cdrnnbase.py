@@ -684,9 +684,6 @@ class CDRNN(Model):
                     use_bias=False,
                     activation=None,
                     dropout=self.irf_dropout_rate,
-                    maxnorm=self.maxnorm,
-                    # batch_normalization_decay=self.batch_normalization_decay,
-                    # layer_normalization_type=self.layer_normalization_type,
                     name='hidden_state_to_irf_l1'
                 )
                 self.layers.append(hidden_state_to_irf_l1)

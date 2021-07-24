@@ -924,7 +924,7 @@ def get_time_windows(
 
     # Unsort X indices
     first_obs = X.index[first_obs]
-    last_obs = X.index[last_obs]
+    last_obs = np.concatenate([np.array(X.index), [len(X)]])[last_obs]
 
     # Unsort Y indices
     first_obs = first_obs[Y.index]
