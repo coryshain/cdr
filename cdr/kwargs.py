@@ -889,14 +889,14 @@ CDRNN_INITIALIZATION_KWARGS = [
         2,
         [int, None],
         "Number of hidden layers in input projection. If ``None``, inferred from length of **n_units_input_projection**.",
-        aliases=['n_layers']
+        aliases=['n_layers', 'n_layers_encoder']
     ),
     Kwarg(
         'n_units_input_projection',
         32,
         [int, str, None],
         "Number of units per input projection hidden layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_rnn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers in input projection.",
-        aliases=['n_units']
+        aliases=['n_units', 'n_units_encoder']
     ),
     Kwarg(
         'n_layers_rnn',
@@ -927,7 +927,7 @@ CDRNN_INITIALIZATION_KWARGS = [
         32,
         [int, str],
         "Number of units in CDRNN hidden state. Must be an ``int``.",
-        aliases=['n_units']
+        aliases=['n_units', 'n_units_encoder']
     ),
     Kwarg(
         'n_layers_irf',

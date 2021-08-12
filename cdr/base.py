@@ -3590,19 +3590,19 @@ class Model(object):
                     for response in self.training_loglik_in:
                         for ix in self.training_loglik_in[response]:
                             tensor = self.training_loglik_in[response][ix]
-                            fd[tensor] = metrics['log_lik'][response][ix]
+                            fd[tensor] = np.squeeze(metrics['log_lik'][response][ix])
                             to_run.append(self.set_training_loglik[response][ix])
                     for response in self.training_mse_in:
                         if self.is_real(response):
                             for ix in self.training_mse_in[response]:
                                 tensor = self.training_mse_in[response][ix]
-                                fd[tensor] = metrics['mse'][response][ix]
+                                fd[tensor] = np.squeeze(metrics['mse'][response][ix])
                                 to_run.append(self.set_training_mse[response][ix])
                     for response in self.training_rho_in:
                         if self.is_real(response):
                             for ix in self.training_rho_in[response]:
                                 tensor = self.training_rho_in[response][ix]
-                                fd[tensor] = metrics['rho'][response][ix]
+                                fd[tensor] = np.squeeze(metrics['rho'][response][ix])
                                 to_run.append(self.set_training_rho[response][ix])
 
                     self.sess.run(to_run, feed_dict=fd)
