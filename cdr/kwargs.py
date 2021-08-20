@@ -895,7 +895,7 @@ CDRNN_INITIALIZATION_KWARGS = [
         'n_units_input_projection',
         32,
         [int, str, None],
-        "Number of units per input projection hidden layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_rnn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers in input projection.",
+        "Number of units per input projection hidden layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_rnn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, input projection.",
         aliases=['n_units', 'n_units_encoder']
     ),
     Kwarg(

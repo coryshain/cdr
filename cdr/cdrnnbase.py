@@ -501,40 +501,41 @@ class CDRNN(Model):
                     )
 
                 input_projection_layers = []
-                for l in range(self.n_layers_input_projection + 1):
-                    if l < self.n_layers_input_projection:
-                        units = self.n_units_input_projection[l]
-                        activation = self.input_projection_inner_activation
-                        dropout = self.input_projection_dropout_rate
-                        if self.normalize_input_projection:
-                            bn = self.batch_normalization_decay
+                if self.n_layers_input_projection:
+                    for l in range(self.n_layers_input_projection + 1):
+                        if l < self.n_layers_input_projection:
+                            units = self.n_units_input_projection[l]
+                            activation = self.input_projection_inner_activation
+                            dropout = self.input_projection_dropout_rate
+                            if self.normalize_input_projection:
+                                bn = self.batch_normalization_decay
+                            else:
+                                bn = None
+                            ln = self.layer_normalization_type
+                            use_bias = True
                         else:
+                            units = self.n_units_hidden_state
+                            activation = self.input_projection_activation
+                            dropout = None
                             bn = None
-                        ln = self.layer_normalization_type
-                        use_bias = True
-                    else:
-                        units = self.n_units_hidden_state
-                        activation = self.input_projection_activation
-                        dropout = None
-                        bn = None
-                        ln = None
-                        use_bias = False
-                    mn = self.maxnorm
+                            ln = None
+                            use_bias = False
+                        mn = self.maxnorm
 
-                    projection = self.initialize_feedforward(
-                        units=units,
-                        use_bias=use_bias,
-                        activation=activation,
-                        dropout=dropout,
-                        maxnorm=mn,
-                        batch_normalization_decay=bn,
-                        layer_normalization_type=ln,
-                        name='input_projection_l%s' % (l + 1)
-                    )
-                    self.layers.append(projection)
+                        projection = self.initialize_feedforward(
+                            units=units,
+                            use_bias=use_bias,
+                            activation=activation,
+                            dropout=dropout,
+                            maxnorm=mn,
+                            batch_normalization_decay=bn,
+                            layer_normalization_type=ln,
+                            name='input_projection_l%s' % (l + 1)
+                        )
+                        self.layers.append(projection)
 
-                    self.regularizable_layers.append(projection)
-                    input_projection_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
+                        self.regularizable_layers.append(projection)
+                        input_projection_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
 
                 input_projection_fn = compose_lambdas(input_projection_layers)
 
@@ -641,27 +642,43 @@ class CDRNN(Model):
                     session=self.sess
                 )
 
-                if self.normalize_h and self.normalize_activations:
-                    self.h_normalization_layer = self.initialize_h_normalization()
-                    self.layers.append(self.h_normalization_layer)
-                    # if self.normalize_after_activation and False:
-                    if self.normalize_after_activation:
-                        h_bias, h_bias_summary = self.initialize_h_bias()
+                if self.n_layers_input_projection or self.n_layers_rnn:
+                    if self.normalize_h and self.normalize_activations:
+                        self.h_normalization_layer = self.initialize_h_normalization()
+                        self.layers.append(self.h_normalization_layer)
+                        # if self.normalize_after_activation and False:
+                        if self.normalize_after_activation:
+                            h_bias, h_bias_summary = self.initialize_h_bias()
+                        else:
+                            h_bias = tf.zeros([1, 1, units])
+                            h_bias_summary = tf.zeros([1, 1, units])
                     else:
-                        h_bias = tf.zeros([1, 1, units])
-                        h_bias_summary = tf.zeros([1, 1, units])
-                else:
-                    h_bias, h_bias_summary = self.initialize_h_bias()
-                self.h_bias = h_bias
+                        h_bias, h_bias_summary = self.initialize_h_bias()
+                    self.h_bias = h_bias
 
-                self.h_dropout_layer = get_dropout(
-                    self.h_dropout_rate,
-                    training=self.training,
-                    use_MAP_mode=self.use_MAP_mode,
-                    name='h_dropout',
-                    session=self.sess
-                )
+                    self.h_dropout_layer = get_dropout(
+                        self.h_dropout_rate,
+                        training=self.training,
+                        use_MAP_mode=self.use_MAP_mode,
+                        name='h_dropout',
+                        session=self.sess
+                    )
 
+                    # Projection from hidden state to first layer (weights and biases) of IRF
+                    hidden_state_to_irf_l1 = self.initialize_feedforward(
+                        units=self.n_units_irf_l1 * 2,
+                        use_bias=False,
+                        activation=None,
+                        dropout=self.irf_dropout_rate,
+                        name='hidden_state_to_irf_l1'
+                    )
+                    self.layers.append(hidden_state_to_irf_l1)
+
+                    self.regularizable_layers.append(hidden_state_to_irf_l1)
+
+                    self.hidden_state_to_irf_l1 = hidden_state_to_irf_l1
+
+                # IRF
                 irf_l1_W, irf_l1_W_summary = self.initialize_irf_l1_weights()
                 self.irf_l1_W = irf_l1_W
                 if self.irf_l1_use_bias:
@@ -678,21 +695,6 @@ class CDRNN(Model):
                         irf_l1_b, irf_l1_b_summary = self.initialize_irf_l1_biases()
                 self.irf_l1_b = irf_l1_b
 
-                # Projection from hidden state to first layer (weights and biases) of IRF
-                hidden_state_to_irf_l1 = self.initialize_feedforward(
-                    units=self.n_units_irf_l1 * 2,
-                    use_bias=False,
-                    activation=None,
-                    dropout=self.irf_dropout_rate,
-                    name='hidden_state_to_irf_l1'
-                )
-                self.layers.append(hidden_state_to_irf_l1)
-
-                self.regularizable_layers.append(hidden_state_to_irf_l1)
-
-                self.hidden_state_to_irf_l1 = hidden_state_to_irf_l1
-
-                # IRF
                 irf_layers = []
                 for l in range(1, self.n_layers_irf + 1):
                     if l < self.n_layers_irf:
@@ -1072,64 +1074,70 @@ class CDRNN(Model):
                     X = tf.concat([X, X_time], axis=-1)
 
                 # Compute hidden state
-                h = self.h_bias
+                if self.n_layers_input_projection or self.n_layers_rnn:
+                    h = self.h_bias
+
+                    if self.n_layers_input_projection:
+                        h_in = self.input_projection_fn(X)
+                        if self.h_in_noise_sd:
+                            def h_in_train_fn(h_in=h_in):
+                                return tf.random_normal(tf.shape(h_in), h_in, stddev=self.h_in_noise_sd)
+                            def h_in_eval_fn(h_in=h_in):
+                                return h_in
+                            h_in = tf.cond(self.training, h_in_train_fn, h_in_eval_fn)
+                        if self.h_in_dropout_rate:
+                            h_in = self.h_in_dropout_layer(h_in)
+                        h += h_in
+
+                    if self.n_layers_rnn:
+                        rnn_hidden, rnn_cell = self._rnn_encoder(
+                            X,
+                            times=X_time,
+                            mask=X_mask
+                        )
+                        h_rnn = self.rnn_projection_fn(rnn_hidden[-1])
+
+                        if self.rnn_dropout_rate:
+                            h_rnn = self.rnn_dropout_layer(h_rnn)
+
+                        if self.h_rnn_noise_sd:
+                            def h_rnn_train_fn(h_rnn=h_rnn):
+                                return tf.random_normal(tf.shape(h_rnn), h_rnn, stddev=self.h_rnn_noise_sd)
+                            def h_rnn_eval_fn(h_rnn=h_rnn):
+                                return h_rnn
+                            h_rnn = tf.cond(self.training, h_rnn_train_fn, h_rnn_eval_fn)
+                        if self.h_rnn_dropout_rate:
+                            h_rnn = self.h_rnn_dropout_layer(h_rnn)
+
+                        h += h_rnn
+                    else:
+                        h_rnn = rnn_hidden = rnn_cell = None
+
+                    if self.h_dropout_rate:
+                        h = self.h_dropout_layer(h)
+
+                    if self.normalize_after_activation:
+                        h = get_activation(self.hidden_state_activation, session=self.sess)(h)
+                    if self.normalize_h and self.normalize_activations:
+                        h = self.h_normalization_layer(h)
+                    if not self.normalize_after_activation:
+                        h = get_activation(self.hidden_state_activation, session=self.sess)(h)
+
+                    h_irf_in = h
+
+                    Wb_proj = self.hidden_state_to_irf_l1(h_irf_in)
+                    W_proj = Wb_proj[..., :self.n_units_irf_l1]
+                    b_proj = Wb_proj[..., self.n_units_irf_l1:]
+                else:
+                    h_in = h_rnn = None
+
+                # Compute IRF outputs
                 W = self.irf_l1_W
                 b = self.irf_l1_b
 
-                h_in = self.input_projection_fn(X)
-                if self.h_in_noise_sd:
-                    def h_in_train_fn(h_in=h_in):
-                        return tf.random_normal(tf.shape(h_in), h_in, stddev=self.h_in_noise_sd)
-                    def h_in_eval_fn(h_in=h_in):
-                        return h_in
-                    h_in = tf.cond(self.training, h_in_train_fn, h_in_eval_fn)
-                if self.h_in_dropout_rate:
-                    h_in = self.h_in_dropout_layer(h_in)
-                h += h_in
-
-                if self.n_layers_rnn:
-                    rnn_hidden, rnn_cell = self._rnn_encoder(
-                        X,
-                        times=X_time,
-                        mask=X_mask
-                    )
-                    h_rnn = self.rnn_projection_fn(rnn_hidden[-1])
-
-                    if self.rnn_dropout_rate:
-                        h_rnn = self.rnn_dropout_layer(h_rnn)
-
-                    if self.h_rnn_noise_sd:
-                        def h_rnn_train_fn(h_rnn=h_rnn):
-                            return tf.random_normal(tf.shape(h_rnn), h_rnn, stddev=self.h_rnn_noise_sd)
-                        def h_rnn_eval_fn(h_rnn=h_rnn):
-                            return h_rnn
-                        h_rnn = tf.cond(self.training, h_rnn_train_fn, h_rnn_eval_fn)
-                    if self.h_rnn_dropout_rate:
-                        h_rnn = self.h_rnn_dropout_layer(h_rnn)
-
-                    h += h_rnn
-                else:
-                    h_rnn = rnn_hidden = rnn_cell = None
-
-                if self.h_dropout_rate:
-                    h = self.h_dropout_layer(h)
-
-                if self.normalize_after_activation:
-                    h = get_activation(self.hidden_state_activation, session=self.sess)(h)
-                if self.normalize_h and self.normalize_activations:
-                    h = self.h_normalization_layer(h)
-                if not self.normalize_after_activation:
-                    h = get_activation(self.hidden_state_activation, session=self.sess)(h)
-
-                h_irf_in = h
-
-                # Compute IRF outputs
-                Wb_proj = self.hidden_state_to_irf_l1(h_irf_in)
-                W_proj = Wb_proj[..., :self.n_units_irf_l1]
-                b_proj = Wb_proj[..., self.n_units_irf_l1:]
-
-                W += W_proj
-                b += b_proj
+                if self.n_layers_input_projection or self.n_layers_rnn:
+                    W += W_proj
+                    b += b_proj
 
                 irf_l1 = W * t_delta + b
                 if self.normalize_after_activation:

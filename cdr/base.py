@@ -1798,6 +1798,7 @@ class Model(object):
                     else:
                         vars = [l]
                     for v in vars:
+                        # print(v.name)
                         if 'bias' not in v.name:
                             self._regularize(v, regtype='nn', var_name=reg_name(v.name))
                 reg_loss = tf.constant(0., dtype=self.FLOAT_TF)

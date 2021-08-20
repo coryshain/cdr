@@ -2079,12 +2079,12 @@ class CDR(Model):
                 for c in t.children:
                     self._initialize_irfs(c, response)
 
-    def _initialize_X_weighted_by_impulse(self):
+    def _initialize_X_weighted_by_irf(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                self.X_weighted_by_impulse = {}
+                self.X_weighted_by_irf = {}
                 for i, response in enumerate(self.response_names):
-                    self.X_weighted_by_impulse[response] = {}
+                    self.X_weighted_by_irf[response] = {}
                     for name in self.terminal_names:
                         t = self.node_table[name]
                         impulse_name = self.terminal2impulse[name]
@@ -2144,7 +2144,7 @@ class CDR(Model):
 
                             out = impulse * irf_seq
 
-                        self.X_weighted_by_impulse[response][name] = out
+                        self.X_weighted_by_irf[response][name] = out
 
     def _sum_interactions(self):
         raise NotImplementedError('Post-IRF interactions are currently disabled. Please raise an issue on Github if you need this feature.')
@@ -2345,7 +2345,7 @@ class CDR(Model):
                 for response in self.response_names:
                     self._initialize_irfs(self.t, response)
                 self._initialize_impulses()
-                self._initialize_X_weighted_by_impulse()
+                self._initialize_X_weighted_by_irf()
                 if len(self.interaction_names) > 0:
                     self._sum_interactions()
 
@@ -2353,12 +2353,11 @@ class CDR(Model):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 for response in self.response_names:
-                    X_weighted_by_impulse = [self.X_weighted_by_impulse[response][x] for x in self.terminal_names]
-                    if len(X_weighted_by_impulse) > 0:
-                        X_weighted = tf.stack(X_weighted_by_impulse, axis=2)
+                    X_weighted_by_irf = [self.X_weighted_by_irf[response][x] for x in self.terminal_names]
+                    if len(X_weighted_by_irf) > 0:
+                        X_weighted = tf.stack(X_weighted_by_irf, axis=2)
                     else:
                         X_weighted = tf.zeros((1, 1, 1, 1, 1), dtype=self.FLOAT_TF)
-
 
                     coef_names = [self.node_table[x].coef_id() for x in self.terminal_names]
                     coef_ix = names2ix(coef_names, self.coef_names)
