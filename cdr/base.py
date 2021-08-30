@@ -1800,7 +1800,13 @@ class Model(object):
                     for v in vars:
                         # print(v.name)
                         if 'bias' not in v.name:
-                            self._regularize(v, regtype='nn', var_name=reg_name(v.name))
+                            if 'input_projection_l%d' % (self.n_layers_input_projection + 1) in v.name:
+                                regtype = 'input_projection'
+                            elif 'rnn_projection_l%d' % (self.n_layers_rnn_projection + 1) in v.name:
+                                regtype = 'rnn_projection'
+                            else:
+                                regtype = 'nn'
+                            self._regularize(v, regtype=regtype, var_name=reg_name(v.name))
                 reg_loss = tf.constant(0., dtype=self.FLOAT_TF)
                 if len(self.regularizer_losses_varnames) > 0:
                     reg_loss += tf.add_n(self.regularizer_losses)
@@ -2102,7 +2108,8 @@ class Model(object):
     ######################################################
 
     def _regularize(self, var, center=None, regtype=None, var_name=None):
-        assert regtype in [None, 'intercept', 'coefficient', 'irf', 'ranef', 'nn', 'context', 'conv_output']
+        assert regtype in [None, 'intercept', 'coefficient', 'irf', 'ranef', 'nn', 'input_projection', 'rnn_projection', 'context', 'conv_output']
+
         if regtype is None:
             regularizer = self.regularizer
         else:
@@ -2122,6 +2129,9 @@ class Model(object):
                         reg_scale = self.regularizer_scale
                         if self.scale_regularizer_with_data:
                             reg_scale *= self.minibatch_size * self.minibatch_scale
+                    elif regtype in ['input_projection', 'rnn_projection'] and getattr(self, '%s_regularizer_name' % regtype) is None:
+                        reg_name = self.nn_regularizer_name
+                        reg_scale = self.nn_regularizer_scale
                     else:
                         reg_name = getattr(self, '%s_regularizer_name' % regtype)
                         reg_scale = getattr(self, '%s_regularizer_scale' % regtype)

@@ -399,6 +399,32 @@ class CDRNN(Model):
                     self.nn_regularizer_scale
                 )
 
+                if self.input_projection_regularizer_name is None:
+                    input_projection_regularizer_name = self.nn_regularizer_name
+                else:
+                    input_projection_regularizer_name = self.input_projection_regularizer_name
+                if self.input_projection_regularizer_scale is None:
+                    input_projection_regularizer_scale = self.nn_regularizer_scale
+                else:
+                    input_projection_regularizer_scale = self.input_projection_regularizer_scale
+                if self.rnn_projection_regularizer_name is None:
+                    rnn_projection_regularizer_name = self.nn_regularizer_name
+                else:
+                    rnn_projection_regularizer_name = self.rnn_projection_regularizer_name
+                if self.rnn_projection_regularizer_scale is None:
+                    rnn_projection_regularizer_scale = self.nn_regularizer_scale
+                else:
+                    rnn_projection_regularizer_scale = self.rnn_projection_regularizer_scale
+
+                self.input_projection_regularizer = self._initialize_regularizer(
+                    input_projection_regularizer_name,
+                    input_projection_regularizer_scale
+                )
+                self.rnn_projection_regularizer = self._initialize_regularizer(
+                    rnn_projection_regularizer_name,
+                    rnn_projection_regularizer_scale
+                )
+
                 if self.context_regularizer_name is None:
                     self.context_regularizer = None
                 elif self.context_regularizer_name == 'inherit':

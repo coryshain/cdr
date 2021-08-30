@@ -867,7 +867,7 @@ CDRNN_INITIALIZATION_KWARGS = [
         True,
         bool,
         "Whether to rescale time values as inputs by their training SD under the hood. Times are automatically reconverted back to the source scale for plotting and model criticism.",
-        aliases=['rescale_time', 'rescale_X_time']
+        aliases=['rescale_time', 'rescale_time_X']
     ),
     Kwarg(
         'rescale_t_delta',
@@ -1081,6 +1081,30 @@ CDRNN_INITIALIZATION_KWARGS = [
         1.,
         [str, float, 'inherit'],
         "Scale of weight regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
+    ),
+    Kwarg(
+        'input_projection_regularizer_name',
+        None,
+        [str, None],
+        "Name of weight regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``) on output layer of input projection; overrides **regularizer_name**. If ``None``, inherits from **nn_regularizer_name**."
+    ),
+    Kwarg(
+        'input_projection_regularizer_scale',
+        1.,
+        [str, float],
+        "Scale of weight regularizer (ignored if ``regularizer_name==None``) on output layer of input projection. If ``None``, inherits from **nn_regularizer_scale**."
+    ),
+    Kwarg(
+        'rnn_projection_regularizer_name',
+        None,
+        [str, None],
+        "Name of weight regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``) on output layer of RNN projection; overrides **regularizer_name**. If ``None``, inherits from **nn_regularizer_name**."
+    ),
+    Kwarg(
+        'rnn_projection_regularizer_scale',
+        1.,
+        [str, float],
+        "Scale of weight regularizer (ignored if ``regularizer_name==None``) on output layer of RNN projection. If ``None``, inherits from **nn_regularizer_scale**."
     ),
     Kwarg(
         'context_regularizer_name',
