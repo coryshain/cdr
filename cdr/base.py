@@ -1258,7 +1258,7 @@ class Model(object):
                     intercept_summary = intercept_fixed_summary[None, ...]
 
                     for i, response_param in enumerate(response_params):
-                        dim_names = self._expand_param_name_by_dim(response, response_param)
+                        dim_names = self.expand_param_name(response, response_param)
                         _p = intercept_fixed[i]
                         _p_summary = intercept_fixed_summary[i]
                         if self.standardize_response and self.is_real(response):
@@ -1320,7 +1320,7 @@ class Model(object):
                                             _p = _p * self.Y_train_sds[response]
                                             _p_summary = self.constraint_fn(_p_summary) + self.epsilon
                                             _p_summary = _p_summary * self.Y_train_sds[response]
-                                    dim_names = self._expand_param_name_by_dim(response, response_param)
+                                    dim_names = self.expand_param_name(response, response_param)
                                     for k, dim_name in enumerate(dim_names):
                                         val = _p[:, k]
                                         val_summary = _p_summary[:, k]
@@ -1484,7 +1484,7 @@ class Model(object):
                     self.output[response] = response_params
 
                     for j, response_param_name in enumerate(response_param_names):
-                        dim_names = self._expand_param_name_by_dim(response, response_param_name)
+                        dim_names = self.expand_param_name(response, response_param_name)
                         for k, dim_name in enumerate(dim_names):
                             self.predictive_distribution_delta[response][dim_name] = output_delta[:, j, k]
 
@@ -1563,7 +1563,7 @@ class Model(object):
                     )
                     self.ema_ops.append(response_params_ema_op)
                     for j, response_param_name in enumerate(response_param_names):
-                        dim_names = self._expand_param_name_by_dim(response, response_param_name)
+                        dim_names = self.expand_param_name(response, response_param_name)
                         for k, dim_name in enumerate(dim_names):
                             tf.summary.scalar(
                                 'ema' + '/%s/%s_%s' % (
@@ -1924,22 +1924,6 @@ class Model(object):
     #  Utility methods
     #
     ######################################################
-
-    def _expand_param_name_by_dim(self, response, response_param):
-        # Returns an empty list if the param is not used by the response.
-        # Returns the unmodified param if the response is univariate.
-        # Returns the concatenation "<param_name>.<dim_name>" if the response is multivariate.
-        ndim = self.get_response_ndim(response)
-        out = []
-        if ndim == 1:
-            if response_param in self.get_response_params(response):
-                out.append(response_param)
-        else:
-            for i in range(ndim):
-                cat = self.response_ix_to_category[response].get(i, i)
-                out.append('%s.%s' % (response_param, cat))
-
-        return out
 
     def _matmul(self, A, B):
         """
@@ -2757,6 +2741,30 @@ class Model(object):
         """
 
         return self.predictive_distribution_config[response]['params_tf']
+
+    def expand_param_name(self, response, response_param):
+        """
+        Expand multivariate predictive distribution parameter names.
+        Returns an empty list if the param is not used by the response.
+        Returns the unmodified param if the response is univariate.
+        Returns the concatenation "<param_name>.<dim_name>" if the response is multivariate.
+
+        :param response: ``str``; name of response variable
+        :param response_param: ``str``; name of predictive distribution parameter
+        :return:
+        """
+
+        ndim = self.get_response_ndim(response)
+        out = []
+        if ndim == 1:
+            if response_param in self.get_response_params(response):
+                out.append(response_param)
+        else:
+            for i in range(ndim):
+                cat = self.response_ix_to_category[response].get(i, i)
+                out.append('%s.%s' % (response_param, cat))
+
+        return out
 
     def get_response_support(self, response):
         """
@@ -4740,7 +4748,7 @@ class Model(object):
                 for _response in responses:
                     X_conv[_response] = {}
                     for _response_param in response_params:
-                        dim_names = self._expand_param_name_by_dim(_response, _response_param)
+                        dim_names = self.expand_param_name(_response, _response_param)
                         for _dim_name in dim_names:
                             X_conv[_response][_dim_name] = np.zeros(
                                 (n, len(self.terminal_names))
@@ -4918,7 +4926,7 @@ class Model(object):
                 for _response in X_conv:
                     for i, _response_param in enumerate(response_param):
                         if self.has_param(_response, _response_param):
-                            dim_names = self._expand_param_name_by_dim(_response, _response_param)
+                            dim_names = self.expand_param_name(_response, _response_param)
                             for j, _dim_name in enumerate(dim_names):
                                 if _response not in out:
                                     out[_response] = {}
@@ -5443,7 +5451,7 @@ class Model(object):
                     for response in responses:
                         to_run[response] = {}
                         for response_param in response_params:
-                            dim_names = self._expand_param_name_by_dim(response, response_param)
+                            dim_names = self.expand_param_name(response, response_param)
                             for dim_name in dim_names:
                                 to_run[response][dim_name] = self.predictive_distribution_delta[response][dim_name]
 

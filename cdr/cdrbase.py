@@ -1278,7 +1278,7 @@ class CDR(Model):
                                     response_param in ['mu', 'sigma']:
                                 _p = _p * self.Y_train_sds[response]
                                 _p_summary = _p_summary * self.Y_train_sds[response]
-                            dim_names = self._expand_param_name_by_dim(response, response_param)
+                            dim_names = self.expand_param_name(response, response_param)
                             for k, dim_name in enumerate(dim_names):
                                 val = _p[i, k]
                                 val_summary = _p_summary[i, k]
@@ -1332,7 +1332,7 @@ class CDR(Model):
                                             response_param in ['mu', 'sigma']:
                                         _p = _p * self.Y_train_sds[response]
                                         _p_summary = _p_summary * self.Y_train_sds[response]
-                                    dim_names = self._expand_param_name_by_dim(response, response_param)
+                                    dim_names = self.expand_param_name(response, response_param)
                                     for l, dim_name in enumerate(dim_names):
                                         val = _p[:, j, l]
                                         val_summary = _p_summary[:, j, l]
@@ -1428,7 +1428,7 @@ class CDR(Model):
                                         response_param in ['mu', 'sigma']:
                                     _p = _p * self.Y_train_sds[response]
                                     _p_summary = _p_summary * self.Y_train_sds[response]
-                                dim_names = self._expand_param_name_by_dim(response, response_param)
+                                dim_names = self.expand_param_name(response, response_param)
                                 for k, dim_name in enumerate(dim_names):
                                     val = _p[i, k]
                                     val_summary = _p_summary[i, k]
@@ -1479,7 +1479,7 @@ class CDR(Model):
                                                 response_param in ['mu', 'sigma']:
                                             _p = _p * self.Y_train_sds[response]
                                             _p_summary = _p_summary * self.Y_train_sds[response]
-                                        dim_names = self._expand_param_name_by_dim(response, response_param)
+                                        dim_names = self.expand_param_name(response, response_param)
                                         for l, dim_name in enumerate(dim_names):
                                             val = _p[:, j, l]
                                             val_summary = _p_summary[:, j, l]
@@ -1643,7 +1643,7 @@ class CDR(Model):
                                     _p_summary = self._sigmoid(_p_summary, a=irf_param_lb, b=irf_param_ub) * (1 - 2 * self.epsilon) + self.epsilon
 
                                 for j, response_param in enumerate(response_params):
-                                    dim_names = self._expand_param_name_by_dim(response, response_param)
+                                    dim_names = self.expand_param_name(response, response_param)
                                     for k, dim_name in enumerate(dim_names):
                                         val = _p[j, k]
                                         val_summary = _p_summary[j, k]
@@ -1700,7 +1700,7 @@ class CDR(Model):
                                                     self.irf_params_random_summary[response][gf][irf_id][irf_param_name] = {}
 
                                                 for k, response_param in enumerate(response_params):
-                                                    dim_names = self._expand_param_name_by_dim(response, response_param)
+                                                    dim_names = self.expand_param_name(response, response_param)
                                                     for l, dim_name in enumerate(dim_names):
                                                         val = irf_param_random[:, j, k, l]
                                                         val_summary = irf_param_random_summary[:, j, k, l]
