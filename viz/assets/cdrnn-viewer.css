@@ -1,0 +1,32 @@
+#cdrnn-body ::-webkit-scrollbar-thumb {
+    background-color: #015BB0;
+}
+
+#cdrnn-control-tabs .tab--selected {
+    color: #015BB0 !important;
+}
+
+#cdrnn-body .rc-slider-track {
+    background-color: #015BB0;
+}
+
+#cdrnn-body .rc-slider-handle {
+    border-color: #015BB0;
+}
+
+#cdrnn-body input[type="number"] {
+    width: 100%;
+    margin-top: 15px;
+}
+
+#cdrnn-body #dropdown_x {
+    display: inline-block;
+    width: 150px;
+    margin-top: 10px;
+}
+
+#cdrnn-body #dropdown_y {
+    display: inline-block;
+    width: 150px;
+    margin-top: 10px;
+}
