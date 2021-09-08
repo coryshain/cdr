@@ -34,18 +34,18 @@ def header_colors():
 
 def generate_figure(x_value, y_value, response_value, resparam_value, ci, xmin=None, xmax=None, ymin=None, ymax=None, zmin=None, zmax=None):
     output_tuple = model.get_plot_data(
-        ref_varies_with_x=False, 
+        ref_varies_with_x=False,
         xvar=x_value, 
         yvar=y_value,
-        # responses =
-        # response_params = 
+        responses=response_value,
+        response_params=resparam_value,
         pair_manipulations=True,
         level=ci,
         xmin=xmin,
         xmax=xmax,
         ymin=ymin,
         ymax=ymax,
-        n_samples=10)
+        n_samples=100)
     # print('response value below')
     # print(response_value)
     # print('response param below')
@@ -100,7 +100,7 @@ def generate_figure(x_value, y_value, response_value, resparam_value, ci, xmin=N
             yaxis=dict(range=[ymin, ymax]),
             zaxis=dict(range=[zmin, zmax])
         ),
-        autosize=False,
+        autosize=True,
         width=650, height=650,
         margin=dict(l=100, r=100, b=100, t=100)
     )
@@ -224,8 +224,8 @@ def layout():
                                         dcc.Dropdown(
                                             id='dropdown_resparams_multivariate',
                                             options=[
-                                                {'label': i, 'value': i} for i in model._expand_param_name_by_dim(response_options[0], model.get_response_params(response_options[0]))],
-                                            value=model._expand_param_name_by_dim(response_options[0], model.get_response_params(response_options[0])[0])[0]
+                                                {'label': i, 'value': i} for i in model.expand_param_name(response_options[0], model.get_response_params(response_options[0]))],
+                                            value=model.expand_param_name(response_options[0], model.get_response_params(response_options[0])[0])[0]
                                         )
                                     ]
                                 ),
@@ -344,8 +344,8 @@ def layout():
                                         dcc.Dropdown(
                                             id='dropdown_resparams_multivariate_2d',
                                             options=[
-                                                {'label': i, 'value': i} for i in model._expand_param_name_by_dim(response_options[0], model.get_response_params(response_options[0]))],
-                                            value=model._expand_param_name_by_dim(response_options[0], model.get_response_params(response_options[0])[0])[0]
+                                                {'label': i, 'value': i} for i in model.expand_param_name(response_options[0], model.get_response_params(response_options[0]))],
+                                            value=model.expand_param_name(response_options[0], model.get_response_params(response_options[0])[0])[0]
                                         )
                                     ]
                                 ),
@@ -379,11 +379,11 @@ def layout():
                 ], style={'display': 'inline-block'}
             ), 
             html.Div(id='cdrnn3d-container', children=[
-                dcc.Graph(id='graph-change', figure=generate_figure(options[0], options[len(options) - 1], response_options[0], model._expand_param_name_by_dim(response_options[0], model.get_response_params(response_options[0])[0])[0], 95))
+                dcc.Graph(id='graph-change', figure=generate_figure(options[0], options[len(options) - 1], response_options[0], model.expand_param_name(response_options[0], model.get_response_params(response_options[0])[0])[0], 95))
             ], style={'display': 'inline-block', 'padding': 50}
             ),
             html.Div(id='cdrnn2d-continer', children=[
-                dcc.Graph(id='2d', figure=generate_2d(options[0], response_options[0], model._expand_param_name_by_dim(response_options[0], model.get_response_params(response_options[0])[0])[0]))
+                dcc.Graph(id='2d', figure=generate_2d(options[0], response_options[0], model.expand_param_name(response_options[0], model.get_response_params(response_options[0])[0])[0]))
             ], style={'display': 'inline-block', 'padding': 50})
         ]
     )
@@ -438,7 +438,7 @@ def callbacks(_app):
         Input('dropdown_resparams', 'value'),
     )
     def update_multivariate(response_value, resparam_value):
-        new_multivariate = [{'label': i, 'value': i} for i in model._expand_param_name_by_dim(response_value, resparam_value)]
+        new_multivariate = [{'label': i, 'value': i} for i in model.expand_param_name(response_value, resparam_value)]
         return new_multivariate
 
     @_app.callback(
@@ -447,7 +447,7 @@ def callbacks(_app):
         Input('dropdown_resparams', 'value'),
     )
     def update_multivariate(response_value, resparam_value):
-        return model._expand_param_name_by_dim(response_value, resparam_value)[0]
+        return model.expand_param_name(response_value, resparam_value)[0]
 
     @_app.callback(
         Output('dropdown_resparams_2d', 'options'),
@@ -470,7 +470,7 @@ def callbacks(_app):
         Input('dropdown_resparams_2d', 'value'),
     )
     def update_multivariate(response_value, resparam_value):
-        new_multivariate = [{'label': i, 'value': i} for i in model._expand_param_name_by_dim(response_value, resparam_value)]
+        new_multivariate = [{'label': i, 'value': i} for i in model.expand_param_name(response_value, resparam_value)]
         return new_multivariate
 
     @_app.callback(
@@ -479,12 +479,14 @@ def callbacks(_app):
         Input('dropdown_resparams_2d', 'value'),
     )
     def update_multivariate(response_value, resparam_value):
-        return model._expand_param_name_by_dim(response_value, resparam_value)[0]
+        return model.expand_param_name(response_value, resparam_value)[0]
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--model', type=str, required=True)
+    parser = argparse.ArgumentParser("""
+    Start a web server for interactive CDR(NN) visualization.
+    """)
+    parser.add_argument('-m', '--model', type=str, required=True, help='Path to model directory')
     args = parser.parse_args()
     model = model_generation(args.model)
     model.set_predict_mode(True)
@@ -496,7 +498,7 @@ if __name__ == '__main__':
     print('----')
     response = response_options[0]
     response_param = model.get_response_params(response)[0]
-    response_param = model._expand_param_name_by_dim(response, response_param)
+    response_param = model.expand_param_name(response, response_param)
     print(response_param)
     manipulations = [{model.impulse_names[0]: 1}]
     app = run_standalone_app(layout, callbacks, header_colors, __file__)
