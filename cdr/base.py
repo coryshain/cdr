@@ -5160,7 +5160,7 @@ class Model(object):
 
                 # Initialize offset reference
                 if t_delta_ref is None:
-                    t_delta_ref = self.t_delta_mean
+                    t_delta_ref = self.reference_time
                 assert np.isscalar(t_delta_ref), 't_delta_ref must be a scalar'
                 t_delta_ref = np.reshape(t_delta_ref, (1, 1, 1))
                 t_delta_ref = np.tile(t_delta_ref, [1, 1, max(n_impulse, 1)])

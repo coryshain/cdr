@@ -8,6 +8,7 @@ import dash
 import dash_core_components as dcc
 import dash_html_components as html
 import plotly.express as px
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from dash.dependencies import Input, Output
@@ -34,8 +35,9 @@ def header_colors():
 
 def generate_figure(x_value, y_value, response_value, resparam_value, ci, xmin=None, xmax=None, ymin=None, ymax=None, zmin=None, zmax=None):
     output_tuple = model.get_plot_data(
-        ref_varies_with_x=False,
-        xvar=x_value, 
+        ref_varies_with_x=x_value in ('t_delta', 'X_time'),
+        ref_varies_with_y=y_value in ('t_delta', 'X_time'),
+        xvar=x_value,
         yvar=y_value,
         responses=response_value,
         response_params=resparam_value,
@@ -66,8 +68,9 @@ def generate_figure(x_value, y_value, response_value, resparam_value, ci, xmin=N
     zmin = zmin
     zmax = zmax
     x, y = output_tuple[0]
+    # x = x[::-1,] # Reverse x for intuitive plotting
     d = output_tuple[1]
-    print(d)
+    # print(d)
     z = d[response_value][resparam_value]
     z1 = z[...,0]   
     min_d = output_tuple[2]
@@ -77,17 +80,46 @@ def generate_figure(x_value, y_value, response_value, resparam_value, ci, xmin=N
     max_z = max_d[response_value][resparam_value]
     z3 = max_z[...,0]
 
+    blue = np.array((0, 0, 255))
+    red = np.array((255, 0, 0))
+    gray = np.array((220, 220, 220))
+
+    lower = z1.min()
+    upper = z1.max()
+    mag = max(np.abs(upper), np.abs(lower))
+    lower_p = lower / mag
+    upper_p = upper / mag
+    if lower_p < 0:
+        lower_c = blue * (-lower_p) + gray * (1 + lower_p)
+    else:
+        lower_c = red * lower_p + gray * (1 - lower_p)
+    if upper_p > 0:
+        upper_c = red * upper_p + gray * (1 - upper_p)
+    else:
+        upper_c = blue * (-upper_p) + gray * (1 + upper_p)
+
+    colorscale = [
+        (0., 'rgb(%s, %s, %s)' % tuple(lower_c)),
+        (1., 'rgb(%s, %s, %s)' % tuple(upper_c)),
+    ]
+
+    if lower_p < 0 and upper_p > 0:
+        midpoint = (-lower_p) / (upper_p - lower_p)
+        colorscale.insert(1, (midpoint, 'rgb(%s, %s, %s)' % tuple(gray)))
+
     fig = go.Figure(data=[
         # go.Surface(z=z1, x=x, y=y, colorscale='blues'),
-        go.Surface(z=z1, x=x, y=y, colorscale=[
-            [0.0, 'rgb(255, 0, 0)'],
-            [0.5, 'rgb(192, 192, 192)'],
-            [1.0, 'rgb(0, 0, 204)']
-        ]),
+        go.Surface(z=z1, x=x, y=y, colorscale=colorscale, showscale=False),
         go.Surface(z=z2, x=x, y=y, colorscale='greys', showscale=False, opacity=0.5),
         go.Surface(z=z3, x=x, y=y, colorscale='greys', showscale=False, opacity=0.5)
     ])
-    
+
+    camera = dict(
+        up=dict(x=0, y=0, z=1),
+        center=dict(x=0, y=0, z=0),
+        eye=dict(x=1.25, y=-1.25, z=1.25)
+    )
+
     fig.update_layout(
         font_family='Times',
         title_font_family='Times',
@@ -96,13 +128,16 @@ def generate_figure(x_value, y_value, response_value, resparam_value, ci, xmin=N
             xaxis_title=x_value,
             yaxis_title=y_value,
             zaxis_title=response_value + " " + resparam_value,
-            xaxis=dict(range=[xmin, xmax]),
-            yaxis=dict(range=[ymin, ymax]),
-            zaxis=dict(range=[zmin, zmax])
+            xaxis=dict(range=[xmin, xmax], gridcolor='rgb(200, 200, 200)', showbackground=False, autorange='reversed'),
+            yaxis=dict(range=[ymin, ymax], gridcolor='rgb(200, 200, 200)', showbackground=False),
+            zaxis=dict(range=[zmin, zmax], gridcolor='rgb(200, 200, 200)', showbackground=False)
         ),
-        autosize=True,
+        autosize=False,
         width=650, height=650,
-        margin=dict(l=100, r=100, b=100, t=100)
+        margin=dict(l=100, r=100, b=100, t=100),
+        plot_bgcolor='rgb(255, 255, 255)',
+        paper_bgcolor='rgb(255, 255, 255)',
+        scene_camera=camera,
     )
     return fig
 
@@ -207,7 +242,7 @@ def layout():
                                             id='dropdown_y',
                                             options=[
                                                 {'label': i, 'value': i} for i in options],
-                                            value=options[len(options) - 1]
+                                            value=options[options.index('t_delta')]
                                         ),
                                         dcc.Dropdown(
                                             id='dropdown_response',
@@ -218,15 +253,12 @@ def layout():
                                         dcc.Dropdown(
                                             id='dropdown_resparams',
                                             options=[
-                                                {'label': i, 'value': i} for i in model.get_response_params(response_options[0])],
-                                            value=model.get_response_params(response_options[0])[0]
+                                                {'label': i, 'value': i} for i in model.expand_param_name(response_options[0], model.get_response_params(response_options[0])[0])
+                                            ],
+                                            value=[
+                                                i for i in model.expand_param_name(response_options[0], model.get_response_params(response_options[0])[0])
+                                            ][0]
                                         ),
-                                        dcc.Dropdown(
-                                            id='dropdown_resparams_multivariate',
-                                            options=[
-                                                {'label': i, 'value': i} for i in model.expand_param_name(response_options[0], model.get_response_params(response_options[0]))],
-                                            value=model.expand_param_name(response_options[0], model.get_response_params(response_options[0])[0])[0]
-                                        )
                                     ]
                                 ),
                                 html.Div(
@@ -379,7 +411,7 @@ def layout():
                 ], style={'display': 'inline-block'}
             ), 
             html.Div(id='cdrnn3d-container', children=[
-                dcc.Graph(id='graph-change', figure=generate_figure(options[0], options[len(options) - 1], response_options[0], model.expand_param_name(response_options[0], model.get_response_params(response_options[0])[0])[0], 95))
+                dcc.Graph(id='graph-change')
             ], style={'display': 'inline-block', 'padding': 50}
             ),
             html.Div(id='cdrnn2d-continer', children=[
@@ -394,7 +426,7 @@ def callbacks(_app):
         Input('dropdown_x', 'value'), 
         Input('dropdown_y', 'value'),
         Input('dropdown_response', 'value'),
-        Input('dropdown_resparams_multivariate', 'value'),
+        Input('dropdown_resparams', 'value'),
         Input('ci', 'value'),
         Input('x_min', 'value'),
         Input('x_max', 'value'),
@@ -422,8 +454,11 @@ def callbacks(_app):
         Input('dropdown_response', 'value')
     )
     def update_response_param_options(response_value):
-        new_response_params = [{'label': i, 'value': i} for i in model.get_response_params(response_value)]
-        return new_response_params
+        response_params = []
+        for x in model.get_response_params(response_value):
+            for y in model.expand_param_name(response_value, x):
+                response_params.append({'label': y, 'value': y})
+        return response_params
 
     @_app.callback(
         Output('dropdown_resparams', 'value'),
@@ -431,23 +466,6 @@ def callbacks(_app):
     )
     def update_response_param_value(response_value):
         return model.get_response_params(response_value)[0]
-
-    @_app.callback(
-        Output('dropdown_resparams_multivariate', 'options'),
-        Input('dropdown_response', 'value'),
-        Input('dropdown_resparams', 'value'),
-    )
-    def update_multivariate(response_value, resparam_value):
-        new_multivariate = [{'label': i, 'value': i} for i in model.expand_param_name(response_value, resparam_value)]
-        return new_multivariate
-
-    @_app.callback(
-        Output('dropdown_resparams_multivariate', 'value'),
-        Input('dropdown_response', 'value'),
-        Input('dropdown_resparams', 'value'),
-    )
-    def update_multivariate(response_value, resparam_value):
-        return model.expand_param_name(response_value, resparam_value)[0]
 
     @_app.callback(
         Output('dropdown_resparams_2d', 'options'),
