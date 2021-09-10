@@ -33,6 +33,14 @@ def header_colors():
         'light_logo': True
     }
 
+def get_resparams(model, response):
+    resparams = []
+    if response in model.response_names:
+        for x in model.get_response_params(response):
+            for y in model.expand_param_name(response, x):
+                resparams.append(y)
+    return resparams
+
 def generate_figure(x_value, y_value, response_value, resparam_value, ci, xmin=None, xmax=None, ymin=None, ymax=None, zmin=None, zmax=None):
     output_tuple = model.get_plot_data(
         ref_varies_with_x=x_value in ('t_delta', 'X_time'),
@@ -144,19 +152,42 @@ def generate_figure(x_value, y_value, response_value, resparam_value, ci, xmin=N
 def generate_2d(x_value, response_value, resparam_value, xmin=None, xmax=None):
     output_tuple_2d = model.get_plot_data(
         ref_varies_with_x=True,
+        responses=response_value,
+        response_params=resparam_value,
         xvar=x_value,
         xmin=xmin,
         xmax=xmax,
-        manipulations=manipulations)
+        manipulations=manipulations,
+        n_samples=100
+    )
     x2d = output_tuple_2d[0]
     d2d = output_tuple_2d[1]
     y2d = d2d[response_value][resparam_value]
     y2d_splice = y2d[...,0]
+    y_lower = output_tuple_2d[2][response_value][resparam_value][..., 0]
+    y_upper = output_tuple_2d[3][response_value][resparam_value][..., 0]
     # y1 = y[...,0]
     # y2 = y[...,1]
     fig = go.Figure(data=[
         go.Scatter(x=x2d, y=y2d_splice, marker=dict(color='blue'), mode='lines'),
-        go.Scatter(x=x2d, y=y2d_splice, marker=dict(color='blue'))
+        go.Scatter(
+            name='Upper Bound',
+            x=x2d,
+            y=y_upper,
+            mode='lines',
+            line=dict(width=0),
+            showlegend=False
+        ),
+        go.Scatter(
+            name='Lower Bound',
+            x=x2d,
+            y=y_lower,
+            line=dict(width=0),
+            mode='lines',
+            fillcolor='rgba(0, 0, 255, 0.2)',
+            fill='tonexty',
+            showlegend=False
+        )
     ])
 
     if xmin is not None and xmax is not None:
@@ -169,6 +200,10 @@ def generate_2d(x_value, response_value, resparam_value, xmin=None, xmax=None):
         title='2D',
         xaxis_title=x_value,
         yaxis_title=response_value + " " + resparam_value,
+        xaxis=dict(range=[xmin, xmax], gridcolor='rgb(200, 200, 200)'),
+        yaxis=dict(gridcolor='rgb(200, 200, 200)'),
+        plot_bgcolor='rgb(255, 255, 255)',
+        paper_bgcolor='rgb(255, 255, 255)',
         autosize=False,
         width=650, height=650,
         margin=dict(l=100, r=100, b=100, t=100)
@@ -252,12 +287,8 @@ def layout():
                                         ),
                                         dcc.Dropdown(
                                             id='dropdown_resparams',
-                                            options=[
-                                                {'label': i, 'value': i} for i in model.expand_param_name(response_options[0], model.get_response_params(response_options[0])[0])
-                                            ],
-                                            value=[
-                                                i for i in model.expand_param_name(response_options[0], model.get_response_params(response_options[0])[0])
-                                            ][0]
+                                            options=[{'label': x, 'value': x} for x in get_resparams(model, response_options[0])],
+                                            value=model.expand_param_name(response_options[0], model.get_response_params(response_options[0])[0])[0]
                                         ),
                                     ]
                                 ),
@@ -369,14 +400,7 @@ def layout():
                                         ),
                                         dcc.Dropdown(
                                             id='dropdown_resparams_2d',
-                                            options=[
-                                                {'label': i, 'value': i} for i in model.get_response_params(response_options[0])],
-                                            value=model.get_response_params(response_options[0])[0]
-                                        ),
-                                        dcc.Dropdown(
-                                            id='dropdown_resparams_multivariate_2d',
-                                            options=[
-                                                {'label': i, 'value': i} for i in model.expand_param_name(response_options[0], model.get_response_params(response_options[0]))],
+                                            options=[{'label': x, 'value': x} for x in get_resparams(model, response_options[0])],
                                             value=model.expand_param_name(response_options[0], model.get_response_params(response_options[0])[0])[0]
                                         )
                                     ]
@@ -442,7 +466,7 @@ def callbacks(_app):
         Output('2d', 'figure'),
         Input('dropdown_x_2d', 'value'),
         Input('dropdown_response_2d', 'value'),
-        Input('dropdown_resparams_multivariate_2d', 'value'),
+        Input('dropdown_resparams_2d', 'value'),
         Input('x_min_2d', 'value'),
         Input('x_max_2d', 'value')
     )
@@ -454,11 +478,7 @@ def callbacks(_app):
         Input('dropdown_response', 'value')
     )
     def update_response_param_options(response_value):
-        response_params = []
-        for x in model.get_response_params(response_value):
-            for y in model.expand_param_name(response_value, x):
-                response_params.append({'label': y, 'value': y})
-        return response_params
+        return [{'label': x, 'value': x} for x in get_resparams(model, response_value)]
 
     @_app.callback(
         Output('dropdown_resparams', 'value'),
@@ -481,24 +501,6 @@ def callbacks(_app):
     )
     def update_response_param_value(response_value):
         return model.get_response_params(response_value)[0]
-
-    @_app.callback(
-        Output('dropdown_resparams_multivariate_2d', 'options'),
-        Input('dropdown_response_2d', 'value'),
-        Input('dropdown_resparams_2d', 'value'),
-    )
-    def update_multivariate(response_value, resparam_value):
-        new_multivariate = [{'label': i, 'value': i} for i in model.expand_param_name(response_value, resparam_value)]
-        return new_multivariate
-
-    @_app.callback(
-        Output('dropdown_resparams_multivariate_2d', 'value'),
-        Input('dropdown_response_2d', 'value'),
-        Input('dropdown_resparams_2d', 'value'),
-    )
-    def update_multivariate(response_value, resparam_value):
-        return model.expand_param_name(response_value, resparam_value)[0]
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser("""
