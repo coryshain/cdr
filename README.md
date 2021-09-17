@@ -33,7 +33,7 @@ Results can be reproduced on UNIX-based systems by navigating to the repository 
 
 Windows users without the ``make`` utility will need to either obtain it or run the commands specified in the `npsy` target of the Makefile by hand.
 
-Results will be placed into a directory called `results` at the root of this repository.
+Results will be placed into a directory called `../results/fMRI_ns_surp` relative to the root of this repository.
 
 ## References
 Shain, Cory and Schuler, William (2018). Deconvolutional time series regression: A technique for modeling temporally diffuse effects. _EMNLP18_.
