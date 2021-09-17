@@ -1,32 +1,30 @@
-emnlp18:
-	python3 -m dtsr.bin.train experiments_emnlp18/synth.ini
-	python3 -m dtsr.bin.train experiments_emnlp18/natstor.ini
-	python3 -m dtsr.bin.predict experiments_emnlp18/natstor.ini -a sampling -p train
-	python3 -m dtsr.bin.predict experiments_emnlp18/natstor.ini -a sampling -p dev
-	python3 -m dtsr.bin.predict experiments_emnlp18/natstor.ini -a sampling -p test
-	python3 -m dtsr.bin.train experiments_emnlp18/dundee.ini
-	python3 -m dtsr.bin.predict experiments_emnlp18/dundee.ini -a sampling -p train
-	python3 -m dtsr.bin.predict experiments_emnlp18/dundee.ini -a sampling -p dev
-	python3 -m dtsr.bin.predict experiments_emnlp18/dundee.ini -a sampling -p test
-	python3 -m dtsr.bin.train experiments_emnlp18/ucl.ini
-	python3 -m dtsr.bin.predict experiments_emnlp18/ucl.ini -a sampling -p train
-	python3 -m dtsr.bin.predict experiments_emnlp18/ucl.ini -a sampling -p dev
-	python3 -m dtsr.bin.predict experiments_emnlp18/ucl.ini -a sampling -p test
-	python3 -m dtsr.bin.compare_to_baselines -t experiments_emnlp18/natstor.ini experiments_emnlp18/dundee.ini experiments_emnlp18/ucl.ini -p test
-
-reading:
-	python3 -m dtsr.bin.train experiments_reading/dundee.ini -m DTSR.*
-	python3 -m dtsr.bin.predict experiments_reading/dundee.ini -a sampling -p train -m DTSR.*
-	python3 -m dtsr.bin.predict experiments_reading/dundee.ini -a sampling -p dev -m DTSR.*
-	python3 -m dtsr.bin.convolve experiments_reading/dundee.ini -a sampling -p train -m DTSR.*
-	python3 -m dtsr.bin.convolve experiments_reading/dundee.ini -a sampling -p dev -m DTSR.*
-	python3 -m dtsr.bin.train experiments_reading/ucl.ini -m DTSR.*
-	python3 -m dtsr.bin.predict experiments_reading/ucl.ini -a sampling -p train -m DTSR.*
-	python3 -m dtsr.bin.predict experiments_reading/ucl.ini -a sampling -p dev -m DTSR.*
-	python3 -m dtsr.bin.convolve experiments_reading/ucl.ini -a sampling -p train -m DTSR.*
-	python3 -m dtsr.bin.convolve experiments_reading/ucl.ini -a sampling -p dev -m DTSR.*
-
-synth:
-	python -m dtsr.bin.synth -o experiments_cl/synth/multicollinearity/data -p train test -g ShiftedGamma -a 1 -x exponential-0.1 -y exponential-0.1 -r 0 0.25 0.5 0.75 0.9 0.95 -e 10
-	python -m dtsr.bin.synth -o experiments_cl/synth/misspecification/data -p train test -g Exp Normal ShiftedGamma -a 1 -x exponential-0.1 -y exponential-0.1 -e 10
-
+default:
+	# TRAINING
+	# Main analyses
+	python -m cdr.bin.train fMRI_ns_LANG.ini
+	python -m cdr.bin.train fMRI_ns_MD.ini
+	python -m cdr.bin.train fMRI_ns_combined.ini
+	# Follow-up analyses splitting on documents
+	python -m cdr.bin.train fMRI_ns_LANG_splitdoc.ini
+	python -m cdr.bin.train fMRI_ns_MD_splitdoc.ini
+	python -m cdr.bin.train fMRI_ns_combined_splitdoc.ini
+	# Follow-up analysis using spatial WM localizer for MD
+	python -m cdr.bin.train fMRI_ns_MDSPWM.ini
+	# EXPLORATORY EVALUATION
+	python -m cdr.bin.predict fMRI_ns_LANG.ini -p train
+	python -m cdr.bin.predict fMRI_ns_MD.ini -p train
+	python -m cdr.bin.predict fMRI_ns_LANG_splitdoc.ini -p train
+	python -m cdr.bin.predict fMRI_ns_MD_splitdoc.ini -p train
+	python -m cdr.bin.predict fMRI_ns_MDSPWM.ini -p train
+	# CRITICAL (GENERALIZATION) EVALUATION
+	python -m cdr.bin.predict fMRI_ns_LANG.ini -m CDR_full -p dev-test
+	python -m cdr.bin.predict fMRI_ns_MD.ini -m CDR_full -p dev-test
+	python -m cdr.bin.predict fMRI_ns_combined.ini -m CDR_full -p dev-test
+	python -m cdr.bin.predict fMRI_ns_LANG_splitdoc.ini -m CDR_full -p dev-test
+	python -m cdr.bin.predict fMRI_ns_combined_splitdoc.ini -m CDR_full -p dev-test
+	# SIGNIF TESTING
+	python -m cdr.bin.ct fMRI_ns_LANG.ini -m CDR_full -a -T -p dev-test
+	python -m cdr.bin.ct fMRI_ns_combined.ini -m CDR_full -a -T -p dev-test
+	python -m cdr.bin.ct fMRI_ns_LANG_splitdoc.ini -m CDR_full -a -T -p dev-test
+	python -m cdr.bin.ct fMRI_ns_combined_splitdoc.ini -m CDR_full -a -T -p dev-test
+	

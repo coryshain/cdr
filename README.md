@@ -1,119 +1,64 @@
 # Continuous-Time Deconvolutional Regression (CDR)
+CDR is a regression technique for modeling temporally diffuse effects (Shain & Schuler, 2018, 2021).
 
-In many real world time series, events trigger "ripples" in a dependent variable that unfold slowly and overlap in time (temporal diffusion).
-Recovering the underlying dynamics of temporally diffuse effects is challenging when events and/or responses occur at irregular intervals.
-Continuous-time deconvolutional regression (CDR) is a regression technique for time series that directly models temporal diffusion of effects (Shain & Schuler, 2018, 2021) as a funtion of continuous time.
-CDR uses machine learning to estimate continuous-time impulse response functions (IRFs) that mediate between predictors (event properties) and responses.
-Given data and a model template specifying the functional form(s) of the IRF kernel(s), CDR finds IRF parameters that optimize some objective function.
-This approach can be generalized to account for non-stationary, non-linear, non-additive, and context-dependent response functions by implementing the IRF as a deep neural network (Shain, 2021).
+This branch (`fMRI_ns_WM`) exists to support reprodiction of results reported in Shain et al. (under review)
+investigating the role of working memory in language processing using fMRI responses to naturalistic story listening.
+It locks the repository at a previous state and therefore lacks any subsequent improvements or bug fixes.
+Do not use this branch to run regressions on your own data.
+Instead, first run the following command from the repository root:
 
-This repository contains source code for the `cdr` Python module as well as support for reproducing published experiments.
-This package provides (1) an API for programming with CDR(NN) and (2) executables that allow users to train and evaluate CDR(NN) models out of the box, without needing to write any code.
-Full documentation for the `cdr` module is available at [http://cdr.readthedocs.io/en/latest/](http://cdr.readthedocs.io/en/latest/).
+`git checkout -b master`
 
-CDR models can be trained and evaluated using provided utility executables.
-Help strings for all available utilities can be viewed by running `python -m cdr.bin.help`.
-Full repository documentation, including an API, is provided at the link above.
+Installation of dependencies can be managed through Anaconda (https://www.anaconda.com/).
+Once you have an Anaconda distribution installed, the software environment can be set up by running the following from the root of this repository:
 
+`conda env create -f cdr.yml`
 
-## Installation
+Once complete, activate the conda environment as follows:
 
-Install [anaconda](https://www.anaconda.com/), then run the following commands from this repository root to create a new conda environment:
+`conda activate cdr`
 
-    conda env create -f conda_cdr.yml
-    conda activate cdr
-    python setup.py install
-    
-The `cdr` environment must first be activated anytime you want to use the CDR codebase:
+## _fMRI WM_ results
 
-    conda activate cdr
+Results depend on both (1) datasets and (2) models as defined in experiment-specific configuration files.
+The fMRI data are available on OSF: https://osf.io/ah429/.
 
+The experiments are defined in `*.ini` files in the root of this repository.
+This reproduction branch assumes the data are all placed into a directory called `../data/fMRI_ns/` (relative to the root of this repository).
+If you wish to place them elsewhere, the paths in the `*.ini` files of root directory must be updated accordingly.
 
-## Basic usage
+In principle, results can be reproduced on UNIX-based systems by navigating to the repository root and invoking the following command:
 
-Once the `cdr` package is installed system-wide as described above (and the `cdr` conda environment is activated via `conda activate cdr`), the `cdr` package can be imported into Python as shown
+`make default`
 
-    import cdr
-    
-Most users will not need to program with CDR(NN), but will instead run command-line executables for model fitting and criticism.
-These can be run as
+However, this will fit models sequentially, which will take a long time (probably weeks on typical computers).
+We therefore recommend either (1) targeted reproduction of the specific models of interest to you or (2) full reproduction on a compute cluster that can fit models in parallel.
+Unfortunately, because job schedulers differ substantially between clusters, we do not provide general automation for this use case.
+Users will instead need to write their own scripts to schedule all the required jobs.
+To this end, note that each *ini file contains multiple models, each of which is defined by a section prefixed by `model_`.
+Everything following this prefix in the section header is used by the system as the model name, with models involving ablated variables additionally using the suffix `!<VAR>` following the model name, where `<VAR>` stands for the name of the ablated variable.
 
-    python -m cdr.bin.<EXECUTABLE-NAME> ...
-    
-For documentation of available CDR(NN) executables, run
+To fit a model, run:
 
-    python -m cdr.bin.help( <SCRIPT-NAME>)*
+`python -m cdr.bin.fit <INI_FILE> -m <MODEL_NAME>`
 
-CDR(NN) models are defined using configuration (`*.ini`) files, which can be more convenient than shell arguments for specifying many settings at once, and which provide written documentation of the specific settings used to generate any given result.
-For convenience, we have provided a utility to initialize a new `*.ini` file, which can be run like this:
+For example, if config file `example.ini` contains a model defined in section name `model_CDRNN_example`, the model can be fitted by running:
 
-    python -m cdr.bin.create_config > PATH.ini
-    
-This will initialize a CDR-oriented config file.
-To initialize a CDRNN-oriented config file, add the flag `-t cdrnn`.
-To initialize a plotting-oriented config file (which defines visualizations to run for an already fitted model), add the flag `-t plot`.
-To include annotation comments in the output file (which can help with customizing it), add the flag `-a`.
-The `PATH.ini` file can then be modified as needed to set up the analysis.
+`python -m cdr.bin.fit example.ini -m CDRNN_example`
 
-CDR model formula syntax resembles R-style model formulas (`DV ~ IV1 + IV2 + ...`) and is fully described in the [docs](http://cdr.readthedocs.io/en/latest/).
-The core novelty is the `C(preds, IRF)` call (`C` for "convolve"), in which the first argument is a '+'-delimited list of predictors and the second argument is a call to an impulse response kernel (e.g. `Exp`, `Normal`, `ShiftedGammaShapeGT1`, see docs for complete list).
-For example, a model with the following specification
+To evaluate (predict from) a model, run:
 
-    formula = DV ~ C(a + b + c, Normal())
-    
-will fit a CDR model that convolves predictors `a`, `b`, `c` using `Normal` IRFs with trainable location and scale parameters.
+`python -m cdr.bin.fit <INI_FILE> -m <MODEL_NAME> -p (train|dev|test)`
 
-CDRNN models do not require user-specification of a kernel family, so their formula syntax is simpler:
+Documentation for additional utilities can be viewed by running:
 
-    formula = DV ~ a + b + c
+`python -m cdr.bin.help`
 
-The response shape to all variables (and all their interactions) will be fitted jointly.
-
-Once a model file has been written (e.g. `model.ini`), the model(s) defined in it can be trained by running:
-
-    python -m cdr.bin.train model.ini
-    
-IRF estimates will be incrementally dumped into the output directory specified by `model.ini`,
-and learning curves can be inspected in Tensorboard:
-
-    python -m tensorboard.main --logdir=<PATH-TO-CDR-OUTPUT>
-
-For more on usage, see the [docs](http://cdr.readthedocs.io/en/latest/).
-
-
-## Reproducing published results
-
-This repository is under active development, and reproducibility of previously published results is not guaranteed from the master branch.
-For this reason, repository states associated with previous results are saved in Git branches.
-To reproduce those results, checkout the relevant branch and follow the instructions in the `README`.
-Current reproduction branches are:
-
- - `emnlp18`
- - `naacl19`
- - `npsy`
- - `cognition21`
- - `acl21`
-
-Thus, to reproduce results from ACL21, for example, run `git checkout acl21` from the repository root, and follow instructions in the `README` file.
-The reproduction branches are also useful sources of example configuration files to use as templates for setting up your own experiments, although you should consult the docs for full documentation of the structure of CDR experiment configurations.
-
-Published results depend on both (1) datasets and (2) models as defined in experiment-specific configuration files.
-In general, we do not distribute data with this repository.
-The datasets used can be provided by email upon request.
-
-Note that some published experiments also involve fitting LME and GAM models, which require `rpy2` and therefore won't work on Windows systems without some serious hacking.
-The `cdr` module is cross-platform and therefore CDR models should train regardless of operating system.
-
-
-## Help and support
-
-For questions, concerns, or data requests, contact Cory Shain ([cory.shain@gmail.com](cory.shain@gmail.com)).
-Bug reports can be logged in the issue tracker on [Github](https://github.com/coryshain/cdr).
-
+For optimal efficiency, each of the above commands should be run as a distinct job.
+Results will be placed into a directory called `results` at the root of this repository.
 
 ## References
 Shain, Cory and Schuler, William (2018). Deconvolutional time series regression: A technique for modeling temporally diffuse effects. _EMNLP18_.
 
 Shain, Cory and Schuler, William (2021). Continuous-time deconvolutional regression for psycholinguistic modeling. _Cognition_.
 
-Shain, Cory (2021). CDRNN: Discovering complex dynamics in human language processing. _ACL21_.
