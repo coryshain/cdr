@@ -23,7 +23,7 @@ Published results depend on both (1) datasets and (2) models as defined in exper
 The synthetic, self-paced reading, and fMRI data are available on OSF: https://osf.io/hb5w2/.
 The eye-tracking (Dundee) data are not publicly available but can be provided by email upon request (cory.shain@gmail.com).
 
-This reproduction branch assumes the data are all placed into a directory at the repository root called `data`.
+This reproduction branch assumes the data are all placed into a sibling directory to the repository root called `data`.
 If you wish to place them elsewhere, the paths in the `*.ini` files of the `acl_ini` directory must be updated accordingly.
 
 The _ACL21_ experiments (Shain, 2021) are defined in the `acl_ini` directory, with names
