@@ -1056,11 +1056,18 @@ CDRNN_INITIALIZATION_KWARGS = [
         "Whether to apply normalization (if applicable) after the non-linearity (otherwise, applied before).",
     ),
     Kwarg(
-        'normalization_use_gamma',
+        'shift_normalized_activations',
+        True,
+        bool,
+        "Whether to use trainable shift in batch/layer normalization layers.",
+        aliases=['normalization_use_beta', 'batch_normalization_use_beta', 'layer_normalization_use_beta']
+    ),
+    Kwarg(
+        'rescale_normalized_activations',
         True,
         bool,
         "Whether to use trainable scale in batch/layer normalization layers.",
-        aliases=['batch_normalization_use_gamma', 'layer_normalization_use_gamma']
+        aliases=['normalization_use_gamma', 'batch_normalization_use_gamma', 'layer_normalization_use_gamma']
     ),
     Kwarg(
         'layer_normalization_type',

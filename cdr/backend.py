@@ -1147,7 +1147,8 @@ class DenseLayer(object):
             batch_normalization_decay=None,
             layer_normalization_type=None,
             normalize_after_activation=False,
-            normalization_use_gamma=True,
+            shift_normalized_activations=True,
+            rescale_normalized_activations=True,
             reuse=tf.AUTO_REUSE,
             epsilon=1e-5,
             session=None,
@@ -1195,7 +1196,8 @@ class DenseLayer(object):
                 self.normalize_activations = self.use_batch_normalization or self.use_layer_normalization
 
                 self.normalize_after_activation = normalize_after_activation
-                self.normalization_use_gamma = normalization_use_gamma
+                self.shift_normalized_activations = shift_normalized_activations
+                self.rescale_normalized_activations = rescale_normalized_activations
 
                 self.normalization_beta = None
                 self.normalization_gamma = None
@@ -1254,8 +1256,8 @@ class DenseLayer(object):
                         if self.use_batch_normalization:
                             self.normalization_layer = BatchNormLayer(
                                 decay=self.batch_normalization_decay,
-                                shift_activations=self.use_bias,
-                                rescale_activations=self.normalization_use_gamma,
+                                shift_activations=self.shift_normalized_activations,
+                                rescale_activations=self.rescale_normalized_activations,
                                 axis=-1,
                                 training=self.training,
                                 epsilon=self.epsilon,
@@ -1266,8 +1268,8 @@ class DenseLayer(object):
                         elif self.use_layer_normalization:
                             self.normalization_layer = LayerNormLayer(
                                 normalization_type=self.layer_normalization_type,
-                                shift_activations=self.use_bias,
-                                rescale_activations=self.normalization_use_gamma,
+                                shift_activations=self.shift_normalized_activations,
+                                rescale_activations=self.rescale_normalized_activations,
                                 axis=-1,
                                 epsilon=self.epsilon,
                                 session=self.session,
@@ -1350,7 +1352,8 @@ class DenseLayerBayes(DenseLayer):
             batch_normalization_decay=None,
             layer_normalization_type=None,
             normalize_after_activation=False,
-            normalization_use_gamma=True,
+            shift_normalized_activations=True,
+            rescale_normalized_activations=True,
             declare_priors_weights=True,
             declare_priors_biases=False,
             declare_priors_gamma=False,
@@ -1379,7 +1382,8 @@ class DenseLayerBayes(DenseLayer):
             batch_normalization_decay=batch_normalization_decay,
             layer_normalization_type=layer_normalization_type,
             normalize_after_activation=normalize_after_activation,
-            normalization_use_gamma=normalization_use_gamma,
+            shift_normalized_activations=shift_normalized_activations,
+            rescale_normalized_activations=rescale_normalized_activations,
             reuse=reuse,
             epsilon=epsilon,
             session=session,
@@ -1519,8 +1523,8 @@ class DenseLayerBayes(DenseLayer):
                         if self.use_batch_normalization:
                             self.normalization_layer = BatchNormLayerBayes(
                                 decay=self.batch_normalization_decay,
-                                shift_activations=self.use_bias,
-                                rescale_activations=self.normalization_use_gamma,
+                                shift_activations=self.shift_normalized_activations,
+                                rescale_activations=self.rescale_normalized_activations,
                                 axis=-1,
                                 use_MAP_mode=self.use_MAP_mode,
                                 declare_priors_scale=self.declare_priors_gamma,
@@ -1540,8 +1544,8 @@ class DenseLayerBayes(DenseLayer):
                         elif self.use_layer_normalization:
                             self.normalization_layer = LayerNormLayerBayes(
                                 normalization_type=self.layer_normalization_type,
-                                shift_activations=self.use_bias,
-                                rescale_activations=self.normalization_use_gamma,
+                                shift_activations=self.shift_normalized_activations,
+                                rescale_activations=self.rescale_normalized_activations,
                                 axis=-1,
                                 use_MAP_mode=self.use_MAP_mode,
                                 declare_priors_scale=self.declare_priors_gamma,

@@ -112,7 +112,8 @@ class CDRNNBayes(ModelBayes, CDRNN):
                     batch_normalization_decay=batch_normalization_decay,
                     layer_normalization_type=layer_normalization_type,
                     normalize_after_activation=self.normalize_after_activation,
-                    normalization_use_gamma=self.normalization_use_gamma,
+                    shift_normalized_activations=self.shift_normalized_activations,
+                    rescale_normalized_activations=self.rescale_normalized_activations,
                     declare_priors_weights=declare_priors_weights,
                     declare_priors_biases=self.declare_priors_biases,
                     kernel_sd_prior=weight_sd_prior,
@@ -415,8 +416,8 @@ class CDRNNBayes(ModelBayes, CDRNN):
                 if self.use_batch_normalization:
                     normalization_layer = BatchNormLayerBayes(
                         decay=self.batch_normalization_decay,
-                        shift_activations=True,
-                        rescale_activations=self.normalization_use_gamma,
+                        shift_activations=self.shift_normalized_activations,
+                        rescale_activations=self.rescale_normalized_activations,
                         axis=-1,
                         use_MAP_mode=self.use_MAP_mode,
                         declare_priors_scale=self.declare_priors_gamma,
@@ -435,8 +436,8 @@ class CDRNNBayes(ModelBayes, CDRNN):
                 elif self.use_layer_normalization:
                     normalization_layer = LayerNormLayerBayes(
                         normalization_type=self.layer_normalization_type,
-                        shift_activations=True,
-                        rescale_activations=self.normalization_use_gamma,
+                        shift_activations=self.shift_normalized_activations,
+                        rescale_activations=self.rescale_normalized_activations,
                         axis=-1,
                         use_MAP_mode=self.use_MAP_mode,
                         declare_priors_scale=self.declare_priors_gamma,
@@ -625,8 +626,8 @@ class CDRNNBayes(ModelBayes, CDRNN):
                 if self.use_batch_normalization:
                     normalization_layer = BatchNormLayerBayes(
                         decay=self.batch_normalization_decay,
-                        shift_activations=True,
-                        rescale_activations=self.normalization_use_gamma,
+                        shift_activations=self.shift_normalized_activations,
+                        rescale_activations=self.rescale_normalized_activations,
                         axis=-1,
                         use_MAP_mode=self.use_MAP_mode,
                         declare_priors_scale=self.declare_priors_gamma,
@@ -645,8 +646,8 @@ class CDRNNBayes(ModelBayes, CDRNN):
                 elif self.use_layer_normalization:
                     normalization_layer = LayerNormLayerBayes(
                         normalization_type=self.layer_normalization_type,
-                        shift_activations=True,
-                        rescale_activations=self.normalization_use_gamma,
+                        shift_activations=self.shift_normalized_activations,
+                        rescale_activations=self.rescale_normalized_activations,
                         axis=-1,
                         use_MAP_mode=self.use_MAP_mode,
                         declare_priors_scale=self.declare_priors_gamma,

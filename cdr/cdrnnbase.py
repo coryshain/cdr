@@ -1321,7 +1321,8 @@ class CDRNN(Model):
                     batch_normalization_decay=batch_normalization_decay,
                     layer_normalization_type=layer_normalization_type,
                     normalize_after_activation=self.normalize_after_activation,
-                    normalization_use_gamma=self.normalization_use_gamma,
+                    shift_normalized_activations=self.shift_normalized_activations,
+                    rescale_normalized_activations=self.rescale_normalized_activations,
                     kernel_sd_init=self.weight_sd_init,
                     epsilon=self.epsilon,
                     session=self.sess,
@@ -1410,8 +1411,8 @@ class CDRNN(Model):
                 if self.use_batch_normalization:
                     normalization_layer = BatchNormLayer(
                         decay=self.batch_normalization_decay,
-                        shift_activations=True,
-                        rescale_activations=self.normalization_use_gamma,
+                        shift_activations=self.shift_normalized_activations,
+                        rescale_activations=self.rescale_normalized_activations,
                         axis=-1,
                         training=self.training,
                         epsilon=self.epsilon,
@@ -1421,8 +1422,8 @@ class CDRNN(Model):
                 elif self.use_layer_normalization:
                     normalization_layer = LayerNormLayer(
                         normalization_type=self.layer_normalization_type,
-                        shift_activations=True,
-                        rescale_activations=self.normalization_use_gamma,
+                        shift_activations=self.shift_normalized_activations,
+                        rescale_activations=self.rescale_normalized_activations,
                         axis=-1,
                         epsilon=self.epsilon,
                         session=self.sess,
@@ -1497,8 +1498,8 @@ class CDRNN(Model):
                 if self.use_batch_normalization:
                     normalization_layer = BatchNormLayer(
                         decay=self.batch_normalization_decay,
-                        shift_activations=True,
-                        rescale_activations=self.normalization_use_gamma,
+                        shift_activations=self.shift_normalized_activations,
+                        rescale_activations=self.rescale_normalized_activations,
                         axis=-1,
                         training=self.training,
                         epsilon=self.epsilon,
@@ -1508,8 +1509,8 @@ class CDRNN(Model):
                 elif self.use_layer_normalization:
                     normalization_layer = LayerNormLayer(
                         normalization_type=self.layer_normalization_type,
-                        shift_activations=True,
-                        rescale_activations=self.normalization_use_gamma,
+                        shift_activations=self.shift_normalized_activations,
+                        rescale_activations=self.rescale_normalized_activations,
                         axis=-1,
                         epsilon=self.epsilon,
                         session=self.sess,
