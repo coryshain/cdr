@@ -22,7 +22,7 @@ def extract_cdr_prediction_files(dirpath):
 
     parser = re.compile(
         '(LM_2STEP_)?'
-        '(CDRpreds|squared_error|losses_mse|mse_losses|loglik|preds|preds_table|obs)'
+        '(CDRpreds|squared_error|losses_mse|mse_losses|loglik|preds|preds_table|obs|output)'
         '(_([^_]+))?(_f([0-9]+))?_([^_]*).(csv|txt)'
     )
     out = {}
@@ -35,7 +35,7 @@ def extract_cdr_prediction_files(dirpath):
             else:
                 pred_type = 'direct'
             filetype = parsed[filetype_ix]
-            if filetype in ['CDRpreds', 'preds_table']:
+            if filetype in ['CDRpreds', 'preds_table', 'output']:
                 filetype = 'table'
             elif filetype in ['squared_error', 'losses_mse', 'mse_losses']:
                 filetype = 'mse'

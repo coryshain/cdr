@@ -1295,3 +1295,31 @@ def split_cdr_outputs(outputs, lengths):
             outputs[k] = {i: arr for i, arr in enumerate(np.split(outputs[k], splits, axis=0))}
 
     return outputs
+
+
+def compare_elementwise_perf(a, b, y=None, mode='err'):
+    """
+    Compare model performance elementwise.
+
+    :param a: ``numpy`` vector; vector of elementwise scores (or predictions if **mode** is ``corr``) for model a.
+    :param b: ``numpy`` vector; vector of elementwise scores (or predictions if **mode** is ``corr``) for model b.
+    :param y: ``numpy`` vector or ``None``; vector of observations. Used only if **mode** is ``corr``.
+    :param mode: ``str``; Type of performance metric. One of ``err``, ``loglik``, or ``corr``.
+    :return: ``numpy`` vector; vector of elementwise performance differences
+    """
+
+    if mode in ['err', 'mse', 'loss', 'loglik']:
+        return b - a
+
+    if mode == 'corr':
+        assert y is not None, 'y must be provided in order to use mode="corr"'
+        y = z(y)
+        a = z(a) * y
+        b = z(b) * y
+
+        out = b - a
+
+        return b - a
+
+    raise ValueError('Unrecognize value for mode: %s.' % mode)
+
