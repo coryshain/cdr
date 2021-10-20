@@ -1744,6 +1744,9 @@ class Model(object):
             with self.sess.graph.as_default():
                 loss_func = -self.ll
 
+                # Average over number of dependent variables for stability
+                loss_func /= self.n_response
+
                 # Filter
                 if self.loss_filter_n_sds and self.ema_decay:
                     beta = self.ema_decay
