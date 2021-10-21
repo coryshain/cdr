@@ -45,6 +45,8 @@ def get_activation(activation, session=None, training=True, from_logits=True, sa
                         out = lambda x: tf.nn.softplus(x) - 0.69314718056
                     elif activation.lower() == 'nlrelu':
                         out = lambda x: tf.log(tf.maximum(0., x) + 1)
+                    elif activation.lower() == 'log':
+                        out = lambda x: tf.log(1 + tf.maximum(0., x)) - tf.log(1 - tf.minimum(0., x))
                     else:
                         out = getattr(tf.nn, activation)
                 else:
