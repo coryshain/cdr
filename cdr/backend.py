@@ -43,6 +43,8 @@ def get_activation(activation, session=None, training=True, from_logits=True, sa
                         out = lambda x: x * tf.nn.sigmoid(x)
                     elif activation.lower() == 'shifted_softplus':
                         out = lambda x: tf.nn.softplus(x) - 0.69314718056
+                    elif activation.lower() == 'nlrelu':
+                        out = lambda x: tf.log(tf.maximum(0., x) + 1)
                     else:
                         out = getattr(tf.nn, activation)
                 else:
