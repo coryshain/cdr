@@ -720,6 +720,13 @@ class CDRNN(Model):
                     else:
                         irf_l1_b, irf_l1_b_summary = self.initialize_irf_l1_biases()
                 self.irf_l1_b = irf_l1_b
+                self.irf_l1_dropout_layer = get_dropout(
+                    self.irf_dropout_rate,
+                    training=self.training,
+                    use_MAP_mode=self.use_MAP_mode,
+                    name='irf_l1_dropout',
+                    session=self.sess
+                )
 
                 irf_layers = []
                 for l in range(1, self.n_layers_irf + 1):
@@ -1166,6 +1173,8 @@ class CDRNN(Model):
                     b += b_proj
 
                 irf_l1 = W * t_delta + b
+                if self.irf_dropout_rate:
+                    irf_l1 = self.irf_l1_dropout_layer(irf_l1)
                 if self.normalize_after_activation:
                     irf_l1 = get_activation(self.irf_inner_activation, session=self.sess)(irf_l1)
                 if self.normalize_irf_l1 and self.irf_l1_use_bias and self.normalize_activations:
@@ -1228,10 +1237,16 @@ class CDRNN(Model):
 
                 if self.input_dropout_rate:
                     self.resample_ops += self.input_dropout_layer.resample_ops() + self.X_time_dropout_layer.resample_ops()
-                if self.ranef_dropout_rate:
-                    self.resample_ops += self.ranef_dropout_layer.resample_ops()
                 if self.rnn_dropout_rate:
                     self.resample_ops += self.rnn_dropout_layer.resample_ops()
+                if self.h_in_dropout_rate:
+                    self.resample_ops += self.h_in_dropout_layer.resample_ops()
+                if self.h_rnn_dropout_rate:
+                    self.resample_ops += self.h_rnn_dropout_layer.resample_ops()
+                if self.h_dropout_rate:
+                    self.resample_ops += self.h_dropout_layer.resample_ops()
+                if self.irf_dropout_rate:
+                    self.resample_ops += self.irf_l1_dropout_layer.resample_ops()
                 for x in self.layers:
                     self.ema_ops += x.ema_ops()
                     self.resample_ops += x.resample_ops()
