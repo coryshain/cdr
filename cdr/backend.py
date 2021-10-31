@@ -45,7 +45,13 @@ def get_activation(activation, session=None, training=True, from_logits=True, sa
                         out = lambda x: tf.nn.softplus(x) - 0.69314718056
                     elif activation.lower() == 'nlrelu':
                         out = lambda x: tf.log1p(tf.nn.relu(x))
-                    elif activation.lower() == 'log':
+                    elif activation.lower() in ('log', 'logmod', 'log-modulus', 'logmodulus'):
+                        # def out(x):
+                        #     # This is mathematically equivalent to tf.sign(x) * tf.log1p(tf.abs(x))
+                        #     # but ensures that the gradient is well defined (and equal to 1) at 0
+                        #     pos = x > 0.
+                        #     one = tf.ones_like(x)
+                        #     return tf.where(pos, one, -one) * tf.log1p(tf.where(pos, x, -x))
                         out = lambda x: tf.sign(x) * tf.log1p(tf.abs(x))
                     else:
                         out = getattr(tf.nn, activation)

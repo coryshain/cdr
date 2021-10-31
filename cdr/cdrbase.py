@@ -934,17 +934,7 @@ class CDR(Model):
         super(CDR, self)._initialize_metadata()
 
         # Initialize model metadata
-        self.t = self.form.t
         t = self.t
-        self.node_table = t.node_table()
-        self.coef_names = t.coef_names()
-        self.fixed_coef_names = t.fixed_coef_names()
-        self.unary_nonparametric_coef_names = t.unary_nonparametric_coef_names()
-        self.interaction_list = t.interactions()
-        self.interaction_names = t.interaction_names()
-        self.fixed_interaction_names = t.fixed_interaction_names()
-        self.impulse_names = t.impulse_names(include_interactions=True)
-        self.terminal_names = t.terminal_names()
         self.atomic_irf_names_by_family = t.atomic_irf_by_family()
         self.atomic_irf_family_by_name = {}
         for family in self.atomic_irf_names_by_family:
@@ -953,17 +943,7 @@ class CDR(Model):
                 self.atomic_irf_family_by_name[id] = family
         self.atomic_irf_param_init_by_family = t.atomic_irf_param_init_by_family()
         self.atomic_irf_param_trainable_by_family = t.atomic_irf_param_trainable_by_family()
-        self.coef2impulse = t.coef2impulse()
-        self.impulse2coef = t.impulse2coef()
-        self.coef2terminal = t.coef2terminal()
-        self.terminal2coef = t.terminal2coef()
-        self.impulse2terminal = t.impulse2terminal()
-        self.terminal2impulse = t.terminal2impulse()
-        self.interaction2inputs = t.interactions2inputs()
-        self.coef_by_rangf = t.coef_by_rangf()
-        self.interaction_by_rangf = t.interaction_by_rangf()
         self.irf_by_rangf = t.irf_by_rangf()
-        self.interactions_list = t.interactions()
 
         self.irf = {}
 
@@ -1054,40 +1034,6 @@ class CDR(Model):
                                 self.coefficient_random_base_summary[response] = {}
                             self.coefficient_random_base[response][gf] = _coefficient_random_base
                             self.coefficient_random_base_summary[response][gf] = _coefficient_random_base_summary
-
-                # Interactions
-                # Key order: response, ?(ran_gf)
-                self.interaction_fixed_base = {}
-                self.interaction_fixed_base_summary = {}
-                self.interaction_random_base = {}
-                self.interaction_random_base_summary = {}
-                for response in self.response_names:
-                    if len(self.interaction_names):
-                        interaction_ids = self.fixed_interaction_names
-                        if len(interaction_ids):
-                            # Fixed
-                            _interaction_fixed_base, _interaction_fixed_base_summary = self.initialize_interaction(
-                                response,
-                                interaction_ids=interaction_ids
-                            )
-                            self.interaction_fixed_base[response] = _interaction_fixed_base
-                            self.interaction_fixed_base_summary[response] = _interaction_fixed_base_summary
-
-                        # Random
-                        for gf in self.rangf:
-                            interaction_ids = self.interaction_by_rangf.get(gf, [])
-                            if len(interaction_ids):
-                                _interaction_random_base, _interaction_random_base_summary = self.initialize_interaction(
-                                    response,
-                                    interaction_ids=interaction_ids,
-                                    ran_gf=gf
-                                )
-                                if response not in self.interaction_random_base:
-                                    self.interaction_random_base[response] = {}
-                                if response not in self.interaction_random_base_summary:
-                                    self.interaction_random_base_summary[response] = {}
-                                self.interaction_random_base[response][gf] = _interaction_random_base
-                                self.interaction_random_base_summary[response][gf] = _interaction_random_base_summary
 
                 # IRF parameters
                 # Key order: family, param
@@ -1376,153 +1322,6 @@ class CDR(Model):
                     self.coefficient[response] = coefficient
                     self.coefficient_summary[response] = coefficient_summary
 
-    def _compile_interactions(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                self.interaction = {}
-                self.interaction_summary = {}
-                self.interaction_fixed = {}
-                self.interaction_fixed_summary = {}
-                self.interaction_random = {}
-                self.interaction_random_summary = {}
-                fixef_ix = names2ix(self.fixed_interaction_names, self.interaction_names)
-                if len(self.interaction_names) > 0:
-                    for response in self.response_names:
-                        self.interaction_fixed[response] = {}
-                        self.interaction_fixed_summary[response] = {}
-
-                        response_params = self.get_response_params(response)
-                        if not self.use_distributional_regression:
-                            response_params = response_params[:1]
-                        nparam = len(response_params)
-                        ndim = self.get_response_ndim(response)
-                        interaction_ids = self.interaction_names
-
-                        interaction_fixed = self._scatter_along_axis(
-                            fixef_ix,
-                            self.interaction_fixed_base[response],
-                            [len(interaction_ids), nparam, ndim]
-                        )
-                        interaction_fixed_summary = self._scatter_along_axis(
-                            fixef_ix,
-                            self.interaction_fixed_base_summary[response],
-                            [len(interaction_ids), nparam, ndim]
-                        )
-                        self._regularize(
-                            self.interaction_fixed_base[response],
-                            regtype='interaction',
-                            var_name='interaction_%s' % response
-                        )
-
-                        interaction = interaction_fixed[None, ...]
-                        interaction_summary = interaction_fixed_summary[None, ...]
-
-                        for i, interaction_name in enumerate(self.interaction_names):
-                            self.interaction_fixed[response][interaction_name] = {}
-                            self.interaction_fixed_summary[response][interaction_name] = {}
-                            for j, response_param in enumerate(response_params):
-                                _p = interaction_fixed[:, j]
-                                _p_summary = interaction_fixed_summary[:, j]
-                                if self.standardize_response and \
-                                        self.is_real(response) and \
-                                        response_param in ['mu', 'sigma']:
-                                    _p = _p * self.Y_train_sds[response]
-                                    _p_summary = _p_summary * self.Y_train_sds[response]
-                                dim_names = self.expand_param_name(response, response_param)
-                                for k, dim_name in enumerate(dim_names):
-                                    val = _p[i, k]
-                                    val_summary = _p_summary[i, k]
-                                    tf.summary.scalar(
-                                        'interaction' + '/%s/%s_%s' % (
-                                            sn(interaction_name),
-                                            sn(response),
-                                            sn(dim_name)
-                                        ),
-                                        val_summary,
-                                        collections=['params']
-                                    )
-                                    self.interaction_fixed[response][interaction_name][dim_name] = val
-                                    self.interaction_fixed_summary[response][interaction_name][dim_name] = val_summary
-
-                        self.interaction_random[response] = {}
-                        self.interaction_random_summary[response] = {}
-                        for i, gf in enumerate(self.rangf):
-                            levels_ix = np.arange(self.rangf_n_levels[i] - 1)
-
-                            interactions = self.interaction_by_rangf.get(gf, [])
-                            if len(interactions) > 0:
-                                interaction_ix = names2ix(interactions, self.interaction_names)
-
-                                interaction_random = self.interaction_random_base[response][gf]
-                                interaction_random_summary = self.interaction_random_base_summary[response][gf]
-
-                                interaction_random_means = tf.reduce_mean(interaction_random, axis=0, keepdims=True)
-                                interaction_random_summary_means = tf.reduce_mean(interaction_random_summary, axis=0, keepdims=True)
-
-                                interaction_random -= interaction_random_means
-                                interaction_random_summary -= interaction_random_summary_means
-
-                                self._regularize(
-                                    interaction_random,
-                                    regtype='ranef',
-                                    var_name='interaction_%s_by_%s' % (sn(response), sn(gf))
-                                )
-
-                                for j, interaction_name in enumerate(interactions):
-                                    self.interaction_random[response][gf][interaction_name] = {}
-                                    self.interaction_random_summary[response][gf][interaction_name] = {}
-                                    for k, response_param in enumerate(response_params):
-                                        _p = interaction_random[:, :, k]
-                                        _p_summary = interaction_random_summary[:, :, k]
-                                        if self.standardize_response and \
-                                                self.is_real(response) and \
-                                                response_param in ['mu', 'sigma']:
-                                            _p = _p * self.Y_train_sds[response]
-                                            _p_summary = _p_summary * self.Y_train_sds[response]
-                                        dim_names = self.expand_param_name(response, response_param)
-                                        for l, dim_name in enumerate(dim_names):
-                                            val = _p[:, j, l]
-                                            val_summary = _p_summary[:, j, l]
-                                            tf.summary.histogram(
-                                                'by_%s/interaction/%s/%s_%s' % (
-                                                    sn(gf),
-                                                    sn(interaction_name),
-                                                    sn(response),
-                                                    sn(dim_name)
-                                                ),
-                                                val_summary,
-                                                collections=['random']
-                                            )
-                                            self.interaction_random[response][gf][interaction_name][dim_name] = val
-                                            self.interaction_random_summary[response][gf][interaction_name][dim_name] = val_summary
-
-                                interaction_random = self._scatter_along_axis(
-                                    interaction_ix,
-                                    self._scatter_along_axis(
-                                        levels_ix,
-                                        interaction_random,
-                                        [self.rangf_n_levels[i], len(interactions), nparam, ndim]
-                                    ),
-                                    [self.rangf_n_levels[i], len(self.interaction_names), nparam, ndim],
-                                    axis=1
-                                )
-                                interaction_random_summary = self._scatter_along_axis(
-                                    interaction_ix,
-                                    self._scatter_along_axis(
-                                        levels_ix,
-                                        interaction_random_summary,
-                                        [self.rangf_n_levels[i], len(interactions), nparam, ndim]
-                                    ),
-                                    [self.rangf_n_levels[i], len(self.interaction_names), nparam, ndim],
-                                    axis=1
-                                )
-
-                                interaction = interaction + tf.gather(interaction_random, self.Y_gf[:, i], axis=0)
-                                interaction_summary = interaction_summary + tf.gather(interaction_random_summary, self.Y_gf[:, i], axis=0)
-
-                        self.interaction[response] = interaction
-                        self.interaction_summary[response] = interaction_summary
-
     def _compile_irf_params(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -1778,16 +1577,6 @@ class CDR(Model):
                             self.parameter_table_fixed_values.append(
                                 self.coefficient_fixed[response][coef_name][dim_name]
                             )
-                for response in self.interaction_fixed:
-                    for interaction_name in self.interaction_fixed[response]:
-                        interaction_name_str = 'interaction_' + interaction_name
-                        for dim_name in self.interaction_fixed[response][interaction_name]:
-                            self.parameter_table_fixed_types.append(interaction_name_str)
-                            self.parameter_table_fixed_responses.append(response)
-                            self.parameter_table_fixed_response_params.append(dim_name)
-                            self.parameter_table_fixed_values.append(
-                                self.interaction_fixed[response][interaction_name][dim_name]
-                            )
                 for response in self.irf_params_fixed:
                     for irf_id in self.irf_params_fixed[response]:
                         for irf_param in self.irf_params_fixed[response][irf_id]:
@@ -1816,22 +1605,6 @@ class CDR(Model):
                                         self.parameter_table_random_rangf_levels.append(level)
                                         self.parameter_table_random_values.append(
                                             self.coefficient_random[response][gf][coef_name][dim_name][l]
-                                        )
-                for response in self.interaction_random:
-                    for r, gf in enumerate(self.rangf):
-                        if gf in self.interaction_random[response]:
-                            levels = sorted(self.rangf_map_ix_2_levelname[r][:-1])
-                            for interaction_name in self.interaction_random[response][gf]:
-                                interaction_name_str = 'interaction_' + interaction_name
-                                for dim_name in self.interaction_random[response][gf][interaction_name]:
-                                    for l, level in enumerate(levels):
-                                        self.parameter_table_random_types.append(interaction_name_str)
-                                        self.parameter_table_random_responses.append(response)
-                                        self.parameter_table_random_response_params.append(dim_name)
-                                        self.parameter_table_random_rangf.append(gf)
-                                        self.parameter_table_random_rangf_levels.append(level)
-                                        self.parameter_table_random_values.append(
-                                            self.interaction_random[response][gf][interaction_name][dim_name][l]
                                         )
                 for response in self.irf_params_fixed:
                     for r, gf in enumerate(self.rangf):
@@ -2146,41 +1919,6 @@ class CDR(Model):
 
                         self.X_weighted_by_irf[response][name] = out
 
-    def _sum_interactions(self):
-        raise NotImplementedError('Post-IRF interactions are currently disabled. Please raise an issue on Github if you need this feature.')
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                if len(self.interaction_names) > 0:
-                    self.summed_interactions = {}
-                    for response in self.response_names:
-                        interaction_ix = np.arange(len(self.interaction_names))
-                        interaction_coefs = tf.gather(self.interaction[response], interaction_ix, axis=1)
-                        interaction_inputs = []
-                        for i, interaction in enumerate(self.interaction_list):
-                            assert interaction.name() == self.interaction_names[i], 'Mismatched sort order between self.interaction_names and self.interaction_list. This should not have happened, so please report it in issue tracker on Github.'
-                            irf_input_names = [x.name() for x in interaction.irf_responses()]
-
-                            inputs_cur = None
-
-                            if len(irf_input_names) > 0:
-                                irf_input_ix = names2ix(irf_input_names, self.terminal_names)
-                                irf_inputs = tf.gather(self.X_conv[response], irf_input_ix, axis=1)
-                                inputs_cur = tf.reduce_prod(irf_inputs, axis=1)
-
-                            non_irf_input_names = [x.name() for x in interaction.non_irf_responses()]
-                            if len(non_irf_input_names):
-                                non_irf_input_ix = names2ix(non_irf_input_names, self.impulse_names)
-                                non_irf_inputs = tf.gather(self.X_processed[:,-1,:], non_irf_input_ix, axis=1)
-                                non_irf_inputs = tf.reduce_prod(non_irf_inputs, axis=1)
-                                if inputs_cur is not None:
-                                    inputs_cur *= non_irf_inputs
-                                else:
-                                    inputs_cur = non_irf_inputs
-
-                            interaction_inputs.append(inputs_cur)
-                        interaction_inputs = tf.stack(interaction_inputs, axis=1)
-                        self.summed_interactions[response] = tf.reduce_sum(interaction_coefs * interaction_inputs, axis=1)
-
 
 
 
@@ -2232,49 +1970,6 @@ class CDR(Model):
                 # shape: (?rangf_n_levels, ncoef, nparam, ndim)
 
                 return coefficient, coefficient_summary
-
-    def initialize_interaction(self, response, interaction_ids=None, ran_gf=None):
-        """
-        Add (response-level) interactions for a given response variable.
-        Must be called for each response variable.
-        This method should only be called at model initialization.
-        Correct model behavior is not guaranteed if called at any other time.
-
-        :param response: ``str``: name of response variable
-        :param coef_ids: ``list`` of ``str``: List of interaction IDs
-        :param ran_gf: ``str`` or ``None``: Name of random grouping factor for random interaction (if ``None``, constructs a fixed interaction)
-        :return: 2-tuple of ``Tensor`` ``(interaction, interaction_summary)``; ``interaction`` is the interaction for use by the model. ``interaction_summary`` is an identically-shaped representation of the current interaction values for logging and plotting (can be identical to ``interaction``). For fixed interactions, should return a vector of ``len(interaction_ids)`` trainable weights. For random interactions, should return batch-length matrix of trainable weights with ``len(interaction_ids)`` columns for each input in the batch. Weights should be initialized around 0.
-        """
-
-        if interaction_ids is None:
-            interaction_ids = self.interaction_names
-
-        if self.use_distributional_regression:
-            nparam = self.get_response_nparam(response)
-        else:
-            nparam = 1
-        ndim = self.get_response_ndim(response)
-        ninter = len(interaction_ids)
-
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                if ran_gf is None:
-                    interaction = tf.Variable(
-                        tf.zeros([ninter, nparam, ndim], dtype=self.FLOAT_TF),
-                        name='interaction_%s' % sn(response)
-                    )
-                    interaction_summary = interaction
-                else:
-                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
-                    interaction = tf.Variable(
-                        tf.zeros([rangf_n_levels, ninter, nparam, ndim], dtype=self.FLOAT_TF),
-                        name='interaction_%s_by_%s' % (sn(response), sn(ran_gf))
-                    )
-                    interaction_summary = interaction
-
-                # shape: (?rangf_n_levels, ninter, nparam, ndim)
-
-                return interaction, interaction_summary
 
     def initialize_irf_param(self, response, family, param_name, ran_gf=None):
         """
@@ -2339,15 +2034,12 @@ class CDR(Model):
         with self.sess.as_default():
             with self.sess.graph.as_default():
                 self._compile_coefficients()
-                self._compile_interactions()
                 self._compile_irf_params()
                 self._initialize_irf_lambdas()
                 for response in self.response_names:
                     self._initialize_irfs(self.t, response)
                 self._initialize_impulses()
                 self._initialize_X_weighted_by_irf()
-                if len(self.interaction_names) > 0:
-                    self._sum_interactions()
 
     def compile_network(self):
         with self.sess.as_default():
@@ -2363,7 +2055,13 @@ class CDR(Model):
                     coef_ix = names2ix(coef_names, self.coef_names)
                     coef = tf.gather(self.coefficient[response], coef_ix, axis=1)
                     coef = tf.expand_dims(coef, axis=1)
-                    X_weighted = X_weighted * coef * self.X_mask[..., None, None]
+
+                    impulse_names = [self.terminal2impulse[x][0] for x in self.terminal_names] # Take 0th item because terminals always have exactly 1 impulse
+                    impulse_ix = names2ix(impulse_names, self.impulse_names)
+                    X_mask = tf.gather(self.X_mask, impulse_ix, axis=-1)
+                    X_mask = X_mask[..., None, None]
+                    X_weighted = X_weighted * coef * X_mask
+
                     self.X_weighted[response] = X_weighted
 
 

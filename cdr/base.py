@@ -246,9 +246,10 @@ class Model(object):
         impulse_uq = {}
         impulse_min = {}
         impulse_max = {}
+        indicators = set()
 
         impulse_df_ix = []
-        for impulse in self.form.t.impulses():
+        for impulse in self.form.t.impulses(include_interactions=True):
             name = impulse.name()
             is_interaction = type(impulse).__name__ == 'ImpulseInteraction'
             found = False
@@ -278,12 +279,15 @@ class Model(object):
                         impulse_min[name] = column.min()
                         impulse_max[name] = column.max()
 
+                        if self._vector_is_indicator(column):
+                            indicators.add(name)
+
                         found = True
                         break
                     elif is_interaction:
                         found = True
-                        impulse_names = [x.name() for x in impulse.impulses()]
-                        for x in impulse.impulses():
+                        impulse_names = [x.name() for x in impulse.impulses(include_interactions=True)]
+                        for x in impulse.impulses(include_interactions=True):
                             if not x.name() in df:
                                 found = False
                                 break
@@ -298,6 +302,9 @@ class Model(object):
                             impulse_uq[name] = np.quantile(column, 0.9)
                             impulse_min[name] = column.min()
                             impulse_max[name] = column.max()
+
+                            if self._vector_is_indicator(column):
+                                indicators.add(name)
             if not found:
                 raise ValueError('Impulse %s was not found in an input file.' % name)
 
@@ -313,6 +320,7 @@ class Model(object):
         self.impulse_uq = impulse_uq
         self.impulse_min = impulse_min
         self.impulse_max = impulse_max
+        self.indicators = indicators
 
         self.response_to_df_ix = {}
         for _response in response_names:
@@ -419,6 +427,8 @@ class Model(object):
         self.prop_bwd = self.history_length / (self.history_length + self.future_length)
         self.prop_fwd = self.future_length / (self.history_length + self.future_length)
 
+        if self.is_cdrnn:
+            self.form = self.form.drop_rate()
         f = self.form
         self.responses = f.responses()
         self.response_names = f.response_names()
@@ -426,7 +436,6 @@ class Model(object):
         self.rangf = f.rangf
         self.ranef_group2ix = {x: i for i, x in enumerate(self.rangf)}
 
-        self.summed_interactions = None
         self.X_weighted = {}  # Key order: <response>; Value: nbatch x ntime x ncoef x nparam x ndim tensor of IRF-weighted values at each timepoint of each predictor for each predictive distribution parameter of the response
         self.layers = [] # CDRNN only, list of DNN layers
         self.kl_penalties = {} # Key order: <variable>; Value: scalar KL divergence
@@ -474,6 +483,16 @@ class Model(object):
                     self.non_dirac_impulses.add(y.name())
             self.terminal_names_to_ix[x] = i
             self.terminal_names_printable[x] = ':'.join([get_irf_name(x, self.irf_name_map) for y in x.split(':')])
+        self.coef2impulse = t.coef2impulse()
+        self.impulse2coef = t.impulse2coef()
+        self.coef2terminal = t.coef2terminal()
+        self.terminal2coef = t.terminal2coef()
+        self.impulse2terminal = t.impulse2terminal()
+        self.terminal2impulse = t.terminal2impulse()
+        self.interaction2inputs = t.interactions2inputs()
+        self.coef_by_rangf = t.coef_by_rangf()
+        self.interaction_by_rangf = t.interaction_by_rangf()
+        self.interactions_list = t.interactions()
 
         # Initialize predictive distribution metadata
         predictive_distribution = {}
@@ -552,13 +571,13 @@ class Model(object):
         self.ranef_level_ix = ranef_level_ix
 
         if self.impulse_df_ix is None:
-            self.impulse_df_ix = np.zeros(len(self.form.t.impulses()))
+            self.impulse_df_ix = np.zeros(len(self.form.t.impulses(include_interactions=True)))
         self.impulse_df_ix = np.array(self.impulse_df_ix, dtype=self.INT_NP)
         self.impulse_df_ix_unique = sorted(list(set(self.impulse_df_ix)))
         self.n_impulse_df = len(self.impulse_df_ix_unique)
         self.impulse_indices = []
         for i in range(self.n_impulse_df):
-            arange = np.arange(len(self.form.t.impulses()))
+            arange = np.arange(len(self.form.t.impulses(include_interactions=True)))
             ix = arange[np.where(self.impulse_df_ix == i)[0]]
             self.impulse_indices.append(ix)
         if self.response_to_df_ix is None:
@@ -572,7 +591,6 @@ class Model(object):
 
         self.parameter_table_columns = ['Estimate']
 
-        self.indicators = set()
         for x in self.indicator_names.split():
             self.indicators.add(x)
 
@@ -583,12 +601,26 @@ class Model(object):
             m = m[None, ...]
         self.impulse_means_arr_expanded = m
 
+        m = self.impulse_means
+        m = np.array([0. if x in self.indicators else m[x] for x in self.impulse_names])
+        self.impulse_shift_arr = m
+        while len(m.shape) < 3:
+            m = m[None, ...]
+        self.impulse_shift_arr_expanded = m
+
         s = self.impulse_sds
         s = np.array([s[x] for x in self.impulse_names])
         self.impulse_sds_arr = s
         while len(s.shape) < 3:
             s = s[None, ...]
         self.impulse_sds_arr_expanded = s
+
+        s = self.impulse_sds
+        s = np.array([1. if x in self.indicators else s[x] for x in self.impulse_names])
+        self.impulse_scale_arr = s
+        while len(s.shape) < 3:
+            s = s[None, ...]
+        self.impulse_scale_arr_expanded = s
 
         q = self.impulse_quantiles
         q = np.stack([q[x] for x in self.impulse_names], axis=1)
@@ -630,8 +662,6 @@ class Model(object):
         s = self.plot_step_map
         s = np.array([s[x] for x in self.impulse_names])
         self.plot_step_arr = s
-
-        self.summed_interactions = None
 
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -741,6 +771,7 @@ class Model(object):
             'impulse_uq': self.impulse_uq,
             'impulse_min': self.impulse_min,
             'impulse_max': self.impulse_max,
+            'indicators': self.indicators,
             'outdir': self.outdir,
             'crossval_factor': self.crossval_factor,
             'crossval_fold': self.crossval_fold,
@@ -788,6 +819,7 @@ class Model(object):
         self.impulse_uq = md.pop('impulse_uq', {})
         self.impulse_min = md.pop('impulse_min', {})
         self.impulse_max = md.pop('impulse_max', {})
+        self.indicators = md.pop('indicators', set())
         self.outdir = md.pop('outdir', './cdr_model/')
         self.crossval_factor = md.pop('crossval_factor', None)
         self.crossval_fold = md.pop('crossval_fold', [])
@@ -836,9 +868,9 @@ class Model(object):
                 self.X_time_dim = X_shape[1]
                 X_processed = self.X
                 if self.center_inputs:
-                    X_processed -= self.impulse_means_arr_expanded
+                    X_processed -= self.impulse_shift_arr_expanded
                 if self.rescale_inputs:
-                    scale = self.impulse_sds_arr_expanded
+                    scale = self.impulse_scale_arr_expanded
                     scale = np.where(scale != 0, scale, 1.)
                     X_processed /= scale
                 self.X_processed = X_processed
@@ -1222,6 +1254,40 @@ class Model(object):
                             self.intercept_random_base[_response][gf] = _intercept_random
                             self.intercept_random_base_summary[_response][gf] = _intercept_random_summary
 
+                # Interactions
+                # Key order: response, ?(ran_gf)
+                self.interaction_fixed_base = {}
+                self.interaction_fixed_base_summary = {}
+                self.interaction_random_base = {}
+                self.interaction_random_base_summary = {}
+                for response in self.response_names:
+                    if len(self.interaction_names):
+                        interaction_ids = self.fixed_interaction_names
+                        if len(interaction_ids):
+                            # Fixed
+                            _interaction_fixed_base, _interaction_fixed_base_summary = self.initialize_interaction(
+                                response,
+                                interaction_ids=interaction_ids
+                            )
+                            self.interaction_fixed_base[response] = _interaction_fixed_base
+                            self.interaction_fixed_base_summary[response] = _interaction_fixed_base_summary
+
+                        # Random
+                        for gf in self.rangf:
+                            interaction_ids = self.interaction_by_rangf.get(gf, [])
+                            if len(interaction_ids):
+                                _interaction_random_base, _interaction_random_base_summary = self.initialize_interaction(
+                                    response,
+                                    interaction_ids=interaction_ids,
+                                    ran_gf=gf
+                                )
+                                if response not in self.interaction_random_base:
+                                    self.interaction_random_base[response] = {}
+                                if response not in self.interaction_random_base_summary:
+                                    self.interaction_random_base_summary[response] = {}
+                                self.interaction_random_base[response][gf] = _interaction_random_base
+                                self.interaction_random_base_summary[response][gf] = _interaction_random_base_summary
+
     def _compile_intercepts(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -1367,6 +1433,197 @@ class Model(object):
                     self.intercept[response] = intercept
                     self.intercept_summary[response] = intercept_summary
 
+    def _compile_interactions(self):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                self.interaction = {}
+                self.interaction_summary = {}
+                self.interaction_fixed = {}
+                self.interaction_fixed_summary = {}
+                self.interaction_random = {}
+                self.interaction_random_summary = {}
+                fixef_ix = names2ix(self.fixed_interaction_names, self.interaction_names)
+                if len(self.interaction_names) > 0:
+                    for response in self.response_names:
+                        self.interaction_fixed[response] = {}
+                        self.interaction_fixed_summary[response] = {}
+
+                        response_params = self.get_response_params(response)
+                        if not self.use_distributional_regression:
+                            response_params = response_params[:1]
+                        nparam = len(response_params)
+                        ndim = self.get_response_ndim(response)
+                        interaction_ids = self.interaction_names
+
+                        interaction_fixed = self._scatter_along_axis(
+                            fixef_ix,
+                            self.interaction_fixed_base[response],
+                            [len(interaction_ids), nparam, ndim]
+                        )
+                        interaction_fixed_summary = self._scatter_along_axis(
+                            fixef_ix,
+                            self.interaction_fixed_base_summary[response],
+                            [len(interaction_ids), nparam, ndim]
+                        )
+                        self._regularize(
+                            self.interaction_fixed_base[response],
+                            regtype='coefficient',
+                            var_name='interaction_%s' % response
+                        )
+
+                        interaction = interaction_fixed[None, ...]
+                        interaction_summary = interaction_fixed_summary[None, ...]
+
+                        for i, interaction_name in enumerate(self.interaction_names):
+                            self.interaction_fixed[response][interaction_name] = {}
+                            self.interaction_fixed_summary[response][interaction_name] = {}
+                            for j, response_param in enumerate(response_params):
+                                _p = interaction_fixed[:, j]
+                                _p_summary = interaction_fixed_summary[:, j]
+                                if self.standardize_response and \
+                                        self.is_real(response) and \
+                                        response_param in ['mu', 'sigma']:
+                                    _p = _p * self.Y_train_sds[response]
+                                    _p_summary = _p_summary * self.Y_train_sds[response]
+                                dim_names = self.expand_param_name(response, response_param)
+                                for k, dim_name in enumerate(dim_names):
+                                    val = _p[i, k]
+                                    val_summary = _p_summary[i, k]
+                                    tf.summary.scalar(
+                                        'interaction' + '/%s/%s_%s' % (
+                                            sn(interaction_name),
+                                            sn(response),
+                                            sn(dim_name)
+                                        ),
+                                        val_summary,
+                                        collections=['params']
+                                    )
+                                    self.interaction_fixed[response][interaction_name][dim_name] = val
+                                    self.interaction_fixed_summary[response][interaction_name][dim_name] = val_summary
+
+                        self.interaction_random[response] = {}
+                        self.interaction_random_summary[response] = {}
+                        for i, gf in enumerate(self.rangf):
+                            levels_ix = np.arange(self.rangf_n_levels[i] - 1)
+
+                            interactions = self.interaction_by_rangf.get(gf, [])
+                            if len(interactions) > 0:
+                                interaction_ix = names2ix(interactions, self.interaction_names)
+
+                                interaction_random = self.interaction_random_base[response][gf]
+                                interaction_random_summary = self.interaction_random_base_summary[response][gf]
+
+                                interaction_random_means = tf.reduce_mean(interaction_random, axis=0, keepdims=True)
+                                interaction_random_summary_means = tf.reduce_mean(interaction_random_summary, axis=0, keepdims=True)
+
+                                interaction_random -= interaction_random_means
+                                interaction_random_summary -= interaction_random_summary_means
+
+                                self._regularize(
+                                    interaction_random,
+                                    regtype='ranef',
+                                    var_name='interaction_%s_by_%s' % (sn(response), sn(gf))
+                                )
+
+                                for j, interaction_name in enumerate(interactions):
+                                    self.interaction_random[response][gf][interaction_name] = {}
+                                    self.interaction_random_summary[response][gf][interaction_name] = {}
+                                    for k, response_param in enumerate(response_params):
+                                        _p = interaction_random[:, :, k]
+                                        _p_summary = interaction_random_summary[:, :, k]
+                                        if self.standardize_response and \
+                                                self.is_real(response) and \
+                                                response_param in ['mu', 'sigma']:
+                                            _p = _p * self.Y_train_sds[response]
+                                            _p_summary = _p_summary * self.Y_train_sds[response]
+                                        dim_names = self.expand_param_name(response, response_param)
+                                        for l, dim_name in enumerate(dim_names):
+                                            val = _p[:, j, l]
+                                            val_summary = _p_summary[:, j, l]
+                                            tf.summary.histogram(
+                                                'by_%s/interaction/%s/%s_%s' % (
+                                                    sn(gf),
+                                                    sn(interaction_name),
+                                                    sn(response),
+                                                    sn(dim_name)
+                                                ),
+                                                val_summary,
+                                                collections=['random']
+                                            )
+                                            self.interaction_random[response][gf][interaction_name][dim_name] = val
+                                            self.interaction_random_summary[response][gf][interaction_name][dim_name] = val_summary
+
+                                interaction_random = self._scatter_along_axis(
+                                    interaction_ix,
+                                    self._scatter_along_axis(
+                                        levels_ix,
+                                        interaction_random,
+                                        [self.rangf_n_levels[i], len(interactions), nparam, ndim]
+                                    ),
+                                    [self.rangf_n_levels[i], len(self.interaction_names), nparam, ndim],
+                                    axis=1
+                                )
+                                interaction_random_summary = self._scatter_along_axis(
+                                    interaction_ix,
+                                    self._scatter_along_axis(
+                                        levels_ix,
+                                        interaction_random_summary,
+                                        [self.rangf_n_levels[i], len(interactions), nparam, ndim]
+                                    ),
+                                    [self.rangf_n_levels[i], len(self.interaction_names), nparam, ndim],
+                                    axis=1
+                                )
+
+                                interaction = interaction + tf.gather(interaction_random, self.Y_gf[:, i], axis=0)
+                                interaction_summary = interaction_summary + tf.gather(interaction_random_summary, self.Y_gf[:, i], axis=0)
+
+                        self.interaction[response] = interaction
+                        self.interaction_summary[response] = interaction_summary
+
+    def _sum_interactions(self, response):
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if len(self.interaction_names) > 0:
+                    interaction_ix = np.arange(len(self.interaction_names))
+                    interaction_coefs = tf.gather(self.interaction[response], interaction_ix, axis=1)
+                    interaction_inputs = []
+                    terminal_names = self.terminal_names[:]
+                    impulse_names = self.impulse_names
+                    if self.is_cdrnn:
+                        terminal_names = ['DiracDelta.rate-Terminal.rate'] + terminal_names
+
+                    for i, interaction in enumerate(self.interaction_list):
+                        assert interaction.name() == self.interaction_names[i], 'Mismatched sort order between self.interaction_names and self.interaction_list. This should not have happened, so please report it in issue tracker on Github.'
+                        irf_input_names = [x.name() for x in interaction.irf_responses()]
+                        non_irf_input_names = [x.name() for x in interaction.non_irf_responses()]
+
+                        inputs_cur = None
+
+                        if len(irf_input_names) > 0:
+                            irf_input_ix = names2ix(irf_input_names, terminal_names)
+                            irf_inputs = tf.gather(
+                                tf.reduce_sum(self.X_weighted[response], axis=1, keepdims=True),
+                                irf_input_ix,
+                                axis=2
+                            )
+                            inputs_cur = tf.reduce_prod(irf_inputs, axis=1, keepdims=True)
+
+                        if len(non_irf_input_names):
+                            non_irf_input_ix = names2ix(non_irf_input_names, impulse_names)
+                            non_irf_inputs = self.X_processed[:,:,-1:]
+                            # Expand out response_param and response_param_dim axes
+                            non_irf_inputs = non_irf_inputs[..., None, None]
+                            non_irf_inputs = tf.gather(non_irf_inputs, non_irf_input_ix, axis=1)
+                            non_irf_inputs = tf.reduce_prod(non_irf_inputs, axis=1, keepdims=True)
+                            if inputs_cur is not None:
+                                inputs_cur *= non_irf_inputs
+                            else:
+                                inputs_cur = non_irf_inputs
+
+                        interaction_inputs.append(inputs_cur)
+                    interaction_inputs = tf.stack(interaction_inputs, axis=1)
+                    return tf.reduce_sum(interaction_coefs * interaction_inputs, axis=1)
+
     def _initialize_predictive_distribution(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
@@ -1400,8 +1657,6 @@ class Model(object):
                     pred_dist_fn = self.get_response_dist(response)
                     response_param_names = self.get_response_params(response)
                     response_params = self.intercept[response] # (batch, param, dim)
-                    if self.summed_interactions:
-                        response_params = response_params + self.summed_interactions[response]
 
                     # Base output deltas
                     X_weighted_delta = self.X_weighted[response] # (batch, time, impulse, param, dim)
@@ -1420,6 +1675,12 @@ class Model(object):
                         )
                     output_delta = X_weighted_delta
 
+                    # Interactions
+                    if len(self.interaction_names):
+                        interactions = self._sum_interactions(response)
+                    else:
+                        interactions = None
+
                     # Prediction targets
                     Y = self.Y[..., i]
                     Y_mask = self.Y_mask[..., i]
@@ -1433,6 +1694,12 @@ class Model(object):
                         lambda: tf.reduce_sum(output_delta, axis=1),
                         lambda: output_delta
                     )
+                    if interactions is not None:
+                        interactions = tf.cond(
+                            self.sum_outputs_along_T,
+                            lambda: tf.reduce_sum(interactions, axis=1),
+                            lambda: interactions
+                        )
                     response_params = tf.cond(
                         self.sum_outputs_along_T,
                         lambda: response_params,
@@ -1456,6 +1723,12 @@ class Model(object):
                         lambda: tf.reduce_sum(output_delta, axis=-3),
                         lambda: output_delta
                     )
+                    if interactions is not None:
+                        interactions = tf.cond(
+                            self.sum_outputs_along_T,
+                            lambda: tf.reduce_sum(interactions, axis=-3),
+                            lambda: interactions
+                        )
                     response_params = tf.cond(
                         self.sum_outputs_along_K,
                         lambda: response_params,
@@ -1478,7 +1751,9 @@ class Model(object):
                         lambda: tf.tile(Y_mask[..., None], tile_shape)
                     )
 
-                    response_params = response_params + output_delta
+                    response_params += output_delta
+                    if interactions is not None:
+                        response_params += interactions
 
                     self.output_delta[response] = output_delta
                     self.output[response] = response_params
@@ -1801,7 +2076,6 @@ class Model(object):
                     else:
                         vars = [l]
                     for v in vars:
-                        # print(v.name)
                         if 'bias' not in v.name:
                             if 'input_projection_l%d' % (self.n_layers_input_projection + 1) in v.name:
                                 regtype = 'input_projection'
@@ -1866,6 +2140,16 @@ class Model(object):
                             self.parameter_table_fixed_values.append(
                                 self.intercept_fixed[response][dim_name]
                             )
+                for response in self.interaction_fixed:
+                    for interaction_name in self.interaction_fixed[response]:
+                        interaction_name_str = 'interaction_' + interaction_name
+                        for dim_name in self.interaction_fixed[response][interaction_name]:
+                            self.parameter_table_fixed_types.append(interaction_name_str)
+                            self.parameter_table_fixed_responses.append(response)
+                            self.parameter_table_fixed_response_params.append(dim_name)
+                            self.parameter_table_fixed_values.append(
+                                self.interaction_fixed[response][interaction_name][dim_name]
+                            )
 
                 # Random
                 self.parameter_table_random_types = []
@@ -1888,6 +2172,22 @@ class Model(object):
                                     self.parameter_table_random_values.append(
                                         self.intercept_random[response][gf][dim_name][l]
                                     )
+                for response in self.interaction_random:
+                    for r, gf in enumerate(self.rangf):
+                        if gf in self.interaction_random[response]:
+                            levels = sorted(self.rangf_map_ix_2_levelname[r][:-1])
+                            for interaction_name in self.interaction_random[response][gf]:
+                                interaction_name_str = 'interaction_' + interaction_name
+                                for dim_name in self.interaction_random[response][gf][interaction_name]:
+                                    for l, level in enumerate(levels):
+                                        self.parameter_table_random_types.append(interaction_name_str)
+                                        self.parameter_table_random_responses.append(response)
+                                        self.parameter_table_random_response_params.append(dim_name)
+                                        self.parameter_table_random_rangf.append(gf)
+                                        self.parameter_table_random_rangf_levels.append(level)
+                                        self.parameter_table_random_values.append(
+                                            self.interaction_random[response][gf][interaction_name][dim_name][l]
+                                        )
 
     def _initialize_saver(self):
         with self.sess.as_default():
@@ -1927,6 +2227,21 @@ class Model(object):
     #  Utility methods
     #
     ######################################################
+
+    def _vector_is_indicator(self, a):
+        vals = set(np.unique(a))
+        if len(vals) != 2:
+            return False
+        return vals in (
+            {0,1},
+            {'0','1'},
+            {True, False},
+            {'True', 'False'},
+            {'TRUE', 'FALSE'},
+            {'true', 'false'},
+            {'T', 'F'},
+            {'t', 'f'},
+        )
 
     def _matmul(self, A, B):
         """
@@ -2464,6 +2779,49 @@ class Model(object):
 
                 return intercept, intercept_summary
 
+    def initialize_interaction(self, response, interaction_ids=None, ran_gf=None):
+        """
+        Add (response-level) interactions for a given response variable.
+        Must be called for each response variable.
+        This method should only be called at model initialization.
+        Correct model behavior is not guaranteed if called at any other time.
+
+        :param response: ``str``: name of response variable
+        :param coef_ids: ``list`` of ``str``: List of interaction IDs
+        :param ran_gf: ``str`` or ``None``: Name of random grouping factor for random interaction (if ``None``, constructs a fixed interaction)
+        :return: 2-tuple of ``Tensor`` ``(interaction, interaction_summary)``; ``interaction`` is the interaction for use by the model. ``interaction_summary`` is an identically-shaped representation of the current interaction values for logging and plotting (can be identical to ``interaction``). For fixed interactions, should return a vector of ``len(interaction_ids)`` trainable weights. For random interactions, should return batch-length matrix of trainable weights with ``len(interaction_ids)`` columns for each input in the batch. Weights should be initialized around 0.
+        """
+
+        if interaction_ids is None:
+            interaction_ids = self.interaction_names
+
+        if self.use_distributional_regression:
+            nparam = self.get_response_nparam(response)
+        else:
+            nparam = 1
+        ndim = self.get_response_ndim(response)
+        ninter = len(interaction_ids)
+
+        with self.sess.as_default():
+            with self.sess.graph.as_default():
+                if ran_gf is None:
+                    interaction = tf.Variable(
+                        tf.zeros([ninter, nparam, ndim], dtype=self.FLOAT_TF),
+                        name='interaction_%s' % sn(response)
+                    )
+                    interaction_summary = interaction
+                else:
+                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
+                    interaction = tf.Variable(
+                        tf.zeros([rangf_n_levels, ninter, nparam, ndim], dtype=self.FLOAT_TF),
+                        name='interaction_%s_by_%s' % (sn(response), sn(ran_gf))
+                    )
+                    interaction_summary = interaction
+
+                # shape: (?rangf_n_levels, ninter, nparam, ndim)
+
+                return interaction, interaction_summary
+
     def build(self, outdir=None, restore=True):
         """
         Construct the CDR(NN) network and initialize/load model parameters.
@@ -2486,6 +2844,7 @@ class Model(object):
                 self._initialize_inputs()
                 self._initialize_base_params()
                 self._compile_intercepts()
+                self._compile_interactions()
                 self.initialize_model()
                 self.compile_network()
                 self._initialize_predictive_distribution()

@@ -1488,6 +1488,18 @@ class Formula(object):
         new_form = Formula(new_formstring)
         return new_form
 
+    def drop_rate(self):
+        """
+        Drop any non-interaction terms involving 'rate'. Used by CDRNN, where rate is implicit and shouldn't be included in the design matrix.
+
+        :return: ``Formula``; transformed ``Formula`` object
+        """
+
+        new_t = self.t.drop_rate()
+        new_formstring = self.to_string(t=new_t)
+        new_form = Formula(new_formstring)
+        return new_form
+
     def __str__(self):
         return self.to_string()
 
@@ -2911,6 +2923,27 @@ class IRFNode(object):
                     irf.add_interactions(interaction)
 
         return self_transformed
+
+    def drop_rate(self):
+        """
+        Drop any non-interaction terms involving 'rate'. Used by CDRNN, where rate is implicit and shouldn't be included in the design matrix.
+        Applies in-place.
+
+        :return: ``IRFNode``; the transformed IRF node.
+        """
+
+        transformed = []
+
+        if self.terminal():
+            if self.impulse.name() == 'rate':
+                self.p.children.remove(self)
+                return None
+        else:
+            for c in self.children:
+                c.drop_rate()
+            if not len(self.children) and self.p is not None:
+                self.p.children.remove(self)
+        return self
 
     @staticmethod
     def pointers2namemmaps(p):

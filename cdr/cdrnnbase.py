@@ -106,12 +106,7 @@ class CDRNN(Model):
         # self.impulse_vectors_train['rate'] = np.ones((self.n_train,))
 
         # Initialize tree metadata
-        self.t = self.form.t
         t = self.t
-        self.node_table = t.node_table()
-        self.impulse_names = t.impulse_names(include_interactions=True)
-        self.terminal_names = t.terminal_names()
-
         # CDRNN can't use any of the IRF formula components.
         # To help users, check to make sure formula doesn't contain any IRF stuff, since it will be ignored anyway.
         irf_families = list(t.atomic_irf_by_family().keys())
@@ -122,7 +117,7 @@ class CDRNN(Model):
         if self.n_units_input_projection:
             if isinstance(self.n_units_input_projection, str):
                 if self.n_units_input_projection.lower() == 'infer':
-                    self.n_units_input_projection = [len(self.impulse_names) + len(self.ablated) + 1]
+                    self.n_units_input_projection = [len(self.terminal_names) + len(self.ablated) + 1]
                 else:
                     self.n_units_input_projection = [int(x) for x in self.n_units_input_projection.split()]
             elif isinstance(self.n_units_input_projection, int):
@@ -143,7 +138,7 @@ class CDRNN(Model):
         if self.n_units_rnn:
             if isinstance(self.n_units_rnn, str):
                 if self.n_units_rnn.lower() == 'infer':
-                    self.n_units_rnn = [len(self.impulse_names) + len(self.ablated) + 1]
+                    self.n_units_rnn = [len(self.terminal_names) + len(self.ablated) + 1]
                 elif self.n_units_rnn.lower() == 'inherit':
                     self.n_units_rnn = ['inherit']
                 else:
@@ -217,12 +212,15 @@ class CDRNN(Model):
                 raise ValueError("Cannot infer size of hidden state. Units are not specified for hidden state, IRF, input projection, or RNN projection.")
         elif isinstance(self.n_units_hidden_state, str):
             if self.n_units_hidden_state.lower() == 'infer':
-                self.n_units_hidden_state = len(self.impulse_names) + len(self.ablated) + 1
+                self.n_units_hidden_state = len(self.terminal_names) + len(self.ablated) + 1
             else:
                 self.n_units_hidden_state = int(self.n_units_hidden_state)
 
         if self.n_units_rnn and self.n_units_rnn[-1] == 'inherit':
             self.n_units_rnn = [self.n_units_hidden_state]
+
+        if len(self.interaction_names):
+            assert not self.n_layers_input_projection and not self.n_layers_rnn, 'Interactions disallowed in CDRNN unless the input projection and RNN are turned off by setting the number of their units to 0. Otherwise, interactions are implicit in the model, rendering explicit interaction terms uninterpretable.'
 
     def _pack_metadata(self):
         md = super(CDRNN, self)._pack_metadata()
@@ -872,32 +870,33 @@ class CDRNN(Model):
                             self.rnn_c_init[l] += tf.gather(rnn_c_random, _Y_gf)
 
                         # CDRNN hidden state
-                        h_bias_random = self.h_bias_random_base[gf]
-                        h_bias_random_summary = self.h_bias_random_base_summary[gf]
-                        h_bias_random -= tf.reduce_mean(h_bias_random, axis=0, keepdims=True)
-                        h_bias_random_summary -= tf.reduce_mean(h_bias_random_summary, axis=0, keepdims=True)
-                        self._regularize(
-                            h_bias_random,
-                            regtype='ranef',
-                            var_name=reg_name('h_bias_by_%s' % (sn(gf)))
-                        )
-                        if self.log_random:
-                            tf.summary.histogram(
-                                sn('by_%s/h' % sn(gf)),
-                                h_bias_random_summary,
-                                collections=['random']
-                            )
-                        self.h_bias_random[gf] = h_bias_random
-                        self.h_bias_random_summary[gf] = h_bias_random_summary
-                        n_units_hidden_state = self.n_units_hidden_state
-                        h_bias_random = tf.concat(
-                            [
+                        if self.n_layers_input_projection or self.n_layers_rnn:
+                            h_bias_random = self.h_bias_random_base[gf]
+                            h_bias_random_summary = self.h_bias_random_base_summary[gf]
+                            h_bias_random -= tf.reduce_mean(h_bias_random, axis=0, keepdims=True)
+                            h_bias_random_summary -= tf.reduce_mean(h_bias_random_summary, axis=0, keepdims=True)
+                            self._regularize(
                                 h_bias_random,
-                                tf.zeros([1, n_units_hidden_state])
-                            ],
-                            axis=0
-                        )
-                        self.h_bias += tf.expand_dims(tf.gather(h_bias_random, _Y_gf), axis=-2)
+                                regtype='ranef',
+                                var_name=reg_name('h_bias_by_%s' % (sn(gf)))
+                            )
+                            if self.log_random:
+                                tf.summary.histogram(
+                                    sn('by_%s/h' % sn(gf)),
+                                    h_bias_random_summary,
+                                    collections=['random']
+                                )
+                            self.h_bias_random[gf] = h_bias_random
+                            self.h_bias_random_summary[gf] = h_bias_random_summary
+                            n_units_hidden_state = self.n_units_hidden_state
+                            h_bias_random = tf.concat(
+                                [
+                                    h_bias_random,
+                                    tf.zeros([1, n_units_hidden_state])
+                                ],
+                                axis=0
+                            )
+                            self.h_bias += tf.expand_dims(tf.gather(h_bias_random, _Y_gf), axis=-2)
 
                         # IRF L1 weights
                         irf_l1_W_random = self.irf_l1_W_random_base[gf]
@@ -984,10 +983,13 @@ class CDRNN(Model):
     def compile_network(self):
         with self.sess.as_default():
             with self.sess.graph.as_default():
-                X = self.X_processed
-                t_delta = self.t_delta
-                X_time = self.X_time
-                X_mask = self.X_mask
+                # Can select the 0th item because all terminals have exactly 1 impulse
+                impulse_names = [self.terminal2impulse[x][0] for x in self.terminal_names]
+                impulse_ix = names2ix(impulse_names, self.impulse_names)
+                X = tf.gather(self.X_processed, impulse_ix, axis=2)
+                t_delta = tf.gather(self.t_delta, impulse_ix, axis=2)
+                X_time = tf.gather(self.X_time, impulse_ix, axis=2)
+                X_mask = tf.gather(self.X_time, impulse_ix, axis=2)
 
                 if X_time is None:
                     X_shape = tf.shape(X)
@@ -1030,8 +1032,10 @@ class CDRNN(Model):
                     for i, ix in enumerate(self.impulse_indices):
                         dim_mask = np.zeros(len(self.impulse_names))
                         dim_mask[ix] = 1
+                        dim_mask = tf.constant(dim_mask, dtype=self.FLOAT_TF)
                         while len(dim_mask.shape) < len(X.shape):
                             dim_mask = dim_mask[None, ...]
+                        dim_mask = tf.gather(dim_mask, impulse_ix, axis=2)
                         X_cur = X * dim_mask
 
                         if t_delta.shape[-1] > 1:
@@ -1182,7 +1186,7 @@ class CDRNN(Model):
                 if not self.normalize_after_activation:
                     irf_l1 = get_activation(self.irf_inner_activation, session=self.sess)(irf_l1)
 
-                n_impulse = len(self.impulse_names) + 1
+                n_impulse = len(self.terminal_names) + 1
                 stabilizing_constant = 1. / ((self.history_length + self.future_length) * n_impulse)
                 irf_out = self.irf(irf_l1) * stabilizing_constant
 
@@ -1262,7 +1266,7 @@ class CDRNN(Model):
 
     def get_irf_output_ndim(self):
         n = 0
-        n_impulse = len(self.impulse_names) + 1
+        n_impulse = len(self.terminal_names) + 1
         for response in self.response_names:
             if self.use_distributional_regression:
                 nparam = self.get_response_nparam(response)
@@ -1279,7 +1283,7 @@ class CDRNN(Model):
                 slices = {}
                 shapes = {}
                 n = 0
-                n_impulse = len(self.impulse_names) + 1
+                n_impulse = len(self.terminal_names) + 1
                 for response in self.response_names:
                     if self.use_distributional_regression:
                         nparam = self.get_response_nparam(response)
