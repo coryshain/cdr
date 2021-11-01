@@ -586,6 +586,14 @@ class Model(object):
         for _response in self.response_to_df_ix:
             self.n_response_df = max(self.n_response_df, max(self.response_to_df_ix[_response]))
         self.n_response_df += 1
+        
+        impulse_dfs_noninteraction = set()
+        for x in self.terminal_names:
+            impulse = self.terminal2impulse[x][0]
+            ix = self.impulse_names.index(impulse)
+            df_ix = self.impulse_df_ix[ix]
+            impulse_dfs_noninteraction.add(df_ix)
+        self.n_impulse_df_noninteraction = len(impulse_dfs_noninteraction)
 
         self.use_crossval = bool(self.crossval_factor)
 

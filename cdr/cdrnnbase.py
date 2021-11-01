@@ -429,7 +429,7 @@ class CDRNN(Model):
                     self.context_regularizer = self.regularizer
                 else:
                     scale = self.context_regularizer_scale / (
-                        (self.history_length + self.future_length) * max(1, self.n_impulse_df)
+                        (self.history_length + self.future_length) * max(1, self.n_impulse_df_noninteraction)
                     ) # Average over time
                     if self.scale_regularizer_with_data:
                          scale *= self.minibatch_scale # Sum over batch, multiply by n batches
@@ -1019,7 +1019,7 @@ class CDRNN(Model):
 
                 # Handle multiple impulse streams with different timestamps
                 # by interleaving the impulses in temporal order
-                if self.n_impulse_df > 1:
+                if self.n_impulse_df_noninteraction > 1:
                     X_cdrnn = []
                     t_delta_cdrnn = []
                     X_time_cdrnn = []
@@ -1068,7 +1068,7 @@ class CDRNN(Model):
                     sort_ix = tf.contrib.framework.argsort(tf.squeeze(X_time_cdrnn, axis=-1), axis=1)
                     B_ix = tf.tile(
                         tf.range(B)[..., None],
-                        [1, T * self.n_impulse_df]
+                        [1, T * self.n_impulse_df_noninteraction]
                     )
                     gather_ix = tf.stack([B_ix, sort_ix], axis=-1)
 
@@ -1294,7 +1294,7 @@ class CDRNN(Model):
                     shapes[response] = tf.convert_to_tensor((
                         self.X_batch_dim,
                         # Predictor files get tiled out over the time dimension:
-                        self.X_time_dim * self.n_impulse_df,
+                        self.X_time_dim * self.n_impulse_df_noninteraction,
                         n_impulse,
                         nparam,
                         ndim
