@@ -483,9 +483,10 @@ class CDRNN(Model):
                             self.rnn_c_random_base_summary[gf].append(rnn_c_random_summary)
 
                         # CDRNN hidden state
-                        h_bias_random, h_bias_random_summary = self.initialize_h_bias(ran_gf=gf)
-                        self.h_bias_random_base[gf] = h_bias_random
-                        self.h_bias_random_base_summary[gf] = h_bias_random_summary
+                        if self.n_layers_input_projection or self.n_layers_rnn:
+                            h_bias_random, h_bias_random_summary = self.initialize_h_bias(ran_gf=gf)
+                            self.h_bias_random_base[gf] = h_bias_random
+                            self.h_bias_random_base_summary[gf] = h_bias_random_summary
 
                         # IRF L1 weights
                         irf_l1_W_random, irf_l1_W_random_summary, = self.initialize_irf_l1_weights(ran_gf=gf)
@@ -1030,34 +1031,35 @@ class CDRNN(Model):
                     T = X_shape[1]
 
                     for i, ix in enumerate(self.impulse_indices):
-                        dim_mask = np.zeros(len(self.impulse_names))
-                        dim_mask[ix] = 1
-                        dim_mask = tf.constant(dim_mask, dtype=self.FLOAT_TF)
-                        while len(dim_mask.shape) < len(X.shape):
-                            dim_mask = dim_mask[None, ...]
-                        dim_mask = tf.gather(dim_mask, impulse_ix, axis=2)
-                        X_cur = X * dim_mask
+                        if len(ix) > 0:
+                            dim_mask = np.zeros(len(self.impulse_names))
+                            dim_mask[ix] = 1
+                            dim_mask = tf.constant(dim_mask, dtype=self.FLOAT_TF)
+                            while len(dim_mask.shape) < len(X.shape):
+                                dim_mask = dim_mask[None, ...]
+                            dim_mask = tf.gather(dim_mask, impulse_ix, axis=2)
+                            X_cur = X * dim_mask
 
-                        if t_delta.shape[-1] > 1:
-                            t_delta_cur = t_delta[..., ix[0]:ix[0]+1]
-                        else:
-                            t_delta_cur = t_delta
+                            if t_delta.shape[-1] > 1:
+                                t_delta_cur = t_delta[..., ix[0]:ix[0]+1]
+                            else:
+                                t_delta_cur = t_delta
 
-                        if X_time.shape[-1] > 1:
-                            _X_time = X_time[..., ix[0]:ix[0]+1]
-                        else:
-                            _X_time = X_time
+                            if X_time.shape[-1] > 1:
+                                _X_time = X_time[..., ix[0]:ix[0]+1]
+                            else:
+                                _X_time = X_time
 
-                        if X_mask is not None and X_mask.shape[-1] > 1:
-                            _X_mask = X_mask[..., ix[0]]
-                        else:
-                            _X_mask = X_mask
+                            if X_mask is not None and X_mask.shape[-1] > 1:
+                                _X_mask = X_mask[..., ix[0]]
+                            else:
+                                _X_mask = X_mask
 
-                        X_cdrnn.append(X_cur)
-                        t_delta_cdrnn.append(t_delta_cur)
-                        X_time_cdrnn.append(_X_time)
-                        if X_mask is not None:
-                            X_mask_cdrnn.append(_X_mask)
+                            X_cdrnn.append(X_cur)
+                            t_delta_cdrnn.append(t_delta_cur)
+                            X_time_cdrnn.append(_X_time)
+                            if X_mask is not None:
+                                X_mask_cdrnn.append(_X_mask)
 
                     X_cdrnn = tf.concat(X_cdrnn, axis=1)
                     t_delta_cdrnn = tf.concat(t_delta_cdrnn, axis=1)
@@ -1444,6 +1446,7 @@ class CDRNN(Model):
                         shift_activations=self.shift_normalized_activations,
                         rescale_activations=self.rescale_normalized_activations,
                         axis=-1,
+                        training=self.training,
                         epsilon=self.epsilon,
                         session=self.sess,
                         name='h'
@@ -1531,6 +1534,7 @@ class CDRNN(Model):
                         shift_activations=self.shift_normalized_activations,
                         rescale_activations=self.rescale_normalized_activations,
                         axis=-1,
+                        training=self.training,
                         epsilon=self.epsilon,
                         session=self.sess,
                         name='irf_l1'

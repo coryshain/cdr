@@ -1005,6 +1005,9 @@ def compute_filter(y, field, cond):
     elif cond.startswith('=='):
         op = '=='
         var = cond[2:].strip()
+    elif cond.startswith('='):
+        op = '=='
+        var = cond[1:].strip()
     elif cond.startswith('!='):
         op = '!='
         var = cond[2:].strip()
@@ -1028,7 +1031,7 @@ def compute_filter(y, field, cond):
         return ~pd.isna(y[field]) & (y[field] < var)
     if cond.startswith('>'):
         return ~pd.isna(y[field]) & (y[field] > var)
-    if cond.startswith('=='):
+    if cond.startswith('='):
         try:
             return ~pd.isna(y[field]) & (y[field] == var)
         except:

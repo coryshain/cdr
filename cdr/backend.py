@@ -922,6 +922,11 @@ class RNNCellBayes(RNNCell):
                 out_dim = self._num_units
                 kernel_sd_prior = get_numerical_sd(self._kernel_sd_prior, in_dim=1, out_dim=out_dim)
                 kernel_sd_posterior = kernel_sd_prior * self._posterior_to_prior_sd_ratio
+                
+                if not self.name:
+                    name = ''
+                else:
+                    name = self.name
 
                 # Posterior distribution
                 t_delta_embedding_W_q_loc = self.add_variable(
@@ -951,10 +956,24 @@ class RNNCellBayes(RNNCell):
                         'scale': kernel_sd_prior,
                         'val': self.t_delta_embedding_W_q_dist.kl_divergence(self.t_delta_embedding_W_prior_dist)
                     }
+                with tf.variable_scope(name, reuse=self.reuse):
+                    self.t_delta_embedding_W_eval_sample = self.t_delta_embedding_W_q_dist.sample()
+                    self.t_delta_embedding_W_eval = tf.get_variable(
+                        name='t_delta_embedding_W_sample',
+                        initializer=tf.zeros_initializer(),
+                        shape=self.t_delta_embedding_W_eval_sample.shape,
+                        dtype=tf.float32,
+                        trainable=False
+                    )
+                    self.t_delta_embedding_W_eval_resample = tf.assign(self.t_delta_embedding_W_eval, self.t_delta_embedding_W_eval_sample)
                 self.t_delta_embedding_W = tf.cond(
-                    self.use_MAP_mode,
-                    self.t_delta_embedding_W_q_dist.mean,
-                    self.t_delta_embedding_W_q_dist.sample
+                    self.training,
+                    self.t_delta_embedding_W_q_dist.sample,
+                    tf.cond(
+                        self.use_MAP_mode,
+                        self.t_delta_embedding_W_q_dist.mean,
+                        lambda: self.t_delta_embedding_W_eval,
+                    )
                 )
 
                 bias_sd_prior = get_numerical_sd(self._kernel_sd_prior, in_dim=1, out_dim=1)
@@ -988,10 +1007,24 @@ class RNNCellBayes(RNNCell):
                         'scale': bias_sd_prior,
                         'val': self.t_delta_embedding_b_q_dist.kl_divergence(self.t_delta_embedding_b_prior_dist)
                     }
+                with tf.variable_scope(name, reuse=self.reuse):
+                    self.t_delta_embedding_b_eval_sample = self.t_delta_embedding_b_q_dist.sample()
+                    self.t_delta_embedding_b_eval = tf.get_variable(
+                        name='t_delta_embedding_b_sample',
+                        initializer=tf.zeros_initializer(),
+                        shape=self.t_delta_embedding_b_eval_sample.shape,
+                        dtype=tf.float32,
+                        trainable=False
+                    )
+                    self.t_delta_embedding_b_eval_resample = tf.assign(self.t_delta_embedding_b_eval, self.t_delta_embedding_b_eval_sample)
                 self.t_delta_embedding_b = tf.cond(
-                    self.use_MAP_mode,
-                    t_delta_embedding_b_q_dist.mean,
-                    t_delta_embedding_b_q_dist.sample
+                    self.training,
+                    self.t_delta_embedding_b_q_dist.sample,
+                    tf.cond(
+                        self.use_MAP_mode,
+                        self.t_delta_embedding_b_q_dist.mean,
+                        lambda: self.t_delta_embedding_b_eval
+                    )
                 )
 
     def kl_penalties(self):
@@ -1003,6 +1036,15 @@ class RNNCellBayes(RNNCell):
 
     def ema_ops(self):
         return []
+
+    def resample_ops(self):
+        out = super(RNNCellBayes, self).resample_ops()
+        if self._forget_gate_as_irf:
+            out += [
+                self.t_delta_embedding_W_eval_resample,
+                self.t_delta_embedding_b_eval_resample,
+            ]
+        return out
 
 
 class RNNLayerBayes(RNNLayer):
@@ -1281,6 +1323,7 @@ class DenseLayer(object):
                                 shift_activations=self.shift_normalized_activations,
                                 rescale_activations=self.rescale_normalized_activations,
                                 axis=-1,
+                                training=self.training,
                                 epsilon=self.epsilon,
                                 session=self.session,
                                 reuse=self.reuse,
@@ -1479,14 +1522,27 @@ class DenseLayerBayes(DenseLayer):
                                 'scale': kernel_sd_prior,
                                 'val': self.kernel_q_dist.kl_divergence(self.kernel_prior_dist)
                             }
+                        with tf.variable_scope(name, reuse=self.reuse):
+                            self.kernel_eval_sample = self.kernel_q_dist.sample()
+                            self.kernel_eval = tf.get_variable(
+                                name='kernel_sample',
+                                initializer=tf.zeros_initializer(),
+                                shape=self.kernel_eval_sample.shape,
+                                dtype=tf.float32,
+                                trainable=False
+                            )
+                            self.kernel_eval_resample = tf.assign(self.kernel_eval, self.kernel_eval_sample)
                         self.kernel = tf.cond(
-                            self.use_MAP_mode,
-                            self.kernel_q_dist.mean,
-                            self.kernel_q_dist.sample
+                            self.training,
+                            self.kernel_q_dist.sample,
+                            lambda: tf.cond(
+                                self.use_MAP_mode,
+                                self.kernel_q_dist.mean,
+                                lambda: self.kernel_eval
+                            )
                         )
 
                         if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
-                        # if self.use_bias and not self.normalize_activations:
                             bias_sd_prior = get_numerical_sd(self.bias_sd_prior, in_dim=1, out_dim=1)
                             if self.bias_sd_init:
                                 bias_sd_posterior = get_numerical_sd(self.bias_sd_init, in_dim=1, out_dim=1)
@@ -1521,10 +1577,24 @@ class DenseLayerBayes(DenseLayer):
                                     'scale': bias_sd_prior,
                                     'val': self.bias_q_dist.kl_divergence(self.bias_prior_dist)
                                 }
+                            with tf.variable_scope(name, reuse=self.reuse):
+                                self.bias_eval_sample = self.bias_q_dist.sample()
+                                self.bias_eval = tf.get_variable(
+                                    name='bias_sample',
+                                    initializer=tf.zeros_initializer(),
+                                    shape=self.bias_eval_sample.shape,
+                                    dtype=tf.float32,
+                                    trainable=False
+                                )
+                                self.bias_eval_resample = tf.assign(self.bias_eval, self.bias_eval_sample)
                             self.bias = tf.cond(
-                                self.use_MAP_mode,
-                                self.bias_q_dist.mean,
-                                self.bias_q_dist.sample
+                                self.training,
+                                self.bias_q_dist.sample,
+                                lambda: tf.cond(
+                                    self.use_MAP_mode,
+                                    self.bias_q_dist.mean,
+                                    lambda: self.bias_eval,
+                                )
                             )
 
                         if self.use_dropout:
@@ -1557,6 +1627,7 @@ class DenseLayerBayes(DenseLayer):
                                 shift_activations=self.shift_normalized_activations,
                                 rescale_activations=self.rescale_normalized_activations,
                                 axis=-1,
+                                training=self.training,
                                 use_MAP_mode=self.use_MAP_mode,
                                 declare_priors_scale=self.declare_priors_gamma,
                                 declare_priors_shift=self.declare_priors_biases,
@@ -1583,6 +1654,17 @@ class DenseLayerBayes(DenseLayer):
                     out.update(self.normalization_layer.kl_penalties())
 
                 return out
+
+    def resample_ops(self):
+        out = super(DenseLayerBayes, self).resample_ops()
+        if self.built:
+            out.append(self.kernel_eval_resample)
+            if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
+                out.append(self.bias_eval_resample)
+            if self.use_batch_normalization or self.use_layer_normalization:
+                out += self.normalization_layer.resample_ops()
+
+        return out
 
 
 class BatchNormLayer(object):
@@ -1852,10 +1934,24 @@ class BatchNormLayerBayes(BatchNormLayer):
                                     'scale': shift_sd_prior,
                                     'val': self.beta_q_dist.kl_divergence(self.beta_prior_dist)
                                 }
+                            with tf.variable_scope(name, reuse=self.reuse):
+                                self.beta_eval_sample = self.beta_q_dist.sample()
+                                self.beta_eval = tf.get_variable(
+                                    name='beta_sample',
+                                    initializer=tf.zeros_initializer(),
+                                    shape=self.beta_eval_sample.shape,
+                                    dtype=tf.float32,
+                                    trainable=False
+                                )
+                                self.beta_eval_resample = tf.assign(self.beta_eval, self.beta_eval_sample)
                             self.beta = tf.cond(
-                                self.use_MAP_mode,
-                                self.beta_q_dist.mean,
-                                self.beta_q_dist.sample
+                                self.training,
+                                self.beta_q_dist.sample,
+                                lambda: tf.cond(
+                                    self.use_MAP_mode,
+                                    self.beta_q_dist.mean,
+                                    lambda: self.beta_eval
+                                )
                             )
                         else:
                             self.beta = tf.Variable(0., name='beta', trainable=False)
@@ -1895,10 +1991,24 @@ class BatchNormLayerBayes(BatchNormLayer):
                                     'scale': scale_sd_prior,
                                     'val': self.gamma_q_dist.kl_divergence(self.gamma_prior_dist)
                                 }
+                            with tf.variable_scope(name, reuse=self.reuse):
+                                self.gamma_eval_sample = self.gamma_q_dist.sample()
+                                self.gamma_eval = tf.get_variable(
+                                    name='gamma_sample',
+                                    initializer=tf.zeros_initializer(),
+                                    shape=self.gamma_eval_sample.shape,
+                                    dtype=tf.float32,
+                                    trainable=False
+                                )
+                                self.gamma_eval_resample = tf.assign(self.gamma_eval, self.gamma_eval_sample)
                             self.gamma = tf.cond(
-                                self.use_MAP_mode,
-                                self.gamma_q_dist.mean,
-                                self.gamma_q_dist.sample
+                                self.training,
+                                self.gamma_q_dist.sample,
+                                lambda: tf.cond(
+                                    self.use_MAP_mode,
+                                    self.gamma_q_dist.mean,
+                                    lambda: self.gamma_eval
+                                )
                             )
                         else:
                             self.gamma = tf.Variable(1., name='beta', trainable=False)
@@ -1910,6 +2020,16 @@ class BatchNormLayerBayes(BatchNormLayer):
             with self.session.graph.as_default():
                 return self.kl_penalties_base.copy()
 
+    def resample_ops(self):
+        out = super(BatchNormLayerBayes, self).resample_ops()
+        if self.built:
+            if self.shift_activations:
+                out.append(self.beta_eval_resample)
+            if self.rescale_activations:
+                out.append(self.gamma_eval_resample)
+
+        return out
+
 
 class LayerNormLayer(object):
     def __init__(
@@ -1918,12 +2038,14 @@ class LayerNormLayer(object):
             shift_activations=True,
             rescale_activations=True,
             axis=-1,
+            training=True,
             epsilon=1e-5,
             session=None,
             reuse=tf.AUTO_REUSE,
             name=None
     ):
         self.session = get_session(session)
+        self.training = training
         self.normalization_type = normalization_type
         assert self.normalization_type in ['z', 'length'], 'Unrecognized normalization type: %s' % self.normalization_type
         self.shift_activations = shift_activations
@@ -2013,6 +2135,7 @@ class LayerNormLayerBayes(LayerNormLayer):
             shift_activations=True,
             rescale_activations=True,
             axis=-1,
+            training=True,
             use_MAP_mode=None,
             declare_priors_scale=True,
             declare_priors_shift=False,
@@ -2028,6 +2151,7 @@ class LayerNormLayerBayes(LayerNormLayer):
             name=None
     ):
         super(LayerNormLayerBayes, self).__init__(
+            training=training,
             normalization_type=normalization_type,
             shift_activations=shift_activations,
             rescale_activations=rescale_activations,
@@ -2076,10 +2200,10 @@ class LayerNormLayerBayes(LayerNormLayer):
             shape = []
             for i in range(len(inputs_shape)):
                 if i in self.reduction_axes:
-                    shape.append(inputs_shape[i])
+                    shape.append(int(inputs_shape[i]))
                 else:
                     shape.append(1)
-            shape = tf.convert_to_tensor(shape)
+            # shape = tf.convert_to_tensor(shape)
 
             if not self.name:
                 name = ''
@@ -2143,10 +2267,24 @@ class LayerNormLayerBayes(LayerNormLayer):
                                     'scale': shift_sd_prior,
                                     'val': self.beta_q_dist.kl_divergence(self.beta_prior_dist)
                                 }
+                            with tf.variable_scope(name, reuse=self.reuse):
+                                self.beta_eval_sample = self.beta_q_dist.sample()
+                                self.beta_eval = tf.get_variable(
+                                    name='beta_sample',
+                                    initializer=tf.zeros_initializer(),
+                                    shape=self.beta_eval_sample.shape,
+                                    dtype=tf.float32,
+                                    trainable=False
+                                )
+                                self.beta_eval_resample = tf.assign(self.beta_eval, self.beta_eval_sample)
                             self.beta = tf.cond(
-                                self.use_MAP_mode,
-                                self.beta_q_dist.mean,
-                                self.beta_q_dist.sample
+                                self.training,
+                                self.beta_q_dist.sample,
+                                lambda: tf.cond(
+                                    self.use_MAP_mode,
+                                    self.beta_q_dist.mean,
+                                    lambda: self.beta_eval
+                                )
                             )
                         else:
                             self.beta = tf.Variable(0., name='beta', trainable=False)
@@ -2186,10 +2324,24 @@ class LayerNormLayerBayes(LayerNormLayer):
                                     'scale': scale_sd_prior,
                                     'val': self.gamma_q_dist.kl_divergence(self.gamma_prior_dist)
                                 }
+                            with tf.variable_scope(name, reuse=self.reuse):
+                                self.gamma_eval_sample = self.gamma_q_dist.sample()
+                                self.gamma_eval = tf.get_variable(
+                                    name='gamma_sample',
+                                    initializer=tf.zeros_initializer(),
+                                    shape=self.gamma_eval_sample.shape,
+                                    dtype=tf.float32,
+                                    trainable=False
+                                )
+                                self.gamma_eval_resample = tf.assign(self.gamma_eval, self.gamma_eval_sample)
                             self.gamma = tf.cond(
-                                self.use_MAP_mode,
-                                self.gamma_q_dist.mean,
-                                self.gamma_q_dist.sample
+                                self.training,
+                                self.gamma_q_dist.sample,
+                                lambda: tf.cond(
+                                    self.use_MAP_mode,
+                                    self.gamma_q_dist.mean,
+                                    lambda: self.gamma_eval
+                                )
                             )
                         else:
                             self.gamma = tf.Variable(1., name='beta', trainable=False)
@@ -2200,6 +2352,16 @@ class LayerNormLayerBayes(LayerNormLayer):
         with self.session.as_default():
             with self.session.graph.as_default():
                 return self.kl_penalties_base.copy()
+
+    def resample_ops(self):
+        out = super(LayerNormLayerBayes, self).resample_ops()
+        if self.built:
+            if self.shift_activations:
+                out.append(self.beta_eval_resample)
+            if self.rescale_activations:
+                out.append(self.gamma_eval_resample)
+
+        return out
 
 
 class DropoutLayer(object):

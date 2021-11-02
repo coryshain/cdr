@@ -246,7 +246,7 @@ class Config(object):
             out['network_type'] = settings.get('network_type', global_settings.get('network_type', network_type_default))
 
         if 'network_type' in out:
-            is_bayes = out['network_type'] == 'bayes'
+            is_bayes = out['network_type'] in ('bbvi', 'bayes', 'bayesian')
         else:
             is_bayes = False
 

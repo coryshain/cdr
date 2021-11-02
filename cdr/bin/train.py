@@ -244,8 +244,10 @@ if __name__ == '__main__':
 
             if p['network_type'] in ['mle', 'nn']:
                 bayes = False
-            else:
+            elif p['network_type'].lower() in ['bbvi', 'bayes', 'bayesian']:
                 bayes = True
+            else:
+                raise ValueError('Unrecognized network type %s.' % p['network_type'])
 
             kwargs = {}
             for kwarg in MODEL_INITIALIZATION_KWARGS:
@@ -258,14 +260,7 @@ if __name__ == '__main__':
             if m.startswith('CDRNN'):
                 for kwarg in CDRNN_INITIALIZATION_KWARGS:
                     kwargs[kwarg.key] = p[kwarg.key]
-                if p['network_type'].lower() in ['mle', 'nn']:
-                    from cdr.cdrnnmle import CDRNNMLE
-
-                    for kwarg in CDRNNMLE_INITIALIZATION_KWARGS:
-                        kwargs[kwarg.key] = p[kwarg.key]
-
-                    CDRModel = CDRNNMLE
-                elif p['network_type'].lower() in ['bbvi', 'bayes', 'bayesian']:
+                if bayes:
                     from cdr.cdrnnbayes import CDRNNBayes
 
                     for kwarg in CDRNNBAYES_INITIALIZATION_KWARGS:
@@ -273,19 +268,17 @@ if __name__ == '__main__':
 
                     CDRModel = CDRNNBayes
                 else:
-                    raise ValueError('Unrecognized network type %s.' % p['network_type'])
+                    from cdr.cdrnnmle import CDRNNMLE
+
+                    for kwarg in CDRNNMLE_INITIALIZATION_KWARGS:
+                        kwargs[kwarg.key] = p[kwarg.key]
+
+                    CDRModel = CDRNNMLE
             else:
                 for kwarg in CDR_INITIALIZATION_KWARGS:
                     kwargs[kwarg.key] = p[kwarg.key]
 
-                if p['network_type'].lower() in ['mle', 'nn']:
-                    from cdr.cdrmle import CDRMLE
-
-                    for kwarg in CDRMLE_INITIALIZATION_KWARGS:
-                        kwargs[kwarg.key] = p[kwarg.key]
-
-                    CDRModel = CDRMLE
-                elif p['network_type'].lower() in ['bbvi', 'bayes', 'bayesian']:
+                if bayes:
                     from cdr.cdrbayes import CDRBayes
 
                     for kwarg in CDRBAYES_INITIALIZATION_KWARGS:
@@ -293,7 +286,12 @@ if __name__ == '__main__':
 
                     CDRModel = CDRBayes
                 else:
-                    raise ValueError('Unrecognized network type %s.' % p['network_type'])
+                    from cdr.cdrmle import CDRMLE
+
+                    for kwarg in CDRMLE_INITIALIZATION_KWARGS:
+                        kwargs[kwarg.key] = p[kwarg.key]
+
+                    CDRModel = CDRMLE
 
             cdr_model = CDRModel(
                 formula,

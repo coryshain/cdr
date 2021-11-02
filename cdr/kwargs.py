@@ -1259,13 +1259,13 @@ CDRNNBAYES_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'declare_priors_biases',
-        False,
+        True,
         bool,
         "Specify Gaussian priors for model biases (if ``False``, use implicit improper uniform priors)."
     ),
     Kwarg(
         'declare_priors_gamma',
-        False,
+        True,
         bool,
         "Specify Gaussian priors for gamma parameters of any batch normalization layers (if ``False``, use implicit improper uniform priors).",
         aliases=['declare_priors']
