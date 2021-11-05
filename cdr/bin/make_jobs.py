@@ -37,7 +37,7 @@ if __name__ == '__main__':
     use_gpu = args.use_gpu
     memory = args.memory
     slurm_partition = args.slurm_partition
-    cli_args = args.cli_args
+    cli_args = args.cli_args.replace('\\', '') # Delete escape characters
     outdir = args.outdir
 
     if not os.path.exists(outdir):
