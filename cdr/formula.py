@@ -1197,7 +1197,8 @@ class Formula(object):
                             Y[i] = self.apply_ops(x, _Y)
                         if X_in_Y_names is None:
                             X_in_Y_names = []
-                        X_in_Y_names.append(x.name())
+                        if x.name() not in X_in_Y_names:
+                            X_in_Y_names.append(x.name())
 
             if type(impulse).__name__ == 'ImpulseInteraction':
                 response_aligned = False
@@ -1210,7 +1211,8 @@ class Formula(object):
                         Y[i] = self.apply_ops(impulse, _Y)
                     if X_in_Y_names is None:
                         X_in_Y_names = []
-                    X_in_Y_names.append(impulse.name())
+                    if impulse.name() not in X_in_Y_names:
+                        X_in_Y_names.append(impulse.name())
                 else:
                     found = False
                     for i in range(len(X)):
