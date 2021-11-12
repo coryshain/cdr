@@ -287,7 +287,7 @@ class Model(object):
                     elif is_interaction:
                         found = True
                         impulse_names = [x.name() for x in impulse.impulses()]
-                        for x in impulse.impulses(include_interactions=True):
+                        for x in impulse.impulses():
                             if not x.name() in df:
                                 found = False
                                 break
