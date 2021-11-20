@@ -6,13 +6,12 @@ import pandas as pd
 
 pd.options.mode.chained_assignment = None
 
-from cdr.kwargs import MODEL_INITIALIZATION_KWARGS, \
-    CDR_INITIALIZATION_KWARGS, CDRMLE_INITIALIZATION_KWARGS, CDRBAYES_INITIALIZATION_KWARGS, \
-    CDRNN_INITIALIZATION_KWARGS, CDRNNMLE_INITIALIZATION_KWARGS, CDRNNBAYES_INITIALIZATION_KWARGS
+from cdr.kwargs import MODEL_INITIALIZATION_KWARGS
 from cdr.config import Config
 from cdr.io import read_tabular_data
 from cdr.formula import Formula
 from cdr.data import filter_invalid_responses, preprocess_data, compute_splitID, compute_partition
+from cdr.model import CDRModel
 from cdr.util import mse, mae, filter_models, get_partition_list, paths_from_partition_cliarg, stderr
 
 
@@ -33,7 +32,11 @@ if __name__ == '__main__':
     argparser.add_argument('--cpu_only', action='store_true', help='Use CPU implementation even if GPU is available.')
     args = argparser.parse_args()
 
+    import time
+    t1 = time.time()
     p = Config(args.config_path)
+    t2 = time.time()
+    print('Config load time: %s' % (t2-t1))
 
     if not p.use_gpu_if_available or args.cpu_only:
         os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
@@ -256,42 +259,6 @@ if __name__ == '__main__':
             kwargs['crossval_factor'] = p['crossval_factor']
             kwargs['crossval_fold'] = p['crossval_fold']
             kwargs['irf_name_map'] = p.irf_name_map
-
-            if m.startswith('CDRNN'):
-                for kwarg in CDRNN_INITIALIZATION_KWARGS:
-                    kwargs[kwarg.key] = p[kwarg.key]
-                if bayes:
-                    from cdr.cdrnnbayes import CDRNNBayes
-
-                    for kwarg in CDRNNBAYES_INITIALIZATION_KWARGS:
-                        kwargs[kwarg.key] = p[kwarg.key]
-
-                    CDRModel = CDRNNBayes
-                else:
-                    from cdr.cdrnnmle import CDRNNMLE
-
-                    for kwarg in CDRNNMLE_INITIALIZATION_KWARGS:
-                        kwargs[kwarg.key] = p[kwarg.key]
-
-                    CDRModel = CDRNNMLE
-            else:
-                for kwarg in CDR_INITIALIZATION_KWARGS:
-                    kwargs[kwarg.key] = p[kwarg.key]
-
-                if bayes:
-                    from cdr.cdrbayes import CDRBayes
-
-                    for kwarg in CDRBAYES_INITIALIZATION_KWARGS:
-                        kwargs[kwarg.key] = p[kwarg.key]
-
-                    CDRModel = CDRBayes
-                else:
-                    from cdr.cdrmle import CDRMLE
-
-                    for kwarg in CDRMLE_INITIALIZATION_KWARGS:
-                        kwargs[kwarg.key] = p[kwarg.key]
-
-                    CDRModel = CDRMLE
 
             cdr_model = CDRModel(
                 formula,

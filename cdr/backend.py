@@ -1,6 +1,6 @@
-import math
 import collections
 import tensorflow as tf
+
 from .util import *
 
 from tensorflow.python.ops import rnn_cell_impl
@@ -185,6 +185,812 @@ def make_lambda(layer, session=None, multi_arg=False, use_kwargs=False):
                     def apply_layer(x, **kwargs):
                         return layer(x)
             return apply_layer
+
+
+def interpolated_integral(loc, val, mask=None, axis=0, session=None):
+    assert isinstance(axis, int), 'axis must be a scalar integer'
+    assert len(loc.shape) == len(val.shape), 'loc and val must be compatibly shaped. Got loc=%s, val=%s' % (loc.shape, val.shape)
+    if mask is not None:
+        assert len(loc.shape) == len(mask.shape), 'loc and mask must be compatibly shaped. Got loc=%s, mask=%s' % (loc.shape, mask.shape)
+    ndim = len(loc.shape)
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            if axis < 0:
+                _axis = ndim + axis
+            else:
+                _axis = axis
+            assert 0 <= _axis < ndim, 'Attempted to integrate over axis %d, but array only has %d dimensions.' % (
+            axis, ndim)
+            axis = _axis
+
+            ntime = tf.shape(loc)[axis]
+
+            def fnA(val=val, mask=mask, axis=axis):
+                return tf.reduce_sum(val * mask, axis=axis)
+
+            def fnB(loc=loc, val=val, mask=mask, axis=axis):
+                sliceA = [slice(None, None) for _ in range(axis)] + [slice(None, -1)]
+                sliceB = [slice(None, None) for _ in range(axis)] + [slice(1, None)]
+
+                locA = loc[sliceA]
+                locB = loc[sliceB]
+                stepsize = locB - locA
+
+                valA = val[sliceA]
+                valB = val[sliceB]
+                valInterp = (valA + valB) / 2
+
+                integral = valInterp * stepsize
+                if mask is not None:
+                    mask = mask[sliceB]
+                    integral = integral * mask
+                integral = tf.reduce_sum(integral, axis=axis)
+
+                return integral
+
+            return tf.cond(ntime > 1, fnB, fnA)
+
+
+# IRF Lambdas (response dimension is always last)
+
+def empirical_integral(irf, session=None):
+    def f(x, irf=irf, n_time_points=1000, session=session):
+        session = get_session(session)
+        with session.as_default():
+            with session.graph.as_default():
+                out = irf(x)
+                support = tf.linspace(0., x, n_time_points)
+                step_size = x / n_time_points
+                while len(support.shape) < len(out.shape):
+                    support = support[None, ...]
+                irf_samples = irf(support)
+                out = (tf.reduce_sum(irf_samples, axis=-2, keepdims=True)) * step_size
+
+                return out
+
+    return f
+
+
+def exponential_irf_factory(
+        beta,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None
+):
+    """
+    Instantiate an exponential impulse response function (IRF).
+
+    :param beta: TF tensor; beta (rate) parameter (beta > 0).
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :return: ``function``; the IRF
+    """
+
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            beta = tf.convert_to_tensor(beta)
+
+            def pdf(x, beta=beta):
+                return beta * tf.exp(-beta * x)
+
+            def cdf(x, beta=beta):
+                return 1 - tf.exp(-beta * x)
+
+            if support_ub is None:
+                def irf(x, pdf=pdf):
+                    return pdf(x)
+            else:
+                norm_const = cdf(support_ub)
+
+                def irf(x, pdf=pdf, norm_const=norm_const, epsilon=epsilon):
+                    # Ensure proper broadcasting
+                    while len(x.shape) > len(norm_const.shape):
+                        norm_const = norm_const[None, ...]
+                    return pdf(x) / (norm_const + epsilon)
+
+            return irf
+
+
+def gamma_irf_factory(
+        alpha,
+        beta,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None,
+        validate_irf_args=False
+):
+    """
+    Instantiate a gamma impulse response function (IRF).
+
+    :param alpha: TF tensor; alpha (shape) parameter (alpha > 0).
+    :param beta: TF tensor; beta (rate) parameter (beta > 0).
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :param validate_irf_args: ``bool``; whether to validate any constraints on the IRF parameters.
+    :return: ``function``; the IRF
+    """
+
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            alpha = tf.convert_to_tensor(alpha)
+            beta = tf.convert_to_tensor(beta)
+
+            dist = tf.contrib.distributions.Gamma(
+                concentration=alpha,
+                rate=beta,
+                validate_args=validate_irf_args
+            )
+            pdf = dist.prob
+            cdf = dist.cdf
+
+            if support_ub is None:
+                def irf(x, pdf=pdf, epsilon=epsilon):
+                    return pdf(x + epsilon)
+
+            else:
+                norm_const = cdf(support_ub)
+
+                def irf(x, pdf=pdf, norm_const=norm_const, epsilon=epsilon):
+                    # Ensure proper broadcasting
+                    while len(x.shape) > len(norm_const.shape):
+                        norm_const = norm_const[None, ...]
+                    return pdf(x + epsilon) / (norm_const + epsilon)
+
+            return irf
+
+
+def shifted_gamma_irf_factory(
+        alpha,
+        beta,
+        delta,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None,
+        validate_irf_args=False
+):
+    """
+    Instantiate a gamma impulse response function (IRF) with an additional shift parameter.
+
+    :param alpha: TF tensor; alpha (shape) parameter (alpha > 0).
+    :param beta: TF tensor; beta (rate) parameter (beta > 0).
+    :param delta: TF tensor; delta (shift) parameter (delta < 0).
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :param validate_irf_args: ``bool``; whether to validate any constraints on the IRF parameters.
+    :return: ``function``; the IRF
+    """
+
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            alpha = tf.convert_to_tensor(alpha)
+            beta = tf.convert_to_tensor(beta)
+            delta = tf.convert_to_tensor(delta)
+
+            dist = tf.contrib.distributions.Gamma(
+                concentration=alpha,
+                rate=beta,
+                validate_args=validate_irf_args
+            )
+
+            pdf = dist.prob
+            cdf = dist.cdf
+            cdf_0 = cdf(-delta)
+
+            if support_ub is None:
+                ub = 1.
+            else:
+                ub = cdf(support_ub - delta)
+
+            norm_const = ub - cdf_0
+
+            def irf(x, pdf=pdf, delta=delta, norm_const=norm_const, epsilon=epsilon):
+                # Ensure proper broadcasting
+                while len(x.shape) > len(delta.shape):
+                    delta = delta[None, ...]
+                while len(x.shape) > len(norm_const.shape):
+                    norm_const = norm_const[None, ...]
+                return pdf(x - delta) / (norm_const + epsilon)
+
+            return irf
+
+
+def normal_irf_factory(
+        mu,
+        sigma,
+        support_ub=None,
+        support_lb=0.,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None
+):
+    """
+    Instantiate a normal impulse response function (IRF).
+
+    :param mu: TF tensor; mu (location) parameter.
+    :param sigma: TF tensor; sigma (scale) parameter (sigma > 0).
+    :param causal: ``bool``; whether to assume causality (x >= 0) in the normalization.
+    :param support_lb: ``tensor``, ``float`` or ``None``; lower bound on the IRF's support. If ``None``, lower bound set to 0.
+    :param support_lb: ``tensor``, ``float`` or ``None``; lower bound on the IRF's support. If ``None``, no lower bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :return: ``function``; the IRF
+    """
+
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            mu = tf.convert_to_tensor(mu)
+            sigma = tf.convert_to_tensor(sigma)
+
+            dist = tf.contrib.distributions.Normal(
+                mu,
+                sigma
+            )
+
+            pdf = dist.prob
+            cdf = dist.cdf
+
+            if support_lb is None:
+                lb = 0.
+            else:
+                lb = cdf(support_lb)
+            if support_ub is None:
+                ub = 1.
+            else:
+                ub = cdf(support_ub)
+
+            norm_const = ub - lb
+
+            def irf(x, pdf=pdf, norm_const=norm_const, epsilon=epsilon):
+                # Ensure proper broadcasting
+                while len(x.shape) > len(norm_const.shape):
+                    norm_const = norm_const[None, ...]
+                return pdf(x) / (norm_const + epsilon)
+
+            return irf
+
+
+def skew_normal_irf_factory(
+        mu,
+        sigma,
+        alpha,
+        support_lb=0.,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None
+):
+    """
+    Instantiate a skew-normal impulse response function (IRF).
+
+    :param mu: TF tensor; mu (location) parameter.
+    :param sigma: TF tensor; sigma (scale) parameter (sigma > 0).
+    :param alpha: TF tensor; alpha (skew) parameter.
+    :param causal: ``bool``; whether to assume causality (x >= 0) in the normalization.
+    :param support_lb: ``tensor``, ``float`` or ``None``; lower bound on the IRF's support. If ``None``, lower bound set to 0.
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :return: ``function``; the IRF
+    """
+
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            mu = tf.convert_to_tensor(mu)
+            sigma = tf.convert_to_tensor(sigma)
+            alpha = tf.convert_to_tensor(alpha)
+
+            stdnorm = tf.contrib.distributions.Normal(loc=0., scale=1.)
+            stdnorm_pdf = stdnorm.prob
+            stdnorm_cdf = stdnorm.cdf
+
+            def irf_base(x, mu=mu, sigma=sigma, alpha=alpha, pdf=stdnorm_pdf, cdf=stdnorm_cdf):
+                # Ensure proper broadcasting
+                while len(x.shape) > len(mu.shape):
+                    mu = mu[None, ...]
+                while len(x.shape) > len(sigma.shape):
+                    sigma = sigma[None, ...]
+                while len(x.shape) > len(alpha.shape):
+                    alpha = alpha[None, ...]
+                return (pdf((x - mu) / (sigma)) * cdf(alpha * (x - mu) / (sigma)))
+
+            cdf = empirical_integral(irf_base, session=session)
+
+            if support_lb is None:
+                lb = 0.
+            else:
+                lb = cdf(support_lb)
+            if support_ub is None:
+                ub = 1.
+            else:
+                ub = cdf(support_ub)
+
+            norm_const = ub - lb
+
+            def irf(x, irf_base=irf_base, norm_const=norm_const, epsilon=epsilon):
+                # Ensure proper broadcasting
+                while len(x.shape) > len(norm_const.shape):
+                    norm_const = norm_const[None, ...]
+                return irf_base(x) / (norm_const + epsilon)
+
+            return irf
+
+
+def emg_irf_factory(
+        mu,
+        sigma,
+        beta,
+        support_lb=0.,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None
+):
+    """
+    Instantiate an exponentially-modified Gaussian (EMG) impulse response function (IRF).
+
+    :param mu: TF tensor; mu (location) parameter.
+    :param sigma: TF tensor; sigma (scale) parameter (sigma > 0).
+    :param beta: TF tensor; beta (rate) parameter (beta > 0).
+    :param support_lb: ``tensor``, ``float`` or ``None``; lower bound on the IRF's support. If ``None``, lower bound set to 0.
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :return: ``function``; the IRF
+    """
+
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            mu = tf.convert_to_tensor(mu)
+            sigma = tf.convert_to_tensor(sigma)
+            beta = tf.convert_to_tensor(beta)
+
+            def cdf(x):
+                return tf.contrib.distributions.Normal(
+                    loc=0.,
+                    scale=beta * sigma
+                )(beta * (x - mu))
+
+            if support_lb is None:
+                lb = 0.
+            else:
+                lb = cdf(support_lb)
+            if support_ub is None:
+                ub = 1.
+            else:
+                ub = cdf(support_ub)
+
+            norm_const = ub - lb
+
+            def irf(x, mu=mu, sigma=sigma, beta=beta, norm_const=norm_const, epsilon=epsilon):
+                # Ensure proper broadcasting
+                while len(x.shape) > len(mu.shape):
+                    mu = mu[None, ...]
+                while len(x.shape) > len(sigma.shape):
+                    sigma = sigma[None, ...]
+                while len(x.shape) > len(beta.shape):
+                    beta = beta[None, ...]
+                while len(x.shape) > len(norm_const.shape):
+                    norm_const = norm_const[None, ...]
+                return (beta / 2 * tf.exp(0.5 * beta * (2. * mu + beta * sigma ** 2. - 2. * x)) *
+                        tf.erfc((mu + beta * sigma ** 2 - x) / (tf.sqrt(2.) * sigma))) / (norm_const + epsilon)
+
+            return irf
+
+
+def beta_prime_irf_factory(
+        alpha,
+        beta,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None
+):
+    """
+    Instantiate a beta-prime impulse response function (IRF).
+
+    :param alpha: TF tensor; alpha (rate) parameter (alpha > 0).
+    :param beta: TF tensor; beta (rate) parameter (beta > 0).
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :return: ``function``; the IRF
+    """
+
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            alpha = tf.convert_to_tensor(alpha)
+            beta = tf.convert_to_tensor(beta)
+
+            def cdf(x, alpha=alpha, beta=beta):
+                # Ensure proper broadcasting
+                while len(x.shape) > len(alpha.shape):
+                    alpha = alpha[None, ...]
+                while len(x.shape) > len(beta.shape):
+                    beta = beta[None, ...]
+                return tf.betainc(alpha, beta, x / (1 + x)) * tf.exp(tf.lbeta(alpha, beta))
+
+            if support_ub is None:
+                ub = 1
+            else:
+                ub = cdf(support_ub)
+
+            cdf_0 = cdf(epsilon)
+
+            norm_const = ub - cdf_0
+
+            def irf(x, alpha=alpha, beta=beta, norm_const=norm_const, epsilon=epsilon):
+                # Ensure proper broadcasting
+                while len(x.shape) > len(alpha.shape):
+                    alpha = alpha[None, ...]
+                while len(x.shape) > len(beta.shape):
+                    beta = beta[None, ...]
+                while len(x.shape) > len(norm_const.shape):
+                    norm_const = norm_const[None, ...]
+                return ((x + epsilon) ** (alpha - 1.) * (1. + (x + epsilon)) ** (-alpha - beta)) / (
+                            norm_const + epsilon)
+
+            return irf
+
+
+def shifted_beta_prime_irf_factory(
+        alpha,
+        beta,
+        delta,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None
+):
+    """
+    Instantiate a beta-prime impulse response function (IRF) with an additional shift parameter.
+
+    :param alpha: TF tensor; alpha (rate) parameter (alpha > 0).
+    :param beta: TF tensor; beta (rate) parameter (beta > 0).
+    :param delta: TF tensor; delta (shift) parameter (delta < 0).
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :return: ``function``; the IRF
+    """
+
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            alpha = tf.convert_to_tensor(alpha)
+            beta = tf.convert_to_tensor(beta)
+            delta = tf.convert_to_tensor(delta)
+
+            def cdf(x, alpha=alpha, beta=beta, delta=delta):
+                # Ensure proper broadcasting
+                while len(x.shape) > len(alpha.shape):
+                    alpha = alpha[None, ...]
+                while len(x.shape) > len(beta.shape):
+                    beta = beta[None, ...]
+                while len(x.shape) > len(delta.shape):
+                    delta = delta[None, ...]
+                return tf.betainc(alpha, beta, (x - delta) / (1 + x - delta)) * tf.exp(tf.lbeta(alpha, beta))
+
+            if support_ub is None:
+                ub = 1
+            else:
+                ub = cdf(support_ub - delta)
+
+            cdf_0 = cdf(-delta)
+
+            norm_const = ub - cdf_0
+
+            def irf(x, alpha=alpha, beta=beta, delta=delta, norm_const=norm_const, epsilon=epsilon):
+                # Ensure proper broadcasting
+                while len(x.shape) > len(alpha.shape):
+                    alpha = alpha[None, ...]
+                while len(x.shape) > len(beta.shape):
+                    beta = beta[None, ...]
+                while len(x.shape) > len(delta.shape):
+                    delta = delta[None, ...]
+                while len(x.shape) > len(norm_const.shape):
+                    norm_const = norm_const[None, ...]
+                return ((x - delta) ** (alpha - 1) * (1 + (x - delta)) ** (-alpha - beta)) / (norm_const + epsilon)
+
+            return irf
+
+
+def double_gamma_1_irf_factory(
+        beta,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None,
+        validate_irf_args=False
+):
+    """
+    Instantiate a double-gamma hemodynamic response function (HRF) for fMRI with one trainable parameter.
+
+    :param beta: TF tensor; beta (rate) parameter (beta > 0).
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :return: ``function``; the IRF
+    """
+
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            alpha_main = 6.
+            alpha_undershoot = 16.
+            beta_main = beta
+            beta_undershoot = beta
+            c = 1. / 6.
+
+            return double_gamma_5_irf_factory(
+                alpha_main=alpha_main,
+                alpha_undershoot=alpha_undershoot,
+                beta_main=beta_main,
+                beta_undershoot=beta_undershoot,
+                c=c,
+                support_ub=support_ub,
+                epsilon=epsilon,
+                session=session,
+                validate_irf_args=validate_irf_args
+            )
+
+
+def double_gamma_2_irf_factory(
+        alpha,
+        beta,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None,
+        validate_irf_args=False
+):
+    """
+    Instantiate a double-gamma hemodynamic response function (HRF) for fMRI with two trainable parameters.
+
+    :param alpha: TF tensor; alpha (shape) parameter (alpha > 0).
+    :param beta: TF tensor; beta (rate) parameter (beta > 0).
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :return: ``function``; the IRF
+    """
+
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            alpha_main = alpha
+            alpha_undershoot = alpha + 10.
+            beta_main = beta
+            beta_undershoot = beta
+            c = 1. / 6.
+
+            return double_gamma_5_irf_factory(
+                alpha_main=alpha_main,
+                alpha_undershoot=alpha_undershoot,
+                beta_main=beta_main,
+                beta_undershoot=beta_undershoot,
+                c=c,
+                support_ub=support_ub,
+                epsilon=epsilon,
+                session=session,
+                validate_irf_args=validate_irf_args
+            )
+
+
+def double_gamma_3_irf_factory(
+        alpha,
+        beta,
+        c,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None,
+        validate_irf_args=False
+):
+    """
+    Instantiate a double-gamma hemodynamic response function (HRF) for fMRI with three trainable parameters.
+
+    :param alpha: TF tensor; alpha (shape) parameter (alpha > 0).
+    :param beta: TF tensor; beta (rate) parameter (beta > 0).
+    :param c: TF tensor; c parameter (amplitude of undershoot).
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :return: ``function``; the IRF
+    """
+
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            alpha_main = alpha
+            alpha_undershoot = alpha + 10.
+            beta_main = beta
+            beta_undershoot = beta
+
+            return double_gamma_5_irf_factory(
+                alpha_main=alpha_main,
+                alpha_undershoot=alpha_undershoot,
+                beta_main=beta_main,
+                beta_undershoot=beta_undershoot,
+                c=c,
+                support_ub=support_ub,
+                epsilon=epsilon,
+                session=session,
+                validate_irf_args=validate_irf_args
+            )
+
+
+def double_gamma_4_irf_factory(
+        alpha_main,
+        alpha_undershoot,
+        beta,
+        c,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None,
+        validate_irf_args=False
+):
+    """
+    Instantiate a double-gamma hemodynamic response function (HRF) for fMRI with four trainable parameters.
+
+    :param alpha_main: TF tensor; alpha (shape) parameter of peak response (alpha_main > 0).
+    :param alpha_undershoot: TF tensor; alpha (shape) parameter of undershoot component (alpha_undershoot > 0).
+    :param beta: TF tensor; beta (rate) parameter (beta > 0).
+    :param c: TF tensor; c parameter (amplitude of undershoot).
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :return: ``function``; the IRF
+    """
+
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            beta_main = beta
+            beta_undershoot = beta
+
+            return double_gamma_5_irf_factory(
+                alpha_main=alpha_main,
+                alpha_undershoot=alpha_undershoot,
+                beta_main=beta_main,
+                beta_undershoot=beta_undershoot,
+                c=c,
+                support_ub=support_ub,
+                epsilon=epsilon,
+                session=session,
+                validate_irf_args=validate_irf_args
+            )
+
+
+def double_gamma_5_irf_factory(
+        alpha_main,
+        alpha_undershoot,
+        beta_main,
+        beta_undershoot,
+        c,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None,
+        validate_irf_args=False
+):
+    """
+    Instantiate a double-gamma hemodynamic response function (HRF) for fMRI with five trainable parameters.
+
+    :param alpha_main: TF tensor; alpha (shape) parameter of peak response (alpha_main > 0).
+    :param alpha_undershoot: TF tensor; alpha (shape) parameter of undershoot component (alpha_undershoot > 0).
+    :param beta_main: TF tensor; beta (rate) parameter of peak response (beta_main > 0).
+    :param beta_undershoot: TF tensor; beta (rate) parameter of undershoot component (beta_undershoot > 0).
+    :param c: TF tensor; c parameter (amplitude of undershoot).
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :return: ``function``; the IRF
+    """
+
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            alpha_main = tf.convert_to_tensor(alpha_main)
+            alpha_undershoot = tf.convert_to_tensor(alpha_undershoot)
+            beta_main = tf.convert_to_tensor(beta_main)
+            beta_undershoot = tf.convert_to_tensor(beta_undershoot)
+            c = tf.convert_to_tensor(c)
+
+            dist_main = tf.contrib.distributions.Gamma(
+                concentration=alpha_main,
+                rate=beta_main,
+                validate_args=validate_irf_args
+            )
+            pdf_main = dist_main.prob
+            cdf_main = dist_main.cdf
+            dist_undershoot = tf.contrib.distributions.Gamma(
+                concentration=alpha_undershoot,
+                rate=beta_undershoot,
+                validate_args=validate_irf_args
+            )
+            pdf_undershoot = dist_undershoot.prob
+            cdf_undershoot = dist_undershoot.cdf
+
+            if support_ub is None:
+                norm_const = 1 - c
+            else:
+                norm_const = cdf_main(support_ub) - c * cdf_undershoot(support_ub)
+
+            def irf(x, pdf_main=pdf_main, pdf_undershoot=pdf_undershoot, c=c, norm_const=norm_const, epsilon=epsilon):
+                # Ensure proper broadcasting
+                while len(x.shape) > len(c.shape):
+                    c = c[None, ...]
+                while len(x.shape) > len(norm_const.shape):
+                    norm_const = norm_const[None, ...]
+                return (pdf_main(x + epsilon) - c * pdf_undershoot(x + epsilon)) / (norm_const + epsilon)
+
+            return irf
+
+
+def LCG_irf_factory(
+        bases,
+        support_lb=0.,
+        support_ub=None,
+        epsilon=4 * np.finfo('float32').eps,
+        session=None,
+        **params
+):
+    """
+    Instantiate a linear combination of Gaussians (LCG) impulse response function (IRF).
+
+    :param bases: ``int``; number of basis kernels in LCG.
+    :param support_lb: ``tensor``, ``float`` or ``None``; lower bound on the IRF's support. If ``None``, lower bound set to 0.
+    :param support_ub: ``tensor``, ``float`` or ``None``; upper bound on the IRF's support. If ``None``, no upper bound.
+    :param epsilon: ``float``; additive constant for numerical stability in the normalization term.
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :param **params: ``tensors``; the LCG parameters. Must have ``3*bases`` total parameters with the following keyword names: x1, ..., xN, y1, ... yN, s1, ..., sN, where N stands for the value of **bases** and x, y, and s parameters respectively encode location, amplitude, and scale of the corresponding basis kernel.
+    :return: ``function``; the IRF
+    """
+
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            # Build kernel locations
+            params = {x: tf.convert_to_tensor(params[x]) for x in params}
+            c = tf.stack([params['x%s' % i] for i in range(1, bases + 1)], -1)
+
+            # Build kernel amplitudes
+            v = tf.stack([params['y%s' % i] for i in range(1, bases + 1)], -1)
+
+            # Build kernel widths
+            b = tf.stack([params['s%s' % i] for i in range(1, bases + 1)], -1)
+
+            dist = tf.contrib.distributions.Normal(
+                loc=c,
+                scale=b + epsilon,
+            )
+            pdf = dist.prob
+            cdf = dist.cdf
+
+            if support_lb is None:
+                lb = 0.
+            else:
+                lb = cdf(support_lb)
+            if support_ub is None:
+                ub = 1.
+            else:
+                ub = cdf(support_ub)
+
+            norm_const = tf.reduce_sum((ub - lb) * v, axis=-1)
+
+            def irf(x, v=v, pdf=pdf, norm_const=norm_const, epsilon=epsilon):
+                # Ensure proper broadcasting
+                x = x[..., None]  # Add a summation axis
+                while len(x.shape) > len(v.shape):
+                    v = v[None, ...]
+                while len(x.shape) - 1 > len(norm_const.shape):
+                    norm_const = norm_const[None, ...]
+
+                return tf.reduce_sum(pdf(x) * v, axis=-1) / (norm_const + epsilon)
+
+            return irf
 
 
 CDRNNStateTuple = collections.namedtuple(
@@ -558,6 +1364,9 @@ class RNNCell(LayerRNNCell):
 
                 return new_state, new_state
 
+    def kl_penalties(self):
+        return {}
+
     def ema_ops(self):
         return []
 
@@ -725,6 +1534,9 @@ class RNNLayer(object):
                     out = H
 
                 return out
+
+    def kl_penalties(self):
+        return {}
 
     def ema_ops(self):
         return self.cell.ema_ops()
@@ -1377,6 +2189,9 @@ class DenseLayer(object):
     def call(self, *args, **kwargs):
         self.__call__(*args, **kwargs)
 
+    def kl_penalties(self):
+        return {}
+
     def ema_ops(self):
         out = []
         if self.use_batch_normalization and self.built:
@@ -1790,6 +2605,9 @@ class BatchNormLayer(object):
 
                 return out
 
+    def kl_penalties(self):
+        return {}
+
     def ema_ops(self):
         return [self.moving_mean_op, self.moving_variance_op]
 
@@ -2120,6 +2938,9 @@ class LayerNormLayer(object):
                 out = out * self.gamma + self.beta
 
                 return out
+
+    def kl_penalties(self):
+        return {}
 
     def ema_ops(self):
         return []
@@ -2477,6 +3298,12 @@ class DropoutLayer(object):
                     )
 
                 return out
+
+    def kl_penalties(self):
+        return {}
+
+    def ema_ops(self):
+        return []
 
     def resample_ops(self):
         out = []

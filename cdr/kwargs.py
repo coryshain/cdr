@@ -60,7 +60,7 @@ def cdr_kwarg_docstring():
 
     out += '\nCDRNNBayes\n^^^^^^^^^^\n\n'
 
-    for kwarg in CDRNNBAYES_INITIALIZATION_KWARGS:
+    for kwarg in NN_BAYES_KWARGS:
         out += docstring_from_kwarg(kwarg)
 
     out += '\n'
@@ -339,6 +339,13 @@ MODEL_INITIALIZATION_KWARGS = [
         str,
         "Constraint function to use for bounded variables. One of ``['abs', 'square', 'softplus']``."
     ),
+    Kwarg(
+        'random_variables',
+        'default',
+        str,
+        "Space-delimited list of model components to instantiate as (variationally optimized) random variables, rather than point estimates. Can be any combination of: `['intercept', 'coefficient', 'interaction', 'irf_param', 'nn']`. Can also be `'all'`, `'none'`, or `'default'`, which defaults to all components except `'nn'`.",
+        aliases=['rvs', 'as_rv', 'as_random_variable']
+    ),
 
     # OPTIMIZATION SETTINGS
     Kwarg(
@@ -504,18 +511,6 @@ MODEL_INITIALIZATION_KWARGS = [
         "Scale of global regularizer; can be overridden by more regularizers for more specific parameters (ignored if ``regularizer_name==None``)."
     ),
     Kwarg(
-        'coefficient_regularizer_name',
-        'inherit',
-        [str, 'inherit', None],
-        "Name of coefficient regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
-    ),
-    Kwarg(
-        'coefficient_regularizer_scale',
-        'inherit',
-        [str, float, 'inherit'],
-        "Scale of coefficient regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
-    ),
-    Kwarg(
         'intercept_regularizer_name',
         'inherit',
         [str, 'inherit', None],
@@ -528,17 +523,41 @@ MODEL_INITIALIZATION_KWARGS = [
         "Scale of intercept regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
     Kwarg(
+        'coefficient_regularizer_name',
+        'inherit',
+        [str, 'inherit', None],
+        "Name of coefficient regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
+    ),
+    Kwarg(
+        'coefficient_regularizer_scale',
+        'inherit',
+        [str, float, 'inherit'],
+        "Scale of coefficient regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
+    ),
+    Kwarg(
+        'irf_regularizer_name',
+        'inherit',
+        [str, 'inherit', None],
+        "Name of IRF parameter regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
+    ),
+    Kwarg(
+        'irf_regularizer_scale',
+        'inherit',
+        [str, float, 'inherit'],
+        "Scale of IRF parameter regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
+    ),
+    Kwarg(
         'ranef_regularizer_name',
         'inherit',
         [str, 'inherit', None],
-        "Name of random effects regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization.",
+        "Name of random effects regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization. Regularization only applies to random effects without variational priors.",
         default_value_cdrnn='l2_regularizer'
     ),
     Kwarg(
         'ranef_regularizer_scale',
         'inherit',
         [str, float, 'inherit'],
-        "Scale of random effects regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**.",
+        "Scale of random effects regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**. Regularization only applies to random effects without variational priors.",
         default_value_cdrnn=10.
     ),
 
@@ -692,6 +711,13 @@ MODEL_INITIALIZATION_KWARGS = [
 
     # DEPRECATED OR RARELY USED
     Kwarg(
+        'validate_irf_args',
+        True,
+        bool,
+        "Check whether inputs and parameters to IRF obey constraints. Imposes a small performance cost but helps catch and report bugs in the model.",
+        suppress=True
+    ),
+    Kwarg(
         'use_jtps',
         False,
         bool,
@@ -742,7 +768,7 @@ MODEL_INITIALIZATION_KWARGS = [
     )
 ]
 
-MODEL_BAYES_INITIALIZATION_KWARGS = [
+BAYES_KWARGS = [
     # PRIORS
     Kwarg(
         'declare_priors_fixef',
@@ -764,38 +790,7 @@ MODEL_BAYES_INITIALIZATION_KWARGS = [
         [str, float, None],
         "Standard deviation of prior on fixed intercept. Can be a space-delimited list of ``;``-delimited floats (one per distributional parameter per response variable), a ``float`` (applied to all responses), or ``None``, in which case the prior is inferred from **prior_sd_scaling_coefficient** and the empirical variance of the response on the training set.",
         aliases=['prior_sd']
-    )
-]
-
-CDR_INITIALIZATION_KWARGS = [
-    # REGULARIZATION
-    Kwarg(
-        'irf_regularizer_name',
-        'inherit',
-        [str, 'inherit', None],
-        "Name of IRF parameter regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
     ),
-    Kwarg(
-        'irf_regularizer_scale',
-        'inherit',
-        [str, float, 'inherit'],
-        "Scale of IRF parameter regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
-    ),
-
-    # DEPRECATED OR RARELY USED
-    Kwarg(
-        'validate_irf_args',
-        True,
-        bool,
-        "Check whether inputs and parameters to IRF obey constraints. Imposes a small performance cost but helps catch and report bugs in the model.",
-        suppress=True
-    )
-]
-
-CDRMLE_INITIALIZATION_KWARGS = []
-
-CDRBAYES_INITIALIZATION_KWARGS = [
-    # PRIORS
     Kwarg(
         'coef_prior_sd',
         None,
@@ -846,7 +841,7 @@ CDRBAYES_INITIALIZATION_KWARGS = [
     )
 ]
 
-CDRNN_INITIALIZATION_KWARGS = [
+NN_KWARGS = [
     # DATA SETTINGS
     Kwarg(
         'center_X_time',
@@ -1016,6 +1011,12 @@ CDRNN_INITIALIZATION_KWARGS = [
         'orthogonal_initializer',
         [str, None],
         "Name of initializer to use in encoder recurrent kernels.",
+    ),
+    Kwarg(
+        'weight_sd_init',
+        'glorot',
+        [float, str],
+        "Standard deviation of kernel initialization distribution (Normal, mean=0). Can also be ``'glorot'``, which uses the SD of the Glorot normal initializer."
     ),
 
     # NORMALIZATION
@@ -1238,17 +1239,8 @@ CDRNN_INITIALIZATION_KWARGS = [
     ),
 ]
 
-CDRNNMLE_INITIALIZATION_KWARGS = [
-    # INITIALIZATION
-    Kwarg(
-        'weight_sd_init',
-        'glorot',
-        [float, str],
-        "Standard deviation of kernel initialization distribution (Normal, mean=0). Can also be ``'glorot'``, which uses the SD of the Glorot normal initializer."
-    )
-]
 
-CDRNNBAYES_INITIALIZATION_KWARGS = [
+NN_BAYES_KWARGS = [
     # PRIORS
     Kwarg(
         'declare_priors_weights',
@@ -1291,32 +1283,6 @@ CDRNNBAYES_INITIALIZATION_KWARGS = [
         "Standard deviation of prior on batch norm gammas. A ``float``, ``'glorot'``, or ``'he'``. Ignored unless batch normalization is used",
         aliases=['conv_prior_sd', 'prior_sd']
     ),
-    Kwarg(
-        'y_sd_prior_sd',
-        None,
-        [float, None],
-        "Standard deviation of prior on standard deviation of output model. If ``None``, inferred as **y_sd_prior_sd_scaling_coefficient** times the empirical variance of the response on the training set.",
-        aliases=['y_scale_prior_sd', 'prior_sd']
-    ),
-    Kwarg(
-        'prior_sd_scaling_coefficient',
-        1,
-        float,
-        "Factor by which to multiply priors on intercepts and coefficients if inferred from the empirical variance of the data (i.e. if **intercept_prior_sd** or **coef_prior_sd** is ``None``). Ignored for any prior widths that are explicitly specified."
-    ),
-    Kwarg(
-        'y_sd_prior_sd_scaling_coefficient',
-        1,
-        float,
-        "Factor by which to multiply prior on output model variance if inferred from the empirical variance of the data (i.e. if **y_sd_prior_sd** is ``None``). Ignored if prior width is explicitly specified.",
-        aliases=['y_scale_prior_sd_scaling_coefficient', 'prior_sd_scaling_coefficient']
-    ),
-    Kwarg(
-        'ranef_to_fixef_prior_sd_ratio',
-        0.1,
-        float,
-        "Ratio of widths of random to fixed effects priors. I.e. if less than 1, random effects have tighter priors."
-    ),
 
     # INITIALIZATION
     Kwarg(
@@ -1344,6 +1310,8 @@ CDRNNBAYES_INITIALIZATION_KWARGS = [
         "Ratio of posterior initialization SD to prior SD. Low values are often beneficial to stability, convergence speed, and quality of final fit by avoiding erratic sampling and divergent behavior early in training."
     )
 ]
+
+MODEL_INITIALIZATION_KWARGS += BAYES_KWARGS + NN_KWARGS + NN_BAYES_KWARGS
 
 PLOT_KWARGS_CORE = [
     # PLOT DATA GENERATION
