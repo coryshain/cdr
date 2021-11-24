@@ -1569,7 +1569,9 @@ class Formula(object):
             nns_by_key[key] = nn
 
         keys = sorted(nns_by_key)
-        ids = ['NN%d' % (i + 1) for i in range(len(keys))]
+        nn_impulse_keys = [key for key in keys if nns_by_key[key].nn_type == 'impulse']
+        nn_irf_keys = [key for key in keys if nns_by_key[key].nn_type == 'irf']
+        ids = ['NN%d' % (i + 1) for i in range(len(nn_impulse_keys))] + ['NNirf%d' % (i + 1) for i in range(len(nn_irf_keys))]
 
         self.nns_by_id = {k: nns_by_key[keys[i]] for i, k in enumerate(ids)}
 
@@ -1867,34 +1869,6 @@ class NN(object):
         """
 
         return self.name_str
-
-    def nn_transformed_inputs(self):
-        """
-        Get a list of all inputs dominated by this NN that are preprocessed by another NN.
-
-        :return: ``list`` of ``Impulse`` or ``ImpulseInteraction``; all inputs dominated by this NN that are preprocessed by another NN.
-        """
-
-        out = sorted([x for x in self.nodes if isinstance(x, NNImpulse)], key=lambda x: x.name())
-        assert self.nn_type == 'irf' or not out, 'Nested neural net impulses are not supported.'
-
-        return out
-
-    def non_nn_transformed_inputs(self):
-        """
-        Get a list of all inputs dominated by this NN that are not preprocessed by another NN.
-
-        :return: ``list`` of ``Impulse`` or ``ImpulseInteraction``; all inputs dominated by this NN that are not preprocessed by another NN.
-        """
-
-        irfs = [x for x in self.nodes if not isinstance(x, NNImpulse)]
-        out = set()
-        for irf in irfs:
-            for impulse in irf.impulses():
-                out.add(impulse)
-        out = sorted(out, key=lambda x: x.name())
-
-        return out
 
 
 class ResponseInteraction(object):

@@ -156,19 +156,8 @@ def reg_name(string):
 
     name = string.split(':')[0]
     name = name.replace('/', '_')
-    cap = True
-    var_name = ''
-    for c in name:
-        if c == '_':
-            cap = True
-        else:
-            if cap:
-                var_name += c.upper()
-            else:
-                var_name += c
-            cap = False
 
-    return var_name
+    return name
 
 
 def pca(X, n_dim=None, dtype=np.float32):

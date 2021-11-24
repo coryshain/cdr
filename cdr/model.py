@@ -482,7 +482,7 @@ class CDRModel(object):
             self.rangf_n_levels.append(len(keys) + 1)
 
         self._initialize_session()
-        tf.keras.backend.set_session(self.sess)
+        tf.keras.backend.set_session(self.session)
 
         if build:
             self._initialize_metadata()
@@ -494,7 +494,7 @@ class CDRModel(object):
 
     def __setstate__(self, state):
         self.g = tf.Graph()
-        self.sess = tf.Session(graph=self.g, config=tf_config)
+        self.session = tf.Session(graph=self.g, config=tf_config)
 
         self._unpack_metadata(state)
         self._initialize_metadata()
@@ -503,7 +503,7 @@ class CDRModel(object):
 
     def _initialize_session(self):
         self.g = tf.Graph()
-        self.sess = tf.Session(graph=self.g, config=tf_config)
+        self.session = tf.Session(graph=self.g, config=tf_config)
 
     def _initialize_metadata(self):
         ## Compute secondary data from intialization settings
@@ -593,18 +593,7 @@ class CDRModel(object):
         self.irf = {}
         self.nn_irf = {} # Key order: <response, nn_id>
         self.irf_by_rangf = t.irf_by_rangf()
-        self.nn_irf_rangfs = set()
-        self.nn_impulse_rangfs = set()
         self.nns_by_id = self.form.nns_by_id
-        for nn_id in self.nns_by_id:
-            node = self.nns_by_id[nn_id]
-            for gf in node.rangf:
-                if node.nn_type == 'irf':
-                    self.nn_irf_rangfs.add(gf)
-                elif node.nn_type == 'impulse':
-                    self.nn_impulse_rangfs.add(gf)
-                else:
-                    raise ValueError('Unrecognized NN type "%s".' % node.nn_type)
 
         self.parametric_irf_terminals = [self.node_table[x] for x in self.terminal_names if self.node_table[x].p.family != 'NN']
         self.parametric_irf_terminal_names = [x.name() for x in self.parametric_irf_terminals]
@@ -623,7 +612,7 @@ class CDRModel(object):
             self.nn_irf_terminal_names[nn_id] = [x.name() for x in self.nn_irf_terminals[nn_id]]
             self.nn_irf_impulses[nn_id] = None
             self.nn_irf_impulse_names[nn_id] = [x.impulse.name() for x in self.nn_irf_terminals[nn_id]]
-            
+
         self.nn_impulse_ids = sorted([x for x in self.nns_by_id if self.nns_by_id[x].nn_type == 'impulse'])
         self.nn_impulse_impulses = {}
         self.nn_impulse_impulse_names = {}
@@ -824,26 +813,26 @@ class CDRModel(object):
 
         self.normalize_activations = self.use_batch_normalization or self.use_layer_normalization
 
-        if self.n_units_input_projection:
-            if isinstance(self.n_units_input_projection, str):
-                if self.n_units_input_projection.lower() == 'infer':
-                    self.n_units_input_projection = [len(self.terminal_names) + len(self.ablated)]
+        if self.n_units_ff:
+            if isinstance(self.n_units_ff, str):
+                if self.n_units_ff.lower() == 'infer':
+                    self.n_units_ff = [len(self.terminal_names) + len(self.ablated)]
                 else:
-                    self.n_units_input_projection = [int(x) for x in self.n_units_input_projection.split()]
-            elif isinstance(self.n_units_input_projection, int):
-                if self.n_layers_input_projection is None:
-                    self.n_units_input_projection = [self.n_units_input_projection]
+                    self.n_units_ff = [int(x) for x in self.n_units_ff.split()]
+            elif isinstance(self.n_units_ff, int):
+                if self.n_layers_ff is None:
+                    self.n_units_ff = [self.n_units_ff]
                 else:
-                    self.n_units_input_projection = [self.n_units_input_projection] * self.n_layers_input_projection
-            if self.n_layers_input_projection is None:
-                self.n_layers_input_projection = len(self.n_units_input_projection)
-            if len(self.n_units_input_projection) == 1 and self.n_layers_input_projection != 1:
-                self.n_units_input_projection = [self.n_units_input_projection[0]] * self.n_layers_input_projection
-                self.n_layers_input_projection = len(self.n_units_input_projection)
+                    self.n_units_ff = [self.n_units_ff] * self.n_layers_ff
+            if self.n_layers_ff is None:
+                self.n_layers_ff = len(self.n_units_ff)
+            if len(self.n_units_ff) == 1 and self.n_layers_ff != 1:
+                self.n_units_ff = [self.n_units_ff[0]] * self.n_layers_ff
+                self.n_layers_ff = len(self.n_units_ff)
         else:
-            self.n_units_input_projection = []
-            self.n_layers_input_projection = 0
-        assert self.n_layers_input_projection == len(self.n_units_input_projection), 'Inferred n_layers_input_projection and n_units_input_projection must have the same number of layers. Saw %d and %d, respectively.' % (self.n_layers_input_projection, len(self.n_units_input_projection))
+            self.n_units_ff = []
+            self.n_layers_ff = 0
+        assert self.n_layers_ff == len(self.n_units_ff), 'Inferred n_layers_ff and n_units_ff must have the same number of layers. Saw %d and %d, respectively.' % (self.n_layers_ff, len(self.n_units_ff))
 
         if self.n_units_rnn:
             if isinstance(self.n_units_rnn, str):
@@ -905,110 +894,62 @@ class CDRModel(object):
         assert self.n_layers_irf == len(self.n_units_irf), 'Inferred n_layers_irf and n_units_irf must have the same number of layers. Saw %d and %d, respectively.' % (self.n_layers_irf, len(self.n_units_irf))
 
         if self.n_units_irf:
-            self.n_units_irf_l1 = self.n_units_irf[0]
             self.irf_l1_use_bias = True
         else:
-            self.n_units_irf_l1 = 1
             self.irf_l1_use_bias = False
 
-        if self.n_units_hidden_state is None:
+        if self.n_units_irf_hidden_state is None:
             if self.n_units_irf:
-                self.n_units_hidden_state = self.n_units_irf[0]
-            elif self.n_units_input_projection:
-                self.n_units_hidden_state = self.n_units_input_projection[-1]
+                self.n_units_irf_hidden_state = self.n_units_irf[0]
+            elif self.n_units_ff:
+                self.n_units_irf_hidden_state = self.n_units_ff[-1]
             elif self.n_units_rnn and self.n_units_rnn[-1] != 'inherit':
-                self.n_units_hidden_state = self.n_units_rnn[-1]
+                self.n_units_irf_hidden_state = self.n_units_rnn[-1]
             else:
                 raise ValueError("Cannot infer size of hidden state. Units are not specified for hidden state, IRF, input projection, or RNN projection.")
-        elif isinstance(self.n_units_hidden_state, str):
-            if self.n_units_hidden_state.lower() == 'infer':
-                self.n_units_hidden_state = len(self.terminal_names) + len(self.ablated)
+        elif isinstance(self.n_units_irf_hidden_state, str):
+            if self.n_units_irf_hidden_state.lower() == 'infer':
+                self.n_units_irf_hidden_state = len(self.terminal_names) + len(self.ablated)
             else:
-                self.n_units_hidden_state = int(self.n_units_hidden_state)
+                self.n_units_irf_hidden_state = int(self.n_units_irf_hidden_state)
 
         if self.n_units_rnn and self.n_units_rnn[-1] == 'inherit':
-            self.n_units_rnn = [self.n_units_hidden_state]
+            self.n_units_rnn = [self.n_units_irf_hidden_state]
 
-        if len(self.interaction_names) and not self.n_layers_input_projection and not self.n_layers_rnn:
-            stderr('WARNING: Be careful about interaction terms in models with neural net IRFs unless the input projection and RNN are turned off by setting the number of their units to 0. Otherwise, interactions can be implicit in the model (if one or more variables are present in both the input to the NN and the interaction), rendering explicit interaction terms uninterpretable.\n')
+        if len(self.interaction_names) and self.input_dependent_irf:
+            stderr('WARNING: Be careful about interaction terms in models with input-dependent neural net IRFs. Otherwise, interactions can be implicit in the model (if one or more variables are present in both the input to the NN and the interaction), rendering explicit interaction terms uninterpretable.\n')
 
-        # NN impulse fixef
-        self.nn_impulse_l1_W = {}
-        self.nn_impulse_l1_normalization_layer = {}
-        self.nn_impulse_l1_b = {}
-        self.nn_impulse_layers = {}
-        self.nn_impulse_l1_dropout_layer = {}
-        self.nn_impulse_lambda = {}
-        
-        # NN IRF fixef
-        if self.input_dropout_rate:
-            self.input_dropout_layer = {}
-            self.X_time_dropout_layer = {}
-        self.input_projection_layers = {}
-        self.input_projection_fn = {}
+        # NN IRF layers/transforms
+        self.input_dropout_layer = {}
+        self.X_time_dropout_layer = {}
+        self.ff_layers = {}
+        self.ff_fn = {}
         self.h_in_dropout_layer = {}
         self.rnn_layers = {}
-        self.rnn_h_init = {}
         self.rnn_h_ema = {}
-        self.rnn_c_init = {}
         self.rnn_c_ema = {}
         self.rnn_encoder = {}
-        if self.n_layers_rnn:
-            self.rnn_projection_layers = {}
-            self.rnn_projection_fn = {}
-            self.h_rnn_dropout_layer = {}
-            self.rnn_dropout_layer = {}
-        if self.n_layers_input_projection or self.n_layers_rnn:
-            self.h_normalization_layer = {}
-            self.h_bias = {}
-            self.h_dropout_layer = {}
-            self.hidden_state_to_irf_l1 = {}
-        self.nn_irf_l1_W = {}
-        if self.irf_l1_use_bias:
-            self.nn_irf_l1_normalization_layer = {}
-        self.nn_irf_l1_b = {}
+        self.rnn_projection_layers = {}
+        self.rnn_projection_fn = {}
+        self.h_rnn_dropout_layer = {}
+        self.rnn_dropout_layer = {}
+        self.h_dropout_layer = {}
+        self.h_bias_layer = {}
+        self.h_normalization_layer = {}
+        self.hidden_state_to_irf_l1 = {}
+        self.nn_irf_l1 = {}
         self.nn_irf_layers = {}
-        self.nn_irf_l1_dropout_layer = {}
         self.nn_irf_lambda = {}
 
-        # Ranef
-        self.nn_impulse_l1_W_random = {}
-        self.nn_impulse_l1_W_random_summary = {}
-        self.nn_impulse_l1_b_random = {}
-        self.nn_impulse_l1_b_random_summary = {}
-        self.rnn_h_random = {}
-        self.rnn_h_random_summary = {}
-        self.rnn_c_random = {}
-        self.rnn_c_random_summary = {}
-        self.h_bias_random = {}
-        self.h_bias_random_summary = {}
-        self.nn_irf_l1_W_random = {}
-        self.nn_irf_l1_W_random_summary = {}
-        self.nn_irf_l1_b_random = {}
-        self.nn_irf_l1_b_random_summary = {}
-
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
 
                 # Initialize constraint functions
 
-                if self.constraint.lower() == 'softplus':
-                    self.constraint_fn = tf.nn.softplus
-                    self.constraint_fn_np = lambda x: np.log(np.exp(x) + 1.)
-                    self.constraint_fn_inv = tf.contrib.distributions.softplus_inverse
-                    self.constraint_fn_inv_np = lambda x: np.log(np.exp(x) - 1.)
-                elif self.constraint.lower() == 'square':
-                    self.constraint_fn = tf.square
-                    self.constraint_fn_np = np.square
-                    self.constraint_fn_inv = tf.sqrt
-                    self.constraint_fn_inv_np = np.sqrt
-                elif self.constraint.lower() == 'abs':
-                    self.constraint_fn = self._abs
-                    self.constraint_fn_np = np.abs
-                    self.constraint_fn_inv = tf.identity
-                    self.constraint_fn_inv_np = lambda x: x
-                else:
-                    raise ValueError('Unrecognized constraint function %s' % self.constraint)
+                self.constraint_fn, \
+                self.constraint_fn_np, \
+                self.constraint_fn_inv, \
+                self.constraint_fn_inv_np = get_constraint(self.constraint)
 
                 # Initialize variational metadata
 
@@ -1149,7 +1090,7 @@ class CDRModel(object):
         self.response_is_categorical = md.pop('response_is_categorical', {x: 'False' for x in self.form.response_names()})
         self.response_ndim = md.pop('response_ndim', md.pop('response_n_dim', {x: 1 for x in self.form.response_names()}))
         self.response_category_maps = md.pop('response_category_maps', {x: {} for x in self.form.response_names()})
-        self.response_expanded_bounds = md.pop('response_expanded_bounds', {x: (i, i+1) for i, x in enumerate(self.form.response_names())})
+        self.response_expanded_bounds = md.pop('response_expanded_bounds', {x: (i, i + 1) for i, x in enumerate(self.form.response_names())})
         self.t_delta_max = md.pop('t_delta_max', md.pop('max_tdelta', None))
         self.t_delta_mean_max = md.pop('t_delta_mean_max', self.t_delta_max)
         self.t_delta_sd = md.pop('t_delta_sd', 1.)
@@ -1201,8 +1142,8 @@ class CDRModel(object):
     ######################################################
 
     def _initialize_inputs(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 # Boolean switches
                 self.training = tf.placeholder_with_default(tf.constant(False, dtype=tf.bool), shape=[], name='training')
                 self.use_MAP_mode = tf.placeholder_with_default(tf.logical_not(self.training), shape=[], name='use_MAP_mode')
@@ -1298,7 +1239,7 @@ class CDRModel(object):
                         rescale=False,
                         constant=self.gf_defaults,
                         name='ranef_dropout',
-                        session=self.sess
+                        session=self.session
                     )
                     self.Y_gf_dropout = self.ranef_dropout_layer(self.Y_gf)
 
@@ -1568,14 +1509,14 @@ class CDRModel(object):
                     self.nn_regularizer_scale
                 )
 
-                if self.input_projection_regularizer_name is None:
-                    input_projection_regularizer_name = self.nn_regularizer_name
+                if self.ff_regularizer_name is None:
+                    ff_regularizer_name = self.nn_regularizer_name
                 else:
-                    input_projection_regularizer_name = self.input_projection_regularizer_name
-                if self.input_projection_regularizer_scale is None:
-                    input_projection_regularizer_scale = self.nn_regularizer_scale
+                    ff_regularizer_name = self.ff_regularizer_name
+                if self.ff_regularizer_scale is None:
+                    ff_regularizer_scale = self.nn_regularizer_scale
                 else:
-                    input_projection_regularizer_scale = self.input_projection_regularizer_scale
+                    ff_regularizer_scale = self.ff_regularizer_scale
                 if self.rnn_projection_regularizer_name is None:
                     rnn_projection_regularizer_name = self.nn_regularizer_name
                 else:
@@ -1585,9 +1526,9 @@ class CDRModel(object):
                 else:
                     rnn_projection_regularizer_scale = self.rnn_projection_regularizer_scale
 
-                self.input_projection_regularizer = self._initialize_regularizer(
-                    input_projection_regularizer_name,
-                    input_projection_regularizer_scale
+                self.ff_regularizer = self._initialize_regularizer(
+                    ff_regularizer_name,
+                    ff_regularizer_scale
                 )
                 self.rnn_projection_regularizer = self._initialize_regularizer(
                     rnn_projection_regularizer_name,
@@ -1618,8 +1559,8 @@ class CDRModel(object):
                 self.regularizable_layers = [] # Only used by CDRNN, defined here for global API
 
     def _get_prior_sd(self, response_name):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 out = []
                 ndim = self.get_response_ndim(response_name)
                 for param in self.get_response_params(response_name):
@@ -1666,20 +1607,13 @@ class CDRModel(object):
         ranef_prior_sd = {x: prior_sd[x] * self.ranef_to_fixef_prior_sd_ratio for x in prior_sd}
         ranef_posterior_sd_init = {x: posterior_sd_init[x] * self.ranef_to_fixef_prior_sd_ratio for x in posterior_sd_init}
 
-        # Invert constraints
-        for _response in self.response_names:
-            prior_sd[_response] = self.constraint_fn_inv_np(prior_sd[_response])
-            posterior_sd_init[_response] = self.constraint_fn_inv_np(posterior_sd_init[_response])
-            ranef_prior_sd[_response] = self.constraint_fn_inv_np(ranef_prior_sd[_response])
-            ranef_posterior_sd_init[_response] = self.constraint_fn_inv_np(ranef_posterior_sd_init[_response])
-
         # outputs all have shape [nparam, ndim]
 
         return prior_sd, posterior_sd_init, ranef_prior_sd, ranef_posterior_sd_init
 
     def _get_intercept_init(self, response_name, has_intercept=True):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 out = []
                 ndim = self.get_response_ndim(response_name)
                 for param in self.get_response_params(response_name):
@@ -1756,106 +1690,82 @@ class CDRModel(object):
     # PARAMETER INITIALIZATION
 
     def _initialize_base_params(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
 
                 # Intercept
+
                 # Key order: response, ?(ran_gf)
                 self.intercept_fixed_base = {}
-                self.intercept_fixed_base_summary = {}
                 self.intercept_random_base = {}
-                self.intercept_random_base_summary = {}
                 for _response in self.response_names:
                     # Fixed
                     if self.has_intercept[None]:
-                        intercept_fixed, intercept_fixed_summary = self._initialize_intercept(_response)
+                        x = self._initialize_intercept(_response)
+                        intercept_fixed = x['value']
+                        if 'kl_penalties' in x:
+                            self.kl_penalties.update(x['kl_penalties'])
+                        if 'eval_resample' in x:
+                            self.resample_ops.append(x['eval_resample'])
                     else:
-                        intercept_fixed = intercept_fixed_summary = tf.constant(self.intercept_init[_response], dtype=self.FLOAT_TF)
+                        intercept_fixed = tf.constant(self.intercept_init[_response], dtype=self.FLOAT_TF)
                     self.intercept_fixed_base[_response] = intercept_fixed
-                    self.intercept_fixed_base_summary[_response] = intercept_fixed_summary
 
                     # Random
                     for gf in self.rangf:
                         if self.has_intercept[gf]:
+                            x = self._initialize_intercept(_response, ran_gf=gf)
+                            _intercept_random = x['value']
+                            if 'kl_penalties' in x:
+                                self.kl_penalties.update(x['kl_penalties'])
+                            if 'eval_resample' in x:
+                                self.resample_ops.append(x['eval_resample'])
                             if _response not in self.intercept_random_base:
                                 self.intercept_random_base[_response] = {}
-                            if _response not in self.intercept_random_base_summary:
-                                self.intercept_random_base_summary[_response] = {}
-                            _intercept_random, _intercept_random_summary = self._initialize_intercept(_response, ran_gf=gf)
                             self.intercept_random_base[_response][gf] = _intercept_random
-                            self.intercept_random_base_summary[_response][gf] = _intercept_random_summary
 
                 # Coefficients
+
                 # Key order: response, ?(ran_gf)
                 self.coefficient_fixed_base = {}
-                self.coefficient_fixed_base_summary = {}
                 self.coefficient_random_base = {}
-                self.coefficient_random_base_summary = {}
                 for response in self.response_names:
                     # Fixed
                     coef_ids = self.fixed_coef_names
                     if len(coef_ids) > 0:
-                        _coefficient_fixed_base, _coefficient_fixed_base_summary = self._initialize_coefficient(
+                        x = self._initialize_coefficient(
                             response,
                             coef_ids=coef_ids
                         )
+                        _coefficient_fixed_base = x['value']
+                        if 'kl_penalties' in x:
+                            self.kl_penalties.update(x['kl_penalties'])
+                        if 'eval_resample' in x:
+                            self.resample_ops.append(x['eval_resample'])
                     else:
                         _coefficient_fixed_base = []
-                        _coefficient_fixed_base_summary = []
                     self.coefficient_fixed_base[response] = _coefficient_fixed_base
-                    self.coefficient_fixed_base_summary[response] = _coefficient_fixed_base_summary
 
                     # Random
                     for gf in self.rangf:
                         coef_ids = self.coef_by_rangf.get(gf, [])
                         if len(coef_ids):
-                            _coefficient_random_base, _coefficient_random_base_summary = self._initialize_coefficient(
+                            x = self._initialize_coefficient(
                                 response,
                                 coef_ids=coef_ids,
                                 ran_gf=gf
                             )
+                            _coefficient_random_base = x['value']
+                            if 'kl_penalties' in x:
+                                self.kl_penalties.update(x['kl_penalties'])
+                            if 'eval_resample' in x:
+                                self.resample_ops.append(x['eval_resample'])
                             if response not in self.coefficient_random_base:
                                 self.coefficient_random_base[response] = {}
-                            if response not in self.coefficient_random_base_summary:
-                                self.coefficient_random_base_summary[response] = {}
                             self.coefficient_random_base[response][gf] = _coefficient_random_base
-                            self.coefficient_random_base_summary[response][gf] = _coefficient_random_base_summary
 
-                # Interactions
-                # Key order: response, ?(ran_gf)
-                self.interaction_fixed_base = {}
-                self.interaction_fixed_base_summary = {}
-                self.interaction_random_base = {}
-                self.interaction_random_base_summary = {}
-                for response in self.response_names:
-                    if len(self.interaction_names):
-                        interaction_ids = self.fixed_interaction_names
-                        if len(interaction_ids):
-                            # Fixed
-                            _interaction_fixed_base, _interaction_fixed_base_summary = self._initialize_interaction(
-                                response,
-                                interaction_ids=interaction_ids
-                            )
-                            self.interaction_fixed_base[response] = _interaction_fixed_base
-                            self.interaction_fixed_base_summary[response] = _interaction_fixed_base_summary
+                # Parametric IRF parameters
 
-                        # Random
-                        for gf in self.rangf:
-                            interaction_ids = self.interaction_by_rangf.get(gf, [])
-                            if len(interaction_ids):
-                                _interaction_random_base, _interaction_random_base_summary = self._initialize_interaction(
-                                    response,
-                                    interaction_ids=interaction_ids,
-                                    ran_gf=gf
-                                )
-                                if response not in self.interaction_random_base:
-                                    self.interaction_random_base[response] = {}
-                                if response not in self.interaction_random_base_summary:
-                                    self.interaction_random_base_summary[response] = {}
-                                self.interaction_random_base[response][gf] = _interaction_random_base
-                                self.interaction_random_base_summary[response][gf] = _interaction_random_base_summary
-
-                # IRF parameters
                 # Key order: family, param
                 self.irf_params_means = {}
                 self.irf_params_means_unconstrained = {}
@@ -1865,9 +1775,7 @@ class CDRModel(object):
                 self.irf_params_untrainable_ix = {}
                 # Key order: response, ?(ran_gf,) family, param
                 self.irf_params_fixed_base = {}
-                self.irf_params_fixed_base_summary = {}
                 self.irf_params_random_base = {}
-                self.irf_params_random_base_summary = {}
                 for family in [x for x in self.atomic_irf_names_by_family]:
                     # Collect metadata for IRF params
                     self.irf_params_means[family] = {}
@@ -1906,31 +1814,36 @@ class CDRModel(object):
                     for response in self.response_names:
                         for _param_name in param_names:
                             # Fixed
-                            _param, _param_summary = self._initialize_irf_param(
+                            x = self._initialize_irf_param(
                                 response,
                                 family,
                                 _param_name
                             )
+                            _param = x['value']
+                            if 'kl_penalties' in x:
+                                self.kl_penalties.update(x['kl_penalties'])
+                            if 'eval_resample' in x:
+                                self.resample_ops.append(x['eval_resample'])
                             if _param is not None:
                                 if response not in self.irf_params_fixed_base:
                                     self.irf_params_fixed_base[response] = {}
                                 if family not in self.irf_params_fixed_base[response]:
                                     self.irf_params_fixed_base[response][family] = {}
-                                if response not in self.irf_params_fixed_base_summary:
-                                    self.irf_params_fixed_base_summary[response] = {}
-                                if family not in self.irf_params_fixed_base_summary[response]:
-                                    self.irf_params_fixed_base_summary[response][family] = {}
                                 self.irf_params_fixed_base[response][family][_param_name] = _param
-                                self.irf_params_fixed_base_summary[response][family][_param_name] = _param
 
                             # Random
                             for gf in self.irf_by_rangf:
-                                _param, _param_summary = self._initialize_irf_param(
+                                x = self._initialize_irf_param(
                                     response,
                                     family,
                                     _param_name,
                                     ran_gf=gf
                                 )
+                                _param = x['value']
+                                if 'kl_penalties' in x:
+                                    self.kl_penalties.update(x['kl_penalties'])
+                                if 'eval_resample' in x:
+                                    self.resample_ops.append(x['eval_resample'])
                                 if _param is not None:
                                     if response not in self.irf_params_random_base:
                                         self.irf_params_random_base[response] = {}
@@ -1938,442 +1851,127 @@ class CDRModel(object):
                                         self.irf_params_random_base[response][gf] = {}
                                     if family not in self.irf_params_random_base[response][gf]:
                                         self.irf_params_random_base[response][gf][family] = {}
-                                    if response not in self.irf_params_random_base_summary:
-                                        self.irf_params_random_base_summary[response] = {}
-                                    if gf not in self.irf_params_random_base_summary[response]:
-                                        self.irf_params_random_base_summary[response][gf] = {}
-                                    if family not in self.irf_params_random_base_summary[response][gf]:
-                                        self.irf_params_random_base_summary[response][gf][family] = {}
                                     self.irf_params_random_base[response][gf][family][_param_name] = _param
-                                    self.irf_params_random_base_summary[response][gf][family][_param_name] = _param_summary
 
-                # NN impulse random effects
+                # Interactions
 
-                self.nn_impulse_l1_W_random_base = {}
-                self.nn_impulse_l1_W_random_base_summary = {}
-                self.nn_impulse_l1_b_random_base = {}
-                self.nn_impulse_l1_b_random_base_summary = {}
-
-                for nn_id in self.nn_impulse_ids:
-                    self.nn_impulse_l1_W_random_base[nn_id] = {}
-                    self.nn_impulse_l1_W_random_base_summary[nn_id] = {}
-                    self.nn_impulse_l1_b_random_base[nn_id] = {}
-                    self.nn_impulse_l1_b_random_base_summary[nn_id] = {}
-                    for i, gf in enumerate(self.rangf):
-                        if gf in self.nn_impulse_rangfs:
-                            # NN L1 weights
-                            l1_W_random, l1_W_random_summary, = self._initialize_weights(
-                                (len(self.nn_impulse_impulse_names[nn_id]), self.n_units_irf_l1),
-                                ran_gf=gf,
-                                name='%s_l1_W' % nn_id
+                # Key order: response, ?(ran_gf)
+                self.interaction_fixed_base = {}
+                self.interaction_random_base = {}
+                for response in self.response_names:
+                    if len(self.interaction_names):
+                        interaction_ids = self.fixed_interaction_names
+                        if len(interaction_ids):
+                            # Fixed
+                            x = self._initialize_interaction(
+                                response,
+                                interaction_ids=interaction_ids
                             )
-                            self.nn_impulse_l1_W_random_base[nn_id][gf] = l1_W_random
-                            self.nn_impulse_l1_W_random_base_summary[nn_id][gf] = l1_W_random_summary
+                            _interaction_fixed_base = x['value']
+                            if 'kl_penalties' in x:
+                                self.kl_penalties.update(x['kl_penalties'])
+                            if 'eval_resample' in x:
+                                self.resample_ops.append(x['eval_resample'])
+                            self.interaction_fixed_base[response] = _interaction_fixed_base
 
-                            # L1 biases
-                            l1_b_random, l1_b_random_summary, = self._initialize_weights(
-                                self.n_units_irf_l1,
-                                ran_gf=gf,
-                                name='%s_l1_b' % nn_id
-                            )
-                            self.nn_impulse_l1_b_random_base[nn_id][gf] = l1_b_random
-                            self.nn_impulse_l1_b_random_base_summary[nn_id][gf] = l1_b_random_summary
-
-                # NN IRF random effects
-
-                self.rnn_h_random_base = {}
-                self.rnn_h_random_base_summary = {}
-                self.rnn_c_random_base = {}
-                self.rnn_c_random_base_summary = {}
-                self.h_bias_random_base = {}
-                self.h_bias_random_base_summary = {}
-                self.nn_irf_l1_W_random_base = {}
-                self.nn_irf_l1_W_random_base_summary = {}
-                self.nn_irf_l1_b_random_base = {}
-                self.nn_irf_l1_b_random_base_summary = {}
-
-                for nn_id in self.nn_irf_ids:
-                    self.rnn_h_random_base[nn_id] = {}
-                    self.rnn_h_random_base_summary[nn_id] = {}
-                    self.rnn_c_random_base[nn_id] = {}
-                    self.rnn_c_random_base_summary[nn_id] = {}
-                    self.h_bias_random_base[nn_id] = {}
-                    self.h_bias_random_base_summary[nn_id] = {}
-                    self.nn_irf_l1_W_random_base[nn_id] = {}
-                    self.nn_irf_l1_W_random_base_summary[nn_id] = {}
-                    self.nn_irf_l1_b_random_base[nn_id] = {}
-                    self.nn_irf_l1_b_random_base_summary[nn_id] = {}
-                    for i, gf in enumerate(self.rangf):
-                        if gf in self.nn_irf_rangfs:
-                            if gf not in self.rnn_h_random_base[nn_id]:
-                                self.rnn_h_random_base[nn_id][gf] = []
-                            if gf not in self.rnn_h_random_base_summary[nn_id]:
-                                self.rnn_h_random_base_summary[nn_id][gf] = []
-                            if gf not in self.rnn_c_random_base[nn_id]:
-                                self.rnn_c_random_base[nn_id][gf] = []
-                            if gf not in self.rnn_c_random_base_summary[nn_id]:
-                                self.rnn_c_random_base_summary[nn_id][gf] = []
-
-                            # Random RNN initialization offsets
-                            for l in range(self.n_layers_rnn):
-                                # RNN hidden state
-                                rnn_h_random, rnn_h_random_summary = self._initialize_biases(
-                                    self.n_units_rnn[l],
-                                    ran_gf=gf,
-                                    name='%s_rnn_h_l%d' % (nn_id, l + 1)
+                        # Random
+                        for gf in self.rangf:
+                            interaction_ids = self.interaction_by_rangf.get(gf, [])
+                            if len(interaction_ids):
+                                x = self._initialize_interaction(
+                                    response,
+                                    interaction_ids=interaction_ids,
+                                    ran_gf=gf
                                 )
-                                self.rnn_h_random_base[nn_id][gf].append(rnn_h_random)
-                                self.rnn_h_random_base_summary[nn_id][gf].append(rnn_h_random_summary)
+                                _interaction_random_base = x['value']
+                                if 'kl_penalties' in x:
+                                    self.kl_penalties.update(x['kl_penalties'])
+                                if 'eval_resample' in x:
+                                    self.resample_ops.append(x['eval_resample'])
+                                if response not in self.interaction_random_base:
+                                    self.interaction_random_base[response] = {}
+                                self.interaction_random_base[response][gf] = _interaction_random_base
 
-                                # RNN cell state
-                                rnn_c_random, rnn_c_random_summary = self._initialize_biases(
-                                    self.n_units_rnn[l],
-                                    ran_gf=gf,
-                                    name='%s_rnn_c_l%d' % (nn_id, l + 1)
-                                )
-                                self.rnn_c_random_base[nn_id][gf].append(rnn_c_random)
-                                self.rnn_c_random_base_summary[nn_id][gf].append(rnn_c_random_summary)
-
-                            # CDRNN hidden state
-                            if self.n_layers_input_projection or self.n_layers_rnn:
-                                h_bias_random, h_bias_random_summary = self._initialize_biases(
-                                    self.n_units_hidden_state,
-                                    ran_gf=gf,
-                                    name='%s_h_bias' % nn_id
-                                )
-                                self.h_bias_random_base[nn_id][gf] = h_bias_random
-                                self.h_bias_random_base_summary[nn_id][gf] = h_bias_random_summary
-
-                            # IRF L1 weights
-                            irf_l1_W_random, irf_l1_W_random_summary, = self._initialize_weights(
-                                self.n_units_irf_l1,
-                                ran_gf=gf,
-                                name='%s_irf_l1_W' % nn_id
-                            )
-                            self.nn_irf_l1_W_random_base[nn_id][gf] = irf_l1_W_random
-                            self.nn_irf_l1_W_random_base_summary[nn_id][gf] = irf_l1_W_random_summary
-
-                            # IRF L1 biases
-                            if self.irf_l1_use_bias:
-                                irf_l1_b_random, irf_l1_b_random_summary, = self._initialize_weights(
-                                    self.n_units_irf_l1,
-                                    ran_gf=gf,
-                                    name='%s_irf_l1_b' % nn_id
-                                )
-                                self.nn_irf_l1_b_random_base[nn_id][gf] = irf_l1_b_random
-                                self.nn_irf_l1_b_random_base_summary[nn_id][gf] = irf_l1_b_random_summary
-
-    # NN IMPULSE INITIALIZATION
-
-    def _initialize_nn_impulse(self, nn_id):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                assert nn_id in self.nn_impulse_ids, 'Unrecognized nn_id for NN impulse: %s.' % nn_id
-                
-                # IRF
-                l1_W, l1_W_summary = self._initialize_weights(
-                    (len(self.nn_impulse_impulse_names[nn_id]), self.n_units_irf_l1),
-                    name='%s_l1_W' % nn_id
-                )
-                self.nn_impulse_l1_W[nn_id] = l1_W
-                if self.normalize_irf_l1 and self.normalize_activations:
-                    self.nn_irf_l1_normalization_layer[nn_id] = self._initialize_normalization('%s_l1' % nn_id)
-                    self.layers.append(self.nn_irf_l1_normalization_layer[nn_id])
-                    if self.normalize_after_activation:
-                        irf_l1_b, irf_l1_b_summary = self._initialize_biases(
-                            self.n_units_irf_l1,
-                            name='%s_l1_b' % nn_id
-                        )
-                    else:
-                        irf_l1_b = tf.zeros_like(self.nn_irf_l1_W)
-                        irf_l1_b_summary = tf.zeros_like(self.nn_irf_l1_W)
-                else:
-                    irf_l1_b, irf_l1_b_summary = self._initialize_biases(
-                        self.n_units_irf_l1,
-                        name='%s_l1_b' % nn_id
-                    )
-                self.nn_impulse_l1_b[nn_id] = irf_l1_b
-                self.nn_impulse_l1_dropout_layer[nn_id] = get_dropout(
-                    self.irf_dropout_rate,
-                    training=self.training,
-                    use_MAP_mode=self.use_MAP_mode,
-                    name='%s_l1_dropout' % nn_id,
-                    session=self.sess
-                )
-
-                nn_layers = []
-                for l in range(1, self.n_layers_irf + 1):
-                    if l < self.n_layers_irf:
-                        units = self.n_units_irf[l]
-                        activation = self.irf_inner_activation
-                        dropout = self.irf_dropout_rate
-                        if self.normalize_irf:
-                            bn = self.batch_normalization_decay
-                            ln = self.layer_normalization_type
-                        else:
-                            bn = None
-                            ln = None
-                        use_bias = True
-                        final = False
-                        mn = self.maxnorm
-                    else:
-                        units = 1
-                        activation = self.irf_activation
-                        dropout = None
-                        bn = None
-                        ln = None
-                        use_bias = False
-                        final = True
-                        mn = None
-
-                    projection = self._initialize_feedforward(
-                        units=units,
-                        use_bias=use_bias,
-                        activation=activation,
-                        dropout=dropout,
-                        maxnorm=mn,
-                        batch_normalization_decay=bn,
-                        layer_normalization_type=ln,
-                        name='%s_l%s' % (nn_id, l + 1),
-                        final=final
-                    )
-                    self.layers.append(projection)
-
-                    if l < self.n_layers_irf:
-                        self.regularizable_layers.append(projection)
-                    nn_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
-
-                nn = compose_lambdas(nn_layers)
-
-                self.nn_impulse_layers[nn_id] = nn_layers
-                self.nn_impulse_lambda[nn_id] = nn
-
-    def _compile_nn_impulse_ranef(self, nn_id):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                assert nn_id in self.nn_impulse_ids, 'Unrecognized nn_id for NN IRF: %s.' % nn_id
-                self.nn_impulse_l1_W_random[nn_id] = {}
-                self.nn_impulse_l1_W_random_summary[nn_id] = {}
-                self.nn_impulse_l1_b_random[nn_id] = {}
-                self.nn_impulse_l1_b_random_summary[nn_id] = {}
-
-                if self.ranef_dropout_rate:
-                    Y_gf = self.Y_gf_dropout
-                else:
-                    Y_gf = self.Y_gf
-
-                for i, gf in enumerate(self.rangf):
-                    _Y_gf = Y_gf[:, i]
-                    if gf in self.nn_impulse_rangfs:
-                        # L1 weights
-                        nn_impulse_l1_W_random = self.nn_impulse_l1_W_random_base[nn_id][gf]
-                        nn_impulse_l1_W_random_summary = self.nn_impulse_l1_W_random_base_summary[nn_id][gf]
-                        nn_impulse_l1_W_random -= tf.reduce_mean(nn_impulse_l1_W_random, axis=0, keepdims=True)
-                        nn_impulse_l1_W_random_summary -= tf.reduce_mean(nn_impulse_l1_W_random_summary, axis=0, keepdims=True)
-                        if 'nn' not in self.rvs:
-                            self._regularize(
-                                nn_impulse_l1_W_random,
-                                regtype='ranef',
-                                var_name=reg_name('%s_l1_W_bias_by_%s' % (nn_id, (gf)))
-                            )
-                        if self.log_random:
-                            tf.summary.histogram(
-                                sn('by_%s/%s_l1_W' % (nn_id, sn(gf))),
-                                nn_impulse_l1_W_random_summary,
-                                collections=['random']
-                            )
-                        self.nn_impulse_l1_W_random[nn_id][gf] = nn_impulse_l1_W_random
-                        self.nn_impulse_l1_W_random_summary[nn_id][gf] = nn_impulse_l1_W_random_summary
-                        nn_impulse_l1_W_random = tf.concat(
-                            [
-                                nn_impulse_l1_W_random,
-                                tf.zeros([1, (len(self.nn_impulse_ids[nn_id]), self.n_units_irf[0])])
-                            ],
-                            axis=0
-                        )
-                        self.nn_impulse_l1_W[nn_id] += tf.expand_dims(tf.gather(nn_impulse_l1_W_random, _Y_gf), axis=-3)
-
-                        # L1 biases
-                        nn_impulse_l1_b_random = self.nn_impulse_l1_b_random_base[nn_id][gf]
-                        nn_impulse_l1_b_random_summary = self.nn_impulse_l1_b_random_base_summary[nn_id][gf]
-                        nn_impulse_l1_b_random -= tf.reduce_mean(nn_impulse_l1_b_random, axis=0, keepdims=True)
-                        nn_impulse_l1_b_random_summary -= tf.reduce_mean(nn_impulse_l1_b_random_summary, axis=0, keepdims=True)
-                        if 'nn' not in self.rvs:
-                            self._regularize(
-                                nn_impulse_l1_b_random,
-                                regtype='ranef',
-                                var_name=reg_name('%s_l1_b_bias_by_%s' % (nn_id, sn(gf)))
-                            )
-                        if self.log_random:
-                            tf.summary.histogram(
-                                sn('by_%s/%s_l1_b' % (nn_id, sn(gf))),
-                                nn_impulse_l1_b_random_summary,
-                                collections=['random']
-                            )
-                        self.nn_impulse_l1_b_random[nn_id][gf] = nn_impulse_l1_b_random
-                        self.nn_impulse_l1_b_random_summary[nn_id][gf] = nn_impulse_l1_b_random_summary
-                        nn_impulse_l1_b_random = tf.concat(
-                            [
-                                nn_impulse_l1_b_random,
-                                tf.zeros([1, self.n_units_irf[0]])
-                            ],
-                            axis=0
-                        )
-                        self.nn_impulse_l1_b[nn_id] += tf.expand_dims(tf.gather(nn_impulse_l1_b_random, _Y_gf), axis=-2)
-
-    def _compile_nn_impulse(self, nn_id):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                assert nn_id in self.nn_impulse_ids, 'Unrecognized nn_id for NN IRF: %s.' % nn_id
-                impulse_names = self.nn_impulse_impulse_names[nn_id]
-                impulse_ix = names2ix(impulse_names, self.impulse_names)
-                X = tf.gather(self.X_processed, impulse_ix, axis=2)
-
-                W = self.nn_impulse_l1_W[nn_id]
-                b = self.nn_impulse_l1_b[nn_id]
-                _X = tf.expand_dims(X, axis=-2)
-                _X = self._matmul(_X, W)
-                _X = tf.squeeze(_X, axis=-2)
-                _X = _X + b
-
-                nn_impulse = self.nn_impulse_lambda[nn_id]
-                _X = nn_impulse(_X)
-                self.nn_transformed_impulses.append(_X)
-
-    def _concat_nn_impulses(self):
-        if len(self.nn_transformed_impulses):
-            if len(self.nn_transformed_impulses) == 1:
-                self.nn_transformed_impulses = self.nn_transformed_impulses[0]
-            else:
-                self.nn_transformed_impulses = tf.concat(self.nn_transformed_impulses, axis=2)
+                # NN components are initialized elsewhere
 
     # INTERCEPT INITIALIZATION
 
-    def _initialize_intercept_mle(self, response_name, ran_gf=None):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                init = self.intercept_init[response_name]
-                name = sn(response_name)
+    def _initialize_intercept_mle(self, response, ran_gf=None):
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                init = self.intercept_init[response]
+                name = sn(response)
                 if ran_gf is None:
                     intercept = tf.Variable(
                         init,
                         dtype=self.FLOAT_TF,
                         name='intercept_%s' % name
                     )
-                    intercept_summary = intercept
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     if self.use_distributional_regression:
-                        nparam = self.get_response_nparam(response_name)
+                        nparam = self.get_response_nparam(response)
                     else:
                         nparam = 1
-                    ndim = self.get_response_ndim(response_name)
+                    ndim = self.get_response_ndim(response)
                     shape = [rangf_n_levels, nparam, ndim]
                     intercept = tf.Variable(
                         tf.zeros(shape, dtype=self.FLOAT_TF),
                         name='intercept_%s_by_%s' % (name, sn(ran_gf))
                     )
-                    intercept_summary = intercept
 
-                return intercept, intercept_summary
+                return {'value': intercept}
 
-    def _initialize_intercept_bayes(self, response_name, ran_gf=None):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                init = self.intercept_init[response_name]
+    def _initialize_intercept_bayes(self, response, ran_gf=None):
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                init = self.intercept_init[response]
 
-                name = sn(response_name)
+                name = sn(response)
                 if ran_gf is None:
-                    prior_sd = self._intercept_prior_sd[response_name]
-                    post_sd = self._intercept_posterior_sd_init[response_name]
+                    sd_prior = self._intercept_prior_sd[response]
+                    sd_posterior = self._intercept_posterior_sd_init[response]
 
-                    # Posterior distribution
-                    intercept_q_loc = tf.Variable(
-                        tf.constant(init, self.FLOAT_TF),
-                        name='intercept_%s_q_loc' % name
+                    rv_dict = get_random_variable(
+                        'intercept_%s' % name,
+                        init.shape,
+                        sd_posterior,
+                        init=init,
+                        constraint=self.constraint,
+                        sd_prior=sd_prior,
+                        training=self.training,
+                        use_MAP_mode=self.use_MAP_mode,
+                        epsilon=self.epsilon,
+                        session=self.session
                     )
-
-                    intercept_q_scale = tf.Variable(
-                        tf.constant(post_sd, self.FLOAT_TF),
-                        name='intercept_%s_q_scale' % name
-                    )
-
-                    intercept_q_dist = Normal(
-                        loc=intercept_q_loc,
-                        scale=self.constraint_fn(intercept_q_scale) + self.epsilon,
-                        name='intercept_%s_q' % name
-                    )
-
-                    intercept = tf.cond(self.use_MAP_mode, intercept_q_dist.mean, intercept_q_dist.sample)
-
-                    intercept_summary = intercept_q_dist.mean()
-
-                    if self.declare_priors_fixef:
-                        # Prior distribution
-                        intercept_prior_dist = Normal(
-                            loc=tf.constant(init, self.FLOAT_TF),
-                            scale=self.constraint_fn(tf.constant(prior_sd, self.FLOAT_TF)),
-                            name='intercept_%s' % name
-                        )
-                        self.kl_penalties['intercept_%s' % name] = {
-                            'loc': init.flatten(),
-                            'scale': self.constraint_fn_np(prior_sd).flatten(),
-                            'val': intercept_q_dist.kl_divergence(intercept_prior_dist)
-                        }
 
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
-                    if self.use_distributional_regression:
-                        nparam = self.get_response_nparam(response_name)
-                    else:
-                        nparam = 1
-                    ndim = self.get_response_ndim(response_name)
-                    shape = [rangf_n_levels, nparam, ndim]
 
-                    prior_sd = self._intercept_ranef_prior_sd[response_name]
-                    post_sd = self._intercept_ranef_posterior_sd_init[response_name]
+                    sd_prior = self._intercept_ranef_prior_sd[response]
+                    sd_posterior = self._intercept_ranef_posterior_sd_init[response]
                     if not self.use_distributional_regression:
-                        post_sd = post_sd[:1]
-                    prior_sd = np.ones((rangf_n_levels, 1, 1)) * prior_sd[None, ...]
-                    post_sd = np.ones((rangf_n_levels, 1, 1)) * post_sd[None, ...]
+                        sd_posterior = sd_posterior[:1]
+                    sd_prior = np.ones((rangf_n_levels, 1, 1)) * sd_prior[None, ...]
+                    sd_posterior = np.ones((rangf_n_levels, 1, 1)) * sd_posterior[None, ...]
 
-                    # Posterior distribution
-                    intercept_q_loc = tf.Variable(
-                        tf.zeros(shape, dtype=self.FLOAT_TF),
-                        name='intercept_%s_by_%s_q_loc' % (name, sn(ran_gf))
+                    rv_dict = get_random_variable(
+                        'intercept_%s_by_%s' % (name, ran_gf),
+                        sd_posterior.shape,
+                        sd_posterior,
+                        constraint=self.constraint,
+                        sd_prior=sd_prior,
+                        training=self.training,
+                        use_MAP_mode=self.use_MAP_mode,
+                        epsilon=self.epsilon,
+                        session=self.session
                     )
 
-                    intercept_q_scale = tf.Variable(
-                        tf.constant(post_sd, self.FLOAT_TF),
-                        name='intercept_%s_by_%s_q_scale' % (name, sn(ran_gf))
-                    )
-
-                    intercept_q_dist = Normal(
-                        loc=intercept_q_loc,
-                        scale=self.constraint_fn(intercept_q_scale) + self.epsilon,
-                        name='intercept_%s_by_%s_q' % (name, sn(ran_gf))
-                    )
-
-                    intercept = tf.cond(self.use_MAP_mode, intercept_q_dist.mean, intercept_q_dist.sample)
-
-                    intercept_summary = intercept_q_dist.mean()
-
-                    if self.declare_priors_ranef:
-                        # Prior distribution
-                        intercept_prior_dist = Normal(
-                            loc=0.,
-                            scale=self.constraint_fn(tf.constant(prior_sd, self.FLOAT_TF)),
-                            name='intercept_%s_by_%s' % (name, sn(ran_gf))
-                        )
-                        self.kl_penalties['intercept_%s_by_%s' % (name, sn(ran_gf))] = {
-                            'loc': 0.,
-                            'scale': self.constraint_fn_np(self._intercept_ranef_prior_sd[response_name]).flatten(),
-                            'val': intercept_q_dist.kl_divergence(intercept_prior_dist)
-                        }
-
-                # shape: (?rangf_n_levels, n_param, n_dim)
-
-                return intercept, intercept_summary
+                return {
+                    'value': rv_dict['v'],
+                    'kl_penalties': rv_dict['kl_penalties'],
+                    'eval_resample': rv_dict['v_eval_resample']
+                }
 
     def _initialize_intercept(self, *args, **kwargs):
         if 'intercept' in self.rvs:
@@ -2381,21 +1979,15 @@ class CDRModel(object):
         return self._initialize_intercept_mle(*args, **kwargs)
 
     def _compile_intercepts(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 self.intercept = {}
-                self.intercept_summary = {}
                 self.intercept_fixed = {}
-                self.intercept_fixed_summary = {}
                 self.intercept_random = {}
-                self.intercept_random_summary = {}
                 for response in self.response_names:
                     self.intercept[response] = {}
-                    self.intercept_summary[response] = {}
                     self.intercept_fixed[response] = {}
-                    self.intercept_fixed_summary[response] = {}
                     self.intercept_random[response] = {}
-                    self.intercept_random_summary[response] = {}
 
                     # Fixed
                     response_params = self.get_response_params(response)
@@ -2403,7 +1995,6 @@ class CDRModel(object):
                     ndim = self.get_response_ndim(response)
 
                     intercept_fixed = self.intercept_fixed_base[response]
-                    intercept_fixed_summary = self.intercept_fixed_base_summary[response]
 
                     self._regularize(
                         intercept_fixed,
@@ -2413,51 +2004,37 @@ class CDRModel(object):
                     )
 
                     intercept = intercept_fixed[None, ...]
-                    intercept_summary = intercept_fixed_summary[None, ...]
 
                     for i, response_param in enumerate(response_params):
                         dim_names = self.expand_param_name(response, response_param)
                         _p = intercept_fixed[i]
-                        _p_summary = intercept_fixed_summary[i]
                         if self.standardize_response and self.is_real(response):
                             if response_param == 'mu':
                                 _p = _p * self.Y_train_sds[response] + self.Y_train_means[response]
-                                _p_summary = _p_summary * self.Y_train_sds[response] + self.Y_train_means[response]
                             elif response_param == 'sigma':
                                 _p = self.constraint_fn(_p) + self.epsilon
                                 _p = _p * self.Y_train_sds[response]
-                                _p_summary = self.constraint_fn(_p_summary) + self.epsilon
-                                _p_summary = _p_summary * self.Y_train_sds[response]
                         if response_param == 'tailweight':
                             _p = self.constraint_fn(_p) + self.epsilon
-                            _p_summary = self.constraint_fn(_p_summary) + self.epsilon
                         for j, dim_name in enumerate(dim_names):
                             val = _p[j]
-                            val_summary = _p_summary[j]
                             if self.has_intercept[None]:
                                 tf.summary.scalar(
                                     'intercept/%s_%s' % (sn(response), sn(dim_name)),
-                                    val_summary,
+                                    val,
                                     collections=['params']
                                 )
                             self.intercept_fixed[response][dim_name] = val
-                            self.intercept_fixed_summary[response][dim_name] = val_summary
 
                     # Random
                     for i, gf in enumerate(self.rangf):
                         # Random intercepts
                         if self.has_intercept[gf]:
                             self.intercept_random[response][gf] = {}
-                            self.intercept_random_summary[response][gf] = {}
 
                             intercept_random = self.intercept_random_base[response][gf]
-                            intercept_random_summary = self.intercept_random_base_summary[response][gf]
-
                             intercept_random_means = tf.reduce_mean(intercept_random, axis=0, keepdims=True)
-                            intercept_random_summary_means = tf.reduce_mean(intercept_random_summary, axis=0, keepdims=True)
-
                             intercept_random -= intercept_random_means
-                            intercept_random_summary -= intercept_random_summary_means
 
                             if 'intercept' not in self.rvs:
                                 self._regularize(
@@ -2469,38 +2046,28 @@ class CDRModel(object):
                             for j, response_param in enumerate(response_params):
                                 if j == 0 or self.use_distributional_regression:
                                     _p = intercept_random[:, j]
-                                    _p_summary = intercept_random_summary[:, j]
                                     if self.standardize_response and self.is_real(response):
                                         if response_param == 'mu':
                                             _p = _p * self.Y_train_sds[response] + self.Y_train_means[response]
-                                            _p_summary = _p_summary * self.Y_train_sds[response] + self.Y_train_means[response]
                                         elif response_param == 'sigma':
                                             _p = self.constraint_fn(_p) + self.epsilon
                                             _p = _p * self.Y_train_sds[response]
-                                            _p_summary = self.constraint_fn(_p_summary) + self.epsilon
-                                            _p_summary = _p_summary * self.Y_train_sds[response]
                                     dim_names = self.expand_param_name(response, response_param)
                                     for k, dim_name in enumerate(dim_names):
                                         val = _p[:, k]
-                                        val_summary = _p_summary[:, k]
                                         if self.log_random:
                                             tf.summary.histogram(
                                                 'by_%s/intercept/%s_%s' % (sn(gf), sn(response), sn(dim_name)),
-                                                val_summary,
+                                                val,
                                                 collections=['random']
                                             )
                                         self.intercept_random[response][gf][dim_name] = val
-                                        self.intercept_random_summary[response][gf][dim_name] = val_summary
 
                             if not self.use_distributional_regression:
                                 # Pad out any unmodeled params of predictive distribution
                                 intercept_random = tf.pad(
                                     intercept_random,
                                     # ranef   pred param    pred dim
-                                    [(0, 0), (0, nparam - 1), (0, 0)]
-                                )
-                                intercept_random_summary = tf.pad(
-                                    intercept_random_summary,
                                     [(0, 0), (0, nparam - 1), (0, 0)]
                                 )
 
@@ -2512,19 +2079,10 @@ class CDRModel(object):
                                 ],
                                 axis=0
                             )
-                            intercept_random_summary = tf.concat(
-                                [
-                                    intercept_random_summary,
-                                    tf.zeros([1, nparam, ndim])
-                                ],
-                                axis=0
-                            )
 
                             intercept = intercept + tf.gather(intercept_random, self.Y_gf[:, i])
-                            intercept_summary = intercept_summary + tf.gather(intercept_random_summary, self.Y_gf[:, i])
 
                     self.intercept[response] = intercept
-                    self.intercept_summary[response] = intercept_summary
 
     # COEFFICIENT INITIALIZATION
 
@@ -2539,130 +2097,82 @@ class CDRModel(object):
         ndim = self.get_response_ndim(response)
         ncoef = len(coef_ids)
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 if ran_gf is None:
                     coefficient = tf.Variable(
                         tf.zeros([ncoef, nparam, ndim], dtype=self.FLOAT_TF),
                         name='coefficient_%s' % sn(response)
                     )
-                    coefficient_summary = coefficient
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     coefficient = tf.Variable(
                         tf.zeros([rangf_n_levels, ncoef, nparam, ndim], dtype=self.FLOAT_TF),
                         name='coefficient_%s_by_%s' % (sn(response), sn(ran_gf))
                     )
-                    coefficient_summary = coefficient
 
                 # shape: (?rangf_n_levels, ncoef, nparam, ndim)
 
-                return coefficient, coefficient_summary
+                return {'value': coefficient}
 
     def _initialize_coefficient_bayes(self, response, coef_ids=None, ran_gf=None):
         if coef_ids is None:
             coef_ids = self.coef_names
 
-        if self.use_distributional_regression:
-            nparam = self.get_response_nparam(response)
-        else:
-            nparam = 1
-
-        ndim = self.get_response_ndim(response)
         ncoef = len(coef_ids)
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 if ran_gf is None:
-                    prior_sd = self._coef_prior_sd[response]
-                    post_sd = self._coef_posterior_sd_init[response]
+                    sd_prior = self._coef_prior_sd[response]
+                    sd_posterior = self._coef_posterior_sd_init[response]
                     if not self.use_distributional_regression:
-                        prior_sd = prior_sd[:1]
-                        post_sd = post_sd[:1]
-                    prior_sd = np.ones((ncoef, 1, 1)) * prior_sd[None, ...]
-                    post_sd = np.ones((ncoef, 1, 1)) * post_sd[None, ...]
+                        sd_prior = sd_prior[:1]
+                        sd_posterior = sd_posterior[:1]
+                    sd_prior = np.ones((ncoef, 1, 1)) * sd_prior[None, ...]
+                    sd_posterior = np.ones((ncoef, 1, 1)) * sd_posterior[None, ...]
 
-                    # Posterior distribution
-                    coefficient_q_loc = tf.Variable(
-                        tf.zeros([ncoef, nparam, ndim], dtype=self.FLOAT_TF),
-                        name='coefficient_%s_q_loc' % sn(response)
+                    rv_dict = get_random_variable(
+                        'coefficient_%s' % sn(response),
+                        sd_posterior.shape,
+                        sd_posterior,
+                        constraint=self.constraint,
+                        sd_prior=sd_prior,
+                        training=self.training,
+                        use_MAP_mode=self.use_MAP_mode,
+                        epsilon=self.epsilon,
+                        session=self.session
                     )
-
-                    coefficient_q_scale = tf.Variable(
-                        tf.constant(post_sd, self.FLOAT_TF),
-                        name='coefficient_%s_q_scale' % sn(response)
-                    )
-
-                    coefficient_q_dist = Normal(
-                        loc=coefficient_q_loc,
-                        scale=self.constraint_fn(coefficient_q_scale) + self.epsilon,
-                        name='coefficient_%s_q' % sn(response)
-                    )
-
-                    coefficient = tf.cond(self.use_MAP_mode, coefficient_q_dist.mean, coefficient_q_dist.sample)
-
-                    coefficient_summary = coefficient_q_dist.mean()
-
-                    if self.declare_priors_fixef:
-                        # Prior distribution
-                        coefficient_prior_dist = Normal(
-                            loc=0.,
-                            scale=self.constraint_fn(tf.constant(prior_sd, self.FLOAT_TF)),
-                            name='coefficient_%s' % sn(response)
-                        )
-                        self.kl_penalties['coefficient_%s' % sn(response)] = {
-                            'loc': 0.,
-                            'scale': self.constraint_fn_np(self._coef_prior_sd[response]).flatten(),
-                            'val': coefficient_q_dist.kl_divergence(coefficient_prior_dist)
-                        }
 
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
-                    prior_sd = self._coef_ranef_prior_sd[response]
-                    post_sd = self._coef_ranef_posterior_sd_init[response]
+                    sd_prior = self._coef_ranef_prior_sd[response]
+                    sd_posterior = self._coef_ranef_posterior_sd_init[response]
                     if not self.use_distributional_regression:
-                        prior_sd = prior_sd[:1]
-                        post_sd = post_sd[:1]
-                    prior_sd = np.ones((rangf_n_levels, ncoef, 1, 1)) * prior_sd[None, None, ...]
-                    post_sd = np.ones((rangf_n_levels, ncoef, 1, 1)) * post_sd[None, None, ...]
+                        sd_prior = sd_prior[:1]
+                        sd_posterior = sd_posterior[:1]
+                    sd_prior = np.ones((rangf_n_levels, ncoef, 1, 1)) * sd_prior[None, None, ...]
+                    sd_posterior = np.ones((rangf_n_levels, ncoef, 1, 1)) * sd_posterior[None, None, ...]
 
-                    # Posterior distribution
-                    coefficient_q_loc = tf.Variable(
-                        tf.zeros([rangf_n_levels, ncoef, nparam, ndim], dtype=self.FLOAT_TF),
-                        name='coefficient_%s_by_%s_q_loc' % (sn(response), sn(ran_gf))
+                    rv_dict = get_random_variable(
+                        'coefficient_%s_by_%s' % (sn(response), sn(ran_gf)),
+                        sd_posterior.shape,
+                        sd_posterior,
+                        constraint=self.constraint,
+                        sd_prior=sd_prior,
+                        training=self.training,
+                        use_MAP_mode=self.use_MAP_mode,
+                        epsilon=self.epsilon,
+                        session=self.session
                     )
-
-                    coefficient_q_scale = tf.Variable(
-                        tf.constant(post_sd, self.FLOAT_TF),
-                        name='coefficient_%s_by_%s_q_scale' % (sn(response), sn(ran_gf))
-                    )
-
-                    coefficient_q_dist = Normal(
-                        loc=coefficient_q_loc,
-                        scale=self.constraint_fn(coefficient_q_scale) + self.epsilon,
-                        name='coefficient_%s_by_%s_q' % (sn(response), sn(ran_gf))
-                    )
-
-                    coefficient = tf.cond(self.use_MAP_mode, coefficient_q_dist.mean, coefficient_q_dist.sample)
-
-                    coefficient_summary = coefficient_q_dist.mean()
-
-                    if self.declare_priors_ranef:
-                        # Prior distribution
-                        coefficient_prior_dist = Normal(
-                            loc=0.,
-                            scale=self.constraint_fn(tf.constant(prior_sd, self.FLOAT_TF)),
-                            name='coefficient_%s_by_%s' % (sn(response), sn(ran_gf))
-                        )
-                        self.kl_penalties['coefficient_%s_by_%s' % (sn(response), sn(ran_gf))] = {
-                            'loc': 0.,
-                            'scale': self.constraint_fn_np(self._coef_ranef_prior_sd[response]).flatten(),
-                            'val': coefficient_q_dist.kl_divergence(coefficient_prior_dist)
-                        }
 
                 # shape: (?rangf_n_levels, ncoef, nparam, ndim)
 
-                return coefficient, coefficient_summary
+                return {
+                    'value': rv_dict['v'],
+                    'kl_penalties': rv_dict['kl_penalties'],
+                    'eval_resample': rv_dict['v_eval_resample']
+                }
 
     def _initialize_coefficient(self, *args, **kwargs):
         if 'coefficient' in self.rvs:
@@ -2670,17 +2180,13 @@ class CDRModel(object):
         return self._initialize_coefficient_mle(*args, **kwargs)
 
     def _compile_coefficients(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 self.coefficient = {}
-                self.coefficient_summary = {}
                 self.coefficient_fixed = {}
-                self.coefficient_fixed_summary = {}
                 self.coefficient_random = {}
-                self.coefficient_random_summary = {}
                 for response in self.response_names:
                     self.coefficient_fixed[response] = {}
-                    self.coefficient_fixed_summary[response] = {}
 
                     response_params = self.get_response_params(response)
                     if not self.use_distributional_regression:
@@ -2695,11 +2201,6 @@ class CDRModel(object):
                         self.coefficient_fixed_base[response],
                         [len(coef_ids), nparam, ndim]
                     )
-                    coefficient_fixed_summary = self._scatter_along_axis(
-                        fixef_ix,
-                        self.coefficient_fixed_base_summary[response],
-                        [len(coef_ids), nparam, ndim]
-                    )
                     self._regularize(
                         self.coefficient_fixed_base[response],
                         regtype='coefficient',
@@ -2707,57 +2208,44 @@ class CDRModel(object):
                     )
 
                     coefficient = coefficient_fixed[None, ...]
-                    coefficient_summary = coefficient_fixed_summary[None, ...]
 
                     for i, coef_name in enumerate(self.coef_names):
                         self.coefficient_fixed[response][coef_name] = {}
-                        self.coefficient_fixed_summary[response][coef_name] = {}
                         for j, response_param in enumerate(response_params):
                             _p = coefficient_fixed[:, j]
-                            _p_summary = coefficient_fixed_summary[:, j]
                             if self.standardize_response and \
                                     self.is_real(response) and \
                                     response_param in ['mu', 'sigma']:
                                 _p = _p * self.Y_train_sds[response]
-                                _p_summary = _p_summary * self.Y_train_sds[response]
                             dim_names = self.expand_param_name(response, response_param)
                             for k, dim_name in enumerate(dim_names):
                                 val = _p[i, k]
-                                val_summary = _p_summary[i, k]
                                 tf.summary.scalar(
                                     'coefficient' + '/%s/%s_%s' % (
                                         sn(coef_name),
                                         sn(response),
                                         sn(dim_name)
                                     ),
-                                    val_summary,
+                                    val,
                                     collections=['params']
                                 )
                                 self.coefficient_fixed[response][coef_name][dim_name] = val
-                                self.coefficient_fixed_summary[response][coef_name][dim_name] = val_summary
 
                     self.coefficient_random[response] = {}
-                    self.coefficient_random_summary[response] = {}
                     for i, gf in enumerate(self.rangf):
                         levels_ix = np.arange(self.rangf_n_levels[i] - 1)
 
                         coefs = self.coef_by_rangf.get(gf, [])
                         if len(coefs) > 0:
                             self.coefficient_random[response][gf] = {}
-                            self.coefficient_random_summary[response][gf] = {}
 
                             nonzero_coef_ix = names2ix(coefs, self.coef_names)
 
                             coefficient_random = self.coefficient_random_base[response][gf]
-                            coefficient_random_summary = self.coefficient_random_base_summary[response][gf]
-
                             coefficient_random_means = tf.reduce_mean(coefficient_random, axis=0, keepdims=True)
-                            coefficient_random_summary_means = tf.reduce_mean(coefficient_random_summary, axis=0, keepdims=True)
-
                             coefficient_random -= coefficient_random_means
-                            coefficient_random_summary -= coefficient_random_summary_means
 
-                            if coefficient not in self.rvs:
+                            if 'coefficient' not in self.rvs:
                                 self._regularize(
                                     coefficient_random,
                                     regtype='ranef',
@@ -2766,19 +2254,15 @@ class CDRModel(object):
 
                             for j, coef_name in enumerate(coefs):
                                 self.coefficient_random[response][gf][coef_name] = {}
-                                self.coefficient_random_summary[response][gf][coef_name] = {}
                                 for k, response_param in enumerate(response_params):
                                     _p = coefficient_random[:, :, k]
-                                    _p_summary = coefficient_random_summary[:, :, k]
                                     if self.standardize_response and \
                                             self.is_real(response) and \
                                             response_param in ['mu', 'sigma']:
                                         _p = _p * self.Y_train_sds[response]
-                                        _p_summary = _p_summary * self.Y_train_sds[response]
                                     dim_names = self.expand_param_name(response, response_param)
                                     for l, dim_name in enumerate(dim_names):
                                         val = _p[:, j, l]
-                                        val_summary = _p_summary[:, j, l]
                                         tf.summary.histogram(
                                             'by_%s/coefficient/%s/%s_%s' % (
                                                 sn(gf),
@@ -2786,11 +2270,10 @@ class CDRModel(object):
                                                 sn(response),
                                                 sn(dim_name)
                                             ),
-                                            val_summary,
+                                            val,
                                             collections=['random']
                                         )
                                         self.coefficient_random[response][gf][coef_name][dim_name] = val
-                                        self.coefficient_random_summary[response][gf][coef_name][dim_name] = val_summary
 
                             coefficient_random = self._scatter_along_axis(
                                 nonzero_coef_ix,
@@ -2802,22 +2285,10 @@ class CDRModel(object):
                                 [self.rangf_n_levels[i], len(self.coef_names), nparam, ndim],
                                 axis=1
                             )
-                            coefficient_random_summary = self._scatter_along_axis(
-                                nonzero_coef_ix,
-                                self._scatter_along_axis(
-                                    levels_ix,
-                                    coefficient_random_summary,
-                                    [self.rangf_n_levels[i], len(coefs), nparam, ndim]
-                                ),
-                                [self.rangf_n_levels[i], len(self.coef_names), nparam, ndim],
-                                axis=1
-                            )
 
                             coefficient = coefficient + tf.gather(coefficient_random, self.Y_gf[:, i], axis=0)
-                            coefficient_summary = coefficient_summary + tf.gather(coefficient_random_summary, self.Y_gf[:, i], axis=0)
 
                     self.coefficient[response] = coefficient
-                    self.coefficient_summary[response] = coefficient_summary
 
     # IRF PARAMETER INITIALIZATION
 
@@ -2834,8 +2305,8 @@ class CDRModel(object):
             response_nparam = 1
         response_ndim = self.get_response_ndim(response)
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 if ran_gf is None:
                     trainable_ids = [x for x in irf_ids_all if param_name in param_trainable[x]]
                     nirf = len(trainable_ids)
@@ -2845,9 +2316,8 @@ class CDRModel(object):
                             tf.ones([nirf, response_nparam, response_ndim], dtype=self.FLOAT_TF) * tf.constant(mean[..., None, None], dtype=self.FLOAT_TF),
                             name=sn('%s_%s_%s' % (param_name, '-'.join(trainable_ids), sn(response)))
                         )
-                        param_summary = param
                     else:
-                        param = param_summary = None
+                        param = None
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     irf_ids_gf = self.irf_by_rangf[ran_gf]
@@ -2859,13 +2329,12 @@ class CDRModel(object):
                             tf.zeros([rangf_n_levels, nirf, response_nparam, response_ndim], dtype=self.FLOAT_TF),
                             name=sn('%s_%s_%s_by_%s' % (param_name, '-'.join(trainable_ids), sn(response), sn(ran_gf)))
                         )
-                        param_summary = param
                     else:
-                        param = param_summary = None
+                        param = None
 
                 # shape: (?rangf_n_levels, nirf, nparam, ndim)
 
-                return param, param_summary
+                return {'value': param}
 
     def _initialize_irf_param_bayes(self, response, family, param_name, ran_gf=None):
         param_mean_unconstrained = self.irf_params_means_unconstrained[family][param_name]
@@ -2874,62 +2343,42 @@ class CDRModel(object):
         irf_ids_all = self.atomic_irf_names_by_family[family]
         param_trainable = self.atomic_irf_param_trainable_by_family[family]
 
-        if self.use_distributional_regression:
-            response_nparam = self.get_response_nparam(response) # number of params of predictive dist, not IRF
-        else:
-            response_nparam = 1
-        response_ndim = self.get_response_ndim(response)
-
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 if ran_gf is None:
                     trainable_ids = [x for x in irf_ids_all if param_name in param_trainable[x]]
                     nirf = len(trainable_ids)
 
                     if nirf:
-                        prior_sd = self._irf_param_prior_sd[response]
-                        post_sd = self._irf_param_posterior_sd_init[response]
+                        sd_prior = self._irf_param_prior_sd[response]
+                        sd_posterior = self._irf_param_posterior_sd_init[response]
                         if not self.use_distributional_regression:
-                            prior_sd = prior_sd[:1]
-                            post_sd = post_sd[:1]
-                        prior_sd = np.ones((nirf, 1, 1)) * prior_sd[None, ...]
-                        post_sd = np.ones((nirf, 1, 1)) * post_sd[None, ...]
+                            sd_prior = sd_prior[:1]
+                            sd_posterior = sd_posterior[:1]
+                        sd_prior = np.ones((nirf, 1, 1)) * sd_prior[None, ...]
+                        sd_posterior = np.ones((nirf, 1, 1)) * sd_posterior[None, ...]
+                        while len(mean.shape) < len(sd_posterior.shape):
+                            mean = mean[..., None]
+                        mean = np.ones_like(sd_posterior) * mean
 
-                        # Posterior distribution
-                        param_q_loc = tf.Variable(
-                            tf.ones([nirf, response_nparam, response_ndim], dtype=self.FLOAT_TF) * tf.constant(mean[..., None, None], dtype=self.FLOAT_TF),
-                            name='%s_%s_%s_q_loc' % (param_name, sn(response), sn('-'.join(trainable_ids)))
+                        rv_dict = get_random_variable(
+                            '%s_%s_%s' % (param_name, sn(response), sn('-'.join(trainable_ids))),
+                            sd_posterior.shape,
+                            sd_posterior,
+                            init=mean,
+                            constraint=self.constraint,
+                            sd_prior=sd_prior,
+                            training=self.training,
+                            use_MAP_mode=self.use_MAP_mode,
+                            epsilon=self.epsilon,
+                            session=self.session
                         )
-
-                        param_q_scale = tf.Variable(
-                            tf.constant(post_sd, self.FLOAT_TF),
-                            name='%s_%s_%s_q_scale' % (param_name, sn(response), sn('-'.join(trainable_ids)))
-                        )
-
-                        param_q_dist = Normal(
-                            loc=param_q_loc,
-                            scale=self.constraint_fn(param_q_scale) + self.epsilon,
-                            name='%s_%s_%s_q' % (param_name, sn(response), sn('-'.join(trainable_ids)))
-                        )
-
-                        param = tf.cond(self.use_MAP_mode, param_q_dist.mean, param_q_dist.sample)
-
-                        param_summary = param_q_dist.mean()
-
-                        if self.declare_priors_fixef:
-                            # Prior distribution
-                            param_prior_dist = Normal(
-                                loc=tf.constant(mean[..., None, None], dtype=self.FLOAT_TF),
-                                scale=self.constraint_fn(tf.constant(prior_sd, self.FLOAT_TF)),
-                                name='%s_%s_%s' % (param_name, sn(response), sn('-'.join(trainable_ids)))
-                            )
-                            self.kl_penalties['%s_%s_%s' % (param_name, sn(response), sn('-'.join(trainable_ids)))] = {
-                                'loc': mean.flatten(),
-                                'scale': self.constraint_fn_np(self._irf_param_prior_sd[response]).flatten(),
-                                'val': param_q_dist.kl_divergence(param_prior_dist)
-                            }
                     else:
-                        param = param_summary = None
+                        rv_dict = {
+                            'v': None,
+                            'kl_penalties': None,
+                            'eval_resample': None
+                        }
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     irf_ids_gf = self.irf_by_rangf[ran_gf]
@@ -2937,53 +2386,39 @@ class CDRModel(object):
                     nirf = len(trainable_ids)
 
                     if nirf:
-                        prior_sd = self._irf_param_ranef_prior_sd[response]
-                        post_sd = self._irf_param_ranef_posterior_sd_init[response]
+                        sd_prior = self._irf_param_ranef_prior_sd[response]
+                        sd_posterior = self._irf_param_ranef_posterior_sd_init[response]
                         if not self.use_distributional_regression:
-                            prior_sd = prior_sd[:1]
-                            post_sd = post_sd[:1]
-                        prior_sd = np.ones((rangf_n_levels, nirf, 1, 1)) * prior_sd[None, None, ...]
-                        post_sd = np.ones((rangf_n_levels, nirf, 1, 1)) * post_sd[None, None, ...]
+                            sd_prior = sd_prior[:1]
+                            sd_posterior = sd_posterior[:1]
+                        sd_prior = np.ones((rangf_n_levels, nirf, 1, 1)) * sd_prior[None, None, ...]
+                        sd_posterior = np.ones((rangf_n_levels, nirf, 1, 1)) * sd_posterior[None, None, ...]
 
-                        # Posterior distribution
-                        param_q_loc = tf.Variable(
-                            tf.zeros([rangf_n_levels, nirf, response_nparam, response_ndim], dtype=self.FLOAT_TF),
-                            name=sn('%s_%s_%s_by_%s_q_loc' % (param_name, sn(response), '-'.join(trainable_ids), sn(ran_gf)))
+                        rv_dict = get_random_variable(
+                            '%s_%s_%s_by_%s' % (param_name, sn(response), sn('-'.join(trainable_ids)), sn(ran_gf)),
+                            sd_posterior.shape,
+                            sd_posterior,
+                            constraint=self.constraint,
+                            sd_prior=sd_prior,
+                            training=self.training,
+                            use_MAP_mode=self.use_MAP_mode,
+                            epsilon=self.epsilon,
+                            session=self.session
                         )
-
-                        param_q_scale = tf.Variable(
-                            tf.constant(post_sd, self.FLOAT_TF),
-                            name=sn('%s_%s_%s_by_%s_q_scale' % (param_name, sn(response), '-'.join(trainable_ids), sn(ran_gf)))
-                        )
-
-                        param_q_dist = Normal(
-                            loc=param_q_loc,
-                            scale=self.constraint_fn(param_q_scale) + self.epsilon,
-                            name=sn('%s_%s_%s_by_%s_q' % (param_name, sn(response), '-'.join(trainable_ids), sn(ran_gf)))
-                        )
-
-                        param = tf.cond(self.use_MAP_mode, param_q_dist.mean, param_q_dist.sample)
-
-                        param_summary = param_q_dist.mean()
-
-                        if self.declare_priors_ranef:
-                            # Prior distribution
-                            param_prior_dist = Normal(
-                                loc=0.,
-                                scale=self.constraint_fn(tf.constant(prior_sd, self.FLOAT_TF)),
-                                name='%s_%s_%s_by_%s' % (param_name, sn(response), sn('-'.join(trainable_ids)), sn(ran_gf))
-                            )
-                            self.kl_penalties['%s_%s_%s_by_%s' % (param_name, sn(response), sn('-'.join(trainable_ids)), sn(ran_gf))] = {
-                                'loc': 0.,
-                                'scale': self.constraint_fn_np(self._irf_param_ranef_prior_sd[response]).flatten(),
-                                'val': param_q_dist.kl_divergence(param_prior_dist)
-                            }
                     else:
-                        param = param_summary = None
+                        rv_dict = {
+                            'v': None,
+                            'kl_penalties': None,
+                            'eval_resample': None
+                        }
 
                 # shape: (?rangf_n_levels, nirf, nparam, ndim)
 
-                return param, param_summary
+                return {
+                    'value': rv_dict['v'],
+                    'kl_penalties': rv_dict['kl_penalties'],
+                    'eval_resample': rv_dict['v_eval_resample']
+                }
 
     def _initialize_irf_param(self, *args, **kwargs):
         if 'irf_param' in self.rvs:
@@ -2991,8 +2426,8 @@ class CDRModel(object):
         return self._initialize_irf_param_mle(*args, **kwargs)
 
     def _compile_irf_params(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 # Base IRF params are saved as tensors with shape (nid, npredparam, npreddim),
                 # one for each irf_param of each IRF kernel family.
                 # Here fixed and random IRF params are summed, constraints are applied, and new tensors are stored
@@ -3001,16 +2436,11 @@ class CDRModel(object):
 
                 # Key order: response, ?(ran_gf), irf_id, irf_param
                 self.irf_params = {}
-                self.irf_params_summary = {}
                 self.irf_params_fixed = {}
-                self.irf_params_fixed_summary = {}
                 self.irf_params_random = {}
-                self.irf_params_random_summary = {}
                 for response in self.response_names:
                     self.irf_params[response] = {}
-                    self.irf_params_summary[response] = {}
                     self.irf_params_fixed[response] = {}
-                    self.irf_params_fixed_summary[response] = {}
                     for family in self.atomic_irf_names_by_family:
                         if family in ('DiracDelta', 'NN'):
                             continue
@@ -3059,11 +2489,6 @@ class CDRModel(object):
                                 self.irf_params_fixed_base[response][family][irf_param_name],
                                 [len(irf_ids), nparam_response, ndim]
                             )
-                            irf_param_trainable_summary = self._scatter_along_axis(
-                                trainable_ix,
-                                self.irf_params_fixed_base_summary[response][family][irf_param_name],
-                                [len(irf_ids), nparam_response, ndim]
-                            )
                             irf_param_untrainable = self._scatter_along_axis(
                                 untrainable_ix,
                                 irf_param_untrainable_means,
@@ -3077,43 +2502,28 @@ class CDRModel(object):
                                 irf_param_trainable,
                                 irf_param_untrainable
                             )
-                            irf_param_fixed_summary = tf.where(
-                                is_trainable,
-                                irf_param_trainable_summary,
-                                irf_param_untrainable
-                            )
 
                             # Add batch dimension
                             irf_param = irf_param_fixed[None, ...]
-                            irf_param_summary = irf_param_fixed_summary[None, ...]
 
                             for i, irf_id in enumerate(irf_ids):
                                 if irf_id not in self.irf_params_fixed[response]:
                                     self.irf_params_fixed[response][irf_id] = {}
                                 if irf_param_name not in self.irf_params_fixed[response][irf_id]:
                                     self.irf_params_fixed[response][irf_id][irf_param_name] = {}
-                                if irf_id not in self.irf_params_fixed_summary[response]:
-                                    self.irf_params_fixed_summary[response][irf_id] = {}
-                                if irf_param_name not in self.irf_params_fixed_summary[response][irf_id]:
-                                    self.irf_params_fixed_summary[response][irf_id][irf_param_name] = {}
 
                                 _p = irf_param_fixed[i]
-                                _p_summary = irf_param_fixed_summary[i]
                                 if irf_param_lb is not None and irf_param_ub is None:
                                     _p = irf_param_lb + self.constraint_fn(_p) + self.epsilon
-                                    _p_summary = irf_param_lb + self.constraint_fn(_p_summary) + self.epsilon
                                 elif irf_param_lb is None and irf_param_ub is not None:
                                     _p = irf_param_ub - self.constraint_fn(_p) - self.epsilon
-                                    _p_summary = irf_param_ub - self.constraint_fn(_p_summary) - self.epsilon
                                 elif irf_param_lb is not None and irf_param_ub is not None:
                                     _p = self._sigmoid(_p, a=irf_param_lb, b=irf_param_ub) * (1 - 2 * self.epsilon) + self.epsilon
-                                    _p_summary = self._sigmoid(_p_summary, a=irf_param_lb, b=irf_param_ub) * (1 - 2 * self.epsilon) + self.epsilon
 
                                 for j, response_param in enumerate(response_params):
                                     dim_names = self.expand_param_name(response, response_param)
                                     for k, dim_name in enumerate(dim_names):
                                         val = _p[j, k]
-                                        val_summary = _p_summary[j, k]
                                         tf.summary.scalar(
                                             '%s/%s/%s_%s' % (
                                                 irf_param_name,
@@ -3121,11 +2531,10 @@ class CDRModel(object):
                                                 sn(response),
                                                 sn(dim_name)
                                             ),
-                                            val_summary,
+                                            val,
                                             collections=['params']
                                         )
                                         self.irf_params_fixed[response][irf_id][irf_param_name][dim_name] = val
-                                        self.irf_params_fixed_summary[response][irf_id][irf_param_name][dim_name] = val_summary
 
                             for i, gf in enumerate(self.rangf):
                                 if gf in self.irf_by_rangf:
@@ -3138,9 +2547,6 @@ class CDRModel(object):
                                         irf_param_random = self.irf_params_random_base[response][gf][family][irf_param_name]
                                         irf_param_random_mean = tf.reduce_mean(irf_param_random, axis=0, keepdims=True)
                                         irf_param_random -= irf_param_random_mean
-                                        irf_param_random_summary = self.irf_params_random_base_summary[response][gf][family][irf_param_name]
-                                        irf_param_random_summary_mean = tf.reduce_mean(irf_param_random_summary, axis=0, keepdims=True)
-                                        irf_param_random_summary -= irf_param_random_summary_mean
 
                                         if 'irf_param' not in self.rvs:
                                             self._regularize(
@@ -3159,20 +2565,11 @@ class CDRModel(object):
                                                     self.irf_params_random[response][gf][irf_id] = {}
                                                 if irf_param_name not in self.irf_params_random[response][gf][irf_id]:
                                                     self.irf_params_random[response][gf][irf_id][irf_param_name] = {}
-                                                if response not in self.irf_params_random_summary:
-                                                    self.irf_params_random_summary[response] = {}
-                                                if gf not in self.irf_params_random_summary[response]:
-                                                    self.irf_params_random_summary[response][gf] = {}
-                                                if irf_id not in self.irf_params_random_summary[response][gf]:
-                                                    self.irf_params_random_summary[response][gf][irf_id] = {}
-                                                if irf_param_name not in self.irf_params_random_summary[response][gf][irf_id]:
-                                                    self.irf_params_random_summary[response][gf][irf_id][irf_param_name] = {}
 
                                                 for k, response_param in enumerate(response_params):
                                                     dim_names = self.expand_param_name(response, response_param)
                                                     for l, dim_name in enumerate(dim_names):
                                                         val = irf_param_random[:, j, k, l]
-                                                        val_summary = irf_param_random_summary[:, j, k, l]
                                                         tf.summary.histogram(
                                                             'by_%s/%s/%s/%s_%s' % (
                                                                 sn(gf),
@@ -3181,11 +2578,10 @@ class CDRModel(object):
                                                                 sn(dim_name),
                                                                 sn(response)
                                                             ),
-                                                            val_summary,
+                                                            val,
                                                             collections=['random']
                                                         )
                                                         self.irf_params_random[response][gf][irf_id][irf_param_name][dim_name] = val
-                                                        self.irf_params_random_summary[response][gf][irf_id][irf_param_name][dim_name] = val_summary
 
                                         irf_param_random = self._scatter_along_axis(
                                             irfs_ix,
@@ -3197,43 +2593,26 @@ class CDRModel(object):
                                             [self.rangf_n_levels[i], len(irf_ids), nparam_response, ndim],
                                             axis=1
                                         )
-                                        irf_param_random_summary = self._scatter_along_axis(
-                                            irfs_ix,
-                                            self._scatter_along_axis(
-                                                levels_ix,
-                                                irf_param_random_summary,
-                                                [self.rangf_n_levels[i], len(irfs_ix), nparam_response, ndim]
-                                            ),
-                                            [self.rangf_n_levels[i], len(irf_ids), nparam_response, ndim],
-                                            axis=1
-                                        )
 
                                         irf_param = irf_param + tf.gather(irf_param_random, self.Y_gf[:, i], axis=0)
-                                        irf_param_summary = irf_param_summary + tf.gather(irf_param_random_summary, self.Y_gf[:, i], axis=0)
 
                             if irf_param_lb is not None and irf_param_ub is None:
                                 irf_param = irf_param_lb + self.constraint_fn(irf_param) + self.epsilon
-                                irf_param_summary = irf_param_lb + self.constraint_fn(irf_param_summary) + self.epsilon
                             elif irf_param_lb is None and irf_param_ub is not None:
                                 irf_param = irf_param_ub - self.constraint_fn(irf_param) - self.epsilon
-                                irf_param_summary = irf_param_ub - self.constraint_fn(irf_param_summary) - self.epsilon
                             elif irf_param_lb is not None and irf_param_ub is not None:
                                 irf_param = self._sigmoid(irf_param, a=irf_param_lb, b=irf_param_ub) * (1 - 2 * self.epsilon) + self.epsilon
-                                irf_param_summary = self._sigmoid(irf_param_summary, a=irf_param_lb, b=irf_param_ub) * (1 - 2 * self.epsilon) + self.epsilon
 
                             for j, irf_id in enumerate(irf_ids):
                                 if irf_param_name in trainable[irf_id]:
                                     if irf_id not in self.irf_params[response]:
                                         self.irf_params[response][irf_id] = {}
-                                    if irf_id not in self.irf_params_summary[response]:
-                                        self.irf_params_summary[response][irf_id] = {}
                                     # id is -3 dimension
                                     self.irf_params[response][irf_id][irf_param_name] = irf_param[..., j, :, :]
-                                    self.irf_params_summary[response][irf_id][irf_param_name] = irf_param_summary[..., j, :, :]
 
     def _initialize_irf_lambdas(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 self.irf_lambdas = {}
                 if self.future_length: # Non-causal
                     support_lb = None
@@ -3244,7 +2623,7 @@ class CDRModel(object):
                 def exponential(**params):
                     return exponential_irf_factory(
                         **params,
-                        session=self.sess
+                        session=self.session
                     )
 
                 self.irf_lambdas['Exp'] = exponential
@@ -3254,7 +2633,7 @@ class CDRModel(object):
                     return gamma_irf_factory(
                         **params,
                         support_ub=support_ub,
-                        session=self.sess,
+                        session=self.session,
                         validate_irf_args=self.validate_irf_args
                     )
 
@@ -3266,7 +2645,7 @@ class CDRModel(object):
                     return shifted_gamma_irf_factory(
                         **params,
                         support_ub=support_ub,
-                        session=self.sess,
+                        session=self.session,
                         validate_irf_args=self.validate_irf_args
                     )
 
@@ -3278,7 +2657,7 @@ class CDRModel(object):
                         **params,
                         support_lb=support_lb,
                         support_ub=support_ub,
-                        session=self.sess
+                        session=self.session
                     )
 
                 self.irf_lambdas['Normal'] = normal
@@ -3288,7 +2667,7 @@ class CDRModel(object):
                         **params,
                         support_lb=support_lb,
                         support_ub=self.t_delta_limit.astype(dtype=self.FLOAT_NP) if support_ub is None else support_ub,
-                        session=self.sess
+                        session=self.session
                     )
 
                 self.irf_lambdas['SkewNormal'] = skew_normal
@@ -3298,7 +2677,7 @@ class CDRModel(object):
                         **kwargs,
                         support_lb=support_lb,
                         support_ub=support_ub,
-                        session=self.sess
+                        session=self.session
                     )
 
                 self.irf_lambdas['EMG'] = emg
@@ -3307,7 +2686,7 @@ class CDRModel(object):
                     return beta_prime_irf_factory(
                         **kwargs,
                         support_ub=support_ub,
-                        session=self.sess
+                        session=self.session
                     )
 
                 self.irf_lambdas['BetaPrime'] = beta_prime
@@ -3316,7 +2695,7 @@ class CDRModel(object):
                     return shifted_beta_prime_irf_factory(
                         **kwargs,
                         support_ub=support_ub,
-                        session=self.sess
+                        session=self.session
                     )
 
                 self.irf_lambdas['ShiftedBetaPrime'] = shifted_beta_prime
@@ -3325,7 +2704,7 @@ class CDRModel(object):
                     return double_gamma_1_irf_factory(
                         **kwargs,
                         support_ub=support_ub,
-                        session=self.sess,
+                        session=self.session,
                         validate_irf_args=self.validate_irf_args
                     )
 
@@ -3335,7 +2714,7 @@ class CDRModel(object):
                     return double_gamma_2_irf_factory(
                         **kwargs,
                         support_ub=support_ub,
-                        session=self.sess,
+                        session=self.session,
                         validate_irf_args=self.validate_irf_args
                     )
 
@@ -3345,7 +2724,7 @@ class CDRModel(object):
                     return double_gamma_3_irf_factory(
                         **kwargs,
                         support_ub=support_ub,
-                        session=self.sess,
+                        session=self.session,
                         validate_irf_args=self.validate_irf_args
                     )
 
@@ -3355,7 +2734,7 @@ class CDRModel(object):
                     return double_gamma_4_irf_factory(
                         **kwargs,
                         support_ub=support_ub,
-                        session=self.sess,
+                        session=self.session,
                         validate_irf_args=self.validate_irf_args
                     )
 
@@ -3365,7 +2744,7 @@ class CDRModel(object):
                     return double_gamma_5_irf_factory(
                         **kwargs,
                         support_ub=support_ub,
-                        session=self.sess,
+                        session=self.session,
                         validate_irf_args=self.validate_irf_args
                     )
 
@@ -3386,7 +2765,7 @@ class CDRModel(object):
                 bases=bases,
                 int_type=self.INT_TF,
                 float_type=self.FLOAT_TF,
-                session=self.sess,
+                session=self.session,
                 support_lb=support_lb,
                 support_ub=support_ub,
                 **params
@@ -3415,8 +2794,8 @@ class CDRModel(object):
             raise ValueError('No IRF lamdba found for family "%s"' % family)
 
     def _initialize_irfs(self, t, response):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 if response not in self.irf:
                     self.irf[response] = {}
                 if t.family is None:
@@ -3441,7 +2820,56 @@ class CDRModel(object):
                 for c in t.children:
                     self._initialize_irfs(c, response)
 
-    # NN IRF INITIALIZATION
+    # NN INITIALIZATION
+
+    def _initialize_bias_mle(
+            self,
+            rangf_map=None,
+            name=None
+    ):
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                bias = BiasLayer(
+                    training=self.training,
+                    use_MAP_mode=self.use_MAP_mode,
+                    rangf_map=rangf_map,
+                    epsilon=self.epsilon,
+                    session=self.session,
+                    name=name
+                )
+
+                return bias
+
+    def _initialize_bias_bayes(
+            self,
+            rangf_map=None,
+            name=None
+    ):
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                sd_prior = self.bias_prior_sd
+                sd_init = self.bias_sd_init
+
+                bias = BiasLayerBayes(
+                    training=self.training,
+                    use_MAP_mode=self.use_MAP_mode,
+                    rangf_map=rangf_map,
+                    declare_priors=self.declare_priors_biases,
+                    sd_prior=sd_prior,
+                    sd_init=sd_init,
+                    posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
+                    constraint=self.constraint,
+                    epsilon=self.epsilon,
+                    session=self.session,
+                    name=name
+                )
+
+                return bias
+
+    def _initialize_bias(self, *args, **kwargs):
+        if 'nn' in self.rvs:
+            return self._initialize_bias_bayes(*args, **kwargs)
+        return self._initialize_bias_mle(*args, **kwargs)
 
     def _initialize_feedforward_mle(
             self,
@@ -3452,11 +2880,12 @@ class CDRModel(object):
             maxnorm=None,
             batch_normalization_decay=None,
             layer_normalization_type=None,
+            rangf_map=None,
             final=False,
             name=None
     ):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 projection = DenseLayer(
                     training=self.training,
                     use_MAP_mode=self.use_MAP_mode,
@@ -3470,9 +2899,10 @@ class CDRModel(object):
                     normalize_after_activation=self.normalize_after_activation,
                     shift_normalized_activations=self.shift_normalized_activations,
                     rescale_normalized_activations=self.rescale_normalized_activations,
+                    rangf_map=rangf_map,
                     kernel_sd_init=self.weight_sd_init,
                     epsilon=self.epsilon,
-                    session=self.sess,
+                    session=self.session,
                     name=name
                 )
 
@@ -3487,11 +2917,12 @@ class CDRModel(object):
             maxnorm=None,
             batch_normalization_decay=None,
             layer_normalization_type=None,
+            rangf_map=None,
             final=False,
             name=None
     ):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 if final:
                     weight_sd_prior = 1.
                     weight_sd_init = self.weight_sd_init
@@ -3522,6 +2953,7 @@ class CDRModel(object):
                     normalize_after_activation=self.normalize_after_activation,
                     shift_normalized_activations=self.shift_normalized_activations,
                     rescale_normalized_activations=self.rescale_normalized_activations,
+                    rangf_map=rangf_map,
                     declare_priors_weights=declare_priors_weights,
                     declare_priors_biases=self.declare_priors_biases,
                     kernel_sd_prior=weight_sd_prior,
@@ -3533,7 +2965,7 @@ class CDRModel(object):
                     posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
                     constraint=self.constraint,
                     epsilon=self.epsilon,
-                    session=self.sess,
+                    session=self.session,
                     name=name
                 )
 
@@ -3544,9 +2976,9 @@ class CDRModel(object):
             return self._initialize_feedforward_bayes(*args, **kwargs)
         return self._initialize_feedforward_mle(*args, **kwargs)
 
-    def _initialize_rnn_mle(self, nn_id, l):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+    def _initialize_rnn_mle(self, nn_id, l, rangf_map=None):
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 units = self.n_units_rnn[l]
                 rnn = RNNLayer(
                     training=self.training,
@@ -3558,21 +2990,22 @@ class CDRModel(object):
                     time_projection_inner_activation=self.irf_inner_activation,
                     bottomup_kernel_sd_init=self.weight_sd_init,
                     recurrent_kernel_sd_init=self.weight_sd_init,
-                    bottomup_dropout=self.input_projection_dropout_rate,
+                    rangf_map=rangf_map,
+                    bottomup_dropout=self.ff_dropout_rate,
                     h_dropout=self.rnn_h_dropout_rate,
                     c_dropout=self.rnn_c_dropout_rate,
                     forget_rate=self.forget_rate,
                     return_sequences=True,
                     name='%s_rnn_l%d' % (nn_id, l + 1),
                     epsilon=self.epsilon,
-                    session=self.sess
+                    session=self.session
                 )
 
                 return rnn
 
-    def _initialize_rnn_bayes(self, nn_id, l):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+    def _initialize_rnn_bayes(self, nn_id, l, rangf_map=None):
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 units = self.n_units_rnn[l]
                 rnn = RNNLayerBayes(
                     training=self.training,
@@ -3582,7 +3015,7 @@ class CDRModel(object):
                     activation=self.rnn_activation,
                     recurrent_activation=self.recurrent_activation,
                     time_projection_inner_activation=self.irf_inner_activation,
-                    bottomup_dropout=self.input_projection_dropout_rate,
+                    bottomup_dropout=self.ff_dropout_rate,
                     h_dropout=self.rnn_h_dropout_rate,
                     c_dropout=self.rnn_c_dropout_rate,
                     forget_rate=self.forget_rate,
@@ -3592,13 +3025,14 @@ class CDRModel(object):
                     kernel_sd_prior=self.weight_prior_sd,
                     bottomup_kernel_sd_init=self.weight_sd_init,
                     recurrent_kernel_sd_init=self.weight_sd_init,
+                    rangf_map=rangf_map,
                     bias_sd_prior=self.bias_prior_sd,
                     bias_sd_init=self.bias_sd_init,
                     posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
                     constraint=self.constraint,
                     name='%s_rnn_l%d' % (nn_id, l + 1),
                     epsilon=self.epsilon,
-                    session=self.sess
+                    session=self.session
                 )
 
                 return rnn
@@ -3608,269 +3042,21 @@ class CDRModel(object):
             return self._initialize_rnn_bayes(*args, **kwargs)
         return self._initialize_rnn_mle(*args, **kwargs)
 
-    def _initialize_weights_mle(self, units, ran_gf=None, name=None):
-        if isinstance(units, int):
-            units = [units]
-        units = list(units)
-        if not name:
-            name_pieces = []
-        else:
-            name_pieces = [name]
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                if ran_gf is None:
-                    if isinstance(self.weight_sd_init, str):
-                        if self.weight_sd_init.lower() in ['xavier', 'glorot']:
-                            sd = math.sqrt(2 / (1 + units[-1]))
-                        elif self.weight_sd_init.lower() == 'he':
-                            sd = math.sqrt(2)
-                        else:
-                            sd = float(self.weight_sd_init)
-                    else:
-                        sd = self.weight_sd_init
-
-                    kernel_init = get_initializer(
-                        'random_normal_initializer_mean=0-stddev=%s' % sd,
-                        session=self.sess
-                    )
-                    irf_l1_W = tf.get_variable(
-                        name='_'.join(name_pieces),
-                        initializer=kernel_init,
-                        shape=[1, 1] + units
-                    )
-                else:
-                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
-                    irf_l1_W = tf.get_variable(
-                        name='_'.join(name_pieces + ['by', sn(ran_gf)]),
-                        initializer=tf.zeros_initializer(),
-                        shape=[rangf_n_levels] + units,
-                    )
-
-                irf_l1_W_summary = irf_l1_W
-
-                return irf_l1_W, irf_l1_W_summary
-
-    def _initialize_weights_bayes(self, units, ran_gf=None, name=None):
-        if isinstance(units, int):
-            units = [units]
-        units = list(units)
-        if not name:
-            name_pieces = []
-        else:
-            name_pieces = [name]
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                irf_l1_W_sd_prior = get_numerical_sd(self.weight_prior_sd, in_dim=1, out_dim=units[-1])
-                irf_l1_W_sd_posterior = irf_l1_W_sd_prior * self.posterior_to_prior_sd_ratio
-
-                if ran_gf is None:
-                    # Posterior distribution
-                    irf_l1_W_q_loc = tf.Variable(
-                        tf.zeros([1, 1] + units),
-                        name='_'.join(name_pieces + ['q_loc'])
-                    )
-
-                    irf_l1_W_q_scale = tf.Variable(
-                        tf.zeros([1, 1] + units) * self.constraint_fn_inv(irf_l1_W_sd_posterior),
-                        name='_'.join(name_pieces + ['q_scale'])
-                    )
-
-                    irf_l1_W_q_dist = Normal(
-                        loc=irf_l1_W_q_loc,
-                        scale=self.constraint_fn(irf_l1_W_q_scale) + self.epsilon,
-                        name='_'.join(name_pieces + ['q'])
-                    )
-
-                    irf_l1_W = tf.cond(self.use_MAP_mode, irf_l1_W_q_dist.mean, irf_l1_W_q_dist.sample)
-
-                    irf_l1_W_summary = irf_l1_W_q_dist.mean()
-
-                    if self.declare_priors_weights:
-                        # Prior distribution
-                        irf_l1_W_prior_dist = Normal(
-                            loc=0.,
-                            scale=irf_l1_W_sd_prior,
-                            name='_'.join(name_pieces)
-                        )
-                        self.kl_penalties['_'.join(name_pieces)] = {
-                            'loc': 0.,
-                            'scale': irf_l1_W_sd_prior,
-                            'val': irf_l1_W_q_dist.kl_divergence(irf_l1_W_prior_dist)
-                        }
-
-                else:
-                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
-
-                    # Posterior distribution
-                    irf_l1_W_q_loc = tf.Variable(
-                        tf.zeros([rangf_n_levels] + units, dtype=self.FLOAT_TF),
-                        name='_'.join(name_pieces + ['q_loc_by', sn(ran_gf)])
-                    )
-
-                    irf_l1_W_q_scale = tf.Variable(
-                        tf.ones([rangf_n_levels] + units, dtype=self.FLOAT_TF) * self.constraint_fn_inv(
-                            irf_l1_W_sd_posterior * self.ranef_to_fixef_prior_sd_ratio),
-                        name='_'.join(name_pieces + ['q_scale_by', sn(ran_gf)])
-                    )
-
-                    irf_l1_W_q_dist = Normal(
-                        loc=irf_l1_W_q_loc,
-                        scale=self.constraint_fn(irf_l1_W_q_scale) + self.epsilon,
-                        name='_'.join(name_pieces + ['q_by', sn(ran_gf)])
-                    )
-
-                    irf_l1_W = tf.cond(self.use_MAP_mode, irf_l1_W_q_dist.mean, irf_l1_W_q_dist.sample)
-
-                    irf_l1_W_summary = irf_l1_W_q_dist.mean()
-
-                    if self.declare_priors_ranef:
-                        # Prior distribution
-                        irf_l1_W_prior_dist = Normal(
-                            loc=0.,
-                            scale=irf_l1_W_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
-                            name='_'.join(name_pieces + [sn(ran_gf)])
-                        )
-                        self.kl_penalties['_'.join(name_pieces + ['q_loc_by', sn(ran_gf)])] = {
-                            'loc': 0.,
-                            'scale': irf_l1_W_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
-                            'val': irf_l1_W_q_dist.kl_divergence(irf_l1_W_prior_dist)
-                        }
-
-                return irf_l1_W, irf_l1_W_summary
-
-    def _initialize_weights(self, *args, **kwargs):
-        if 'nn' in self.rvs:
-            return self._initialize_weights_bayes(*args, **kwargs)
-        return self._initialize_weights_mle(*args, **kwargs)
-
-    def _initialize_biases_mle(self, units, ran_gf=None, name=None):
-        if not name:
-            name_pieces = []
-        else:
-            name_pieces = [name]
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                if ran_gf is None:
-                    irf_l1_b = tf.get_variable(
-                        name='_'.join(name_pieces),
-                        initializer=tf.zeros_initializer(),
-                        shape=[1, 1, units]
-                    )
-                else:
-                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
-                    irf_l1_b = tf.get_variable(
-                        name='_'.join(name_pieces + ['by', sn(ran_gf)]),
-                        initializer=tf.zeros_initializer(),
-                        shape=[rangf_n_levels, units],
-                    )
-
-                irf_l1_b_summary = irf_l1_b
-
-                return irf_l1_b, irf_l1_b_summary
-
-    def _initialize_biases_bayes(self, units, ran_gf=None, name=None):
-        if not name:
-            name_pieces = []
-        else:
-            name_pieces = [name]
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                irf_l1_b_sd_prior = get_numerical_sd(self.bias_prior_sd, in_dim=1, out_dim=1)
-                irf_l1_b_sd_posterior = irf_l1_b_sd_prior * self.posterior_to_prior_sd_ratio
-
-                if ran_gf is None:
-                    # Posterior distribution
-                    irf_l1_b_q_loc = tf.Variable(
-                        tf.zeros([1, 1, units]),
-                        name='_'.join(name_pieces + ['q_loc'])
-                    )
-
-                    irf_l1_b_q_scale = tf.Variable(
-                        tf.zeros([1, 1, units]) * self.constraint_fn_inv(irf_l1_b_sd_posterior),
-                        name='_'.join(name_pieces + ['q_scale'])
-                    )
-
-                    irf_l1_b_q_dist = Normal(
-                        loc=irf_l1_b_q_loc,
-                        scale=self.constraint_fn(irf_l1_b_q_scale) + self.epsilon,
-                        name='_'.join(name_pieces + ['q'])
-                    )
-
-                    irf_l1_b = tf.cond(self.use_MAP_mode, irf_l1_b_q_dist.mean, irf_l1_b_q_dist.sample)
-
-                    irf_l1_b_summary = irf_l1_b_q_dist.mean()
-
-                    if self.declare_priors_biases:
-                        # Prior distribution
-                        irf_l1_b_prior_dist = Normal(
-                            loc=0.,
-                            scale=irf_l1_b_sd_prior,
-                            name='_'.join(name_pieces)
-                        )
-                        self.kl_penalties['_'.join(name_pieces)] = {
-                            'loc': 0.,
-                            'scale': irf_l1_b_sd_prior,
-                            'val': irf_l1_b_q_dist.kl_divergence(irf_l1_b_prior_dist)
-                        }
-
-                else:
-                    rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
-
-                    # Posterior distribution
-                    irf_l1_b_q_loc = tf.Variable(
-                        tf.zeros([rangf_n_levels, units], dtype=self.FLOAT_TF),
-                        name='_'.join(name_pieces + ['q_loc_by', sn(ran_gf)])
-                    )
-
-                    irf_l1_b_q_scale = tf.Variable(
-                        tf.ones([rangf_n_levels, units], dtype=self.FLOAT_TF) * self.constraint_fn_inv(irf_l1_b_sd_posterior * self.ranef_to_fixef_prior_sd_ratio),
-                        name='_'.join(name_pieces + ['q_scale_by', sn(ran_gf)])
-                    )
-
-                    irf_l1_b_q_dist = Normal(
-                        loc=irf_l1_b_q_loc,
-                        scale=self.constraint_fn(irf_l1_b_q_scale) + self.epsilon,
-                        name='_'.join(name_pieces + ['q_by', sn(ran_gf)])
-                    )
-
-                    irf_l1_b = tf.cond(self.use_MAP_mode, irf_l1_b_q_dist.mean, irf_l1_b_q_dist.sample)
-
-                    irf_l1_b_summary = irf_l1_b_q_dist.mean()
-
-                    if self.declare_priors_ranef:
-                        # Prior distribution
-                        irf_l1_b_prior_dist = Normal(
-                            loc=0.,
-                            scale=irf_l1_b_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
-                            name='_'.join(name_pieces + ['by', sn(ran_gf)])
-                        )
-                        self.kl_penalties['_'.join(name_pieces + ['by', sn(ran_gf)])] = {
-                            'loc': 0.,
-                            'scale': irf_l1_b_sd_prior * self.ranef_to_fixef_prior_sd_ratio,
-                            'val': irf_l1_b_q_dist.kl_divergence(irf_l1_b_prior_dist)
-                        }
-
-                return irf_l1_b, irf_l1_b_summary
-
-    def _initialize_biases(self, *args, **kwargs):
-        if 'nn' in self.rvs:
-            return self._initialize_biases_bayes(*args, **kwargs)
-        return self._initialize_biases_mle(*args, **kwargs)
-
-    def _initialize_normalization_mle(self, name=None):
+    def _initialize_normalization_mle(self, rangf_map=None, name=None):
         if name is None:
             name = ''
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 if self.use_batch_normalization:
                     normalization_layer = BatchNormLayer(
                         decay=self.batch_normalization_decay,
                         shift_activations=self.shift_normalized_activations,
                         rescale_activations=self.rescale_normalized_activations,
                         axis=-1,
+                        rangf_map=rangf_map,
                         training=self.training,
                         epsilon=self.epsilon,
-                        session=self.sess,
+                        session=self.session,
                         name=name
                     )
                 elif self.use_layer_normalization:
@@ -3879,9 +3065,10 @@ class CDRModel(object):
                         shift_activations=self.shift_normalized_activations,
                         rescale_activations=self.rescale_normalized_activations,
                         axis=-1,
+                        rangf_map=rangf_map,
                         training=self.training,
                         epsilon=self.epsilon,
-                        session=self.sess,
+                        session=self.session,
                         name=name
                     )
                 else:
@@ -3889,17 +3076,18 @@ class CDRModel(object):
 
                 return normalization_layer
 
-    def _initialize_normalization_bayes(self, name=None):
+    def _initialize_normalization_bayes(self, rangf_map=None, name=None):
         if name is None:
             name = ''
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 if self.use_batch_normalization:
                     normalization_layer = BatchNormLayerBayes(
                         decay=self.batch_normalization_decay,
                         shift_activations=self.shift_normalized_activations,
                         rescale_activations=self.rescale_normalized_activations,
                         axis=-1,
+                        rangf_map=rangf_map,
                         use_MAP_mode=self.use_MAP_mode,
                         declare_priors_scale=self.declare_priors_gamma,
                         declare_priors_shift=self.declare_priors_biases,
@@ -3911,7 +3099,7 @@ class CDRModel(object):
                         constraint=self.constraint,
                         training=self.training,
                         epsilon=self.epsilon,
-                        session=self.sess,
+                        session=self.session,
                         name='%s' % name
                     )
                 elif self.use_layer_normalization:
@@ -3931,7 +3119,7 @@ class CDRModel(object):
                         posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
                         constraint=self.constraint,
                         epsilon=self.epsilon,
-                        session=self.sess,
+                        session=self.session,
                         name='%s' % name
                     )
                 else:
@@ -3944,51 +3132,237 @@ class CDRModel(object):
             return self._initialize_normalization_bayes(*args, **kwargs)
         return self._initialize_normalization_mle(*args, **kwargs)
 
-    def _initialize_nn_irf(self, nn_id):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                assert nn_id in self.nn_irf_ids, 'Unrecognized nn_id for NN IRF: %s.' % nn_id
+    def _initialize_nn(self, nn_id):
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                rangf_map = {}
+                if self.ranef_dropout_rate:
+                    Y_gf = self.Y_gf_dropout
+                else:
+                    Y_gf = self.Y_gf
+                for i, gf in enumerate(self.rangf):
+                    if gf in self.nns_by_id[nn_id].rangf:
+                        _Y_gf = Y_gf[:, i]
+                        rangf_map[gf] = (self.rangf_n_levels[self.rangf.index(gf)], _Y_gf)
 
-                # FEEDFORWARD ENCODER
-                if self.input_dropout_rate:
-                    self.input_dropout_layer[nn_id] = get_dropout(
-                        self.input_dropout_rate,
+                if nn_id in self.nn_impulse_ids or self.input_dependent_irf:
+                    assert self.n_layers_ff or self.n_layers_rnn, "n_layers_ff and n_layers_rnn can't both be zero in NN transforms of predictors."
+
+                    # FEEDFORWARD ENCODER
+
+                    if self.input_dropout_rate:
+                        self.input_dropout_layer[nn_id] = get_dropout(
+                            self.input_dropout_rate,
+                            training=self.training,
+                            use_MAP_mode=self.use_MAP_mode,
+                            rescale=False,
+                            name='%s_input_dropout' % nn_id,
+                            session=self.session
+                        )
+                        self.X_time_dropout_layer[nn_id] = get_dropout(
+                            self.input_dropout_rate,
+                            training=self.training,
+                            use_MAP_mode=self.use_MAP_mode,
+                            rescale=False,
+                            name='%s_X_time_dropout' % nn_id,
+                            session=self.session
+                        )
+
+                    ff_layers = []
+                    if self.n_layers_ff:
+                        for l in range(self.n_layers_ff + 1):
+                            if l < self.n_layers_ff:
+                                units = self.n_units_ff[l]
+                                activation = self.ff_inner_activation
+                                dropout = self.ff_dropout_rate
+                                if self.normalize_ff:
+                                    bn = self.batch_normalization_decay
+                                else:
+                                    bn = None
+                                ln = self.layer_normalization_type
+                                use_bias = True
+                            else:
+                                if nn_id in self.nn_irf_ids:
+                                    units = self.n_units_irf_hidden_state
+                                else:
+                                    units = 1
+                                activation = self.ff_activation
+                                dropout = None
+                                bn = None
+                                ln = None
+                                use_bias = False
+                            mn = self.maxnorm
+
+                            projection = self._initialize_feedforward(
+                                units=units,
+                                use_bias=use_bias,
+                                activation=activation,
+                                dropout=dropout,
+                                maxnorm=mn,
+                                batch_normalization_decay=bn,
+                                layer_normalization_type=ln,
+                                rangf_map=rangf_map,
+                                name='%s_ff_l%s' % (nn_id, l + 1)
+                            )
+                            self.layers.append(projection)
+
+                            self.regularizable_layers.append(projection)
+                            ff_layers.append(make_lambda(projection, session=self.session, use_kwargs=False))
+
+                    ff_fn = compose_lambdas(ff_layers)
+
+                    self.ff_layers[nn_id] = ff_layers
+                    self.ff_fn[nn_id] = ff_fn
+                    self.h_in_dropout_layer[nn_id] = get_dropout(
+                        self.h_in_dropout_rate,
                         training=self.training,
                         use_MAP_mode=self.use_MAP_mode,
-                        rescale=False,
-                        name='%s_input_dropout' % nn_id,
-                        session=self.sess
-                    )
-                    self.X_time_dropout_layer[nn_id] = get_dropout(
-                        self.input_dropout_rate,
-                        training=self.training,
-                        use_MAP_mode=self.use_MAP_mode,
-                        rescale=False,
-                        name='%s_X_time_dropout' % nn_id,
-                        session=self.sess
+                        name='%s_h_in_dropout' % nn_id,
+                        session=self.session
                     )
 
-                input_projection_layers = []
-                if self.n_layers_input_projection:
-                    for l in range(self.n_layers_input_projection + 1):
-                        if l < self.n_layers_input_projection:
-                            units = self.n_units_input_projection[l]
-                            activation = self.input_projection_inner_activation
-                            dropout = self.input_projection_dropout_rate
-                            if self.normalize_input_projection:
+                    # RNN ENCODER
+
+                    rnn_layers = []
+                    rnn_h_ema = []
+                    rnn_c_ema = []
+                    for l in range(self.n_layers_rnn):
+                        layer = self._initialize_rnn(nn_id, l, rangf_map=rangf_map)
+                        _rnn_h_ema = tf.Variable(tf.zeros(units), trainable=False, name='%s_rnn_h_ema_l%d' % (nn_id, l+1))
+                        rnn_h_ema.append(_rnn_h_ema)
+                        _rnn_c_ema = tf.Variable(tf.zeros(units), trainable=False, name='%s_rnn_c_ema_l%d' % (nn_id, l+1))
+                        rnn_c_ema.append(_rnn_c_ema)
+                        self.layers.append(layer)
+                        self.regularizable_layers.append(layer)
+                        rnn_layers.append(make_lambda(layer, session=self.session, use_kwargs=True))
+
+                    rnn_encoder = compose_lambdas(rnn_layers)
+
+                    self.rnn_layers[nn_id] = rnn_layers
+                    self.rnn_h_ema[nn_id] = rnn_h_ema
+                    self.rnn_c_ema[nn_id] = rnn_c_ema
+                    self.rnn_encoder[nn_id] = rnn_encoder
+
+                    if self.n_layers_rnn:
+                        rnn_projection_layers = []
+                        for l in range(self.n_layers_rnn_projection + 1):
+                            if l < self.n_layers_rnn_projection:
+                                units = self.n_units_rnn_projection[l]
+                                activation = self.rnn_projection_inner_activation
                                 bn = self.batch_normalization_decay
+                                ln = self.layer_normalization_type
+                                use_bias = True
+                            else:
+                                if nn_id in self.nn_irf_ids:
+                                    units = self.n_units_irf_hidden_state
+                                else:
+                                    units = 1
+                                activation = self.rnn_projection_activation
+                                bn = None
+                                ln = None
+                                use_bias = False
+                            mn = self.maxnorm
+
+                            projection = self._initialize_feedforward(
+                                units=units,
+                                use_bias=use_bias,
+                                activation=activation,
+                                dropout=None,
+                                maxnorm=mn,
+                                batch_normalization_decay=bn,
+                                layer_normalization_type=ln,
+                                rangf_map=rangf_map,
+                                name='%s_rnn_projection_l%s' % (nn_id, l + 1)
+                            )
+                            self.layers.append(projection)
+
+                            self.regularizable_layers.append(projection)
+                            rnn_projection_layers.append(make_lambda(projection, session=self.session, use_kwargs=False))
+
+                        rnn_projection_fn = compose_lambdas(rnn_projection_layers)
+
+                        self.rnn_projection_layers[nn_id] = rnn_projection_layers
+                        self.rnn_projection_fn[nn_id] = rnn_projection_fn
+
+                        self.h_rnn_dropout_layer[nn_id] = get_dropout(
+                            self.h_rnn_dropout_rate,
+                            training=self.training,
+                            use_MAP_mode=self.use_MAP_mode,
+                            name='%s_h_rnn_dropout' % nn_id,
+                            session=self.session
+                        )
+                        self.rnn_dropout_layer[nn_id] = get_dropout(
+                            self.rnn_dropout_rate,
+                            noise_shape=[None, None, 1],
+                            training=self.training,
+                            use_MAP_mode=self.use_MAP_mode,
+                            rescale=False,
+                            name='%s_rnn_dropout' % nn_id,
+                            session=self.session
+                        )
+
+                    self.h_dropout_layer[nn_id] = get_dropout(
+                        self.h_dropout_rate,
+                        training=self.training,
+                        use_MAP_mode=self.use_MAP_mode,
+                        name='%s_h_dropout' % nn_id,
+                        session=self.session
+                    )
+
+                    # H normalization
+                    if self.normalize_h and self.normalize_activations:
+                        self.h_normalization_layer[nn_id] = self._initialize_normalization(
+                            rangf_map=rangf_map,
+                            name='%s_h' % nn_id
+                        )
+                        self.layers.append(self.h_normalization_layer[nn_id])
+
+                    # H bias
+                    if not (self.normalize_h and self.normalize_activations) or self.normalize_after_activation:
+                        self.h_bias_layer[nn_id] = self._initialize_bias(name='%s_h_bias' % nn_id, rangf_map=rangf_map)
+
+                    if self.input_dependent_irf:
+                        # Projection from hidden state to first layer (weights and biases) of IRF
+                        hidden_state_to_irf_l1 = self._initialize_feedforward(
+                            units=self.n_units_irf[0] * 2,
+                            use_bias=False,
+                            activation=None,
+                            dropout=self.irf_dropout_rate,
+                            rangf_map=rangf_map,
+                            name='%s_hidden_state_to_irf_l1' % nn_id
+                        )
+                        self.layers.append(hidden_state_to_irf_l1)
+                        self.regularizable_layers.append(hidden_state_to_irf_l1)
+                        self.hidden_state_to_irf_l1[nn_id] = hidden_state_to_irf_l1
+
+                if nn_id in self.nn_irf_ids:
+
+                    # IRF
+
+                    irf_layers = []
+                    for l in range(self.n_layers_irf + 1):
+                        if l < self.n_layers_irf:
+                            units = self.n_units_irf[l]
+                            activation = self.irf_inner_activation
+                            dropout = self.irf_dropout_rate
+                            if self.normalize_irf:
+                                bn = self.batch_normalization_decay
+                                ln = self.layer_normalization_type
                             else:
                                 bn = None
-                            ln = self.layer_normalization_type
+                                ln = None
                             use_bias = True
+                            final = False
+                            mn = self.maxnorm
                         else:
-                            units = self.n_units_hidden_state
-                            activation = self.input_projection_activation
+                            units = self.get_nn_irf_output_ndim(nn_id)
+                            activation = self.irf_activation
                             dropout = None
                             bn = None
                             ln = None
                             use_bias = False
-                        mn = self.maxnorm
+                            final = True
+                            mn = None
 
                         projection = self._initialize_feedforward(
                             units=units,
@@ -3998,451 +3372,31 @@ class CDRModel(object):
                             maxnorm=mn,
                             batch_normalization_decay=bn,
                             layer_normalization_type=ln,
-                            name='%s_input_projection_l%s' % (nn_id, l + 1)
+                            rangf_map=rangf_map,
+                            final=final,
+                            name='%s_irf_l%s' % (nn_id, l + 1)
                         )
                         self.layers.append(projection)
 
-                        self.regularizable_layers.append(projection)
-                        input_projection_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
-
-                input_projection_fn = compose_lambdas(input_projection_layers)
-
-                self.input_projection_layers[nn_id] = input_projection_layers
-                self.input_projection_fn[nn_id] = input_projection_fn
-                self.h_in_dropout_layer[nn_id] = get_dropout(
-                    self.h_in_dropout_rate,
-                    training=self.training,
-                    use_MAP_mode=self.use_MAP_mode,
-                    name='%s_h_in_dropout' % nn_id,
-                    session=self.sess
-                )
-
-                # RNN ENCODER
-                rnn_layers = []
-                rnn_h_init = []
-                rnn_h_ema = []
-                rnn_c_init = []
-                rnn_c_ema = []
-                for l in range(self.n_layers_rnn):
-                    units = self.n_units_rnn[l]
-
-                    h_init, h_init_summary = self._initialize_biases(
-                        self.n_units_rnn[l],
-                        name='%s_rnn_h_l%d' % (nn_id, l + 1)
-                    )
-                    h_init = tf.squeeze(h_init, axis=0)
-                    h_init_summary = tf.squeeze(h_init_summary, axis=0)
-                    rnn_h_init.append(h_init)
-
-                    h_ema_init = tf.Variable(
-                        tf.zeros(units),
-                        trainable=False,
-                        name='%s_rnn_h_ema_l%d' % (nn_id, l+1)
-                    )
-                    rnn_h_ema.append(h_ema_init)
-
-                    c_init, c_init_summary = self._initialize_biases(
-                        self.n_units_rnn[l],
-                        name='%s_rnn_c_l%d' % (nn_id, l + 1)
-                    )
-                    c_init = tf.squeeze(c_init, axis=0)
-                    c_init_summary = tf.squeeze(c_init_summary, axis=0)
-                    rnn_c_init.append(c_init)
-
-                    c_ema_init = tf.Variable(tf.zeros(units), trainable=False, name='%s_rnn_c_ema_l%d' % (nn_id, l+1))
-                    rnn_c_ema.append(c_ema_init)
-
-                    layer = self._initialize_rnn(nn_id, l)
-                    self.layers.append(layer)
-                    self.regularizable_layers.append(layer)
-                    rnn_layers.append(make_lambda(layer, session=self.sess, use_kwargs=True))
-
-                rnn_encoder = compose_lambdas(rnn_layers)
-
-                self.rnn_layers[nn_id] = rnn_layers
-                self.rnn_h_init[nn_id] = rnn_h_init
-                self.rnn_h_ema[nn_id] = rnn_h_ema
-                self.rnn_c_init[nn_id] = rnn_c_init
-                self.rnn_c_ema[nn_id] = rnn_c_ema
-                self.rnn_encoder[nn_id] = rnn_encoder
-
-                if self.n_layers_rnn:
-                    rnn_projection_layers = []
-                    for l in range(self.n_layers_rnn_projection + 1):
-                        if l < self.n_layers_rnn_projection:
-                            units = self.n_units_rnn_projection[l]
-                            activation = self.rnn_projection_inner_activation
-                            bn = self.batch_normalization_decay
-                            ln = self.layer_normalization_type
-                            use_bias = True
+                        if l < self.n_layers_irf:
+                            self.regularizable_layers.append(projection)
+                        if l == 0:
+                            self.nn_irf_l1[nn_id] = projection
                         else:
-                            units = self.n_units_hidden_state
-                            activation = self.rnn_projection_activation
-                            bn = None
-                            ln = None
-                            use_bias = False
-                        mn = self.maxnorm
+                            irf_layers.append(make_lambda(projection, session=self.session, use_kwargs=False))
 
-                        projection = self._initialize_feedforward(
-                            units=units,
-                            use_bias=use_bias,
-                            activation=activation,
-                            dropout=None,
-                            maxnorm=mn,
-                            batch_normalization_decay=bn,
-                            layer_normalization_type=ln,
-                            name='%s_rnn_projection_l%s' % (nn_id, l + 1)
-                        )
-                        self.layers.append(projection)
+                    irf = compose_lambdas(irf_layers)
 
-                        self.regularizable_layers.append(projection)
-                        rnn_projection_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
+                    self.nn_irf_layers[nn_id] = irf_layers
+                    self.nn_irf_lambda[nn_id] = irf
 
-                    rnn_projection_fn = compose_lambdas(rnn_projection_layers)
-
-                    self.rnn_projection_layers[nn_id] = rnn_projection_layers
-                    self.rnn_projection_fn[nn_id] = rnn_projection_fn
-
-                    self.h_rnn_dropout_layer[nn_id] = get_dropout(
-                        self.h_rnn_dropout_rate,
-                        training=self.training,
-                        use_MAP_mode=self.use_MAP_mode,
-                        name='%s_h_rnn_dropout' % nn_id,
-                        session=self.sess
-                    )
-                    self.rnn_dropout_layer[nn_id] = get_dropout(
-                        self.rnn_dropout_rate,
-                        noise_shape=[None, None, 1],
-                        training=self.training,
-                        use_MAP_mode=self.use_MAP_mode,
-                        rescale=False,
-                        name='%s_rnn_dropout' % nn_id,
-                        session=self.sess
-                    )
-
-                if self.n_layers_input_projection or self.n_layers_rnn:
-                    if self.normalize_h and self.normalize_activations:
-                        self.h_normalization_layer[nn_id] = self._initialize_normalization(name='%s_h' % nn_id)
-                        self.layers.append(self.h_normalization_layer[nn_id])
-                        # if self.normalize_after_activation and False:
-                        if self.normalize_after_activation:
-                            h_bias, h_bias_summary = self._initialize_biases(
-                                self.n_units_hidden_state,
-                                name='%s_h_bias' % nn_id
-                            )
-                        else:
-                            h_bias = tf.zeros([1, 1, units])
-                            h_bias_summary = tf.zeros([1, 1, units])
-                    else:
-                        h_bias, h_bias_summary = self._initialize_biases(
-                            self.n_units_hidden_state,
-                            name='%s_h_bias' % nn_id
-                        )
-                    self.h_bias[nn_id] = h_bias
-
-                    self.h_dropout_layer[nn_id] = get_dropout(
-                        self.h_dropout_rate,
-                        training=self.training,
-                        use_MAP_mode=self.use_MAP_mode,
-                        name='%s_h_dropout' % nn_id,
-                        session=self.sess
-                    )
-
-                    # Projection from hidden state to first layer (weights and biases) of IRF
-                    hidden_state_to_irf_l1 = self._initialize_feedforward(
-                        units=self.n_units_irf_l1 * 2,
-                        use_bias=False,
-                        activation=None,
-                        dropout=self.irf_dropout_rate,
-                        name='%s_hidden_state_to_irf_l1' % nn_id
-                    )
-                    self.layers.append(hidden_state_to_irf_l1)
-                    self.regularizable_layers.append(hidden_state_to_irf_l1)
-                    self.hidden_state_to_irf_l1[nn_id] = hidden_state_to_irf_l1
-
-                # IRF
-                irf_l1_W, irf_l1_W_summary = self._initialize_weights(
-                    self.n_units_irf_l1,
-                    name='%s_irf_l1_W' % nn_id
-                )
-                self.nn_irf_l1_W[nn_id] = irf_l1_W
-                if self.irf_l1_use_bias:
-                    if self.normalize_irf_l1 and self.normalize_activations:
-                        self.nn_irf_l1_normalization_layer[nn_id] = self._initialize_normalization('%s_irf_l1' % nn_id)
-                        self.layers.append(self.nn_irf_l1_normalization_layer[nn_id])
-                        if self.normalize_after_activation:
-                            irf_l1_b, irf_l1_b_summary = self._initialize_biases(
-                                self.n_units_irf_l1,
-                                name='%s_irf_l1_b' % nn_id
-                            )
-                        else:
-                            irf_l1_b = tf.zeros_like(self.nn_irf_l1_W)
-                            irf_l1_b_summary = tf.zeros_like(self.nn_irf_l1_W)
-                    else:
-                        irf_l1_b, irf_l1_b_summary = self._initialize_biases(
-                            self.n_units_irf_l1,
-                            name='%s_irf_l1_b' % nn_id
-                        )
-                self.nn_irf_l1_b[nn_id] = irf_l1_b
-                self.nn_irf_l1_dropout_layer[nn_id] = get_dropout(
-                    self.irf_dropout_rate,
-                    training=self.training,
-                    use_MAP_mode=self.use_MAP_mode,
-                    name='%s_irf_l1_dropout' % nn_id,
-                    session=self.sess
-                )
-
-                irf_layers = []
-                for l in range(1, self.n_layers_irf + 1):
-                    if l < self.n_layers_irf:
-                        units = self.n_units_irf[l]
-                        activation = self.irf_inner_activation
-                        dropout = self.irf_dropout_rate
-                        if self.normalize_irf:
-                            bn = self.batch_normalization_decay
-                            ln = self.layer_normalization_type
-                        else:
-                            bn = None
-                            ln = None
-                        use_bias = True
-                        final = False
-                        mn = self.maxnorm
-                    else:
-                        units = self.get_nn_irf_output_ndim(nn_id)
-                        activation = self.irf_activation
-                        dropout = None
-                        bn = None
-                        ln = None
-                        use_bias = False
-                        final = True
-                        mn = None
-
-                    projection = self._initialize_feedforward(
-                        units=units,
-                        use_bias=use_bias,
-                        activation=activation,
-                        dropout=dropout,
-                        maxnorm=mn,
-                        batch_normalization_decay=bn,
-                        layer_normalization_type=ln,
-                        name='%s_irf_l%s' % (nn_id, l + 1),
-                        final=final
-                    )
-                    self.layers.append(projection)
-
-                    if l < self.n_layers_irf:
-                        self.regularizable_layers.append(projection)
-                    irf_layers.append(make_lambda(projection, session=self.sess, use_kwargs=False))
-
-                irf = compose_lambdas(irf_layers)
-
-                self.nn_irf_layers[nn_id] = irf_layers
-                self.nn_irf_lambda[nn_id] = irf
-
-    def _compile_nn_irf_ranef(self, nn_id):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                assert nn_id in self.nn_irf_ids, 'Unrecognized nn_id for NN IRF: %s.' % nn_id
-                self.rnn_h_random[nn_id] = {}
-                self.rnn_h_random_summary[nn_id] = {}
-                self.rnn_c_random[nn_id] = {}
-                self.rnn_c_random_summary[nn_id] = {}
-                self.h_bias_random[nn_id] = {}
-                self.h_bias_random_summary[nn_id] = {}
-                self.nn_irf_l1_W_random[nn_id] = {}
-                self.nn_irf_l1_W_random_summary[nn_id] = {}
-                self.nn_irf_l1_b_random[nn_id] = {}
-                self.nn_irf_l1_b_random_summary[nn_id] = {}
-
-                if self.ranef_dropout_rate:
-                    Y_gf = self.Y_gf_dropout
-                else:
-                    Y_gf = self.Y_gf
-
-                for i, gf in enumerate(self.rangf):
-                    _Y_gf = Y_gf[:, i]
-                    if gf in self.nn_irf_rangfs:
-                        if gf not in self.rnn_h_random[nn_id]:
-                            self.rnn_h_random[nn_id][gf] = []
-                        if gf not in self.rnn_h_random_summary[nn_id]:
-                            self.rnn_h_random_summary[nn_id][gf] = []
-                        if gf not in self.rnn_c_random[nn_id]:
-                            self.rnn_c_random[nn_id][gf] = []
-                        if gf not in self.rnn_c_random_summary[nn_id]:
-                            self.rnn_c_random_summary[nn_id][gf] = []
-
-                        # Random RNN initialization offsets
-                        for l in range(self.n_layers_rnn):
-                            # RNN hidden state
-                            rnn_h_random = self.rnn_h_random_base[nn_id][gf][l]
-                            rnn_h_random_summary = self.rnn_h_random_base_summary[nn_id][gf][l]
-                            rnn_h_random_summary -= tf.reduce_mean(rnn_h_random_summary, axis=0, keepdims=True)
-                            if 'nn' not in self.rvs:
-                                self._regularize(
-                                    rnn_h_random,
-                                    regtype='ranef',
-                                    var_name=reg_name('%s_rnn_h_ran_l%d_by_%s' % (nn_id, l, sn(gf)))
-                                )
-                            if self.log_random:
-                                tf.summary.histogram(
-                                    sn('by_%s/%s_rnn_h_l%d' % (nn_id, sn(gf), l+1)),
-                                    rnn_h_random_summary,
-                                    collections=['random']
-                                )
-                            self.rnn_h_random[nn_id][gf].append(rnn_h_random)
-                            self.rnn_h_random_summary[nn_id][gf].append(rnn_h_random_summary)
-                            rnn_h_random = tf.concat(
-                                [
-                                    rnn_h_random,
-                                    tf.zeros([1, self.n_units_rnn[l]])
-                                ],
-                                axis=0
-                            )
-                            self.rnn_h_init[nn_id][l] += tf.gather(rnn_h_random, _Y_gf)
-
-                            # RNN cell state
-                            rnn_c_random = self.rnn_c_random_base[nn_id][gf][l]
-                            rnn_c_random_summary = self.rnn_c_random_base_summary[nn_id][gf][l]
-                            rnn_c_random -= tf.reduce_mean(rnn_c_random, axis=0, keepdims=True)
-                            rnn_c_random_summary -= tf.reduce_mean(rnn_c_random_summary, axis=0, keepdims=True)
-                            if 'nn' not in self.rvs:
-                                self._regularize(
-                                    rnn_c_random,
-                                    regtype='ranef',
-                                    var_name=reg_name('%s_rnn_c_ran_l%d_by_%s' % (nn_id, l + 1, sn(gf)))
-                                )
-                            if self.log_random:
-                                tf.summary.histogram(
-                                    sn('by_%s/%s_rnn_c_l%d' % (nn_id, sn(gf), l+1)),
-                                    rnn_c_random_summary,
-                                    collections=['random']
-                                )
-                            self.rnn_c_random[nn_id][gf].append(rnn_c_random)
-                            self.rnn_c_random_summary[nn_id][gf].append(rnn_c_random_summary)
-                            rnn_c_random = tf.concat(
-                                [
-                                    rnn_c_random,
-                                    tf.zeros([1, self.n_units_rnn[l]])
-                                ],
-                                axis=0
-                            )
-                            self.rnn_c_init[nn_id][l] += tf.gather(rnn_c_random, _Y_gf)
-
-                        # CDRNN hidden state
-                        if self.n_layers_input_projection or self.n_layers_rnn:
-                            h_bias_random = self.h_bias_random_base[nn_id][gf]
-                            h_bias_random_summary = self.h_bias_random_base_summary[nn_id][gf]
-                            h_bias_random -= tf.reduce_mean(h_bias_random, axis=0, keepdims=True)
-                            h_bias_random_summary -= tf.reduce_mean(h_bias_random_summary, axis=0, keepdims=True)
-                            if 'nn' not in self.rvs:
-                                self._regularize(
-                                    h_bias_random,
-                                    regtype='ranef',
-                                    var_name=reg_name('%s_h_bias_by_%s' % (nn_id, sn(gf)))
-                                )
-                            if self.log_random:
-                                tf.summary.histogram(
-                                    sn('by_%s/%s_h' % (nn_id, sn(gf))),
-                                    h_bias_random_summary,
-                                    collections=['random']
-                                )
-                            self.h_bias_random[nn_id][gf] = h_bias_random
-                            self.h_bias_random_summary[nn_id][gf] = h_bias_random_summary
-                            n_units_hidden_state = self.n_units_hidden_state
-                            h_bias_random = tf.concat(
-                                [
-                                    h_bias_random,
-                                    tf.zeros([1, n_units_hidden_state])
-                                ],
-                                axis=0
-                            )
-                            self.h_bias[nn_id] += tf.expand_dims(tf.gather(h_bias_random, _Y_gf), axis=-2)
-
-                        # IRF L1 weights
-                        irf_l1_W_random = self.nn_irf_l1_W_random_base[nn_id][gf]
-                        irf_l1_W_random_summary = self.nn_irf_l1_W_random_base_summary[nn_id][gf]
-                        irf_l1_W_random -= tf.reduce_mean(irf_l1_W_random, axis=0, keepdims=True)
-                        irf_l1_W_random_summary -= tf.reduce_mean(irf_l1_W_random_summary, axis=0, keepdims=True)
-                        if 'nn' not in self.rvs:
-                            self._regularize(
-                                irf_l1_W_random,
-                                regtype='ranef',
-                                var_name=reg_name('%s_irf_l1_W_bias_by_%s' % (nn_id, (gf)))
-                            )
-                        if self.log_random:
-                            tf.summary.histogram(
-                                sn('by_%s/%s_irf_l1_W' % (nn_id, sn(gf))),
-                                irf_l1_W_random_summary,
-                                collections=['random']
-                            )
-                        self.nn_irf_l1_W_random[nn_id][gf] = irf_l1_W_random
-                        self.nn_irf_l1_W_random_summary[nn_id][gf] = irf_l1_W_random_summary
-                        irf_l1_W_random = tf.concat(
-                            [
-                                irf_l1_W_random,
-                                tf.zeros([1, self.n_units_irf[0]])
-                            ],
-                            axis=0
-                        )
-                        self.nn_irf_l1_W[nn_id] += tf.expand_dims(tf.gather(irf_l1_W_random, _Y_gf), axis=-2)
-
-                        # IRF L1 biases
-                        if self.irf_l1_use_bias:
-                            irf_l1_b_random = self.nn_irf_l1_b_random_base[nn_id][gf]
-                            irf_l1_b_random_summary = self.nn_irf_l1_b_random_base_summary[nn_id][gf]
-                            irf_l1_b_random -= tf.reduce_mean(irf_l1_b_random, axis=0, keepdims=True)
-                            irf_l1_b_random_summary -= tf.reduce_mean(irf_l1_b_random_summary, axis=0, keepdims=True)
-                            if 'nn' not in self.rvs:
-                                self._regularize(
-                                    irf_l1_b_random,
-                                    regtype='ranef',
-                                    var_name=reg_name('%s_irf_l1_b_bias_by_%s' % (nn_id, sn(gf)))
-                                )
-                            if self.log_random:
-                                tf.summary.histogram(
-                                    sn('by_%s/%s_irf_l1_b' % (nn_id, sn(gf))),
-                                    irf_l1_b_random_summary,
-                                    collections=['random']
-                                )
-                            self.nn_irf_l1_b_random[nn_id][gf] = irf_l1_b_random
-                            self.nn_irf_l1_b_random_summary[nn_id][gf] = irf_l1_b_random_summary
-                            irf_l1_b_random = tf.concat(
-                                [
-                                    irf_l1_b_random,
-                                    tf.zeros([1, self.n_units_irf[0]])
-                                ],
-                                axis=0
-                            )
-                            self.nn_irf_l1_b[nn_id] += tf.expand_dims(tf.gather(irf_l1_b_random, _Y_gf), axis=-2)
-
-    def _rnn_encoder(self, nn_id, X, **kwargs):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                assert nn_id in self.nn_irf_ids, 'Unrecognized nn_id for NN IRF: %s.' % nn_id
-                h = [X]
-                c = []
-                b = tf.shape(X)[0]
-                for l in range(self.n_layers_rnn):
-                    tile_dims = [b // tf.shape(self.rnn_h_init[nn_id][l])[0], 1]
-                    h_init = tf.tile(self.rnn_h_init[nn_id][l], tile_dims)
-                    c_init = tf.tile(self.rnn_c_init[nn_id][l], tile_dims)
-
-                    t_init = tf.zeros(tf.convert_to_tensor([b, 1]), dtype=self.FLOAT_TF)
-                    initial_state = CDRNNStateTuple(c=c_init, h=h_init, t=t_init)
-
-                    layer = self.rnn_layers[nn_id][l]
-                    h_l, c_l = layer(h[-1], return_state=True, initial_state=initial_state, **kwargs)
-                    h.append(h_l)
-                    c.append(c_l)
-
-                return h, c
-
-    def _compile_nn_irf(self, nn_id):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                assert nn_id in self.nn_irf_ids, 'Unrecognized nn_id for NN IRF: %s.' % nn_id
-                assert not self.nns_by_id[nn_id].nn_transformed_inputs(), 'Nesting neural net transforms under neural net IRFs is not currently supported.'
-                impulse_names = self.nn_irf_impulse_names[nn_id]
+    def _compile_nn(self, nn_id):
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                if nn_id in self.nn_impulse_ids:
+                    impulse_names = self.nn_impulse_impulse_names[nn_id]
+                else:  # nn_id in self.nn_irf_ids
+                    impulse_names = self.nn_irf_impulse_names[nn_id]
                 impulse_ix = names2ix(impulse_names, self.impulse_names)
                 X = tf.gather(self.X_processed, impulse_ix, axis=2)
                 t_delta = tf.gather(self.t_delta, impulse_ix, axis=2)
@@ -4498,12 +3452,12 @@ class CDRModel(object):
                             X_cur = X * dim_mask
 
                             if t_delta.shape[-1] > 1:
-                                t_delta_cur = t_delta[..., ix[0]:ix[0]+1]
+                                t_delta_cur = t_delta[..., ix[0]:ix[0] + 1]
                             else:
                                 t_delta_cur = t_delta
 
                             if X_time.shape[-1] > 1:
-                                _X_time = X_time[..., ix[0]:ix[0]+1]
+                                _X_time = X_time[..., ix[0]:ix[0] + 1]
                             else:
                                 _X_time = X_time
 
@@ -4561,8 +3515,8 @@ class CDRModel(object):
                     )
 
                 if self.input_dropout_rate:
-                    X = self.input_dropout_layer(X)
-                    X_time = self.X_time_dropout_layer(X_time)
+                    X = self.input_dropout_layer[nn_id](X)
+                    X_time = self.X_time_dropout_layer[nn_id](X_time)
 
                 impulse_names_no_rate = [x for x in impulse_names if x != 'rate']
                 impulse_ix = names2ix(impulse_names_no_rate, impulse_names)
@@ -4571,11 +3525,10 @@ class CDRModel(object):
                     X_in = tf.concat([X_in, X_time], axis=-1)
 
                 # Compute hidden state
-                if self.n_layers_input_projection or self.n_layers_rnn:
-                    h = self.h_bias[nn_id]
-
-                    if self.n_layers_input_projection:
-                        h_in = self.input_projection_fn[nn_id](X_in)
+                if self.n_layers_ff or self.n_layers_rnn:
+                    h = None
+                    if self.n_layers_ff:
+                        h_in = self.ff_fn[nn_id](X_in)
                         if self.h_in_noise_sd:
                             def h_in_train_fn(h_in=h_in):
                                 return tf.random_normal(tf.shape(h_in), h_in, stddev=self.h_in_noise_sd[nn_id])
@@ -4584,15 +3537,23 @@ class CDRModel(object):
                             h_in = tf.cond(self.training, h_in_train_fn, h_in_eval_fn)
                         if self.h_in_dropout_rate:
                             h_in = self.h_in_dropout_layer[nn_id](h_in)
-                        h += h_in
+                        h = h_in
 
                     if self.n_layers_rnn:
-                        rnn_hidden, rnn_cell = self._rnn_encoder(
-                            nn_id,
-                            X_in,
-                            times=X_time,
-                            mask=X_mask
-                        )
+                        _X_in = X_in
+                        rnn_hidden = []
+                        rnn_cell = []
+                        for l in range(self.n_layers_rnn):
+                            _rnn_hidden, _rnn_cell = self.rnn_layers[nn_id][l](
+                                _X_in,
+                                return_state=True,
+                                times=X_time,
+                                mask=X_mask
+                            )
+                            rnn_hidden.append(_rnn_hidden)
+                            rnn_cell.append(_rnn_cell)
+                            _X_in = _rnn_hidden
+
                         h_rnn = self.rnn_projection_fn[nn_id](rnn_hidden[-1])
 
                         if self.rnn_dropout_rate:
@@ -4607,74 +3568,79 @@ class CDRModel(object):
                         if self.h_rnn_dropout_rate:
                             h_rnn = self.h_rnn_dropout_layer[nn_id](h_rnn)
 
-                        h += h_rnn
+                        if h is None:
+                            h = h_rnn
+                        else:
+                            h += h_rnn
                     else:
                         h_rnn = rnn_hidden = rnn_cell = None
+
+                    assert h is not None, 'NN impulse transforms must involve a feedforward component, an RNN component, or both.'
+
+                    if not (self.normalize_h and self.normalize_activations) or self.normalize_after_activation:
+                        h = self.h_bias_layer[nn_id](h)
 
                     if self.h_dropout_rate:
                         h = self.h_dropout_layer[nn_id](h)
 
-                    if self.normalize_after_activation:
-                        h = get_activation(self.hidden_state_activation, session=self.sess)(h)
-                    if self.normalize_h and self.normalize_activations:
-                        h = self.h_normalization_layer[nn_id](h)
-                    if not self.normalize_after_activation:
-                        h = get_activation(self.hidden_state_activation, session=self.sess)(h)
+                    if nn_id in self.nn_irf_ids:
+                        if self.normalize_after_activation:
+                            h = get_activation(self.hidden_state_activation, session=self.session)(h)
+                        if self.normalize_h and self.normalize_activations:
+                            h = self.h_normalization_layer[nn_id](h)
+                        if not self.normalize_after_activation:
+                            h = get_activation(self.hidden_state_activation, session=self.session)(h)
 
-                    h_irf_in = h
+                if nn_id in self.nn_impulse_ids:
+                    self.nn_transformed_impulses.append(h)
+                else:  # nn_id in self.nn_irf_ids
+                    # Compute IRF outputs
 
-                    Wb_proj = self.hidden_state_to_irf_l1[nn_id](h_irf_in)
-                    W_proj = Wb_proj[..., :self.n_units_irf_l1]
-                    b_proj = Wb_proj[..., self.n_units_irf_l1:]
-                else:
-                    h_in = h_rnn = None
+                    irf_out = t_delta
 
-                # Compute IRF outputs
-                W = self.nn_irf_l1_W[nn_id]
-                b = self.nn_irf_l1_b[nn_id]
+                    # L1
+                    if self.input_dependent_irf:
+                        irf_l1_Wb_offsets = tf.expand_dims(self.hidden_state_to_irf_l1[nn_id](h), axis=-2)
+                        irf_l1_W_offsets = irf_l1_Wb_offsets[..., :self.n_units_irf[0]]
+                        irf_l1_b_offsets = irf_l1_Wb_offsets[..., self.n_units_irf[0]:]
+                    else:
+                        irf_l1_W_offsets = irf_l1_b_offsets = None
 
-                if self.n_layers_input_projection or self.n_layers_rnn:
-                    W += W_proj
-                    b += b_proj
+                    irf_out = self.nn_irf_l1[nn_id](
+                        irf_out,
+                        kernel_offsets=irf_l1_W_offsets,
+                        bias_offsets=irf_l1_b_offsets,
+                    )
 
-                irf_l1 = W * t_delta + b
-                if self.irf_dropout_rate:
-                    irf_l1 = self.nn_irf_l1_dropout_layer[nn_id](irf_l1)
-                if self.normalize_after_activation:
-                    irf_l1 = get_activation(self.irf_inner_activation, session=self.sess)(irf_l1)
-                if self.normalize_irf_l1 and self.irf_l1_use_bias and self.normalize_activations:
-                    irf_l1 = self.nn_irf_l1_normalization_layer[nn_id](irf_l1)
-                if not self.normalize_after_activation:
-                    irf_l1 = get_activation(self.irf_inner_activation, session=self.sess)(irf_l1)
+                    # L2+
+                    irf_out = self.nn_irf_lambda[nn_id](irf_out)
+                    stabilizing_constant = (self.history_length + self.future_length) * len(self.terminal_names)
+                    irf_out = irf_out / stabilizing_constant
 
-                irf_out = self.nn_irf_lambda[nn_id](irf_l1)
-                stabilizing_constant = (self.history_length + self.future_length) * len(self.terminal_names)
-                irf_out = irf_out / stabilizing_constant
+                    impulse_ix = names2ix(self.nn_irf_impulse_names[nn_id], impulse_names)
+                    nn_irf_impulses = tf.gather(X, impulse_ix, axis=2)
+                    nn_irf_impulses = nn_irf_impulses[..., None, None] # Pad out for ndim of response distribution(s)
+                    self.nn_irf_impulses[nn_id] = nn_irf_impulses
 
-                impulse_ix = names2ix(self.nn_irf_impulse_names[nn_id], impulse_names)
-                nn_irf_impulses = tf.gather(X, impulse_ix, axis=2)
-                nn_irf_impulses = nn_irf_impulses[..., None, None] # Pad out for ndim of response distribution(s)
-                self.nn_irf_impulses[nn_id] = nn_irf_impulses
+                    # Slice and apply IRF outputs
+                    slices, shapes = self.get_nn_irf_output_slice_and_shape(nn_id)
+                    if X_mask is None:
+                        X_mask_out = None
+                    else:
+                        X_mask_out = X_mask[..., None, None, None] # Pad out for impulses plus nparam, ndim of response distribution(s)
+                    _X_time = X_time[..., None, None]
 
-                # Slice and apply IRF outputs
-                slices, shapes = self.get_nn_irf_output_slice_and_shape(nn_id)
-                if X_mask is None:
-                    X_mask_out = None
-                else:
-                    X_mask_out = X_mask[..., None, None, None] # Pad out for impulses plus nparam, ndim of response distribution(s)
-                _X_time = X_time[..., None, None]
+                    for i, response in enumerate(self.response_names):
+                        _slice = slices[response]
+                        _shape = shapes[response]
 
-                for i, response in enumerate(self.response_names):
-                    _slice = slices[response]
-                    _shape = shapes[response]
+                        _irf_out = tf.reshape(irf_out[..., _slice], _shape)
+                        if X_mask_out is not None:
+                            _irf_out = _irf_out * X_mask_out
 
-                    _irf_out = tf.reshape(irf_out[..., _slice], _shape)
-                    if X_mask_out is not None:
-                        _irf_out = _irf_out * X_mask_out
-
-                    if response not in self.nn_irf:
-                        self.nn_irf[response] = {}
-                    self.nn_irf[response][nn_id] = _irf_out
+                        if response not in self.nn_irf:
+                            self.nn_irf[response] = {}
+                        self.nn_irf[response][nn_id] = _irf_out
 
                 # Set up EMA for RNN
                 ema_rate = self.ema_decay
@@ -4691,8 +3657,7 @@ class CDRModel(object):
                 for l in range(self.n_layers_rnn):
                     reduction_axes = list(range(len(rnn_hidden[l].shape) - 1))
 
-                    h_sum = tf.reduce_sum(rnn_hidden[l + 1] * mask,
-                                          axis=reduction_axes)  # 0th layer is the input, so + 1
+                    h_sum = tf.reduce_sum(rnn_hidden[l] * mask, axis=reduction_axes)
                     h_mean = h_sum / (denom + self.epsilon)
                     h_ema = self.rnn_h_ema[nn_id][l]
                     h_ema_op = tf.assign(
@@ -4711,8 +3676,7 @@ class CDRModel(object):
                     self.ema_ops.append(c_ema_op)
 
                 if self.input_dropout_rate:
-                    self.resample_ops += self.input_dropout_layer[nn_id].resample_ops() + self.X_time_dropout_layer[
-                        nn_id].resample_ops()
+                    self.resample_ops += self.input_dropout_layer[nn_id].resample_ops() + self.X_time_dropout_layer[nn_id].resample_ops()
                 if self.rnn_dropout_rate and self.n_layers_rnn:
                     self.resample_ops += self.h_rnn_dropout_layer[nn_id].resample_ops()
                     self.resample_ops += self.rnn_dropout_layer[nn_id].resample_ops()
@@ -4722,12 +3686,17 @@ class CDRModel(object):
                     self.resample_ops += self.h_rnn_dropout_layer[nn_id].resample_ops()
                 if self.h_dropout_rate:
                     self.resample_ops += self.h_dropout_layer[nn_id].resample_ops()
-                if self.irf_dropout_rate:
-                    self.resample_ops += self.nn_irf_l1_dropout_layer[nn_id].resample_ops()
+
+    def _concat_nn_impulses(self):
+        if len(self.nn_transformed_impulses):
+            if len(self.nn_transformed_impulses) == 1:
+                self.nn_transformed_impulses = self.nn_transformed_impulses[0]
+            else:
+                self.nn_transformed_impulses = tf.concat(self.nn_transformed_impulses, axis=2)
 
     def _collect_layerwise_ops(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 for x in self.layers:
                     self.ema_ops += x.ema_ops()
                     self.resample_ops += x.resample_ops()
@@ -4743,25 +3712,23 @@ class CDRModel(object):
         ndim = self.get_response_ndim(response)
         ninter = len(interaction_ids)
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 if ran_gf is None:
                     interaction = tf.Variable(
                         tf.zeros([ninter, nparam, ndim], dtype=self.FLOAT_TF),
                         name='interaction_%s' % sn(response)
                     )
-                    interaction_summary = interaction
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     interaction = tf.Variable(
                         tf.zeros([rangf_n_levels, ninter, nparam, ndim], dtype=self.FLOAT_TF),
                         name='interaction_%s_by_%s' % (sn(response), sn(ran_gf))
                     )
-                    interaction_summary = interaction
 
                 # shape: (?rangf_n_levels, ninter, nparam, ndim)
 
-                return interaction, interaction_summary
+                return {'value': interaction}
 
     def _initialize_interaction_bayes(self, response, interaction_ids=None, ran_gf=None):
         if interaction_ids is None:
@@ -4774,97 +3741,57 @@ class CDRModel(object):
         ndim = self.get_response_ndim(response)
         ninter = len(interaction_ids)
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 if ran_gf is None:
-                    prior_sd = self._coef_prior_sd[response]
-                    post_sd = self._coef_posterior_sd_init[response]
+                    sd_prior = self._coef_prior_sd[response]
+                    sd_posterior = self._coef_posterior_sd_init[response]
                     if not self.use_distributional_regression:
-                        prior_sd = prior_sd[:1]
-                        post_sd = post_sd[:1]
-                    prior_sd = np.ones((ninter, 1, 1)) * prior_sd[None, ...]
-                    post_sd = np.ones((ninter, 1, 1)) * post_sd[None, ...]
+                        sd_prior = sd_prior[:1]
+                        sd_posterior = sd_posterior[:1]
+                    sd_prior = np.ones((ninter, 1, 1)) * sd_prior[None, ...]
+                    sd_posterior = np.ones((ninter, 1, 1)) * sd_posterior[None, ...]
 
-                    # Posterior distribution
-                    interaction_q_loc = tf.Variable(
-                        tf.zeros([ninter, nparam, ndim], dtype=self.FLOAT_TF),
-                        name='interaction_%s_q_loc' % sn(response)
+                    rv_dict = get_random_variable(
+                        'interaction_%s' % sn(response),
+                        sd_posterior.shape,
+                        sd_posterior,
+                        constraint=self.constraint,
+                        sd_prior=sd_prior,
+                        training=self.training,
+                        use_MAP_mode=self.use_MAP_mode,
+                        epsilon=self.epsilon,
+                        session=self.session
                     )
-
-                    interaction_q_scale = tf.Variable(
-                        tf.constant(post_sd, self.FLOAT_TF),
-                        name='interaction_%s_q_scale' % sn(response)
-                    )
-
-                    interaction_q_dist = Normal(
-                        loc=interaction_q_loc,
-                        scale=self.constraint_fn(interaction_q_scale) + self.epsilon,
-                        name='interaction_%s_q' % (response)
-                    )
-
-                    interaction = tf.cond(self.use_MAP_mode, interaction_q_dist.mean, interaction_q_dist.sample)
-
-                    interaction_summary = interaction_q_dist.mean()
-
-                    if self.declare_priors_fixef:
-                        # Prior distribution
-                        interaction_prior_dist = Normal(
-                            loc=0.,
-                            scale=self.constraint_fn(tf.constant(prior_sd, self.FLOAT_TF)),
-                            name='interaction_%s' % sn(response)
-                        )
-                        self.kl_penalties['interaction_%s' % sn(response)] = {
-                            'loc': 0.,
-                            'scale': self.constraint_fn_np(self._coef_prior_sd[response]).flatten(),
-                            'val': interaction_q_dist.kl_divergence(interaction_prior_dist)
-                        }
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
-                    prior_sd = self._coef_ranef_prior_sd[response]
-                    post_sd = self._coef_ranef_posterior_sd_init[response]
+                    sd_prior = self._coef_ranef_prior_sd[response]
+                    sd_posterior = self._coef_ranef_posterior_sd_init[response]
                     if not self.use_distributional_regression:
-                        prior_sd = prior_sd[:1]
-                        post_sd = post_sd[:1]
-                    prior_sd = np.ones((rangf_n_levels, ninter, 1, 1)) * prior_sd[None, None, ...]
-                    post_sd = np.ones((rangf_n_levels, ninter, 1, 1)) * post_sd[None, None, ...]
+                        sd_prior = sd_prior[:1]
+                        sd_posterior = sd_posterior[:1]
+                    sd_prior = np.ones((rangf_n_levels, ninter, 1, 1)) * sd_prior[None, None, ...]
+                    sd_posterior = np.ones((rangf_n_levels, ninter, 1, 1)) * sd_posterior[None, None, ...]
 
-                    # Posterior distribution
-                    interaction_q_loc = tf.Variable(
-                        tf.zeros([rangf_n_levels, ninter, nparam, ndim], dtype=self.FLOAT_TF),
-                        name='interaction_%s_by_%s_q_loc' % (sn(response), sn(ran_gf))
+                    rv_dict = get_random_variable(
+                        'interaction_%s_by_%s' % (sn(response), sn(ran_gf)),
+                        sd_posterior.shape,
+                        sd_posterior,
+                        constraint=self.constraint,
+                        sd_prior=sd_prior,
+                        training=self.training,
+                        use_MAP_mode=self.use_MAP_mode,
+                        epsilon=self.epsilon,
+                        session=self.session
                     )
-
-                    interaction_q_scale = tf.Variable(
-                        tf.constant(post_sd, self.FLOAT_TF),
-                        name='interaction_%s_by_%s_q_scale' % (sn(response), sn(ran_gf))
-                    )
-
-                    interaction_q_dist = Normal(
-                        loc=interaction_q_loc,
-                        scale=self.constraint_fn(interaction_q_scale) + self.epsilon,
-                        name='interaction_%s_by_%s_q' % (sn(response), sn(ran_gf))
-                    )
-
-                    interaction = tf.cond(self.use_MAP_mode, interaction_q_dist.mean, interaction_q_dist.sample)
-
-                    interaction_summary = interaction_q_dist.mean()
-
-                    if self.declare_priors_ranef:
-                        # Prior distribution
-                        interaction_prior_dist = Normal(
-                            loc=0.,
-                            scale=self.constraint_fn(tf.constant(prior_sd, self.FLOAT_TF)),
-                            name='interaction_%s_by_%s' % (sn(response), sn(ran_gf))
-                        )
-                        self.kl_penalties['interaction_%s_by_%s' % (sn(response), sn(ran_gf))] = {
-                            'loc': 0.,
-                            'scale': self.constraint_fn_np(self._coef_ranef_prior_sd[response]).flatten(),
-                            'val': interaction_q_dist.kl_divergence(interaction_prior_dist)
-                        }
 
                 # shape: (?rangf_n_levels, ninter, nparam, ndim)
 
-                return interaction, interaction_summary
+                return {
+                    'value': rv_dict['v'],
+                    'kl_penalties': rv_dict['kl_penalties'],
+                    'eval_resample': rv_dict['v_eval_resample']
+                }
 
     def _initialize_interaction(self, *args, **kwargs):
         if 'interaction' in self.rvs:
@@ -4872,19 +3799,15 @@ class CDRModel(object):
         return self._initialize_interaction_mle(*args, **kwargs)
 
     def _compile_interactions(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 self.interaction = {}
-                self.interaction_summary = {}
                 self.interaction_fixed = {}
-                self.interaction_fixed_summary = {}
                 self.interaction_random = {}
-                self.interaction_random_summary = {}
                 fixef_ix = names2ix(self.fixed_interaction_names, self.interaction_names)
                 if len(self.interaction_names) > 0:
                     for response in self.response_names:
                         self.interaction_fixed[response] = {}
-                        self.interaction_fixed_summary[response] = {}
 
                         response_params = self.get_response_params(response)
                         if not self.use_distributional_regression:
@@ -4898,11 +3821,6 @@ class CDRModel(object):
                             self.interaction_fixed_base[response],
                             [len(interaction_ids), nparam, ndim]
                         )
-                        interaction_fixed_summary = self._scatter_along_axis(
-                            fixef_ix,
-                            self.interaction_fixed_base_summary[response],
-                            [len(interaction_ids), nparam, ndim]
-                        )
                         self._regularize(
                             self.interaction_fixed_base[response],
                             regtype='coefficient',
@@ -4910,55 +3828,42 @@ class CDRModel(object):
                         )
 
                         interaction = interaction_fixed[None, ...]
-                        interaction_summary = interaction_fixed_summary[None, ...]
 
                         for i, interaction_name in enumerate(self.interaction_names):
                             self.interaction_fixed[response][interaction_name] = {}
-                            self.interaction_fixed_summary[response][interaction_name] = {}
                             for j, response_param in enumerate(response_params):
                                 _p = interaction_fixed[:, j]
-                                _p_summary = interaction_fixed_summary[:, j]
                                 if self.standardize_response and \
                                         self.is_real(response) and \
                                         response_param in ['mu', 'sigma']:
                                     _p = _p * self.Y_train_sds[response]
-                                    _p_summary = _p_summary * self.Y_train_sds[response]
                                 dim_names = self.expand_param_name(response, response_param)
                                 for k, dim_name in enumerate(dim_names):
                                     val = _p[i, k]
-                                    val_summary = _p_summary[i, k]
                                     tf.summary.scalar(
                                         'interaction' + '/%s/%s_%s' % (
                                             sn(interaction_name),
                                             sn(response),
                                             sn(dim_name)
                                         ),
-                                        val_summary,
+                                        val,
                                         collections=['params']
                                     )
                                     self.interaction_fixed[response][interaction_name][dim_name] = val
-                                    self.interaction_fixed_summary[response][interaction_name][dim_name] = val_summary
 
                         self.interaction_random[response] = {}
-                        self.interaction_random_summary[response] = {}
                         for i, gf in enumerate(self.rangf):
                             levels_ix = np.arange(self.rangf_n_levels[i] - 1)
 
                             interactions = self.interaction_by_rangf.get(gf, [])
                             if len(interactions) > 0:
                                 self.interaction_random[response][gf] = {}
-                                self.interaction_random_summary[response][gf] = {}
 
                                 interaction_ix = names2ix(interactions, self.interaction_names)
 
                                 interaction_random = self.interaction_random_base[response][gf]
-                                interaction_random_summary = self.interaction_random_base_summary[response][gf]
-
                                 interaction_random_means = tf.reduce_mean(interaction_random, axis=0, keepdims=True)
-                                interaction_random_summary_means = tf.reduce_mean(interaction_random_summary, axis=0, keepdims=True)
-
                                 interaction_random -= interaction_random_means
-                                interaction_random_summary -= interaction_random_summary_means
 
                                 self._regularize(
                                     interaction_random,
@@ -4968,19 +3873,15 @@ class CDRModel(object):
 
                                 for j, interaction_name in enumerate(interactions):
                                     self.interaction_random[response][gf][interaction_name] = {}
-                                    self.interaction_random_summary[response][gf][interaction_name] = {}
                                     for k, response_param in enumerate(response_params):
                                         _p = interaction_random[:, :, k]
-                                        _p_summary = interaction_random_summary[:, :, k]
                                         if self.standardize_response and \
                                                 self.is_real(response) and \
                                                 response_param in ['mu', 'sigma']:
                                             _p = _p * self.Y_train_sds[response]
-                                            _p_summary = _p_summary * self.Y_train_sds[response]
                                         dim_names = self.expand_param_name(response, response_param)
                                         for l, dim_name in enumerate(dim_names):
                                             val = _p[:, j, l]
-                                            val_summary = _p_summary[:, j, l]
                                             tf.summary.histogram(
                                                 'by_%s/interaction/%s/%s_%s' % (
                                                     sn(gf),
@@ -4988,11 +3889,10 @@ class CDRModel(object):
                                                     sn(response),
                                                     sn(dim_name)
                                                 ),
-                                                val_summary,
+                                                val,
                                                 collections=['random']
                                             )
                                             self.interaction_random[response][gf][interaction_name][dim_name] = val
-                                            self.interaction_random_summary[response][gf][interaction_name][dim_name] = val_summary
 
                                 interaction_random = self._scatter_along_axis(
                                     interaction_ix,
@@ -5004,26 +3904,14 @@ class CDRModel(object):
                                     [self.rangf_n_levels[i], len(self.interaction_names), nparam, ndim],
                                     axis=1
                                 )
-                                interaction_random_summary = self._scatter_along_axis(
-                                    interaction_ix,
-                                    self._scatter_along_axis(
-                                        levels_ix,
-                                        interaction_random_summary,
-                                        [self.rangf_n_levels[i], len(interactions), nparam, ndim]
-                                    ),
-                                    [self.rangf_n_levels[i], len(self.interaction_names), nparam, ndim],
-                                    axis=1
-                                )
 
                                 interaction = interaction + tf.gather(interaction_random, self.Y_gf[:, i], axis=0)
-                                interaction_summary = interaction_summary + tf.gather(interaction_random_summary, self.Y_gf[:, i], axis=0)
 
                         self.interaction[response] = interaction
-                        self.interaction_summary[response] = interaction_summary
 
     def _sum_interactions(self, response):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 if len(self.interaction_names) > 0:
                     interaction_coefs = self.interaction[response]
                     interaction_coefs = tf.expand_dims(interaction_coefs, axis=1)  # Add "time" dimension
@@ -5067,8 +3955,6 @@ class CDRModel(object):
                                 inputs_cur = nn_impulse_inputs
                                 
                         if len(dirac_delta_input_names):
-                            print(dirac_delta_input_names)
-                            print(impulse_names)
                             dirac_delta_input_ix = names2ix(dirac_delta_input_names, impulse_names)
                             dirac_delta_inputs = self.X_processed[:,-1:]
                             # Expand out response_param and response_param_dim axes
@@ -5087,8 +3973,8 @@ class CDRModel(object):
                     return tf.reduce_sum(interaction_coefs * interaction_inputs, axis=2, keepdims=True)
 
     def _compile_irf_impulses(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 # Parametric IRFs with non-neural impulses
                 irf_impulses = []
                 terminal_names = []
@@ -5140,8 +4026,8 @@ class CDRModel(object):
                 self.irf_impulses = irf_impulses
 
     def _compile_X_weighted_by_irf(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 self.X_weighted_by_irf = {}
                 for i, response in enumerate(self.response_names):
                     self.X_weighted_by_irf[response] = {}
@@ -5223,8 +4109,8 @@ class CDRModel(object):
                     self.X_weighted[response] = X_weighted
 
     def _initialize_predictive_distribution(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 self.output_delta = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of stimulus-driven offsets at predictive distribution parameter of the response (summing over predictors and time)
                 self.output = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of predictoins at predictive distribution parameter of the response (summing over predictors and time)
                 self.predictive_distribution = {}
@@ -5509,8 +4395,8 @@ class CDRModel(object):
                 self.ll = tf.add_n([self.ll_by_var[x] for x in self.ll_by_var])
 
     def _initialize_regularizer(self, regularizer_name, regularizer_scale):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 if regularizer_name is None:
                     regularizer = None
                 elif regularizer_name == 'inherit':
@@ -5542,8 +4428,8 @@ class CDRModel(object):
         name = self.optim_name.lower()
         use_jtps = self.use_jtps
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 lr = tf.constant(self.learning_rate, dtype=self.FLOAT_TF)
                 if name is None:
                     self.lr = lr
@@ -5601,11 +4487,11 @@ class CDRModel(object):
                 }[name]
 
                 if clip:
-                    optimizer_class = get_clipped_optimizer_class(optimizer_class, session=self.sess)
+                    optimizer_class = get_clipped_optimizer_class(optimizer_class, session=self.session)
                     optimizer_kwargs['max_global_norm'] = clip
 
                 if use_jtps:
-                    optimizer_class = get_JTPS_optimizer_class(optimizer_class, session=self.sess)
+                    optimizer_class = get_JTPS_optimizer_class(optimizer_class, session=self.session)
                     optimizer_kwargs['meta_learning_rate'] = 1
 
                 optim = optimizer_class(*optimizer_args, **optimizer_kwargs)
@@ -5613,8 +4499,8 @@ class CDRModel(object):
                 return optim
 
     def _initialize_objective(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 loss_func = -self.ll
 
                 # Average over number of dependent variables for stability
@@ -5669,14 +4555,26 @@ class CDRModel(object):
 
                 # Regularize
                 for l in self.regularizable_layers: # CDRNN only
-                    if hasattr(l, 'weights'):
-                        vars = l.weights
+                    if hasattr(l, 'regularizable_weights'):
+                        vars = l.regularizable_weights
                     else:
                         vars = [l]
                     for v in vars:
-                        if 'bias' not in v.name:
-                            if 'input_projection_l%d' % (self.n_layers_input_projection + 1) in v.name:
-                                regtype = 'input_projection'
+                        is_ranef = False
+                        for gf in self.rangf:
+                            if '_by_%s' % sn(gf) in v.name:
+                                is_ranef = True
+                                break
+                        if is_ranef:
+                            if 'nn' not in self.rvs:
+                                self._regularize(
+                                    v,
+                                    regtype='ranef',
+                                    var_name=reg_name(v.name)
+                                )
+                        elif 'bias' not in v.name:
+                            if 'ff_l%d' % (self.n_layers_ff + 1) in v.name:
+                                regtype = 'ff'
                             elif 'rnn_projection_l%d' % (self.n_layers_rnn_projection + 1) in v.name:
                                 regtype = 'rnn_projection'
                             else:
@@ -5704,8 +4602,8 @@ class CDRModel(object):
                 self.train_op = self.optim.minimize(self.loss_func, global_step=self.global_batch_step)
 
     def _initialize_logging(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 tf.summary.scalar('opt/loss_by_iter', self.loss_total, collections=['opt'])
                 tf.summary.scalar('opt/reg_loss_by_iter', self.reg_loss_total, collections=['opt'])
                 if self.is_bayesian:
@@ -5713,7 +4611,7 @@ class CDRModel(object):
                 if self.loss_filter_n_sds:
                     tf.summary.scalar('opt/n_dropped', self.n_dropped_in, collections=['opt'])
                 if self.log_graph:
-                    self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/cdr', self.sess.graph)
+                    self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/cdr', self.session.graph)
                 else:
                     self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/cdr')
                 self.summary_opt = tf.summary.merge_all(key='opt')
@@ -5722,8 +4620,8 @@ class CDRModel(object):
                     self.summary_random = tf.summary.merge_all(key='random')
 
     def _initialize_parameter_tables(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 # Fixed
                 self.parameter_table_fixed_types = []
                 self.parameter_table_fixed_responses = []
@@ -5840,15 +4738,15 @@ class CDRModel(object):
                                         )
 
     def _initialize_saver(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 self.saver = tf.train.Saver()
 
                 self.check_numerics_ops = [tf.check_numerics(v, 'Numerics check failed') for v in tf.trainable_variables()]
 
     def _initialize_ema(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 self.ema_vars = tf.get_collection('trainable_variables')
                 self.ema = tf.train.ExponentialMovingAverage(decay=self.ema_decay if self.ema_decay else 0.)
                 ema_op = self.ema.apply(self.ema_vars)
@@ -5859,8 +4757,8 @@ class CDRModel(object):
                 self.ema_saver = tf.train.Saver(self.ema_map)
 
     def _initialize_convergence_checking(self):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 if self.check_convergence:
                     self.rho_t = tf.placeholder(self.FLOAT_TF, name='rho_t_in')
                     self.p_rho_t = tf.placeholder(self.FLOAT_TF, name='p_rho_t_in')
@@ -5893,36 +4791,13 @@ class CDRModel(object):
             {'t', 'f'},
         )
 
-    def _matmul(self, A, B):
-        """
-        Matmul operation that supports broadcasting
-
-        :param A: Left tensor
-        :param B: Right tensor
-        :return: Broadcasted matrix multiplication
-        """
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                assert len(A.shape) == len(B.shape), 'A and B must have the same rank. Got %s and %s.' % (len(A.shape), len(B.shape))
-                A_shape = tf.shape(A)[:-2]
-                B_shape = tf.shape(B)[:-2]
-                A_tile = tf.concat([tf.maximum(B_shape // A_shape, 1), [1, 1]], 0)
-                B_tile = tf.concat([tf.maximum(A_shape // B_shape, 1), [1, 1]], 0)
-
-                A = tf.tile(A, A_tile)
-                B = tf.tile(B, B_tile)
-
-                C = tf.matmul(A, B)
-
-                return C
-
     def _tril_diag_ix(self, n):
-        return (np.arange(1, n+1).cumsum() - 1).astype(self.INT_NP)
+        return (np.arange(1, n + 1).cumsum() - 1).astype(self.INT_NP)
 
     def _scatter_along_axis(self, axis_indices, updates, shape, axis=0):
         # Except for axis, updates and shape must be identically shaped
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 if axis != 0:
                     transpose_axes = [axis] + list(range(axis)) + list(range(axis + 1, len(updates.shape)))
                     inverse_transpose_axes = list(range(1, axis + 1)) + [0] + list(range(axis + 1, len(updates.shape)))
@@ -5944,8 +4819,8 @@ class CDRModel(object):
                 return out
 
     def _softplus_sigmoid(self, x, a=-1., b=1.):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 f = tf.nn.softplus
                 c = b - a
 
@@ -5953,8 +4828,8 @@ class CDRModel(object):
                 return g
 
     def _softplus_sigmoid_inverse(self, x, a=-1., b=1.):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 f = tf.nn.softplus
                 ln = tf.log
                 exp = tf.exp
@@ -5963,29 +4838,24 @@ class CDRModel(object):
                 g = ln(exp(c) / ( (exp(c) + 1) * exp( -f(c) * (x - a) / c ) - 1) - 1) + a
                 return g
 
-    def _abs(self, x):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                return tf.where(x > 0., x, -x)
-
     def _sigmoid(self, x, lb=0., ub=1.):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 return tf.sigmoid(x) * (ub - lb) + lb
 
     def _sigmoid_np(self, x, lb=0., ub=1.):
         return (1. / (1. + np.exp(-x))) * (ub - lb) + lb
 
     def _logit(self, x, lb=0., ub=1.):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 x = (x - lb) / (ub - lb)
                 x = x * (1 - 2 * self.epsilon) + self.epsilon
                 return tf.log(x / (1 - x))
 
     def _logit_np(self, x, lb=0., ub=1.):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 x = (x - lb) / (ub - lb)
                 x = x * (1 - 2 * self.epsilon) + self.epsilon
                 return np.log(x / (1 - x))
@@ -5993,8 +4863,8 @@ class CDRModel(object):
     def _piecewise_linear_interpolant(self, c, v):
         # c: knot locations, shape=[B, Q, K], B = batch, Q = query points or 1, K = n knots
         # v: knot values, shape identical to c
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 if len(c.shape) == 1:
                     # No batch or query dim
                     c = c[None, None, ...]
@@ -6074,8 +4944,8 @@ class CDRModel(object):
     def _compose_irf(self, f_list):
         if not isinstance(f_list, list):
             f_list = [f_list]
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 f = f_list[0](self.interpolation_support)[..., 0]
                 for g in f_list[1:]:
                     _f = tf.spectral.rfft(f)
@@ -6111,8 +4981,8 @@ class CDRModel(object):
         return mean
 
     def _process_mean(self, mean, lb=None, ub=None):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 if lb is not None and ub is None:
                     # Lower-bounded support only
                     mean = self.constraint_fn_inv_np(mean - lb - self.epsilon)
@@ -6145,7 +5015,7 @@ class CDRModel(object):
 
     def _regularize(self, var, center=None, regtype=None, var_name=None):
         assert regtype in [
-            None, 'intercept', 'coefficient', 'irf', 'ranef', 'nn', 'input_projection', 'rnn_projection', 'context',
+            None, 'intercept', 'coefficient', 'irf', 'ranef', 'nn', 'ff', 'rnn_projection', 'context',
             'unit_integral', 'conv_output']
 
         if regtype is None:
@@ -6154,8 +5024,8 @@ class CDRModel(object):
             regularizer = getattr(self, '%s_regularizer' % regtype)
 
         if regularizer is not None:
-            with self.sess.as_default():
-                with self.sess.graph.as_default():
+            with self.session.as_default():
+                with self.session.graph.as_default():
                     if center is None:
                         reg = tf.contrib.layers.apply_regularization(regularizer, [var])
                     else:
@@ -6167,7 +5037,7 @@ class CDRModel(object):
                         reg_scale = self.regularizer_scale
                         if self.scale_regularizer_with_data:
                             reg_scale *= self.minibatch_size * self.minibatch_scale
-                    elif regtype in ['input_projection', 'rnn_projection'] and getattr(self, '%s_regularizer_name' % regtype) is None:
+                    elif regtype in ['ff', 'rnn_projection'] and getattr(self, '%s_regularizer_name' % regtype) is None:
                         reg_name = self.nn_regularizer_name
                         reg_scale = self.nn_regularizer_scale
                     elif regtype == 'unit_integral':
@@ -6186,8 +5056,8 @@ class CDRModel(object):
                     self.regularizer_losses_scales.append(reg_scale)
 
     def _add_convergence_tracker(self, var, name, alpha=0.9):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 if self.convergence_n_iterates:
                     # Flatten the variable for easy argmax
                     var = tf.reshape(var, [-1])
@@ -6226,8 +5096,8 @@ class CDRModel(object):
         return rt, p_tt, ra, p_ta
 
     def run_convergence_check(self, verbose=True, feed_dict=None):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 if self.check_convergence:
                     min_p = 1.
                     min_p_ix = 0
@@ -6236,8 +5106,8 @@ class CDRModel(object):
                     p_ta_at_min_p = 0
                     fd_assign = {}
 
-                    cur_step = self.global_step.eval(session=self.sess)
-                    last_check = self.last_convergence_check.eval(session=self.sess)
+                    cur_step = self.global_step.eval(session=self.session)
+                    last_check = self.last_convergence_check.eval(session=self.session)
                     offset = cur_step % self.convergence_stride
                     update = last_check < cur_step and self.convergence_stride > 0
                     if update and feed_dict is None:
@@ -6246,13 +5116,13 @@ class CDRModel(object):
 
                     push = update and offset == 0
                     # End of stride if next step is a push
-                    end_of_stride = last_check < (cur_step+1) and self.convergence_stride > 0 and ((cur_step+1) % self.convergence_stride == 0)
+                    end_of_stride = last_check < (cur_step + 1) and self.convergence_stride > 0 and ((cur_step + 1) % self.convergence_stride == 0)
 
                     if self.check_convergence:
                         if update:
-                            var_d0, var_d0_iterates = self.sess.run([self.d0, self.d0_saved], feed_dict=feed_dict)
+                            var_d0, var_d0_iterates = self.session.run([self.d0, self.d0_saved], feed_dict=feed_dict)
                         else:
-                            var_d0_iterates = self.sess.run(self.d0_saved)
+                            var_d0_iterates = self.session.run(self.d0_saved)
 
                         start_ix = int(self.convergence_n_iterates / self.convergence_stride) - int(cur_step / self.convergence_stride)
                         start_ix = max(0, start_ix)
@@ -6283,30 +5153,30 @@ class CDRModel(object):
                                 p_ta_at_min_p = p_ta[new_min_p_ix]
 
                         if update:
-                            fd_assign[self.last_convergence_check_update] = self.global_step.eval(session=self.sess)
+                            fd_assign[self.last_convergence_check_update] = self.global_step.eval(session=self.session)
                             to_run = [self.d0_assign, self.last_convergence_check_assign]
-                            self.sess.run(to_run, feed_dict=fd_assign)
+                            self.session.run(to_run, feed_dict=fd_assign)
 
                     if end_of_stride:
                         locally_converged = cur_step > self.convergence_n_iterates and \
                                     (min_p > self.convergence_alpha)
-                        convergence_history = self.convergence_history.eval(session=self.sess)
+                        convergence_history = self.convergence_history.eval(session=self.session)
                         convergence_history[:-1] = convergence_history[1:]
                         convergence_history[-1] = locally_converged
-                        self.sess.run(self.convergence_history_assign, {self.convergence_history_update: convergence_history})
+                        self.session.run(self.convergence_history_assign, {self.convergence_history_update: convergence_history})
 
-                    if self.log_freq > 0 and self.global_step.eval(session=self.sess) % self.log_freq == 0:
+                    if self.log_freq > 0 and self.global_step.eval(session=self.session) % self.log_freq == 0:
                         fd_convergence = {
                                 self.rho_t: rt_at_min_p,
                                 self.p_rho_t: min_p
                             }
-                        summary_convergence = self.sess.run(
+                        summary_convergence = self.session.run(
                             self.summary_convergence,
                             feed_dict=fd_convergence
                         )
-                        self.writer.add_summary(summary_convergence, self.global_step.eval(session=self.sess))
+                        self.writer.add_summary(summary_convergence, self.global_step.eval(session=self.session))
 
-                    proportion_converged = self.proportion_converged.eval(session=self.sess)
+                    proportion_converged = self.proportion_converged.eval(session=self.session)
                     converged = cur_step > self.convergence_n_iterates and \
                                 (min_p > self.convergence_alpha) and \
                                 (proportion_converged > self.convergence_alpha)
@@ -6326,7 +5196,7 @@ class CDRModel(object):
                     if verbose:
                         stderr('Convergence checking off.\n')
 
-                self.sess.run(self.set_converged, feed_dict={self.converged_in: converged})
+                self.session.run(self.set_converged, feed_dict={self.converged_in: converged})
 
                 return min_p_ix, min_p, rt_at_min_p, ra_at_min_p, p_ta_at_min_p, proportion_converged, converged
 
@@ -6342,8 +5212,8 @@ class CDRModel(object):
         :return: ``numpy`` array; Predicted responses, one for each training sample
         """
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 to_run = [self.train_op]
                 to_run += self.ema_ops
 
@@ -6358,7 +5228,7 @@ class CDRModel(object):
                     to_run_names.append('kl_loss')
                     to_run.append(self.kl_loss)
 
-                out = self.sess.run(
+                out = self.session.run(
                     to_run,
                     feed_dict=feed_dict
                 )
@@ -6379,8 +5249,8 @@ class CDRModel(object):
 
         alpha = 100 - float(level)
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 self.set_predict_mode(True)
 
                 if fixed:
@@ -6391,8 +5261,8 @@ class CDRModel(object):
                 samples = []
                 for i in range(n_samples):
                     if self.resample_ops:
-                        self.sess.run(self.resample_ops)
-                    samples.append(self.sess.run(param_vector, feed_dict={self.use_MAP_mode: False}))
+                        self.session.run(self.resample_ops)
+                    samples.append(self.session.run(param_vector, feed_dict={self.use_MAP_mode: False}))
                 samples = np.stack(samples, axis=1)
 
                 mean = samples.mean(axis=1)
@@ -6463,7 +5333,7 @@ class CDRModel(object):
             (
                 self.has_nn_irf and
                 (
-                    self.input_projection_dropout_rate or
+                    self.ff_dropout_rate or
                     self.rnn_h_dropout_rate or
                     self.rnn_c_dropout_rate or
                     self.h_in_dropout_rate or
@@ -6518,8 +5388,8 @@ class CDRModel(object):
 
         assert nn_id in self.nn_irf_ids, 'Unrecognized nn_id for NN IRF: %s.' % nn_id
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 slices = {}
                 shapes = {}
                 n = 0
@@ -6560,23 +5430,23 @@ class CDRModel(object):
         else:
             self.outdir = outdir
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 self._initialize_inputs()
                 self._initialize_base_params()
                 for nn_id in self.nn_impulse_ids:
-                    self._initialize_nn_impulse(nn_id)
-                    self._compile_nn_impulse_ranef(nn_id)
-                    self._compile_nn_impulse(nn_id)
+                    self._initialize_nn(nn_id)
+                    # self._compile_nn_ranef(nn_id)
+                    self._compile_nn(nn_id)
+                self._concat_nn_impulses()
                 self._compile_intercepts()
                 self._compile_coefficients()
                 self._compile_interactions()
                 self._compile_irf_params()
                 for nn_id in self.nn_irf_ids:
-                    self._initialize_nn_irf(nn_id)
-                    self._compile_nn_irf_ranef(nn_id)
-                    self._compile_nn_irf(nn_id)
-                self._concat_nn_impulses()
+                    self._initialize_nn(nn_id)
+                    # self._compile_nn_ranef(nn_id)
+                    self._compile_nn(nn_id)
                 self._collect_layerwise_ops()
                 self._initialize_irf_lambdas()
                 for response in self.response_names:
@@ -6606,10 +5476,10 @@ class CDRModel(object):
         :return: ``None``
         """
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 for op in self.check_numerics_ops:
-                    self.sess.run(op)
+                    self.session.run(op)
 
     def initialized(self):
         """
@@ -6618,9 +5488,9 @@ class CDRModel(object):
         :return: ``bool``; whether the model has been initialized.
         """
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
-                uninitialized = self.sess.run(self.report_uninitialized)
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                uninitialized = self.session.run(self.report_uninitialized)
                 if len(uninitialized) == 0:
                     return True
                 else:
@@ -6638,15 +5508,15 @@ class CDRModel(object):
 
         if dir is None:
             dir = self.outdir
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 failed = True
                 i = 0
 
                 # Try/except to handle race conditions in Windows
                 while failed and i < 10:
                     try:
-                        self.saver.save(self.sess, dir + '/model.ckpt')
+                        self.saver.save(self.session, dir + '/model.ckpt')
                         with open(dir + '/m.obj', 'wb') as f:
                             pickle.dump(self, f)
                         failed = False
@@ -6656,7 +5526,7 @@ class CDRModel(object):
                         i += 1
                 if i >= 10:
                     stderr('Could not save model to checkpoint file. Saving to backup...\n')
-                    self.saver.save(self.sess, dir + '/model_backup.ckpt')
+                    self.saver.save(self.session, dir + '/model_backup.ckpt')
                     with open(dir + '/m.obj', 'wb') as f:
                         pickle.dump(self, f)
 
@@ -6674,22 +5544,22 @@ class CDRModel(object):
 
         if outdir is None:
             outdir = self.outdir
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 if not self.initialized():
-                    self.sess.run(tf.global_variables_initializer())
+                    self.session.run(tf.global_variables_initializer())
                 if restore and os.path.exists(outdir + '/checkpoint'):
                     # Thanks to Ralph Mao (https://github.com/RalphMao) for this workaround for missing vars
                     path = outdir + '/model.ckpt'
                     try:
-                        self.saver.restore(self.sess, path)
+                        self.saver.restore(self.session, path)
                         if predict and self.ema_decay:
-                            self.ema_saver.restore(self.sess, path)
+                            self.ema_saver.restore(self.session, path)
                     except tf.errors.DataLossError:
                         stderr('Read failure during load. Trying from backup...\n')
-                        self.saver.restore(self.sess, path[:-5] + '_backup.ckpt')
+                        self.saver.restore(self.session, path[:-5] + '_backup.ckpt')
                         if predict:
-                            self.ema_saver.restore(self.sess, path[:-5] + '_backup.ckpt')
+                            self.ema_saver.restore(self.session, path[:-5] + '_backup.ckpt')
                     except tf.errors.NotFoundError as err:  # Model contains variables that are missing in checkpoint, special handling needed
                         if allow_missing:
                             reader = tf.train.NewCheckpointReader(path)
@@ -6727,14 +5597,14 @@ class CDRModel(object):
                                         restore_vars.append(curr_var)
 
                             saver_tmp = tf.train.Saver(restore_vars)
-                            saver_tmp.restore(self.sess, path)
+                            saver_tmp.restore(self.session, path)
 
                             if predict:
                                 self.ema_map = {}
                                 for v in restore_vars:
                                     self.ema_map[self.ema.average_name(v)] = v
                                 saver_tmp = tf.train.Saver(self.ema_map)
-                                saver_tmp.restore(self.sess, path)
+                                saver_tmp.restore(self.session, path)
 
                         else:
                             raise err
@@ -6749,7 +5619,7 @@ class CDRModel(object):
         :return: ``None``
         """
 
-        self.sess.close()
+        self.session.close()
 
     def set_predict_mode(self, mode):
         """
@@ -6763,8 +5633,8 @@ class CDRModel(object):
         """
 
         if mode != self.predict_mode:
-            with self.sess.as_default():
-                with self.sess.graph.as_default():
+            with self.session.as_default():
+                with self.session.graph.as_default():
                     self.load(predict=mode)
 
             self.predict_mode = mode
@@ -6776,10 +5646,10 @@ class CDRModel(object):
         :return: ``bool``; whether the model has converged
         """
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 if self.check_convergence:
-                    return self.sess.run(self.converged)
+                    return self.session.run(self.converged)
                 else:
                     return False
 
@@ -6793,12 +5663,12 @@ class CDRModel(object):
         :return: ``None``
         """
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 if status:
-                    self.sess.run(self.training_complete_true)
+                    self.session.run(self.training_complete_true)
                 else:
-                    self.sess.run(self.training_complete_false)
+                    self.session.run(self.training_complete_false)
 
     def get_response_dist(self, response):
         """
@@ -7179,11 +6049,11 @@ class CDRModel(object):
         :return: ``str``; the num. parameters report
         """
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 n_params = 0
                 var_names = [v.name for v in tf.trainable_variables()]
-                var_vals = self.sess.run(tf.trainable_variables())
+                var_vals = self.session.run(tf.trainable_variables())
                 vars_and_vals = zip(var_names, var_vals)
                 vars_and_vals = sorted(list(vars_and_vals), key=lambda x: x[0])
                 out = ' ' * indent + 'TRAINABLE PARAMETERS:\n'
@@ -7203,8 +6073,8 @@ class CDRModel(object):
         :return: ``str``; the regularization report
         """
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 assert len(self.regularizer_losses) == len(self.regularizer_losses_names) == len(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)), 'Different numbers of regularized variables found in different places'
 
                 out = ' ' * indent + 'REGULARIZATION:\n'
@@ -7237,7 +6107,10 @@ class CDRModel(object):
                             out += ' ' * indent + '  %s:\n' % name
                             for k in sorted(list(kl_penalties[name].keys())):
                                 if not k == 'val':
-                                    out += ' ' * indent + '    %s: %s\n' % (k, kl_penalties[name][k])
+                                    val = str(kl_penalties[name][k])
+                                    if len(val) > 100:
+                                        val = val[:100] + '...'
+                                    out += ' ' * indent + '    %s: %s\n' % (k, val)
 
                         out += '\n'
 
@@ -7334,7 +6207,7 @@ class CDRModel(object):
 
         out += self.report_formula_string(indent=indent+2)
         out += self.report_settings(indent=indent+2)
-        out += '\n' + ' ' * (indent + 2) + 'Training iterations completed: %d\n\n' %self.global_step.eval(session=self.sess)
+        out += '\n' + ' ' * (indent + 2) + 'Training iterations completed: %d\n\n' %self.global_step.eval(session=self.session)
         out += self.report_irf_tree(indent=indent+2)
         out += self.report_n_params(indent=indent+2)
         out += self.report_regularized_variables(indent=indent+2)
@@ -7355,7 +6228,7 @@ class CDRModel(object):
         out += ' ' * indent + '---------------------------\n\n'
 
         if len(self.response_names) > 1:
-            out += ' ' * indent + 'Full loglik: %s\n\n' % self.training_loglik_full.eval(session=self.sess)
+            out += ' ' * indent + 'Full loglik: %s\n\n' % self.training_loglik_full.eval(session=self.session)
 
         for response in self.response_names:
             file_ix = self.response_to_df_ix[response]
@@ -7365,13 +6238,13 @@ class CDRModel(object):
                 if multiple_files:
                     out += ' ' * indent + 'File: %s\n\n' % ix
                 out += ' ' * indent + 'MODEL EVALUATION STATISTICS:\n'
-                out += ' ' * indent +     'Loglik:        %s\n' % self.training_loglik[response][ix].eval(session=self.sess)
+                out += ' ' * indent +     'Loglik:        %s\n' % self.training_loglik[response][ix].eval(session=self.session)
                 if response in self.training_mse:
-                    out += ' ' * indent + 'MSE:           %s\n' % self.training_mse[response][ix].eval(session=self.sess)
+                    out += ' ' * indent + 'MSE:           %s\n' % self.training_mse[response][ix].eval(session=self.session)
                 if response in self.training_rho:
-                    out += ' ' * indent + 'r(true, pred): %s\n' % self.training_rho[response][ix].eval(session=self.sess)
+                    out += ' ' * indent + 'r(true, pred): %s\n' % self.training_rho[response][ix].eval(session=self.session)
                 if response in self.training_percent_variance_explained:
-                    out += ' ' * indent + '%% var expl:    %s\n' % self.training_percent_variance_explained[response][ix].eval(session=self.sess)
+                    out += ' ' * indent + '%% var expl:    %s\n' % self.training_percent_variance_explained[response][ix].eval(session=self.session)
                 out += '\n'
 
         return out
@@ -7389,7 +6262,7 @@ class CDRModel(object):
         out += ' ' * indent + '-------------------\n\n'
 
         if self.check_convergence:
-            n_iter = self.global_step.eval(session=self.sess)
+            n_iter = self.global_step.eval(session=self.session)
             min_p_ix, min_p, rt_at_min_p, ra_at_min_p, p_ta_at_min_p, proportion_converged, converged = self.run_convergence_check(verbose=False)
             location = self.d0_names[min_p_ix]
 
@@ -7527,39 +6400,39 @@ class CDRModel(object):
         if False:
             self.make_plots(prefix='plt')
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 self.run_convergence_check(verbose=False)
 
-                if (self.global_step.eval(session=self.sess) < n_iter) and not self.has_converged():
+                if (self.global_step.eval(session=self.session) < n_iter) and not self.has_converged():
                     self.set_training_complete(False)
 
-                if self.training_complete.eval(session=self.sess):
+                if self.training_complete.eval(session=self.session):
                     stderr('Model training is already complete; no additional updates to perform. To train for additional iterations, re-run fit() with a larger n_iter.\n\n')
                 else:
-                    if self.global_step.eval(session=self.sess) == 0:
+                    if self.global_step.eval(session=self.session) == 0:
                         if not type(self).__name__.startswith('CDRNN'):
-                            summary_params = self.sess.run(self.summary_params)
-                            self.writer.add_summary(summary_params, self.global_step.eval(session=self.sess))
+                            summary_params = self.session.run(self.summary_params)
+                            self.writer.add_summary(summary_params, self.global_step.eval(session=self.session))
                             if self.log_random and self.is_mixed_model:
-                                summary_random = self.sess.run(self.summary_random)
-                                self.writer.add_summary(summary_random, self.global_step.eval(session=self.sess))
+                                summary_random = self.session.run(self.summary_random)
+                                self.writer.add_summary(summary_random, self.global_step.eval(session=self.session))
                             self.writer.flush()
                     else:
                         stderr('Resuming training from most recent checkpoint...\n\n')
 
-                    if self.global_step.eval(session=self.sess) == 0:
+                    if self.global_step.eval(session=self.session) == 0:
                         stderr('Saving initial weights...\n')
                         self.save()
 
-                    while not self.has_converged() and self.global_step.eval(session=self.sess) < n_iter:
+                    while not self.has_converged() and self.global_step.eval(session=self.session) < n_iter:
                         p, p_inv = get_random_permutation(n)
                         t0_iter = pytime.time()
                         stderr('-' * 50 + '\n')
-                        stderr('Iteration %d\n' % int(self.global_step.eval(session=self.sess) + 1))
+                        stderr('Iteration %d\n' % int(self.global_step.eval(session=self.session) + 1))
                         stderr('\n')
                         if self.optim_name is not None and self.lr_decay_family is not None:
-                            stderr('Learning rate: %s\n' %self.lr.eval(session=self.sess))
+                            stderr('Learning rate: %s\n' % self.lr.eval(session=self.session))
 
                         pb = tf.contrib.keras.utils.Progbar(n_minibatch)
 
@@ -7636,18 +6509,18 @@ class CDRModel(object):
                                 kl_loss_total += kl_loss_cur
                                 pb_update.append(('kl', kl_loss_cur))
 
-                            pb.update((i/minibatch_size)+1, values=pb_update)
+                            pb.update((i/minibatch_size) + 1, values=pb_update)
 
                             # if self.global_batch_step.eval(session=self.sess) % 1000 == 0:
                             #     self.save()
                             #     self.make_plots(prefix='plt')
 
-                        self.sess.run(self.incr_global_step)
+                        self.session.run(self.incr_global_step)
 
                         if self.check_convergence:
                             self.run_convergence_check(verbose=False, feed_dict={self.loss_total: loss_total/n_minibatch})
 
-                        if self.log_freq > 0 and self.global_step.eval(session=self.sess) % self.log_freq == 0:
+                        if self.log_freq > 0 and self.global_step.eval(session=self.session) % self.log_freq == 0:
                             loss_total /= n_minibatch
                             reg_loss_total /= n_minibatch
                             log_fd = {self.loss_total: loss_total, self.reg_loss_total: reg_loss_total}
@@ -7656,22 +6529,22 @@ class CDRModel(object):
                                 log_fd[self.kl_loss_total] = kl_loss_total
                             if self.loss_filter_n_sds:
                                 log_fd[self.n_dropped_in] = n_dropped
-                            summary_train_loss = self.sess.run(self.summary_opt, feed_dict=log_fd)
-                            self.writer.add_summary(summary_train_loss, self.global_step.eval(session=self.sess))
-                            summary_params = self.sess.run(self.summary_params)
-                            self.writer.add_summary(summary_params, self.global_step.eval(session=self.sess))
+                            summary_train_loss = self.session.run(self.summary_opt, feed_dict=log_fd)
+                            self.writer.add_summary(summary_train_loss, self.global_step.eval(session=self.session))
+                            summary_params = self.session.run(self.summary_params)
+                            self.writer.add_summary(summary_params, self.global_step.eval(session=self.session))
                             if self.log_random and self.is_mixed_model:
-                                summary_random = self.sess.run(self.summary_random)
-                                self.writer.add_summary(summary_random, self.global_step.eval(session=self.sess))
+                                summary_random = self.session.run(self.summary_random)
+                                self.writer.add_summary(summary_random, self.global_step.eval(session=self.session))
                             self.writer.flush()
 
-                        if self.save_freq > 0 and self.global_step.eval(session=self.sess) % self.save_freq == 0:
+                        if self.save_freq > 0 and self.global_step.eval(session=self.session) % self.save_freq == 0:
                             self.save()
                             self.make_plots(prefix='plt')
 
                         t1_iter = pytime.time()
                         if self.check_convergence:
-                            stderr('Convergence:    %.2f%%\n' % (100 * self.sess.run(self.proportion_converged) / self.convergence_alpha))
+                            stderr('Convergence:    %.2f%%\n' % (100 * self.session.run(self.proportion_converged) / self.convergence_alpha))
                         stderr('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
 
                     self.save()
@@ -7687,7 +6560,7 @@ class CDRModel(object):
                         self.make_plots(n_samples=self.n_samples_eval, prefix='plt')
 
 
-                if not self.training_complete.eval(session=self.sess) or force_training_evaluation:
+                if not self.training_complete.eval(session=self.session) or force_training_evaluation:
                     # Extract and save predictions
                     metrics, summary = self.evaluate(
                         X_in,
@@ -7699,7 +6572,7 @@ class CDRModel(object):
 
                     # Extract and save losses
                     ll_full = sum([_ll for r in self.response_names for _ll in metrics['log_lik'][r]])
-                    self.sess.run(self.set_training_loglik_full, feed_dict={self.training_loglik_full_in: ll_full})
+                    self.session.run(self.set_training_loglik_full, feed_dict={self.training_loglik_full_in: ll_full})
                     fd = {}
                     to_run = []
                     for response in self.training_loglik_in:
@@ -7720,7 +6593,7 @@ class CDRModel(object):
                                 fd[tensor] = np.squeeze(metrics['rho'][response][ix])
                                 to_run.append(self.set_training_rho[response][ix])
 
-                    self.sess.run(to_run, feed_dict=fd)
+                    self.session.run(to_run, feed_dict=fd)
                     self.save()
 
                     self.save_parameter_table()
@@ -7869,8 +6742,8 @@ class CDRModel(object):
             )
 
         if return_preds or return_loglik:
-            with self.sess.as_default():
-                with self.sess.graph.as_default():
+            with self.session.as_default():
+                with self.session.graph.as_default():
                     self.set_predict_mode(True)
 
                     out = {}
@@ -7896,7 +6769,7 @@ class CDRModel(object):
                     n_eval_minibatch = math.ceil(n / B)
                     for i in range(0, n, B):
                         if verbose:
-                            stderr('\rMinibatch %d/%d' %((i/B)+1, n_eval_minibatch))
+                            stderr('\rMinibatch %d/%d' %((i / B) + 1, n_eval_minibatch))
                         if optimize_memory:
                             _Y = None if Y is None else Y[i:i + B]
                             _first_obs = [x[i:i + B] for x in first_obs]
@@ -8059,10 +6932,10 @@ class CDRModel(object):
             to_run['log_lik'] = to_run_loglik
 
         if to_run:
-            with self.sess.as_default():
-                with self.sess.graph.as_default():
+            with self.session.as_default():
+                with self.session.graph.as_default():
                     if use_MAP_mode:
-                        out = self.sess.run(to_run, feed_dict=feed_dict)
+                        out = self.session.run(to_run, feed_dict=feed_dict)
                     else:
                         feed_dict[self.use_MAP_mode] = False
                         if n_samples is None:
@@ -8080,9 +6953,9 @@ class CDRModel(object):
 
                         for i in range(n_samples):
                             if self.resample_ops:
-                                self.sess.run(self.resample_ops)
+                                self.session.run(self.resample_ops)
 
-                            _out = self.sess.run(to_run, feed_dict=feed_dict)
+                            _out = self.session.run(to_run, feed_dict=feed_dict)
                             if to_run_preds:
                                 _preds = _out['preds']
                                 for _response in _preds:
@@ -8452,7 +7325,7 @@ class CDRModel(object):
             summary_header += 'Formula:\n'
             summary_header += '  ' + self.form_str + '\n\n'
             summary_header += 'Partition: %s\n' % partition
-            summary_header += 'Training iterations completed: %d\n\n' % self.global_step.eval(session=self.sess)
+            summary_header += 'Training iterations completed: %d\n\n' % self.global_step.eval(session=self.session)
             summary_header += 'Full log likelihood: %s\n\n' % np.squeeze(metrics['full_log_lik'])
 
             summary += summary_header
@@ -8582,8 +7455,8 @@ class CDRModel(object):
                 float_type=self.float_type,
             )
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 self.set_predict_mode(True)
 
                 if training is None:
@@ -8595,7 +7468,7 @@ class CDRModel(object):
                 loss = np.zeros((n,))
                 for i in range(0, n, B):
                     if verbose:
-                        stderr('\rMinibatch %d/%d' %(i+1, n_minibatch))
+                        stderr('\rMinibatch %d/%d' %(i + 1, n_minibatch))
                     if optimize_memory:
                         _Y = Y[i:i + B]
                         _first_obs = [x[i:i + B] for x in first_obs]
@@ -8670,10 +7543,10 @@ class CDRModel(object):
         use_MAP_mode = algorithm in ['map', 'MAP']
         feed_dict[self.use_MAP_mode] = use_MAP_mode
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 if use_MAP_mode:
-                    loss = self.sess.run(self.loss_func, feed_dict=feed_dict)
+                    loss = self.session.run(self.loss_func, feed_dict=feed_dict)
                 else:
                     feed_dict[self.use_MAP_mode] = False
                     if n_samples is None:
@@ -8686,8 +7559,8 @@ class CDRModel(object):
 
                     for i in range(n_samples):
                         if self.resample_ops:
-                            self.sess.run(self.resample_ops)
-                        loss[:, i] = self.sess.run(self.loss_func, feed_dict=feed_dict)
+                            self.session.run(self.resample_ops)
+                        loss[:, i] = self.session.run(self.loss_func, feed_dict=feed_dict)
                         if verbose:
                             pb.update(i + 1)
 
@@ -8835,8 +7708,8 @@ class CDRModel(object):
                 float_type=self.float_type,
             )
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 self.set_predict_mode(True)
                 B = self.eval_minibatch_size
                 n_eval_minibatch = math.ceil(n / B)
@@ -8989,10 +7862,10 @@ class CDRModel(object):
         for _response in responses:
             to_run[_response] = self.X_conv_delta[_response]
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 if use_MAP_mode:
-                    X_conv = self.sess.run(to_run, feed_dict=feed_dict)
+                    X_conv = self.session.run(to_run, feed_dict=feed_dict)
                 else:
                     X_conv = {}
                     for _response in to_run:
@@ -9008,7 +7881,7 @@ class CDRModel(object):
                         pb = tf.contrib.keras.utils.Progbar(n_samples)
 
                     for i in range(0, n_samples):
-                        _X_conv = self.sess.run(to_run, feed_dict=feed_dict)
+                        _X_conv = self.session.run(to_run, feed_dict=feed_dict)
                         for _response in _X_conv:
                             X_conv[_response][..., i] = _X_conv[_response]
                         if verbose:
@@ -9035,14 +7908,14 @@ class CDRModel(object):
             n_errors,
             response
     ):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 self.set_predict_mode(True)
                 fd = {
                     self.n_errors[response]: n_errors,
                     self.training: not self.predict_mode
                 }
-                err_q = self.sess.run(self.error_distribution_theoretical_quantiles[response], feed_dict=fd)
+                err_q = self.session.run(self.error_distribution_theoretical_quantiles[response], feed_dict=fd)
                 self.set_predict_mode(False)
 
                 return err_q
@@ -9052,13 +7925,13 @@ class CDRModel(object):
             errors,
             response
     ):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 fd = {
                     self.errors[response]: errors,
                     self.training: not self.predict_mode
                 }
-                err_cdf = self.sess.run(self.error_distribution_theoretical_cdf[response], feed_dict=fd)
+                err_cdf = self.session.run(self.error_distribution_theoretical_cdf[response], feed_dict=fd)
 
                 return err_cdf
 
@@ -9067,8 +7940,8 @@ class CDRModel(object):
             errors,
             response
     ):
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 err_cdf = self.error_theoretical_cdf(errors, response)
 
                 D, p_value = scipy.stats.kstest(errors, lambda x: err_cdf)
@@ -9169,8 +8042,8 @@ class CDRModel(object):
         if isinstance(response_params, str):
             response_params = [response_params]
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 is_3d = yvar is not None
                 if manipulations is None:
                     manipulations = []
@@ -9555,8 +8428,8 @@ class CDRModel(object):
                                 to_run[response][dim_name] = self.predictive_distribution_delta[response][dim_name]
 
                     if self.resample_ops:
-                        self.sess.run(self.resample_ops)
-                    sample_ref = self.sess.run(to_run, feed_dict=fd_ref)
+                        self.session.run(self.resample_ops)
+                    sample_ref = self.session.run(to_run, feed_dict=fd_ref)
                     for response in to_run:
                         for dim_name in to_run[response]:
                             _sample = sample_ref[response][dim_name]
@@ -9564,7 +8437,7 @@ class CDRModel(object):
 
                     if n_manip:
                         sample = {}
-                        sample_main = self.sess.run(to_run, feed_dict=fd_main)
+                        sample_main = self.session.run(to_run, feed_dict=fd_main)
                         for response in to_run:
                             sample[response] = {}
                             for dim_name in sample_main[response]:
@@ -9939,8 +8812,8 @@ class CDRModel(object):
             ranef_level_names = [None]
             ranef_group_names = [None]
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
 
                 self.set_predict_mode(True)
 
@@ -10139,10 +9012,10 @@ class CDRModel(object):
 
                                     plot_irf(
                                         plot_x,
-                                        _plot_y[:, g:g+1],
+                                        _plot_y[:, g:g + 1],
                                         [name],
-                                        lq=None if _lq is None else _lq[:, g:g+1],
-                                        uq=None if _uq is None else _uq[:, g:g+1],
+                                        lq=None if _lq is None else _lq[:, g:g + 1],
+                                        uq=None if _uq is None else _uq[:, g:g + 1],
                                         dir=self.outdir,
                                         filename=filename,
                                         irf_name_map=irf_name_map,
@@ -10267,8 +9140,8 @@ class CDRModel(object):
                 if generate_err_dist_plots:
                     for _response in self.error_distribution_plot:
                         if self.is_real(_response):
-                            lb = self.sess.run(self.error_distribution_plot_lb[_response])
-                            ub = self.sess.run(self.error_distribution_plot_ub[_response])
+                            lb = self.session.run(self.error_distribution_plot_lb[_response])
+                            ub = self.session.run(self.error_distribution_plot_ub[_response])
                             n_time_units = ub - lb
                             fd = {
                                 self.support_start: lb,
@@ -10276,10 +9149,10 @@ class CDRModel(object):
                                 self.n_time_points: plot_n_time_points,
                                 self.training: not self.predict_mode
                             }
-                            plot_x = self.sess.run(self.support, feed_dict=fd)
+                            plot_x = self.session.run(self.support, feed_dict=fd)
                             plot_name = 'error_distribution_%s.png' % sn(_response)
 
-                            plot_y = self.sess.run(self.error_distribution_plot[_response], feed_dict=fd)
+                            plot_y = self.session.run(self.error_distribution_plot[_response], feed_dict=fd)
                             lq = None
                             uq = None
 
@@ -10312,8 +9185,8 @@ class CDRModel(object):
             if self.is_bayesian or self.has_dropout:
                 n_samples = self.n_samples_eval
 
-        with self.sess.as_default():
-            with self.sess.graph.as_default():
+        with self.session.as_default():
+            with self.session.graph.as_default():
                 self.set_predict_mode(True)
 
                 if fixed:

@@ -63,6 +63,28 @@ def get_activation(activation, session=None, training=True, from_logits=True, sa
     return out
 
 
+def get_constraint(name):
+    if name.lower() == 'softplus':
+        constraint_fn = tf.nn.softplus
+        constraint_fn_np = lambda x: np.log(np.exp(x) + 1.)
+        constraint_fn_inv = tf.contrib.distributions.softplus_inverse
+        constraint_fn_inv_np = lambda x: np.log(np.exp(x) - 1.)
+    elif name.lower() == 'square':
+        constraint_fn = tf.square
+        constraint_fn_np = np.square
+        constraint_fn_inv = tf.sqrt
+        constraint_fn_inv_np = np.sqrt
+    elif name.lower() == 'abs':
+        constraint_fn = lambda x: tf.where(x > 0., x, -x)
+        constraint_fn_np = np.abs
+        constraint_fn_inv = tf.identity
+        constraint_fn_inv_np = lambda x: x
+    else:
+        raise ValueError('Unrecognized constraint function %s' % name)
+
+    return constraint_fn, constraint_fn_np, constraint_fn_inv, constraint_fn_inv_np
+
+
 def get_initializer(initializer, session=None):
     session = get_session(session)
     with session.as_default():
@@ -156,6 +178,127 @@ def get_dropout(
             return out
 
 
+def get_random_variable(
+        name,
+        shape,
+        sd_posterior,
+        init=None,
+        constraint=None,
+        sd_prior=None,
+        training=None,
+        use_MAP_mode=None,
+        epsilon=1e-8,
+        session=None
+):
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+
+            if constraint is None:
+                constraint = 'softplus'
+            constraint_fn, \
+            constraint_fn_np, \
+            constraint_fn_inv, \
+            constraint_fn_inv_np = get_constraint(constraint)
+
+            if init is None:
+                init = 0.
+                loc_initializer = tf.zeros_initializer()
+            else:
+                loc_initializer = tf.constant_initializer(init, dtype=tf.float32)
+            scale_initializer = tf.constant_initializer(
+                np.ones(shape) * constraint_fn_inv_np(sd_posterior),
+                dtype=tf.float32
+            )
+            init_np = init
+            init = tf.constant(init, dtype=tf.float32)
+
+            if sd_prior is None:
+                sd_prior_np = None
+            else:
+                sd_prior_np = sd_prior
+                sd_prior = tf.constant(sd_prior, dtype=tf.float32)
+
+            if use_MAP_mode is None:
+                use_MAP_mode = tf.logical_not(training)
+
+            kl_penalties = {}
+
+            # Posterior distribution
+            v_q_loc = tf.get_variable(
+                name='%s_q_loc' % name,
+                initializer=loc_initializer,
+                shape=shape
+            )
+            v_q_scale = tf.get_variable(
+                name='%s_q_scale' % name,
+                initializer=scale_initializer,
+                shape=shape
+            )
+            v_q_dist = Normal(
+                loc=v_q_loc,
+                scale=constraint_fn(v_q_scale) + epsilon,
+                name='%s_q' % name
+            )
+
+            # Prior distribution
+            if sd_prior is None:
+                v_prior_dist = None
+            else:
+                v_prior_dist = Normal(
+                    loc=init,
+                    scale=sd_prior,
+                    name=name
+                )
+                kl_penalties[v_prior_dist.name] = {
+                    'loc': np.array(init_np).flatten(),
+                    'scale': np.array(sd_prior_np).flatten(),
+                    'val': v_q_dist.kl_divergence(v_prior_dist)
+                }
+
+            v_eval_sample = v_q_dist.sample()
+            v_eval = tf.get_variable(
+                name='%s_sample' % name,
+                initializer=tf.zeros_initializer(),
+                shape=v_eval_sample.shape,
+                dtype=tf.float32,
+                trainable=False
+            )
+            v_eval_resample = tf.assign(v_eval, v_eval_sample)
+            v = tf.cond(
+                training,
+                v_q_dist.sample,
+                lambda: tf.cond(
+                    use_MAP_mode,
+                    v_q_dist.mean,
+                    lambda: v_eval
+                )
+            )
+            
+            assert v_q_loc.shape == shape, 'v_q_loc.shape should be %s, saw %s.' % (shape, v_q_loc.shape)
+            assert v_q_scale.shape == shape, 'v_q_scale.shape should be %s, saw %s.' % (shape, v_q_scale.shape)
+            assert v_q_dist.batch_shape == shape, 'v_q_dist.shape should be %s, saw %s.' % (shape, v_q_dist.batch_shape)
+            if v_prior_dist is not None:
+                assert v_prior_dist.batch_shape == shape, 'v_prior_dist.shape should be %s, saw %s.' % (shape, v_prior_dist.batch_shape)
+            for k in kl_penalties:
+                assert kl_penalties[k]['val'].shape == shape, "kl_penalties['%s']['val'].shape should be %s, saw %s." % (k, shape, kl_penalties[k]['val'].shape)
+            assert v_eval_sample.shape == shape, 'v_eval_sample.shape should be %s, saw %s.' % (shape, v_eval_sample.shape)
+            assert v_eval.shape == shape, 'v_eval.shape should be %s, saw %s.' % (shape, v_eval.shape)
+            assert v.shape == shape, 'v.shape should be %s, saw %s.' % (shape, v.shape)
+
+            return {
+                'v_q_loc': v_q_loc,
+                'v_q_scale': v_q_scale,
+                'v_q_dist': v_q_dist,
+                'v_prior_dist': v_prior_dist,
+                'v_eval_sample': v_eval_sample,
+                'v_eval': v_eval,
+                'v_eval_resample': v_eval_resample,
+                'v': v,
+                'kl_penalties': kl_penalties,
+            }
+
+
 def compose_lambdas(lambdas):
     def composed_lambdas(x, **kwargs):
         out = x
@@ -185,6 +328,33 @@ def make_lambda(layer, session=None, multi_arg=False, use_kwargs=False):
                     def apply_layer(x, **kwargs):
                         return layer(x)
             return apply_layer
+
+
+def matmul(A, B, session=None):
+    """
+    Matmul operation that supports broadcasting
+
+    :param A: Left tensor
+    :param B: Right tensor
+    :param session: TF ``session`` object; the graph's TensorFlow session.
+    :return: Broadcasted matrix multiplication
+    """
+
+    session = get_session(session)
+    with session.as_default():
+        with session.graph.as_default():
+            assert len(A.shape) == len(B.shape), 'A and B must have the same rank. Got %s and %s.' % (len(A.shape), len(B.shape))
+            A_shape = tf.shape(A)[:-2]
+            B_shape = tf.shape(B)[:-2]
+            A_tile = tf.concat([tf.maximum(B_shape // A_shape, 1), [1, 1]], 0)
+            B_tile = tf.concat([tf.maximum(A_shape // B_shape, 1), [1, 1]], 0)
+
+            A = tf.tile(A, A_tile)
+            B = tf.tile(B, B_tile)
+
+            C = tf.matmul(A, B)
+
+            return C
 
 
 def interpolated_integral(loc, val, mask=None, axis=0, session=None):
@@ -999,6 +1169,730 @@ CDRNNStateTuple = collections.namedtuple(
 )
 
 
+class BiasLayer(object):
+    def __init__(
+            self,
+            training=False,
+            use_MAP_mode=True,
+            rangf_map=None,  # Dict mapping <rangfid>: (n_levels, tensor)
+            reuse=tf.AUTO_REUSE,
+            epsilon=1e-5,
+            session=None,
+            name=None
+    ):
+        self.session = get_session(session)
+        self.reuse = reuse
+        self.epsilon = epsilon
+        self.name = name
+
+        with session.as_default():
+            with session.graph.as_default():
+                self.training = training
+                self.use_MAP_mode = use_MAP_mode
+                if not bool(rangf_map):
+                    rangf_map = {}
+                self.rangf_map = rangf_map
+
+                self.built = False
+
+    @property
+    def regularizable_weights(self):
+        return []
+
+    def build(self, inputs_shape):
+        if not self.built:
+            units = inputs_shape[-1]
+
+            if not self.name:
+                name = ''
+            else:
+                name = self.name
+
+            with self.session.as_default():
+                with self.session.graph.as_default():
+                    with tf.variable_scope(name, reuse=self.reuse):
+                        self.bias = tf.get_variable(
+                            name='bias',
+                            shape=[units],
+                            initializer=tf.zeros_initializer(),
+                        )
+                        self.bias_ran = {}
+                        for gf in self.rangf_map:
+                            n_levels = self.rangf_map[gf][0] - 1
+                            self.bias_ran[gf] = tf.get_variable(
+                                name='bias_by_%s' % sn(gf),
+                                initializer=tf.zeros_initializer(),
+                                shape=[n_levels, units]
+                            )
+
+            self.built = True
+
+    def __call__(self, inputs, kernel_offsets=None, bias_offsets=None):
+        if not self.built:
+            self.build(inputs.shape)
+
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                H = inputs
+                bias = self.bias[None, ...] # Expand batch dim
+                for gf in self.bias_ran:
+                    Y_gf = self.rangf_map[gf][1]
+                    bias_ran = self.bias_ran[gf]
+                    bias_ran -= tf.reduce_mean(bias_ran, axis=0, keepdims=True)
+                    bias_ran = tf.pad(bias_ran, [[0,1], [0,0]])
+                    bias += tf.gather(bias_ran, Y_gf)
+                while len(bias.shape) < len(H.shape):
+                    bias = tf.expand_dims(bias, axis=1)
+                if bias_offsets is not None:
+                    bias = bias + bias_offsets
+                H += bias
+
+                return H
+
+    def call(self, *args, **kwargs):
+        self.__call__(*args, **kwargs)
+
+    def kl_penalties(self):
+        return {}
+
+    def ema_ops(self):
+        return []
+
+    def resample_ops(self):
+        return []
+
+
+class BiasLayerBayes(BiasLayer):
+    def __init__(
+            self,
+            training=False,
+            use_MAP_mode=True,
+            rangf_map=None,
+            declare_priors=False,
+            sd_prior=1.,
+            sd_init=None,
+            posterior_to_prior_sd_ratio=1,
+            ranef_to_fixef_prior_sd_ratio=0.1,
+            constraint='softplus',
+            reuse=tf.AUTO_REUSE,
+            epsilon=1e-5,
+            session=None,
+            name=None
+    ):
+        super(BiasLayerBayes, self).__init__(
+            training=training,
+            use_MAP_mode=use_MAP_mode,
+            rangf_map=rangf_map,
+            reuse=reuse,
+            epsilon=epsilon,
+            session=session,
+            name=name
+        )
+        self.session = get_session(session)
+        with session.as_default():
+            with session.graph.as_default():
+                self.declare_priors = declare_priors
+                self.sd_prior = sd_prior
+                self.sd_init = sd_init
+                self.posterior_to_prior_sd_ratio = posterior_to_prior_sd_ratio
+                self.ranef_to_fixef_prior_sd_ratio = ranef_to_fixef_prior_sd_ratio
+
+                self.constraint = constraint
+                self.kl_penalties_base = {}
+
+    def build(self, inputs_shape):
+        if not self.built:
+            units = inputs_shape[-1]
+            if not self.name:
+                name = ''
+            else:
+                name = self.name
+
+            with self.session.as_default():
+                with self.session.graph.as_default():
+                    with tf.variable_scope(name, reuse=self.reuse):
+
+                        bias_sd_prior = get_numerical_sd(self.sd_prior, in_dim=1, out_dim=1)
+                        if self.sd_init:
+                            bias_sd_posterior = get_numerical_sd(self.sd_init, in_dim=1, out_dim=1)
+                        else:
+                            bias_sd_posterior = bias_sd_prior * self.posterior_to_prior_sd_ratio
+                        _bias_sd_prior = np.ones([units]) * bias_sd_prior
+                        _bias_sd_posterior = np.ones([units]) * bias_sd_posterior
+
+                        rv_dict = get_random_variable(
+                            'bias',
+                            [units],
+                            _bias_sd_posterior,
+                            constraint=self.constraint,
+                            sd_prior=_bias_sd_prior,
+                            training=self.training,
+                            use_MAP_mode=self.use_MAP_mode,
+                            epsilon=self.epsilon,
+                            session=self.session
+                        )
+                        if self.declare_priors:
+                            self.kl_penalties_base.update(rv_dict['kl_penalties'])
+                        self.bias_eval_resample = rv_dict['v_eval_resample']
+                        self.bias = rv_dict['v']
+                        self.bias_eval_resample_ran = {}
+                        self.bias_ran = {}
+                        for gf in self.rangf_map:
+                            n_levels = self.rangf_map[gf][0] - 1
+                            _bias_sd_prior = np.ones([n_levels, units]) * bias_sd_prior * self.ranef_to_fixef_prior_sd_ratio
+                            _bias_sd_posterior = np.ones([n_levels, units]) * bias_sd_posterior * self.ranef_to_fixef_prior_sd_ratio
+                            rv_dict = get_random_variable(
+                                'bias_by_%s' % sn(gf),
+                                [n_levels, units],
+                                _bias_sd_posterior,
+                                constraint=self.constraint,
+                                sd_prior=_bias_sd_prior,
+                                training=self.training,
+                                use_MAP_mode=self.use_MAP_mode,
+                                epsilon=self.epsilon,
+                                session=self.session
+                            )
+                            if self.declare_priors:
+                                self.kl_penalties_base.update(rv_dict['kl_penalties'])
+                            self.bias_eval_resample_ran[gf] = rv_dict['v_eval_resample']
+                            self.bias_ran[gf] = rv_dict['v']
+
+            self.built = True
+
+    def kl_penalties(self):
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                return self.kl_penalties_base.copy()
+
+    def resample_ops(self):
+        out = super(BiasLayerBayes, self).resample_ops()
+        if self.built:
+            out.append(self.bias_eval_resample)
+            for gf in self.rangf_map:
+                out.append(self.bias_eval_resample_ran[gf])
+
+        return out
+
+
+class DenseLayer(object):
+    def __init__(
+            self,
+            training=False,
+            use_MAP_mode=True,
+            units=None,
+            use_bias=True,
+            activation=None,
+            kernel_sd_init='he',
+            dropout=None,
+            maxnorm=None,
+            batch_normalization_decay=None,
+            layer_normalization_type=None,
+            normalize_after_activation=False,
+            shift_normalized_activations=True,
+            rescale_normalized_activations=True,
+            rangf_map=None,  # Dict mapping <rangfid>: (n_levels, tensor)
+            reuse=tf.AUTO_REUSE,
+            epsilon=1e-5,
+            session=None,
+            name=None
+    ):
+        self.session = get_session(session)
+        self.reuse = reuse
+        self.epsilon = epsilon
+        self.name = name
+
+        with session.as_default():
+            with session.graph.as_default():
+                self.training = training
+                self.use_MAP_mode = use_MAP_mode
+                self.units = units
+                self.use_bias = use_bias
+                self.activation = get_activation(activation, session=self.session, training=self.training)
+                self.kernel_sd_init = kernel_sd_init
+                self.use_dropout = bool(dropout)
+                self.dropout_layer = get_dropout(
+                    dropout,
+                    training=self.training,
+                    use_MAP_mode=self.use_MAP_mode,
+                    name='dropout',
+                    reuse=self.reuse,
+                    session=self.session
+                )
+                self.maxnorm = maxnorm
+
+                self.batch_normalization_decay = batch_normalization_decay
+                self.use_batch_normalization = bool(self.batch_normalization_decay)
+
+                self.layer_normalization_type = layer_normalization_type
+                if layer_normalization_type is None:
+                    self.layer_normalization_type = layer_normalization_type
+                elif layer_normalization_type.lower() == 'z':
+                    self.layer_normalization_type = 'z'
+                elif layer_normalization_type.lower() == 'length':
+                    self.layer_normalization_type = 'length'
+                else:
+                    raise ValueError('Unrecognized layer normalization type: %s' % layer_normalization_type)
+                self.use_layer_normalization = bool(self.layer_normalization_type)
+
+                assert not (self.use_batch_normalization and self.use_layer_normalization), 'Cannot batch normalize and layer normalize the same layer.'
+                self.normalize_activations = self.use_batch_normalization or self.use_layer_normalization
+
+                self.normalize_after_activation = normalize_after_activation
+                self.shift_normalized_activations = shift_normalized_activations
+                self.rescale_normalized_activations = rescale_normalized_activations
+
+                if not bool(rangf_map):
+                    rangf_map = {}
+                self.rangf_map = rangf_map
+
+                self.normalization_beta = None
+                self.normalization_gamma = None
+
+                if batch_normalization_decay and dropout:
+                    stderr('WARNING: Batch normalization and dropout are being applied simultaneously in layer %s.\n         This is usually not a good idea.')
+
+                self.built = False
+
+    @property
+    def regularizable_weights(self):
+        out = []
+        if self.built:
+            out.append(self.kernel)
+            for gf in self.rangf_map:
+                out.append(self.kernel_ran[gf])
+                if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
+                    out.append(self.bias_ran[gf])
+
+        return out
+
+    def build(self, inputs_shape):
+        if not self.built:
+            in_dim = inputs_shape[-1]
+            if self.units is None:
+                out_dim = in_dim
+            else:
+                out_dim = self.units
+
+            if not self.name:
+                name = ''
+            else:
+                name = self.name
+
+            with self.session.as_default():
+                with self.session.graph.as_default():
+                    with tf.variable_scope(name, reuse=self.reuse):
+                        sd = get_numerical_sd(self.kernel_sd_init, in_dim=in_dim, out_dim=out_dim)
+
+                        kernel_init = get_initializer(
+                            'random_normal_initializer_mean=0-stddev=%s' % sd,
+                            session=self.session
+                        )
+                        self.kernel = tf.get_variable(
+                            name='kernel',
+                            initializer=kernel_init,
+                            shape=[in_dim, out_dim]
+                        )
+                        self.kernel_ran = {}
+                        for gf in self.rangf_map:
+                            n_levels = self.rangf_map[gf][0] - 1
+                            self.kernel_ran[gf] = tf.get_variable(
+                                name='kernel_by_%s' % sn(gf),
+                                initializer=tf.zeros_initializer(),
+                                shape=[n_levels, in_dim, out_dim]
+                            )
+
+                        if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
+                            self.bias = tf.get_variable(
+                                name='bias',
+                                shape=[out_dim],
+                                initializer=tf.zeros_initializer(),
+                            )
+                            self.bias_ran = {}
+                            for gf in self.rangf_map:
+                                n_levels = self.rangf_map[gf][0] - 1
+                                self.bias_ran[gf] = tf.get_variable(
+                                    name='bias_by_%s' % sn(gf),
+                                    initializer=tf.zeros_initializer(),
+                                    shape=[n_levels, out_dim]
+                                )
+                        #
+                        # if self.use_dropout:
+                        #     self.dropout_layer.build([x for x in inputs_shape[:-1]] + [out_dim])
+
+                        if self.use_batch_normalization:
+                            self.normalization_layer = BatchNormLayer(
+                                decay=self.batch_normalization_decay,
+                                shift_activations=self.shift_normalized_activations,
+                                rescale_activations=self.rescale_normalized_activations,
+                                axis=-1,
+                                training=self.training,
+                                epsilon=self.epsilon,
+                                session=self.session,
+                                reuse=self.reuse,
+                                name=self.name
+                            )
+                        elif self.use_layer_normalization:
+                            self.normalization_layer = LayerNormLayer(
+                                normalization_type=self.layer_normalization_type,
+                                shift_activations=self.shift_normalized_activations,
+                                rescale_activations=self.rescale_normalized_activations,
+                                axis=-1,
+                                training=self.training,
+                                epsilon=self.epsilon,
+                                session=self.session,
+                                reuse=self.reuse,
+                                name=self.name
+                            )
+
+            self.built = True
+
+    def __call__(self, inputs, kernel_offsets=None, bias_offsets=None):
+        assert len(inputs.shape) > 1, 'inputs must have a batch dim'
+        if not self.built:
+            self.build(inputs.shape)
+
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                if not self.name:
+                    name = ''
+                else:
+                    name = self.name
+                with tf.variable_scope(name, reuse=self.reuse):
+                    if len(inputs.shape) == 2:
+                        inputs = tf.expand_dims(inputs, axis=1) # Ensure batch dim
+                        squeeze = True
+                    else:
+                        squeeze = False
+
+                    kernel = self.kernel[None, ...] # Expand batch dim
+                    for gf in self.kernel_ran:
+                        Y_gf = self.rangf_map[gf][1]
+                        kernel_ran = self.kernel_ran[gf]
+                        kernel_ran -= tf.reduce_mean(kernel_ran, axis=0, keepdims=True)
+                        kernel_ran = tf.pad(kernel_ran, [[0,1], [0,0], [0,0]])
+                        kernel += tf.gather(kernel_ran, Y_gf)
+                    while len(kernel.shape) < len(inputs.shape):
+                        kernel = tf.expand_dims(kernel, axis=1)
+                    if kernel_offsets is not None:
+                        while len(kernel.shape) < len(kernel_offsets.shape):
+                            kernel = tf.expand_dims(kernel, axis=1)
+                        while len(kernel_offsets.shape) < len(kernel.shape):
+                            kernel_offsets = tf.expand_dims(kernel_offsets, axis=1)
+                        kernel = kernel + kernel_offsets
+                    if self.maxnorm:
+                        kernel = tf.clip_by_norm(kernel, self.maxnorm, axes=[0])
+                    if (len(kernel.shape) - len(inputs.shape)) == 1:
+                        inputs = tf.expand_dims(inputs, axis=-2)
+                        squeeze = True
+                    H = matmul(inputs, kernel)
+                    if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
+                        bias = self.bias[None, ...] # Expand batch dim
+                        for gf in self.bias_ran:
+                            Y_gf = self.rangf_map[gf][1]
+                            bias_ran = self.bias_ran[gf]
+                            bias_ran -= tf.reduce_mean(bias_ran, axis=0, keepdims=True)
+                            bias_ran = tf.pad(bias_ran, [[0,1], [0,0]])
+                            bias += tf.gather(bias_ran, Y_gf)
+                        while len(bias.shape) < len(H.shape):
+                            bias = tf.expand_dims(bias, axis=1)
+                        if bias_offsets is not None:
+                            bias = bias + bias_offsets
+                        H += bias
+
+                    if self.activation is not None and self.normalize_after_activation:
+                        H = self.activation(H)
+
+                    if self.normalize_activations:
+                        H = self.normalization_layer(H)
+
+                    if self.activation is not None and not self.normalize_after_activation:
+                        H = self.activation(H)
+
+                    H = self.dropout_layer(H)
+
+                    if squeeze:
+                        H = tf.squeeze(H, axis=-2)
+
+                    return H
+
+    def call(self, *args, **kwargs):
+        self.__call__(*args, **kwargs)
+
+    def kl_penalties(self):
+        return {}
+
+    def ema_ops(self):
+        out = []
+        if self.use_batch_normalization and self.built:
+            out += self.normalization_layer.ema_ops()
+
+        return out
+
+    def resample_ops(self):
+        out = []
+        if self.use_dropout and self.built:
+            out.append(self.dropout_layer.resample_ops())
+
+        return out
+
+
+class DenseLayerBayes(DenseLayer):
+    def __init__(
+            self,
+            training=False,
+            use_MAP_mode=True,
+            units=None,
+            use_bias=True,
+            activation=None,
+            dropout=None,
+            maxnorm=None,
+            batch_normalization_decay=None,
+            layer_normalization_type=None,
+            normalize_after_activation=False,
+            shift_normalized_activations=True,
+            rescale_normalized_activations=True,
+            rangf_map=None,
+            declare_priors_weights=True,
+            declare_priors_biases=False,
+            declare_priors_gamma=False,
+            kernel_sd_prior=1,
+            kernel_sd_init=None,
+            bias_sd_prior=1.,
+            bias_sd_init=None,
+            gamma_sd_prior=1.,
+            gamma_sd_init=None,
+            posterior_to_prior_sd_ratio=1,
+            ranef_to_fixef_prior_sd_ratio=0.1,
+            constraint='softplus',
+            reuse=tf.AUTO_REUSE,
+            epsilon=1e-5,
+            session=None,
+            name=None
+    ):
+        super(DenseLayerBayes, self).__init__(
+            training=training,
+            use_MAP_mode=use_MAP_mode,
+            units=units,
+            use_bias=use_bias,
+            activation=activation,
+            kernel_sd_init=kernel_sd_init,
+            dropout=dropout,
+            maxnorm=maxnorm,
+            batch_normalization_decay=batch_normalization_decay,
+            layer_normalization_type=layer_normalization_type,
+            normalize_after_activation=normalize_after_activation,
+            shift_normalized_activations=shift_normalized_activations,
+            rescale_normalized_activations=rescale_normalized_activations,
+            rangf_map=rangf_map,
+            reuse=reuse,
+            epsilon=epsilon,
+            session=session,
+            name=name
+        )
+        self.session = get_session(session)
+        with session.as_default():
+            with session.graph.as_default():
+                self.declare_priors_weights = declare_priors_weights
+                self.declare_priors_biases = declare_priors_biases
+                self.declare_priors_gamma = declare_priors_gamma
+                self.kernel_sd_prior = kernel_sd_prior
+                self.bias_sd_prior = bias_sd_prior
+                self.bias_sd_init = bias_sd_init
+                self.gamma_sd_prior = gamma_sd_prior
+                self.gamma_sd_init = gamma_sd_init
+                self.posterior_to_prior_sd_ratio = posterior_to_prior_sd_ratio
+                self.ranef_to_fixef_prior_sd_ratio = ranef_to_fixef_prior_sd_ratio
+
+                self.constraint = constraint
+                self.kl_penalties_base = {}
+
+    def build(self, inputs_shape):
+        if not self.built:
+            in_dim = inputs_shape[-1]
+            if self.units is None:
+                out_dim = in_dim
+            else:
+                out_dim = self.units
+
+            if not self.name:
+                name = ''
+            else:
+                name = self.name
+
+            with self.session.as_default():
+                with self.session.graph.as_default():
+                    with tf.variable_scope(name, reuse=self.reuse):
+                        kernel_sd_prior = get_numerical_sd(self.kernel_sd_prior, in_dim=in_dim, out_dim=out_dim)
+                        if self.kernel_sd_init:
+                            kernel_sd_posterior = get_numerical_sd(self.kernel_sd_init, in_dim=in_dim, out_dim=out_dim)
+                        else:
+                            kernel_sd_posterior = kernel_sd_prior * self.posterior_to_prior_sd_ratio
+                        _kernel_sd_prior = np.ones([in_dim, out_dim]) * kernel_sd_prior
+                        _kernel_sd_posterior = np.ones([in_dim, out_dim]) * kernel_sd_posterior
+
+                        if self.use_MAP_mode is None:
+                            self.use_MAP_mode = tf.logical_not(self.training)
+
+                        rv_dict = get_random_variable(
+                            'kernel',
+                            [in_dim, out_dim],
+                            _kernel_sd_posterior,
+                            constraint=self.constraint,
+                            sd_prior=_kernel_sd_prior,
+                            training=self.training,
+                            use_MAP_mode=self.use_MAP_mode,
+                            epsilon=self.epsilon,
+                            session=self.session
+                        )
+                        if self.declare_priors_weights:
+                            self.kl_penalties_base.update(rv_dict['kl_penalties'])
+                        self.kernel_eval_resample = rv_dict['v_eval_resample']
+                        self.kernel = rv_dict['v']
+                        self.kernel_eval_resample_ran = {}
+                        self.kernel_ran = {}
+                        for gf in self.rangf_map:
+                            n_levels = self.rangf_map[gf][0] - 1
+                            _kernel_sd_prior = np.ones([n_levels, in_dim, out_dim]) * kernel_sd_prior * self.ranef_to_fixef_prior_sd_ratio
+                            _kernel_sd_posterior = np.ones([n_levels, in_dim, out_dim]) * kernel_sd_posterior * self.ranef_to_fixef_prior_sd_ratio
+                            rv_dict = get_random_variable(
+                                'kernel_by_%s' % sn(gf),
+                                [n_levels, in_dim, out_dim],
+                                _kernel_sd_posterior,
+                                constraint=self.constraint,
+                                sd_prior=_kernel_sd_prior,
+                                training=self.training,
+                                use_MAP_mode=self.use_MAP_mode,
+                                epsilon=self.epsilon,
+                                session=self.session
+                            )
+                            if self.declare_priors_weights:
+                                self.kl_penalties_base.update(rv_dict['kl_penalties'])
+                            self.kernel_eval_resample_ran[gf] = rv_dict['v_eval_resample']
+                            self.kernel_ran[gf] = rv_dict['v']
+
+                        if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
+                            bias_sd_prior = get_numerical_sd(self.bias_sd_prior, in_dim=1, out_dim=1)
+                            if self.bias_sd_init:
+                                bias_sd_posterior = get_numerical_sd(self.bias_sd_init, in_dim=1, out_dim=1)
+                            else:
+                                bias_sd_posterior = bias_sd_prior * self.posterior_to_prior_sd_ratio
+                            _bias_sd_prior = np.ones([out_dim]) * bias_sd_prior
+                            _bias_sd_posterior = np.ones([out_dim]) * bias_sd_posterior
+
+                            # Posterior distribution
+                            rv_dict = get_random_variable(
+                                'bias',
+                                [out_dim],
+                                _bias_sd_posterior,
+                                constraint=self.constraint,
+                                sd_prior=_bias_sd_prior,
+                                training=self.training,
+                                use_MAP_mode=self.use_MAP_mode,
+                                epsilon=self.epsilon,
+                                session=self.session
+                            )
+                            if self.declare_priors_biases:
+                                self.kl_penalties_base.update(rv_dict['kl_penalties'])
+                            self.bias_eval_resample = rv_dict['v_eval_resample']
+                            self.bias = rv_dict['v']
+                            self.bias_eval_resample_ran = {}
+                            self.bias_ran = {}
+                            for gf in self.rangf_map:
+                                n_levels = self.rangf_map[gf][0] - 1
+                                _bias_sd_prior = np.ones([n_levels, out_dim]) * bias_sd_prior * self.ranef_to_fixef_prior_sd_ratio
+                                _bias_sd_posterior = np.ones([n_levels, out_dim]) * bias_sd_posterior * self.ranef_to_fixef_prior_sd_ratio
+                                rv_dict = get_random_variable(
+                                    'bias_by_%s' % sn(gf),
+                                    [n_levels, out_dim],
+                                    _bias_sd_posterior,
+                                    constraint=self.constraint,
+                                    sd_prior=_bias_sd_prior,
+                                    training=self.training,
+                                    use_MAP_mode=self.use_MAP_mode,
+                                    epsilon=self.epsilon,
+                                    session=self.session
+                                )
+                                if self.declare_priors_weights:
+                                    self.kl_penalties_base.update(rv_dict['kl_penalties'])
+                                self.bias_eval_resample_ran[gf] = rv_dict['v_eval_resample']
+                                self.bias_ran[gf] = rv_dict['v']
+
+                        # if self.use_dropout:
+                        #     self.dropout_layer.build([x for x in inputs_shape[:-1]] + [out_dim])
+
+                        if self.use_batch_normalization:
+                            self.normalization_layer = BatchNormLayerBayes(
+                                decay=self.batch_normalization_decay,
+                                shift_activations=self.shift_normalized_activations,
+                                rescale_activations=self.rescale_normalized_activations,
+                                axis=-1,
+                                training=self.training,
+                                rangf_map=self.rangf_map,
+                                use_MAP_mode=self.use_MAP_mode,
+                                declare_priors_scale=self.declare_priors_gamma,
+                                declare_priors_shift=self.declare_priors_biases,
+                                scale_sd_prior=self.gamma_sd_prior,
+                                scale_sd_init=self.gamma_sd_init,
+                                shift_sd_prior=self.bias_sd_prior,
+                                shift_sd_init=self.bias_sd_init,
+                                posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
+                                ranef_to_fixef_prior_sd_ratio=self.ranef_to_fixef_prior_sd_ratio,
+                                constraint=self.constraint,
+                                epsilon=self.epsilon,
+                                session=self.session,
+                                reuse=self.reuse,
+                                name=self.name
+                            )
+                        elif self.use_layer_normalization:
+                            self.normalization_layer = LayerNormLayerBayes(
+                                normalization_type=self.layer_normalization_type,
+                                shift_activations=self.shift_normalized_activations,
+                                rescale_activations=self.rescale_normalized_activations,
+                                axis=-1,
+                                training=self.training,
+                                rangf_map=self.rangf_map,
+                                use_MAP_mode=self.use_MAP_mode,
+                                declare_priors_scale=self.declare_priors_gamma,
+                                declare_priors_shift=self.declare_priors_biases,
+                                scale_sd_prior=self.gamma_sd_prior,
+                                scale_sd_init=self.gamma_sd_init,
+                                shift_sd_prior=self.bias_sd_prior,
+                                shift_sd_init=self.bias_sd_init,
+                                posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
+                                constraint=self.constraint,
+                                epsilon=self.epsilon,
+                                session=self.session,
+                                reuse=self.reuse,
+                                name=self.name
+                            )
+
+            self.built = True
+
+    def kl_penalties(self):
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                out = self.kl_penalties_base.copy()
+                if self.batch_normalization_decay:
+                    out.update(self.normalization_layer.kl_penalties())
+
+                return out
+
+    def resample_ops(self):
+        out = super(DenseLayerBayes, self).resample_ops()
+        if self.built:
+            out.append(self.kernel_eval_resample)
+            for gf in self.rangf_map:
+                out.append(self.kernel_eval_resample_ran[gf])
+            if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
+                out.append(self.bias_eval_resample)
+                for gf in self.rangf_map:
+                    out.append(self.bias_eval_resample_ran[gf])
+            if self.use_batch_normalization or self.use_layer_normalization:
+                out += self.normalization_layer.resample_ops()
+
+        return out
+
+
 class RNNCell(LayerRNNCell):
     def __init__(
             self,
@@ -1022,6 +1916,7 @@ class RNNCell(LayerRNNCell):
             forget_rate=None,
             weight_normalization=False,
             layer_normalization=False,
+            rangf_map=None,  # Dict mapping <rangfid>: (n_levels, tensor)
             use_bias=True,
             global_step=None,
             l2_normalize_states=False,
@@ -1047,9 +1942,12 @@ class RNNCell(LayerRNNCell):
                 self._forget_gate_as_irf = forget_gate_as_irf
 
                 self._activation = get_activation(activation, session=self._session, training=self._training)
-                self._recurrent_activation = get_activation(recurrent_activation, session=self._session, training=self._training)
-                self._prefinal_activation = get_activation(prefinal_activation, session=self._session, training=self._training)
-                self._time_projection_inner_activation = get_activation(time_projection_inner_activation, session=self._session, training=self._training)
+                self._recurrent_activation = get_activation(recurrent_activation, session=self._session,
+                                                            training=self._training)
+                self._prefinal_activation = get_activation(prefinal_activation, session=self._session,
+                                                           training=self._training)
+                self._time_projection_inner_activation = get_activation(time_projection_inner_activation,
+                                                                        session=self._session, training=self._training)
 
                 self._bottomup_kernel_sd_init = bottomup_kernel_sd_init
                 self._recurrent_kernel_sd_init = recurrent_kernel_sd_init
@@ -1086,6 +1984,7 @@ class RNNCell(LayerRNNCell):
 
                 self._weight_normalization = weight_normalization
                 self._layer_normalization = layer_normalization
+                self._rangf_map = rangf_map
                 self._use_bias = use_bias
                 self._global_step = global_step
 
@@ -1165,6 +2064,7 @@ class RNNCell(LayerRNNCell):
                     kernel_layer = DenseLayer(
                         training=self._training,
                         units=units,
+                        rangf_map=self._rangf_map,
                         use_bias=use_bias,
                         kernel_sd_init=kernel_sd_init,
                         activation=activation,
@@ -1184,19 +2084,20 @@ class RNNCell(LayerRNNCell):
                 return kernel, layers
 
     @property
-    def weights(self):
+    def regularizable_weights(self):
         weights = [self._bias]
-        weights += sum([x.weights for x in self._kernel_bottomup_layers], [])
-        weights += sum([x.weights for x in self._kernel_recurrent_layers], [])
+        weights += sum([x.regularizable_weights for x in self._kernel_bottomup_layers], [])
+        weights += sum([x.regularizable_weights for x in self._kernel_recurrent_layers], [])
         if self._forget_gate_as_irf:
-            weights += sum([x.weights for x in self._kernel_time_projection_layers], []) + [self.t_delta_embedding_W]
+            weights += sum([x.regularizable_weights for x in self._kernel_time_projection_layers], []) + [
+                self.t_delta_embedding_W]
 
         return weights[:]
 
     def build(self, inputs_shape):
         with self._session.as_default():
             with self._session.graph.as_default():
-                if isinstance(inputs_shape, list): # Has a mask
+                if isinstance(inputs_shape, list):  # Has a mask
                     inputs_shape = inputs_shape[0]
                 if inputs_shape[1].value is None:
                     raise ValueError("Expected inputs.shape[-1] to be known, saw shape: %s" % inputs_shape)
@@ -1204,7 +2105,7 @@ class RNNCell(LayerRNNCell):
                 self._input_dims = inputs_shape[1].value
                 bottomup_dim = self._input_dims
                 recurrent_dim = self._num_units
-                output_dim = self._num_units * 5 # forget (2x), input, and output gates, plus cell proposal
+                output_dim = self._num_units * 5  # forget (2x), input, and output gates, plus cell proposal
                 self.layers = []
 
                 # Build bias
@@ -1273,7 +2174,8 @@ class RNNCell(LayerRNNCell):
     def call(self, inputs, state):
         with self._session.as_default():
             with self._session.graph.as_default():
-                assert isinstance(inputs, dict), 'Inputs to CDRNNCell must be a dict containing fields ``inputs`` and (optionally) ``times``, and ``mask``.'
+                assert isinstance(inputs,
+                                  dict), 'Inputs to CDRNNCell must be a dict containing fields ``inputs`` and (optionally) ``times``, and ``mask``.'
 
                 units = self._num_units
                 c_prev = state.c
@@ -1296,7 +2198,8 @@ class RNNCell(LayerRNNCell):
 
                 if self._forget_rate:
                     def train_fn_forget(h_prev=h_prev, c_prev=c_prev):
-                        dropout_mask = tf.cast(tf.random_uniform(shape=[tf.shape(inputs)[0], 1]) > self._forget_rate, dtype=tf.float32)
+                        dropout_mask = tf.cast(tf.random_uniform(shape=[tf.shape(inputs)[0], 1]) > self._forget_rate,
+                                               dtype=tf.float32)
 
                         h_prev_out = h_prev * dropout_mask
                         # c_prev_out = c_prev
@@ -1322,21 +2225,21 @@ class RNNCell(LayerRNNCell):
                 i = self._recurrent_activation(i)
 
                 # Output gate
-                o = s[:, units:units*2]
+                o = s[:, units:units * 2]
                 if self._layer_normalization:
                     o = self.norm(o, 'o_ln')
                 o = self._recurrent_activation(o)
 
                 # Cell proposal
-                g = s[:, units*2:units*3]
+                g = s[:, units * 2:units * 3]
                 if self._layer_normalization:
                     g = self.norm(g, 'g_ln')
                 g = self._activation(g)
 
                 # Forget gate
                 if self._forget_gate_as_irf:
-                    f_W = self._t_delta_embedding_W + s[:, units*3:units*4]
-                    f_b = self._t_delta_embedding_b + s[:, units*4:units*5]
+                    f_W = self._t_delta_embedding_W + s[:, units * 3:units * 4]
+                    f_b = self._t_delta_embedding_b + s[:, units * 4:units * 5]
                     if self._layer_normalization:
                         f_W = self.norm(f_W, 'f_W_ln')
                         f_b = self.norm(f_b, 'f_b_ln')
@@ -1344,7 +2247,7 @@ class RNNCell(LayerRNNCell):
                     t_embedding = self._time_projection_inner_activation(f_W * t + f_b + self._forget_bias)
                     f = self._kernel_time_projection(t_embedding)
                 else:
-                    f = s[:, units*3:units*4]
+                    f = s[:, units * 3:units * 4]
                 f = self._recurrent_activation(f)
 
                 c = f * c_prev + i * g
@@ -1402,6 +2305,7 @@ class RNNLayer(object):
             forget_rate=None,
             weight_normalization=False,
             layer_normalization=False,
+            rangf_map=None,  # Dict mapping <rangfid>: (n_levels, tensor)
             use_bias=True,
             global_step=None,
             l2_normalize_states=False,
@@ -1434,6 +2338,9 @@ class RNNLayer(object):
         self.forget_rate = forget_rate
         self.weight_normalization = weight_normalization
         self.layer_normalization = layer_normalization
+        if not bool(rangf_map):
+            rangf_map = {}
+        self.rangf_map = rangf_map
         self.use_bias = use_bias
         self.global_step = global_step
         self.l2_normalize_states = l2_normalize_states
@@ -1478,6 +2385,7 @@ class RNNLayer(object):
                         forget_rate=self.forget_rate,
                         weight_normalization=self.weight_normalization,
                         layer_normalization=self.layer_normalization,
+                        rangf_map=self.rangf_map,
                         use_bias=self.use_bias,
                         global_step=self.global_step,
                         l2_normalize_states=self.l2_normalize_states,
@@ -1492,8 +2400,8 @@ class RNNLayer(object):
             self.built = True
 
     @property
-    def weights(self):
-        return self.cell.weights
+    def regularizable_weights(self):
+        return self.cell.regularizable_weights
 
     def __call__(self, inputs, times=None, mask=None, return_state=False, initial_state=None):
         if not self.built:
@@ -1575,6 +2483,7 @@ class RNNCellBayes(RNNCell):
             forget_rate=None,
             weight_normalization=False,
             layer_normalization=False,
+            rangf_map=None,  # Dict mapping <rangfid>: (n_levels, tensor)
             use_bias=True,
             global_step=None,
             l2_normalize_states=False,
@@ -1605,6 +2514,7 @@ class RNNCellBayes(RNNCell):
             forget_rate=forget_rate,
             weight_normalization=weight_normalization,
             layer_normalization=layer_normalization,
+            rangf_map=rangf_map,
             use_bias=use_bias,
             global_step=global_step,
             l2_normalize_states=l2_normalize_states,
@@ -1704,6 +2614,7 @@ class RNNCellBayes(RNNCell):
                         units=units,
                         use_bias=use_bias,
                         activation=activation,
+                        rangf_map=self._rangf_map,
                         declare_priors_weights=self._declare_priors_weights,
                         declare_priors_biases=self._declare_priors_biases,
                         use_MAP_mode=self.use_MAP_mode,
@@ -1734,7 +2645,7 @@ class RNNCellBayes(RNNCell):
                 out_dim = self._num_units
                 kernel_sd_prior = get_numerical_sd(self._kernel_sd_prior, in_dim=1, out_dim=out_dim)
                 kernel_sd_posterior = kernel_sd_prior * self._posterior_to_prior_sd_ratio
-                
+
                 if not self.name:
                     name = ''
                 else:
@@ -1777,7 +2688,8 @@ class RNNCellBayes(RNNCell):
                         dtype=tf.float32,
                         trainable=False
                     )
-                    self.t_delta_embedding_W_eval_resample = tf.assign(self.t_delta_embedding_W_eval, self.t_delta_embedding_W_eval_sample)
+                    self.t_delta_embedding_W_eval_resample = tf.assign(self.t_delta_embedding_W_eval,
+                                                                       self.t_delta_embedding_W_eval_sample)
                 self.t_delta_embedding_W = tf.cond(
                     self.training,
                     self.t_delta_embedding_W_q_dist.sample,
@@ -1817,7 +2729,7 @@ class RNNCellBayes(RNNCell):
                     self.kl_penalties_base[self.name + '/t_delta_embedding_b'] = {
                         'loc': 0.,
                         'scale': bias_sd_prior,
-                        'val': self.t_delta_embedding_b_q_dist.kl_divergence(self.t_delta_embedding_b_prior_dist)
+                        'val': t_delta_embedding_b_q_dist.kl_divergence(self.t_delta_embedding_b_prior_dist)
                     }
                 with tf.variable_scope(name, reuse=self.reuse):
                     self.t_delta_embedding_b_eval_sample = self.t_delta_embedding_b_q_dist.sample()
@@ -1828,7 +2740,8 @@ class RNNCellBayes(RNNCell):
                         dtype=tf.float32,
                         trainable=False
                     )
-                    self.t_delta_embedding_b_eval_resample = tf.assign(self.t_delta_embedding_b_eval, self.t_delta_embedding_b_eval_sample)
+                    self.t_delta_embedding_b_eval_resample = tf.assign(self.t_delta_embedding_b_eval,
+                                                                       self.t_delta_embedding_b_eval_sample)
                 self.t_delta_embedding_b = tf.cond(
                     self.training,
                     self.t_delta_embedding_b_q_dist.sample,
@@ -1889,6 +2802,7 @@ class RNNLayerBayes(RNNLayer):
             forget_rate=None,
             weight_normalization=False,
             layer_normalization=False,
+            rangf_map=None,  # Dict mapping <rangfid>: (n_levels, tensor)
             use_bias=True,
             global_step=None,
             l2_normalize_states=False,
@@ -1920,6 +2834,7 @@ class RNNLayerBayes(RNNLayer):
             forget_rate=forget_rate,
             weight_normalization=weight_normalization,
             layer_normalization=layer_normalization,
+            rangf_map=rangf_map,
             use_bias=use_bias,
             global_step=global_step,
             l2_normalize_states=l2_normalize_states,
@@ -1977,6 +2892,7 @@ class RNNLayerBayes(RNNLayer):
                         constraint=self.constraint,
                         weight_normalization=self.weight_normalization,
                         layer_normalization=self.layer_normalization,
+                        rangf_map=self.rangf_map,
                         use_bias=self.use_bias,
                         global_step=self.global_step,
                         l2_normalize_states=self.l2_normalize_states,
@@ -1997,491 +2913,6 @@ class RNNLayerBayes(RNNLayer):
         return self.cell.ema_ops()
 
 
-class DenseLayer(object):
-    def __init__(
-            self,
-            training=False,
-            use_MAP_mode=True,
-            units=None,
-            use_bias=True,
-            activation=None,
-            kernel_sd_init='he',
-            dropout=None,
-            maxnorm=None,
-            batch_normalization_decay=None,
-            layer_normalization_type=None,
-            normalize_after_activation=False,
-            shift_normalized_activations=True,
-            rescale_normalized_activations=True,
-            reuse=tf.AUTO_REUSE,
-            epsilon=1e-5,
-            session=None,
-            name=None
-    ):
-        self.session = get_session(session)
-        self.reuse = reuse
-        self.epsilon = epsilon
-        self.name = name
-
-        with session.as_default():
-            with session.graph.as_default():
-                self.training = training
-                self.use_MAP_mode = use_MAP_mode
-                self.units = units
-                self.use_bias = use_bias
-                self.activation = get_activation(activation, session=self.session, training=self.training)
-                self.kernel_sd_init = kernel_sd_init
-                self.use_dropout = bool(dropout)
-                self.dropout_layer = get_dropout(
-                    dropout,
-                    training=self.training,
-                    use_MAP_mode=self.use_MAP_mode,
-                    name='dropout',
-                    reuse=self.reuse,
-                    session=self.session
-                )
-                self.maxnorm = maxnorm
-
-                self.batch_normalization_decay = batch_normalization_decay
-                self.use_batch_normalization = bool(self.batch_normalization_decay)
-
-                self.layer_normalization_type = layer_normalization_type
-                if layer_normalization_type is None:
-                    self.layer_normalization_type = layer_normalization_type
-                elif layer_normalization_type.lower() == 'z':
-                    self.layer_normalization_type = 'z'
-                elif layer_normalization_type.lower() == 'length':
-                    self.layer_normalization_type = 'length'
-                else:
-                    raise ValueError('Unrecognized layer normalization type: %s' % layer_normalization_type)
-                self.use_layer_normalization = bool(self.layer_normalization_type)
-
-                assert not (self.use_batch_normalization and self.use_layer_normalization), 'Cannot batch normalize and layer normalize the same layer.'
-                self.normalize_activations = self.use_batch_normalization or self.use_layer_normalization
-
-                self.normalize_after_activation = normalize_after_activation
-                self.shift_normalized_activations = shift_normalized_activations
-                self.rescale_normalized_activations = rescale_normalized_activations
-
-                self.normalization_beta = None
-                self.normalization_gamma = None
-
-                if batch_normalization_decay and dropout:
-                    stderr('WARNING: Batch normalization and dropout are being applied simultaneously in layer %s.\n         This is usually not a good idea.')
-
-                self.built = False
-
-    @property
-    def weights(self):
-        out = []
-        if self.built:
-            out.append(self.kernel)
-        return out
-
-    def build(self, inputs_shape):
-        if not self.built:
-            in_dim = inputs_shape[-1]
-            if self.units is None:
-                out_dim = in_dim
-            else:
-                out_dim = self.units
-
-            if not self.name:
-                name = ''
-            else:
-                name = self.name
-
-            with self.session.as_default():
-                with self.session.graph.as_default():
-                    with tf.variable_scope(name, reuse=self.reuse):
-                        sd = get_numerical_sd(self.kernel_sd_init, in_dim=in_dim, out_dim=out_dim)
-
-                        kernel_init = get_initializer(
-                            'random_normal_initializer_mean=0-stddev=%s' % sd,
-                            session=self.session
-                        )
-                        self.kernel = tf.get_variable(
-                            name='kernel',
-                            initializer=kernel_init,
-                            shape=[in_dim, out_dim]
-                        )
-
-                        if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
-                        # if self.use_bias and not self.normalize_activations:
-                            self.bias = tf.get_variable(
-                                name='bias',
-                                shape=[out_dim],
-                                initializer=tf.zeros_initializer(),
-                            )
-
-                        if self.use_dropout:
-                            self.dropout_layer.build([x for x in inputs_shape[:-1]] + [out_dim])
-
-                        if self.use_batch_normalization:
-                            self.normalization_layer = BatchNormLayer(
-                                decay=self.batch_normalization_decay,
-                                shift_activations=self.shift_normalized_activations,
-                                rescale_activations=self.rescale_normalized_activations,
-                                axis=-1,
-                                training=self.training,
-                                epsilon=self.epsilon,
-                                session=self.session,
-                                reuse=self.reuse,
-                                name=self.name
-                            )
-                        elif self.use_layer_normalization:
-                            self.normalization_layer = LayerNormLayer(
-                                normalization_type=self.layer_normalization_type,
-                                shift_activations=self.shift_normalized_activations,
-                                rescale_activations=self.rescale_normalized_activations,
-                                axis=-1,
-                                training=self.training,
-                                epsilon=self.epsilon,
-                                session=self.session,
-                                reuse=self.reuse,
-                                name=self.name
-                            )
-
-            self.built = True
-
-    def __call__(self, inputs):
-        if not self.built:
-            self.build(inputs.shape)
-
-        with self.session.as_default():
-            with self.session.graph.as_default():
-                kernel = self.kernel
-                if self.maxnorm:
-                    kernel = tf.clip_by_norm(kernel, self.maxnorm, axes=[0])
-                H = tf.tensordot(inputs, kernel, 1)
-                if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
-                # if self.use_bias and not self.normalize_activations:
-                    bias = self.bias
-                    while len(bias.shape) < len(H.shape):
-                        bias = bias[None, ...]
-                    H += bias
-
-                if self.activation is not None and self.normalize_after_activation:
-                    H = self.activation(H)
-
-                if self.normalize_activations:
-                    # H = tf.contrib.layers.batch_norm(
-                    #     H,
-                    #     decay=self.batch_normalization_decay,
-                    #     center=self.use_bias,
-                    #     scale=self.batch_normalization_use_gamma,
-                    #     zero_debias_moving_mean=True,
-                    #     epsilon=self.epsilon,
-                    #     is_training=self.training,
-                    #     updates_collections=None,
-                    #     reuse=self.reuse,
-                    #     scope=self.name
-                    # )
-                    H = self.normalization_layer(H)
-
-                if self.activation is not None and not self.normalize_after_activation:
-                    H = self.activation(H)
-
-                H = self.dropout_layer(H)
-
-                return H
-
-    def call(self, *args, **kwargs):
-        self.__call__(*args, **kwargs)
-
-    def kl_penalties(self):
-        return {}
-
-    def ema_ops(self):
-        out = []
-        if self.use_batch_normalization and self.built:
-            out += self.normalization_layer.ema_ops()
-
-        return out
-
-    def resample_ops(self):
-        out = []
-        if self.use_dropout and self.built:
-            out.append(self.dropout_layer.resample_ops())
-
-        return out
-
-
-class DenseLayerBayes(DenseLayer):
-    def __init__(
-            self,
-            training=False,
-            use_MAP_mode=True,
-            units=None,
-            use_bias=True,
-            activation=None,
-            dropout=None,
-            maxnorm=None,
-            batch_normalization_decay=None,
-            layer_normalization_type=None,
-            normalize_after_activation=False,
-            shift_normalized_activations=True,
-            rescale_normalized_activations=True,
-            declare_priors_weights=True,
-            declare_priors_biases=False,
-            declare_priors_gamma=False,
-            kernel_sd_prior=1,
-            kernel_sd_init=None,
-            bias_sd_prior=1.,
-            bias_sd_init=None,
-            gamma_sd_prior=1.,
-            gamma_sd_init=None,
-            posterior_to_prior_sd_ratio=1,
-            constraint='softplus',
-            reuse=tf.AUTO_REUSE,
-            epsilon=1e-5,
-            session=None,
-            name=None
-    ):
-        super(DenseLayerBayes, self).__init__(
-            training=training,
-            use_MAP_mode=use_MAP_mode,
-            units=units,
-            use_bias=use_bias,
-            activation=activation,
-            kernel_sd_init=kernel_sd_init,
-            dropout=dropout,
-            maxnorm=maxnorm,
-            batch_normalization_decay=batch_normalization_decay,
-            layer_normalization_type=layer_normalization_type,
-            normalize_after_activation=normalize_after_activation,
-            shift_normalized_activations=shift_normalized_activations,
-            rescale_normalized_activations=rescale_normalized_activations,
-            reuse=reuse,
-            epsilon=epsilon,
-            session=session,
-            name=name
-        )
-        self.session = get_session(session)
-        with session.as_default():
-            with session.graph.as_default():
-                self.declare_priors_weights = declare_priors_weights
-                self.declare_priors_biases = declare_priors_biases
-                self.declare_priors_gamma = declare_priors_gamma
-                self.kernel_sd_prior = kernel_sd_prior
-                self.bias_sd_prior = bias_sd_prior
-                self.bias_sd_init = bias_sd_init
-                self.gamma_sd_prior = gamma_sd_prior
-                self.gamma_sd_init = gamma_sd_init
-                self.posterior_to_prior_sd_ratio = posterior_to_prior_sd_ratio
-
-                self.constraint = constraint
-                if self.constraint.lower() == 'softplus':
-                    self.constraint_fn = tf.nn.softplus
-                    self.constraint_fn_inv = tf.contrib.distributions.softplus_inverse
-                elif self.constraint.lower() == 'square':
-                    self.constraint_fn = tf.square
-                    self.constraint_fn_inv = tf.sqrt
-                elif self.constraint.lower() == 'abs':
-                    self.constraint_fn = self._safe_abs
-                    self.constraint_fn_inv = tf.identity
-                else:
-                    raise ValueError('Unrecognized constraint function %s' % self.constraint)
-
-                self.kl_penalties_base = {}
-
-    def build(self, inputs_shape):
-        if not self.built:
-            in_dim = inputs_shape[-1]
-            if self.units is None:
-                out_dim = in_dim
-            else:
-                out_dim = self.units
-
-            if not self.name:
-                name = ''
-            else:
-                name = self.name
-
-            with self.session.as_default():
-                with self.session.graph.as_default():
-                    with tf.variable_scope(name, reuse=self.reuse):
-                        kernel_sd_prior = get_numerical_sd(self.kernel_sd_prior, in_dim=in_dim, out_dim=out_dim)
-                        if self.kernel_sd_init:
-                            kernel_sd_posterior = get_numerical_sd(self.kernel_sd_init, in_dim=in_dim, out_dim=out_dim)
-                        else:
-                            kernel_sd_posterior = kernel_sd_prior * self.posterior_to_prior_sd_ratio
-
-                        if self.use_MAP_mode is None:
-                            self.use_MAP_mode = tf.logical_not(self.training)
-
-                        # Posterior distribution
-                        self.kernel_q_loc = tf.get_variable(
-                            name='kernel_q_loc',
-                            initializer=tf.zeros_initializer(),
-                            shape=[in_dim, out_dim]
-                        )
-                        self.kernel_q_scale = tf.get_variable(
-                            name='kernel_q_scale',
-                            initializer=lambda: tf.ones([in_dim, out_dim]) * self.constraint_fn_inv(kernel_sd_posterior)
-                        )
-                        self.kernel_q_dist = Normal(
-                            loc=self.kernel_q_loc,
-                            scale=self.constraint_fn(self.kernel_q_scale) + self.epsilon,
-                            name='kernel_q'
-                        )
-                        if self.declare_priors_weights:
-                            # Prior distribution
-                            self.kernel_prior_dist = Normal(
-                                loc=0.,
-                                scale=kernel_sd_prior,
-                                name='kernel'
-                            )
-                            self.kl_penalties_base[self.name + '/kernel'] = {
-                                'loc': 0.,
-                                'scale': kernel_sd_prior,
-                                'val': self.kernel_q_dist.kl_divergence(self.kernel_prior_dist)
-                            }
-                        with tf.variable_scope(name, reuse=self.reuse):
-                            self.kernel_eval_sample = self.kernel_q_dist.sample()
-                            self.kernel_eval = tf.get_variable(
-                                name='kernel_sample',
-                                initializer=tf.zeros_initializer(),
-                                shape=self.kernel_eval_sample.shape,
-                                dtype=tf.float32,
-                                trainable=False
-                            )
-                            self.kernel_eval_resample = tf.assign(self.kernel_eval, self.kernel_eval_sample)
-                        self.kernel = tf.cond(
-                            self.training,
-                            self.kernel_q_dist.sample,
-                            lambda: tf.cond(
-                                self.use_MAP_mode,
-                                self.kernel_q_dist.mean,
-                                lambda: self.kernel_eval
-                            )
-                        )
-
-                        if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
-                            bias_sd_prior = get_numerical_sd(self.bias_sd_prior, in_dim=1, out_dim=1)
-                            if self.bias_sd_init:
-                                bias_sd_posterior = get_numerical_sd(self.bias_sd_init, in_dim=1, out_dim=1)
-                            else:
-                                bias_sd_posterior = bias_sd_prior * self.posterior_to_prior_sd_ratio
-
-                            # Posterior distribution
-                            self.bias_q_loc = tf.get_variable(
-                                name='bias_q_loc',
-                                initializer=tf.zeros_initializer(),
-                                shape=[out_dim]
-                            )
-                            self.bias_q_scale = tf.get_variable(
-                                name='bias_q_scale',
-                                initializer=lambda: tf.ones([out_dim]) * self.constraint_fn_inv(bias_sd_posterior)
-                            )
-
-                            self.bias_q_dist = Normal(
-                                loc=self.bias_q_loc,
-                                scale=self.constraint_fn(self.bias_q_scale) + self.epsilon,
-                                name='bias_q'
-                            )
-                            if self.declare_priors_biases:
-                                # Prior distribution
-                                self.bias_prior_dist = Normal(
-                                    loc=0.,
-                                    scale=bias_sd_prior,
-                                    name='bias'
-                                )
-                                self.kl_penalties_base[self.name + '/bias'] = {
-                                    'loc': 0.,
-                                    'scale': bias_sd_prior,
-                                    'val': self.bias_q_dist.kl_divergence(self.bias_prior_dist)
-                                }
-                            with tf.variable_scope(name, reuse=self.reuse):
-                                self.bias_eval_sample = self.bias_q_dist.sample()
-                                self.bias_eval = tf.get_variable(
-                                    name='bias_sample',
-                                    initializer=tf.zeros_initializer(),
-                                    shape=self.bias_eval_sample.shape,
-                                    dtype=tf.float32,
-                                    trainable=False
-                                )
-                                self.bias_eval_resample = tf.assign(self.bias_eval, self.bias_eval_sample)
-                            self.bias = tf.cond(
-                                self.training,
-                                self.bias_q_dist.sample,
-                                lambda: tf.cond(
-                                    self.use_MAP_mode,
-                                    self.bias_q_dist.mean,
-                                    lambda: self.bias_eval,
-                                )
-                            )
-
-                        if self.use_dropout:
-                            self.dropout_layer.build([x for x in inputs_shape[:-1]] + [out_dim])
-
-                        if self.use_batch_normalization:
-                            self.normalization_layer = BatchNormLayerBayes(
-                                decay=self.batch_normalization_decay,
-                                shift_activations=self.shift_normalized_activations,
-                                rescale_activations=self.rescale_normalized_activations,
-                                axis=-1,
-                                use_MAP_mode=self.use_MAP_mode,
-                                declare_priors_scale=self.declare_priors_gamma,
-                                declare_priors_shift=self.declare_priors_biases,
-                                scale_sd_prior=self.gamma_sd_prior,
-                                scale_sd_init=self.gamma_sd_init,
-                                shift_sd_prior=self.bias_sd_prior,
-                                shift_sd_init=self.bias_sd_init,
-                                posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
-                                constraint=self.constraint,
-                                training=self.training,
-                                epsilon=self.epsilon,
-                                session=self.session,
-                                reuse=self.reuse,
-                                name=self.name
-                            )
-                        elif self.use_layer_normalization:
-                            self.normalization_layer = LayerNormLayerBayes(
-                                normalization_type=self.layer_normalization_type,
-                                shift_activations=self.shift_normalized_activations,
-                                rescale_activations=self.rescale_normalized_activations,
-                                axis=-1,
-                                training=self.training,
-                                use_MAP_mode=self.use_MAP_mode,
-                                declare_priors_scale=self.declare_priors_gamma,
-                                declare_priors_shift=self.declare_priors_biases,
-                                scale_sd_prior=self.gamma_sd_prior,
-                                scale_sd_init=self.gamma_sd_init,
-                                shift_sd_prior=self.bias_sd_prior,
-                                shift_sd_init=self.bias_sd_init,
-                                posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
-                                constraint=self.constraint,
-                                epsilon=self.epsilon,
-                                session=self.session,
-                                reuse=self.reuse,
-                                name=self.name
-                            )
-
-
-            self.built = True
-
-    def kl_penalties(self):
-        with self.session.as_default():
-            with self.session.graph.as_default():
-                out = self.kl_penalties_base.copy()
-                if self.batch_normalization_decay:
-                    out.update(self.normalization_layer.kl_penalties())
-
-                return out
-
-    def resample_ops(self):
-        out = super(DenseLayerBayes, self).resample_ops()
-        if self.built:
-            out.append(self.kernel_eval_resample)
-            if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
-                out.append(self.bias_eval_resample)
-            if self.use_batch_normalization or self.use_layer_normalization:
-                out += self.normalization_layer.resample_ops()
-
-        return out
-
-
 class BatchNormLayer(object):
     def __init__(
             self,
@@ -2490,11 +2921,13 @@ class BatchNormLayer(object):
             rescale_activations=True,
             axis=-1,
             training=True,
+            rangf_map=None,  # Dict mapping <rangfid>: (n_levels, tensor)
             epsilon=1e-5,
             session=None,
             reuse=tf.AUTO_REUSE,
             name=None
     ):
+        assert axis != 0, 'Cannot target the batch dimension for normalization'
         self.session = get_session(session)
         self.decay = decay
         self.shift_activations = shift_activations
@@ -2502,6 +2935,9 @@ class BatchNormLayer(object):
         self.axis = axis
         self.epsilon = epsilon
         self.training = training
+        if not bool(rangf_map):
+            rangf_map = {}
+        self.rangf_map = rangf_map
         self.reuse = reuse
         self.name = name
 
@@ -2554,6 +2990,14 @@ class BatchNormLayer(object):
                                 initializer=tf.zeros_initializer(),
                                 shape=shape
                             )
+                            self.beta_ran = {}
+                            for gf in self.rangf_map:
+                                n_levels = self.rangf_map[gf][0] - 1
+                                self.beta_ran[gf] = tf.get_variable(
+                                    name='beta_by_%s' % sn(gf),
+                                    initializer=tf.zeros_initializer(),
+                                    shape=[n_levels] + shape[1:]
+                                )
                         else:
                             self.beta = tf.Variable(0., name='beta', trainable=False)
 
@@ -2563,6 +3007,14 @@ class BatchNormLayer(object):
                                 initializer=tf.ones_initializer(),
                                 shape=shape
                             )
+                            self.gamma_ran = {}
+                            for gf in self.rangf_map:
+                                n_levels = self.rangf_map[gf][0] - 1
+                                self.gamma_ran[gf] = tf.get_variable(
+                                    name='gamma_by_%s' % sn(gf),
+                                    initializer=tf.zeros_initializer(),
+                                    shape=[n_levels] + shape[1:]
+                                )
                         else:
                             self.gamma = tf.Variable(1., name='beta', trainable=False)
 
@@ -2586,9 +3038,31 @@ class BatchNormLayer(object):
                     return self.moving_mean, self.moving_variance
 
                 mean, variance = tf.cond(self.training, train_fn, eval_fn)
-
                 sd = tf.sqrt(variance + self.epsilon)
-                out = ((inputs - mean) / sd) * self.gamma + self.beta
+                out = ((inputs - mean) / sd)
+
+                beta = self.beta
+                gamma = self.gamma
+                for gf in self.rangf_map:
+                    Y_gf = self.rangf_map[gf][1]
+
+                    if self.shift_activations:
+                        beta_ran = self.beta_ran[gf]
+                        beta_ran -= tf.reduce_mean(beta_ran, axis=0, keepdims=True)
+                        beta_ran = tf.pad(beta_ran, [[0,1]] + [[0,0]] * (len(beta_ran.shape) - 1))
+                        beta += tf.gather(beta_ran, Y_gf)
+
+                    if self.rescale_activations:
+                        gamma_ran = self.gamma_ran[gf]
+                        gamma_ran -= tf.reduce_mean(gamma_ran, axis=0, keepdims=True)
+                        gamma_ran = tf.pad(gamma_ran, [[0,1]] + [[0,0]] * (len(beta_ran.shape) - 1))
+                        gamma += tf.gather(gamma_ran, Y_gf)
+
+                while len(beta.shape) < len(out.shape):
+                    beta = tf.expand_dims(beta, axis=1)
+                while len(gamma.shape) < len(out.shape):
+                    gamma = tf.expand_dims(gamma, axis=1)
+                out = out * gamma + beta
 
                 if self.moving_mean_op is None:
                     self.moving_mean_op = tf.assign(
@@ -2623,6 +3097,7 @@ class BatchNormLayerBayes(BatchNormLayer):
             rescale_activations=True,
             axis=-1,
             training=True,
+            rangf_map=None,  # Dict mapping <rangfid>: (n_levels, tensor)
             use_MAP_mode=None,
             declare_priors_scale=True,
             declare_priors_shift=False,
@@ -2631,6 +3106,7 @@ class BatchNormLayerBayes(BatchNormLayer):
             shift_sd_prior=1.,
             shift_sd_init=None,
             posterior_to_prior_sd_ratio=1.,
+            ranef_to_fixef_prior_sd_ratio=0.1,
             constraint='softplus',
             epsilon=1e-5,
             session=None,
@@ -2643,6 +3119,7 @@ class BatchNormLayerBayes(BatchNormLayer):
             rescale_activations=rescale_activations,
             axis=axis,
             training=training,
+            rangf_map=rangf_map,
             epsilon=epsilon,
             session=session,
             reuse=reuse,
@@ -2657,6 +3134,7 @@ class BatchNormLayerBayes(BatchNormLayer):
         self.shift_sd_prior = shift_sd_prior
         self.shift_sd_init = shift_sd_init
         self.posterior_to_prior_sd_ratio = posterior_to_prior_sd_ratio
+        self.ranef_to_fixef_prior_sd_ratio = ranef_to_fixef_prior_sd_ratio
         self.constraint = constraint
 
         if self.constraint.lower() == 'softplus':
@@ -2723,56 +3201,45 @@ class BatchNormLayerBayes(BatchNormLayer):
                                 shift_sd_posterior = get_numerical_sd(self.shift_sd_init, in_dim=1, out_dim=1)
                             else:
                                 shift_sd_posterior = shift_sd_prior * self.posterior_to_prior_sd_ratio
+                            _shift_sd_prior = np.ones(shape) * shift_sd_prior
+                            _shift_sd_posterior = np.ones(shape) * shift_sd_posterior
 
-                            # Posterior distribution
-                            self.beta_q_loc = tf.get_variable(
-                                name='beta_q_loc',
-                                initializer=tf.zeros_initializer(),
-                                shape=shape
-                            )
-                            self.beta_q_scale = tf.get_variable(
-                                name='beta_q_scale',
-                                initializer=lambda: tf.ones(shape) * self.constraint_fn_inv(shift_sd_posterior)
-                            )
-
-                            self.beta_q_dist = Normal(
-                                loc=self.beta_q_loc,
-                                scale=self.constraint_fn(self.beta_q_scale) + self.epsilon,
-                                name='beta_q'
+                            rv_dict = get_random_variable(
+                                'beta',
+                                shape,
+                                _shift_sd_posterior,
+                                constraint=self.constraint,
+                                sd_prior=_shift_sd_prior,
+                                training=self.training,
+                                use_MAP_mode=self.use_MAP_mode,
+                                epsilon=self.epsilon,
+                                session=self.session
                             )
                             if self.declare_priors_shift:
-                                # Prior distribution
-                                self.beta_prior_dist = Normal(
-                                    loc=0.,
-                                    scale=shift_sd_prior,
-                                    name='beta'
+                                self.kl_penalties_base.update(rv_dict['kl_penalties'])
+                            self.beta_eval_resample = rv_dict['v_eval_resample']
+                            self.beta = rv_dict['v']
+                            self.beta_eval_resample_ran = {}
+                            self.beta_ran = {}
+                            for gf in self.rangf_map:
+                                n_levels = self.rangf_map[gf][0] - 1
+                                _shift_sd_prior = np.ones([n_levels] + shape) * shift_sd_prior * self.ranef_to_fixef_prior_sd_ratio
+                                _shift_sd_posterior = np.ones([n_levels] + shape) * shift_sd_posterior * self.ranef_to_fixef_prior_sd_ratio
+                                rv_dict = get_random_variable(
+                                    'beta_by_%s' % sn(gf),
+                                    [n_levels] + shape[1:],
+                                    _shift_sd_posterior,
+                                    constraint=self.constraint,
+                                    sd_prior=_shift_sd_prior,
+                                    training=self.training,
+                                    use_MAP_mode=self.use_MAP_mode,
+                                    epsilon=self.epsilon,
+                                    session=self.session
                                 )
-                                self.kl_penalties_base[self.name + '/beta'] = {
-                                    'loc': 0.,
-                                    'scale': shift_sd_prior,
-                                    'val': self.beta_q_dist.kl_divergence(self.beta_prior_dist)
-                                }
-                            with tf.variable_scope(name, reuse=self.reuse):
-                                self.beta_eval_sample = self.beta_q_dist.sample()
-                                self.beta_eval = tf.get_variable(
-                                    name='beta_sample',
-                                    initializer=tf.zeros_initializer(),
-                                    shape=self.beta_eval_sample.shape,
-                                    dtype=tf.float32,
-                                    trainable=False
-                                )
-                                self.beta_eval_resample = tf.assign(self.beta_eval, self.beta_eval_sample)
-                            self.beta = tf.cond(
-                                self.training,
-                                self.beta_q_dist.sample,
-                                lambda: tf.cond(
-                                    self.use_MAP_mode,
-                                    self.beta_q_dist.mean,
-                                    lambda: self.beta_eval
-                                )
-                            )
-                        else:
-                            self.beta = tf.Variable(0., name='beta', trainable=False)
+                                if self.declare_priors_shift:
+                                    self.kl_penalties_base.update(rv_dict['kl_penalties'])
+                                self.beta_eval_resample_ran[gf] = rv_dict['v_eval_resample']
+                                self.beta_ran[gf] = rv_dict['v']
 
                         if self.rescale_activations:
                             scale_sd_prior = get_numerical_sd(self.scale_sd_prior, in_dim=1, out_dim=1)
@@ -2780,56 +3247,47 @@ class BatchNormLayerBayes(BatchNormLayer):
                                 scale_sd_posterior = get_numerical_sd(self.scale_sd_init, in_dim=1, out_dim=1)
                             else:
                                 scale_sd_posterior = scale_sd_prior * self.posterior_to_prior_sd_ratio
+                            init = np.ones(shape)
+                            _scale_sd_prior = init * scale_sd_prior
+                            _scale_sd_posterior = init * scale_sd_posterior
 
-                            # Posterior distribution
-                            self.gamma_q_loc = tf.get_variable(
-                                name='gamma_q_loc',
-                                initializer=tf.ones_initializer(),
-                                shape=shape
+                            rv_dict = get_random_variable(
+                                'gamma',
+                                shape,
+                                _scale_sd_posterior,
+                                init=init,
+                                constraint=self.constraint,
+                                sd_prior=_scale_sd_prior,
+                                training=self.training,
+                                use_MAP_mode=self.use_MAP_mode,
+                                epsilon=self.epsilon,
+                                session=self.session
                             )
-                            self.gamma_q_scale = tf.get_variable(
-                                name='gamma_q_scale',
-                                initializer=lambda: tf.ones(shape) * self.constraint_fn_inv(scale_sd_posterior)
-                            )
-
-                            self.gamma_q_dist = Normal(
-                                loc=self.gamma_q_loc,
-                                scale=self.constraint_fn(self.gamma_q_scale) + self.epsilon,
-                                name='gamma_q'
-                            )
-                            if self.declare_priors_shift:
-                                # Prior distribution
-                                self.gamma_prior_dist = Normal(
-                                    loc=1.,
-                                    scale=scale_sd_prior,
-                                    name='gamma'
+                            if self.declare_priors_scale:
+                                self.kl_penalties_base.update(rv_dict['kl_penalties'])
+                            self.gamma_eval_resample = rv_dict['v_eval_resample']
+                            self.gamma = rv_dict['v']
+                            self.gamma_eval_resample_ran = {}
+                            self.gamma_ran = {}
+                            for gf in self.rangf_map:
+                                n_levels = self.rangf_map[gf][0] - 1
+                                _scale_sd_prior = np.ones([n_levels] + shape) * scale_sd_prior * self.ranef_to_fixef_prior_sd_ratio
+                                _scale_sd_posterior = np.ones([n_levels] + shape) * scale_sd_posterior * self.ranef_to_fixef_prior_sd_ratio
+                                rv_dict = get_random_variable(
+                                    'gamma_by_%s' % sn(gf),
+                                    [n_levels] + shape[1:],
+                                    _scale_sd_posterior,
+                                    constraint=self.constraint,
+                                    sd_prior=_scale_sd_prior,
+                                    training=self.training,
+                                    use_MAP_mode=self.use_MAP_mode,
+                                    epsilon=self.epsilon,
+                                    session=self.session
                                 )
-                                self.kl_penalties_base[self.name + '/gamma'] = {
-                                    'loc': 1.,
-                                    'scale': scale_sd_prior,
-                                    'val': self.gamma_q_dist.kl_divergence(self.gamma_prior_dist)
-                                }
-                            with tf.variable_scope(name, reuse=self.reuse):
-                                self.gamma_eval_sample = self.gamma_q_dist.sample()
-                                self.gamma_eval = tf.get_variable(
-                                    name='gamma_sample',
-                                    initializer=tf.zeros_initializer(),
-                                    shape=self.gamma_eval_sample.shape,
-                                    dtype=tf.float32,
-                                    trainable=False
-                                )
-                                self.gamma_eval_resample = tf.assign(self.gamma_eval, self.gamma_eval_sample)
-                            self.gamma = tf.cond(
-                                self.training,
-                                self.gamma_q_dist.sample,
-                                lambda: tf.cond(
-                                    self.use_MAP_mode,
-                                    self.gamma_q_dist.mean,
-                                    lambda: self.gamma_eval
-                                )
-                            )
-                        else:
-                            self.gamma = tf.Variable(1., name='beta', trainable=False)
+                                if self.declare_priors_scale:
+                                    self.kl_penalties_base.update(rv_dict['kl_penalties'])
+                                self.gamma_eval_resample_ran[gf] = rv_dict['v_eval_resample']
+                                self.gamma_ran[gf] = rv_dict['v']
 
         self.built = True
 
@@ -2843,8 +3301,12 @@ class BatchNormLayerBayes(BatchNormLayer):
         if self.built:
             if self.shift_activations:
                 out.append(self.beta_eval_resample)
+                for gf in self.rangf_map:
+                    out.append(self.beta_eval_resample_ran[gf])
             if self.rescale_activations:
                 out.append(self.gamma_eval_resample)
+                for gf in self.rangf_map:
+                    out.append(self.gamma_eval_resample_ran[gf])
 
         return out
 
@@ -2857,11 +3319,13 @@ class LayerNormLayer(object):
             rescale_activations=True,
             axis=-1,
             training=True,
+            rangf_map=None,  # Dict mapping <rangfid>: (n_levels, tensor)
             epsilon=1e-5,
             session=None,
             reuse=tf.AUTO_REUSE,
             name=None
     ):
+        assert axis != 0, 'Cannot target the batch dimension for normalization'
         self.session = get_session(session)
         self.training = training
         self.normalization_type = normalization_type
@@ -2869,6 +3333,9 @@ class LayerNormLayer(object):
         self.shift_activations = shift_activations
         self.rescale_activations = rescale_activations
         self.axis = axis
+        if not bool(rangf_map):
+            rangf_map = {}
+        self.rangf_map = rangf_map
         self.epsilon = epsilon
         self.reuse = reuse
         self.name = name
@@ -2908,6 +3375,14 @@ class LayerNormLayer(object):
                                 initializer=tf.zeros_initializer(),
                                 shape=shape
                             )
+                            self.beta_ran = {}
+                            for gf in self.rangf_map:
+                                n_levels = self.rangf_map[gf][0] - 1
+                                self.beta_ran[gf] = tf.get_variable(
+                                    name='beta_by_%s' % sn(gf),
+                                    initializer=tf.zeros_initializer(),
+                                    shape=[n_levels] + shape[1:]
+                                )
                         else:
                             self.beta = tf.Variable(0., name='beta', trainable=False)
 
@@ -2917,6 +3392,14 @@ class LayerNormLayer(object):
                                 initializer=tf.ones_initializer(),
                                 shape=shape
                             )
+                            self.gamma_ran = {}
+                            for gf in self.rangf_map:
+                                n_levels = self.rangf_map[gf][0] - 1
+                                self.gamma_ran[gf] = tf.get_variable(
+                                    name='gamma_by_%s' % sn(gf),
+                                    initializer=tf.zeros_initializer(),
+                                    shape=[n_levels] + shape[1:]
+                                )
                         else:
                             self.gamma = tf.Variable(1., name='beta', trainable=False)
 
@@ -2935,7 +3418,30 @@ class LayerNormLayer(object):
                 else: # length normalization
                     out = tf.nn.l2_normalize(inputs, axis=self.reduction_axes, epsilon=self.epsilon)
 
-                out = out * self.gamma + self.beta
+                beta = self.beta
+                gamma = self.gamma
+
+                for gf in self.rangf_map:
+                    Y_gf = self.rangf_map[gf][1]
+
+                    if self.shift_activations:
+                        beta_ran = self.beta_ran[gf]
+                        beta_ran -= tf.reduce_mean(beta_ran, axis=0, keepdims=True)
+                        beta_ran = tf.pad(beta_ran, [[0,1]] + [[0,0]] * (len(beta_ran.shape) - 1))
+                        beta += tf.gather(beta_ran, Y_gf)
+
+                    if self.rescale_activations:
+                        gamma_ran = self.gamma_ran[gf]
+                        gamma_ran -= tf.reduce_mean(gamma_ran, axis=0, keepdims=True)
+                        gamma_ran = tf.pad(gamma_ran, [[0,1]] + [[0,0]] * (len(beta_ran.shape) - 1))
+                        gamma += tf.gather(gamma_ran, Y_gf)
+
+                while len(beta.shape) < len(out.shape):
+                    beta = tf.expand_dims(beta, axis=1)
+                while len(gamma.shape) < len(out.shape):
+                    gamma = tf.expand_dims(gamma, axis=1)
+
+                out = out * gamma + beta
 
                 return out
 
@@ -2957,6 +3463,7 @@ class LayerNormLayerBayes(LayerNormLayer):
             rescale_activations=True,
             axis=-1,
             training=True,
+            rangf_map=None,  # Dict mapping <rangfid>: (n_levels, tensor)
             use_MAP_mode=None,
             declare_priors_scale=True,
             declare_priors_shift=False,
@@ -2965,6 +3472,7 @@ class LayerNormLayerBayes(LayerNormLayer):
             shift_sd_prior=1.,
             shift_sd_init=None,
             posterior_to_prior_sd_ratio=1.,
+            ranef_to_fixef_prior_sd_ratio=0.1,
             constraint='softplus',
             epsilon=1e-5,
             session=None,
@@ -2977,6 +3485,7 @@ class LayerNormLayerBayes(LayerNormLayer):
             shift_activations=shift_activations,
             rescale_activations=rescale_activations,
             axis=axis,
+            rangf_map=rangf_map,
             epsilon=epsilon,
             session=session,
             reuse=reuse,
@@ -2991,6 +3500,7 @@ class LayerNormLayerBayes(LayerNormLayer):
         self.shift_sd_prior = shift_sd_prior
         self.shift_sd_init = shift_sd_init
         self.posterior_to_prior_sd_ratio = posterior_to_prior_sd_ratio
+        self.ranef_to_fixef_prior_sd_ratio = ranef_to_fixef_prior_sd_ratio
         self.constraint = constraint
 
         if self.constraint.lower() == 'softplus':
@@ -3037,78 +3547,51 @@ class LayerNormLayerBayes(LayerNormLayer):
             with self.session.as_default():
                 with self.session.graph.as_default():
                     with tf.variable_scope(name, reuse=self.reuse):
-                        self.moving_mean = tf.get_variable(
-                            name='moving_mean',
-                            initializer=tf.zeros_initializer(),
-                            shape=shape,
-                            trainable=False
-                        )
-                        self.moving_mean_op = None
-
-                        self.moving_variance = tf.get_variable(
-                            name='moving_variance',
-                            initializer=tf.ones_initializer(),
-                            shape=shape,
-                            trainable=False
-                        )
-                        self.moving_variance_op = None
-
                         if self.shift_activations:
                             shift_sd_prior = get_numerical_sd(self.shift_sd_prior, in_dim=1, out_dim=1)
                             if self.shift_sd_init:
                                 shift_sd_posterior = get_numerical_sd(self.shift_sd_init, in_dim=1, out_dim=1)
                             else:
                                 shift_sd_posterior = shift_sd_prior * self.posterior_to_prior_sd_ratio
+                            _shift_sd_prior = np.ones(shape) * shift_sd_prior
+                            _shift_sd_posterior = np.ones(shape) * shift_sd_posterior
 
-                            # Posterior distribution
-                            self.beta_q_loc = tf.get_variable(
-                                name='beta_q_loc',
-                                initializer=tf.zeros_initializer(),
-                                shape=shape
-                            )
-                            self.beta_q_scale = tf.get_variable(
-                                name='beta_q_scale',
-                                initializer=lambda: tf.ones(shape) * self.constraint_fn_inv(shift_sd_posterior)
-                            )
-
-                            self.beta_q_dist = Normal(
-                                loc=self.beta_q_loc,
-                                scale=self.constraint_fn(self.beta_q_scale) + self.epsilon,
-                                name='beta_q'
+                            rv_dict = get_random_variable(
+                                'beta',
+                                shape,
+                                _shift_sd_posterior,
+                                constraint=self.constraint,
+                                sd_prior=_shift_sd_prior,
+                                training=self.training,
+                                use_MAP_mode=self.use_MAP_mode,
+                                epsilon=self.epsilon,
+                                session=self.session
                             )
                             if self.declare_priors_shift:
-                                # Prior distribution
-                                self.beta_prior_dist = Normal(
-                                    loc=0.,
-                                    scale=shift_sd_prior,
-                                    name='beta'
+                                self.kl_penalties_base.update(rv_dict['kl_penalties'])
+                            self.beta_eval_resample = rv_dict['v_eval_resample']
+                            self.beta = rv_dict['v']
+                            self.beta_eval_resample_ran = {}
+                            self.beta_ran = {}
+                            for gf in self.rangf_map:
+                                n_levels = self.rangf_map[gf][0] - 1
+                                _shift_sd_prior = np.ones([n_levels] + shape) * shift_sd_prior * self.ranef_to_fixef_prior_sd_ratio
+                                _shift_sd_posterior = np.ones([n_levels] + shape) * shift_sd_posterior * self.ranef_to_fixef_prior_sd_ratio
+                                rv_dict = get_random_variable(
+                                    'beta_by_%s' % sn(gf),
+                                    [n_levels] + shape[1:],
+                                    _shift_sd_posterior,
+                                    constraint=self.constraint,
+                                    sd_prior=_shift_sd_prior,
+                                    training=self.training,
+                                    use_MAP_mode=self.use_MAP_mode,
+                                    epsilon=self.epsilon,
+                                    session=self.session
                                 )
-                                self.kl_penalties_base[self.name + '/beta'] = {
-                                    'loc': 0.,
-                                    'scale': shift_sd_prior,
-                                    'val': self.beta_q_dist.kl_divergence(self.beta_prior_dist)
-                                }
-                            with tf.variable_scope(name, reuse=self.reuse):
-                                self.beta_eval_sample = self.beta_q_dist.sample()
-                                self.beta_eval = tf.get_variable(
-                                    name='beta_sample',
-                                    initializer=tf.zeros_initializer(),
-                                    shape=self.beta_eval_sample.shape,
-                                    dtype=tf.float32,
-                                    trainable=False
-                                )
-                                self.beta_eval_resample = tf.assign(self.beta_eval, self.beta_eval_sample)
-                            self.beta = tf.cond(
-                                self.training,
-                                self.beta_q_dist.sample,
-                                lambda: tf.cond(
-                                    self.use_MAP_mode,
-                                    self.beta_q_dist.mean,
-                                    lambda: self.beta_eval
-                                )
-                            )
-                        else:
-                            self.beta = tf.Variable(0., name='beta', trainable=False)
+                                if self.declare_priors_shift:
+                                    self.kl_penalties_base.update(rv_dict['kl_penalties'])
+                                self.beta_eval_resample_ran[gf] = rv_dict['v_eval_resample']
+                                self.beta_ran[gf] = rv_dict['v']
 
                         if self.rescale_activations:
                             scale_sd_prior = get_numerical_sd(self.scale_sd_prior, in_dim=1, out_dim=1)
@@ -3116,56 +3599,47 @@ class LayerNormLayerBayes(LayerNormLayer):
                                 scale_sd_posterior = get_numerical_sd(self.scale_sd_init, in_dim=1, out_dim=1)
                             else:
                                 scale_sd_posterior = scale_sd_prior * self.posterior_to_prior_sd_ratio
+                            init = np.ones(shape)
+                            _scale_sd_prior = init * scale_sd_prior
+                            _scale_sd_posterior = init * scale_sd_posterior
 
-                            # Posterior distribution
-                            self.gamma_q_loc = tf.get_variable(
-                                name='gamma_q_loc',
-                                initializer=tf.ones_initializer(),
-                                shape=shape
+                            rv_dict = get_random_variable(
+                                'gamma',
+                                shape,
+                                _scale_sd_posterior,
+                                init=init,
+                                constraint=self.constraint,
+                                sd_prior=_scale_sd_prior,
+                                training=self.training,
+                                use_MAP_mode=self.use_MAP_mode,
+                                epsilon=self.epsilon,
+                                session=self.session
                             )
-                            self.gamma_q_scale = tf.get_variable(
-                                name='gamma_q_scale',
-                                initializer=lambda: tf.ones(shape) * self.constraint_fn_inv(scale_sd_posterior)
-                            )
-
-                            self.gamma_q_dist = Normal(
-                                loc=self.gamma_q_loc,
-                                scale=self.constraint_fn(self.gamma_q_scale) + self.epsilon,
-                                name='gamma_q'
-                            )
-                            if self.declare_priors_shift:
-                                # Prior distribution
-                                self.gamma_prior_dist = Normal(
-                                    loc=1.,
-                                    scale=scale_sd_prior,
-                                    name='gamma'
+                            if self.declare_priors_scale:
+                                self.kl_penalties_base.update(rv_dict['kl_penalties'])
+                            self.gamma_eval_resample = rv_dict['v_eval_resample']
+                            self.gamma = rv_dict['v']
+                            self.gamma_eval_resample_ran = {}
+                            self.gamma_ran = {}
+                            for gf in self.rangf_map:
+                                n_levels = self.rangf_map[gf][0] - 1
+                                _scale_sd_prior = np.ones([n_levels] + shape) * scale_sd_prior * self.ranef_to_fixef_prior_sd_ratio
+                                _scale_sd_posterior = np.ones([n_levels] + shape) * scale_sd_posterior * self.ranef_to_fixef_prior_sd_ratio
+                                rv_dict = get_random_variable(
+                                    'gamma_by_%s' % sn(gf),
+                                    [n_levels] + shape[1:],
+                                    _scale_sd_posterior,
+                                    constraint=self.constraint,
+                                    sd_prior=_scale_sd_prior,
+                                    training=self.training,
+                                    use_MAP_mode=self.use_MAP_mode,
+                                    epsilon=self.epsilon,
+                                    session=self.session
                                 )
-                                self.kl_penalties_base[self.name + '/gamma'] = {
-                                    'loc': 1.,
-                                    'scale': scale_sd_prior,
-                                    'val': self.gamma_q_dist.kl_divergence(self.gamma_prior_dist)
-                                }
-                            with tf.variable_scope(name, reuse=self.reuse):
-                                self.gamma_eval_sample = self.gamma_q_dist.sample()
-                                self.gamma_eval = tf.get_variable(
-                                    name='gamma_sample',
-                                    initializer=tf.zeros_initializer(),
-                                    shape=self.gamma_eval_sample.shape,
-                                    dtype=tf.float32,
-                                    trainable=False
-                                )
-                                self.gamma_eval_resample = tf.assign(self.gamma_eval, self.gamma_eval_sample)
-                            self.gamma = tf.cond(
-                                self.training,
-                                self.gamma_q_dist.sample,
-                                lambda: tf.cond(
-                                    self.use_MAP_mode,
-                                    self.gamma_q_dist.mean,
-                                    lambda: self.gamma_eval
-                                )
-                            )
-                        else:
-                            self.gamma = tf.Variable(1., name='beta', trainable=False)
+                                if self.declare_priors_scale:
+                                    self.kl_penalties_base.update(rv_dict['kl_penalties'])
+                                self.gamma_eval_resample_ran[gf] = rv_dict['v_eval_resample']
+                                self.gamma_ran[gf] = rv_dict['v']
 
         self.built = True
 
@@ -3179,8 +3653,12 @@ class LayerNormLayerBayes(LayerNormLayer):
         if self.built:
             if self.shift_activations:
                 out.append(self.beta_eval_resample)
+                for gf in self.rangf_map:
+                    out.append(self.beta_eval_resample_ran[gf])
             if self.rescale_activations:
                 out.append(self.gamma_eval_resample)
+                for gf in self.rangf_map:
+                    out.append(self.gamma_eval_resample_ran[gf])
 
         return out
 

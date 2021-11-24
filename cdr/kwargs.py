@@ -374,7 +374,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'eval_minibatch_size',
-        10000,
+        1024,
         int,
         "Size of minibatches to use for prediction/evaluation."
     ),
@@ -404,14 +404,13 @@ MODEL_INITIALIZATION_KWARGS = [
         None,
         [float, None],
         'Maximum allowable value for the global norm of the gradient, which will be clipped as needed. If ``None``, no gradient clipping.',
-        default_value_cdrnn=1.,
+        default_value_cdrnn=None,
     ),
     Kwarg(
         'epsilon',
         1e-5,
         float,
-        "Epsilon parameter to use for numerical stability in bounded parameter estimation.",
-        default_value_cdrnn=1e-2,
+        "Epsilon parameter to use for numerical stability in bounded parameter estimation."
     ),
     Kwarg(
         'optim_epsilon',
@@ -424,7 +423,7 @@ MODEL_INITIALIZATION_KWARGS = [
         0.001,
         float,
         "Initial value for the learning rate.",
-        default_value_cdrnn=0.01
+        default_value_cdrnn=0.005
     ),
     Kwarg(
         'learning_rate_min',
@@ -859,14 +858,15 @@ NN_KWARGS = [
     ),
     Kwarg(
         'rescale_X_time',
-        True,
+        False,
         bool,
         "Whether to rescale time values as inputs by their training SD under the hood. Times are automatically reconverted back to the source scale for plotting and model criticism.",
-        aliases=['rescale_time', 'rescale_time_X']
+        aliases=['rescale_time', 'rescale_time_X'],
+        default_value_cdrnn=True
     ),
     Kwarg(
         'rescale_t_delta',
-        True,
+        False,
         bool,
         "Whether to rescale time offset values by their training SD under the hood. Offsets are automatically reconverted back to the source scale for plotting and model criticism.",
         aliases=['rescale_time', 'rescale_tdelta']
@@ -875,23 +875,23 @@ NN_KWARGS = [
         'nonstationary',
         True,
         bool,
-        "Whether to model non-stationarity by feeding impulse timestamps as input."
+        "Whether to model non-stationarity in NN components by feeding impulse timestamps as input."
     ),
 
     # MODEL SIZE
     Kwarg(
-        'n_layers_input_projection',
+        'n_layers_ff',
         2,
         [int, None],
-        "Number of hidden layers in input projection. If ``None``, inferred from length of **n_units_input_projection**.",
-        aliases=['n_layers', 'n_layers_encoder']
+        "Number of hidden layers in feedforward encoder. If ``None``, inferred from length of **n_units_ff**.",
+        aliases=['n_layers', 'n_layers_encoder', 'n_layers_input_projection']
     ),
     Kwarg(
-        'n_units_input_projection',
+        'n_units_ff',
         32,
         [int, str, None],
-        "Number of units per input projection hidden layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_rnn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, input projection.",
-        aliases=['n_units', 'n_units_encoder']
+        "Number of units per feedforward encoder hidden layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_rnn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no feedforward encoder.",
+        aliases=['n_units', 'n_units_encoder', 'n_units_input_projection']
     ),
     Kwarg(
         'n_layers_rnn',
@@ -918,11 +918,17 @@ NN_KWARGS = [
         "Number of units per hidden layer in projection of RNN state. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_units_rnn_projection** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers in RNN projection."
     ),
     Kwarg(
-        'n_units_hidden_state',
+        'input_dependent_irf',
+        True,
+        bool,
+        "Whether or not NN IRFs are input-dependent (can modify their shape at different values of the predictors)."
+    ),
+    Kwarg(
+        'n_units_irf_hidden_state',
         32,
         [int, str],
         "Number of units in CDRNN hidden state. Must be an ``int``.",
-        aliases=['n_units', 'n_units_encoder']
+        aliases=['n_units', 'n_units_encoder', 'n_units_hidden_state']
     ),
     Kwarg(
         'n_layers_irf',
@@ -941,17 +947,18 @@ NN_KWARGS = [
 
     # ACTIVATION FUNCTIONS
     Kwarg(
-        'input_projection_inner_activation',
+        'ff_inner_activation',
         'gelu',
         [str, None],
-        "Name of activation function to use for hidden layers in input projection.",
-        aliases=['activation']
+        "Name of activation function to use for hidden layers in feedforward encoder.",
+        aliases=['activation', 'input_projection_inner_activation']
     ),
     Kwarg(
-        'input_projection_activation',
+        'ff_activation',
         None,
         [str, None],
-        "Name of activation function to use for output of input projection."
+        "Name of activation function to use for output of feedforward encoder.",
+        aliases=['input_projection_activation']
     ),
     Kwarg(
         'rnn_activation',
@@ -1015,8 +1022,8 @@ NN_KWARGS = [
     Kwarg(
         'weight_sd_init',
         'glorot',
-        [float, str],
-        "Standard deviation of kernel initialization distribution (Normal, mean=0). Can also be ``'glorot'``, which uses the SD of the Glorot normal initializer."
+        [float, str, None],
+        "Standard deviation of kernel initialization distribution (Normal, mean=0). Can also be ``'glorot'``, which uses the SD of the Glorot normal initializer. If ``None``, inferred from other hyperparams."
     ),
 
     # NORMALIZATION
@@ -1027,10 +1034,11 @@ NN_KWARGS = [
         "Decay rate to use for batch normalization in internal layers. If ``None``, no batch normalization.",
     ),
     Kwarg(
-        'normalize_input_projection',
+        'normalize_ff',
         True,
         bool,
-        "Whether to apply normalization (if applicable) to hidden layers of the input projection.",
+        "Whether to apply normalization (if applicable) to hidden layers of feedforward encoders.",
+        aliases=['normalize_input_projection']
     ),
     Kwarg(
         'normalize_h',
@@ -1091,16 +1099,18 @@ NN_KWARGS = [
         "Scale of weight regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
     Kwarg(
-        'input_projection_regularizer_name',
+        'ff_regularizer_name',
         None,
         [str, None],
-        "Name of weight regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``) on output layer of input projection; overrides **regularizer_name**. If ``None``, inherits from **nn_regularizer_name**."
+        "Name of weight regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``) on output layer of feedforward encoders; overrides **regularizer_name**. If ``None``, inherits from **nn_regularizer_name**.",
+        aliases=['input_projection_regularizer_name']
     ),
     Kwarg(
-        'input_projection_regularizer_scale',
+        'ff_regularizer_scale',
         1.,
         [str, float],
-        "Scale of weight regularizer (ignored if ``regularizer_name==None``) on output layer of input projection. If ``None``, inherits from **nn_regularizer_scale**."
+        "Scale of weight regularizer (ignored if ``regularizer_name==None``) on output layer of feedforward encoders. If ``None``, inherits from **nn_regularizer_scale**.",
+        aliases=['input_projection_regularizer_scale']
     ),
     Kwarg(
         'rnn_projection_regularizer_name',
@@ -1141,11 +1151,11 @@ NN_KWARGS = [
         "Rate at which to drop input_features."
     ),
     Kwarg(
-        'input_projection_dropout_rate',
+        'ff_dropout_rate',
         0.2,
         [float, None],
-        "Rate at which to drop neurons of input projection layers.",
-        aliases=['dropout_rate']
+        "Rate at which to drop neurons of feedforward encoder layers.",
+        aliases=['dropout_rate', 'input_projection']
     ),
     Kwarg(
         'rnn_h_dropout_rate',
@@ -1195,10 +1205,9 @@ NN_KWARGS = [
     ),
     Kwarg(
         'ranef_dropout_rate',
-        0.2,
+        None,
         [float, None],
-        "Rate at which to drop random effects indicators.",
-        aliases=['dropout_rate']
+        "Rate at which to drop random effects indicators."
     ),
 
     # DEPRECATED OR RARELY USED
@@ -1285,12 +1294,6 @@ NN_BAYES_KWARGS = [
     ),
 
     # INITIALIZATION
-    Kwarg(
-        'weight_sd_init',
-        None,
-        [str, float, None],
-        "Initial standard deviation of variational posterior over weights. If ``None``, inferred from other hyperparams."
-    ),
     Kwarg(
         'bias_sd_init',
         None,

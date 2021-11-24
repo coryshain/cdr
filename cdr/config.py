@@ -115,7 +115,7 @@ class Config(object):
         for model_field in [m for m in config.keys() if m.startswith('model_')]:
             model_name = model_field[6:]
             formula = Formula(config[model_field]['formula'])
-            is_cdrnn = len(formula.nns_by_id) > 1
+            is_cdrnn = len(formula.nns_by_id) > 0
             if model_name.startswith('CDR') or model_name.startswith('DTSR'):
                 reg_type = 'cdr'
             else:
@@ -233,20 +233,6 @@ class Config(object):
             # Standardize the model string
             out['formula'] = str(Formula(out['formula']))
 
-        if 'network_type' in settings:
-            out['network_type'] = settings.get('network_type')
-        elif add_defaults:
-            if is_cdr and not is_cdrnn:
-                network_type_default = 'bayes'
-            else:
-                network_type_default = 'mle'
-            out['network_type'] = settings.get('network_type', global_settings.get('network_type', network_type_default))
-
-        if 'network_type' in out:
-            is_bayes = out['network_type'] in ('bbvi', 'bayes', 'bayesian')
-        else:
-            is_bayes = False
-
         # Model initialization keyword arguments
         if is_cdr:
             # Allowing settings to propagate for the wrong model type if specified
@@ -265,29 +251,6 @@ class Config(object):
                     out[kwarg.key] = kwarg.kwarg_from_config(settings, is_cdrnn=is_cdrnn)
                 if kwarg.key == 'plot_interactions' and kwarg.key in out and isinstance(out[kwarg.key], str):
                     out[kwarg.key] = out[kwarg.key].split()
-
-            # Bayesian initialization keyword arguments
-            for kwarg in BAYES_KWARGS:
-                if add_defaults:
-                    if kwarg.in_settings(settings) or kwarg.key not in global_settings:
-                        out[kwarg.key] = kwarg.kwarg_from_config(settings, is_cdrnn=is_cdrnn)
-                    else:
-                        out[kwarg.key] = global_settings[kwarg.key]
-                elif kwarg.in_settings(settings):
-                    out[kwarg.key] = kwarg.kwarg_from_config(settings, is_cdrnn=is_cdrnn)
-
-            # CDRNNBayes initialization keyword arguments
-            for kwarg in NN_BAYES_KWARGS:
-                if is_cdrnn and is_bayes:
-                    if add_defaults:
-                        if kwarg.in_settings(settings) or kwarg.key not in global_settings:
-                            out[kwarg.key] = kwarg.kwarg_from_config(settings, is_cdrnn=is_cdrnn)
-                        else:
-                            out[kwarg.key] = global_settings[kwarg.key]
-                    elif kwarg.in_settings(settings):
-                        out[kwarg.key] = kwarg.kwarg_from_config(settings, is_cdrnn=is_cdrnn)
-                elif kwarg.in_settings(settings) and not kwarg.key in out:
-                    out[kwarg.key] = kwarg.kwarg_from_config(settings, is_cdrnn=is_cdrnn)
 
         out['ablated'] = set()
 

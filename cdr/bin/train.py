@@ -32,11 +32,7 @@ if __name__ == '__main__':
     argparser.add_argument('--cpu_only', action='store_true', help='Use CPU implementation even if GPU is available.')
     args = argparser.parse_args()
 
-    import time
-    t1 = time.time()
     p = Config(args.config_path)
-    t2 = time.time()
-    print('Config load time: %s' % (t2-t1))
 
     if not p.use_gpu_if_available or args.cpu_only:
         os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
@@ -244,13 +240,6 @@ if __name__ == '__main__':
             Y_valid, select_Y_valid = filter_invalid_responses(Y, dv)
 
             stderr('\nInitializing model %s...\n\n' % m)
-
-            if p['network_type'] in ['mle', 'nn']:
-                bayes = False
-            elif p['network_type'].lower() in ['bbvi', 'bayes', 'bayesian']:
-                bayes = True
-            else:
-                raise ValueError('Unrecognized network type %s.' % p['network_type'])
 
             kwargs = {}
             for kwarg in MODEL_INITIALIZATION_KWARGS:
