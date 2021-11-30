@@ -403,8 +403,7 @@ MODEL_INITIALIZATION_KWARGS = [
         'max_global_gradient_norm',
         None,
         [float, None],
-        'Maximum allowable value for the global norm of the gradient, which will be clipped as needed. If ``None``, no gradient clipping.',
-        default_value_cdrnn=None,
+        'Maximum allowable value for the global norm of the gradient, which will be clipped as needed. If ``None``, no gradient clipping.'
     ),
     Kwarg(
         'epsilon',
@@ -924,6 +923,36 @@ NN_KWARGS = [
         "Whether or not NN IRFs are input-dependent (can modify their shape at different values of the predictors)."
     ),
     Kwarg(
+        'input_dependent_l1_only',
+        False,
+        bool,
+        "Whether to include random effects only on first layer of feedforward transforms (``True``) or on all neural components."
+    ),
+    Kwarg(
+        'input_dependent_bias_only',
+        True,
+        bool,
+        "Whether to only bias terms of neural components are input-dependent (``True``) or also weight matrices."
+    ),
+    Kwarg(
+        'ranef_l1_only',
+        False,
+        bool,
+        "Whether to include random effects only on first layer of feedforward transforms (``True``) or on all neural components."
+    ),
+    Kwarg(
+        'ranef_bias_only',
+        True,
+        bool,
+        "Whether to include random effects only on bias terms of neural components (``True``) or also on weight matrices."
+    ),
+    Kwarg(
+        'normalizer_use_ranef',
+        False,
+        bool,
+        "Whether to include random effects in normalizer layers (``True``) or not."
+    ),
+    Kwarg(
         'n_units_irf_hidden_state',
         32,
         [int, str],
@@ -1080,7 +1109,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'layer_normalization_type',
-        None,
+        'z',
         [str, None],
         "Type of layer normalization, one of ``['z', 'length', None]``. If ``'z'``, classical z-transform-based normalization. If ``'length'``, normalize by the norm of the activation vector. If ``None``, no layer normalization. Incompatible with batch normalization.",
     ),

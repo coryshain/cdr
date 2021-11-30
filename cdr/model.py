@@ -621,6 +621,9 @@ class CDRModel(object):
             assert len(self.nns_by_id[nn_id].nodes) == 1, 'NN impulses should have exactly 1 associated node. Got %d.' % len(self.nns_by_id[nn_id].nodes)
             self.nn_impulse_impulse_names[nn_id] = [x.name() for x in self.nns_by_id[nn_id].nodes[0].impulses()]
         self.nn_transformed_impulses = []
+        self.nn_transformed_impulse_t_delta = []
+        self.nn_transformed_impulse_X_time = []
+        self.nn_transformed_impulse_X_mask = []
 
         # Initialize predictive distribution metadata
 
@@ -939,7 +942,6 @@ class CDRModel(object):
         self.hidden_state_to_irf_l1 = {}
         self.nn_irf_l1 = {}
         self.nn_irf_layers = {}
-        self.nn_irf_lambda = {}
 
         with self.session.as_default():
             with self.session.graph.as_default():
@@ -2881,9 +2883,18 @@ class CDRModel(object):
             batch_normalization_decay=None,
             layer_normalization_type=None,
             rangf_map=None,
+            weights_use_ranef=None,
+            biases_use_ranef=None,
+            normalizer_use_ranef=None,
             final=False,
             name=None
     ):
+        if weights_use_ranef is None:
+            weights_use_ranef = not self.ranef_bias_only
+        if biases_use_ranef is None:
+            biases_use_ranef = True
+        if normalizer_use_ranef is None:
+            normalizer_use_ranef = self.normalizer_use_ranef
         with self.session.as_default():
             with self.session.graph.as_default():
                 projection = DenseLayer(
@@ -2900,6 +2911,9 @@ class CDRModel(object):
                     shift_normalized_activations=self.shift_normalized_activations,
                     rescale_normalized_activations=self.rescale_normalized_activations,
                     rangf_map=rangf_map,
+                    weights_use_ranef=weights_use_ranef,
+                    biases_use_ranef=biases_use_ranef,
+                    normalizer_use_ranef=normalizer_use_ranef,
                     kernel_sd_init=self.weight_sd_init,
                     epsilon=self.epsilon,
                     session=self.session,
@@ -2918,9 +2932,18 @@ class CDRModel(object):
             batch_normalization_decay=None,
             layer_normalization_type=None,
             rangf_map=None,
+            weights_use_ranef=None,
+            biases_use_ranef=None,
+            normalizer_use_ranef=None,
             final=False,
             name=None
     ):
+        if weights_use_ranef is None:
+            weights_use_ranef = not self.ranef_bias_only
+        if biases_use_ranef is None:
+            biases_use_ranef = True
+        if normalizer_use_ranef is None:
+            normalizer_use_ranef = self.normalizer_use_ranef
         with self.session.as_default():
             with self.session.graph.as_default():
                 if final:
@@ -2954,6 +2977,9 @@ class CDRModel(object):
                     shift_normalized_activations=self.shift_normalized_activations,
                     rescale_normalized_activations=self.rescale_normalized_activations,
                     rangf_map=rangf_map,
+                    weights_use_ranef=weights_use_ranef,
+                    biases_use_ranef=biases_use_ranef,
+                    normalizer_use_ranef=normalizer_use_ranef,
                     declare_priors_weights=declare_priors_weights,
                     declare_priors_biases=self.declare_priors_biases,
                     kernel_sd_prior=weight_sd_prior,
@@ -2976,7 +3002,21 @@ class CDRModel(object):
             return self._initialize_feedforward_bayes(*args, **kwargs)
         return self._initialize_feedforward_mle(*args, **kwargs)
 
-    def _initialize_rnn_mle(self, nn_id, l, rangf_map=None):
+    def _initialize_rnn_mle(
+            self,
+            nn_id,
+            l,
+            rangf_map=None,
+            weights_use_ranef=None,
+            biases_use_ranef=None,
+            normalizer_use_ranef=None,
+    ):
+        if weights_use_ranef is None:
+            weights_use_ranef = not self.ranef_bias_only
+        if biases_use_ranef is None:
+            biases_use_ranef = True
+        if normalizer_use_ranef is None:
+            normalizer_use_ranef = self.normalizer_use_ranef
         with self.session.as_default():
             with self.session.graph.as_default():
                 units = self.n_units_rnn[l]
@@ -2991,6 +3031,9 @@ class CDRModel(object):
                     bottomup_kernel_sd_init=self.weight_sd_init,
                     recurrent_kernel_sd_init=self.weight_sd_init,
                     rangf_map=rangf_map,
+                    weights_use_ranef=weights_use_ranef,
+                    biases_use_ranef=biases_use_ranef,
+                    normalizer_use_ranef=normalizer_use_ranef,
                     bottomup_dropout=self.ff_dropout_rate,
                     h_dropout=self.rnn_h_dropout_rate,
                     c_dropout=self.rnn_c_dropout_rate,
@@ -3003,7 +3046,21 @@ class CDRModel(object):
 
                 return rnn
 
-    def _initialize_rnn_bayes(self, nn_id, l, rangf_map=None):
+    def _initialize_rnn_bayes(
+            self,
+            nn_id,
+            l,
+            rangf_map=None,
+            weights_use_ranef=None,
+            biases_use_ranef=None,
+            normalizer_use_ranef=None,
+    ):
+        if weights_use_ranef is None:
+            weights_use_ranef = not self.ranef_bias_only
+        if biases_use_ranef is None:
+            biases_use_ranef = True
+        if normalizer_use_ranef is None:
+            normalizer_use_ranef = self.normalizer_use_ranef
         with self.session.as_default():
             with self.session.graph.as_default():
                 units = self.n_units_rnn[l]
@@ -3026,6 +3083,9 @@ class CDRModel(object):
                     bottomup_kernel_sd_init=self.weight_sd_init,
                     recurrent_kernel_sd_init=self.weight_sd_init,
                     rangf_map=rangf_map,
+                    weights_use_ranef=weights_use_ranef,
+                    biases_use_ranef=biases_use_ranef,
+                    normalizer_use_ranef=normalizer_use_ranef,
                     bias_sd_prior=self.bias_prior_sd,
                     bias_sd_init=self.bias_sd_init,
                     posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
@@ -3144,6 +3204,11 @@ class CDRModel(object):
                     if gf in self.nns_by_id[nn_id].rangf:
                         _Y_gf = Y_gf[:, i]
                         rangf_map[gf] = (self.rangf_n_levels[self.rangf.index(gf)], _Y_gf)
+                rangf_map_l1 = rangf_map
+                if self.ranef_l1_only:
+                    rangf_map_other = None
+                else:
+                    rangf_map_other = rangf_map
 
                 if nn_id in self.nn_impulse_ids or self.input_dependent_irf:
                     assert self.n_layers_ff or self.n_layers_rnn, "n_layers_ff and n_layers_rnn can't both be zero in NN transforms of predictors."
@@ -3171,6 +3236,11 @@ class CDRModel(object):
                     ff_layers = []
                     if self.n_layers_ff:
                         for l in range(self.n_layers_ff + 1):
+                            if l == 0 or not self.ranef_l1_only:
+                                _rangf_map = rangf_map_l1
+                            else:
+                                _rangf_map = rangf_map_other
+
                             if l < self.n_layers_ff:
                                 units = self.n_units_ff[l]
                                 activation = self.ff_inner_activation
@@ -3201,7 +3271,7 @@ class CDRModel(object):
                                 maxnorm=mn,
                                 batch_normalization_decay=bn,
                                 layer_normalization_type=ln,
-                                rangf_map=rangf_map,
+                                rangf_map=_rangf_map,
                                 name='%s_ff_l%s' % (nn_id, l + 1)
                             )
                             self.layers.append(projection)
@@ -3227,7 +3297,11 @@ class CDRModel(object):
                     rnn_h_ema = []
                     rnn_c_ema = []
                     for l in range(self.n_layers_rnn):
-                        layer = self._initialize_rnn(nn_id, l, rangf_map=rangf_map)
+                        if l == 0:
+                            _rangf_map = rangf_map_l1
+                        else:
+                            _rangf_map = rangf_map_other
+                        layer = self._initialize_rnn(nn_id, l, rangf_map=_rangf_map)
                         _rnn_h_ema = tf.Variable(tf.zeros(units), trainable=False, name='%s_rnn_h_ema_l%d' % (nn_id, l+1))
                         rnn_h_ema.append(_rnn_h_ema)
                         _rnn_c_ema = tf.Variable(tf.zeros(units), trainable=False, name='%s_rnn_c_ema_l%d' % (nn_id, l+1))
@@ -3312,23 +3386,35 @@ class CDRModel(object):
                     # H normalization
                     if self.normalize_h and self.normalize_activations:
                         self.h_normalization_layer[nn_id] = self._initialize_normalization(
-                            rangf_map=rangf_map,
+                            rangf_map=rangf_map_l1 if self.normalizer_use_ranef else None,
                             name='%s_h' % nn_id
                         )
                         self.layers.append(self.h_normalization_layer[nn_id])
 
                     # H bias
                     if not (self.normalize_h and self.normalize_activations) or self.normalize_after_activation:
-                        self.h_bias_layer[nn_id] = self._initialize_bias(name='%s_h_bias' % nn_id, rangf_map=rangf_map)
+                        self.h_bias_layer[nn_id] = self._initialize_bias(name='%s_h_bias' % nn_id, rangf_map=rangf_map_l1)
 
                     if self.input_dependent_irf:
                         # Projection from hidden state to first layer (weights and biases) of IRF
+                        units_coef = 1
+                        if not self.input_dependent_bias_only:
+                            units_coef += 1
+                        if self.nonstationary:
+                            units_coef += 1
+                        if self.input_dependent_l1_only:
+                            n_layers = 1
+                        else:
+                            n_layers = self.n_layers_irf
+                        units = 0
+                        for l in range(n_layers):
+                            units += self.n_units_irf[0] * units_coef
                         hidden_state_to_irf_l1 = self._initialize_feedforward(
-                            units=self.n_units_irf[0] * 2,
+                            units=units,
                             use_bias=False,
                             activation=None,
-                            dropout=self.irf_dropout_rate,
-                            rangf_map=rangf_map,
+                            dropout=None,
+                            rangf_map=rangf_map_other,
                             name='%s_hidden_state_to_irf_l1' % nn_id
                         )
                         self.layers.append(hidden_state_to_irf_l1)
@@ -3341,6 +3427,11 @@ class CDRModel(object):
 
                     irf_layers = []
                     for l in range(self.n_layers_irf + 1):
+                        if l == 0 or not self.ranef_l1_only:
+                            _rangf_map = rangf_map_l1
+                        else:
+                            _rangf_map = rangf_map_other
+
                         if l < self.n_layers_irf:
                             units = self.n_units_irf[l]
                             activation = self.irf_inner_activation
@@ -3372,23 +3463,19 @@ class CDRModel(object):
                             maxnorm=mn,
                             batch_normalization_decay=bn,
                             layer_normalization_type=ln,
-                            rangf_map=rangf_map,
+                            rangf_map=_rangf_map,
                             final=final,
                             name='%s_irf_l%s' % (nn_id, l + 1)
                         )
                         self.layers.append(projection)
+                        irf_layers.append(projection)
 
                         if l < self.n_layers_irf:
                             self.regularizable_layers.append(projection)
                         if l == 0:
                             self.nn_irf_l1[nn_id] = projection
-                        else:
-                            irf_layers.append(make_lambda(projection, session=self.session, use_kwargs=False))
-
-                    irf = compose_lambdas(irf_layers)
 
                     self.nn_irf_layers[nn_id] = irf_layers
-                    self.nn_irf_lambda[nn_id] = irf
 
     def _compile_nn(self, nn_id):
         with self.session.as_default():
@@ -3397,12 +3484,80 @@ class CDRModel(object):
                     impulse_names = self.nn_impulse_impulse_names[nn_id]
                 else:  # nn_id in self.nn_irf_ids
                     impulse_names = self.nn_irf_impulse_names[nn_id]
-                impulse_ix = names2ix(impulse_names, self.impulse_names)
-                X = tf.gather(self.X_processed, impulse_ix, axis=2)
-                t_delta = tf.gather(self.t_delta, impulse_ix, axis=2)
-                X_time = tf.gather(self.X_time, impulse_ix, axis=2)
-                X_mask = tf.gather(self.X_mask, impulse_ix, axis=2)
 
+                X = []
+                t_delta = []
+                X_time = []
+                X_mask = []
+                impulse_names_ordered = []
+
+                # Collect non-neural impulses
+                non_nn_impulse_names = [x for x in impulse_names if x in self.impulse_names]
+                if len(non_nn_impulse_names):
+                    impulse_ix = names2ix(non_nn_impulse_names, self.impulse_names)
+                    X.append(tf.gather(self.X_processed, impulse_ix, axis=2))
+                    t_delta.append(tf.gather(self.t_delta, impulse_ix, axis=2))
+                    X_time.append(tf.gather(self.X_time, impulse_ix, axis=2))
+                    X_mask.append(tf.gather(self.X_mask, impulse_ix, axis=2))
+                    impulse_names_ordered += non_nn_impulse_names
+
+                # Collect neurally transformed impulses
+                nn_impulse_names = [x for x in impulse_names if x not in self.impulse_names]
+                assert not len(nn_impulse_names) or nn_id in self.nn_irf_ids, 'NN impulse transforms may not be nested.'
+                if len(nn_impulse_names):
+                    all_nn_impulse_names = [self.nns_by_id[x].name() for x in self.nn_impulse_ids]
+                    impulse_ix = names2ix(nn_impulse_names, all_nn_impulse_names)
+                    X.append(tf.gather(self.nn_transformed_impulses, impulse_ix, axis=2))
+                    t_delta.append(tf.gather(self.nn_transformed_impulse_t_delta, impulse_ix, axis=2))
+                    X_time.append(tf.gather(self.nn_transformed_impulse_X_time, impulse_ix, axis=2))
+                    X_mask.append(tf.gather(self.nn_transformed_impulse_X_mask, impulse_ix, axis=2))
+                    impulse_names_ordered += nn_impulse_names
+                    
+                assert len(impulse_names_ordered), 'NN transform must get at least one input'
+                # Pad and concatenate impulses, deltas, timestamps, and masks
+                if len(X) == 1:
+                    X = X[0]
+                else:
+                    max_len = tf.reduce_max([tf.shape(x)[1] for x in X])  # Get maximum timesteps
+                    X = [
+                        tf.pad(x, ((0, 0), (max_len - tf.shape(x)[1], 0), (0, 0))) for x in X
+                    ]
+                    X = tf.concat(X, axis=2)
+                if len(t_delta) == 1:
+                    t_delta = t_delta[0]
+                else:
+                    max_len = tf.reduce_max([tf.shape(x)[1] for x in t_delta])  # Get maximum timesteps
+                    t_delta = [
+                        tf.pad(x, ((0, 0), (max_len - tf.shape(x)[1], 0), (0, 0))) for x in t_delta
+                    ]
+                    t_delta = tf.concat(t_delta, axis=2)
+                if len(X_time) == 1:
+                    X_time = X_time[0]
+                else:
+                    max_len = tf.reduce_max([tf.shape(x)[1] for x in X_time])  # Get maximum timesteps
+                    X_time = [
+                        tf.pad(x, ((0, 0), (max_len - tf.shape(x)[1], 0), (0, 0), (0, 0), (0, 0))) for x in X_time
+                    ]
+                    X_time = tf.concat(X_time, axis=2)
+                if len(X_mask) == 1:
+                    X_mask = X_mask[0]
+                else:
+                    max_len = tf.reduce_max([tf.shape(x)[1] for x in X_mask])  # Get maximum timesteps
+                    X_mask = [
+                        tf.pad(x, ((0, 0), (max_len - tf.shape(x)[1], 0), (0, 0), (0, 0), (0, 0))) for x in X_mask
+                    ]
+                    X_mask = tf.concat(X_mask, axis=2)
+
+                # Reorder impulses if needed (i.e. if both neural and non-neural impulses are included, they
+                # will be out of order relative to impulse_names)
+                if len(non_nn_impulse_names) and len(nn_impulse_names):
+                    impulse_ix = names2ix(impulse_names_ordered, impulse_names)
+                    X = tf.gather(X, impulse_ix, axis=2)
+                    t_delta = tf.gather(t_delta, impulse_ix, axis=2)
+                    X_time = tf.gather(X_time, impulse_ix, axis=2)
+                    X_mask = tf.gather(X_mask, impulse_ix, axis=2)
+
+                # Process and reshape impulses, deltas, timestamps, and masks if needed
                 if X_time is None:
                     X_shape = tf.shape(X)
                     X_time_shape = []
@@ -3593,27 +3748,52 @@ class CDRModel(object):
 
                 if nn_id in self.nn_impulse_ids:
                     self.nn_transformed_impulses.append(h)
+                    self.nn_transformed_impulse_t_delta.append(t_delta)
+                    self.nn_transformed_impulse_X_time.append(X_time)
+                    self.nn_transformed_impulse_X_mask.append(X_mask)
                 else:  # nn_id in self.nn_irf_ids
                     # Compute IRF outputs
 
-                    irf_out = t_delta
-
-                    # L1
                     if self.input_dependent_irf:
-                        irf_l1_Wb_offsets = tf.expand_dims(self.hidden_state_to_irf_l1[nn_id](h), axis=-2)
-                        irf_l1_W_offsets = irf_l1_Wb_offsets[..., :self.n_units_irf[0]]
-                        irf_l1_b_offsets = irf_l1_Wb_offsets[..., self.n_units_irf[0]:]
+                        irf_offsets = self.hidden_state_to_irf_l1[nn_id](h)
+
+                    ix = 0
+                    if self.nonstationary:
+                        irf_out = tf.concat([t_delta, X_time], axis=2)
                     else:
-                        irf_l1_W_offsets = irf_l1_b_offsets = None
+                        irf_out = t_delta
+                    for l in range(self.n_layers_irf + 1):
+                        if l == self.n_layers_irf:
+                            _W_offsets = None
+                            _b_offsets = None
+                        elif self.input_dependent_irf:
+                            if l == 0 or not self.input_dependent_l1_only:
+                                _b_offsets = irf_offsets[..., ix: ix + self.n_units_irf[l]]
+                                ix += self.n_units_irf[l]
+                                if not self.input_dependent_bias_only:
+                                    shift = self.n_units_irf[l]
+                                    if self.nonstationary:
+                                        shift *= 2
+                                    _W_offsets = irf_offsets[..., ix: ix + shift]
+                                    ix += shift
+                                    if self.nonstationary:
+                                        shape = tf.shape(_W_offsets)
+                                        irf_l1_W_offsets = tf.reshape(
+                                            irf_l1_W_offsets,
+                                            [shape[0], shape[1], 2, self.n_units_irf[l]]
+                                        )
+                                else:
+                                    _W_offsets = None
+                            else:
+                                _W_offsets = None
+                                _b_offsets = None
 
-                    irf_out = self.nn_irf_l1[nn_id](
-                        irf_out,
-                        kernel_offsets=irf_l1_W_offsets,
-                        bias_offsets=irf_l1_b_offsets,
-                    )
+                        irf_out = self.nn_irf_layers[nn_id][l](
+                            irf_out,
+                            kernel_offsets=_W_offsets,
+                            bias_offsets=_b_offsets
+                        )
 
-                    # L2+
-                    irf_out = self.nn_irf_lambda[nn_id](irf_out)
                     stabilizing_constant = (self.history_length + self.future_length) * len(self.terminal_names)
                     irf_out = irf_out / stabilizing_constant
 
@@ -3693,6 +3873,18 @@ class CDRModel(object):
                 self.nn_transformed_impulses = self.nn_transformed_impulses[0]
             else:
                 self.nn_transformed_impulses = tf.concat(self.nn_transformed_impulses, axis=2)
+            if len(self.nn_transformed_impulse_t_delta) == 1:
+                self.nn_transformed_impulse_t_delta = self.nn_transformed_impulse_t_delta[0]
+            else:
+                self.nn_transformed_impulse_t_delta = tf.concat(self.nn_transformed_impulse_t_delta, axis=2)
+            if len(self.nn_transformed_impulse_X_time) == 1:
+                self.nn_transformed_impulse_X_time = self.nn_transformed_impulse_X_time[0]
+            else:
+                self.nn_transformed_impulse_X_time = tf.concat(self.nn_transformed_impulse_X_time, axis=2)
+            if len(self.nn_transformed_impulse_X_mask) == 1:
+                self.nn_transformed_impulse_X_mask = self.nn_transformed_impulse_X_mask[0]
+            else:
+                self.nn_transformed_impulse_X_mask = tf.concat(self.nn_transformed_impulse_X_mask, axis=2)
 
     def _collect_layerwise_ops(self):
         with self.session.as_default():
@@ -3931,7 +4123,6 @@ class CDRModel(object):
                         if len(irf_input_names) > 0:
                             irf_input_ix = names2ix(irf_input_names, terminal_names)
                             irf_inputs = self.X_weighted_unscaled[response]
-                            # irf_inputs = self.X_weighted[response]
                             irf_inputs = tf.reduce_sum(irf_inputs, axis=1, keepdims=True)
                             irf_inputs = tf.gather(
                                 irf_inputs,
@@ -4101,11 +4292,12 @@ class CDRModel(object):
 
                     self.X_weighted_unscaled[response] = X_weighted_by_irf
 
+                    X_weighted = X_weighted_by_irf
                     coef_names = [self.node_table[x].coef_id() for x in self.terminal_names]
                     coef_ix = names2ix(coef_names, self.coef_names)
                     coef = tf.gather(self.coefficient[response], coef_ix, axis=1)
                     coef = tf.expand_dims(coef, axis=1)
-                    X_weighted = X_weighted_by_irf * coef
+                    X_weighted = X_weighted * coef
                     self.X_weighted[response] = X_weighted
 
     def _initialize_predictive_distribution(self):
@@ -4554,7 +4746,7 @@ class CDRModel(object):
                     loss_func = loss_func * self.minibatch_scale
 
                 # Regularize
-                for l in self.regularizable_layers: # CDRNN only
+                for l in self.regularizable_layers:
                     if hasattr(l, 'regularizable_weights'):
                         vars = l.regularizable_weights
                     else:
@@ -5436,7 +5628,6 @@ class CDRModel(object):
                 self._initialize_base_params()
                 for nn_id in self.nn_impulse_ids:
                     self._initialize_nn(nn_id)
-                    # self._compile_nn_ranef(nn_id)
                     self._compile_nn(nn_id)
                 self._concat_nn_impulses()
                 self._compile_intercepts()
@@ -5445,7 +5636,6 @@ class CDRModel(object):
                 self._compile_irf_params()
                 for nn_id in self.nn_irf_ids:
                     self._initialize_nn(nn_id)
-                    # self._compile_nn_ranef(nn_id)
                     self._compile_nn(nn_id)
                 self._collect_layerwise_ops()
                 self._initialize_irf_lambdas()

@@ -1391,6 +1391,9 @@ class DenseLayer(object):
             shift_normalized_activations=True,
             rescale_normalized_activations=True,
             rangf_map=None,  # Dict mapping <rangfid>: (n_levels, tensor)
+            weights_use_ranef=False,
+            biases_use_ranef=True,
+            normalizer_use_ranef=False,
             reuse=tf.AUTO_REUSE,
             epsilon=1e-5,
             session=None,
@@ -1444,6 +1447,9 @@ class DenseLayer(object):
                 if not bool(rangf_map):
                     rangf_map = {}
                 self.rangf_map = rangf_map
+                self.weights_use_ranef = weights_use_ranef
+                self.biases_use_ranef = biases_use_ranef
+                self.normalizer_use_ranef = normalizer_use_ranef
 
                 self.normalization_beta = None
                 self.normalization_gamma = None
@@ -1459,8 +1465,9 @@ class DenseLayer(object):
         if self.built:
             out.append(self.kernel)
             for gf in self.rangf_map:
-                out.append(self.kernel_ran[gf])
-                if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
+                if self.weights_use_ranef:
+                    out.append(self.kernel_ran[gf])
+                if self.use_bias and (not self.normalize_activations or self.normalize_after_activation) and self.biases_use_ranef:
                     out.append(self.bias_ran[gf])
 
         return out
@@ -1493,13 +1500,14 @@ class DenseLayer(object):
                             shape=[in_dim, out_dim]
                         )
                         self.kernel_ran = {}
-                        for gf in self.rangf_map:
-                            n_levels = self.rangf_map[gf][0] - 1
-                            self.kernel_ran[gf] = tf.get_variable(
-                                name='kernel_by_%s' % sn(gf),
-                                initializer=tf.zeros_initializer(),
-                                shape=[n_levels, in_dim, out_dim]
-                            )
+                        if self.weights_use_ranef:
+                            for gf in self.rangf_map:
+                                n_levels = self.rangf_map[gf][0] - 1
+                                self.kernel_ran[gf] = tf.get_variable(
+                                    name='kernel_by_%s' % sn(gf),
+                                    initializer=tf.zeros_initializer(),
+                                    shape=[n_levels, in_dim, out_dim]
+                                )
 
                         if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
                             self.bias = tf.get_variable(
@@ -1508,16 +1516,14 @@ class DenseLayer(object):
                                 initializer=tf.zeros_initializer(),
                             )
                             self.bias_ran = {}
-                            for gf in self.rangf_map:
-                                n_levels = self.rangf_map[gf][0] - 1
-                                self.bias_ran[gf] = tf.get_variable(
-                                    name='bias_by_%s' % sn(gf),
-                                    initializer=tf.zeros_initializer(),
-                                    shape=[n_levels, out_dim]
-                                )
-                        #
-                        # if self.use_dropout:
-                        #     self.dropout_layer.build([x for x in inputs_shape[:-1]] + [out_dim])
+                            if self.biases_use_ranef:
+                                for gf in self.rangf_map:
+                                    n_levels = self.rangf_map[gf][0] - 1
+                                    self.bias_ran[gf] = tf.get_variable(
+                                        name='bias_by_%s' % sn(gf),
+                                        initializer=tf.zeros_initializer(),
+                                        shape=[n_levels, out_dim]
+                                    )
 
                         if self.use_batch_normalization:
                             self.normalization_layer = BatchNormLayer(
@@ -1525,6 +1531,7 @@ class DenseLayer(object):
                                 shift_activations=self.shift_normalized_activations,
                                 rescale_activations=self.rescale_normalized_activations,
                                 axis=-1,
+                                rangf_map=self.rangf_map if self.normalizer_use_ranef else False,
                                 training=self.training,
                                 epsilon=self.epsilon,
                                 session=self.session,
@@ -1537,6 +1544,7 @@ class DenseLayer(object):
                                 shift_activations=self.shift_normalized_activations,
                                 rescale_activations=self.rescale_normalized_activations,
                                 axis=-1,
+                                rangf_map=self.rangf_map if self.normalizer_use_ranef else False,
                                 training=self.training,
                                 epsilon=self.epsilon,
                                 session=self.session,
@@ -1548,6 +1556,13 @@ class DenseLayer(object):
 
     def __call__(self, inputs, kernel_offsets=None, bias_offsets=None):
         assert len(inputs.shape) > 1, 'inputs must have a batch dim'
+        hadamard = inputs.shape[-1] == 1
+        add_dim_1 = len(inputs.shape) == 2
+        add_dim_m3 = False
+        if kernel_offsets is not None:
+            assert len(kernel_offsets.shape) <= len(inputs.shape) + 1, 'Rank of kernel_offsets can be no bigger than rank of inputs + 1. Saw rank inputs=%d, rank kernel_offsets=%d.' % (len(inputs.shape), len(kernel_offsets.shape))
+        if bias_offsets is not None:
+            assert len(bias_offsets.shape) <= len(bias_offsets.shape), 'Rank of bias_offsets can be no bigger than rank of inputs . Saw rank inputs=%d, rank kernel_offsets=%d.' % (len(inputs.shape), len(bias_offsets.shape))
         if not self.built:
             self.build(inputs.shape)
 
@@ -1558,44 +1573,49 @@ class DenseLayer(object):
                 else:
                     name = self.name
                 with tf.variable_scope(name, reuse=self.reuse):
-                    if len(inputs.shape) == 2:
-                        inputs = tf.expand_dims(inputs, axis=1) # Ensure batch dim
-                        squeeze = True
-                    else:
-                        squeeze = False
-
+                    if add_dim_1:
+                        inputs = tf.expand_dims(inputs, axis=1)
                     kernel = self.kernel[None, ...] # Expand batch dim
-                    for gf in self.kernel_ran:
-                        Y_gf = self.rangf_map[gf][1]
-                        kernel_ran = self.kernel_ran[gf]
-                        kernel_ran -= tf.reduce_mean(kernel_ran, axis=0, keepdims=True)
-                        kernel_ran = tf.pad(kernel_ran, [[0,1], [0,0], [0,0]])
-                        kernel += tf.gather(kernel_ran, Y_gf)
+                    if self.weights_use_ranef:
+                        for gf in self.kernel_ran:
+                            Y_gf = self.rangf_map[gf][1]
+                            kernel_ran = self.kernel_ran[gf]
+                            kernel_ran -= tf.reduce_mean(kernel_ran, axis=0, keepdims=True)
+                            kernel_ran = tf.pad(kernel_ran, [[0,1], [0,0], [0,0]])
+                            kernel += tf.gather(kernel_ran, Y_gf)
                     while len(kernel.shape) < len(inputs.shape):
-                        kernel = tf.expand_dims(kernel, axis=1)
+                        kernel = tf.expand_dims(kernel, axis=-3) # Batch axis immediately before weight matrix
                     if kernel_offsets is not None:
-                        while len(kernel.shape) < len(kernel_offsets.shape):
-                            kernel = tf.expand_dims(kernel, axis=1)
                         while len(kernel_offsets.shape) < len(kernel.shape):
-                            kernel_offsets = tf.expand_dims(kernel_offsets, axis=1)
+                            kernel_offsets = tf.expand_dims(kernel_offsets, axis=-3)
+                        if len(kernel_offsets.shape) - len(kernel.shape) == 1:
+                            kernel = tf.expand_dims(kernel, axis=-3)
+                            add_dim_m3 = True
                         kernel = kernel + kernel_offsets
                     if self.maxnorm:
                         kernel = tf.clip_by_norm(kernel, self.maxnorm, axes=[0])
-                    if (len(kernel.shape) - len(inputs.shape)) == 1:
+                    if hadamard:
+                        H = inputs * kernel
+                    elif add_dim_m3:
                         inputs = tf.expand_dims(inputs, axis=-2)
-                        squeeze = True
-                    H = matmul(inputs, kernel)
+                        H = matmul(inputs, kernel)
+                        H = tf.squeeze(H, axis=-2)
+                    else:
+                        H = matmul(inputs, kernel)
                     if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
                         bias = self.bias[None, ...] # Expand batch dim
-                        for gf in self.bias_ran:
-                            Y_gf = self.rangf_map[gf][1]
-                            bias_ran = self.bias_ran[gf]
-                            bias_ran -= tf.reduce_mean(bias_ran, axis=0, keepdims=True)
-                            bias_ran = tf.pad(bias_ran, [[0,1], [0,0]])
-                            bias += tf.gather(bias_ran, Y_gf)
+                        if self.biases_use_ranef:
+                            for gf in self.bias_ran:
+                                Y_gf = self.rangf_map[gf][1]
+                                bias_ran = self.bias_ran[gf]
+                                bias_ran -= tf.reduce_mean(bias_ran, axis=0, keepdims=True)
+                                bias_ran = tf.pad(bias_ran, [[0,1], [0,0]])
+                                bias += tf.gather(bias_ran, Y_gf)
                         while len(bias.shape) < len(H.shape):
-                            bias = tf.expand_dims(bias, axis=1)
+                            bias = tf.expand_dims(bias, axis=-2)
                         if bias_offsets is not None:
+                            while len(bias_offsets.shape) < len(bias.shape):
+                                bias_offsets = tf.expand_dims(bias_offsets, axis=-2)
                             bias = bias + bias_offsets
                         H += bias
 
@@ -1610,8 +1630,8 @@ class DenseLayer(object):
 
                     H = self.dropout_layer(H)
 
-                    if squeeze:
-                        H = tf.squeeze(H, axis=-2)
+                    if add_dim_1:
+                        H = tf.squeeze(H, axis=1)
 
                     return H
 
@@ -1652,6 +1672,9 @@ class DenseLayerBayes(DenseLayer):
             shift_normalized_activations=True,
             rescale_normalized_activations=True,
             rangf_map=None,
+            weights_use_ranef=False,
+            biases_use_ranef=True,
+            normalizer_use_ranef=False,
             declare_priors_weights=True,
             declare_priors_biases=False,
             declare_priors_gamma=False,
@@ -1684,6 +1707,9 @@ class DenseLayerBayes(DenseLayer):
             shift_normalized_activations=shift_normalized_activations,
             rescale_normalized_activations=rescale_normalized_activations,
             rangf_map=rangf_map,
+            weights_use_ranef=weights_use_ranef,
+            biases_use_ranef=biases_use_ranef,
+            normalizer_use_ranef=normalizer_use_ranef,
             reuse=reuse,
             epsilon=epsilon,
             session=session,
@@ -1748,27 +1774,28 @@ class DenseLayerBayes(DenseLayer):
                             self.kl_penalties_base.update(rv_dict['kl_penalties'])
                         self.kernel_eval_resample = rv_dict['v_eval_resample']
                         self.kernel = rv_dict['v']
-                        self.kernel_eval_resample_ran = {}
-                        self.kernel_ran = {}
-                        for gf in self.rangf_map:
-                            n_levels = self.rangf_map[gf][0] - 1
-                            _kernel_sd_prior = np.ones([n_levels, in_dim, out_dim]) * kernel_sd_prior * self.ranef_to_fixef_prior_sd_ratio
-                            _kernel_sd_posterior = np.ones([n_levels, in_dim, out_dim]) * kernel_sd_posterior * self.ranef_to_fixef_prior_sd_ratio
-                            rv_dict = get_random_variable(
-                                'kernel_by_%s' % sn(gf),
-                                [n_levels, in_dim, out_dim],
-                                _kernel_sd_posterior,
-                                constraint=self.constraint,
-                                sd_prior=_kernel_sd_prior,
-                                training=self.training,
-                                use_MAP_mode=self.use_MAP_mode,
-                                epsilon=self.epsilon,
-                                session=self.session
-                            )
-                            if self.declare_priors_weights:
-                                self.kl_penalties_base.update(rv_dict['kl_penalties'])
-                            self.kernel_eval_resample_ran[gf] = rv_dict['v_eval_resample']
-                            self.kernel_ran[gf] = rv_dict['v']
+                        if self.weights_use_ranef:
+                            self.kernel_eval_resample_ran = {}
+                            self.kernel_ran = {}
+                            for gf in self.rangf_map:
+                                n_levels = self.rangf_map[gf][0] - 1
+                                _kernel_sd_prior = np.ones([n_levels, in_dim, out_dim]) * kernel_sd_prior * self.ranef_to_fixef_prior_sd_ratio
+                                _kernel_sd_posterior = np.ones([n_levels, in_dim, out_dim]) * kernel_sd_posterior * self.ranef_to_fixef_prior_sd_ratio
+                                rv_dict = get_random_variable(
+                                    'kernel_by_%s' % sn(gf),
+                                    [n_levels, in_dim, out_dim],
+                                    _kernel_sd_posterior,
+                                    constraint=self.constraint,
+                                    sd_prior=_kernel_sd_prior,
+                                    training=self.training,
+                                    use_MAP_mode=self.use_MAP_mode,
+                                    epsilon=self.epsilon,
+                                    session=self.session
+                                )
+                                if self.declare_priors_weights:
+                                    self.kl_penalties_base.update(rv_dict['kl_penalties'])
+                                self.kernel_eval_resample_ran[gf] = rv_dict['v_eval_resample']
+                                self.kernel_ran[gf] = rv_dict['v']
 
                         if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
                             bias_sd_prior = get_numerical_sd(self.bias_sd_prior, in_dim=1, out_dim=1)
@@ -1795,30 +1822,28 @@ class DenseLayerBayes(DenseLayer):
                                 self.kl_penalties_base.update(rv_dict['kl_penalties'])
                             self.bias_eval_resample = rv_dict['v_eval_resample']
                             self.bias = rv_dict['v']
-                            self.bias_eval_resample_ran = {}
-                            self.bias_ran = {}
-                            for gf in self.rangf_map:
-                                n_levels = self.rangf_map[gf][0] - 1
-                                _bias_sd_prior = np.ones([n_levels, out_dim]) * bias_sd_prior * self.ranef_to_fixef_prior_sd_ratio
-                                _bias_sd_posterior = np.ones([n_levels, out_dim]) * bias_sd_posterior * self.ranef_to_fixef_prior_sd_ratio
-                                rv_dict = get_random_variable(
-                                    'bias_by_%s' % sn(gf),
-                                    [n_levels, out_dim],
-                                    _bias_sd_posterior,
-                                    constraint=self.constraint,
-                                    sd_prior=_bias_sd_prior,
-                                    training=self.training,
-                                    use_MAP_mode=self.use_MAP_mode,
-                                    epsilon=self.epsilon,
-                                    session=self.session
-                                )
-                                if self.declare_priors_weights:
-                                    self.kl_penalties_base.update(rv_dict['kl_penalties'])
-                                self.bias_eval_resample_ran[gf] = rv_dict['v_eval_resample']
-                                self.bias_ran[gf] = rv_dict['v']
-
-                        # if self.use_dropout:
-                        #     self.dropout_layer.build([x for x in inputs_shape[:-1]] + [out_dim])
+                            if self.biases_use_ranef:
+                                self.bias_eval_resample_ran = {}
+                                self.bias_ran = {}
+                                for gf in self.rangf_map:
+                                    n_levels = self.rangf_map[gf][0] - 1
+                                    _bias_sd_prior = np.ones([n_levels, out_dim]) * bias_sd_prior * self.ranef_to_fixef_prior_sd_ratio
+                                    _bias_sd_posterior = np.ones([n_levels, out_dim]) * bias_sd_posterior * self.ranef_to_fixef_prior_sd_ratio
+                                    rv_dict = get_random_variable(
+                                        'bias_by_%s' % sn(gf),
+                                        [n_levels, out_dim],
+                                        _bias_sd_posterior,
+                                        constraint=self.constraint,
+                                        sd_prior=_bias_sd_prior,
+                                        training=self.training,
+                                        use_MAP_mode=self.use_MAP_mode,
+                                        epsilon=self.epsilon,
+                                        session=self.session
+                                    )
+                                    if self.declare_priors_weights:
+                                        self.kl_penalties_base.update(rv_dict['kl_penalties'])
+                                    self.bias_eval_resample_ran[gf] = rv_dict['v_eval_resample']
+                                    self.bias_ran[gf] = rv_dict['v']
 
                         if self.use_batch_normalization:
                             self.normalization_layer = BatchNormLayerBayes(
@@ -1827,7 +1852,7 @@ class DenseLayerBayes(DenseLayer):
                                 rescale_activations=self.rescale_normalized_activations,
                                 axis=-1,
                                 training=self.training,
-                                rangf_map=self.rangf_map,
+                                rangf_map=self.rangf_map if self.normalizer_use_ranef else False,
                                 use_MAP_mode=self.use_MAP_mode,
                                 declare_priors_scale=self.declare_priors_gamma,
                                 declare_priors_shift=self.declare_priors_biases,
@@ -1850,7 +1875,7 @@ class DenseLayerBayes(DenseLayer):
                                 rescale_activations=self.rescale_normalized_activations,
                                 axis=-1,
                                 training=self.training,
-                                rangf_map=self.rangf_map,
+                                rangf_map=self.rangf_map if self.normalizer_use_ranef else False,
                                 use_MAP_mode=self.use_MAP_mode,
                                 declare_priors_scale=self.declare_priors_gamma,
                                 declare_priors_shift=self.declare_priors_biases,
@@ -1881,12 +1906,14 @@ class DenseLayerBayes(DenseLayer):
         out = super(DenseLayerBayes, self).resample_ops()
         if self.built:
             out.append(self.kernel_eval_resample)
-            for gf in self.rangf_map:
-                out.append(self.kernel_eval_resample_ran[gf])
+            if self.weights_use_ranef:
+                for gf in self.rangf_map:
+                    out.append(self.kernel_eval_resample_ran[gf])
             if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
                 out.append(self.bias_eval_resample)
-                for gf in self.rangf_map:
-                    out.append(self.bias_eval_resample_ran[gf])
+                if self.biases_use_ranef:
+                    for gf in self.rangf_map:
+                        out.append(self.bias_eval_resample_ran[gf])
             if self.use_batch_normalization or self.use_layer_normalization:
                 out += self.normalization_layer.resample_ops()
 
@@ -1917,6 +1944,9 @@ class RNNCell(LayerRNNCell):
             weight_normalization=False,
             layer_normalization=False,
             rangf_map=None,  # Dict mapping <rangfid>: (n_levels, tensor)
+            weights_use_ranef=False,
+            biases_use_ranef=True,
+            normalizer_use_ranef=False,
             use_bias=True,
             global_step=None,
             l2_normalize_states=False,
@@ -1985,6 +2015,9 @@ class RNNCell(LayerRNNCell):
                 self._weight_normalization = weight_normalization
                 self._layer_normalization = layer_normalization
                 self._rangf_map = rangf_map
+                self._weights_use_ranef = weights_use_ranef
+                self._biases_use_ranef = biases_use_ranef
+                self._normalizer_use_ranef = normalizer_use_ranef
                 self._use_bias = use_bias
                 self._global_step = global_step
 
@@ -2065,6 +2098,9 @@ class RNNCell(LayerRNNCell):
                         training=self._training,
                         units=units,
                         rangf_map=self._rangf_map,
+                        weights_use_ranef=self._weights_use_ranef,
+                        biases_use_ranef=self._biases_use_ranef,
+                        normalizer_use_ranef=self._normalizer_use_ranef,
                         use_bias=use_bias,
                         kernel_sd_init=kernel_sd_init,
                         activation=activation,
@@ -2306,6 +2342,9 @@ class RNNLayer(object):
             weight_normalization=False,
             layer_normalization=False,
             rangf_map=None,  # Dict mapping <rangfid>: (n_levels, tensor)
+            weights_use_ranef=False,
+            biases_use_ranef=True,
+            normalizer_use_ranef=False,
             use_bias=True,
             global_step=None,
             l2_normalize_states=False,
@@ -2341,6 +2380,9 @@ class RNNLayer(object):
         if not bool(rangf_map):
             rangf_map = {}
         self.rangf_map = rangf_map
+        self.weights_use_ranef = weights_use_ranef
+        self.biases_use_ranef = biases_use_ranef
+        self.normalizer_use_ranef = normalizer_use_ranef
         self.use_bias = use_bias
         self.global_step = global_step
         self.l2_normalize_states = l2_normalize_states
@@ -2386,6 +2428,9 @@ class RNNLayer(object):
                         weight_normalization=self.weight_normalization,
                         layer_normalization=self.layer_normalization,
                         rangf_map=self.rangf_map,
+                        weights_use_ranef=self.weights_use_ranef,
+                        biases_use_ranef=self.biases_use_ranef,
+                        normalizer_use_ranef=self.normalizer_use_ranef,
                         use_bias=self.use_bias,
                         global_step=self.global_step,
                         l2_normalize_states=self.l2_normalize_states,
@@ -2484,6 +2529,9 @@ class RNNCellBayes(RNNCell):
             weight_normalization=False,
             layer_normalization=False,
             rangf_map=None,  # Dict mapping <rangfid>: (n_levels, tensor)
+            weights_use_ranef=False,
+            biases_use_ranef=True,
+            normalizer_use_ranef=False,
             use_bias=True,
             global_step=None,
             l2_normalize_states=False,
@@ -2515,6 +2563,9 @@ class RNNCellBayes(RNNCell):
             weight_normalization=weight_normalization,
             layer_normalization=layer_normalization,
             rangf_map=rangf_map,
+            weights_use_ranef=weights_use_ranef,
+            biases_use_ranef=biases_use_ranef,
+            normalizer_use_ranef=normalizer_use_ranef,
             use_bias=use_bias,
             global_step=global_step,
             l2_normalize_states=l2_normalize_states,
@@ -2615,6 +2666,9 @@ class RNNCellBayes(RNNCell):
                         use_bias=use_bias,
                         activation=activation,
                         rangf_map=self._rangf_map,
+                        weights_use_ranef=self._weights_use_ranef,
+                        biases_use_ranef=self._biases_use_ranef,
+                        normalizer_use_ranef=self._normalizer_use_ranef,
                         declare_priors_weights=self._declare_priors_weights,
                         declare_priors_biases=self._declare_priors_biases,
                         use_MAP_mode=self.use_MAP_mode,
@@ -2803,6 +2857,9 @@ class RNNLayerBayes(RNNLayer):
             weight_normalization=False,
             layer_normalization=False,
             rangf_map=None,  # Dict mapping <rangfid>: (n_levels, tensor)
+            weights_use_ranef=False,
+            biases_use_ranef=True,
+            normalizer_use_ranef=False,
             use_bias=True,
             global_step=None,
             l2_normalize_states=False,
@@ -2835,6 +2892,9 @@ class RNNLayerBayes(RNNLayer):
             weight_normalization=weight_normalization,
             layer_normalization=layer_normalization,
             rangf_map=rangf_map,
+            weights_use_ranef=weights_use_ranef,
+            biases_use_ranef=biases_use_ranef,
+            normalizer_use_ranef=normalizer_use_ranef,
             use_bias=use_bias,
             global_step=global_step,
             l2_normalize_states=l2_normalize_states,
@@ -2893,6 +2953,9 @@ class RNNLayerBayes(RNNLayer):
                         weight_normalization=self.weight_normalization,
                         layer_normalization=self.layer_normalization,
                         rangf_map=self.rangf_map,
+                        weights_use_ranef=self.weights_use_ranef,
+                        biases_use_ranef=self.biases_use_ranef,
+                        normalizer_use_ranef=self.normalizer_use_ranef,
                         use_bias=self.use_bias,
                         global_step=self.global_step,
                         l2_normalize_states=self.l2_normalize_states,
