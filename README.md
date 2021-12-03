@@ -26,7 +26,7 @@ The eye-tracking (Dundee) data are not publicly available but can be provided by
 Preprocessing for the fMRI baselines was performed by passing the language network predictor and response dataframes from Shain, Blank, et al. (2020) (available at https://osf.io/eyp8q/) through the script `fmri_align.py`, which itself depends on Alex Huth's tutorial repository: https://github.com/HuthLab/speechmodeltutorial.
 To reproduce, clone the tutorial to the root of this repository, and apply the script as described by its usage (e.g. by running `python fmri_align.py -h`).
 
-This reproduction branch assumes the data are all placed into a directory at the repository root called `data`.
+This reproduction branch assumes the data are all placed into a directory next to this one called `data` (i.e. `../data`).
 If you wish to place them elsewhere, the paths in the `*.ini` files of the `cognition_ini` directory must be updated accordingly.
 
 The _Cognition_ experiments (Shain & Schuler, 2021) are defined in the `cognition_ini` directory, with names
@@ -40,7 +40,7 @@ However, this will fit hundreds of models sequentially, which will take a long t
 We therefore recommend either (1) targeted reproduction of the specific models of interest to you or (2) full reproduction on a compute cluster that can fit models in parallel.
 Unfortunately, because job schedulers differ substantially between clusters, we do not provide general automation for this use case.
 Users will instead need to write their own scripts to schedule all the required jobs.
-To this end, note that each *ini file contains multiple models, each of which is defined by a section prefixed by `model_`.
+To this end, note that each `ini` file contains multiple models, each of which is defined by a section prefixed by `model_`.
 Everything following this prefix in the section header is used by the system as the model name, with models involving ablated variables additionally using the suffix `!<VAR>` following the model name, where `<VAR>` stands for the name of the ablated variable.
 
 To fit a model, run:
@@ -60,7 +60,7 @@ Documentation for additional utilities can be viewed by running:
 `python -m cdr.bin.help`
 
 For optimal efficiency, each of the above commands should be run as a distinct job.
-Results will be placed into a directory called `results` at the root of this repository.
+Results will be placed into a directory next to this one called `results` (i.e. `../results`).
 
 ## References
 Shain, Cory and Schuler, William (2018). Deconvolutional time series regression: A technique for modeling temporally diffuse effects. _EMNLP18_.
