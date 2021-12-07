@@ -3024,10 +3024,8 @@ class CDRModel(object):
                     training=self.training,
                     use_MAP_mode=self.use_MAP_mode,
                     units=units,
-                    time_projection_depth=self.n_layers_irf + 1,
                     activation=self.rnn_activation,
                     recurrent_activation=self.recurrent_activation,
-                    time_projection_inner_activation=self.irf_inner_activation,
                     bottomup_kernel_sd_init=self.weight_sd_init,
                     recurrent_kernel_sd_init=self.weight_sd_init,
                     rangf_map=rangf_map,
@@ -3068,10 +3066,8 @@ class CDRModel(object):
                     training=self.training,
                     use_MAP_mode=self.use_MAP_mode,
                     units=units,
-                    time_projection_depth=self.n_layers_irf + 1,
                     activation=self.rnn_activation,
                     recurrent_activation=self.recurrent_activation,
-                    time_projection_inner_activation=self.irf_inner_activation,
                     bottomup_dropout=self.ff_dropout_rate,
                     h_dropout=self.rnn_h_dropout_rate,
                     c_dropout=self.rnn_c_dropout_rate,
@@ -3089,6 +3085,7 @@ class CDRModel(object):
                     bias_sd_prior=self.bias_prior_sd,
                     bias_sd_init=self.bias_sd_init,
                     posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
+                    ranef_to_fixef_prior_sd_ratio=self.ranef_to_fixef_prior_sd_ratio,
                     constraint=self.constraint,
                     name='%s_rnn_l%d' % (nn_id, l + 1),
                     epsilon=self.epsilon,
@@ -3702,7 +3699,6 @@ class CDRModel(object):
                             _rnn_hidden, _rnn_cell = self.rnn_layers[nn_id][l](
                                 _X_in,
                                 return_state=True,
-                                times=X_time,
                                 mask=X_mask
                             )
                             rnn_hidden.append(_rnn_hidden)

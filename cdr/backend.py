@@ -1195,10 +1195,6 @@ class BiasLayer(object):
 
                 self.built = False
 
-    @property
-    def regularizable_weights(self):
-        return []
-
     def build(self, inputs_shape):
         if not self.built:
             units = inputs_shape[-1]
@@ -1227,7 +1223,7 @@ class BiasLayer(object):
 
             self.built = True
 
-    def __call__(self, inputs, kernel_offsets=None, bias_offsets=None):
+    def __call__(self, inputs, bias_offsets=None):
         if not self.built:
             self.build(inputs.shape)
 
@@ -1242,7 +1238,7 @@ class BiasLayer(object):
                     bias_ran = tf.pad(bias_ran, [[0,1], [0,0]])
                     bias += tf.gather(bias_ran, Y_gf)
                 while len(bias.shape) < len(H.shape):
-                    bias = tf.expand_dims(bias, axis=1)
+                    bias = tf.expand_dims(bias, axis=-2)
                 if bias_offsets is not None:
                     bias = bias + bias_offsets
                 H += bias
@@ -1272,7 +1268,7 @@ class BiasLayerBayes(BiasLayer):
             sd_prior=1.,
             sd_init=None,
             posterior_to_prior_sd_ratio=1,
-            ranef_to_fixef_prior_sd_ratio=0.1,
+            ranef_to_fixef_prior_sd_ratio=1,
             constraint='softplus',
             reuse=tf.AUTO_REUSE,
             epsilon=1e-5,
@@ -1685,7 +1681,7 @@ class DenseLayerBayes(DenseLayer):
             gamma_sd_prior=1.,
             gamma_sd_init=None,
             posterior_to_prior_sd_ratio=1,
-            ranef_to_fixef_prior_sd_ratio=0.1,
+            ranef_to_fixef_prior_sd_ratio=1,
             constraint='softplus',
             reuse=tf.AUTO_REUSE,
             epsilon=1e-5,
@@ -1927,14 +1923,11 @@ class RNNCell(LayerRNNCell):
             training=False,
             use_MAP_mode=False,
             kernel_depth=1,
-            time_projection_depth=1,
             prefinal_mode='max',
             forget_bias=1.0,
-            forget_gate_as_irf=False,
             activation=None,
             recurrent_activation='sigmoid',
             prefinal_activation='tanh',
-            time_projection_inner_activation='tanh',
             bottomup_kernel_sd_init='glorot_normal',
             recurrent_kernel_sd_init='glorot_normal',
             bottomup_dropout=None,
@@ -1966,18 +1959,12 @@ class RNNCell(LayerRNNCell):
                 self.use_MAP_mode = use_MAP_mode
 
                 self._kernel_depth = kernel_depth
-                self._time_projection_depth = time_projection_depth
                 self._prefinal_mode = prefinal_mode
                 self._forget_bias = forget_bias
-                self._forget_gate_as_irf = forget_gate_as_irf
 
                 self._activation = get_activation(activation, session=self._session, training=self._training)
-                self._recurrent_activation = get_activation(recurrent_activation, session=self._session,
-                                                            training=self._training)
-                self._prefinal_activation = get_activation(prefinal_activation, session=self._session,
-                                                           training=self._training)
-                self._time_projection_inner_activation = get_activation(time_projection_inner_activation,
-                                                                        session=self._session, training=self._training)
+                self._recurrent_activation = get_activation(recurrent_activation, session=self._session, training=self._training)
+                self._prefinal_activation = get_activation(prefinal_activation, session=self._session, training=self._training)
 
                 self._bottomup_kernel_sd_init = bottomup_kernel_sd_init
                 self._recurrent_kernel_sd_init = recurrent_kernel_sd_init
@@ -2034,6 +2021,14 @@ class RNNCell(LayerRNNCell):
     @property
     def output_size(self):
         return CDRNNStateTuple(c=self._num_units, h=self._num_units, t=1)
+
+    @property
+    def regularizable_weights(self):
+        weights = []
+        weights += sum([x.regularizable_weights for x in self._kernel_bottomup_layers], [])
+        weights += sum([x.regularizable_weights for x in self._kernel_recurrent_layers], [])
+
+        return weights[:]
 
     def initialize_kernel(
             self,
@@ -2119,16 +2114,27 @@ class RNNCell(LayerRNNCell):
 
                 return kernel, layers
 
-    @property
-    def regularizable_weights(self):
-        weights = [self._bias]
-        weights += sum([x.regularizable_weights for x in self._kernel_bottomup_layers], [])
-        weights += sum([x.regularizable_weights for x in self._kernel_recurrent_layers], [])
-        if self._forget_gate_as_irf:
-            weights += sum([x.regularizable_weights for x in self._kernel_time_projection_layers], []) + [
-                self.t_delta_embedding_W]
+    def initialize_biases(self):
+        with self._session.as_default():
+            with self._session.graph.as_default():
+                if self.name:
+                    name = self.name + '/'
+                else:
+                    name = ''
 
-        return weights[:]
+                if self._biases_use_ranef:
+                    rangf_map = self._rangf_map
+                else:
+                    rangf_map = None
+
+                self._bias_layer = BiasLayer(
+                    training=self._training,
+                    rangf_map=rangf_map,
+                    reuse=self._reuse,
+                    epsilon=self._epsilon,
+                    session=self._session,
+                    name=name + 'bias'
+                )
 
     def build(self, inputs_shape):
         with self._session.as_default():
@@ -2146,11 +2152,7 @@ class RNNCell(LayerRNNCell):
 
                 # Build bias
                 if not self._layer_normalization and self._use_bias:
-                    self._bias = self.add_variable(
-                        'bias',
-                        shape=[1, output_dim],
-                        initializer=tf.zeros_initializer()
-                    )
+                    self.initialize_biases()
 
                 # Build LSTM kernels (bottomup and recurrent)
                 self._kernel_bottomup, self._kernel_bottomup_layers = self.initialize_kernel(
@@ -2175,37 +2177,7 @@ class RNNCell(LayerRNNCell):
                 if self._c_dropout_rate:
                     self._c_dropout_layer.build([x for x in inputs_shape[:-1]] + [output_dim])
 
-                if self._forget_gate_as_irf:
-                    self.initialize_irf_biases()
-
-                    self._kernel_time_projection, self._kernel_time_projection_layers = self.initialize_kernel(
-                        recurrent_dim,
-                        recurrent_dim,
-                        kernel_type='time_projection',
-                        depth=self._time_projection_depth,
-                        inner_activation=self._time_projection_inner_activation,
-                        name='time_projection'
-                    )
-                    self.layers += self._kernel_time_projection_layers
-                else:
-                    self._kernel_time_projection = None
-                    self._kernel_time_projection_layers = []
-
         self.built = True
-
-    def initialize_irf_biases(self):
-        with self._session.as_default():
-            with self._session.graph.as_default():
-                self.t_delta_embedding_W = self.add_variable(
-                    't_delta_embedding_W',
-                    shape=[1, self._num_units],
-                    initializer=self._bottomup_initializer
-                )
-                self.t_delta_embedding_b = self.add_variable(
-                    't_delta_embedding_b',
-                    shape=[1, self._num_units],
-                    initializer=tf.zeros_initializer()
-                )
 
     def call(self, inputs, state):
         with self._session.as_default():
@@ -2252,7 +2224,7 @@ class RNNCell(LayerRNNCell):
                 s_recurrent = self._kernel_recurrent(h_prev)
                 s = s_bottomup + s_recurrent
                 if not self._layer_normalization and self._use_bias:
-                    s += self._bias
+                    s = self._bias_layer(s)
 
                 # Input gate
                 i = s[:, :units]
@@ -2273,17 +2245,7 @@ class RNNCell(LayerRNNCell):
                 g = self._activation(g)
 
                 # Forget gate
-                if self._forget_gate_as_irf:
-                    f_W = self._t_delta_embedding_W + s[:, units * 3:units * 4]
-                    f_b = self._t_delta_embedding_b + s[:, units * 4:units * 5]
-                    if self._layer_normalization:
-                        f_W = self.norm(f_W, 'f_W_ln')
-                        f_b = self.norm(f_b, 'f_b_ln')
-                    t = t_cur - t_prev
-                    t_embedding = self._time_projection_inner_activation(f_W * t + f_b + self._forget_bias)
-                    f = self._kernel_time_projection(t_embedding)
-                else:
-                    f = s[:, units * 3:units * 4]
+                f = s[:, units * 3:units * 4]
                 f = self._recurrent_activation(f)
 
                 c = f * c_prev + i * g
@@ -2312,7 +2274,7 @@ class RNNCell(LayerRNNCell):
     def resample_ops(self):
         out = []
         if self.built:
-            for layer in self._kernel_bottomup_layers + self._kernel_recurrent_layers + self._kernel_time_projection_layers:
+            for layer in self._kernel_bottomup_layers + self._kernel_recurrent_layers:
                 out.append(layer.resample_ops())
 
         return out
@@ -2325,14 +2287,11 @@ class RNNLayer(object):
             training=False,
             use_MAP_mode=True,
             kernel_depth=1,
-            time_projection_depth=1,
             prefinal_mode='max',
             forget_bias=1.0,
-            forget_gate_as_irf=False,
             activation=None,
             recurrent_activation='sigmoid',
             prefinal_activation='tanh',
-            time_projection_inner_activation='tanh',
             bottomup_kernel_sd_init='glorot_normal',
             recurrent_kernel_sd_init='glorot_normal',
             bottomup_dropout=None,
@@ -2361,14 +2320,11 @@ class RNNLayer(object):
         self.use_MAP_mode = use_MAP_mode
         self.units = units
         self.kernel_depth = kernel_depth
-        self.time_projection_depth = time_projection_depth
         self.prefinal_mode = prefinal_mode
         self.forget_bias = forget_bias
-        self.forget_gate_as_irf = forget_gate_as_irf
         self.activation = activation
         self.recurrent_activation = recurrent_activation
         self.prefinal_activation = prefinal_activation
-        self.time_projection_inner_activation = time_projection_inner_activation
         self.bottomup_kernel_sd_init = bottomup_kernel_sd_init
         self.recurrent_kernel_sd_init = recurrent_kernel_sd_init
         self.bottomup_dropout = bottomup_dropout
@@ -2396,6 +2352,10 @@ class RNNLayer(object):
 
         self.built = False
 
+    @property
+    def regularizable_weights(self):
+        return self.cell.regularizable_weights
+
     def build(self, inputs_shape):
         if not self.built:
             with self.session.as_default():
@@ -2411,14 +2371,11 @@ class RNNLayer(object):
                         training=self.training,
                         use_MAP_mode=self.use_MAP_mode,
                         kernel_depth=self.kernel_depth,
-                        time_projection_depth=self.time_projection_depth,
                         prefinal_mode=self.prefinal_mode,
                         forget_bias=self.forget_bias,
-                        forget_gate_as_irf=self.forget_gate_as_irf,
                         activation=self.activation,
                         recurrent_activation=self.recurrent_activation,
                         prefinal_activation=self.prefinal_activation,
-                        time_projection_inner_activation=self.time_projection_inner_activation,
                         bottomup_kernel_sd_init=self.bottomup_kernel_sd_init,
                         recurrent_kernel_sd_init=self.recurrent_kernel_sd_init,
                         bottomup_dropout=self.bottomup_dropout,
@@ -2440,24 +2397,18 @@ class RNNLayer(object):
                         epsilon=self.epsilon,
                     )
 
+                    # Shape per timestep is batch (axis=0) and features (axis=1), dropping time (axis=1)
                     self.cell.build((inputs_shape[0], inputs_shape[2]))
 
             self.built = True
 
-    @property
-    def regularizable_weights(self):
-        return self.cell.regularizable_weights
-
-    def __call__(self, inputs, times=None, mask=None, return_state=False, initial_state=None):
+    def __call__(self, inputs, mask=None, return_state=False, initial_state=None):
         if not self.built:
             self.build(inputs.shape)
 
         with self.session.as_default():
             with self.session.graph.as_default():
                 inputs = {'inputs': inputs}
-
-                if times is not None:
-                    inputs['times'] = times
 
                 if mask is None:
                     sequence_length = None
@@ -2505,14 +2456,11 @@ class RNNCellBayes(RNNCell):
             training=False,
             use_MAP_mode=True,
             kernel_depth=1,
-            time_projection_depth=1,
             prefinal_mode='max',
             forget_bias=1.0,
-            forget_gate_as_irf=False,
             activation=None,
             recurrent_activation='sigmoid',
             prefinal_activation='tanh',
-            time_projection_inner_activation='tanh',
             bottomup_kernel_sd_init=None,
             recurrent_kernel_sd_init=None,
             declare_priors_weights=True,
@@ -2521,6 +2469,7 @@ class RNNCellBayes(RNNCell):
             bias_sd_prior=1,
             bias_sd_init=None,
             posterior_to_prior_sd_ratio=1,
+            ranef_to_fixef_prior_sd_ratio=1,
             constraint='softplus',
             bottomup_dropout=None,
             h_dropout=None,
@@ -2546,14 +2495,11 @@ class RNNCellBayes(RNNCell):
             training=training,
             use_MAP_mode=use_MAP_mode,
             kernel_depth=kernel_depth,
-            time_projection_depth=time_projection_depth,
             prefinal_mode=prefinal_mode,
             forget_bias=forget_bias,
-            forget_gate_as_irf=forget_gate_as_irf,
             activation=activation,
             recurrent_activation=recurrent_activation,
             prefinal_activation=prefinal_activation,
-            time_projection_inner_activation=time_projection_inner_activation,
             bottomup_kernel_sd_init=bottomup_kernel_sd_init,
             recurrent_kernel_sd_init=recurrent_kernel_sd_init,
             bottomup_dropout=bottomup_dropout,
@@ -2582,6 +2528,7 @@ class RNNCellBayes(RNNCell):
         self._bias_sd_prior = bias_sd_prior
         self._bias_sd_init = bias_sd_init
         self._posterior_to_prior_sd_ratio = posterior_to_prior_sd_ratio
+        self._ranef_to_fixef_prior_sd_ratio = ranef_to_fixef_prior_sd_ratio
 
         self._constraint = constraint
         if self._constraint.lower() == 'softplus':
@@ -2677,6 +2624,7 @@ class RNNCellBayes(RNNCell):
                         bias_sd_prior=self._bias_sd_prior,
                         bias_sd_init=self._bias_sd_init,
                         posterior_to_prior_sd_ratio=self._posterior_to_prior_sd_ratio,
+                        ranef_to_fixef_prior_sd_ratio=self._ranef_to_fixef_prior_sd_ratio,
                         constraint=self._constraint,
                         epsilon=self._epsilon,
                         session=self._session,
@@ -2693,117 +2641,33 @@ class RNNCellBayes(RNNCell):
 
                 return kernel, layers
 
-    def initialize_irf_biases(self):
+    def initialize_biases(self):
         with self._session.as_default():
             with self._session.graph.as_default():
-                out_dim = self._num_units
-                kernel_sd_prior = get_numerical_sd(self._kernel_sd_prior, in_dim=1, out_dim=out_dim)
-                kernel_sd_posterior = kernel_sd_prior * self._posterior_to_prior_sd_ratio
-
-                if not self.name:
-                    name = ''
+                if self.name:
+                    name = self.name + '/'
                 else:
-                    name = self.name
+                    name = ''
 
-                # Posterior distribution
-                t_delta_embedding_W_q_loc = self.add_variable(
-                    name='t_delta_embedding_W_q_loc',
-                    initializer=tf.zeros_initializer(),
-                    shape=[1, self._num_units]
-                )
-                t_delta_embedding_W_q_scale = self.add_variable(
-                    name='t_delta_embedding_W_q_scale',
-                    initializer=self._constraint_fn_inv(kernel_sd_posterior),
-                    shape=[1, self._num_units]
-                )
-                self.t_delta_embedding_W_q_dist = Normal(
-                    loc=t_delta_embedding_W_q_loc,
-                    scale=self._constraint_fn(t_delta_embedding_W_q_scale) + self.epsilon,
-                    name='t_delta_embedding_W_q'
-                )
-                if self._declare_priors_weights:
-                    # Prior distribution
-                    self.t_delta_embedding_W_prior_dist = Normal(
-                        loc=0.,
-                        scale=kernel_sd_prior,
-                        name='t_delta_embedding_W'
-                    )
-                    self.kl_penalties_base[self.name + '/t_delta_embedding_W'] = {
-                        'loc': 0.,
-                        'scale': kernel_sd_prior,
-                        'val': self.t_delta_embedding_W_q_dist.kl_divergence(self.t_delta_embedding_W_prior_dist)
-                    }
-                with tf.variable_scope(name, reuse=self.reuse):
-                    self.t_delta_embedding_W_eval_sample = self.t_delta_embedding_W_q_dist.sample()
-                    self.t_delta_embedding_W_eval = tf.get_variable(
-                        name='t_delta_embedding_W_sample',
-                        initializer=tf.zeros_initializer(),
-                        shape=self.t_delta_embedding_W_eval_sample.shape,
-                        dtype=tf.float32,
-                        trainable=False
-                    )
-                    self.t_delta_embedding_W_eval_resample = tf.assign(self.t_delta_embedding_W_eval,
-                                                                       self.t_delta_embedding_W_eval_sample)
-                self.t_delta_embedding_W = tf.cond(
-                    self.training,
-                    self.t_delta_embedding_W_q_dist.sample,
-                    tf.cond(
-                        self.use_MAP_mode,
-                        self.t_delta_embedding_W_q_dist.mean,
-                        lambda: self.t_delta_embedding_W_eval,
-                    )
-                )
+                if self._biases_use_ranef:
+                    rangf_map = self._rangf_map
+                else:
+                    rangf_map = None
 
-                bias_sd_prior = get_numerical_sd(self._kernel_sd_prior, in_dim=1, out_dim=1)
-                bias_sd_posterior = bias_sd_prior * self._posterior_to_prior_sd_ratio
-
-                # Posterior distribution
-                t_delta_embedding_b_q_loc = self.add_variable(
-                    name='t_delta_embedding_b_q_loc',
-                    initializer=tf.zeros_initializer(),
-                    shape=[1, self._num_units]
-                )
-                t_delta_embedding_b_q_scale = self.add_variable(
-                    name='t_delta_embedding_b_q_scale',
-                    initializer=self._constraint_fn_inv(bias_sd_posterior),
-                    shape=[1, self._num_units]
-                )
-                t_delta_embedding_b_q_dist = Normal(
-                    loc=t_delta_embedding_b_q_loc,
-                    scale=self._constraint_fn(t_delta_embedding_b_q_scale) + self.epsilon,
-                    name='t_delta_embedding_b_q'
-                )
-                if self._declare_priors_biases:
-                    # Prior distribution
-                    self.t_delta_embedding_b_prior_dist = Normal(
-                        loc=0.,
-                        scale=bias_sd_prior,
-                        name='t_delta_embedding_b'
-                    )
-                    self.kl_penalties_base[self.name + '/t_delta_embedding_b'] = {
-                        'loc': 0.,
-                        'scale': bias_sd_prior,
-                        'val': t_delta_embedding_b_q_dist.kl_divergence(self.t_delta_embedding_b_prior_dist)
-                    }
-                with tf.variable_scope(name, reuse=self.reuse):
-                    self.t_delta_embedding_b_eval_sample = self.t_delta_embedding_b_q_dist.sample()
-                    self.t_delta_embedding_b_eval = tf.get_variable(
-                        name='t_delta_embedding_b_sample',
-                        initializer=tf.zeros_initializer(),
-                        shape=self.t_delta_embedding_b_eval_sample.shape,
-                        dtype=tf.float32,
-                        trainable=False
-                    )
-                    self.t_delta_embedding_b_eval_resample = tf.assign(self.t_delta_embedding_b_eval,
-                                                                       self.t_delta_embedding_b_eval_sample)
-                self.t_delta_embedding_b = tf.cond(
-                    self.training,
-                    self.t_delta_embedding_b_q_dist.sample,
-                    tf.cond(
-                        self.use_MAP_mode,
-                        self.t_delta_embedding_b_q_dist.mean,
-                        lambda: self.t_delta_embedding_b_eval
-                    )
+                self._bias_layer = BiasLayerBayes(
+                    training=self._training,
+                    use_MAP_mode=self._use_MAP_mode,
+                    rangf_map=rangf_map,
+                    declare_priors=self._declare_priors_biases,
+                    sd_prior=self._bias_sd_prior,
+                    sd_init=self._bias_sd_init,
+                    posterior_to_prior_sd_ratio=self._posterior_to_prior_sd_ratio,
+                    ranef_to_fixef_prior_sd_ratio=self._ranef_to_fixef_prior_sd_ratio,
+                    constraint='softplus',
+                    reuse=self._reuse,
+                    epsilon=self._epsilon,
+                    session=self._session,
+                    name=name + 'bias'
                 )
 
     def kl_penalties(self):
@@ -2818,11 +2682,7 @@ class RNNCellBayes(RNNCell):
 
     def resample_ops(self):
         out = super(RNNCellBayes, self).resample_ops()
-        if self._forget_gate_as_irf:
-            out += [
-                self.t_delta_embedding_W_eval_resample,
-                self.t_delta_embedding_b_eval_resample,
-            ]
+
         return out
 
 
@@ -2833,14 +2693,11 @@ class RNNLayerBayes(RNNLayer):
             training=False,
             use_MAP_mode=True,
             kernel_depth=1,
-            time_projection_depth=1,
             prefinal_mode='max',
             forget_bias=1.0,
-            forget_gate_as_irf=False,
             activation=None,
             recurrent_activation='sigmoid',
             prefinal_activation='tanh',
-            time_projection_inner_activation='tanh',
             bottomup_kernel_sd_init=None,
             recurrent_kernel_sd_init=None,
             declare_priors_weights=True,
@@ -2849,6 +2706,7 @@ class RNNLayerBayes(RNNLayer):
             bias_sd_prior=1,
             bias_sd_init=None,
             posterior_to_prior_sd_ratio=1,
+            ranef_to_fixef_prior_sd_ratio=1,
             constraint='softplus',
             bottomup_dropout=None,
             h_dropout=None,
@@ -2875,14 +2733,11 @@ class RNNLayerBayes(RNNLayer):
             training=training,
             use_MAP_mode=use_MAP_mode,
             kernel_depth=kernel_depth,
-            time_projection_depth=time_projection_depth,
             prefinal_mode=prefinal_mode,
             forget_bias=forget_bias,
-            forget_gate_as_irf=forget_gate_as_irf,
             activation=activation,
             recurrent_activation=recurrent_activation,
             prefinal_activation=prefinal_activation,
-            time_projection_inner_activation=time_projection_inner_activation,
             bottomup_kernel_sd_init=bottomup_kernel_sd_init,
             recurrent_kernel_sd_init=recurrent_kernel_sd_init,
             bottomup_dropout=bottomup_dropout,
@@ -2912,13 +2767,13 @@ class RNNLayerBayes(RNNLayer):
         self.bias_sd_prior = bias_sd_prior
         self.bias_sd_init = bias_sd_init
         self.posterior_to_prior_sd_ratio = posterior_to_prior_sd_ratio
+        self.ranef_to_fixef_prior_sd_ratio = ranef_to_fixef_prior_sd_ratio
         self.constraint = constraint
 
     def build(self, inputs_shape):
         if not self.built:
             with self.session.as_default():
                 with self.session.graph.as_default():
-
                     if self.units is None:
                         units = inputs_shape[-1]
                     else:
@@ -2929,14 +2784,11 @@ class RNNLayerBayes(RNNLayer):
                         training=self.training,
                         use_MAP_mode=self.use_MAP_mode,
                         kernel_depth=self.kernel_depth,
-                        time_projection_depth=self.time_projection_depth,
                         prefinal_mode=self.prefinal_mode,
                         forget_bias=self.forget_bias,
-                        forget_gate_as_irf=self.forget_gate_as_irf,
                         activation=self.activation,
                         recurrent_activation=self.recurrent_activation,
                         prefinal_activation=self.prefinal_activation,
-                        time_projection_inner_activation=self.time_projection_inner_activation,
                         bottomup_kernel_sd_init=self.bottomup_kernel_sd_init,
                         recurrent_kernel_sd_init=self.recurrent_kernel_sd_init,
                         bottomup_dropout=self.bottomup_dropout,
@@ -2949,6 +2801,7 @@ class RNNLayerBayes(RNNLayer):
                         bias_sd_prior=self.bias_sd_prior,
                         bias_sd_init=self.bias_sd_init,
                         posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
+                        ranef_to_fixef_prior_sd_ratio=self.ranef_to_fixef_prior_sd_ratio,
                         constraint=self.constraint,
                         weight_normalization=self.weight_normalization,
                         layer_normalization=self.layer_normalization,
@@ -3169,7 +3022,7 @@ class BatchNormLayerBayes(BatchNormLayer):
             shift_sd_prior=1.,
             shift_sd_init=None,
             posterior_to_prior_sd_ratio=1.,
-            ranef_to_fixef_prior_sd_ratio=0.1,
+            ranef_to_fixef_prior_sd_ratio=1,
             constraint='softplus',
             epsilon=1e-5,
             session=None,
@@ -3535,7 +3388,7 @@ class LayerNormLayerBayes(LayerNormLayer):
             shift_sd_prior=1.,
             shift_sd_init=None,
             posterior_to_prior_sd_ratio=1.,
-            ranef_to_fixef_prior_sd_ratio=0.1,
+            ranef_to_fixef_prior_sd_ratio=1,
             constraint='softplus',
             epsilon=1e-5,
             session=None,
