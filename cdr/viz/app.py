@@ -14,7 +14,7 @@ import plotly.graph_objects as go
 from dash.dependencies import Input, Output
 from cdr.viz.layout_helper import run_standalone_app
 
-from cdr.util import load_cdr
+from cdr.util import load_cdr, get_irf_name
 
 # UPLOAD_DIRECTORY = '/cdr/uploaded_files'
 # if not os.path.exists(UPLOAD_DIRECTORY):
@@ -25,13 +25,6 @@ def model_generation(model_path):
 
 def description():
     return 'Visualization of continuous-time deconvolutional regression (CDR) neural networks: a regression technique for temporarily diffuse effects.'
-
-def header_colors():
-    return {
-        'bg_color': '#015BB0',
-        'font_color': '#FFFFFF',
-        'light_logo': True
-    }
 
 def get_resparams(model, response):
     resparams = []
@@ -46,7 +39,7 @@ def generate_figure(
         response,
         resparam,
         yvar=None,
-        n_samples=100,
+        n_samples=10,
         level=95,
         xmin=None,
         xmax=None,
@@ -73,7 +66,7 @@ def generate_figure(
         n_samples=n_samples
     )
 
-    if yvar is None:
+    if yvar is None: # 2D plot
         x2d = plot_data[0]
         d2d = plot_data[1]
         y2d = d2d[response][resparam]
@@ -106,29 +99,22 @@ def generate_figure(
 
         if xmin is not None and xmax is not None:
             fig.update_xaxes(range=[xmin, xmax])
-        # fig.add_trace(go.Scatter(x=x, y=y1, mode='lines'))
-        # fig.add_trace(go.Scatter(x=x, y=y2, mode='lines'))
         fig.update_layout(
-            font_family='Times',
-            title_font_family='Times',
+            font_family='Helvetica',
+            title_font_family='Helvetica',
             title='2D',
             xaxis_title=xvar,
             yaxis_title=response + " " + resparam,
             xaxis=dict(range=[xmin, xmax], gridcolor='rgb(200, 200, 200)'),
             yaxis=dict(gridcolor='rgb(200, 200, 200)'),
             plot_bgcolor='rgb(255, 255, 255)',
-            paper_bgcolor='rgb(255, 255, 255)',
-            autosize=False,
-            width=650, height=650,
-            margin=dict(l=100, r=100, b=100, t=100),
+            paper_bgcolor='rgb(255, 255, 255)'
         )
-    else:
+    else: # 3D plot
         zmin = zmin
         zmax = zmax
         x, y = plot_data[0]
-        # x = x[::-1,] # Reverse x for intuitive plotting
         d = plot_data[1]
-        # print(d)
         z = d[response][resparam]
         z1 = z[...,0]
         min_d = plot_data[2]
@@ -166,11 +152,31 @@ def generate_figure(
             colorscale.insert(1, (midpoint, 'rgb(%s, %s, %s)' % tuple(gray)))
 
         fig = go.Figure(data=[
-            # go.Surface(z=z1, x=x, y=y, colorscale='blues'),
-            go.Surface(z=z1, x=x, y=y, colorscale=colorscale, showscale=False),
-            go.Surface(z=z2, x=x, y=y, colorscale='greys', showscale=False, opacity=0.5),
-            go.Surface(z=z3, x=x, y=y, colorscale='greys', showscale=False, opacity=0.5)
+            go.Surface(
+                z=z1,
+                x=x,
+                y=y,
+                colorscale=colorscale,
+                showscale=False,
+                lighting=dict(
+                    ambient=1.0,
+                    diffuse=1.0
+                )
+            )
         ])
+        for _x, _y, _zmin, _zmax in zip(x.flatten(), y.flatten(), z2.flatten(), z3.flatten()):
+            fig.add_traces(
+                go.Scatter3d(
+                    x=(_x, _x),
+                    y=(_y, _y),
+                    z=(_zmin, _zmax),
+                    mode='lines',
+                    line=dict(
+                        color='rgba(0, 0, 0, 0.15)',
+                        width=3
+                    )
+                )
+            )
 
         camera = dict(
             up=dict(x=0, y=0, z=1),
@@ -179,171 +185,144 @@ def generate_figure(
         )
 
         fig.update_layout(
-            font_family='Times',
-            title_font_family='Times',
-            title='Surface Plot of ' + yvar + ' vs. ' + xvar,
+            font_family='Helvetica',
+            title_font_family='Helvetica',
+            title='%s vs. %s' % (get_irf_name(xvar, model.irf_name_map), get_irf_name(yvar, model.irf_name_map)),
             scene = dict(
-                xaxis_title=xvar,
-                yaxis_title=yvar,
-                zaxis_title=response + " " + resparam,
+                xaxis_title=get_irf_name(xvar, model.irf_name_map),
+                yaxis_title=get_irf_name(yvar, model.irf_name_map),
+                zaxis_title=get_irf_name(response, model.irf_name_map) + ", " + resparam,
                 xaxis=dict(range=[xmin, xmax], gridcolor='rgb(200, 200, 200)', showbackground=False, autorange='reversed'),
                 yaxis=dict(range=[ymin, ymax], gridcolor='rgb(200, 200, 200)', showbackground=False),
                 zaxis=dict(range=[zmin, zmax], gridcolor='rgb(200, 200, 200)', showbackground=False)
             ),
-            autosize=False,
-            width=650, height=650,
-            margin=dict(l=100, r=100, b=100, t=100),
             plot_bgcolor='rgb(255, 255, 255)',
             paper_bgcolor='rgb(255, 255, 255)',
             scene_camera=camera,
+            showlegend=False
         )
 
     return fig
 
 def layout():
     reference_settings = [
-        html.Div(className='fullwidth-app-controls-name',
-                 children='Change reference values'),
         html.Div(
-            className='app-controls-desc',
-            children='Set reference values for the predictors in the model'
+            className='fullwidth-app-controls-name',
+            children='Reference predictor values'
     )]
     for x in model.impulse_names:
-        reference_settings += [
+        reference_settings.append(
             html.Label(
                 id='%s-reference-label' % x,
-                children=[x]
-            ),
-            dcc.Input(
-                id='%s-reference' % x,
-                type='number',
-                debounce=True,
-                placeholder=model.reference_arr[model.impulse_names_to_ix[x]],
-                value=model.reference_arr[model.impulse_names_to_ix[x]]
+                children=[
+                    get_irf_name(x, model.irf_name_map),
+                    dcc.Input(
+                        id='%s-reference' % x,
+                        type='number',
+                        debounce=True,
+                        placeholder=model.reference_arr[model.impulse_names_to_ix[x]],
+                        value=model.reference_arr[model.impulse_names_to_ix[x]]
+                    )
+                ]
             )
-        ]
+        )
 
     return html.Div(
         id='cdrnn-body',
         className='app-body',
         children=[
             html.Div(
-                id='cdrnn-control-tabs',
-                className='control-tabs',
+                id="viewport-wrapper",
                 children=[
-                    dcc.Tabs(id='cdrnn-tabs', value='settings', children=[
-                        dcc.Tab(
-                            label='Settings',
-                            value='settings',
-                            children=html.Div(className='control-tab', children=[
+                    dcc.Loading(
+                    type="dot",
+                    fullscreen=False,
+                    children=html.Div(
+                        id='viewport',
+                        children=dcc.Graph(
+                            id='graph',
+                            config=dict(
+                                editable=True,
+                            ),
+                            style={'width': '70vw', 'height': '90vh'}
+                        ),
+                    ))
+                ]
+            ),
+            html.Div(
+                id='cdrnn-settings',
+                className='control-settings',
+                children=html.Div(
+                    id='cdrnn-settings-inner',
+                    children=[
+                        html.Div(
+                            title='Axis settings',
+                            className='app-controls-block',
+                            children=[
                                 html.Div(
-                                    title='Axis variables',
-                                    className='app-controls-block',
+                                    className='fullwidth-app-controls-name',
+                                    children='Axes'
+                                ),
+                                html.Label(
                                     children=[
-                                        html.Div(
-                                            className='fullwidth-app-controls-name',
-                                            children='Change respective axes names to view'),
-                                        html.Div(
-                                            className='app-controls-desc',
-                                            children='Select the respective x-y coordinate axes names ' +
-                                            'by using the dropdown menus below.'
-                                        ),
+                                        'X axis',
                                         dcc.Dropdown(
                                             id='dropdown_x',
-                                            options=[
-                                                {'label': i, 'value': i} for i in options],
-                                            value=options[0]
-                                        ),
-                                        dcc.Dropdown(
-                                            id='dropdown_y',
-                                            options=[
-                                                {'label': i, 'value': i} for i in options],
-                                            value=options[options.index('t_delta')]
-                                        ),
-                                        dcc.Dropdown(
-                                            id='dropdown_response',
-                                            options=[
-                                                {'label': i, 'value': i} for i in response_options],
-                                            value=response_options[0]
-                                        ),
-                                        dcc.Dropdown(
-                                            id='dropdown_resparams',
-                                            options=[{'label': x, 'value': x} for x in get_resparams(model, response_options[0])],
-                                            value=model.expand_param_name(response_options[0], model.get_response_params(response_options[0])[0])[0]
-                                        ),
-                                    ]
-                                ),
-                                html.Div(
-                                    title='Reference values',
-                                    className='app-controls-block',
-                                    children=reference_settings
-                                ),
-                                html.Div(
-                                    title='Change the bounds of x-y coordinate axes',
-                                    className='app-controls-block',
-                                    children=[
-                                        html.Div(className='app-controls-name',
-                                                 children='Bounds manipulator'),
-                                        html.Div(
-                                            className='app-controls-desc',
-                                            children='Minimum and maximum of x-coordinate axis'
-                                        ),
-                                        dcc.Input(
-                                            id='x_min',
-                                            type='number',
-                                            debounce=True,
-                                            placeholder='Minimum x-axis value'
-                                        ),
-                                        dcc.Input(
-                                            id='x_max',
-                                            type='number',
-                                            debounce=True,
-                                            placeholder='Maximum x-axis value'
-                                        ),
-                                        html.Div(
-                                            className='app-controls-desc',
-                                            children='Minimum and maximum of y-coordinate axis'
-                                        ),
-                                        dcc.Input(
-                                            id='y_min',
-                                            type='number',
-                                            debounce=True,
-                                            placeholder='Minimum y-axis value'
-                                        ),
-                                        dcc.Input(
-                                            id='y_max',
-                                            type='number',
-                                            debounce=True,
-                                            placeholder='Maximum y-axis value'
-                                        ),
-                                        html.Div(
-                                            className='app-controls-desc',
-                                            children='Minimum and maximum of z-coordinate axis'
-                                        ),
-                                        dcc.Input(
-                                            id='z_min',
-                                            type='number',
-                                            debounce=True,
-                                            placeholder='Minimum z-axis value'
-                                        ),
-                                        dcc.Input(
-                                            id='z_max',
-                                            type='number',
-                                            debounce=True,
-                                            placeholder='Maximum z-axis value'
+                                            options=[{'label': get_irf_name(i, model.irf_name_map), 'value': i} for i in options],
+                                            value=options[0],
+                                            clearable=False
                                         )
                                     ]
                                 ),
-                                html.Div(
-                                    title='Error',
-                                    className='app-controls-block',
+                                html.Label(
                                     children=[
-                                        html.Div(className='app-controls-name',
-                                                 children='Error interval'),
-                                        html.Div(
-                                            className='app-controls-desc',
-                                            children='Number of samples (default: 100)'
-                                        ),
+                                        'Y axis (optional)',
+                                        dcc.Dropdown(
+                                            id='dropdown_y',
+                                            options=[{'label': get_irf_name(i, model.irf_name_map), 'value': i} for i in options],
+                                            value=options[options.index('t_delta')],
+                                            clearable=True
+                                        )
+                                    ]
+                                ),
+                                html.Label(
+                                    children=[
+                                        'Response variable',
+                                        dcc.Dropdown(
+                                            id='dropdown_response',
+                                            options=[{'label': get_irf_name(i, model.irf_name_map), 'value': i} for i in response_options],
+                                            value=response_options[0],
+                                            clearable=False
+                                        )
+                                    ]
+                                ),
+                                html.Label(
+                                    children=[
+                                        'Response parameter',
+                                            dcc.Dropdown(
+                                            id='dropdown_resparams',
+                                            options=[{'label': x, 'value': x} for x in get_resparams(model, response_options[0])],
+                                            value=model.expand_param_name(response_options[0], model.get_response_params(response_options[0])[0])[0],
+                                            clearable=False
+                                        )
+                                    ]
+                                ),
+                            ]
+                        ),
+                        html.Div(
+                            title='Reference values',
+                            className='app-controls-block',
+                            children=reference_settings
+                        ),
+                        html.Div(
+                            title='Uncertainty',
+                            className='app-controls-block',
+                            children=[
+                                html.Div(className='fullwidth-app-controls-name',
+                                         children='Uncertainty'),
+                                html.Label(
+                                    children=[
+                                        'Number of samples',
                                         dcc.Input(
                                             id='n_samples',
                                             type='number',
@@ -351,17 +330,18 @@ def layout():
                                             placeholder='Number of samples',
                                             min=0,
                                             step=1,
-                                            value=100
-                                        ),
-                                        html.Div(
-                                            className='app-controls-desc',
-                                            children='Error interval, 0-100 (default: 95)'
-                                        ),
+                                            value=10
+                                        )
+                                    ]
+                                ),
+                                html.Label(
+                                    children=[
+                                        'Error interval, 0-100 (default: 95)',
                                         dcc.Input(
                                             id='ci',
                                             type='number',
                                             debounce=True,
-                                            placeholder='Error interval',
+                                            placeholder='Error interval, 0-100 (default: 95)',
                                             min=0,
                                             max=100,
                                             step=1,
@@ -369,53 +349,61 @@ def layout():
                                         )
                                     ]
                                 )
-                            ])
-                        ),
-                        dcc.Tab(
-                            label='Model',
-                            value='model',
-                            children=html.Div(className='control-tab', children=[
-                                html.Div(
-                                    title='Select CDRNN model to view',
-                                    className='app-controls-block',
-                                    children=[
-                                        html.Div(
-                                            className='fullwidth-app-controls-name',
-                                            children='Model type'),
-                                        html.Div(
-                                            className='app-controls-desc',
-                                            children='The CDR(NN) model being viewed is: ' + args.model
-                                        ),
-                                        html.Div(
-                                            className='app-controls-desc',
-                                            children='Currently, in order to change the CDR(NN) model you have to restart the command terminal and input the model path from there.'
-                                        )
-                                    ]
+                            ]),
+                        html.Div(
+                            title='Axis bounds',
+                            className='app-controls-block',
+                            children=[
+                                html.Div(className='fullwidth-app-controls-name',
+                                         children=' Axis bounds'),
+
+                                dcc.Input(
+                                    id='x_min',
+                                    type='number',
+                                    debounce=True,
+                                    placeholder='Minimum x-axis value'
+                                ),
+                                dcc.Input(
+                                    id='x_max',
+                                    type='number',
+                                    debounce=True,
+                                    placeholder='Maximum x-axis value'
+                                ),
+                                dcc.Input(
+                                    id='y_min',
+                                    type='number',
+                                    debounce=True,
+                                    placeholder='Minimum y-axis value'
+                                ),
+                                dcc.Input(
+                                    id='y_max',
+                                    type='number',
+                                    debounce=True,
+                                    placeholder='Maximum y-axis value'
+                                ),
+                                dcc.Input(
+                                    id='z_min',
+                                    type='number',
+                                    debounce=True,
+                                    placeholder='Minimum z-axis value'
+                                ),
+                                dcc.Input(
+                                    id='z_max',
+                                    type='number',
+                                    debounce=True,
+                                    placeholder='Maximum z-axis value'
                                 )
-                            ])
+                            ]
                         ),
-                        dcc.Tab(
-                            label='About',
-                            value='about',
-                            children=html.Div(className='control-tab', children=[
-                                html.H4(className='what-is', children='What is CDR(NN) Viewer?'),
-                                html.P('CDR(NN) Viewer is a visualization tool for continuous-time deconvolutional regression (CDR) neural networks. You can get a high-level overview here: https://github.com/coryshain/cdr/blob/master/README.md and full documentation here: https://cdr.readthedocs.io/en/latest/.'),
-                                html.P('In the "View 3D/2D" tabs, you can use the dropdown menus to change plotted variables such as responses, multivariate response parameters, signals, and more. You can also use the text inputs to change the range of various axes.')
-                            ])
-                        )
-                    ])
-                ], style={'display': 'inline-block'}
-            ), 
-            html.Div(id='viewport', children=[
-                dcc.Graph(id='graph-change')
-            ], style={'display': 'inline-block', 'padding': 50}
+                    ]
+                )
             )
         ]
     )
 
 def callbacks(_app):
     args = [
-        Output('graph-change', 'figure'),
+        Output('graph', 'figure'),
         Input('dropdown_x', 'value'),
         Input('dropdown_response', 'value'),
         Input('dropdown_resparams', 'value'),
@@ -497,21 +485,22 @@ def callbacks(_app):
         return model.get_response_params(response_value)[0]
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser("""
-    Start a web server for interactive CDR(NN) visualization.
+    argparser = argparse.ArgumentParser("""
+    Start a web server for interactive CDR visualization.
     """)
-    parser.add_argument('model', help='Path to model directory')
-    args = parser.parse_args()
+    argparser.add_argument('model', help='Path to model directory')
+    argparser.add_argument('-d', '--debug', action='store_true', help='Whether to run in debug mode.')
+    args = argparser.parse_args()
+
     model = model_generation(args.model)
     model.set_predict_mode(True)
-    options = ['rate'] + (model.impulse_names if model.has_nn_irf else model.impulse_names)[:]
+    options = (model.impulse_names if model.has_nn_irf else model.impulse_names)[:]
     options += ['t_delta', 'X_time']
     response_options = model.response_names
     response = response_options[0]
     response_param = model.get_response_params(response)[0]
     response_param = model.expand_param_name(response, response_param)
     manipulations = [{model.impulse_names[0]: 1}]
-    app = run_standalone_app(layout, callbacks, header_colors, __file__)
+    app = run_standalone_app(layout, callbacks, __file__)
     server = app.server
-    print('Loaded')
-    app.run_server(debug=True, port=5000)
+    app.run_server(debug=args.debug, port=5000)

@@ -9,7 +9,6 @@ import dash_html_components as html
 def run_standalone_app(
         layout,
         callbacks,
-        header_colors,
         filename
 ):
     app = dash.Dash(__name__)
@@ -17,16 +16,15 @@ def run_standalone_app(
 
     app.config['suppress_callback_exceptions'] = True
 
-    app_name = 'CDR(NN) Visualization Tool'
+    app_name = 'CDR Viewer'
 
-    app_title = 'CDR(NN) Visualization Tool'
+    app_title = 'CDR Viewer'
 
     app.layout = app_page_layout(
         page_layout=layout(),
         app_title=app_title,
         app_name=app_name,
-        standalone=True,
-        **header_colors()
+        standalone=True
     )
 
     callbacks(app)
@@ -35,12 +33,11 @@ def run_standalone_app(
 
 
 def app_page_layout(page_layout,
-                    app_title="CDR(NN) Visualization Tool",
-                    app_name="CDR(NN) Visualization Tool",
+                    app_title="CDR Viewer",
+                    app_name="CDR Viewer",
                     light_logo=True,
                     standalone=False,
-                    bg_color="#506784",
-                    font_color="#F3F6FA"):
+                    font_color="#FFFFFF"):
     return html.Div(
         id='main_page',
         children=[
@@ -49,11 +46,10 @@ def app_page_layout(page_layout,
                 id='app-page-header',
                 children=[
                     html.H2(
-                        '......' + app_title
+                        app_title
                     )
                 ],
                 style={
-                    'background': bg_color,
                     'color': font_color,
                 }
             ),

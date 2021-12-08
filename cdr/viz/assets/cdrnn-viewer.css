@@ -2,8 +2,23 @@
     background-color: #015BB0;
 }
 
-#cdrnn-control-tabs .tab--selected {
-    color: #015BB0 !important;
+#cdrnn-settings {
+    height: 90vh;
+    width: 30vw;
+    display: inline-block;
+    float: left;
+    overflow: scroll;
+}
+
+#cdrnn-settings-inner {
+    padding: 1rem;
+}
+
+#viewport-wrapper {
+    display: inline-block;
+    vertical-align: top;
+    width: 70vw;
+    float: right;
 }
 
 #cdrnn-body .rc-slider-track {
@@ -14,19 +29,6 @@
     border-color: #015BB0;
 }
 
-#cdrnn-body input[type="number"] {
+#cdrnn-body input {
     width: 100%;
-    margin-top: 15px;
-}
-
-#cdrnn-body #dropdown_x {
-    display: inline-block;
-    width: 150px;
-    margin-top: 10px;
-}
-
-#cdrnn-body #dropdown_y {
-    display: inline-block;
-    width: 150px;
-    margin-top: 10px;
 }
