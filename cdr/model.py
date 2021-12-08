@@ -673,8 +673,8 @@ class CDRModel(object):
             ix_2_levelname = [None] * self.rangf_n_levels[i]
             for level in self.rangf_map_base[i]:
                 ix_2_levelname[self.rangf_map_base[i][level]] = level
-            assert ix_2_levelname[-1] is None, 'Non-null value found in rangf map for unknown level'
-            ix_2_levelname[-1] = 'UNK'
+            assert ix_2_levelname[-1] is None, 'Non-null value found in rangf map for overall/unknown level'
+            ix_2_levelname[-1] = 'Overall'
             self.rangf_map_ix_2_levelname.append(ix_2_levelname)
 
         self.ranef_ix2level = {}

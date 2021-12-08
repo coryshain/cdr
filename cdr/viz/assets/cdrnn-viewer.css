@@ -21,6 +21,10 @@
     float: right;
 }
 
+#viewport-wrapper > div {
+    visibility: visible !important;
+}
+
 #cdrnn-body .rc-slider-track {
     background-color: #2186f4;
 }
@@ -29,6 +33,7 @@
     border-color: #2186f4;
 }
 
-#cdrnn-body input {
+input[type=text], [type=number], [type=dropdown] {
     width: 100%;
 }
+
