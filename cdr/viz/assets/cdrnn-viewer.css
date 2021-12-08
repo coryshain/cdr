@@ -1,5 +1,5 @@
 #cdrnn-body ::-webkit-scrollbar-thumb {
-    background-color: #015BB0;
+    background-color: #2186f4;
 }
 
 #cdrnn-settings {
@@ -22,11 +22,11 @@
 }
 
 #cdrnn-body .rc-slider-track {
-    background-color: #015BB0;
+    background-color: #2186f4;
 }
 
 #cdrnn-body .rc-slider-handle {
-    border-color: #015BB0;
+    border-color: #2186f4;
 }
 
 #cdrnn-body input {

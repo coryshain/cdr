@@ -13,8 +13,8 @@ label {
 #app-page-header {
     width: 100vw;
     height: 10vh;
-    background-color: #015BB0;
-    font-color: #FFFFFF;
+    background-color: #2186f4;
+    color: #FFFFFF;
 }
 
 #app-page-header > a > img {
