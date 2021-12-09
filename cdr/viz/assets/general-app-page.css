@@ -13,10 +13,13 @@ label {
 #app-page-header {
     width: 100vw;
     height: 10vh;
-    background-color: #2186f4;
+    background-color: #4d4d4d;
     color: #FFFFFF;
     display: flex;
     justify-content: center;
+    box-shadow: 0 0 5px 5px rgba(0, 0, 0, 0.2);
+    position: relative;
+    z-index: 10;
 }
 
 #app-page-header > a > img {

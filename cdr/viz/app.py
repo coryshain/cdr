@@ -3,7 +3,7 @@ import dash_core_components as dcc
 import dash_html_components as html
 import numpy as np
 import plotly.graph_objects as go
-from dash.dependencies import Input, Output
+from dash.dependencies import Input, Output, State
 from cdr.viz.layout_helper import run_standalone_app
 
 from cdr.util import load_cdr, get_irf_name
@@ -59,7 +59,7 @@ def generate_figure(
         response,
         resparam,
         yvar=None,
-        n_samples=N_SAMPLES,
+        n_samples=None,
         level=95,
         xmin=None,
         xmax=None,
@@ -68,179 +68,232 @@ def generate_figure(
         zmin=None,
         zmax=None,
         X_ref=None,
+        X_time_ref=None,
+        t_delta_ref=None,
         ref_varies_with_x=None,
         ref_varies_with_y=None,
         pair_manipulations=True,
         gf_y_ref=None,
-        fuzzy=False
+        fuzzy=False,
+        height=None
 ):
+    if n_samples is None:
+        n_samples = N_SAMPLES
     if ref_varies_with_x is None:
         ref_varies_with_x = xvar in ('t_delta', 'X_time') and yvar is not None
     if ref_varies_with_y is None:
         ref_varies_with_y = yvar in ('t_delta', 'X_time')
+    if height is None:
+        height = 1
 
-    plot_data = model.get_plot_data(
-        ref_varies_with_x=ref_varies_with_x,
-        ref_varies_with_y=ref_varies_with_y,
-        xvar=xvar,
-        yvar=yvar,
-        responses=response,
-        response_params=resparam,
-        X_ref=X_ref,
-        gf_y_ref=gf_y_ref,
-        pair_manipulations=pair_manipulations,
-        level=level,
-        xmin=xmin,
-        xmax=xmax,
-        ymin=ymin,
-        ymax=ymax,
-        n_samples=n_samples
-    )
-
-    if yvar is None: # 2D plot
-        x2d = plot_data[0]
-        d2d = plot_data[1]
-        y2d = d2d[response][resparam]
-        y2d_splice = y2d[..., 0]
-        y_lower = plot_data[2][response][resparam][..., 0]
-        y_upper = plot_data[3][response][resparam][..., 0]
-        fig = go.Figure(data=[
-            go.Scatter(x=x2d, y=y2d_splice, marker=dict(color='blue'), mode='lines'),
-            go.Scatter(
-                name='Upper Bound',
-                x=x2d,
-                y=y_upper,
-                mode='lines',
-                line=dict(width=0),
-                showlegend=False
-            ),
-            go.Scatter(
-                name='Lower Bound',
-                x=x2d,
-                y=y_lower,
-                line=dict(width=0),
-                mode='lines',
-                fillcolor='rgba(0, 0, 255, 0.2)',
-                fill='tonexty',
-                showlegend=False
-            )
-        ])
-
-        if xmin is not None and xmax is not None:
-            fig.update_xaxes(range=[xmin, xmax])
-        fig.update_layout(
-            font_family='Helvetica',
-            title_font_family='Helvetica',
-            title='2D',
-            xaxis_title=xvar,
-            yaxis_title=response + " " + resparam,
-            xaxis=dict(range=[xmin, xmax], gridcolor='rgb(200, 200, 200)'),
-            yaxis=dict(gridcolor='rgb(200, 200, 200)'),
-            plot_bgcolor='rgb(255, 255, 255)',
-            paper_bgcolor='rgb(255, 255, 255)'
+    try:
+        plot_data = model.get_plot_data(
+            ref_varies_with_x=ref_varies_with_x,
+            ref_varies_with_y=ref_varies_with_y,
+            xvar=xvar,
+            yvar=yvar,
+            responses=response,
+            response_params=resparam,
+            X_ref=X_ref,
+            X_time_ref=X_time_ref,
+            t_delta_ref=t_delta_ref,
+            gf_y_ref=gf_y_ref,
+            pair_manipulations=pair_manipulations,
+            level=level,
+            xmin=xmin,
+            xmax=xmax,
+            ymin=ymin,
+            ymax=ymax,
+            n_samples=n_samples
         )
-    else: # 3D plot
-        zmin = zmin
-        zmax = zmax
-        x, y = plot_data[0]
-        z = plot_data[1][response][resparam]
-        z_lower = plot_data[2][response][resparam]
-        z_upper = plot_data[3][response][resparam]
 
-        fig = go.Figure()
-        traces = []
-        for i in range(z.shape[-1]):
-            _z = z[..., i]
-            traces.append(
-                go.Surface(
-                    z=_z,
-                    x=x,
-                    y=y,
-                    colorscale=get_surface_colorscale(_z),
-                    showscale=False,
-                    lighting=dict(
-                        ambient=1.0,
-                        diffuse=1.0
+        if yvar is None: # 2D plot
+            x2d = plot_data[0]
+            d2d = plot_data[1]
+            y2d = d2d[response][resparam]
+            y2d_splice = y2d[..., 0]
+            y_lower = plot_data[2][response][resparam][..., 0]
+            y_upper = plot_data[3][response][resparam][..., 0]
+            fig = go.Figure(data=[
+                go.Scatter(x=x2d, y=y2d_splice, marker=dict(color='blue'), mode='lines'),
+                go.Scatter(
+                    name='Upper Bound',
+                    x=x2d,
+                    y=y_upper,
+                    mode='lines',
+                    line=dict(width=0),
+                    showlegend=False
+                ),
+                go.Scatter(
+                    name='Lower Bound',
+                    x=x2d,
+                    y=y_lower,
+                    line=dict(width=0),
+                    mode='lines',
+                    fillcolor='rgba(0, 0, 255, 0.2)',
+                    fill='tonexty',
+                    showlegend=False
+                )
+            ])
+
+            if xmin is not None and xmax is not None:
+                fig.update_xaxes(range=[xmin, xmax])
+            fig.update_layout(
+                font_family='Helvetica',
+                title_font_family='Helvetica',
+                title='2D',
+                xaxis_title=xvar,
+                yaxis_title=response + " " + resparam,
+                xaxis=dict(range=[xmin, xmax], gridcolor='rgb(200, 200, 200)'),
+                yaxis=dict(gridcolor='rgb(200, 200, 200)'),
+                plot_bgcolor='rgb(255, 255, 255)',
+                paper_bgcolor='rgb(255, 255, 255)'
+            )
+        else: # 3D plot
+            zmin = zmin
+            zmax = zmax
+            x, y = plot_data[0]
+            z = plot_data[1][response][resparam]
+            z_lower = plot_data[2][response][resparam]
+            z_upper = plot_data[3][response][resparam]
+
+            fig = go.Figure()
+            traces = []
+            for i in range(z.shape[-1]):
+                _z = z[..., i]
+                traces.append(
+                    go.Surface(
+                        z=_z,
+                        x=x,
+                        y=y,
+                        colorscale=get_surface_colorscale(_z),
+                        showscale=False,
+                        lighting=dict(
+                            ambient=1.0,
+                            diffuse=1.0
+                        )
                     )
                 )
-            )
-            if n_samples:
-                if fuzzy:
-                    _z_lower = z_lower[..., i]
-                    _z_upper = z_upper[..., i]
-                    for _x, _y, _zmin, _zmax in zip(x.flatten(), y.flatten(), _z_lower.flatten(), _z_upper.flatten()):
+                if n_samples:
+                    if fuzzy:
+                        _z_lower = z_lower[..., i]
+                        _z_upper = z_upper[..., i]
+                        for _x, _y, _zmin, _zmax in zip(x.flatten(), y.flatten(), _z_lower.flatten(), _z_upper.flatten()):
+                            traces.append(
+                                go.Scatter3d(
+                                    x=(_x, _x),
+                                    y=(_y, _y),
+                                    z=(_zmin, _zmax),
+                                    mode='lines',
+                                    line=dict(
+                                        color='rgba(0, 0, 0, 0.15)',
+                                        width=3
+                                    )
+                                )
+                            )
+                        fig.add_traces(traces)
+                    else:
+                        _z_lower = z_lower[..., i]
+                        _z_upper = z_upper[..., i]
                         traces.append(
-                            go.Scatter3d(
-                                x=(_x, _x),
-                                y=(_y, _y),
-                                z=(_zmin, _zmax),
-                                mode='lines',
-                                line=dict(
-                                    color='rgba(0, 0, 0, 0.15)',
-                                    width=3
+                            go.Surface(
+                                z=_z_lower,
+                                x=x,
+                                y=y,
+                                colorscale=get_surface_colorscale(_z_lower),
+                                opacity=0.4,
+                                showscale=False,
+                                lighting=dict(
+                                    ambient=1.0,
+                                    diffuse=1.0
                                 )
                             )
                         )
-                    fig.add_traces(traces)
+                        traces.append(
+                            go.Surface(
+                                z=_z_upper,
+                                x=x,
+                                y=y,
+                                colorscale=get_surface_colorscale(_z_upper),
+                                opacity=0.4,
+                                showscale=False,
+                                lighting=dict(
+                                    ambient=1.0,
+                                    diffuse=1.0
+                                )
+                            )
+                        )
+
+            fig.add_traces(traces)
+
+            camera = dict(
+                up=dict(x=0, y=0, z=1),
+                center=dict(x=0, y=0, z=0),
+                eye=dict(x=1.25, y=-1.25, z=1)
+            )
+
+            fig.update_layout(
+                font_family='Helvetica',
+                title_font_family='Helvetica',
+                title='%s vs. %s' % (get_irf_name(xvar, model.irf_name_map), get_irf_name(yvar, model.irf_name_map)),
+                scene = dict(
+                    xaxis_title=get_irf_name(xvar, model.irf_name_map),
+                    yaxis_title=get_irf_name(yvar, model.irf_name_map),
+                    zaxis_title=get_irf_name(response, model.irf_name_map) + ", " + resparam,
+                    xaxis=dict(range=[xmin, xmax], gridcolor='rgb(200, 200, 200)', showbackground=False, autorange='reversed'),
+                    yaxis=dict(range=[ymin, ymax], gridcolor='rgb(200, 200, 200)', showbackground=False),
+                    zaxis=dict(range=[zmin, zmax], gridcolor='rgb(200, 200, 200)', showbackground=False)
+                ),
+                plot_bgcolor='rgb(255, 255, 255)',
+                paper_bgcolor='rgb(255, 255, 255)',
+                scene_camera=camera,
+                scene_aspectmode='manual',
+                scene_aspectratio=dict(x=1, y=1, z=height),
+                margin=dict(r=0, l=0, b=0, t=40),
+                showlegend=False
+            )
+
+    except AssertionError as e:
+        msg = ''
+        msg_src = ('Invalid plot settings. %s' % e).split()
+        line = ''
+        while msg_src:
+            w = msg_src.pop(0)
+            if not line:
+                line += w
+            else:
+                line += ' ' + w
+            if len(line) > 50:
+                if msg:
+                    msg += '<br>' + line
                 else:
-                    _z_lower = z_lower[..., i]
-                    _z_upper = z_upper[..., i]
-                    traces.append(
-                        go.Surface(
-                            z=_z_lower,
-                            x=x,
-                            y=y,
-                            colorscale=get_surface_colorscale(_z_lower),
-                            opacity=0.4,
-                            showscale=False,
-                            lighting=dict(
-                                ambient=1.0,
-                                diffuse=1.0
-                            )
-                        )
-                    )
-                    traces.append(
-                        go.Surface(
-                            z=_z_upper,
-                            x=x,
-                            y=y,
-                            colorscale=get_surface_colorscale(_z_upper),
-                            opacity=0.4,
-                            showscale=False,
-                            lighting=dict(
-                                ambient=1.0,
-                                diffuse=1.0
-                            )
-                        )
-                    )
-
-        fig.add_traces(traces)
-
-        camera = dict(
-            up=dict(x=0, y=0, z=1),
-            center=dict(x=0, y=0, z=0),
-            eye=dict(x=1.25, y=-1.25, z=1)
-        )
-
-        fig.update_layout(
-            font_family='Helvetica',
-            title_font_family='Helvetica',
-            title='%s vs. %s' % (get_irf_name(xvar, model.irf_name_map), get_irf_name(yvar, model.irf_name_map)),
-            scene = dict(
-                xaxis_title=get_irf_name(xvar, model.irf_name_map),
-                yaxis_title=get_irf_name(yvar, model.irf_name_map),
-                zaxis_title=get_irf_name(response, model.irf_name_map) + ", " + resparam,
-                xaxis=dict(range=[xmin, xmax], gridcolor='rgb(200, 200, 200)', showbackground=False, autorange='reversed'),
-                yaxis=dict(range=[ymin, ymax], gridcolor='rgb(200, 200, 200)', showbackground=False),
-                zaxis=dict(range=[zmin, zmax], gridcolor='rgb(200, 200, 200)', showbackground=False)
-            ),
-            plot_bgcolor='rgb(255, 255, 255)',
-            paper_bgcolor='rgb(255, 255, 255)',
-            scene_camera=camera,
-            scene_aspectmode='manual',
-            scene_aspectratio=dict(x=1, y=1, z=1),
-            showlegend=False
-        )
+                    msg += line
+                line = ''
+        if msg:
+            msg += '<br>' + line
+        else:
+            msg += line
+        fig = {
+            'layout': {
+                'xaxis': {
+                    'visible': False
+                },
+                'yaxis': {
+                    'visible': False
+                },
+                'annotations': [
+                    {
+                        'text': msg,
+                        'xref': 'paper',
+                        'yref': 'paper',
+                        'showarrow': False,
+                        'font': {
+                            'size': 16
+                        }
+                    }
+                ]
+            }
+        }
 
     return fig
 
@@ -260,12 +313,39 @@ def layout():
                         id='%s-reference' % x,
                         type='number',
                         debounce=True,
-                        placeholder=model.reference_arr[model.impulse_names_to_ix[x]],
-                        value=model.reference_arr[model.impulse_names_to_ix[x]]
+                        placeholder=model.reference_arr[model.impulse_names_to_ix[x]]
                     )
                 ]
             )
         )
+    reference_settings.append(
+        html.Label(
+            id='X-time-reference-label',
+            children=[
+                'Time',
+                dcc.Input(
+                    id='X-time-reference',
+                    type='number',
+                    debounce=True,
+                    placeholder=model.X_time_mean
+                )
+            ]
+        )
+    )
+    reference_settings.append(
+        html.Label(
+            id='t-delta-reference-label',
+            children=[
+                get_irf_name('t_delta', model.irf_name_map),
+                dcc.Input(
+                    id='t-delta-reference',
+                    type='number',
+                    debounce=True,
+                    placeholder=model.reference_time
+                )
+            ]
+        )
+    )
     for i, x in enumerate(model.rangf):
         reference_settings.append(
             html.Label(
@@ -294,7 +374,7 @@ def layout():
                     fullscreen=False,
                     style={
                         'position': 'fixed',
-                        'top': '55vh',
+                        'top': '50vh',
                         'left': '65vw',
                     },
                     children=dcc.Graph(
@@ -310,219 +390,255 @@ def layout():
                                 scale=1
                             )
                         ),
-                        style={'width': '70vw', 'height': '90vh'}
+                        style={'width': '70vw', 'height': '100vh'}
                     )
                 )
             ),
             html.Div(
-                id='cdrnn-settings',
-                className='control-settings',
-                children=html.Div(
-                    id='cdrnn-settings-inner',
-                    children=[
-                        html.Div(
-                            title='Plot Definition',
-                            className='app-controls-block',
-                            children=[
-                                html.Div(
-                                    className='fullwidth-app-controls-name',
-                                    children='Plot Definition'
-                                ),
-                                html.Label(
-                                    children=[
-                                        'X axis',
-                                        dcc.Dropdown(
-                                            id='dropdown_x',
-                                            options=[{'label': get_irf_name(i, model.irf_name_map), 'value': i} for i in options],
-                                            value=options[0],
-                                            clearable=False
-                                        )
-                                    ]
-                                ),
-                                html.Label(
-                                    children=[
-                                        'Y axis (optional)',
-                                        dcc.Dropdown(
-                                            id='dropdown_y',
-                                            options=[{'label': get_irf_name(i, model.irf_name_map), 'value': i} for i in options],
-                                            value=options[options.index('t_delta')],
-                                            clearable=True
-                                        )
-                                    ]
-                                ),
-                                html.Label(
-                                    children=[
-                                        'Response variable',
-                                        dcc.Dropdown(
-                                            id='dropdown_response',
-                                            options=[{'label': get_irf_name(i, model.irf_name_map), 'value': i} for i in response_options],
-                                            value=response_options[0],
-                                            clearable=False
-                                        )
-                                    ]
-                                ),
-                                html.Label(
-                                    children=[
-                                        'Response parameter',
-                                            dcc.Dropdown(
-                                            id='dropdown_resparams',
-                                            options=[{'label': x, 'value': x} for x in get_resparams(model, response_options[0])],
-                                            value=model.expand_param_name(response_options[0], model.get_response_params(response_options[0])[0])[0],
-                                            clearable=False
-                                        )
-                                    ]
-                                ),
-                                html.Label(
-                                    children=[
-                                        dcc.Checklist(
-                                            id='plot-switches',
-                                            options=[
-                                                {'label': 'Reference varies with X', 'value': 'ref_varies_with_x'},
-                                                {'label': 'Reference varies with Y', 'value': 'ref_varies_with_y'},
-                                                {'label': 'Pair manipulations', 'value': 'pair_manipulations'}
-                                            ],
-                                            value=['ref_varies_with_y', 'pair_manipulations']
-                                        )
-                                    ]
-                                ),
-                            ]
-                        ),
-                        html.Div(
-                            title='Reference values',
-                            className='app-controls-block',
-                            children=reference_settings
-                        ),
-                        html.Div(
-                            title='Uncertainty',
-                            className='app-controls-block',
-                            children=[
-                                html.Div(className='fullwidth-app-controls-name',
-                                         children='Uncertainty'),
-                                html.Label(
-                                    children=[
-                                        'Number of samples',
-                                        dcc.Input(
-                                            id='n_samples',
-                                            type='number',
-                                            debounce=True,
-                                            placeholder='Number of samples',
-                                            min=0,
-                                            step=1,
-                                            value=N_SAMPLES
-                                        )
-                                    ]
-                                ),
-                                html.Label(
-                                    children=[
-                                        'Error interval, 0-100 (default: 95)',
-                                        dcc.Input(
-                                            id='ci',
-                                            type='number',
-                                            debounce=True,
-                                            placeholder='Error interval, 0-100 (default: 95)',
-                                            min=0,
-                                            max=100,
-                                            step=1,
-                                            value=95
-                                        )
-                                    ]
-                                )
-                            ]),
-                        html.Div(
-                            title='Axis bounds',
-                            className='app-controls-block',
-                            children=[
-                                html.Div(className='fullwidth-app-controls-name',
-                                         children=' Axis bounds'),
-
-                                html.Label(
-                                    children=[
-                                        html.Span(
-                                            'X min',
-                                            id='x-min-lab'
-                                        ),
-                                        dcc.Input(
-                                            id='x_min',
-                                            type='number',
-                                            debounce=True,
-                                            placeholder=''
-                                        )
-                                    ]
-                                ),
-                                html.Label(
-                                    children=[
-                                        html.Span(
-                                            'X max',
-                                            id='x-max-lab'
-                                        ),
-                                        dcc.Input(
-                                            id='x_max',
-                                            type='number',
-                                            debounce=True,
-                                            placeholder=''
-                                        )
-                                    ]
-                                ),
-                                html.Label(
-                                    children=[
-                                        html.Span(
-                                            'Y min',
-                                            id='y-min-lab'
-                                        ),
-                                        dcc.Input(
-                                            id='y_min',
-                                            type='number',
-                                            debounce=True,
-                                            placeholder=''
-                                        )
-                                    ]
-                                ),
-                                html.Label(
-                                    children=[
-                                        html.Span(
-                                            'Y max',
-                                            id='y-max-lab'
-                                        ),
-                                        dcc.Input(
-                                            id='y_max',
-                                            type='number',
-                                            debounce=True,
-                                            placeholder=''
-                                        )
-                                    ]
-                                ),
-                                html.Label(
-                                    children=[
-                                        html.Span(
-                                            'Z min',
-                                            id='z-min-lab'
-                                        ),
-                                        dcc.Input(
-                                            id='z_min',
-                                            type='number',
-                                            debounce=True,
-                                            placeholder=''
-                                        )
-                                    ]
-                                ),
-                                html.Label(
-                                    children=[
-                                        html.Span(
-                                            'Z max',
-                                            id='z-max-lab'
-                                        ),
-                                        dcc.Input(
-                                            id='z_max',
-                                            type='number',
-                                            debounce=True,
-                                            placeholder=''
-                                        )
-                                    ]
-                                ),
-                            ]
-                        ),
-                    ]
-                )
+                id='side-panel',
+                children=[
+                    html.Button('Update Plot', id='update', n_clicks=0),
+                    html.Div(
+                        id='cdrnn-settings',
+                        className='control-settings',
+                        children=[
+                            html.Div(
+                                id='cdrnn-settings-inner',
+                                children=[
+                                    html.Div(
+                                        title='Plot Definition',
+                                        className='app-controls-block',
+                                        children=[
+                                            html.Div(
+                                                className='fullwidth-app-controls-name',
+                                                children='Plot Definition'
+                                            ),
+                                            html.Label(
+                                                children=[
+                                                    'X axis',
+                                                    dcc.Dropdown(
+                                                        id='dropdown_x',
+                                                        options=[{'label': get_irf_name(i, model.irf_name_map), 'value': i} for i in options],
+                                                        value=options[0],
+                                                        clearable=False
+                                                    )
+                                                ]
+                                            ),
+                                            html.Label(
+                                                children=[
+                                                    'Y axis (optional)',
+                                                    dcc.Dropdown(
+                                                        id='dropdown_y',
+                                                        options=[{'label': get_irf_name(i, model.irf_name_map), 'value': i} for i in options],
+                                                        value=options[options.index('t_delta')],
+                                                        clearable=True
+                                                    )
+                                                ]
+                                            ),
+                                            html.Label(
+                                                children=[
+                                                    'Response variable',
+                                                    dcc.Dropdown(
+                                                        id='dropdown_response',
+                                                        options=[{'label': get_irf_name(i, model.irf_name_map), 'value': i} for i in response_options],
+                                                        value=response_options[0],
+                                                        clearable=False
+                                                    )
+                                                ]
+                                            ),
+                                            html.Label(
+                                                children=[
+                                                    'Response parameter',
+                                                        dcc.Dropdown(
+                                                        id='dropdown_resparams',
+                                                        options=[{'label': x, 'value': x} for x in get_resparams(model, response_options[0])],
+                                                        value=model.expand_param_name(response_options[0], model.get_response_params(response_options[0])[0])[0],
+                                                        clearable=False
+                                                    )
+                                                ]
+                                            ),
+                                            html.Label(
+                                                children=[
+                                                    dcc.Checklist(
+                                                        id='plot-switches',
+                                                        options=[
+                                                            {'label': 'Reference varies with X', 'value': 'ref_varies_with_x'},
+                                                            {'label': 'Reference varies with Y', 'value': 'ref_varies_with_y'},
+                                                            {'label': 'Pair manipulations', 'value': 'pair_manipulations'}
+                                                        ],
+                                                        value=['ref_varies_with_y', 'pair_manipulations']
+                                                    )
+                                                ]
+                                            ),
+                                        ]
+                                    ),
+                                    html.Div(
+                                        title='Reference values',
+                                        className='app-controls-block',
+                                        children=reference_settings
+                                    ),
+                                    html.Div(
+                                        title='Uncertainty',
+                                        className='app-controls-block',
+                                        children=[
+                                            html.Div(
+                                                className='fullwidth-app-controls-name',
+                                                 children='Uncertainty'
+                                            ),
+                                            html.Label(
+                                                children=[
+                                                    'Number of samples',
+                                                    dcc.Input(
+                                                        id='n_samples',
+                                                        type='number',
+                                                        debounce=True,
+                                                        placeholder=N_SAMPLES,
+                                                        min=0,
+                                                        step=1
+                                                    )
+                                                ]
+                                            ),
+                                            html.Label(
+                                                children=[
+                                                    'Error interval, 0-100 (default: 95)',
+                                                    dcc.Input(
+                                                        id='ci',
+                                                        type='number',
+                                                        debounce=True,
+                                                        placeholder=95,
+                                                        min=0,
+                                                        max=100,
+                                                        step=1
+                                                    )
+                                                ]
+                                            )
+                                        ]),
+                                    html.Div(
+                                        title='Axis bounds',
+                                        className='app-controls-block',
+                                        children=[
+                                            html.Div(
+                                                className='fullwidth-app-controls-name',
+                                                 children='Axis bounds'
+                                            ),
+                                            html.Label(
+                                                children=[
+                                                    html.Span(
+                                                        'X min',
+                                                        id='x-min-lab'
+                                                    ),
+                                                    dcc.Input(
+                                                        id='x_min',
+                                                        type='number',
+                                                        debounce=True,
+                                                    )
+                                                ]
+                                            ),
+                                            html.Label(
+                                                children=[
+                                                    html.Span(
+                                                        'X max',
+                                                        id='x-max-lab'
+                                                    ),
+                                                    dcc.Input(
+                                                        id='x_max',
+                                                        type='number',
+                                                        debounce=True,
+                                                    )
+                                                ]
+                                            ),
+                                            html.Label(
+                                                children=[
+                                                    html.Span(
+                                                        'Y min',
+                                                        id='y-min-lab'
+                                                    ),
+                                                    dcc.Input(
+                                                        id='y_min',
+                                                        type='number',
+                                                        debounce=True,
+                                                    )
+                                                ]
+                                            ),
+                                            html.Label(
+                                                children=[
+                                                    html.Span(
+                                                        'Y max',
+                                                        id='y-max-lab'
+                                                    ),
+                                                    dcc.Input(
+                                                        id='y_max',
+                                                        type='number',
+                                                        debounce=True,
+                                                    )
+                                                ]
+                                            ),
+                                            html.Label(
+                                                children=[
+                                                    html.Span(
+                                                        'Z min',
+                                                        id='z-min-lab'
+                                                    ),
+                                                    dcc.Input(
+                                                        id='z_min',
+                                                        type='number',
+                                                        debounce=True,
+                                                    )
+                                                ]
+                                            ),
+                                            html.Label(
+                                                children=[
+                                                    html.Span(
+                                                        'Z max',
+                                                        id='z-max-lab'
+                                                    ),
+                                                    dcc.Input(
+                                                        id='z_max',
+                                                        type='number',
+                                                        debounce=True,
+                                                    )
+                                                ]
+                                            ),
+                                        ]
+                                    ),
+                                    html.Div(
+                                        title='Aesthetics',
+                                        className='app-controls-block',
+                                        children=[
+                                            html.Div(
+                                                className='fullwidth-app-controls-name',
+                                                children='Aesthetics'
+                                            ),
+                                            html.Label(
+                                                children=[
+                                                    html.Label(
+                                                        id='height-label',
+                                                        children=[
+                                                            'Relative Height',
+                                                            dcc.Input(
+                                                                id='height',
+                                                                type='number',
+                                                                debounce=True,
+                                                                placeholder=1
+                                                            )
+                                                        ]
+                                                    ),
+                                                    dcc.Checklist(
+                                                        id='aes-plot-switches',
+                                                        options=[
+                                                            {'label': 'Fuzzy', 'value': 'fuzzy'},
+                                                        ],
+                                                        value=[]
+                                                    )
+                                                ]
+                                            ),
+                                        ]
+                                    )
+                                ]
+                            )
+                        ]
+                    )
+                ]
             )
         ]
     )
@@ -536,26 +652,34 @@ def callbacks(_app):
         Output('y-max-lab', 'children'),
         Output('z-min-lab', 'children'),
         Output('z-max-lab', 'children'),
-        Input('dropdown_x', 'value'),
-        Input('dropdown_y', 'value'),
-        Input('dropdown_response', 'value'),
-        Input('dropdown_resparams', 'value'),
-        Input('plot-switches', 'value'),
-        Input('n_samples', 'value'),
-        Input('ci', 'value'),
-        Input('x_min', 'value'),
-        Input('x_max', 'value'),
-        Input('y_min', 'value'),
-        Input('y_max', 'value'),
-        Input('z_min', 'value'),
-        Input('z_max', 'value'),
+        Input('update', 'n_clicks'),
+        State('dropdown_x', 'value'),
+        State('dropdown_y', 'value'),
+        State('dropdown_response', 'value'),
+        State('dropdown_resparams', 'value'),
+        State('plot-switches', 'value'),
+        State('n_samples', 'value'),
+        State('ci', 'value'),
+        State('x_min', 'value'),
+        State('x_max', 'value'),
+        State('y_min', 'value'),
+        State('y_max', 'value'),
+        State('z_min', 'value'),
+        State('z_max', 'value'),
     ] + [
-        Input('%s-reference' % x, 'value') for x in model.impulse_names
+        State('%s-reference' % x, 'value') for x in model.impulse_names
     ] + [
-        Input('%s-reference' % x, 'value') for x in model.rangf
+        State('X-time-reference', 'value'),
+        State('t-delta-reference', 'value')
+    ] + [
+        State('%s-reference' % x, 'value') for x in model.rangf
+    ] + [
+        State('aes-plot-switches', 'value'),
+        State('height', 'value')
     ]
     @_app.callback(*args)
     def update_graph(
+            update,
             xvar,
             yvar,
             response,
@@ -578,10 +702,22 @@ def callbacks(_app):
             if arg is not None:
                 X_ref[x] = arg
             i += 1
+        X_time_ref = args[i]
+        i += 1
+        t_delta_ref = args[i]
+        i += 1
         for x, arg in zip(model.rangf, args[i:]):
             if arg is not None:
                 gf_y_ref[x] = arg
             i += 1
+        aes_plot_switches = args[i]
+        i += 1
+        height = args[i]
+        i += 1
+        if 'fuzzy' in aes_plot_switches:
+            fuzzy = True
+        else:
+            fuzzy = False
 
         if 'ref_varies_with_x' in switches:
             ref_varies_with_x = True
@@ -610,11 +746,16 @@ def callbacks(_app):
             zmin=zmin,
             zmax=zmax,
             X_ref=X_ref,
+            X_time_ref=X_time_ref,
+            t_delta_ref=t_delta_ref,
             ref_varies_with_x=ref_varies_with_x,
             ref_varies_with_y=ref_varies_with_y,
             pair_manipulations=pair_manipulations,
-            gf_y_ref=gf_y_ref
+            gf_y_ref=gf_y_ref,
+            fuzzy=fuzzy,
+            height=height
         )
+
         x_min_lab = '%s min' % (get_irf_name(xvar, model.irf_name_map))
         x_max_lab = '%s max' % (get_irf_name(xvar, model.irf_name_map))
         if yvar:

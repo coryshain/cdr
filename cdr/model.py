@@ -8212,6 +8212,9 @@ class CDRModel(object):
         assert xvar is not None, 'Value must be provided for xvar'
         assert xvar != yvar, 'Cannot vary two axes along the same variable'
 
+        if level is None:
+            level = 95
+
         if responses is None:
             if self.n_response == 1:
                 responses = self.response_names

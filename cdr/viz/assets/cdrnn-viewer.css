@@ -2,10 +2,35 @@
     background-color: #2186f4;
 }
 
-#cdrnn-settings {
-    height: 90vh;
+#side-panel {
+    position: fixed;
+    top: 0;
+    left: 0;
     width: 30vw;
     display: inline-block;
+    box-shadow: 0 0 3px 3px rgba(0, 0, 0, 0.2);
+    z-index: 9;
+}
+
+#update {
+    color: #FFFFFF;
+    display: block;
+    float: left;
+    height: 5vh;
+    width: 100%;
+    background-color: #2186f4;
+    border: none;
+    border-radius: 0px;
+}
+
+#update:hover {
+    background-color: #1a67ba;
+}
+
+#cdrnn-settings {
+    height: 95vh;
+    width: 100%;
+    display: block;
     float: left;
     overflow: scroll;
 }
@@ -17,6 +42,7 @@
 #viewport-wrapper {
     display: inline-block;
     vertical-align: top;
+    height: 100vh;
     width: 70vw;
     float: right;
 }

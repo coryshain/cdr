@@ -43,17 +43,6 @@ def app_page_layout(page_layout,
         children=[
             dcc.Location(id='url', refresh=False),
             html.Div(
-                id='app-page-header',
-                children=[
-                    html.H2(
-                        app_title
-                    )
-                ],
-                style={
-                    'color': font_color,
-                }
-            ),
-            html.Div(
                 id='app-page-content',
                 children=page_layout
             )
