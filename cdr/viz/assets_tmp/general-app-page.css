@@ -1,8 +1,9 @@
 @import url('https://fonts.googleapis.com/css?family=Open+Sans:300,400');
 
 label {
-  display: block;
-  font-size: 10pt;
+    color: #4d4d4d;
+    display: block;
+    font-size: 10pt;
 }
 
 #app-page-content {
@@ -74,16 +75,6 @@ label {
     border-color: #dfe8f3 !important;
 }
 
-#app-page-content ::-webkit-scrollbar {
-    width: 4px;
-    height: 0px;
-    background-color: #f6f6f6;
-}
-
-#app-page-content ::-webkit-scrollbar-thumb {
-    width: 2px;
-    border-radius: 15px;
-}
 
 #app-page-content .app-body {
     margin: 0 auto;

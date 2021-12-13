@@ -171,6 +171,7 @@ class Config(object):
         self.irf_name_map = {
             't_delta': 'Delay (s)',
             'time_X': 'Timestamp (s)',
+            'X_time': 'Timestamp (s)',
             'rate': 'Rate'
         }
         if 'irf_name_map' in config:

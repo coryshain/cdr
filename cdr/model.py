@@ -1953,6 +1953,7 @@ class CDRModel(object):
                     sd_prior = self._intercept_ranef_prior_sd[response]
                     sd_posterior = self._intercept_ranef_posterior_sd_init[response]
                     if not self.use_distributional_regression:
+                        sd_prior = sd_prior[:1]
                         sd_posterior = sd_posterior[:1]
                     sd_prior = np.ones((rangf_n_levels, 1, 1)) * sd_prior[None, ...]
                     sd_posterior = np.ones((rangf_n_levels, 1, 1)) * sd_posterior[None, ...]
@@ -3391,6 +3392,7 @@ class CDRModel(object):
                     # H bias
                     if not (self.normalize_h and self.normalize_activations) or self.normalize_after_activation:
                         self.h_bias_layer[nn_id] = self._initialize_bias(name='%s_h_bias' % nn_id, rangf_map=rangf_map_l1)
+                        self.regularizable_layers.append(self.h_bias_layer[nn_id])
 
                     if self.input_dependent_irf:
                         # Projection from hidden state to first layer (weights and biases) of IRF
