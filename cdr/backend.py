@@ -1,11 +1,24 @@
 import collections
-import tensorflow as tf
 
 from .util import *
 
+import tensorflow as tf
+if int(tf.__version__.split('.')[0]) == 1:
+    from tensorflow.contrib.distributions import Normal, Gamma
+    from tensorflow.contrib.distributions import softplus_inverse as tf_softplus_inverse
+    from tensorflow.nn import dynamic_rnn
+elif int(tf.__version__.split('.')[0]) == 2:
+    import tensorflow.compat.v1 as tf
+    tf.disable_v2_behavior()
+    from tensorflow_probability import distributions as tfd
+    from tensorflow_probability import math as tfm
+    Normal = tfd.Normal
+    Gamma = tfd.Gamma
+    tf_softplus_inverse = tfm.softplus_inverse
+    dynamic_rnn = tf.nn.dynamic_rnn
+else:
+    raise ImportError('Unsupported TensorFlow version: %s. Must be 1.x.x or 2.x.x.' % tf.__version__)
 from tensorflow.python.ops import rnn_cell_impl
-from tensorflow.contrib.distributions import Normal
-
 if hasattr(rnn_cell_impl, 'LayerRNNCell'):
     LayerRNNCell = rnn_cell_impl.LayerRNNCell
 else:
@@ -67,7 +80,7 @@ def get_constraint(name):
     if name.lower() == 'softplus':
         constraint_fn = tf.nn.softplus
         constraint_fn_np = lambda x: np.log(np.exp(x) + 1.)
-        constraint_fn_inv = tf.contrib.distributions.softplus_inverse
+        constraint_fn_inv = tf_softplus_inverse
         constraint_fn_inv_np = lambda x: np.log(np.exp(x) - 1.)
     elif name.lower() == 'square':
         constraint_fn = tf.square
@@ -126,7 +139,7 @@ def get_regularizer(init, scale=None, session=None):
             if scale is None and isinstance(init, str) and '_' in init:
                 try:
                     init_split = init.split('_')
-                    scale = float(init_split[-1])
+                    scale = init_split[-1]
                     init = '_'.join(init_split[:-1])
                 except ValueError:
                     pass
@@ -134,12 +147,31 @@ def get_regularizer(init, scale=None, session=None):
             if scale is None:
                 scale = 0.001
 
+            if isinstance(scale, str):
+                scale = [float(x) for x in scale.split(';')]
+            if not isinstance(scale, tuple) and not isinstance(scale, list):
+                scale = [scale]
+
             if init is None:
                 out = None
             elif isinstance(init, str):
-                out = getattr(tf.contrib.layers, init)(scale=scale)
+                if init.lower() == 'l1_regularizer':
+                    l1_scale = scale[0]
+                    l2_scale = None
+                elif init.lower() == 'l2_regularizer':
+                    l1_scale = None
+                    l2_scale = scale[0]
+                elif init.lower() == 'l1_l2_regularizer':
+                    if len(scale) == 1:
+                        l1_scale = l2_scale = scale[0]
+                    else:
+                        l1_scale = scale[0]
+                        l2_scale = scale[1]
+                else:
+                    raise ValueError('Unrecognized regularizer: %s' % init)
+                out = RegularizerLayer(l1_scale=l1_scale, l2_scale=l2_scale, session=session)
             elif isinstance(init, float):
-                out = tf.contrib.layers.l2_regularizer(scale=init)
+                out = RegularizerLayer(l2_scale=init, session=session)
             else:
                 out = init
 
@@ -490,7 +522,7 @@ def gamma_irf_factory(
             alpha = tf.convert_to_tensor(alpha)
             beta = tf.convert_to_tensor(beta)
 
-            dist = tf.contrib.distributions.Gamma(
+            dist = Gamma(
                 concentration=alpha,
                 rate=beta,
                 validate_args=validate_irf_args
@@ -543,7 +575,7 @@ def shifted_gamma_irf_factory(
             beta = tf.convert_to_tensor(beta)
             delta = tf.convert_to_tensor(delta)
 
-            dist = tf.contrib.distributions.Gamma(
+            dist = Gamma(
                 concentration=alpha,
                 rate=beta,
                 validate_args=validate_irf_args
@@ -598,7 +630,7 @@ def normal_irf_factory(
             mu = tf.convert_to_tensor(mu)
             sigma = tf.convert_to_tensor(sigma)
 
-            dist = tf.contrib.distributions.Normal(
+            dist = Normal(
                 mu,
                 sigma
             )
@@ -656,7 +688,7 @@ def skew_normal_irf_factory(
             sigma = tf.convert_to_tensor(sigma)
             alpha = tf.convert_to_tensor(alpha)
 
-            stdnorm = tf.contrib.distributions.Normal(loc=0., scale=1.)
+            stdnorm = Normal(loc=0., scale=1.)
             stdnorm_pdf = stdnorm.prob
             stdnorm_cdf = stdnorm.cdf
 
@@ -722,7 +754,7 @@ def emg_irf_factory(
             beta = tf.convert_to_tensor(beta)
 
             def cdf(x):
-                return tf.contrib.distributions.Normal(
+                return Normal(
                     loc=0.,
                     scale=beta * sigma
                 )(beta * (x - mu))
@@ -1068,14 +1100,14 @@ def double_gamma_5_irf_factory(
             beta_undershoot = tf.convert_to_tensor(beta_undershoot)
             c = tf.convert_to_tensor(c)
 
-            dist_main = tf.contrib.distributions.Gamma(
+            dist_main = Gamma(
                 concentration=alpha_main,
                 rate=beta_main,
                 validate_args=validate_irf_args
             )
             pdf_main = dist_main.prob
             cdf_main = dist_main.cdf
-            dist_undershoot = tf.contrib.distributions.Gamma(
+            dist_undershoot = Gamma(
                 concentration=alpha_undershoot,
                 rate=beta_undershoot,
                 validate_args=validate_irf_args
@@ -1132,7 +1164,7 @@ def LCG_irf_factory(
             # Build kernel widths
             b = tf.stack([params['s%s' % i] for i in range(1, bases + 1)], -1)
 
-            dist = tf.contrib.distributions.Normal(
+            dist = Normal(
                 loc=c,
                 scale=b + epsilon,
             )
@@ -1167,6 +1199,36 @@ CDRNNStateTuple = collections.namedtuple(
     'AttentionalLSTMDecoderStateTuple',
     ' '.join(['c', 'h', 't'])
 )
+
+
+class RegularizerLayer(object):
+    def __init__(
+            self,
+            l1_scale=0.,
+            l2_scale=1.,
+            session=None
+    ):
+        self.session = get_session(session)
+        self.l1_scale = l1_scale
+        self.l2_scale = l2_scale
+
+    def __call__(self, v):
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                reg = None
+                if self.l1_scale:
+                    reg = tf.reduce_sum(tf.abs(v)) * self.l1_scale
+                if self.l2_scale:
+                    _reg = tf.reduce_sum(tf.square(v)) * self.l2_scale
+                    if reg is None:
+                        reg = _reg
+                    else:
+                        reg += _reg
+
+                if reg is None:
+                    reg = tf.constant(0., dtype=tf.float32)
+
+                return reg
 
 
 class BiasLayer(object):
@@ -2452,7 +2514,7 @@ class RNNLayer(object):
                     while len(mask.shape) < 3:
                         mask = mask[..., None]
 
-                H, _ = tf.nn.dynamic_rnn(
+                H, _ = dynamic_rnn(
                     self.cell,
                     inputs,
                     initial_state=initial_state,
@@ -2566,17 +2628,10 @@ class RNNCellBayes(RNNCell):
         self._ranef_to_fixef_prior_sd_ratio = ranef_to_fixef_prior_sd_ratio
 
         self._constraint = constraint
-        if self._constraint.lower() == 'softplus':
-            self._constraint_fn = tf.nn.softplus
-            self._constraint_fn_inv = tf.contrib.distributions.softplus_inverse
-        elif self._constraint.lower() == 'square':
-            self._constraint_fn = tf.square
-            self._constraint_fn_inv = tf.sqrt
-        elif self._constraint.lower() == 'abs':
-            self._constraint_fn = self._safe_abs
-            self._constraint_fn_inv = tf.identity
-        else:
-            raise ValueError('Unrecognized constraint function %s' % self._constraint)
+        self._constraint_fn, \
+        self._constraint_fn_np, \
+        self._constraint_fn_inv, \
+        self._constraint_fn_inv_np = get_constraint(self._constraint)
 
         self.kl_penalties_base = {}
 
@@ -3120,17 +3175,10 @@ class BatchNormLayerBayes(BatchNormLayer):
         self.ranef_to_fixef_prior_sd_ratio = ranef_to_fixef_prior_sd_ratio
         self.constraint = constraint
 
-        if self.constraint.lower() == 'softplus':
-            self.constraint_fn = tf.nn.softplus
-            self.constraint_fn_inv = tf.contrib.distributions.softplus_inverse
-        elif self.constraint.lower() == 'square':
-            self.constraint_fn = tf.square
-            self.constraint_fn_inv = tf.sqrt
-        elif self.constraint.lower() == 'abs':
-            self.constraint_fn = self._safe_abs
-            self.constraint_fn_inv = tf.identity
-        else:
-            raise ValueError('Unrecognized constraint function %s' % self.constraint)
+        self.constraint_fn, \
+        self.constraint_fn_np, \
+        self.constraint_fn_inv, \
+        self.constraint_fn_inv_np = get_constraint(self.constraint)
 
         self.kl_penalties_base = {}
 
@@ -3518,18 +3566,10 @@ class LayerNormLayerBayes(LayerNormLayer):
         self.posterior_to_prior_sd_ratio = posterior_to_prior_sd_ratio
         self.ranef_to_fixef_prior_sd_ratio = ranef_to_fixef_prior_sd_ratio
         self.constraint = constraint
-
-        if self.constraint.lower() == 'softplus':
-            self.constraint_fn = tf.nn.softplus
-            self.constraint_fn_inv = tf.contrib.distributions.softplus_inverse
-        elif self.constraint.lower() == 'square':
-            self.constraint_fn = tf.square
-            self.constraint_fn_inv = tf.sqrt
-        elif self.constraint.lower() == 'abs':
-            self.constraint_fn = self._safe_abs
-            self.constraint_fn_inv = tf.identity
-        else:
-            raise ValueError('Unrecognized constraint function %s' % self.constraint)
+        self.constraint_fn, \
+        self.constraint_fn_np, \
+        self.constraint_fn_inv, \
+        self.constraint_fn_inv_np = get_constraint(self.constraint)
 
         self.kl_penalties_base = {}
 

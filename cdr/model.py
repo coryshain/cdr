@@ -16,7 +16,33 @@ from .opt import *
 from .plot import *
 
 import tensorflow as tf
-from tensorflow.contrib.distributions import Normal, SinhArcsinh
+if int(tf.__version__.split('.')[0]) == 1:
+    from tensorflow.contrib.distributions import Normal, SinhArcsinh, Bernoulli, Categorical, Exponential
+    ExponentiallyModifiedGaussian = None # Not supported
+    from tensorflow.contrib.opt import NadamOptimizer
+    from tensorflow.contrib.framework import argsort as tf_argsort
+    from tensorflow.contrib import keras
+    from tensorflow import check_numerics as tf_check_numerics
+    TF_MAJOR_VERSION = 1
+elif int(tf.__version__.split('.')[0]) == 2:
+    import tensorflow.compat.v1 as tf
+    tf.disable_v2_behavior()
+    from tensorflow_probability import distributions as tfd
+    Normal = tfd.Normal
+    SinhArcsinh = tfd.SinhArcsinh
+    Bernoulli = tfd.Bernoulli
+    Categorical = tfd.Categorical
+    Exponential = tfd.Exponential
+    ExponentiallyModifiedGaussian = tfd.ExponentiallyModifiedGaussian
+    from tensorflow.compat.v1.keras.optimizers import Nadam as NadamOptimizer
+    from tensorflow import argsort as tf_argsort
+    from tensorflow import keras
+    from tensorflow.debugging import check_numerics as tf_check_numerics
+    TF_MAJOR_VERSION = 1
+else:
+    raise ImportError('Unsupported TensorFlow version: %s. Must be 1.x.x or 2.x.x.' % tf.__version__)
+from tensorflow.python.ops import control_flow_ops
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 tf.logging.set_verbosity(tf.logging.ERROR)
@@ -165,18 +191,32 @@ class CDRModel(object):
             'support': 'real'
         },
         'bernoulli': {
-            'dist': tf.contrib.distributions.Bernoulli,
+            'dist': Bernoulli,
             'name': 'bernoulli',
             'params': ('logit',),
             'params_tf': ('logits',),
             'support': 'discrete'
         },
         'categorical': {
-            'dist': tf.contrib.distributions.Categorical,
+            'dist': Categorical,
             'name': 'categorical',
             'params': ('logit',),
             'params_tf': ('logits',),
             'support': 'discrete'
+        },
+        'exponential': {
+            'dist': Exponential,
+            'name': 'exponential',
+            'params': ('beta'),
+            'params_tf': ('rate',),
+            'support': 'positive'
+        },
+        'exgaussian': {
+            'dist': ExponentiallyModifiedGaussian,
+            'name': 'exgaussian',
+            'params': ('mu', 'sigma', 'beta'),
+            'params_tf': ('loc', 'scale', 'rate',),
+            'support': 'real'
         }
     }
 
@@ -507,6 +547,8 @@ class CDRModel(object):
 
     def _initialize_metadata(self):
         ## Compute secondary data from intialization settings
+
+        assert TF_MAJOR_VERSION == 1 or self.optim_name.lower() != 'nadam', 'Nadam optimizer is not supported when using TensorFlow 2.X.X'
 
         self.FLOAT_TF = getattr(tf, self.float_type)
         self.FLOAT_NP = getattr(np, self.float_type)
@@ -1476,35 +1518,20 @@ class CDRModel(object):
                 elif self.intercept_regularizer_name == 'inherit':
                     self.intercept_regularizer = self.regularizer
                 else:
-                    scale = self.intercept_regularizer_scale
-                    if self.scale_regularizer_with_data:
-                        scale *= self.minibatch_size * self.minibatch_scale
-                    self.intercept_regularizer = getattr(tf.contrib.layers, self.intercept_regularizer_name)(scale)
+                    self.intercept_regularizer = self._initialize_regularizer(
+                        self.intercept_regularizer_name,
+                        self.intercept_regularizer_scale
+                    )
 
                 if self.ranef_regularizer_name is None:
                     self.ranef_regularizer = None
                 elif self.ranef_regularizer_name == 'inherit':
                     self.ranef_regularizer = self.regularizer
                 else:
-                    scale = self.ranef_regularizer_scale
-                    if isinstance(scale, str):
-                        scale = [float(x) for x in scale.split(';')]
-                    else:
-                        scale = [scale]
-                    if self.scale_regularizer_with_data:
-                        scale = [x * self.minibatch_size * self.minibatch_scale for x in scale]
-                    if self.ranef_regularizer_name == 'l1_l2_regularizer':
-                        if len(scale) == 1:
-                            scale_l1 = scale_l2 = scale[0]
-                        else:
-                            scale_l1 = scale[0]
-                            scale_l2 = scale[1]
-                        self.ranef_regularizer = getattr(tf.contrib.layers, self.ranef_regularizer_name)(
-                            scale_l1,
-                            scale_l2
-                        )
-                    else:
-                        self.ranef_regularizer = getattr(tf.contrib.layers, self.ranef_regularizer_name)(scale[0])
+                    self.ranef_regularizer = self._initialize_regularizer(
+                        self.ranef_regularizer_name,
+                        self.ranef_regularizer_scale
+                    )
 
                 self.nn_regularizer = self._initialize_regularizer(
                     self.nn_regularizer_name,
@@ -1545,17 +1572,11 @@ class CDRModel(object):
                     scale = self.context_regularizer_scale / (
                         (self.history_length + self.future_length) * max(1, self.n_impulse_df_noninteraction)
                     ) # Average over time
-                    if self.scale_regularizer_with_data:
-                         scale *= self.minibatch_scale # Sum over batch, multiply by n batches
-                    else:
-                        scale /= self.minibatch_size # Mean over batch
-                    if self.context_regularizer_name == 'l1_l2_regularizer':
-                        self.context_regularizer = getattr(tf.contrib.layers, self.context_regularizer_name)(
-                            scale,
-                            scale
-                        )
-                    else:
-                        self.context_regularizer = getattr(tf.contrib.layers, self.context_regularizer_name)(scale)
+                    self.context_regularizer = self._initialize_regularizer(
+                        self.context_regularizer_name,
+                        scale,
+                        per_item=True
+                    )
 
                 self.resample_ops = [] # Only used by CDRNN, defined here for global API
                 self.regularizable_layers = [] # Only used by CDRNN, defined here for global API
@@ -3632,7 +3653,7 @@ class CDRModel(object):
                     if X_mask is not None:
                         X_mask_cdrnn = tf.concat(X_mask_cdrnn, axis=1)
 
-                    sort_ix = tf.contrib.framework.argsort(tf.squeeze(X_time_cdrnn, axis=-1), axis=1)
+                    sort_ix = tf_argsort(tf.squeeze(X_time_cdrnn, axis=-1), axis=1)
                     B_ix = tf.tile(
                         tf.range(B)[..., None],
                         [1, T * self.n_impulse_df_noninteraction]
@@ -4524,37 +4545,6 @@ class CDRModel(object):
                                 collections=['params']
                             )
 
-                    # # Define EMA over X_conv
-                    # X_conv = tf.unstack(self.X_conv[response], axis=2) # X_conv is (batch, impulse, param, dim)
-                    # self.X_conv_ema[response] = {}
-                    # self.X_conv_ema_debiased[response] = {}
-                    # X_conv_response_param_names = response_param_names
-                    # if not self.use_distributional_regression:
-                    #     X_conv_response_param_names = response_param_names[:1]
-                    # for j, response_param_name in enumerate(X_conv_response_param_names):
-                    #     _X_conv = X_conv[j]
-                    #     if self.standardize_response and self.is_real(response) and response_param_name in ['mu', 'sigma']:
-                    #         _X_conv = _X_conv * self.Y_train_sds[response]
-                    #     _X_conv = tf.reduce_mean(_X_conv, axis=0)
-                    #     dim_names = self._expand_param_name_by_dim(response, response_param_name)
-                    #     for k, dim_name in enumerate(dim_names):
-                    #         X_conv_ema_cur = _X_conv[:, k]
-                    #         self.X_conv_ema[response][dim_name] = tf.Variable(
-                    #             tf.zeros_like(X_conv_ema_cur),
-                    #             trainable=False,
-                    #             name='response_params_ema_%s_%s' % (sn(response), sn(dim_name))
-                    #         )
-                    #         X_conv_ema_prev = self.X_conv_ema[response][dim_name]
-                    #         X_conv_ema_debiased = X_conv_ema_prev / (1. - beta ** step)
-                    #         self.X_conv_ema_debiased[response][dim_name] = X_conv_ema_debiased
-                    #         ema_update = beta * X_conv_ema_prev + \
-                    #                      (1. - beta) * X_conv_ema_cur
-                    #         X_conv_ema_op = tf.assign(
-                    #             self.X_conv_ema[response][dim_name],
-                    #             ema_update
-                    #         )
-                    #         self.ema_ops.append(X_conv_ema_op)
-
                     # Define error distribution
                     if self.is_real(response):
                         empirical_quantiles = tf.linspace(0., 1., self.n_errors[response])
@@ -4584,7 +4574,7 @@ class CDRModel(object):
 
                 self.ll = tf.add_n([self.ll_by_var[x] for x in self.ll_by_var])
 
-    def _initialize_regularizer(self, regularizer_name, regularizer_scale):
+    def _initialize_regularizer(self, regularizer_name, regularizer_scale, per_item=False):
         with self.session.as_default():
             with self.session.graph.as_default():
                 if regularizer_name is None:
@@ -4598,19 +4588,18 @@ class CDRModel(object):
                     else:
                         scale = [scale]
                     if self.scale_regularizer_with_data:
-                        scale = [x * self.minibatch_size * self.minibatch_scale for x in scale]
-                    if regularizer_name == 'l1_l2_regularizer':
-                        if len(scale) == 1:
-                            scale_l1 = scale_l2 = scale[0]
+                        if per_item:
+                            scale = [x * self.minibatch_scale for x in scale]
                         else:
-                            scale_l1 = scale[0]
-                            scale_l2 = scale[1]
-                        regularizer = getattr(tf.contrib.layers, regularizer_name)(
-                            scale_l1,
-                            scale_l2
-                        )
-                    else:
-                        regularizer = getattr(tf.contrib.layers, regularizer_name)(scale[0])
+                            scale = [x * self.minibatch_size * self.minibatch_scale for x in scale]
+                    elif per_item:
+                        scale = [x / self.minibatch_size for x in scale]
+
+                    regularizer = get_regularizer(
+                        regularizer_name,
+                        scale=scale,
+                        session=self.session
+                    )
 
                 return regularizer
 
@@ -4672,7 +4661,7 @@ class CDRModel(object):
                     'ftrl': tf.train.FtrlOptimizer,
                     'rmsprop': tf.train.RMSPropOptimizer,
                     'adam': tf.train.AdamOptimizer,
-                    'nadam': tf.contrib.opt.NadamOptimizer,
+                    'nadam': NadamOptimizer,
                     'amsgrad': AMSGradOptimizer
                 }[name]
 
@@ -4789,7 +4778,10 @@ class CDRModel(object):
                 self.optim = self._initialize_optimizer()
                 assert self.optim_name is not None, 'An optimizer name must be supplied'
 
-                self.train_op = self.optim.minimize(self.loss_func, global_step=self.global_batch_step)
+                self.train_op = control_flow_ops.group(
+                    self.optim.minimize(self.loss_func, var_list=tf.trainable_variables()),
+                    self.incr_global_batch_step
+                )
 
     def _initialize_logging(self):
         with self.session.as_default():
@@ -4932,7 +4924,7 @@ class CDRModel(object):
             with self.session.graph.as_default():
                 self.saver = tf.train.Saver()
 
-                self.check_numerics_ops = [tf.check_numerics(v, 'Numerics check failed') for v in tf.trainable_variables()]
+                self.check_numerics_ops = [tf_check_numerics(v, 'Numerics check failed') for v in tf.trainable_variables()]
 
     def _initialize_ema(self):
         with self.session.as_default():
@@ -5217,9 +5209,9 @@ class CDRModel(object):
             with self.session.as_default():
                 with self.session.graph.as_default():
                     if center is None:
-                        reg = tf.contrib.layers.apply_regularization(regularizer, [var])
+                        reg = regularizer(var)
                     else:
-                        reg = tf.contrib.layers.apply_regularization(regularizer, [var - center])
+                        reg = regularizer(var - center)
                     self.regularizer_losses.append(reg)
                     self.regularizer_losses_varnames.append(str(var_name))
                     if regtype is None:
@@ -5960,7 +5952,7 @@ class CDRModel(object):
         :return: ``bool``; whether the response is real-valued
         """
 
-        return self.get_response_support(response) == 'real'
+        return self.get_response_support(response) in ('real', 'positive', 'negative')
 
     def is_categorical(self, response):
         """
@@ -6263,7 +6255,7 @@ class CDRModel(object):
 
         with self.session.as_default():
             with self.session.graph.as_default():
-                assert len(self.regularizer_losses) == len(self.regularizer_losses_names) == len(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)), 'Different numbers of regularized variables found in different places'
+                assert len(self.regularizer_losses) == len(self.regularizer_losses_names), 'Different numbers of regularized variables found in different places'
 
                 out = ' ' * indent + 'REGULARIZATION:\n'
 
@@ -6622,7 +6614,7 @@ class CDRModel(object):
                         if self.optim_name is not None and self.lr_decay_family is not None:
                             stderr('Learning rate: %s\n' % self.lr.eval(session=self.session))
 
-                        pb = tf.contrib.keras.utils.Progbar(n_minibatch)
+                        pb = keras.utils.Progbar(n_minibatch)
 
                         loss_total = 0.
                         reg_loss_total = 0.
@@ -7130,7 +7122,7 @@ class CDRModel(object):
                             n_samples = self.n_samples_eval
 
                         if verbose:
-                            pb = tf.contrib.keras.utils.Progbar(n_samples)
+                            pb = keras.utils.Progbar(n_samples)
 
                         out = {}
                         if return_preds:
@@ -7741,7 +7733,7 @@ class CDRModel(object):
                         n_samples = self.n_samples_eval
 
                     if verbose:
-                        pb = tf.contrib.keras.utils.Progbar(n_samples)
+                        pb = keras.utils.Progbar(n_samples)
 
                     loss = np.zeros((len(feed_dict[self.Y_time]), n_samples))
 
@@ -8066,7 +8058,7 @@ class CDRModel(object):
                     if n_samples is None:
                         n_samples = self.n_samples_eval
                     if verbose:
-                        pb = tf.contrib.keras.utils.Progbar(n_samples)
+                        pb = keras.utils.Progbar(n_samples)
 
                     for i in range(0, n_samples):
                         _X_conv = self.session.run(to_run, feed_dict=feed_dict)

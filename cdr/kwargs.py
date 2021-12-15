@@ -386,7 +386,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'optim_name',
-        'Nadam',
+        'Adam',
         [str, None],
         """Name of the optimizer to use. Must be one of:
         

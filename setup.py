@@ -11,7 +11,7 @@ setup(name='CDR',
       install_requires=['numpy>=1.9.1',
                         'pandas>=1.1',
                         'matplotlib',
-                        'tensorflow>=1.9,<2.0',
+                        'tensorflow>=1.9',
                         'scipy>=0.14'],
       packages=find_packages(),
 )
