@@ -60,7 +60,7 @@ def cdr_kwarg_docstring():
 
     out += '\nCDRNNBayes\n^^^^^^^^^^\n\n'
 
-    for kwarg in CDRNNBAYES_INITIALIZATION_KWARGS:
+    for kwarg in NN_BAYES_KWARGS:
         out += docstring_from_kwarg(kwarg)
 
     out += '\n'
@@ -291,7 +291,7 @@ MODEL_INITIALIZATION_KWARGS = [
         'predictive_distribution_map',
         None,
         [str, None],
-        "Map defining predictive distribution. Can be a space-delimited list of distribution names (one per response variable), a space-delimited list of ';'-delimited tuples matching response variables to distribution names (e.g. ``response;Bernoulli``), or ``None``, in which case the predictive distribution will be inferred as ``Normal`` for continuous variables and ``Categorical`` for categorical variables."
+        "Definition of predictive distribution. Can be a single distribution name (shared across all response variables), a space-delimited list of distribution names (one per response variable), a space-delimited list of ';'-delimited tuples matching response variables to distribution names (e.g. ``response;Bernoulli``), or ``None``, in which case the predictive distribution will be inferred as ``Normal`` for continuous variables and ``Categorical`` for categorical variables."
     ),
     Kwarg(
         'center_inputs',
@@ -339,6 +339,13 @@ MODEL_INITIALIZATION_KWARGS = [
         str,
         "Constraint function to use for bounded variables. One of ``['abs', 'square', 'softplus']``."
     ),
+    Kwarg(
+        'random_variables',
+        'default',
+        str,
+        "Space-delimited list of model components to instantiate as (variationally optimized) random variables, rather than point estimates. Can be any combination of: `['intercept', 'coefficient', 'interaction', 'irf_param', 'nn']`. Can also be `'all'`, `'none'`, or `'default'`, which defaults to all components except `'nn'`.",
+        aliases=['rvs', 'as_rv', 'as_random_variable']
+    ),
 
     # OPTIMIZATION SETTINGS
     Kwarg(
@@ -361,13 +368,13 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'minibatch_size',
-        1024,
+        512,
         [int, None],
         "Size of minibatches to use for fitting (full-batch if ``None``)."
     ),
     Kwarg(
         'eval_minibatch_size',
-        10000,
+        1024,
         int,
         "Size of minibatches to use for prediction/evaluation."
     ),
@@ -379,7 +386,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'optim_name',
-        'Nadam',
+        'Adam',
         [str, None],
         """Name of the optimizer to use. Must be one of:
         
@@ -394,17 +401,15 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'max_global_gradient_norm',
-        None,
+        1.,
         [float, None],
-        'Maximum allowable value for the global norm of the gradient, which will be clipped as needed. If ``None``, no gradient clipping.',
-        default_value_cdrnn=1.,
+        'Maximum allowable value for the global norm of the gradient, which will be clipped as needed. If ``None``, no gradient clipping.'
     ),
     Kwarg(
         'epsilon',
         1e-5,
         float,
-        "Epsilon parameter to use for numerical stability in bounded parameter estimation.",
-        default_value_cdrnn=1e-2,
+        "Epsilon parameter to use for numerical stability in bounded parameter estimation."
     ),
     Kwarg(
         'optim_epsilon',
@@ -417,7 +422,7 @@ MODEL_INITIALIZATION_KWARGS = [
         0.001,
         float,
         "Initial value for the learning rate.",
-        default_value_cdrnn=0.01
+        default_value_cdrnn=0.005
     ),
     Kwarg(
         'learning_rate_min',
@@ -504,18 +509,6 @@ MODEL_INITIALIZATION_KWARGS = [
         "Scale of global regularizer; can be overridden by more regularizers for more specific parameters (ignored if ``regularizer_name==None``)."
     ),
     Kwarg(
-        'coefficient_regularizer_name',
-        'inherit',
-        [str, 'inherit', None],
-        "Name of coefficient regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
-    ),
-    Kwarg(
-        'coefficient_regularizer_scale',
-        'inherit',
-        [str, float, 'inherit'],
-        "Scale of coefficient regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
-    ),
-    Kwarg(
         'intercept_regularizer_name',
         'inherit',
         [str, 'inherit', None],
@@ -528,17 +521,41 @@ MODEL_INITIALIZATION_KWARGS = [
         "Scale of intercept regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
     Kwarg(
+        'coefficient_regularizer_name',
+        'inherit',
+        [str, 'inherit', None],
+        "Name of coefficient regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
+    ),
+    Kwarg(
+        'coefficient_regularizer_scale',
+        'inherit',
+        [str, float, 'inherit'],
+        "Scale of coefficient regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
+    ),
+    Kwarg(
+        'irf_regularizer_name',
+        'inherit',
+        [str, 'inherit', None],
+        "Name of IRF parameter regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
+    ),
+    Kwarg(
+        'irf_regularizer_scale',
+        'inherit',
+        [str, float, 'inherit'],
+        "Scale of IRF parameter regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
+    ),
+    Kwarg(
         'ranef_regularizer_name',
         'inherit',
         [str, 'inherit', None],
-        "Name of random effects regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization.",
+        "Name of random effects regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization. Regularization only applies to random effects without variational priors.",
         default_value_cdrnn='l2_regularizer'
     ),
     Kwarg(
         'ranef_regularizer_scale',
         'inherit',
         [str, float, 'inherit'],
-        "Scale of random effects regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**.",
+        "Scale of random effects regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**. Regularization only applies to random effects without variational priors.",
         default_value_cdrnn=10.
     ),
 
@@ -692,6 +709,13 @@ MODEL_INITIALIZATION_KWARGS = [
 
     # DEPRECATED OR RARELY USED
     Kwarg(
+        'validate_irf_args',
+        True,
+        bool,
+        "Check whether inputs and parameters to IRF obey constraints. Imposes a small performance cost but helps catch and report bugs in the model.",
+        suppress=True
+    ),
+    Kwarg(
         'use_jtps',
         False,
         bool,
@@ -742,7 +766,7 @@ MODEL_INITIALIZATION_KWARGS = [
     )
 ]
 
-MODEL_BAYES_INITIALIZATION_KWARGS = [
+BAYES_KWARGS = [
     # PRIORS
     Kwarg(
         'declare_priors_fixef',
@@ -764,38 +788,7 @@ MODEL_BAYES_INITIALIZATION_KWARGS = [
         [str, float, None],
         "Standard deviation of prior on fixed intercept. Can be a space-delimited list of ``;``-delimited floats (one per distributional parameter per response variable), a ``float`` (applied to all responses), or ``None``, in which case the prior is inferred from **prior_sd_scaling_coefficient** and the empirical variance of the response on the training set.",
         aliases=['prior_sd']
-    )
-]
-
-CDR_INITIALIZATION_KWARGS = [
-    # REGULARIZATION
-    Kwarg(
-        'irf_regularizer_name',
-        'inherit',
-        [str, 'inherit', None],
-        "Name of IRF parameter regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
     ),
-    Kwarg(
-        'irf_regularizer_scale',
-        'inherit',
-        [str, float, 'inherit'],
-        "Scale of IRF parameter regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
-    ),
-
-    # DEPRECATED OR RARELY USED
-    Kwarg(
-        'validate_irf_args',
-        True,
-        bool,
-        "Check whether inputs and parameters to IRF obey constraints. Imposes a small performance cost but helps catch and report bugs in the model.",
-        suppress=True
-    )
-]
-
-CDRMLE_INITIALIZATION_KWARGS = []
-
-CDRBAYES_INITIALIZATION_KWARGS = [
-    # PRIORS
     Kwarg(
         'coef_prior_sd',
         None,
@@ -846,7 +839,7 @@ CDRBAYES_INITIALIZATION_KWARGS = [
     )
 ]
 
-CDRNN_INITIALIZATION_KWARGS = [
+NN_KWARGS = [
     # DATA SETTINGS
     Kwarg(
         'center_X_time',
@@ -864,14 +857,15 @@ CDRNN_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'rescale_X_time',
-        True,
+        False,
         bool,
         "Whether to rescale time values as inputs by their training SD under the hood. Times are automatically reconverted back to the source scale for plotting and model criticism.",
-        aliases=['rescale_time', 'rescale_X_time']
+        aliases=['rescale_time', 'rescale_time_X'],
+        default_value_cdrnn=True
     ),
     Kwarg(
         'rescale_t_delta',
-        True,
+        False,
         bool,
         "Whether to rescale time offset values by their training SD under the hood. Offsets are automatically reconverted back to the source scale for plotting and model criticism.",
         aliases=['rescale_time', 'rescale_tdelta']
@@ -880,23 +874,23 @@ CDRNN_INITIALIZATION_KWARGS = [
         'nonstationary',
         True,
         bool,
-        "Whether to model non-stationarity by feeding impulse timestamps as input."
+        "Whether to model non-stationarity in NN components by feeding impulse timestamps as input."
     ),
 
     # MODEL SIZE
     Kwarg(
-        'n_layers_input_projection',
+        'n_layers_ff',
         2,
         [int, None],
-        "Number of hidden layers in input projection. If ``None``, inferred from length of **n_units_input_projection**.",
-        aliases=['n_layers']
+        "Number of hidden layers in feedforward encoder. If ``None``, inferred from length of **n_units_ff**.",
+        aliases=['n_layers', 'n_layers_encoder', 'n_layers_input_projection']
     ),
     Kwarg(
-        'n_units_input_projection',
+        'n_units_ff',
         32,
         [int, str, None],
-        "Number of units per input projection hidden layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_rnn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers in input projection.",
-        aliases=['n_units']
+        "Number of units per feedforward encoder hidden layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_rnn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no feedforward encoder.",
+        aliases=['n_units', 'n_units_encoder', 'n_units_input_projection']
     ),
     Kwarg(
         'n_layers_rnn',
@@ -923,11 +917,47 @@ CDRNN_INITIALIZATION_KWARGS = [
         "Number of units per hidden layer in projection of RNN state. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_units_rnn_projection** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers in RNN projection."
     ),
     Kwarg(
-        'n_units_hidden_state',
+        'input_dependent_irf',
+        True,
+        bool,
+        "Whether or not NN IRFs are input-dependent (can modify their shape at different values of the predictors)."
+    ),
+    Kwarg(
+        'input_dependent_l1_only',
+        False,
+        bool,
+        "Whether to include random effects only on first layer of feedforward transforms (``True``) or on all neural components."
+    ),
+    Kwarg(
+        'input_dependent_bias_only',
+        True,
+        bool,
+        "Whether to only bias terms of neural components are input-dependent (``True``) or also weight matrices."
+    ),
+    Kwarg(
+        'ranef_l1_only',
+        False,
+        bool,
+        "Whether to include random effects only on first layer of feedforward transforms (``True``) or on all neural components."
+    ),
+    Kwarg(
+        'ranef_bias_only',
+        True,
+        bool,
+        "Whether to include random effects only on bias terms of neural components (``True``) or also on weight matrices."
+    ),
+    Kwarg(
+        'normalizer_use_ranef',
+        False,
+        bool,
+        "Whether to include random effects in normalizer layers (``True``) or not."
+    ),
+    Kwarg(
+        'n_units_irf_hidden_state',
         32,
         [int, str],
         "Number of units in CDRNN hidden state. Must be an ``int``.",
-        aliases=['n_units']
+        aliases=['n_units', 'n_units_encoder', 'n_units_hidden_state']
     ),
     Kwarg(
         'n_layers_irf',
@@ -946,17 +976,18 @@ CDRNN_INITIALIZATION_KWARGS = [
 
     # ACTIVATION FUNCTIONS
     Kwarg(
-        'input_projection_inner_activation',
+        'ff_inner_activation',
         'gelu',
         [str, None],
-        "Name of activation function to use for hidden layers in input projection.",
-        aliases=['activation']
+        "Name of activation function to use for hidden layers in feedforward encoder.",
+        aliases=['activation', 'input_projection_inner_activation']
     ),
     Kwarg(
-        'input_projection_activation',
+        'ff_activation',
         None,
         [str, None],
-        "Name of activation function to use for output of input projection."
+        "Name of activation function to use for output of feedforward encoder.",
+        aliases=['input_projection_activation']
     ),
     Kwarg(
         'rnn_activation',
@@ -1017,6 +1048,12 @@ CDRNN_INITIALIZATION_KWARGS = [
         [str, None],
         "Name of initializer to use in encoder recurrent kernels.",
     ),
+    Kwarg(
+        'weight_sd_init',
+        'glorot',
+        [float, str, None],
+        "Standard deviation of kernel initialization distribution (Normal, mean=0). Can also be ``'glorot'``, which uses the SD of the Glorot normal initializer. If ``None``, inferred from other hyperparams."
+    ),
 
     # NORMALIZATION
     Kwarg(
@@ -1026,10 +1063,11 @@ CDRNN_INITIALIZATION_KWARGS = [
         "Decay rate to use for batch normalization in internal layers. If ``None``, no batch normalization.",
     ),
     Kwarg(
-        'normalize_input_projection',
+        'normalize_ff',
         True,
         bool,
-        "Whether to apply normalization (if applicable) to hidden layers of the input projection.",
+        "Whether to apply normalization (if applicable) to hidden layers of feedforward encoders.",
+        aliases=['normalize_input_projection']
     ),
     Kwarg(
         'normalize_h',
@@ -1039,13 +1077,13 @@ CDRNN_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'normalize_irf_l1',
-        False,
+        True,
         bool,
         "Whether to apply normalization (if applicable) to the first IRF layer.",
     ),
     Kwarg(
         'normalize_irf',
-        False,
+        True,
         bool,
         "Whether to apply normalization (if applicable) to non-initial internal IRF layers.",
     ),
@@ -1056,15 +1094,22 @@ CDRNN_INITIALIZATION_KWARGS = [
         "Whether to apply normalization (if applicable) after the non-linearity (otherwise, applied before).",
     ),
     Kwarg(
-        'normalization_use_gamma',
+        'shift_normalized_activations',
+        True,
+        bool,
+        "Whether to use trainable shift in batch/layer normalization layers.",
+        aliases=['normalization_use_beta', 'batch_normalization_use_beta', 'layer_normalization_use_beta']
+    ),
+    Kwarg(
+        'rescale_normalized_activations',
         True,
         bool,
         "Whether to use trainable scale in batch/layer normalization layers.",
-        aliases=['batch_normalization_use_gamma', 'layer_normalization_use_gamma']
+        aliases=['normalization_use_gamma', 'batch_normalization_use_gamma', 'layer_normalization_use_gamma']
     ),
     Kwarg(
         'layer_normalization_type',
-        None,
+        'z',
         [str, None],
         "Type of layer normalization, one of ``['z', 'length', None]``. If ``'z'``, classical z-transform-based normalization. If ``'length'``, normalize by the norm of the activation vector. If ``None``, no layer normalization. Incompatible with batch normalization.",
     ),
@@ -1078,9 +1123,35 @@ CDRNN_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'nn_regularizer_scale',
-        1.,
+        10.,
         [str, float, 'inherit'],
         "Scale of weight regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
+    ),
+    Kwarg(
+        'ff_regularizer_name',
+        None,
+        [str, None],
+        "Name of weight regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``) on output layer of feedforward encoders; overrides **regularizer_name**. If ``None``, inherits from **nn_regularizer_name**.",
+        aliases=['input_projection_regularizer_name']
+    ),
+    Kwarg(
+        'ff_regularizer_scale',
+        1.,
+        [str, float],
+        "Scale of weight regularizer (ignored if ``regularizer_name==None``) on output layer of feedforward encoders. If ``None``, inherits from **nn_regularizer_scale**.",
+        aliases=['input_projection_regularizer_scale']
+    ),
+    Kwarg(
+        'rnn_projection_regularizer_name',
+        None,
+        [str, None],
+        "Name of weight regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``) on output layer of RNN projection; overrides **regularizer_name**. If ``None``, inherits from **nn_regularizer_name**."
+    ),
+    Kwarg(
+        'rnn_projection_regularizer_scale',
+        1.,
+        [str, float],
+        "Scale of weight regularizer (ignored if ``regularizer_name==None``) on output layer of RNN projection. If ``None``, inherits from **nn_regularizer_scale**."
     ),
     Kwarg(
         'context_regularizer_name',
@@ -1109,11 +1180,11 @@ CDRNN_INITIALIZATION_KWARGS = [
         "Rate at which to drop input_features."
     ),
     Kwarg(
-        'input_projection_dropout_rate',
+        'ff_dropout_rate',
         0.2,
         [float, None],
-        "Rate at which to drop neurons of input projection layers.",
-        aliases=['dropout_rate']
+        "Rate at which to drop neurons of feedforward encoder layers.",
+        aliases=['dropout_rate', 'input_projection']
     ),
     Kwarg(
         'rnn_h_dropout_rate',
@@ -1163,10 +1234,9 @@ CDRNN_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'ranef_dropout_rate',
-        0.2,
+        None,
         [float, None],
-        "Rate at which to drop random effects indicators.",
-        aliases=['dropout_rate']
+        "Rate at which to drop random effects indicators."
     ),
 
     # DEPRECATED OR RARELY USED
@@ -1207,17 +1277,8 @@ CDRNN_INITIALIZATION_KWARGS = [
     ),
 ]
 
-CDRNNMLE_INITIALIZATION_KWARGS = [
-    # INITIALIZATION
-    Kwarg(
-        'weight_sd_init',
-        'glorot',
-        [float, str],
-        "Standard deviation of kernel initialization distribution (Normal, mean=0). Can also be ``'glorot'``, which uses the SD of the Glorot normal initializer."
-    )
-]
 
-CDRNNBAYES_INITIALIZATION_KWARGS = [
+NN_BAYES_KWARGS = [
     # PRIORS
     Kwarg(
         'declare_priors_weights',
@@ -1228,13 +1289,13 @@ CDRNNBAYES_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'declare_priors_biases',
-        False,
+        True,
         bool,
         "Specify Gaussian priors for model biases (if ``False``, use implicit improper uniform priors)."
     ),
     Kwarg(
         'declare_priors_gamma',
-        False,
+        True,
         bool,
         "Specify Gaussian priors for gamma parameters of any batch normalization layers (if ``False``, use implicit improper uniform priors).",
         aliases=['declare_priors']
@@ -1260,40 +1321,8 @@ CDRNNBAYES_INITIALIZATION_KWARGS = [
         "Standard deviation of prior on batch norm gammas. A ``float``, ``'glorot'``, or ``'he'``. Ignored unless batch normalization is used",
         aliases=['conv_prior_sd', 'prior_sd']
     ),
-    Kwarg(
-        'y_sd_prior_sd',
-        None,
-        [float, None],
-        "Standard deviation of prior on standard deviation of output model. If ``None``, inferred as **y_sd_prior_sd_scaling_coefficient** times the empirical variance of the response on the training set.",
-        aliases=['y_scale_prior_sd', 'prior_sd']
-    ),
-    Kwarg(
-        'prior_sd_scaling_coefficient',
-        1,
-        float,
-        "Factor by which to multiply priors on intercepts and coefficients if inferred from the empirical variance of the data (i.e. if **intercept_prior_sd** or **coef_prior_sd** is ``None``). Ignored for any prior widths that are explicitly specified."
-    ),
-    Kwarg(
-        'y_sd_prior_sd_scaling_coefficient',
-        1,
-        float,
-        "Factor by which to multiply prior on output model variance if inferred from the empirical variance of the data (i.e. if **y_sd_prior_sd** is ``None``). Ignored if prior width is explicitly specified.",
-        aliases=['y_scale_prior_sd_scaling_coefficient', 'prior_sd_scaling_coefficient']
-    ),
-    Kwarg(
-        'ranef_to_fixef_prior_sd_ratio',
-        0.1,
-        float,
-        "Ratio of widths of random to fixed effects priors. I.e. if less than 1, random effects have tighter priors."
-    ),
 
     # INITIALIZATION
-    Kwarg(
-        'weight_sd_init',
-        None,
-        [str, float, None],
-        "Initial standard deviation of variational posterior over weights. If ``None``, inferred from other hyperparams."
-    ),
     Kwarg(
         'bias_sd_init',
         None,
@@ -1313,6 +1342,8 @@ CDRNNBAYES_INITIALIZATION_KWARGS = [
         "Ratio of posterior initialization SD to prior SD. Low values are often beneficial to stability, convergence speed, and quality of final fit by avoiding erratic sampling and divergent behavior early in training."
     )
 ]
+
+MODEL_INITIALIZATION_KWARGS += BAYES_KWARGS + NN_KWARGS + NN_BAYES_KWARGS
 
 PLOT_KWARGS_CORE = [
     # PLOT DATA GENERATION

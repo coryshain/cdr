@@ -1,0 +1,162 @@
+@import url('https://fonts.googleapis.com/css?family=Open+Sans:300,400');
+
+
+
+/* Core elements */
+
+body {
+    font-size: 1.5em;
+    line-height: 1.6;
+    font-weight: 400;
+    font-family: "Open Sans", "HelveticaNeue", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    color: rgb(50, 50, 50);
+    margin: 0 !important;
+}
+
+label {
+    color: #4d4d4d;
+    display: block;
+    font-size: 10pt;
+}
+
+.button,
+button,
+input[type="submit"],
+input[type="reset"],
+input[type="button"] {
+    display: inline-block;
+    color: #555;
+    text-align: center;
+    font-weight: 600;
+    letter-spacing: .1rem;
+    text-transform: uppercase;
+    cursor: pointer;
+}
+
+input[type="email"],
+input[type="number"],
+input[type="search"],
+input[type="text"],
+input[type="tel"],
+input[type="url"],
+input[type="password"],
+textarea,
+select {
+    display: block;
+    height: 1rem;
+    padding: 0.5rem;
+    background-color: #fff;
+    border: 1px solid #D1D1D1;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: inherit;
+}
+
+input[type="email"]:focus,
+input[type="number"]:focus,
+input[type="search"]:focus,
+input[type="text"]:focus,
+input[type="tel"]:focus,
+input[type="url"]:focus,
+input[type="password"]:focus,
+textarea:focus,
+select:focus {
+    border: 1px solid #2186f4;
+    outline: 0;
+}
+
+
+
+/* Side panel */
+
+.fullwidth-app-controls-name {
+    color: #FFFFFF;
+    background-color: #545454;
+}
+
+.fullwidth-app-controls {
+    padding: 1rem;
+}
+
+.fullwidth-app-controls-name-text {
+    padding: 1rem;
+}
+
+#side-panel {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 30vw;
+    display: inline-block;
+    box-shadow: 0 0 3px 3px rgba(0, 0, 0, 0.2);
+    z-index: 9;
+}
+
+#update-button, #download-button {
+    color: #FFFFFF;
+    display: block;
+    float: left;
+    height: 5vh;
+    width: 100%;
+    background-color: #2186f4;
+    border: none;
+    border-radius: 0;
+    box-sizing: border-box;
+}
+
+#update-button:hover, #download-button:hover {
+    background-color: #1a67ba;
+}
+
+#cdrnn-settings {
+    height: 95vh;
+    width: 100%;
+    display: block;
+    float: left;
+    overflow: scroll;
+}
+
+
+
+
+
+/* Viewport */
+
+#viewport-wrapper {
+    display: inline-block;
+    vertical-align: top;
+    width: 70vw;
+    float: right;
+    overflow: hidden;
+}
+
+#viewport-wrapper > div {
+    visibility: visible !important;
+}
+
+#cdrnn-body .rc-slider-track {
+    background-color: #2186f4;
+}
+
+#cdrnn-body .rc-slider-handle {
+    border-color: #2186f4;
+}
+
+
+
+/* Scrollbars */
+
+#cdrnn-body ::-webkit-scrollbar-thumb {
+    background-color: #2186f4;
+}
+
+#app-page-content ::-webkit-scrollbar {
+    width: 4px;
+    height: 0px;
+    background-color: #f6f6f6;
+}
+
+#app-page-content ::-webkit-scrollbar-thumb {
+    width: 2px;
+    border-radius: 15px;
+}

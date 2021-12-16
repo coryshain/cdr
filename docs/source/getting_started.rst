@@ -12,12 +12,12 @@ The approach of using config files rather than command line arguments to define 
 - The config file contains a permanent record of the settings used in the experiment, facilitating later reproduction
 - The config file can be shared across many utilities (training, evaluation, statistical testing, plotting, etc.)
 
-This guide describes how to write the config file and use it to train and evaluate CDR(NN) models.
+This guide describes how to write the config file and use it to train and evaluate CDR models.
 
 
 
 
-Configuring CDR(NN) Experiments
+Configuring CDR Experiments
 -------------------------------
 
 A set of CDR experiments is definied in a config file ``*.ini``, which can then be passed to CDR executables.
@@ -27,7 +27,7 @@ For example, once a config file ``foo.ini`` has been created, the models defined
 
 The config file must at minimum contain the sections ``[data]`` (with pointers to training/evaluation data) and ``[global_settings]`` (with the location of the output directory).
 A section ``[cdr_settings]`` can be (optionally) provided to override default settings.
-In addition, the config file should contain at least one model section, consisting of the prefix ``model_CDR_`` (for CDR) or ``model_CDRNN_`` (for CDRNN) followed by a custom name for the model.
+In addition, the config file should contain at least one model section, consisting of the prefix ``model_CDR_`` followed by a custom name for the model.
 For example, to define a CDR model called ``readingtimes``, use the section heading ``[model_CDR_readingtimes]``.
 The identifier ``CDR_readingtimes`` will then be used by a number of utilities to designate this model
 (the reason ``CDR`` must be included in the prefix is that this repository distributes with unofficial support for running LM, LME, and GAM models from the same interface).
@@ -43,7 +43,7 @@ To jump-start a new config file, run::
 
     python -m cdr.bin.create_config > PATH.ini
 
-Add the flag ``-t cdrnn`` to generate a CDRNN-oriented config, and add the flag ``-a`` to include annotations that can help you fill in the fields correctly.
+Add the flag ``-a`` to include annotations that can help you fill in the fields correctly.
 
 
 
@@ -69,7 +69,7 @@ The following sections go into more detail about training and evaluation utiliti
 
 
 
-Training CDR(NN) Models
+Training CDR Models
 -----------------------
 
 First, gather some data and write a config file defining your experiments.
@@ -99,7 +99,7 @@ To run Tensorboard for a CDR model called ``CDR_A`` saved in experiment director
 
 then open the returned address (usually ``http://<USERNAME>:6006``) in a web browser.
 
-Evaluating CDR(NN) Models
+Evaluating CDR Models
 -------------------------
 
 This package provides several utilities for inspecting and evaluating fitted CDR models.
@@ -121,10 +121,10 @@ The above call will permutation test pairwise differences in mean squared error 
 
 In addition to these core utilities, ``convolve`` convolves the input predictors using the fitted CDR data transform and saves the data table, and ``make_plots`` generates IRF plots with basic customization as permitted by the command line arguments.
 
-CDR(NN) Model Comparison
+CDR Model Comparison
 ------------------------
 
-Two or more CDR(NN) models can be statistically compared using bootstrap testing (specifically, paired permutation tests).
+Two or more CDR models can be statistically compared using bootstrap testing (specifically, paired permutation tests).
 This repository provides utilities to support this.
 To compare models ``CDR_A`` and ``CDR_B`` using a mean squared error test statistic on the test partition designated in the ``*.ini`` file, run::
 

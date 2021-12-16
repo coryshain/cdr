@@ -526,21 +526,71 @@ The two responses can thus be separated via parameter tying of the hemodynamic r
 
 
 
-CDRNN Model Formulas
---------------------
+Neural Network Components
+-------------------------
 
-CDRNN models compute a single joint multivariate IRF with a highly distributed and interactive structure.
-As a result, it is not necessary (or even possible) to constrain the IRF to have a particular shape.
-Instead, all shape features are estimated from data.
-Therefore, CDRNN model formulas are very simple: they contain a list of predictors and (optionally) a list of random grouping factors.
-For example, the following defines a CDRNN model with predictors ``A`` and ``B`` and random grouping factor ``subject``::
+CDR now allows two kinds of neural network components in the model architecture.
+First, rather than using a parametric IRF kernel, you can use a deep neural network IRF, simply by using the term ``NN()`` as the second argument of a ``C()`` call::
 
-    y ~ A + B + (1 | subject)
+    y ~ C(A + B, NN())
 
-The ``(1 | subject)`` term may look like a random intercept from linear mixed models, but this is misleading.
-It simply allows CDRNN to take ``subject`` into account when computing any aspect of the response.
-It thus incorporates by-subject variation in the size, shape, and degree of interaction for all variables in the model.
-Because of the distributed nature of CDRNN representations, it is not possible to distinguish e.g. random intercepts, slopes, and IRF parameters, as CDR permits.
-A random term is simply present or not, and its influence can be accommodated as needed throughout the model.
-For details about how random effects are incorporated into the CDRNN architecture, see Shain (2021).
+For simplicity, ``NN()`` currently doesn't take any arguments. All NN hyperparameters are globally defined through keywords in ``[cdr_settings]``.
+Just like other IRFs, neural network IRFs can participate in both fixed and random effects.
+For example, the following defines a single population-level neural network IRF but allows the coefficients to vary by subject::
+
+    y ~ C(A + B, NN()) + (C(A + B, NN()) | subject)
+
+By contrast, the following allows by-subject variation in both in the coefficients and in the neural network parameters themselves::
+
+    y ~ C(A + B, NN()) + (C(A + B, NN(ran=T)) | subject)
+
+In addition, formulas can include trainable neural network transformations of predictors, simply by placing ``NN()`` in the first argument of a ``C()`` call and entering the sum of predictors to transform as its argument::
+
+    y ~ C(NN(A + B + C), Normal())
+
+The above formula will first apply a feedforward neural network to transform the vector ``[A, B, C]`` into a scalar, which is then treated as a predictor with a ``Normal`` IRF kernel.
+Neural net predictor transforms can also take neural network IRFs::
+
+    y ~ C(NN(A + B + C), NN())
+
+In this case, one NN defines a transform on ``A``, ``B``, and ``C``, and another defines an IRF that describes the diffusion of the effect of that transformed value over time.
+Note that in the above formula, the two NNs operate independently, one transforming data, the other convolving it.
+But this implementation also supports input-dependent NN IRFs that take the input values into account in determining the IRF shape.
+Input-dependent IRFs can be used by setting the ``input_dependent_irf`` field to ``True`` in the ``[cdr_settings]`` section of the config.
+Input-dependent IRFs make predictor transformations unnecessary (since the IRF implicitly represents a transformation of the predictors), so the above formula would only make sense if input-dependence were turned off.
+
+Parametric IRFs distribute over their inputs. Thus, the following two formulas are equivalent, and both express distinct IRF transforms for the variables A and B::
+
+    y ~ C(A + B, Normal())
+    y ~ C(A, Normal()) + C(B, Normal())
+
+However, this is not the case for deep neural IRFs, where the elements in the first argument of ``C()`` determine the number of convolution weights that the neural IRF will generate.
+Thus, the following two formulas are not equivalent::
+
+    y ~ C(A + B, NN())
+    y ~ C(A, NN()) + C(B, NN())
+
+The first defines a single NN IRF with two outputs that jointly convolves ``A`` and ``B``.
+The second defines two distinct NN IRFs, each with one output, that separately convolve ``A`` and ``B``.
+
+Neural components can be flexibly combined with non-neural components.
+For example, the following treats ``A`` as a linear (``DiracDelta``) predictor, convolves ``B`` with a neural IRF, and convolves ``C`` with a ``Normal`` IRF::
+
+    y ~ A + C(B, NN()) + C(C, Normal())
+
+
+
+Multivariate Responses
+----------------------
+
+CDR can jointly model multiple response variables.
+Unless the model contains neural components, this is equivalent to fitting a distinct CDR model to each response vector, but it can be more computationally efficient.
+When neural components are used, distributed representations entail that multivariate models can substantively differ from separate univariate models.
+Information about one response variable can inform inferences made about other response variables.
+
+To model multiple response variables, simply enter them all on the left-hand side of the model formula, delimited by ``+``.
+For example, the following jointly models ``y1`` and ``y2`` as a function of ``A`` and ``B``::
+
+    y1 + y1 ~ C(A + B, Gamma())
+
 

@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
-from matplotlib import pyplot as plt
 
 from cdr.config import Config
 from cdr.signif import permutation_test, correlation_test

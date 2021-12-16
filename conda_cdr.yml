@@ -2,14 +2,14 @@ name: cdr
 channels:
   - defaults
 dependencies:
-  - matplotlib
-  - numpy
-  - pandas
   - pip
-  - scipy
-  - seaborn
-  - scikit-learn
-  - tensorflow<2.0
+  - python>=3
   - pip:
+    - dash
+    - matplotlib
+    - numpy>=1.9
+    - pandas>=1.1
     - scikit-learn
-
+    - scipy>=0.14
+    - tensorflow>=1.9
+    - tensorflow-probability

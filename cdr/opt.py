@@ -1,4 +1,15 @@
 import tensorflow as tf
+if int(tf.__version__.split('.')[0]) == 1:
+    from tensorflow import check_numerics as tf_check_numerics
+    from tensorflow.contrib.distributions import softplus_inverse as tf_softplus_inverse
+elif int(tf.__version__.split('.')[0]) == 2:
+    import tensorflow.compat.v1 as tf
+    tf.disable_v2_behavior()
+    from tensorflow.debugging import check_numerics as tf_check_numerics
+    from tensorflow_probability import math as tfm
+    tf_softplus_inverse = tfm.softplus_inverse
+else:
+    raise ImportError('Unsupported TensorFlow version: %s. Must be 1.x.x or 2.x.x.' % tf.__version__)
 from tensorflow.python.ops import control_flow_ops, state_ops
 
 from .backend import get_session
@@ -14,7 +25,7 @@ def get_safe_optimizer_class(base_optimizer_class, session=None):
                     super(SafeOptimizer, self).__init__(*args, **kwargs)
 
                 def apply_gradients(self, grads_and_vars, **kwargs):
-                    with tf.control_dependencies([tf.check_numerics(g, 'Numerics check failed in gradient to variable %s' % v.name) for g, v in grads_and_vars if g is not None]):
+                    with tf.control_dependencies([tf_check_numerics(g, 'Numerics check failed in gradient to variable %s' % v.name) for g, v in grads_and_vars if g is not None]):
                         return super(SafeOptimizer, self).apply_gradients(grads_and_vars, **kwargs)
 
             return SafeOptimizer
@@ -27,15 +38,6 @@ class AMSGradOptimizer(tf.keras.optimizers.Adam):
     def minimize(self, loss, global_step=None, var_list=None, grad_loss=None, name=None):
         if var_list is None:
             var_list = [v for v in tf.trainable_variables() if type(self).__name__ not in v.name]
-        print(dir(self))
-        print(var_list)
-
-        # for var in var_list:
-        #     print(var)
-        #     print(self.get_gradients(loss, [var]))
-        #     print()
-
-        # op = super(AMSGradOptimizer, self).minimize(loss, var_list, grad_loss=grad_loss, name=name)
 
         grads = self.get_gradients(loss, var_list)
         grads_and_vars = [(g, v) for g, v in zip(grads, var_list)]
@@ -60,7 +62,7 @@ def get_clipped_optimizer_class(base_optimizer_class, session=None):
                     if self.max_global_norm is None:
                         return grads_and_vars
                     grads, _ = tf.clip_by_global_norm([g for g, _ in grads_and_vars], self.max_global_norm)
-                    with tf.control_dependencies([tf.check_numerics(g, 'Numerics check failed in gradient') for g in grads if g is not None]):
+                    with tf.control_dependencies([tf_check_numerics(g, 'Numerics check failed in gradient') for g in grads if g is not None]):
                         vars = [v for _, v in grads_and_vars]
                     grads_and_vars = []
                     for grad, var in zip(grads, vars):
@@ -112,7 +114,7 @@ def get_JTPS_optimizer_class(base_optimizer_class, session=None):
                             inv = tf.identity
                         elif fn.lower() == 'softplus':
                             out = tf.nn.softplus
-                            inv = tf.contrib.distributions.softplus_inverse
+                            inv = tf_softplus_inverse
                         else:
                             raise ValueError('Unrecognized constraint function "%s"' % fn)
                     else:

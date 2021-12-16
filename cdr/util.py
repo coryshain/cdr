@@ -22,7 +22,7 @@ def extract_cdr_prediction_files(dirpath):
 
     parser = re.compile(
         '(LM_2STEP_)?'
-        '(CDRpreds|squared_error|losses_mse|mse_losses|loglik|preds|preds_table|obs)'
+        '(CDRpreds|squared_error|losses_mse|mse_losses|loglik|preds|preds_table|obs|output)'
         '(_([^_]+))?(_f([0-9]+))?_([^_]*).(csv|txt)'
     )
     out = {}
@@ -35,7 +35,7 @@ def extract_cdr_prediction_files(dirpath):
             else:
                 pred_type = 'direct'
             filetype = parsed[filetype_ix]
-            if filetype in ['CDRpreds', 'preds_table']:
+            if filetype in ['CDRpreds', 'preds_table', 'output']:
                 filetype = 'table'
             elif filetype in ['squared_error', 'losses_mse', 'mse_losses']:
                 filetype = 'mse'
@@ -156,19 +156,8 @@ def reg_name(string):
 
     name = string.split(':')[0]
     name = name.replace('/', '_')
-    cap = True
-    var_name = ''
-    for c in name:
-        if c == '_':
-            cap = True
-        else:
-            if cap:
-                var_name += c.upper()
-            else:
-                var_name += c
-            cap = False
 
-    return var_name
+    return name
 
 
 def pca(X, n_dim=None, dtype=np.float32):

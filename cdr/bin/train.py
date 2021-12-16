@@ -6,13 +6,12 @@ import pandas as pd
 
 pd.options.mode.chained_assignment = None
 
-from cdr.kwargs import MODEL_INITIALIZATION_KWARGS, \
-    CDR_INITIALIZATION_KWARGS, CDRMLE_INITIALIZATION_KWARGS, CDRBAYES_INITIALIZATION_KWARGS, \
-    CDRNN_INITIALIZATION_KWARGS, CDRNNMLE_INITIALIZATION_KWARGS, CDRNNBAYES_INITIALIZATION_KWARGS
+from cdr.kwargs import MODEL_INITIALIZATION_KWARGS
 from cdr.config import Config
 from cdr.io import read_tabular_data
 from cdr.formula import Formula
 from cdr.data import filter_invalid_responses, preprocess_data, compute_splitID, compute_partition
+from cdr.model import CDRModel
 from cdr.util import mse, mae, filter_models, get_partition_list, paths_from_partition_cliarg, stderr
 
 
@@ -242,11 +241,6 @@ if __name__ == '__main__':
 
             stderr('\nInitializing model %s...\n\n' % m)
 
-            if p['network_type'] in ['mle', 'nn']:
-                bayes = False
-            else:
-                bayes = True
-
             kwargs = {}
             for kwarg in MODEL_INITIALIZATION_KWARGS:
                 if kwarg.key not in ['outdir', 'history_length', 'future_length']:
@@ -254,46 +248,6 @@ if __name__ == '__main__':
             kwargs['crossval_factor'] = p['crossval_factor']
             kwargs['crossval_fold'] = p['crossval_fold']
             kwargs['irf_name_map'] = p.irf_name_map
-
-            if m.startswith('CDRNN'):
-                for kwarg in CDRNN_INITIALIZATION_KWARGS:
-                    kwargs[kwarg.key] = p[kwarg.key]
-                if p['network_type'].lower() in ['mle', 'nn']:
-                    from cdr.cdrnnmle import CDRNNMLE
-
-                    for kwarg in CDRNNMLE_INITIALIZATION_KWARGS:
-                        kwargs[kwarg.key] = p[kwarg.key]
-
-                    CDRModel = CDRNNMLE
-                elif p['network_type'].lower() in ['bbvi', 'bayes', 'bayesian']:
-                    from cdr.cdrnnbayes import CDRNNBayes
-
-                    for kwarg in CDRNNBAYES_INITIALIZATION_KWARGS:
-                        kwargs[kwarg.key] = p[kwarg.key]
-
-                    CDRModel = CDRNNBayes
-                else:
-                    raise ValueError('Unrecognized network type %s.' % p['network_type'])
-            else:
-                for kwarg in CDR_INITIALIZATION_KWARGS:
-                    kwargs[kwarg.key] = p[kwarg.key]
-
-                if p['network_type'].lower() in ['mle', 'nn']:
-                    from cdr.cdrmle import CDRMLE
-
-                    for kwarg in CDRMLE_INITIALIZATION_KWARGS:
-                        kwargs[kwarg.key] = p[kwarg.key]
-
-                    CDRModel = CDRMLE
-                elif p['network_type'].lower() in ['bbvi', 'bayes', 'bayesian']:
-                    from cdr.cdrbayes import CDRBayes
-
-                    for kwarg in CDRBAYES_INITIALIZATION_KWARGS:
-                        kwargs[kwarg.key] = p[kwarg.key]
-
-                    CDRModel = CDRBayes
-                else:
-                    raise ValueError('Unrecognized network type %s.' % p['network_type'])
 
             cdr_model = CDRModel(
                 formula,

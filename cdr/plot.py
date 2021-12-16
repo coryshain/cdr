@@ -470,7 +470,7 @@ def plot_surface(
             dpi=dpi,
             transparent=transparent_background
         )
-    except TypeError as e:
+    except Exception as e:
         stderr('Error saving plot to file %s. Description:\n%s\nSkipping...\n' % (dir + '/' + filename, e))
     ax.clear()
 
@@ -541,7 +541,7 @@ def plot_qq(
     plt.tight_layout()
     try:
         plt.savefig(dir+'/'+filename, dpi=dpi, transparent=transparent_background)
-    except e:
+    except Exception as e:
         stderr('Error saving plot to file %s\n. \s\nSkipping...\n' %(dir+'/'+filename, e))
     plt.close('all')
 
@@ -581,7 +581,7 @@ def plot_heatmap(
     plt.gcf().subplots_adjust(bottom=0.25,left=0.25)
     try:
         plt.savefig(dir+'/'+filename)
-    except:
+    except Exception as e:
         stderr('Error saving plot to file %s. Skipping...\n' %(dir+'/'+filename))
     plt.close('all')
 

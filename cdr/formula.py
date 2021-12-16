@@ -79,6 +79,7 @@ class Formula(object):
         'HRFDoubleGamma3': ['alpha', 'beta', 'c'],
         'HRFDoubleGamma4': ['alpha_main', 'alpha_undershoot', 'beta', 'c'],
         'HRFDoubleGamma5': ['alpha_main', 'alpha_undershoot', 'beta_main', 'beta_undershoot', 'c'],
+        'NN': [],
     }
 
     CAUSAL_IRFS = {
@@ -228,15 +229,19 @@ class Formula(object):
         rhs_parsed = ast.parse(Formula.prep_formula_string(rhs))
 
         self.t = IRFNode()
+        terms = []
         if len(rhs_parsed.body):
             self.process_ast(
                 rhs_parsed.body[0].value,
+                terms=terms,
                 has_intercept=self.has_intercept
             )
         else:
             self.has_intercept[None] = '0' not in [x.strip() for x in rhs.strip().split('+')]
 
         self.rangf = sorted([x for x in list(self.has_intercept.keys()) if x is not None])
+
+        self.initialize_nns()
 
     def process_ast(
             self,
@@ -506,7 +511,7 @@ class Formula(object):
                                 for response in s.irf_responses():
                                     irf = response.irf_to_formula(rangf)
                                     responses.append('C(%s' % response.impulse.name() + ', ' + irf + ')')
-                                for response in s.non_irf_responses():
+                                for response in s.dirac_delta_responses():
                                     responses.append(response.name())
                                 new_str = ':'.join(responses)
                             else:
@@ -522,7 +527,7 @@ class Formula(object):
                                 for response in s.irf_responses():
                                     irf = response.irf_to_formula(rangf)
                                     responses.append('C(%s' % response.impulse.name() + ', ' + irf + ')')
-                                for response in s.non_irf_responses():
+                                for response in s.dirac_delta_responses():
                                     responses.append(response.name())
                                 new_str = ':'.join(responses)
                             else:
@@ -666,11 +671,59 @@ class Formula(object):
                     under_interaction=under_interaction
                 )
                 new_subterms = []
+                nn_inputs = sum(subterms, [])
                 for S in subterms:
                     for s in S:
-                        new = self.process_irf(t.args[1], input=s, ops=None, rangf=rangf)
+                        new = self.process_irf(t.args[1], input=s, ops=None, rangf=rangf, nn_inputs=nn_inputs)
                         new_subterms.append(new)
                 terms.append(new_subterms)
+            elif t.func.id == 'NN':
+                assert len(t.args) == 1, 'NN transforms take exactly one argument in CDR formula strings'
+                assert not ops, 'NN transforms cannot be dominated by ops'
+
+                subterms = []
+                self.process_ast(
+                    t.args[0],
+                    terms=subterms,
+                    has_intercept=has_intercept,
+                    rangf=rangf,
+                    impulses_by_name=impulses_by_name,
+                    interactions_by_name=interactions_by_name,
+                    under_irf=True,
+                    under_interaction=under_interaction
+                )
+                subterms = sum(subterms, [])
+                for s in subterms:
+                    assert isinstance(s, Impulse) or isinstance(s, ImpulseInteraction), 'NN transforms may only dominate nodes of type Impulse or ImpulseInteraction. Got %s.' % type(s)
+
+                new = NNImpulse(subterms)
+
+                if under_irf or under_interaction:
+                    if new.name() in impulses_by_name:
+                        new = impulses_by_name[new.name()]
+                    else:
+                        impulses_by_name[new.name()] = new
+
+                    terms.append([new])
+                else:
+                    term_str = 'C(%s, DiracDelta())' % str(new)
+
+                    new_ast = ast.parse(Formula.prep_formula_string(term_str)).body[0].value
+                    subterms = []
+
+                    self.process_ast(
+                        new_ast,
+                        terms=subterms,
+                        has_intercept=has_intercept,
+                        ops=None,
+                        rangf=rangf,
+                        impulses_by_name=impulses_by_name,
+                        interactions_by_name=interactions_by_name,
+                        under_irf=under_irf,
+                        under_interaction=under_interaction
+                    )
+                    terms += subterms
+
             elif Formula.normalize_irf_family(t.func.id) in Formula.IRF_PARAMS.keys() or lcg_re.match(t.func.id) is not None:
                 raise ValueError('IRF calls can only occur as inputs to C() in CDR formula strings')
             else:
@@ -745,7 +798,8 @@ class Formula(object):
             t,
             input,
             ops=None,
-            rangf=None
+            rangf=None,
+            nn_inputs=None
     ):
         """
         Process data from AST node representing part of an IRF definition and insert data into internal representation of the model.
@@ -754,6 +808,7 @@ class Formula(object):
         :param input: ``IRFNode`` object; child IRF of current node
         :param ops: ``list`` of ``str``, or ``None``; ops applied to IRF. If ``None``, no ops applied
         :param rangf: ``str`` or ``None``; name of rangf for random term currently being processed, or ``None`` if currently processing fixed effects portion of model.
+        :param nn_inputs: ``tuple`` or ``None``; tuple of input impulses to neural network IRF, or ``None`` if not a neural network IRF.
         :return: ``IRFNode`` object; the IRF node
         """
 
@@ -762,7 +817,6 @@ class Formula(object):
         assert t.func.id in Formula.IRF_PARAMS.keys() or Formula.is_LCG(t.func.id) is not None, 'Ill-formed model string: process_irf() called on non-IRF node'
         irf_id = None
         coef_id = None
-        cont = False
         ranirf = False
         trainable = None
         param_init={}
@@ -782,17 +836,6 @@ class Formula(object):
                         coef_id = k.value.id
                     elif type(k.value).__name__ == 'Num':
                         coef_id = str(k.value.n)
-                elif k.arg == 'cont':
-                    if type(k.value).__name__ == 'Str':
-                        if k.value.s in ['True', 'TRUE', 'true', 'T']:
-                            cont = True
-                    elif type(k.value).__name__ == 'Name':
-                        if k.value.id in ['True', 'TRUE', 'true', 'T']:
-                            cont = True
-                    elif type(k.value).__name__ == 'NameConstant':
-                        cont = k.value.value
-                    elif type(k.value).__name__ == 'Num':
-                        cont = k.value.n > 0
                 elif k.arg == 'ran':
                     if type(k.value).__name__ == 'Str':
                         if k.value.s in ['True', 'TRUE', 'true', 'T']:
@@ -829,6 +872,7 @@ class Formula(object):
                 ops=ops,
                 fixed=rangf is None,
                 rangf=rangf if ranirf else None,
+                nn_inputs=nn_inputs,
                 param_init=param_init,
                 trainable=trainable
             )
@@ -840,7 +884,7 @@ class Formula(object):
                 p = self.process_irf(
                     t.args[0],
                     input = new,
-                    rangf=rangf
+                    nn_inputs=nn_inputs,
                 )
             else:
                 p = self.t
@@ -852,7 +896,6 @@ class Formula(object):
                 family='Terminal',
                 impulse=input,
                 coefID=coef_id,
-                cont=cont,
                 fixed=rangf is None,
                 rangf=rangf,
                 param_init=param_init,
@@ -862,7 +905,8 @@ class Formula(object):
             p = self.process_irf(
                 t,
                 input=new,
-                rangf=rangf
+                rangf=rangf,
+                nn_inputs=nn_inputs
             )
 
         for c in p.children:
@@ -938,7 +982,7 @@ class Formula(object):
 
             expanded_impulses = None
             if impulse.id not in _X:
-                if type(impulse).__name__ == 'ImpulseInteraction':
+                if type(impulse).__name__ in ('ImpulseInteraction', 'NNImpulse'):
                     _X, expanded_impulses, expanded_atomic_impulses = impulse.expand_categorical(_X)
                     for x in expanded_atomic_impulses:
                         for a in x:
@@ -947,7 +991,7 @@ class Formula(object):
                         if x.name() not in _X:
                             _X[x.id] = _X[[y.name() for y in x.atomic_impulses]].product(axis=1)
             else:
-                if type(impulse).__name__ == 'ImpulseInteraction':
+                if type(impulse).__name__ == ('ImpulseInteraction', 'NNImpulse'):
                     _X, expanded_impulses, _ = impulse.expand_categorical(_X)
                 else:
                     _X, expanded_impulses = impulse.expand_categorical(_X)
@@ -1197,7 +1241,8 @@ class Formula(object):
                             Y[i] = self.apply_ops(x, _Y)
                         if X_in_Y_names is None:
                             X_in_Y_names = []
-                        X_in_Y_names.append(x.name())
+                        if x.name() not in X_in_Y_names:
+                            X_in_Y_names.append(x.name())
 
             if type(impulse).__name__ == 'ImpulseInteraction':
                 response_aligned = False
@@ -1210,7 +1255,8 @@ class Formula(object):
                         Y[i] = self.apply_ops(impulse, _Y)
                     if X_in_Y_names is None:
                         X_in_Y_names = []
-                    X_in_Y_names.append(impulse.name())
+                    if impulse.name() not in X_in_Y_names:
+                        X_in_Y_names.append(impulse.name())
                 else:
                     found = False
                     for i in range(len(X)):
@@ -1388,11 +1434,11 @@ class Formula(object):
             fixed = terms.pop(None)
             new_terms = {}
             for term in fixed:
-                if term['irf'] in new_terms:
-                    new_terms[term['irf']]['impulses'] += term['impulses']
+                if (term['irf'], term['nn_key']) in new_terms:
+                    new_terms[(term['irf'], term['nn_key'])]['impulses'] += term['impulses']
                 else:
-                    new_terms[term['irf']] = term
-            new_terms = [new_terms[x] for x in sorted(list(new_terms.keys()))]
+                    new_terms[(term['irf'], term['nn_key'])] = term
+            new_terms = [new_terms[x] for x in sorted(list(new_terms.keys()), key=lambda x: x[0])]
             term_strings.append(' + '.join(['C(%s, %s)' %(' + '.join([x.name() for x in y['impulses']]), y['irf']) for y in new_terms]))
 
             for x in t.interactions():
@@ -1411,11 +1457,11 @@ class Formula(object):
             ran = terms[rangf]
             new_terms = {}
             for term in ran:
-                if term['irf'] in new_terms:
-                    new_terms[term['irf']]['impulses'] += term['impulses']
+                if (term['irf'], term['nn_key']) in new_terms:
+                    new_terms[(term['irf'], term['nn_key'])]['impulses'] += term['impulses']
                 else:
-                    new_terms[term['irf']] = term
-            new_terms = [new_terms[x] for x in sorted(list(new_terms.keys()))]
+                    new_terms[(term['irf'], term['nn_key'])] = term
+            new_terms = [new_terms[x] for x in sorted(list(new_terms.keys()), key=lambda x: x[0])]
             new_terms_str = '('
             if not self.has_intercept[rangf]:
                 new_terms_str += '0 + '
@@ -1488,10 +1534,49 @@ class Formula(object):
         new_form = Formula(new_formstring)
         return new_form
 
+    def initialize_nns(self):
+        """
+        Initialize a dictionary mapping ids to metadata for all NN components in this CDR model
+
+        :return: ``dict``; mapping from NN ``str`` id to ``NN`` object storing metadata for that NN.
+        """
+        nn_meta_by_key = self.t.nns_by_key()
+        nns_by_key = {}
+
+        for key in nn_meta_by_key:
+            nodes = []
+            nn_types = []
+            rangf = []
+            for node, gf in nn_meta_by_key[key]:
+                nodes.append(node)
+                if isinstance(node, IRFNode):
+                    nn_types.append('irf')
+                elif isinstance(node, NNImpulse):
+                    nn_types.append('impulse')
+                else:
+                    raise ValueError('Got unsupported object of type "%s" associated with NN key "%s".' % (type(node), key))
+                rangf += gf
+            assert nodes, 'NN key "%s" must be associated with at least one node in the tree.' % key
+            nodes = set(nodes)
+            nn_types = set(nn_types)
+            rangf = set(rangf)
+            assert len(nn_types) == 1, 'Each NN key may only have 1 type. Got > 1 types for NN key "%s".' % key
+            nn_inputs = sorted(nodes, key=lambda x: x.name())
+            nn_type = tuple(nn_types)[0]
+            rangf = list(rangf)
+
+            nn = NN(nn_inputs, nn_type, rangf=rangf, nn_key=key)
+            nns_by_key[key] = nn
+
+        keys = sorted(nns_by_key)
+        nn_impulse_keys = [key for key in keys if nns_by_key[key].nn_type == 'impulse']
+        nn_irf_keys = [key for key in keys if nns_by_key[key].nn_type == 'irf']
+        ids = ['NN%d' % (i + 1) for i in range(len(nn_impulse_keys))] + ['NNirf%d' % (i + 1) for i in range(len(nn_irf_keys))]
+
+        self.nns_by_id = {k: nns_by_key[keys[i]] for i, k in enumerate(ids)}
+
     def __str__(self):
         return self.to_string()
-
-
 
 class Impulse(object):
     """
@@ -1576,6 +1661,16 @@ class Impulse(object):
 
         return X, impulses
 
+    def is_nn_impulse(self):
+        """
+        Type check for whether impulse represents an NN transformation of impulses.
+
+        :return: ``False``
+        """
+
+        return False
+
+
 class ImpulseInteraction(object):
     """
     Data structure representing an interaction of impulse-aligned variables (impulses) in a CDR model.
@@ -1622,7 +1717,7 @@ class ImpulseInteraction(object):
         :return: ``list`` of ``Impulse``; impulses dominated by interaction.
         """
 
-        return self.atomic_impulses
+        return self.atomic_impulses[:]
 
     def expand_categorical(self, X):
         """
@@ -1649,6 +1744,133 @@ class ImpulseInteraction(object):
 
         return X, expanded_interaction_impulses, expanded_atomic_impulses
 
+    def is_nn_impulse(self):
+        """
+        Type check for whether impulse represents an NN transformation of impulses.
+
+        :return: ``False``
+        """
+
+        return False
+
+
+class NNImpulse(object):
+    """
+    Data structure representing a feedforward neural network transform of one or more impulses in a CDR model.
+
+    :param impulses: ``list`` of ``Impulse``; impulses to transform.
+    """
+
+    def __init__(self, impulses):
+        self.atomic_impulses = []
+        names = set()
+        for x in impulses:
+            names.add(x.name())
+            self.atomic_impulses.append(x)
+        self.nn_inputs = tuple(sorted([x for x in impulses], key=lambda x: x.name()))
+        self.nn_key = 'impulseNN_' + '_'.join([x.name() for x in self.nn_inputs])
+        self.name_str = 'NN(%s)' % ' + '.join([str(x) for x in self.impulses()])
+        self.ops = []
+
+        self.id = ':'.join([x.id for x in sorted(self.atomic_impulses, key=lambda x: x.id)])
+
+    def __str__(self):
+        return self.name_str
+
+    def name(self):
+        """
+        Get name of NN impulse.
+
+        :return: ``str``; name.
+        """
+
+        return self.name_str
+
+    def impulses(self):
+        """
+        Get list of impulses dominated by NN.
+
+        :return: ``list`` of ``NNImpulse``; impulses dominated by NN.
+        """
+
+        return self.atomic_impulses[:]
+
+    def expand_categorical(self, X):
+        """
+        Expand any categorical predictors in **X** into 1-hot columns.
+
+        :param X: list of ``pandas`` tables; input data.
+        :return: 3-tuple of ``pandas`` table, ``list`` of ``NNImpulse``, ``list`` of ``list`` of ``Impulse``; expanded data, list of expanded ``NNImpulse`` objects, list of lists of expanded ``Impulse`` objects, one list for each interaction.
+        """
+
+        if not isinstance(X, list):
+            X = [X]
+            delistify = True
+        else:
+            delistify = False
+
+        expanded_atomic_impulses = []
+        for x in self.impulses():
+            X, expanded_atomic_impulses_cur = x.expand_categorical(X)
+            expanded_atomic_impulses.append(expanded_atomic_impulses_cur)
+        expanded_interaction_impulses = [NNImpulse(sum([expanded_atomic_impulses], []))]
+
+        if delistify:
+            X = X[0]
+
+        return X, expanded_interaction_impulses, expanded_atomic_impulses
+
+    def is_nn_impulse(self):
+        """
+        Type check for whether impulse represents an NN transformation of impulses.
+
+        :return: ``True``
+        """
+
+        return True
+
+
+class NN(object):
+    """
+    Data structure representing a neural network within a CDR model.
+
+    :param nodes: ``list`` of ``IRFNode``, and/or ``NNImpulse`` objects; nodes associated with this NN
+    :param nn_type: ``str``; name of NN type (``'irf'`` or ``'impulse'``).
+    :param rangf: ``str`` or list of ``str``; random grouping factors for which to build random effects for this NN.
+    """
+
+    def __init__(self, nodes, nn_type, rangf=None, nn_key=None):
+        assert nn_type in ('irf', 'impulse'), 'nn_type must be either "irf" or "impulse". Got %s.' % nn_type
+        _nodes = []
+        names = set()
+        for x in nodes:
+            names.add(x.name())
+            _nodes.append(x)
+        self.nodes = tuple(sorted([x for x in _nodes], key=lambda x: x.name()))
+        self.nn_type = nn_type
+        self.name_str = ', '.join([str(x) for x in self.nodes])
+        if nn_key is None:
+            self.nn_key = '%sNN_' % nn_type + '_'.join([x.name() for x in self.nodes])
+        else:
+            self.nn_key = nn_key
+        if not isinstance(rangf, list):
+            rangf = [rangf]
+        self.rangf = rangf
+        self.n_outputs = len(self.nodes)
+
+    def __str__(self):
+        return 'NN; nn_key: %s; nn_type: %s; nodes: %s' % (self.nn_key, self.nn_type, ', '.join([x.name() for x in self.nodes]))
+
+    def name(self):
+        """
+        Get name of NN.
+
+        :return: ``str``; name.
+        """
+
+        return self.name_str
+
+
 class ResponseInteraction(object):
     """
     Data structure representing an interaction of response-aligned variables (containing at least one IRF-convolved impulse) in a CDR model.
@@ -1660,7 +1882,7 @@ class ResponseInteraction(object):
     def __init__(self, responses, rangf=None):
         self.atomic_responses = []
         for x in responses:
-            assert (type(x).__name__ == 'IRFNode' and x.terminal()) or type(x).__name__ in ['Impulse', 'ImpulseInteraction', 'ResponseInteraction'], 'All inputs to ResponseInteraction must be either terminal IRFNode, Impulse, ImpulseInteraction, or ResponseInteraction objects. Got %s.' % type(x).__name__
+            assert (type(x).__name__ == 'IRFNode' and x.terminal()) or type(x).__name__ in ['Impulse', 'ImpulseInteraction', 'ResponseInteraction', 'NNImpulse'], 'All inputs to ResponseInteraction must be either terminal IRFNode, Impulse, ImpulseInteraction, ResponseInteraction, or NNImpulse objects. Got %s.' % type(x).__name__
             if isinstance(x, ResponseInteraction):
                 for y in x.responses():
                     self.atomic_responses.append(y)
@@ -1701,14 +1923,23 @@ class ResponseInteraction(object):
 
         return [x for x in self.atomic_responses if type(x).__name__ == 'IRFNode']
 
-    def non_irf_responses(self):
+    def nn_impulse_responses(self):
         """
-        Get list of non-IRF response-aligned variables dominated by interaction.
+        Get list of NN impulse terms dominated by interaction.
 
-        :return: ``list`` of ``Impulse`` and/or ``ImpulseInteraction`` objects; non-IRF variables dominated by interaction.
+        :return: ``list`` of ``NNImpulse`` objects; NN impulse terms dominated by interaction.
         """
 
-        return [x for x in self.atomic_responses if type(x).__name__ != 'IRFNode']
+        return [x for x in self.atomic_responses if type(x).__name__ == 'NNImpulse']
+
+    def dirac_delta_responses(self):
+        """
+        Get list of response-aligned Dirac delta variables dominated by interaction.
+
+        :return: ``list`` of ``Impulse`` and/or ``ImpulseInteraction`` objects; Dirac delta variables dominated by interaction.
+        """
+
+        return [x for x in self.atomic_responses if type(x).__name__ in ('Impulse', 'ImpulseInteraction')]
 
     def contains_member(self, x):
         """
@@ -1726,7 +1957,6 @@ class ResponseInteraction(object):
                     break
 
         return out
-
 
     def add_rangf(self, rangf):
         """
@@ -1767,9 +1997,9 @@ class IRFNode(object):
     :param irfID: ``str`` or ``None``; string ID of node if applicable. If ``None``, automatically-generated ID will discribe node's family and structural position.
     :param coefID: ``str`` or ``None``; string ID of coefficient if applicable. If ``None``, automatically-generated ID will discribe node's family and structural position. Only applicable to terminal nodes, so this property will not be used if the node is non-terminal.
     :param ops: ``list`` of ``str``, or ``None``; ops to apply to IRF node. If ``None``, no ops.
-    :param cont: ``bool``; Node connects directly to a continuous predictor. Only applicable to terminal nodes, so this property will not be used if the node is non-terminal.
     :param fixed: ``bool``; Whether node exists in the model's fixed effects structure.
     :param rangf: ``list`` of ``str``, ``str``, or ``None``; names of any random grouping factors associated with the node.
+    :param nn_inputs: ``tuple`` or ``None``; tuple of input impulses to neural network IRF, or ``None`` if not a neural network IRF.
     :param param_init: ``dict``; map from parameter names to initial values, which will also be used as prior means.
     :param trainable: ``list`` of ``str``, or ``None``; trainable parameters at this node. If ``None``, all parameters are trainable.
     """
@@ -1782,9 +2012,9 @@ class IRFNode(object):
             irfID=None,
             coefID=None,
             ops=None,
-            cont=False,
             fixed=True,
             rangf=None,
+            nn_inputs=None,
             param_init=None,
             trainable=None
     ):
@@ -1794,26 +2024,31 @@ class IRFNode(object):
         if family != 'Terminal':
             assert coefID is None, 'Attempted to set coef_id=%s on non-terminal IRF node (family=%s)' % (coefID, family)
             assert impulse is None, 'Attempted to attach impulse (%s) to non-terminal IRF node (family=%s)' % (impulse, family)
-            assert not cont, 'Attempted to set cont=True on non-terminal IRF node (family=%s)' % family
         if family is None:
             self.ops = []
-            self.cont = False
             self.impulse = None
             self.family = None
             self.irfID = None
             self.coefID = None
             self.fixed = fixed
             self.rangf = []
+            self.nn_inputs = None
             self.param_init={}
         else:
             self.ops = [] if ops is None else ops[:]
-            self.cont = cont
             self.impulse = impulse
             self.family = family
             self.irfID = irfID
             self.coefID = coefID
             self.fixed = fixed
             self.rangf = [] if rangf is None else sorted(rangf) if isinstance(rangf, list) else [rangf]
+            if family == 'NN':
+                assert nn_inputs, 'Parameter nn_inputs must be provided to neural network IRFs'
+                self.nn_inputs = tuple(sorted([x for x in nn_inputs], key=lambda x: x.name()))
+                self.nn_key = 'irfNN_' + '_'.join([x.name() for x in self.nn_inputs])
+            else:
+                self.nn_inputs = None
+                self.nn_key = None
 
             self.param_init = {}
             if param_init is not None:
@@ -1855,6 +2090,10 @@ class IRFNode(object):
                 c.add_child(c_t)
             out = c
         else:
+            if self.family == 'NN':
+                assert t.terminal(), 'Neural network IRFs cannot dominate other IRF types in the network tree'
+            if t.family == 'NN':
+                assert self.family is None, 'Neural network IRFs cannot be dominated by other IRF types in the network tree'
             self.children.append(t)
             t.p = self
             out = t
@@ -1978,7 +2217,6 @@ class IRFNode(object):
 
         return out
 
-
     def local_name(self):
         """
         Get descriptive name for this node, ignoring its position in the IRF tree.
@@ -2028,9 +2266,6 @@ class IRFNode(object):
                     break
             if rangf in self.rangf:
                 params.append('ran=T')
-            for c in self.children:
-                if c.terminal() and c.cont:
-                    params.append('cont=T')
             if len(self.param_init) > 0:
                 params.append(', '.join(['%s=%s' % (x, self.param_init[x]) for x in self.param_init]))
             if set(self.trainable) != set(Formula.irf_params(self.family)):
@@ -2078,6 +2313,37 @@ class IRFNode(object):
                 return self.name()
             return self.coefID
         return None
+
+    def nns_by_key(self, nns_by_key=None):
+        """
+        Get a dict mapping NN keys to objects associated with them.
+
+        :param keys: ``dict`` or ``None``; dictionary to modify. Empty if ``None``.
+
+        :return: ``dict``; map from string keys to ``list`` of associated ``IRFNode`` and/or ``NNImpulse`` objects.
+        """
+
+        if nns_by_key is None:
+            nns_by_key = {}
+
+        if self.family == 'NN':
+            if self.nn_key not in nns_by_key:
+                nns_by_key[self.nn_key] = [(self, self.rangf[:])]
+            else:
+                nns_by_key[self.nn_key].append((self, self.rangf[:]))
+
+        if self.terminal():
+            for x in self.impulses(include_interactions=True, include_nn=True):
+                if isinstance(x, NNImpulse):
+                    if x.nn_key not in nns_by_key:
+                        nns_by_key[x.nn_key] = [(x, self.rangf[:])]
+                    else:
+                        nns_by_key[x.nn_key].append((x, self.rangf[:]))
+
+        for c in self.children:
+            nns_by_key = c.nns_by_key(nns_by_key)
+
+        return nns_by_key
 
     def terminal(self):
         """
@@ -2129,25 +2395,31 @@ class IRFNode(object):
 
         return Formula.bases(self.family)
 
-    def impulses(self, include_interactions=False):
+    def impulses(self, include_interactions=False, include_nn=False, include_nn_inputs=True):
         """
         Get list of impulses dominated by node.
     
         :param include_interactions: ``bool``; whether to return impulses defined by interaction terms.
+        :param include_nn: ``bool``; whether to return NN transformations of impulses.
+        :param include_nn_inputs: ``bool``; whether to return input impulses to NN transformations.
 
         :return: ``list`` of ``Impulse``; impulses dominated by node.
         """
 
         out = []
         if self.terminal():
-            out.append(self.impulse)
+            if include_nn or not isinstance(self.impulse, NNImpulse):
+                out.append(self.impulse)
+            if include_nn_inputs and isinstance(self.impulse, NNImpulse):
+                for impulse in self.impulse.nn_inputs:
+                    out.append(impulse)
             if include_interactions:
                 for interaction in self.interactions():
                     for response in interaction.responses():
                         if isinstance(response, IRFNode):
                             if response.impulse.name() not in [x.name() for x in out]:
                                 out.append(response.impulse)
-                        elif isinstance(response, ImpulseInteraction):
+                        elif isinstance(response, ImpulseInteraction) or (include_nn_inputs and isinstance(response, NNImpulse)):
                             for subresponse in response.impulses():
                                 if subresponse.name() not in [x.name() for x in out]:
                                     out.append(subresponse)
@@ -2158,7 +2430,7 @@ class IRFNode(object):
                             raise ValueError('Unsupported type "%s" for input to interaction' % type(response).__name__)
         else:
             for c in self.children:
-                for imp in c.impulses(include_interactions=include_interactions):
+                for imp in c.impulses(include_interactions=include_interactions, include_nn=include_nn, include_nn_inputs=include_nn_inputs):
                     if imp.name() not in [x.name() for x in out]:
                         out.append(imp)
         return out
@@ -2186,26 +2458,30 @@ class IRFNode(object):
 
         return out
 
-    def impulse_names(self, include_interactions=False):
+    def impulse_names(self, include_interactions=False, include_nn=False):
         """
         Get list of names of impulses dominated by node.
 
         :param include_interactions: ``bool``; whether to return impulses defined by interaction terms.
+        :param include_nn: ``bool``; whether to return NN transformations of impulses.
        
         :return: ``list`` of ``str``; names of impulses dominated by node.
         """
 
-        return [x.name() for x in self.impulses(include_interactions=include_interactions)]
+        return [x.name() for x in self.impulses(include_interactions=include_interactions, include_nn=include_nn)]
 
-    def impulses_by_name(self):
+    def impulses_by_name(self, include_interactions=False, include_nn=False):
         """
         Get dictionary mapping names of impulses dominated by node to their corresponding impulses.
+
+        :param include_interactions: ``bool``; whether to return impulses defined by interaction terms.
+        :param include_nn: ``bool``; whether to return NN transformations of impulses.
 
         :return: ``dict``; map from impulse names to impulses
         """
 
         out = {}
-        for x in self.impulses():
+        for x in self.impulses(include_interactions=include_interactions, include_nn=include_nn):
             out[x.name()] = x
 
         return out
@@ -2666,7 +2942,6 @@ class IRFNode(object):
                     family='Terminal',
                     impulse=self.impulse,
                     coefID=self.coefID,
-                    cont=self.cont,
                     fixed=self.fixed,
                     rangf=self.rangf[:],
                     param_init=self.param_init,
@@ -2684,7 +2959,6 @@ class IRFNode(object):
                         family='Terminal',
                         impulse=x,
                         coefID=self.coefID,
-                        cont=self.cont,
                         fixed=self.fixed,
                         rangf=self.rangf[:],
                         param_init=self.param_init,
@@ -2819,8 +3093,29 @@ class IRFNode(object):
 
                 new_impulses = [ImpulseInteraction(x, ops=self.impulse.ops) for x in itertools.product(*expanded_atomic_impulses)]
 
+            if type(self.impulse).__name__ == 'NNImpulse':
+                expanded_atomic_impulses = []
+                for x in self.impulse.impulses():
+                    if x.name() not in expansion_map:
+                        if x.categorical(X):
+                            found = False
+                            for _X in X:
+                                if x.id in _X:
+                                    found = True
+                                    vals = sorted(_X[x.id].unique())[1:]
+                                    expansion = [Impulse('_'.join([x.id, pythonize_string(str(val))]), ops=x.ops) for val in vals]
+                                    break
+                            assert found, 'Impulse %s not found in data.' % x.id
+                        else:
+                            expansion = [x]
+                        expansion_map[x.name()] = expansion
+
+                    expanded_atomic_impulses.append(expansion_map[x.name()])
+
+                new_impulses = [NNImpulse(sum(expanded_atomic_impulses, []))]
+
             else:
-                if not self.impulse.name() in expansion_map:
+                if not self.impulse.name() in expansion_map and not isinstance(self.impulse, NNImpulse):
                     if self.impulse.categorical(X):
                         if self.impulse.categorical(X):
                             found = False
@@ -2846,9 +3141,9 @@ class IRFNode(object):
                     family='Terminal',
                     impulse=x,
                     coefID=self.coefID,
-                    cont=self.cont,
                     fixed=self.fixed,
                     rangf=self.rangf[:],
+                    nn_inputs=self.nn_inputs,
                     param_init=self.param_init,
                     trainable=self.trainable
                 )
@@ -2880,6 +3175,7 @@ class IRFNode(object):
                     irfID=self.irfID,
                     fixed=self.fixed,
                     rangf=self.rangf,
+                    nn_inputs=self.nn_inputs,
                     param_init=self.param_init,
                     trainable=self.trainable
                 )
@@ -2900,6 +3196,13 @@ class IRFNode(object):
                             expansion = expansion_map[impulse.name()]
                             expanded_interaction_impulse.append(expansion)
                         expanded_interaction_impulse = [ImpulseInteraction(x, ops=response.ops) for x in itertools.product(*expanded_interaction_impulse)]
+                        expanded_interaction.append(expanded_interaction_impulse)
+                    elif isinstance(response, NNImpulse):
+                        expanded_interaction_impulse = []
+                        for impulse in response.impulses():
+                            expansion = expansion_map[impulse.name()]
+                            expanded_interaction_impulse.append(expansion)
+                        expanded_interaction_impulse = [NNImpulse(sum(expanded_interaction_impulse, []))]
                         expanded_interaction.append(expanded_interaction_impulse)
                     else:
                         expansion = expansion_map[response.name()]
@@ -3008,7 +3311,7 @@ class IRFNode(object):
         Return data structure representing formula terms dominated by node, grouped by random grouping factor.
         Key ``None`` represents the fixed portion of the model (no random grouping factor).
 
-        :return: ``dict``; map from random grouping factors data structure representing formula terms.
+        :return: ``dict``; map from random grouping factors to data structure representing formula terms.
             Data structure contains 2 fields, ``'impulses'`` containing impulses and ``'irf'`` containing IRF Nodes.
         """
 
@@ -3016,13 +3319,15 @@ class IRFNode(object):
             out = {}
             if self.fixed:
                 out[None] = [{
-                    'impulses': self.impulses(),
-                    'irf': ''
+                    'impulses': self.impulses(include_nn=True, include_nn_inputs=False),
+                    'irf': '',
+                    'nn_key': None
                 }]
             for rangf in self.rangf:
                 out[rangf] = [{
-                    'impulses': self.impulses(),
-                    'irf': ''
+                    'impulses': self.impulses(include_nn=True, include_nn_inputs=False),
+                    'irf': '',
+                    'nn_key': None
                 }]
 
             return out
@@ -3040,6 +3345,7 @@ class IRFNode(object):
             for key in out:
                 for term in out[key]:
                     term['irf'] = self.irf_to_formula(rangf=key)
+                    term['nn_key'] = self.nn_key
 
         return out
 
