@@ -10,7 +10,7 @@ if __name__ == '__main__':
     argparser = argparse.ArgumentParser('''
     Initialize a CDR(NN) config file template.
     ''')
-    argparser.add_argument('-t', '--type', type=str, default='cdr', help='Type of model. One of ``["cdr", "cdrnn"]``.')
+    argparser.add_argument('-t', '--type', type=str, default='cdr', help='Type of model. One of ``["cdr", "plot"]``.')
     argparser.add_argument('-a', '--annotate', action='store_true', help='Print annotation comments in the output config file.')
     args = argparser.parse_args()
 
@@ -19,7 +19,7 @@ if __name__ == '__main__':
     elif args.type.lower() == 'plot':
         src_path = 'cdr_plot_template.ini'
     else:
-        src_path = 'cdrnn_model_template.ini'
+        raise ValueError('Unrecognized config type: %s' % args.type)
 
     src_config = pkg_resources.open_text(templates, src_path)
 

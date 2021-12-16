@@ -13,4 +13,3 @@ dependencies:
     - scipy>=0.14
     - tensorflow>=1.9
     - tensorflow-probability
-prefix: C:\ProgramData\Anaconda3\envs\tf2.6

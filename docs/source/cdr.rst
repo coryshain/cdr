@@ -11,13 +11,6 @@ cdr\.backend module
     :members:
     :show-inheritance:
 
-cdr\.base module
-----------------
-
-.. automodule:: cdr.base
-    :members:
-    :show-inheritance:
-
 cdr\.config module
 ------------------
 
@@ -30,53 +23,6 @@ cdr\.data module
 
 .. automodule:: cdr.data
     :members:
-    :show-inheritance:
-
-cdr\.cdrbase module
--------------------
-
-.. automodule:: cdr.cdrbase
-    :members:
-    :show-inheritance:
-
-cdr\.cdrbayes module
---------------------
-
-.. automodule:: cdr.cdrbayes
-    :members:
-    :inherited-members:
-    :show-inheritance:
-
-cdr\.cdrmle module
-------------------
-
-.. automodule:: cdr.cdrmle
-    :members:
-    :inherited-members:
-    :show-inheritance:
-
-cdr\.cdrnnbase module
----------------------
-
-.. automodule:: cdr.cdrnnbase
-    :members:
-    :inherited-members:
-    :show-inheritance:
-
-cdr\.cdrnnbayes module
-----------------------
-
-.. automodule:: cdr.cdrnnbayes
-    :members:
-    :inherited-members:
-    :show-inheritance:
-
-cdr\.cdrnnmle module
---------------------
-
-.. automodule:: cdr.cdrnnmle
-    :members:
-    :inherited-members:
     :show-inheritance:
 
 cdr\.formula module
@@ -100,13 +46,19 @@ cdr\.kwargs module
     :members:
     :show-inheritance:
 
+cdr\.model module
+------------------
+
+.. automodule:: cdr.model
+    :members:
+    :show-inheritance:
+
 cdr\.opt module
 ---------------
 
 .. automodule:: cdr.opt
     :members:
     :show-inheritance:
-
 
 cdr\.plot module
 ----------------
