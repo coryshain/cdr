@@ -3,7 +3,7 @@ from setuptools import setup
 from setuptools import find_packages
 
 setup(
-    name='CDR',
+    name='cdr',
     python_requires='>=3',
     version='0.5.1',
     description='A toolkit for continuous-time deconvolutional regression (CDR)',
@@ -20,5 +20,6 @@ setup(
         'scikit-learn',
         'scipy>=0.14'
     ],
+    include_package_data=True,
     packages=find_packages(),
 )
