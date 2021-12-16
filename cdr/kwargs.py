@@ -291,7 +291,7 @@ MODEL_INITIALIZATION_KWARGS = [
         'predictive_distribution_map',
         None,
         [str, None],
-        "Map defining predictive distribution. Can be a space-delimited list of distribution names (one per response variable), a space-delimited list of ';'-delimited tuples matching response variables to distribution names (e.g. ``response;Bernoulli``), or ``None``, in which case the predictive distribution will be inferred as ``Normal`` for continuous variables and ``Categorical`` for categorical variables."
+        "Definition of predictive distribution. Can be a single distribution name (shared across all response variables), a space-delimited list of distribution names (one per response variable), a space-delimited list of ';'-delimited tuples matching response variables to distribution names (e.g. ``response;Bernoulli``), or ``None``, in which case the predictive distribution will be inferred as ``Normal`` for continuous variables and ``Categorical`` for categorical variables."
     ),
     Kwarg(
         'center_inputs',
@@ -368,7 +368,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'minibatch_size',
-        1024,
+        512,
         [int, None],
         "Size of minibatches to use for fitting (full-batch if ``None``)."
     ),
@@ -401,7 +401,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'max_global_gradient_norm',
-        None,
+        1.,
         [float, None],
         'Maximum allowable value for the global norm of the gradient, which will be clipped as needed. If ``None``, no gradient clipping.'
     ),
@@ -1123,7 +1123,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'nn_regularizer_scale',
-        1.,
+        10.,
         [str, float, 'inherit'],
         "Scale of weight regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),

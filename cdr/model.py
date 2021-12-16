@@ -34,6 +34,8 @@ elif int(tf.__version__.split('.')[0]) == 2:
     Categorical = tfd.Categorical
     Exponential = tfd.Exponential
     ExponentiallyModifiedGaussian = tfd.ExponentiallyModifiedGaussian
+    from tensorflow_probability import math as tfm
+    tf_erfcx = tfm.erfcx
     from tensorflow.compat.v1.keras.optimizers import Nadam as NadamOptimizer
     from tensorflow import argsort as tf_argsort
     from tensorflow import keras
@@ -673,8 +675,10 @@ class CDRModel(object):
         predictive_distribution_map = {}
         if self.predictive_distribution_map is not None:
             _predictive_distribution_map = self.predictive_distribution_map.split()
+            if len(_predictive_distribution_map) == 1:
+                _predictive_distribution_map = _predictive_distribution_map * len(self.response_names)
             has_delim = [';' in x for x in _predictive_distribution_map]
-            assert np.all(has_delim) or (not np.any(has_delim) and len(has_delim) == len(self.response_names)), 'predictive_distribution_map must either contain a one-to-one list of distribution names, one per response variable, or a list of ``;``-delimited pairs mapping <response, distribution>.'
+            assert np.all(has_delim) or (not np.any(has_delim) and len(has_delim) == len(self.response_names)), 'predictive_distribution must contain a single distribution name, a one-to-one list of distribution names, one per response variable, or a list of ``;``-delimited pairs mapping <response, distribution>.'
             for i, x in enumerate(_predictive_distribution_map):
                 if has_delim[i]:
                     _response, _dist = x.split(';')
@@ -684,7 +688,7 @@ class CDRModel(object):
 
         for _response in self.response_names:
             if _response in predictive_distribution_map:
-                predictive_distribution[_response] = predictive_distribution_map[_response]
+                predictive_distribution[_response] = self.PREDICTIVE_DISTRIBUTIONS[predictive_distribution_map[_response]]
             elif self.response_is_categorical[_response]:
                 predictive_distribution[_response] = self.PREDICTIVE_DISTRIBUTIONS['categorical']
             elif self.asymmetric_error:
@@ -1121,6 +1125,7 @@ class CDRModel(object):
         }
         for kwarg in CDRModel._INITIALIZATION_KWARGS:
             md[kwarg.key] = getattr(self, kwarg.key)
+
         return md
 
     def _unpack_metadata(self, md):
@@ -1650,6 +1655,10 @@ class CDRModel(object):
                             _out = self.constraint_fn_inv_np(np.ones((1, ndim)))
                         else:
                             _out = self.constraint_fn_inv_np(self.Y_train_sds[response_name][None, ...])
+                    elif param in ['beta', 'tailweight']:
+                        _out = self.constraint_fn_inv_np(np.ones((1, ndim)))
+                    elif param == 'skewness':
+                        _out = np.zeros((1, ndim))
                     elif param == 'logit':
                         if has_intercept:
                             _out = np.log(self.Y_train_means[response_name][None, ...])
@@ -4464,7 +4473,7 @@ class CDRModel(object):
                     for j, response_param_name in enumerate(response_param_names):
                         _response_param = response_params[j]
                         if self.standardize_response and self.is_real(response):
-                            if response_param_name in ['sigma', 'tailweight']:
+                            if response_param_name in ['sigma', 'tailweight', 'beta']:
                                 _response_param = self.constraint_fn(_response_param) + self.epsilon
                             if response_param_name == 'mu':
                                 _response_param = tf.cond(
@@ -4491,12 +4500,31 @@ class CDRModel(object):
 
                     # Define prediction tensors
                     dist_name = self.get_response_dist_name(response)
-                    mode = response_dist.mode()
+                    def MAP_predict(response=response, response_dist=response_dist, dist_name=dist_name):
+                        if dist_name.lower() == 'exgaussian':
+                            # Mode not currently implemented for ExGaussian in TensorFlow Probability
+                            # and reimplementation not possible until TFP implements the erfcxinv function.
+                            # Approximation taken from eq. 15 of Kalambet et al., 2010.
+                            m = response_dist.loc
+                            s = response_dist.scale
+                            b = response_dist.rate
+                            t = 1. / tf.maximum(b, self.epsilon)
+                            z = (t / tf.maximum(s, self.epsilon)) / np.sqrt(2. / np.pi)
+                            # Approximation to erfcxinv, most accurate when z < 1 (i.e. skew is small relative to scale)
+                            y = 1. / tf.maximum(z * np.sqrt(np.pi), self.epsilon) + z * np.sqrt(np.pi) / 2.
+                            mode = m - y * s * np.sqrt(2.) - s / tf.maximum(t, self.epsilon)
+                        elif dist_name.lower() == 'sinharcsinh':
+                            mode = response_dist.loc
+                        else:
+                            mode = response_dist.mode()
+                        return mode
+
+                    prediction = tf.cond(self.use_MAP_mode, MAP_predict, response_dist.sample)
                     if dist_name in ['bernoulli', 'categorical']:
-                        self.prediction[response] = tf.cast(mode, self.INT_TF) * \
+                        self.prediction[response] = tf.cast(prediction, self.INT_TF) * \
                                                     tf.cast(Y_mask, self.INT_TF)
                     else: # Treat as continuous regression, use the first (location) parameter
-                        self.prediction[response] = mode * Y_mask
+                        self.prediction[response] = prediction * Y_mask
 
                     ll = response_dist.log_prob(Y)
                     # Mask out likelihoods of predictions for missing response variables
@@ -4558,15 +4586,22 @@ class CDRModel(object):
                         if self.get_response_ndim(response) == 1:
                             err_dist_params = [tf.squeeze(x, axis=-1) for x in err_dist_params]
                         err_dist = pred_dist_fn(*err_dist_params)
-                        err_dist_theoretical_quantiles = err_dist.quantile(empirical_quantiles)
                         err_dist_theoretical_cdf = err_dist.cdf(self.errors[response])
+                        try:
+                            err_dist_theoretical_quantiles = err_dist.quantile(empirical_quantiles)
+                            err_dist_lb = err_dist.quantile(.025)
+                            err_dist_ub = err_dist.quantile(.975)
+                            self.error_distribution_theoretical_quantiles[response] = err_dist_theoretical_quantiles
+                        except NotImplementedError:
+                            err_dist_mean = err_dist.mean()
+                            err_dist_sttdev = tf.sqrt(err_dist.variance())
+                            err_dist_lb = err_dist_mean - 2 * err_dist_sttdev
+                            err_dist_ub = err_dist_mean + 2 * err_dist_sttdev
+                            self.error_distribution_theoretical_quantiles[response] = None
 
                         err_dist_plot = tf.exp(err_dist.log_prob(self.support))
-                        err_dist_lb = err_dist.quantile(.025)
-                        err_dist_ub = err_dist.quantile(.975)
 
                         self.error_distribution[response] = err_dist
-                        self.error_distribution_theoretical_quantiles[response] = err_dist_theoretical_quantiles
                         self.error_distribution_theoretical_cdf[response] = err_dist_theoretical_cdf
                         self.error_distribution_plot[response] = err_dist_plot
                         self.error_distribution_plot_lb[response] = err_dist_lb
@@ -6867,6 +6902,15 @@ class CDRModel(object):
         if not isinstance(responses, list):
             responses = [responses]
 
+        if algorithm.lower() == 'map':
+            for response in responses:
+                dist_name = self.get_response_dist_name(response)
+                if dist_name.lower() == 'exgaussian':
+                    stderr('WARNING: The exact mode of the ExGaussian distribution is currently not implemented,\n' +
+                           'and an approximation is used that degrades when the skew is larger than the scale.\n' +
+                           'Predictions/errors from ExGaussian models should be treated with caution.\n')
+                    break
+
         # Preprocess data
         if not isinstance(X, list):
             X = [X]
@@ -7438,10 +7482,13 @@ class CDRModel(object):
                                     error = np.array(_y - __preds) ** 2
                                     score = error.mean()
                                     resid = np.sort(_y - __preds)
-                                    resid_theoretical_q = self.error_theoretical_quantiles(len(resid), _response)
-                                    valid = np.isfinite(resid_theoretical_q)
-                                    resid = resid[valid]
-                                    resid_theoretical_q = resid_theoretical_q[valid]
+                                    if self.error_distribution_theoretical_quantiles[_response] is None:
+                                        resid_theoretical_q = None
+                                    else:
+                                        resid_theoretical_q = self.error_theoretical_quantiles(len(resid), _response)
+                                        valid = np.isfinite(resid_theoretical_q)
+                                        resid = resid[valid]
+                                        resid_theoretical_q = resid_theoretical_q[valid]
                                     D, p_value = self.error_ks_test(resid, _response)
 
                                     if metrics['mse'][_response][ix] is None:
@@ -7487,7 +7534,8 @@ class CDRModel(object):
                         preds_outfile = self.outdir + '/output_%s.csv' % name_base
                         df.to_csv(preds_outfile, sep=' ', na_rep='NaN', index=False)
 
-                        if _response in self.predictive_distribution_config and self.is_real(_response):
+                        if _response in self.predictive_distribution_config and \
+                                self.is_real(_response) and resid_theoretical_q is not None:
                             plot_qq(
                                 resid_theoretical_q,
                                 resid,

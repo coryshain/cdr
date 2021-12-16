@@ -5,11 +5,13 @@ Recovering the underlying dynamics of temporally diffuse effects is challenging 
 Continuous-time deconvolutional regression (CDR) is a regression technique for time series that directly models temporal diffusion of effects (Shain & Schuler, 2018, 2021) as a funtion of continuous time.
 CDR uses machine learning to estimate continuous-time impulse response functions (IRFs) that mediate between predictors (event properties) and responses.
 Given data and a model template specifying the functional form(s) of the IRF kernel(s), CDR finds IRF parameters that optimize some objective function.
-This approach can be generalized to account for non-stationary, non-linear, non-additive, and context-dependent response functions by implementing the IRF as a deep neural network (Shain, 2021).
+CDR is a form of distributional regression: it can model continuous-time influences of predictors on all parameters of arbitrary predictive distributions, not just on the mean of a normal predictive distribution.
+This approach can be generalized to account for non-stationarity, non-linearity, non-additivity, and context-dependence by incorporating deep neural network components (Shain, 2021).
 
 This repository contains source code for the `cdr` Python module as well as support for reproducing published experiments.
-This package provides (1) an API for programming with CDR(NN) and (2) executables that allow users to train and evaluate CDR(NN) models out of the box, without needing to write any code.
+This package provides (1) an API for programming with CDR and (2) executables that allow users to train and evaluate CDR models out of the box, without needing to write any code.
 Full documentation for the `cdr` module is available at [http://cdr.readthedocs.io/en/latest/](http://cdr.readthedocs.io/en/latest/).
+This repository also provides an experimental tool for interactive browser-based visualization of CDR estimates.
 
 CDR models can be trained and evaluated using provided utility executables.
 Help strings for all available utilities can be viewed by running `python -m cdr.bin.help`.
@@ -79,6 +81,19 @@ and learning curves can be inspected in Tensorboard:
     python -m tensorboard.main --logdir=<PATH-TO-CDR-OUTPUT>
 
 For more on usage, see the [docs](http://cdr.readthedocs.io/en/latest/).
+
+
+## Interactive visualization
+
+We are in the process of developing a web-based tool for interactive visualization of CDR estimates.
+This is especially useful in models with neural network components, where estimates can contain rich interactions.
+To play with the current version of the tool, run:
+
+    python -m cdr.bin.viz <PATH-TO-CDR-OUTPUT>
+    
+and open the URL displayed in the console in a web browser.
+You can then use the provided interface to explore many aspects of your model's estimates.
+This tool is still in very early stages of development, and feedback is welcome.
 
 
 ## Reproducing published results
