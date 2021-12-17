@@ -923,15 +923,15 @@ NN_KWARGS = [
     ),
     Kwarg(
         'input_dependent_l1_only',
-        False,
+        True,
         bool,
-        "Whether to include random effects only on first layer of feedforward transforms (``True``) or on all neural components."
+        "Whether to input dependence only in first layer of IRF (``True``) or on all IRF layers."
     ),
     Kwarg(
         'input_dependent_bias_only',
         True,
         bool,
-        "Whether to only bias terms of neural components are input-dependent (``True``) or also weight matrices."
+        "Whether only bias terms of neural IRF are input-dependent (``True``) or also weight matrices."
     ),
     Kwarg(
         'ranef_l1_only',
