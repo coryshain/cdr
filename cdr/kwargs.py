@@ -465,7 +465,6 @@ MODEL_INITIALIZATION_KWARGS = [
         None,
         [float, None],
         "How many moving standard deviations above the moving mean of the loss to use as a cut-off for stability (suppressing large losses). If ``None``, or ``0``, no loss filtering.",
-        default_value_cdrnn=1000.,
     ),
     Kwarg(
         'ema_decay',
@@ -1123,7 +1122,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'nn_regularizer_scale',
-        10.,
+        1.,
         [str, float, 'inherit'],
         "Scale of weight regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),

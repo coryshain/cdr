@@ -2,7 +2,8 @@
 from setuptools import setup
 from setuptools import find_packages
 
-setup(name='CDR',
+setup(
+    name='CDR',
     python_requires='>=3',
     version='0.5.1',
     description='A toolkit for continuous-time deconvolutional regression (CDR)',
@@ -19,5 +20,10 @@ setup(name='CDR',
         'scikit-learn',
         'scipy>=0.14'
     ],
+    package_data=[
+        'cdr/templates/cdr_model_template.ini',
+        'cdr/templates/cdr_plot_template.ini',
+    ],
+    include_package_data=True,
     packages=find_packages(),
 )
