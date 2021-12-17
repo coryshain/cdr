@@ -976,7 +976,7 @@ NN_KWARGS = [
     # ACTIVATION FUNCTIONS
     Kwarg(
         'ff_inner_activation',
-        'gelu',
+        'logmod',
         [str, None],
         "Name of activation function to use for hidden layers in feedforward encoder.",
         aliases=['activation', 'input_projection_inner_activation']
@@ -1002,7 +1002,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'rnn_projection_inner_activation',
-        'gelu',
+        'logmod',
         [str, None],
         "Name of activation function to use for hidden layers in projection of RNN state.",
         aliases=['activation']
@@ -1015,14 +1015,14 @@ NN_KWARGS = [
     ),
     Kwarg(
         'hidden_state_activation',
-        'gelu',
+        'logmod',
         [str, None],
         "Name of activation function to use for CDRNN hidden state.",
         aliases=['activation']
     ),
     Kwarg(
         'irf_inner_activation',
-        'gelu',
+        'logmod',
         [str, None],
         "Name of activation function to use for hidden layers in IRF.",
         aliases=['activation']
