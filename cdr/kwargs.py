@@ -465,7 +465,6 @@ MODEL_INITIALIZATION_KWARGS = [
         None,
         [float, None],
         "How many moving standard deviations above the moving mean of the loss to use as a cut-off for stability (suppressing large losses). If ``None``, or ``0``, no loss filtering.",
-        default_value_cdrnn=1000.,
     ),
     Kwarg(
         'ema_decay',
@@ -924,15 +923,15 @@ NN_KWARGS = [
     ),
     Kwarg(
         'input_dependent_l1_only',
-        False,
+        True,
         bool,
-        "Whether to include random effects only on first layer of feedforward transforms (``True``) or on all neural components."
+        "Whether to input dependence only in first layer of IRF (``True``) or on all IRF layers."
     ),
     Kwarg(
         'input_dependent_bias_only',
         True,
         bool,
-        "Whether to only bias terms of neural components are input-dependent (``True``) or also weight matrices."
+        "Whether only bias terms of neural IRF are input-dependent (``True``) or also weight matrices."
     ),
     Kwarg(
         'ranef_l1_only',
@@ -977,7 +976,7 @@ NN_KWARGS = [
     # ACTIVATION FUNCTIONS
     Kwarg(
         'ff_inner_activation',
-        'gelu',
+        'logmod',
         [str, None],
         "Name of activation function to use for hidden layers in feedforward encoder.",
         aliases=['activation', 'input_projection_inner_activation']
@@ -1003,7 +1002,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'rnn_projection_inner_activation',
-        'gelu',
+        'logmod',
         [str, None],
         "Name of activation function to use for hidden layers in projection of RNN state.",
         aliases=['activation']
@@ -1016,14 +1015,14 @@ NN_KWARGS = [
     ),
     Kwarg(
         'hidden_state_activation',
-        'gelu',
+        'logmod',
         [str, None],
         "Name of activation function to use for CDRNN hidden state.",
         aliases=['activation']
     ),
     Kwarg(
         'irf_inner_activation',
-        'gelu',
+        'logmod',
         [str, None],
         "Name of activation function to use for hidden layers in IRF.",
         aliases=['activation']
