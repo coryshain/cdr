@@ -1123,7 +1123,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'nn_regularizer_scale',
-        10.,
+        1.,
         [str, float, 'inherit'],
         "Scale of weight regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
@@ -1155,7 +1155,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'context_regularizer_name',
-        'l2_regularizer',
+        'l1_regularizer',
         [str, 'inherit', None],
         "Name of regularizer on contribution of context (RNN) to hidden state (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
     ),
@@ -1236,7 +1236,8 @@ NN_KWARGS = [
         'ranef_dropout_rate',
         None,
         [float, None],
-        "Rate at which to drop random effects indicators."
+        "Rate at which to drop random effects indicators.",
+        aliases=['dropout_rate']
     ),
 
     # DEPRECATED OR RARELY USED
@@ -1457,7 +1458,7 @@ PLOT_KWARGS_CORE = [
     # AESTHETICS
     Kwarg(
         'plot_n_time_units',
-        2.5,
+        5,
         float,
         "Number of time units to use for plotting."
     ),
