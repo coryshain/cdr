@@ -25,7 +25,7 @@ if __name__ == '__main__':
     argparser.add_argument('-g', '--use_gpu', action='store_true', help='Whether to request a GPU node')
     argparser.add_argument('-m', '--memory', type=int, default=64, help='Number of GB of memory to request')
     argparser.add_argument('-P', '--slurm_partition', default=None, help='Value for SLURM --partition setting, if applicable')
-    argparser.add_argument('-e', '--exclude', default='+', help='Nodes to exclude')
+    argparser.add_argument('-e', '--exclude', nargs='+', help='Nodes to exclude')
     argparser.add_argument('-c', '--cli_args', default='', help='Command line arguments to pass into call')
     argparser.add_argument('-o', '--outdir', default='./', help='Directory in which to place generated batch scripts.')
     args = argparser.parse_args()
