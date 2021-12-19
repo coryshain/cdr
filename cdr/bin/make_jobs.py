@@ -25,6 +25,7 @@ if __name__ == '__main__':
     argparser.add_argument('-g', '--use_gpu', action='store_true', help='Whether to request a GPU node')
     argparser.add_argument('-m', '--memory', type=int, default=64, help='Number of GB of memory to request')
     argparser.add_argument('-P', '--slurm_partition', default=None, help='Value for SLURM --partition setting, if applicable')
+    argparser.add_argument('-e', '--exclude', default='+', help='Nodes to exclude')
     argparser.add_argument('-c', '--cli_args', default='', help='Command line arguments to pass into call')
     argparser.add_argument('-o', '--outdir', default='./', help='Directory in which to place generated batch scripts.')
     args = argparser.parse_args()
@@ -37,6 +38,7 @@ if __name__ == '__main__':
     use_gpu = args.use_gpu
     memory = args.memory
     slurm_partition = args.slurm_partition
+    exclude = ','.join(args.exclude)
     cli_args = args.cli_args.replace('\\', '') # Delete escape characters
     outdir = args.outdir
 
@@ -59,6 +61,8 @@ if __name__ == '__main__':
                     f.write('#SBATCH --gres=gpu:1\n')
                 if slurm_partition:
                     f.write('#SBATCH --partition=%s\n' % slurm_partition)
+                if exclude:
+                    f.write('#SBATCH --exclude=%s\n' % exclude)
                 f.write('\n')
                 for job_type in job_types:
                     if job_type.lower() == 'save_and_exit':
