@@ -670,7 +670,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'generate_interaction_surface_plots',
-        True,
+        False,
         bool,
         "Whether to plot IRF interaction surfaces at time **reference_time**."
     ),
