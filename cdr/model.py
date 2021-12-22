@@ -3045,7 +3045,13 @@ class CDRModel(object):
         if weights_use_ranef is None:
             weights_use_ranef = not self.ranef_bias_only
         if biases_use_ranef is None:
-            biases_use_ranef = True
+            if self.ranef_l1_only:
+                if l == 0:
+                    biases_use_ranef = True
+                else:
+                    biases_use_ranef = True
+            else:
+                biases_use_ranef = True
         if normalizer_use_ranef is None:
             normalizer_use_ranef = self.normalizer_use_ranef
         with self.session.as_default():
@@ -3087,7 +3093,13 @@ class CDRModel(object):
         if weights_use_ranef is None:
             weights_use_ranef = not self.ranef_bias_only
         if biases_use_ranef is None:
-            biases_use_ranef = True
+            if self.ranef_l1_only:
+                if l == 0:
+                    biases_use_ranef = True
+                else:
+                    biases_use_ranef = True
+            else:
+                biases_use_ranef = True
         if normalizer_use_ranef is None:
             normalizer_use_ranef = self.normalizer_use_ranef
         with self.session.as_default():
