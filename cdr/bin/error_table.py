@@ -100,7 +100,7 @@ if __name__ == '__main__':
         baseline_names = args.baseline_names[:]
     assert len(baselines) == len(baseline_names)
 
-    systems = args.systems[:]
+    systems = args.systems
     if args.system_names is None:
         system_names = systems[:]
     else:
