@@ -140,9 +140,8 @@ if __name__ == '__main__':
             if s in p.model_list:
                 s_path = s.replace(':', ':')
                 for partition in ['train', 'dev', 'test']:
-                    if (not response or response in path) and path.startswith('eval') and path.endswith(
-                            '%s.txt' % partition):
-                        eval_path = p.outdir + '/' + b_path + '/' + path
+                    if (not response or response in path) and path.startswith('eval') and path.endswith('%s.txt' % partition):
+                        eval_path = p.outdir + '/' + s_path + '/' + path
                         _response = path.split()[1]
                         _task_name = task_names[i] + ' ' + _response
                         converged = True
