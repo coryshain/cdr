@@ -74,7 +74,7 @@ if __name__ == '__main__':
     Tasks are defined as sets of experiments within the same config file (because they are constrained to use the same data).
     ''')
     argparser.add_argument('config_paths', nargs='+', help='Path(s) to config files defining models to compare.')
-    argparser.add_argument('response', nargs='+', help='Name of response to evaluate.')
+    argparser.add_argument('response', help='Name of response to evaluate.')
     argparser.add_argument('-t', '--task_names', nargs='+', default=None, help='Task names to use (should be in 1-1 alignment with ``config_paths``). If not provided, names will be inferred from config paths.')
     argparser.add_argument('-b', '--baselines',  nargs='+', default=None, help='Models to treat as baselines.')
     argparser.add_argument('-B', '--baseline_names',  nargs='+', default=None, help='Names of baselines (should be in 1-1 alignment with ``baselines``. If not provided, names will be inferred from baselines.')
