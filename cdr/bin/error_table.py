@@ -43,7 +43,8 @@ def new_row(system, results, tasks):
     return out
     
 
-def results_to_table(results, tasks, systems, baselines=None, indent=4):
+def results_to_table(results, systems, baselines=None, indent=4):
+    tasks = results.keys()
     out = ''
     out += '\\begin{table}\n'
     out += ' ' * indent + '\\begin{tabular}{r|%s}\n' % ('|'.join(['ccc'] * len(results)))
@@ -163,5 +164,5 @@ if __name__ == '__main__':
                                 line = f.readline()
 
 
-    sys.stdout.write(results_to_table(results, task_names, system_names, baselines=baseline_names))
+    sys.stdout.write(results_to_table(results, system_names, baselines=baseline_names))
 
