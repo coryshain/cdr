@@ -110,6 +110,8 @@ if __name__ == '__main__':
     results = {}
     for i, path in enumerate(args.config_paths):
         p = Config(path)
+        if systems is None:
+            _systems = [x for x in p.model_list if x not in baselines]
         for j, b in enumerate(baselines):
             if b in p.model_list:
                 b_path = b.replace(':', '+')
@@ -136,7 +138,7 @@ if __name__ == '__main__':
                                     if line.strip() == 'No convergence warnings.':
                                         converged = True
                                     line = f.readline()
-        for j, s in enumerate(systems):
+        for j, s in enumerate(_systems):
             if s in p.model_list:
                 s_path = s.replace(':', ':')
                 for partition in ['train', 'dev', 'test']:
