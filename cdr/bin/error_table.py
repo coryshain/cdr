@@ -82,7 +82,7 @@ if __name__ == '__main__':
     argparser.add_argument('-S', '--system_names',  nargs='+', default=None, help='Names of systems (should be in 1-1 alignment with ``systems``. If not provided, names will be inferred from systems.')
     args = argparser.parse_args()
 
-    response = sn(args.response)
+    response = args.response
     if args.task_names is None:
         task_names = [os.path.splitext(os.path.basename(p))[0] for p in args.config_paths]
     else:
