@@ -2,6 +2,7 @@ import sys
 import os
 import argparse
 from cdr.config import Config
+from cdr.util import sn
 
 def new_row(system, results, tasks):
     s = system
@@ -73,6 +74,7 @@ if __name__ == '__main__':
     Tasks are defined as sets of experiments within the same config file (because they are constrained to use the same data).
     ''')
     argparser.add_argument('config_paths', nargs='+', help='Path(s) to config files defining models to compare.')
+    argparser.add_argument('response', nargs='+', help='Name of response to evaluate.')
     argparser.add_argument('-t', '--task_names', nargs='+', default=None, help='Task names to use (should be in 1-1 alignment with ``config_paths``). If not provided, names will be inferred from config paths.')
     argparser.add_argument('-b', '--baselines',  nargs='+', default=None, help='Models to treat as baselines.')
     argparser.add_argument('-B', '--baseline_names',  nargs='+', default=None, help='Names of baselines (should be in 1-1 alignment with ``baselines``. If not provided, names will be inferred from baselines.')
@@ -80,6 +82,7 @@ if __name__ == '__main__':
     argparser.add_argument('-S', '--system_names',  nargs='+', default=None, help='Names of systems (should be in 1-1 alignment with ``systems``. If not provided, names will be inferred from systems.')
     args = argparser.parse_args()
 
+    response = sn(args.response)
     if args.task_names is None:
         task_names = [os.path.splitext(os.path.basename(p))[0] for p in args.config_paths]
     else:
@@ -113,7 +116,7 @@ if __name__ == '__main__':
             if b in p.model_list:
                 b_path = b.replace(':', '+')
                 for partition in ['train', 'dev', 'test']:
-                    eval_path = p.outdir + '/' + b_path + '/' + 'eval_%s.txt' % partition
+                    eval_path = p.outdir + '/' + b_path + '/' + 'eval_%s_%s.txt' % (response, partition)
                     if os.path.exists(eval_path):
                         converged = True
                         if b.startswith('LME'):
@@ -136,7 +139,7 @@ if __name__ == '__main__':
             if s in p.model_list:
                 s_path = s.replace(':', ':')
                 for partition in ['train', 'dev', 'test']:
-                    eval_path = p.outdir + '/' + s_path + '/' + 'eval_%s.txt' % partition
+                    eval_path = p.outdir + '/' + s_path + '/' + 'eval_%s_%s.txt' % (response, partition)
                     if os.path.exists(eval_path):
                         converged = True
                         if s.startswith('LME'):
