@@ -74,7 +74,7 @@ if __name__ == '__main__':
     Tasks are defined as sets of experiments within the same config file (because they are constrained to use the same data).
     ''')
     argparser.add_argument('config_paths', nargs='+', help='Path(s) to config files defining models to compare.')
-    argparser.add_argument('response', help='Name of response to evaluate.')
+    argparser.add_argument('-r', '--response', default=None, help='Name of response to evaluate.')
     argparser.add_argument('-t', '--task_names', nargs='+', default=None, help='Task names to use (should be in 1-1 alignment with ``config_paths``). If not provided, names will be inferred from config paths.')
     argparser.add_argument('-b', '--baselines',  nargs='+', default=None, help='Models to treat as baselines.')
     argparser.add_argument('-B', '--baseline_names',  nargs='+', default=None, help='Names of baselines (should be in 1-1 alignment with ``baselines``. If not provided, names will be inferred from baselines.')
@@ -99,10 +99,7 @@ if __name__ == '__main__':
         baseline_names = args.baseline_names[:]
     assert len(baselines) == len(baseline_names)
 
-    if args.systems is None:
-        systems = []
-    else:
-        systems = args.systems[:]
+    systems = args.systems[:]
     if args.system_names is None:
         system_names = systems[:]
     else:
@@ -116,31 +113,37 @@ if __name__ == '__main__':
             if b in p.model_list:
                 b_path = b.replace(':', '+')
                 for partition in ['train', 'dev', 'test']:
-                    eval_path = p.outdir + '/' + b_path + '/' + 'eval_%s_%s.txt' % (response, partition)
-                    if os.path.exists(eval_path):
-                        converged = True
-                        if b.startswith('LME'):
-                            converged = False
-                        with open(eval_path, 'r') as f:
-                            line = f.readline()
-                            while line:
-                                if line.strip().startswith('MSE'):
-                                    val = float(line.strip().split()[1])
-                                    if task_names[i] not in results:
-                                        results[task_names[i]] = {}
-                                    if baseline_names[j] not in results[task_names[i]]:
-                                        results[task_names[i]][baseline_names[j]] = {}
-                                    if partition not in results[task_names[i]][baseline_names[j]]:
-                                        results[task_names[i]][baseline_names[j]][partition] = {'loss': val, 'converged': converged}
-                                if line.strip() == 'No convergence warnings.':
-                                    converged = True
+                    for path in os.listdir(p.outdir + '/' + b_path):
+                        if (not response or response in path) and path.startswith('eval') and path.endswith('%s.txt' % partition):
+                            eval_path = p.outdir + '/' + b_path + '/' + path
+                            _response = path.split()[1]
+                            _task_name = task_names[i] + ' ' + _response
+                            converged = True
+                            if b.startswith('LME'):
+                                converged = False
+                            with open(eval_path, 'r') as f:
                                 line = f.readline()
+                                while line:
+                                    if line.strip().startswith('MSE'):
+                                        val = float(line.strip().split()[1])
+                                        if _task_name not in results:
+                                            results[_task_name] = {}
+                                        if baseline_names[j] not in results[_task_name]:
+                                            results[_task_name][baseline_names[j]] = {}
+                                        if partition not in results[_task_name][baseline_names[j]]:
+                                            results[_task_name][baseline_names[j]][partition] = {'loss': val, 'converged': converged}
+                                    if line.strip() == 'No convergence warnings.':
+                                        converged = True
+                                    line = f.readline()
         for j, s in enumerate(systems):
             if s in p.model_list:
                 s_path = s.replace(':', ':')
                 for partition in ['train', 'dev', 'test']:
-                    eval_path = p.outdir + '/' + s_path + '/' + 'eval_%s_%s.txt' % (response, partition)
-                    if os.path.exists(eval_path):
+                    if (not response or response in path) and path.startswith('eval') and path.endswith(
+                            '%s.txt' % partition):
+                        eval_path = p.outdir + '/' + b_path + '/' + path
+                        _response = path.split()[1]
+                        _task_name = task_names[i] + ' ' + _response
                         converged = True
                         if s.startswith('LME'):
                             converged = False
@@ -149,12 +152,12 @@ if __name__ == '__main__':
                             while line:
                                 if line.strip().startswith('MSE'):
                                     val = float(line.strip().split()[1])
-                                    if task_names[i] not in results:
-                                        results[task_names[i]] = {}
-                                    if system_names[j] not in results[task_names[i]]:
-                                        results[task_names[i]][system_names[j]] = {}
-                                    if partition not in results[task_names[i]][system_names[j]]:
-                                        results[task_names[i]][system_names[j]][partition] = {'loss': val, 'converged': converged}
+                                    if _task_name not in results:
+                                        results[_task_name] = {}
+                                    if system_names[j] not in results[_task_name]:
+                                        results[_task_name][system_names[j]] = {}
+                                    if partition not in results[_task_name][system_names[j]]:
+                                        results[_task_name][system_names[j]][partition] = {'loss': val, 'converged': converged}
                                 if line.strip() == 'No convergence warnings.':
                                     converged = True
                                 line = f.readline()
