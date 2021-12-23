@@ -101,17 +101,22 @@ if __name__ == '__main__':
     assert len(baselines) == len(baseline_names)
 
     systems = args.systems
-    if args.system_names is None:
-        system_names = systems[:]
-    else:
-        system_names = args.system_names[:]
-    assert len(systems) == len(system_names)
+    system_names = args.system_names
 
     results = {}
+    system_names_all = []
     for i, path in enumerate(args.config_paths):
         p = Config(path)
         if systems is None:
             _systems = [x for x in p.model_list if x not in baselines]
+        if system_names is None:
+            _system_names = _systems[:]
+        else:
+            _system_names = args.system_names[:]
+        for s in _system_names:
+            if s not in system_names_all:
+                system_names_all.append(s)
+        assert len(_systems) == len(_system_names)
         for j, b in enumerate(baselines):
             if b in p.model_list:
                 b_path = b.replace(':', '+')
@@ -157,14 +162,14 @@ if __name__ == '__main__':
                                         val = float(line.strip().split()[1])
                                         if _task_name not in results:
                                             results[_task_name] = {}
-                                        if system_names[j] not in results[_task_name]:
-                                            results[_task_name][system_names[j]] = {}
-                                        if partition not in results[_task_name][system_names[j]]:
-                                            results[_task_name][system_names[j]][partition] = {'loss': val, 'converged': converged}
+                                        if _system_names[j] not in results[_task_name]:
+                                            results[_task_name][_system_names[j]] = {}
+                                        if partition not in results[_task_name][_system_names[j]]:
+                                            results[_task_name][_system_names[j]][partition] = {'loss': val, 'converged': converged}
                                     if line.strip() == 'No convergence warnings.':
                                         converged = True
                                     line = f.readline()
 
 
-    sys.stdout.write(results_to_table(results, system_names, baselines=baseline_names))
+    sys.stdout.write(results_to_table(results, system_names_all, baselines=baseline_names))
 
