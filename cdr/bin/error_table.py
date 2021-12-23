@@ -140,27 +140,28 @@ if __name__ == '__main__':
             if s in p.model_list:
                 s_path = s.replace(':', ':')
                 for partition in ['train', 'dev', 'test']:
-                    if (not response or response in path) and path.startswith('eval') and path.endswith('%s.txt' % partition):
-                        eval_path = p.outdir + '/' + s_path + '/' + path
-                        _response = path.split()[1]
-                        _task_name = task_names[i] + ' ' + _response
-                        converged = True
-                        if s.startswith('LME'):
-                            converged = False
-                        with open(eval_path, 'r') as f:
-                            line = f.readline()
-                            while line:
-                                if line.strip().startswith('MSE'):
-                                    val = float(line.strip().split()[1])
-                                    if _task_name not in results:
-                                        results[_task_name] = {}
-                                    if system_names[j] not in results[_task_name]:
-                                        results[_task_name][system_names[j]] = {}
-                                    if partition not in results[_task_name][system_names[j]]:
-                                        results[_task_name][system_names[j]][partition] = {'loss': val, 'converged': converged}
-                                if line.strip() == 'No convergence warnings.':
-                                    converged = True
+                    for path in os.listdir(p.outdir + '/' + s_path):
+                        if (not response or response in path) and path.startswith('eval') and path.endswith('%s.txt' % partition):
+                            eval_path = p.outdir + '/' + s_path + '/' + path
+                            _response = path.split()[1]
+                            _task_name = task_names[i] + ' ' + _response
+                            converged = True
+                            if s.startswith('LME'):
+                                converged = False
+                            with open(eval_path, 'r') as f:
                                 line = f.readline()
+                                while line:
+                                    if line.strip().startswith('MSE'):
+                                        val = float(line.strip().split()[1])
+                                        if _task_name not in results:
+                                            results[_task_name] = {}
+                                        if system_names[j] not in results[_task_name]:
+                                            results[_task_name][system_names[j]] = {}
+                                        if partition not in results[_task_name][system_names[j]]:
+                                            results[_task_name][system_names[j]][partition] = {'loss': val, 'converged': converged}
+                                    if line.strip() == 'No convergence warnings.':
+                                        converged = True
+                                    line = f.readline()
 
 
     sys.stdout.write(results_to_table(results, system_names, baselines=baseline_names))
