@@ -3284,6 +3284,7 @@ class CDRModel(object):
                     rnn_h_ema = []
                     rnn_c_ema = []
                     for l in range(self.n_layers_rnn):
+                        units = self.n_units_rnn[l]
                         if l == 0:
                             _rangf_map = rangf_map_l1
                         else:
