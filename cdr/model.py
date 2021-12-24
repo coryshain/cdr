@@ -973,7 +973,7 @@ class CDRModel(object):
         self.X_time_dropout_layer = {}
         self.ff_layers = {}
         self.ff_fn = {}
-        self.h_in_dropout_layer = {}
+        self.ff_dropout_layer = {}
         self.rnn_layers = {}
         self.rnn_h_ema = {}
         self.rnn_c_ema = {}
@@ -982,9 +982,6 @@ class CDRModel(object):
         self.rnn_projection_fn = {}
         self.h_rnn_dropout_layer = {}
         self.rnn_dropout_layer = {}
-        self.h_dropout_layer = {}
-        self.h_bias_layer = {}
-        self.h_normalization_layer = {}
         self.hidden_state_to_irf_l1 = {}
         self.nn_irf_l1 = {}
         self.nn_irf_layers = {}
@@ -2855,55 +2852,6 @@ class CDRModel(object):
 
     # NN INITIALIZATION
 
-    def _initialize_bias_mle(
-            self,
-            rangf_map=None,
-            name=None
-    ):
-        with self.session.as_default():
-            with self.session.graph.as_default():
-                bias = BiasLayer(
-                    training=self.training,
-                    use_MAP_mode=self.use_MAP_mode,
-                    rangf_map=rangf_map,
-                    epsilon=self.epsilon,
-                    session=self.session,
-                    name=name
-                )
-
-                return bias
-
-    def _initialize_bias_bayes(
-            self,
-            rangf_map=None,
-            name=None
-    ):
-        with self.session.as_default():
-            with self.session.graph.as_default():
-                sd_prior = self.bias_prior_sd
-                sd_init = self.bias_sd_init
-
-                bias = BiasLayerBayes(
-                    training=self.training,
-                    use_MAP_mode=self.use_MAP_mode,
-                    rangf_map=rangf_map,
-                    declare_priors=self.declare_priors_biases,
-                    sd_prior=sd_prior,
-                    sd_init=sd_init,
-                    posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
-                    constraint=self.constraint,
-                    epsilon=self.epsilon,
-                    session=self.session,
-                    name=name
-                )
-
-                return bias
-
-    def _initialize_bias(self, *args, **kwargs):
-        if 'nn' in self.rvs:
-            return self._initialize_bias_bayes(*args, **kwargs)
-        return self._initialize_bias_mle(*args, **kwargs)
-
     def _initialize_feedforward_mle(
             self,
             units,
@@ -3250,10 +3198,9 @@ class CDRModel(object):
                 else:
                     rangf_map_other = rangf_map
 
-                if nn_id in self.nn_impulse_ids or self.input_dependent_irf:
+                # FEEDFORWARD ENCODER
+                if nn_id in self.nn_impulse_ids:
                     assert self.n_layers_ff or self.n_layers_rnn, "n_layers_ff and n_layers_rnn can't both be zero in NN transforms of predictors."
-
-                    # FEEDFORWARD ENCODER
 
                     if self.input_dropout_rate:
                         self.input_dropout_layer[nn_id] = get_dropout(
@@ -3323,16 +3270,16 @@ class CDRModel(object):
 
                     self.ff_layers[nn_id] = ff_layers
                     self.ff_fn[nn_id] = ff_fn
-                    self.h_in_dropout_layer[nn_id] = get_dropout(
-                        self.h_in_dropout_rate,
+                    self.ff_dropout_layer[nn_id] = get_dropout(
+                        self.ff_dropout_rate,
                         training=self.training,
                         use_MAP_mode=self.use_MAP_mode,
-                        name='%s_h_in_dropout' % nn_id,
+                        name='%s_ff_dropout' % nn_id,
                         session=self.session
                     )
 
-                    # RNN ENCODER
-
+                # RNN ENCODER
+                if nn_id in self.nn_impulse_ids or self.input_dependent_irf:
                     rnn_layers = []
                     rnn_h_ema = []
                     rnn_c_ema = []
@@ -3415,57 +3362,8 @@ class CDRModel(object):
                             session=self.session
                         )
 
-                    self.h_dropout_layer[nn_id] = get_dropout(
-                        self.h_dropout_rate,
-                        training=self.training,
-                        use_MAP_mode=self.use_MAP_mode,
-                        name='%s_h_dropout' % nn_id,
-                        session=self.session
-                    )
-
-                    # H normalization
-                    if self.normalize_h and self.normalize_activations:
-                        self.h_normalization_layer[nn_id] = self._initialize_normalization(
-                            rangf_map=rangf_map_l1 if self.normalizer_use_ranef else None,
-                            name='%s_h' % nn_id
-                        )
-                        self.layers.append(self.h_normalization_layer[nn_id])
-
-                    # H bias
-                    if not (self.normalize_h and self.normalize_activations) or self.normalize_after_activation:
-                        self.h_bias_layer[nn_id] = self._initialize_bias(name='%s_h_bias' % nn_id, rangf_map=rangf_map_l1)
-                        self.regularizable_layers.append(self.h_bias_layer[nn_id])
-
-                    if self.input_dependent_irf:
-                        # Projection from hidden state to first layer (weights and biases) of IRF
-                        units_coef = 1
-                        if not self.input_dependent_bias_only:
-                            units_coef += 1
-                        if self.nonstationary:
-                            units_coef += 1
-                        if self.input_dependent_l1_only:
-                            n_layers = 1
-                        else:
-                            n_layers = self.n_layers_irf
-                        units = 0
-                        for l in range(n_layers):
-                            units += self.n_units_irf[0] * units_coef
-                        hidden_state_to_irf_l1 = self._initialize_feedforward(
-                            units=units,
-                            use_bias=False,
-                            activation=None,
-                            dropout=None,
-                            rangf_map=rangf_map_other,
-                            name='%s_hidden_state_to_irf_l1' % nn_id
-                        )
-                        self.layers.append(hidden_state_to_irf_l1)
-                        self.regularizable_layers.append(hidden_state_to_irf_l1)
-                        self.hidden_state_to_irf_l1[nn_id] = hidden_state_to_irf_l1
-
+                # IRF
                 if nn_id in self.nn_irf_ids:
-
-                    # IRF
-
                     irf_layers = []
                     for l in range(self.n_layers_irf + 1):
                         if l == 0 or not self.ranef_l1_only:
@@ -3721,19 +3619,19 @@ class CDRModel(object):
                     X_in = tf.concat([X_in, X_time], axis=-1)
 
                 # Compute hidden state
+                h = None
                 if self.n_layers_ff or self.n_layers_rnn:
-                    h = None
-                    if self.n_layers_ff:
-                        h_in = self.ff_fn[nn_id](X_in)
-                        if self.h_in_noise_sd:
-                            def h_in_train_fn(h_in=h_in):
-                                return tf.random_normal(tf.shape(h_in), h_in, stddev=self.h_in_noise_sd[nn_id])
-                            def h_in_eval_fn(h_in=h_in):
-                                return h_in
-                            h_in = tf.cond(self.training, h_in_train_fn, h_in_eval_fn)
-                        if self.h_in_dropout_rate:
-                            h_in = self.h_in_dropout_layer[nn_id](h_in)
-                        h = h_in
+                    if self.n_layers_ff and nn_id in self.nn_impulse_ids:
+                        h_ff = self.ff_fn[nn_id](X_in)
+                        if self.ff_noise_sd:
+                            def ff_train_fn(ff=h_ff):
+                                return tf.random_normal(tf.shape(ff), ff, stddev=self.ff_noise_sd[nn_id])
+                            def ff_eval_fn(ff=h_ff):
+                                return ff
+                            h_ff = tf.cond(self.training, ff_train_fn, ff_eval_fn)
+                        if self.ff_dropout_rate:
+                            h_ff = self.ff_dropout_layer[nn_id](h_ff)
+                        h = h_ff
 
                     if self.n_layers_rnn:
                         _X_in = X_in
@@ -3770,23 +3668,8 @@ class CDRModel(object):
                     else:
                         h_rnn = rnn_hidden = rnn_cell = None
 
-                    assert h is not None, 'NN impulse transforms must involve a feedforward component, an RNN component, or both.'
-
-                    if not (self.normalize_h and self.normalize_activations) or self.normalize_after_activation:
-                        h = self.h_bias_layer[nn_id](h)
-
-                    if self.h_dropout_rate:
-                        h = self.h_dropout_layer[nn_id](h)
-
-                    if nn_id in self.nn_irf_ids:
-                        if self.normalize_after_activation:
-                            h = get_activation(self.hidden_state_activation, session=self.session)(h)
-                        if self.normalize_h and self.normalize_activations:
-                            h = self.h_normalization_layer[nn_id](h)
-                        if not self.normalize_after_activation:
-                            h = get_activation(self.hidden_state_activation, session=self.session)(h)
-
                 if nn_id in self.nn_impulse_ids:
+                    assert h is not None, 'NN impulse transforms must involve a feedforward component, an RNN component, or both.'
                     self.nn_transformed_impulses.append(h)
                     self.nn_transformed_impulse_t_delta.append(t_delta)
                     self.nn_transformed_impulse_X_time.append(X_time)
@@ -3794,51 +3677,26 @@ class CDRModel(object):
                 else:  # nn_id in self.nn_irf_ids
                     # Compute IRF outputs
 
-                    if self.input_dependent_irf:
-                        irf_offsets = self.hidden_state_to_irf_l1[nn_id](h)
+                    impulse_ix = names2ix(self.nn_irf_impulse_names[nn_id], impulse_names)
+                    nn_irf_impulses = tf.gather(X, impulse_ix, axis=2)
 
                     ix = 0
+                    irf_out = [t_delta]
                     if self.nonstationary:
-                        irf_out = tf.concat([t_delta, X_time], axis=2)
-                    else:
-                        irf_out = t_delta
+                        irf_out.append(X_time)
+                    if self.input_dependent_irf:
+                        irf_out.append(nn_irf_impulses)
+                    if h_rnn is not None:
+                        irf_out.append(h_rnn)
+                    irf_out = tf.concat(irf_out, axis=2)
                     for l in range(self.n_layers_irf + 1):
-                        if l == self.n_layers_irf:
-                            _W_offsets = None
-                            _b_offsets = None
-                        elif self.input_dependent_irf:
-                            if l == 0 or not self.input_dependent_l1_only:
-                                _b_offsets = irf_offsets[..., ix: ix + self.n_units_irf[l]]
-                                ix += self.n_units_irf[l]
-                                if not self.input_dependent_bias_only:
-                                    shift = self.n_units_irf[l]
-                                    if self.nonstationary:
-                                        shift *= 2
-                                    _W_offsets = irf_offsets[..., ix: ix + shift]
-                                    ix += shift
-                                    if self.nonstationary:
-                                        shape = tf.shape(_W_offsets)
-                                        irf_l1_W_offsets = tf.reshape(
-                                            irf_l1_W_offsets,
-                                            [shape[0], shape[1], 2, self.n_units_irf[l]]
-                                        )
-                                else:
-                                    _W_offsets = None
-                            else:
-                                _W_offsets = None
-                                _b_offsets = None
-
                         irf_out = self.nn_irf_layers[nn_id][l](
                             irf_out,
-                            kernel_offsets=_W_offsets,
-                            bias_offsets=_b_offsets
                         )
 
                     stabilizing_constant = (self.history_length + self.future_length) * len(self.terminal_names)
                     irf_out = irf_out / stabilizing_constant
 
-                    impulse_ix = names2ix(self.nn_irf_impulse_names[nn_id], impulse_names)
-                    nn_irf_impulses = tf.gather(X, impulse_ix, axis=2)
                     nn_irf_impulses = nn_irf_impulses[..., None, None] # Pad out for ndim of response distribution(s)
                     self.nn_irf_impulses[nn_id] = nn_irf_impulses
 
@@ -3900,12 +3758,10 @@ class CDRModel(object):
                 if self.rnn_dropout_rate and self.n_layers_rnn:
                     self.resample_ops += self.h_rnn_dropout_layer[nn_id].resample_ops()
                     self.resample_ops += self.rnn_dropout_layer[nn_id].resample_ops()
-                if self.h_in_dropout_rate:
-                    self.resample_ops += self.h_in_dropout_layer[nn_id].resample_ops()
+                if self.ff_dropout_rate and nn_id in self.ff_dropout_layer:
+                    self.resample_ops += self.ff_dropout_layer[nn_id].resample_ops()
                 if self.h_rnn_dropout_rate and self.n_layers_rnn:
                     self.resample_ops += self.h_rnn_dropout_layer[nn_id].resample_ops()
-                if self.h_dropout_rate:
-                    self.resample_ops += self.h_dropout_layer[nn_id].resample_ops()
 
     def _concat_nn_impulses(self):
         if len(self.nn_transformed_impulses):
@@ -5565,7 +5421,6 @@ class CDRModel(object):
                     self.ff_dropout_rate or
                     self.rnn_h_dropout_rate or
                     self.rnn_c_dropout_rate or
-                    self.h_in_dropout_rate or
                     self.h_rnn_dropout_rate or
                     self.rnn_dropout_rate or
                     self.irf_dropout_rate or

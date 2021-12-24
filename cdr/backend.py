@@ -1295,7 +1295,7 @@ class BiasLayer(object):
         return out
 
 
-    def __call__(self, inputs, bias_offsets=None):
+    def __call__(self, inputs):
         if not self.built:
             self.build(inputs.shape)
 
@@ -1311,8 +1311,6 @@ class BiasLayer(object):
                     bias += tf.gather(bias_ran, Y_gf)
                 while len(bias.shape) < len(H.shape):
                     bias = tf.expand_dims(bias, axis=-2)
-                if bias_offsets is not None:
-                    bias = bias + bias_offsets
                 H += bias
 
                 return H
@@ -1632,15 +1630,11 @@ class DenseLayer(object):
 
             self.built = True
 
-    def __call__(self, inputs, kernel_offsets=None, bias_offsets=None, beta_offsets=None, gamma_offsets=None):
+    def __call__(self, inputs):
         assert len(inputs.shape) > 1, 'inputs must have a batch dim'
         hadamard = inputs.shape[-1] == 1
         add_dim_1 = len(inputs.shape) == 2
         add_dim_m3 = False
-        if kernel_offsets is not None:
-            assert len(kernel_offsets.shape) <= len(inputs.shape) + 1, 'Rank of kernel_offsets can be no bigger than rank of inputs + 1. Saw rank inputs=%d, rank kernel_offsets=%d.' % (len(inputs.shape), len(kernel_offsets.shape))
-        if bias_offsets is not None:
-            assert len(bias_offsets.shape) <= len(bias_offsets.shape), 'Rank of bias_offsets can be no bigger than rank of inputs . Saw rank inputs=%d, rank kernel_offsets=%d.' % (len(inputs.shape), len(bias_offsets.shape))
         if not self.built:
             self.build(inputs.shape)
 
@@ -1663,13 +1657,6 @@ class DenseLayer(object):
                             kernel += tf.gather(kernel_ran, Y_gf)
                     while len(kernel.shape) < len(inputs.shape):
                         kernel = tf.expand_dims(kernel, axis=-3) # Batch axis immediately before weight matrix
-                    if kernel_offsets is not None:
-                        while len(kernel_offsets.shape) < len(kernel.shape):
-                            kernel_offsets = tf.expand_dims(kernel_offsets, axis=-3)
-                        if len(kernel_offsets.shape) - len(kernel.shape) == 1:
-                            kernel = tf.expand_dims(kernel, axis=-3)
-                            add_dim_m3 = True
-                        kernel = kernel + kernel_offsets
                     if self.maxnorm:
                         kernel = tf.clip_by_norm(kernel, self.maxnorm, axes=[0])
                     if hadamard:
@@ -1691,17 +1678,13 @@ class DenseLayer(object):
                                 bias += tf.gather(bias_ran, Y_gf)
                         while len(bias.shape) < len(H.shape):
                             bias = tf.expand_dims(bias, axis=-2)
-                        if bias_offsets is not None:
-                            while len(bias_offsets.shape) < len(bias.shape):
-                                bias_offsets = tf.expand_dims(bias_offsets, axis=-2)
-                            bias = bias + bias_offsets
                         H += bias
 
                     if self.activation is not None and self.normalize_after_activation:
                         H = self.activation(H)
 
                     if self.normalize_activations:
-                        H = self.normalization_layer(H, beta_offsets=beta_offsets, gamma_offsets=gamma_offsets)
+                        H = self.normalization_layer(H)
 
                     if self.activation is not None and not self.normalize_after_activation:
                         H = self.activation(H)
@@ -3043,7 +3026,7 @@ class BatchNormLayer(object):
 
         self.built = True
 
-    def __call__(self, inputs, beta_offsets=None, gamma_offsets=None):
+    def __call__(self, inputs):
         if not self.built:
             self.build(inputs.shape)
 
@@ -3086,16 +3069,6 @@ class BatchNormLayer(object):
                 while len(gamma.shape) < len(out.shape):
                     gamma = tf.expand_dims(gamma, axis=-2)
 
-                if beta_offsets is not None:
-                    while len(beta_offsets.shape) < len(beta.shape):
-                        beta_offsets = tf.expand_dims(beta_offsets, axis=-2)
-                    beta = beta + beta_offsets
-                    
-                if gamma_offsets is not None:
-                    while len(gamma_offsets.shape) < len(gamma.shape):
-                        gamma_offsets = tf.expand_dims(gamma_offsets, axis=-2)
-                    gamma = gamma + gamma_offsets
-                
                 out = out * gamma + beta
 
                 if self.moving_mean_op is None:
@@ -3455,7 +3428,7 @@ class LayerNormLayer(object):
 
         self.built = True
 
-    def __call__(self, inputs, beta_offsets=None, gamma_offsets=None):
+    def __call__(self, inputs):
         if not self.built:
             self.build(inputs.shape)
 
@@ -3490,16 +3463,6 @@ class LayerNormLayer(object):
                     beta = tf.expand_dims(beta, axis=-2)
                 while len(gamma.shape) < len(out.shape):
                     gamma = tf.expand_dims(gamma, axis=-2)
-
-                if beta_offsets is not None:
-                    while len(beta_offsets.shape) < len(beta.shape):
-                        beta_offsets = tf.expand_dims(beta_offsets, axis=-2)
-                    beta = beta + beta_offsets
-
-                if gamma_offsets is not None:
-                    while len(gamma_offsets.shape) < len(gamma.shape):
-                        gamma_offsets = tf.expand_dims(gamma_offsets, axis=-2)
-                    gamma = gamma + gamma_offsets
 
                 out = out * gamma + beta
 

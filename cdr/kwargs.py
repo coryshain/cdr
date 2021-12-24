@@ -922,18 +922,6 @@ NN_KWARGS = [
         "Whether or not NN IRFs are input-dependent (can modify their shape at different values of the predictors)."
     ),
     Kwarg(
-        'input_dependent_l1_only',
-        True,
-        bool,
-        "Whether to input dependence only in first layer of IRF (``True``) or on all IRF layers."
-    ),
-    Kwarg(
-        'input_dependent_bias_only',
-        True,
-        bool,
-        "Whether only bias terms of neural IRF are input-dependent (``True``) or also weight matrices."
-    ),
-    Kwarg(
         'ranef_l1_only',
         False,
         bool,
@@ -1069,12 +1057,6 @@ NN_KWARGS = [
         aliases=['normalize_input_projection']
     ),
     Kwarg(
-        'normalize_h',
-        True,
-        bool,
-        "Whether to apply normalization (if applicable) to the hidden state.",
-    ),
-    Kwarg(
         'normalize_irf_l1',
         True,
         bool,
@@ -1198,11 +1180,11 @@ NN_KWARGS = [
         "Rate at which to drop neurons of RNN cell state."
     ),
     Kwarg(
-        'h_in_dropout_rate',
+        'ff_dropout_rate',
         0.2,
         [float, None],
-        "Rate at which to drop neurons of h_in.",
-        aliases=['dropout_rate']
+        "Rate at which to drop neurons of FF projection.",
+        aliases=['dropout_rate', 'h_in_dropout_rate']
     ),
     Kwarg(
         'h_rnn_dropout_rate',
@@ -1210,12 +1192,6 @@ NN_KWARGS = [
         [float, None],
         "Rate at which to drop neurons of h_rnn.",
         aliases=['dropout_rate']
-    ),
-    Kwarg(
-        'h_dropout_rate',
-        None,
-        [float, None],
-        "Rate at which to drop neurons of h."
     ),
     Kwarg(
         'rnn_dropout_rate',
@@ -1262,10 +1238,10 @@ NN_KWARGS = [
         suppress=True
     ),
     Kwarg(
-        'h_in_noise_sd',
+        'ff_noise_sd',
         None,
         [float, None],
-        "SD of white-out noise to inject into h_in.",
+        "SD of white-out noise to inject into FF projection.",
         suppress=True
     ),
     Kwarg(
