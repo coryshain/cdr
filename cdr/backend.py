@@ -1634,7 +1634,6 @@ class DenseLayer(object):
         assert len(inputs.shape) > 1, 'inputs must have a batch dim'
         hadamard = inputs.shape[-1] == 1
         add_dim_1 = len(inputs.shape) == 2
-        add_dim_m3 = False
         if not self.built:
             self.build(inputs.shape)
 
@@ -1661,12 +1660,7 @@ class DenseLayer(object):
                         kernel = tf.clip_by_norm(kernel, self.maxnorm, axes=[0])
                     if hadamard:
                         H = inputs * kernel
-                    elif add_dim_m3:
-                        inputs = tf.expand_dims(inputs, axis=-2)
-                        H = matmul(inputs, kernel)
-                        H = tf.squeeze(H, axis=-2)
-                    else:
-                        H = matmul(inputs, kernel)
+                    H = matmul(inputs, kernel)
                     if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
                         bias = self.bias[None, ...] # Expand batch dim
                         if self.biases_use_ranef:
