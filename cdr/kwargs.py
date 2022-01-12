@@ -931,7 +931,8 @@ NN_KWARGS = [
         'ranef_bias_only',
         True,
         bool,
-        "Whether to include random effects only on bias terms of neural components (``True``) or also on weight matrices."
+        "Whether to include random effects only on bias terms of neural components (``True``) or also on weight matrices.",
+        aliases=['ranef_biases_only']
     ),
     Kwarg(
         'normalizer_use_ranef',

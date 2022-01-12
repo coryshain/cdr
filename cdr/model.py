@@ -2941,6 +2941,7 @@ class CDRModel(object):
                     gamma_sd_prior = self.gamma_prior_sd
                     gamma_sd_init = self.gamma_sd_init
                     declare_priors_weights = self.declare_priors_weights
+                    declare_priors_gamma = self.declare_priors_gamma
 
                 projection = DenseLayerBayes(
                     training=self.training,
@@ -2961,6 +2962,7 @@ class CDRModel(object):
                     normalizer_use_ranef=normalizer_use_ranef,
                     declare_priors_weights=declare_priors_weights,
                     declare_priors_biases=self.declare_priors_biases,
+                    declare_priors_gamma=self.declare_priors_gamma,
                     kernel_sd_prior=weight_sd_prior,
                     kernel_sd_init=weight_sd_init,
                     bias_sd_prior=bias_sd_prior,
@@ -2968,6 +2970,7 @@ class CDRModel(object):
                     gamma_sd_prior=gamma_sd_prior,
                     gamma_sd_init=gamma_sd_init,
                     posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
+                    ranef_to_fixef_prior_sd_ratio=self.ranef_to_fixef_prior_sd_ratio,
                     constraint=self.constraint,
                     epsilon=self.epsilon,
                     session=self.session,
@@ -3144,6 +3147,7 @@ class CDRModel(object):
                         shift_sd_prior=self.bias_prior_sd,
                         shift_sd_init=self.bias_prior_sd,
                         posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
+                        ranef_to_fixef_prior_sd_ratio=self.ranef_to_fixef_prior_sd_ratio,
                         constraint=self.constraint,
                         training=self.training,
                         epsilon=self.epsilon,
