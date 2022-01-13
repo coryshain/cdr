@@ -1997,8 +1997,7 @@ class RNNCell(LayerRNNCell):
             activation=None,
             recurrent_activation='sigmoid',
             prefinal_activation='tanh',
-            bottomup_kernel_sd_init='glorot_normal',
-            recurrent_kernel_sd_init='glorot_normal',
+            kernel_sd_init='glorot_normal',
             bottomup_dropout=None,
             h_dropout=None,
             c_dropout=None,
@@ -2035,8 +2034,7 @@ class RNNCell(LayerRNNCell):
                 self._recurrent_activation = get_activation(recurrent_activation, session=self._session, training=self._training)
                 self._prefinal_activation = get_activation(prefinal_activation, session=self._session, training=self._training)
 
-                self._bottomup_kernel_sd_init = bottomup_kernel_sd_init
-                self._recurrent_kernel_sd_init = recurrent_kernel_sd_init
+                self._kernel_sd_init = kernel_sd_init
 
                 self.use_dropout = bool(bottomup_dropout or h_dropout or c_dropout)
                 self._bottomup_dropout_rate = bottomup_dropout
@@ -2094,8 +2092,7 @@ class RNNCell(LayerRNNCell):
     @property
     def regularizable_weights(self):
         weights = []
-        weights += sum([x.regularizable_weights for x in self._kernel_bottomup_layers], [])
-        weights += sum([x.regularizable_weights for x in self._kernel_recurrent_layers], [])
+        weights += sum([x.regularizable_weights for x in self._kernel_layers], [])
 
         return weights[:]
 
@@ -2103,16 +2100,12 @@ class RNNCell(LayerRNNCell):
             self,
             in_dim,
             out_dim,
-            kernel_type='bottomup',
             depth=None,
             inner_activation=None,
             prefinal_mode=None,
             name=None
     ):
-        if kernel_type.lower() == 'recurrent':
-            kernel_sd_init = self._recurrent_kernel_sd_init
-        else:
-            kernel_sd_init = self._bottomup_kernel_sd_init
+        kernel_sd_init = self._kernel_sd_init
         with self._session.as_default():
             with self._session.graph.as_default():
                 kernel_lambdas = []
@@ -2216,7 +2209,8 @@ class RNNCell(LayerRNNCell):
                 self._input_dims = inputs_shape[1].value
                 bottomup_dim = self._input_dims
                 recurrent_dim = self._num_units
-                output_dim = self._num_units * 5  # forget (2x), input, and output gates, plus cell proposal
+                input_dim = bottomup_dim + recurrent_dim
+                output_dim = self._num_units * 4  # forget, input, and output gates, plus cell proposal
                 self.layers = []
 
                 # Build bias
@@ -2224,23 +2218,15 @@ class RNNCell(LayerRNNCell):
                     self.initialize_biases()
 
                 # Build LSTM kernels (bottomup and recurrent)
-                self._kernel_bottomup, self._kernel_bottomup_layers = self.initialize_kernel(
-                    bottomup_dim,
+                self._kernel, self._kernel_layers = self.initialize_kernel(
+                    input_dim,
                     output_dim,
-                    kernel_type='bottomup',
-                    name='bottomup'
+                    name='kernel'
                 )
-                self.layers += self._kernel_bottomup_layers
+                self.layers += self._kernel_layers
                 if self._bottomup_dropout_rate:
                     self._bottomup_dropout_layer.build(inputs_shape)
 
-                self._kernel_recurrent, self._kernel_recurrent_layers = self.initialize_kernel(
-                    recurrent_dim,
-                    output_dim,
-                    kernel_type='recurrent',
-                    name='recurrent'
-                )
-                self.layers += self._kernel_recurrent_layers
                 if self._h_dropout_rate:
                     self._h_dropout_layer.build([x for x in inputs_shape[:-1]] + [output_dim])
                 if self._c_dropout_rate:
@@ -2289,9 +2275,8 @@ class RNNCell(LayerRNNCell):
 
                     h_prev, c_prev = tf.cond(self._training, train_fn_forget, eval_fn_forget)
 
-                s_bottomup = self._kernel_bottomup(inputs)
-                s_recurrent = self._kernel_recurrent(h_prev)
-                s = s_bottomup + s_recurrent
+                kernel_in = tf.concat([inputs, h_prev], axis=-1)
+                s = self._kernel(kernel_in)
                 if not self._layer_normalization and self._use_bias:
                     s = self._bias_layer(s)
 
@@ -2343,7 +2328,7 @@ class RNNCell(LayerRNNCell):
     def resample_ops(self):
         out = []
         if self.built:
-            for layer in self._kernel_bottomup_layers + self._kernel_recurrent_layers:
+            for layer in self._kernel_layers:
                 out.append(layer.resample_ops())
 
         return out
@@ -2361,8 +2346,7 @@ class RNNLayer(object):
             activation=None,
             recurrent_activation='sigmoid',
             prefinal_activation='tanh',
-            bottomup_kernel_sd_init='glorot_normal',
-            recurrent_kernel_sd_init='glorot_normal',
+            kernel_sd_init='glorot_normal',
             bottomup_dropout=None,
             h_dropout=None,
             c_dropout=None,
@@ -2394,8 +2378,7 @@ class RNNLayer(object):
         self.activation = activation
         self.recurrent_activation = recurrent_activation
         self.prefinal_activation = prefinal_activation
-        self.bottomup_kernel_sd_init = bottomup_kernel_sd_init
-        self.recurrent_kernel_sd_init = recurrent_kernel_sd_init
+        self.kernel_sd_init = kernel_sd_init
         self.bottomup_dropout = bottomup_dropout
         self.h_dropout = h_dropout
         self.c_dropout = c_dropout
@@ -2445,8 +2428,7 @@ class RNNLayer(object):
                         activation=self.activation,
                         recurrent_activation=self.recurrent_activation,
                         prefinal_activation=self.prefinal_activation,
-                        bottomup_kernel_sd_init=self.bottomup_kernel_sd_init,
-                        recurrent_kernel_sd_init=self.recurrent_kernel_sd_init,
+                        kernel_sd_init=self.kernel_sd_init,
                         bottomup_dropout=self.bottomup_dropout,
                         h_dropout=self.h_dropout,
                         c_dropout=self.c_dropout,
@@ -2530,8 +2512,7 @@ class RNNCellBayes(RNNCell):
             activation=None,
             recurrent_activation='sigmoid',
             prefinal_activation='tanh',
-            bottomup_kernel_sd_init=None,
-            recurrent_kernel_sd_init=None,
+            kernel_sd_init=None,
             declare_priors_weights=True,
             declare_priors_biases=False,
             kernel_sd_prior=1,
@@ -2569,8 +2550,7 @@ class RNNCellBayes(RNNCell):
             activation=activation,
             recurrent_activation=recurrent_activation,
             prefinal_activation=prefinal_activation,
-            bottomup_kernel_sd_init=bottomup_kernel_sd_init,
-            recurrent_kernel_sd_init=recurrent_kernel_sd_init,
+            kernel_sd_init=kernel_sd_init,
             bottomup_dropout=bottomup_dropout,
             h_dropout=h_dropout,
             c_dropout=c_dropout,
@@ -2611,7 +2591,6 @@ class RNNCellBayes(RNNCell):
             self,
             in_dim,
             out_dim,
-            kernel_type='bottomup',
             depth=None,
             inner_activation=None,
             prefinal_mode=None,
@@ -2639,12 +2618,7 @@ class RNNCellBayes(RNNCell):
 
                 layers = []
 
-                if kernel_type == 'bottomup':
-                    kernel_sd_init = self._bottomup_kernel_sd_init
-                elif kernel_type == 'recurrent':
-                    kernel_sd_init = self._recurrent_kernel_sd_init
-                else:
-                    raise ValueError('Unrecognized kernel type: %s.' % kernel_type)
+                kernel_sd_init = self._kernel_sd_init
 
                 for d in range(depth):
                     if d == depth - 1:
@@ -2760,7 +2734,7 @@ class RNNLayerBayes(RNNLayer):
             activation=None,
             recurrent_activation='sigmoid',
             prefinal_activation='tanh',
-            bottomup_kernel_sd_init=None,
+            kernel_sd_init=None,
             recurrent_kernel_sd_init=None,
             declare_priors_weights=True,
             declare_priors_biases=False,
@@ -2800,8 +2774,7 @@ class RNNLayerBayes(RNNLayer):
             activation=activation,
             recurrent_activation=recurrent_activation,
             prefinal_activation=prefinal_activation,
-            bottomup_kernel_sd_init=bottomup_kernel_sd_init,
-            recurrent_kernel_sd_init=recurrent_kernel_sd_init,
+            kernel_sd_init=kernel_sd_init,
             bottomup_dropout=bottomup_dropout,
             h_dropout=h_dropout,
             c_dropout=c_dropout,
@@ -2851,8 +2824,7 @@ class RNNLayerBayes(RNNLayer):
                         activation=self.activation,
                         recurrent_activation=self.recurrent_activation,
                         prefinal_activation=self.prefinal_activation,
-                        bottomup_kernel_sd_init=self.bottomup_kernel_sd_init,
-                        recurrent_kernel_sd_init=self.recurrent_kernel_sd_init,
+                        kernel_sd_init=self.kernel_sd_init,
                         bottomup_dropout=self.bottomup_dropout,
                         h_dropout=self.h_dropout,
                         c_dropout=self.c_dropout,

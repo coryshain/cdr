@@ -3005,6 +3005,9 @@ class CDRModel(object):
                 biases_use_ranef = True
         if normalizer_use_ranef is None:
             normalizer_use_ranef = self.normalizer_use_ranef
+        # weights_use_ranef = False # DELETE
+        # biases_use_ranef = False # DELETE
+        # normalizer_use_ranef = False # DELETE
         with self.session.as_default():
             with self.session.graph.as_default():
                 units = self.n_units_rnn[l]
@@ -3014,8 +3017,7 @@ class CDRModel(object):
                     units=units,
                     activation=self.rnn_activation,
                     recurrent_activation=self.recurrent_activation,
-                    bottomup_kernel_sd_init=self.weight_sd_init,
-                    recurrent_kernel_sd_init=self.weight_sd_init,
+                    kernel_sd_init=self.weight_sd_init,
                     rangf_map=rangf_map,
                     weights_use_ranef=weights_use_ranef,
                     biases_use_ranef=biases_use_ranef,
@@ -3053,6 +3055,9 @@ class CDRModel(object):
                 biases_use_ranef = True
         if normalizer_use_ranef is None:
             normalizer_use_ranef = self.normalizer_use_ranef
+        # weights_use_ranef = False # DELETE
+        # biases_use_ranef = False # DELETE
+        # normalizer_use_ranef = False # DELETE
         with self.session.as_default():
             with self.session.graph.as_default():
                 units = self.n_units_rnn[l]
@@ -3070,8 +3075,7 @@ class CDRModel(object):
                     declare_priors_weights=self.declare_priors_weights,
                     declare_priors_biases=self.declare_priors_biases,
                     kernel_sd_prior=self.weight_prior_sd,
-                    bottomup_kernel_sd_init=self.weight_sd_init,
-                    recurrent_kernel_sd_init=self.weight_sd_init,
+                    kernel_sd_init=self.weight_sd_init,
                     rangf_map=rangf_map,
                     weights_use_ranef=weights_use_ranef,
                     biases_use_ranef=biases_use_ranef,
