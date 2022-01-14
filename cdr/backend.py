@@ -1271,6 +1271,10 @@ class BiasLayer(object):
             with self.session.as_default():
                 with self.session.graph.as_default():
                     with tf.variable_scope(name, reuse=self.reuse):
+                        print('bias scope')
+                        print(name)
+                        print()
+
                         self.bias = tf.get_variable(
                             name='bias',
                             shape=[units],
@@ -1379,6 +1383,9 @@ class BiasLayerBayes(BiasLayer):
             with self.session.as_default():
                 with self.session.graph.as_default():
                     with tf.variable_scope(name, reuse=self.reuse):
+                        print('bias scope')
+                        print(name)
+                        print()
 
                         bias_sd_prior = get_numerical_sd(self.sd_prior, in_dim=1, out_dim=1)
                         if self.sd_init:
@@ -1558,6 +1565,10 @@ class DenseLayer(object):
             with self.session.as_default():
                 with self.session.graph.as_default():
                     with tf.variable_scope(name, reuse=self.reuse):
+                        print('dense scope')
+                        print(name)
+                        print()
+
                         sd = get_numerical_sd(self.kernel_sd_init, in_dim=in_dim, out_dim=out_dim)
 
                         kernel_init = get_initializer(
@@ -1634,7 +1645,6 @@ class DenseLayer(object):
 
     def __call__(self, inputs):
         assert len(inputs.shape) > 1, 'inputs must have a batch dim'
-        hadamard = inputs.shape[-1] == 1
         add_dim_1 = len(inputs.shape) == 2
         if not self.built:
             self.build(inputs.shape)
@@ -1660,9 +1670,14 @@ class DenseLayer(object):
                         kernel = tf.expand_dims(kernel, axis=-3) # Batch axis immediately before weight matrix
                     if self.maxnorm:
                         kernel = tf.clip_by_norm(kernel, self.maxnorm, axes=[0])
-                    if hadamard:
-                        H = inputs * kernel
-                    H = matmul(inputs, kernel)
+                    # H = matmul(inputs, kernel)
+                    kernel_squeezed = tf.squeeze(kernel)
+                    if len(kernel_squeezed.shape) < 3:
+                        # Kernel is matrix (or less), tensordot is way faster
+                        H = tf.tensordot(inputs, self.kernel, 1)
+                    else:
+                        # Kernel is tensor, custom matmul needed
+                        H = matmul(inputs, kernel)
                     if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
                         bias = self.bias[None, ...] # Expand batch dim
                         if self.biases_use_ranef:
@@ -2102,8 +2117,7 @@ class RNNCell(LayerRNNCell):
             out_dim,
             depth=None,
             inner_activation=None,
-            prefinal_mode=None,
-            name=None
+            prefinal_mode=None
     ):
         kernel_sd_init = self._kernel_sd_init
         with self._session.as_default():
@@ -2142,14 +2156,10 @@ class RNNCell(LayerRNNCell):
                         use_bias = self._use_bias
 
                     if self.name:
-                        name_cur = self.name + '/'
+                        name_cur = self.name
                     else:
                         name_cur = ''
-
-                    if name:
-                        name_cur += name + '_d%d' % d
-                    else:
-                        name_cur += 'd%d' % d
+                    name_cur += '_d%d' % d
 
                     kernel_layer = DenseLayer(
                         training=self._training,
@@ -2180,9 +2190,9 @@ class RNNCell(LayerRNNCell):
         with self._session.as_default():
             with self._session.graph.as_default():
                 if self.name:
-                    name = self.name + '/'
+                    name_cur = self.name
                 else:
-                    name = ''
+                    name_cur = ''
 
                 if self._biases_use_ranef:
                     rangf_map = self._rangf_map
@@ -2192,11 +2202,13 @@ class RNNCell(LayerRNNCell):
                 self._bias_layer = BiasLayer(
                     training=self._training,
                     rangf_map=rangf_map,
-                    reuse=self._reuse,
                     epsilon=self._epsilon,
                     session=self._session,
-                    name=name + 'bias'
+                    reuse=self._reuse,
+                    name=name_cur
                 )
+
+                self._bias_layer.build([None, self._num_units * 4])
 
     def build(self, inputs_shape):
         with self._session.as_default():
@@ -2213,17 +2225,17 @@ class RNNCell(LayerRNNCell):
                 output_dim = self._num_units * 4  # forget, input, and output gates, plus cell proposal
                 self.layers = []
 
+                # Build kernel
+                self._kernel, self._kernel_layers = self.initialize_kernel(
+                    input_dim,
+                    output_dim
+                )
+                self.layers += self._kernel_layers
+
                 # Build bias
                 if not self._layer_normalization and self._use_bias:
                     self.initialize_biases()
 
-                # Build LSTM kernels (bottomup and recurrent)
-                self._kernel, self._kernel_layers = self.initialize_kernel(
-                    input_dim,
-                    output_dim,
-                    name='kernel'
-                )
-                self.layers += self._kernel_layers
                 if self._bottomup_dropout_rate:
                     self._bottomup_dropout_layer.build(inputs_shape)
 
@@ -2593,8 +2605,7 @@ class RNNCellBayes(RNNCell):
             out_dim,
             depth=None,
             inner_activation=None,
-            prefinal_mode=None,
-            name=None
+            prefinal_mode=None
     ):
         with self._session.as_default():
             with self._session.graph.as_default():
@@ -2634,14 +2645,10 @@ class RNNCellBayes(RNNCell):
                         use_bias = self._use_bia
 
                     if self.name:
-                        name_cur = self.name + '/'
+                        name_cur = self.name
                     else:
                         name_cur = ''
-
-                    if name:
-                        name_cur += name + '_d%d' % d
-                    else:
-                        name_cur += 'd%d' % d
+                    name_cur += '_d%d' % d
 
                     kernel_layer = DenseLayerBayes(
                         training=self._training,
@@ -2681,9 +2688,9 @@ class RNNCellBayes(RNNCell):
         with self._session.as_default():
             with self._session.graph.as_default():
                 if self.name:
-                    name = self.name + '/'
+                    name_cur = self.name + '/'
                 else:
-                    name = ''
+                    name_cur = ''
 
                 if self._biases_use_ranef:
                     rangf_map = self._rangf_map
@@ -2692,7 +2699,7 @@ class RNNCellBayes(RNNCell):
 
                 self._bias_layer = BiasLayerBayes(
                     training=self._training,
-                    use_MAP_mode=self._use_MAP_mode,
+                    use_MAP_mode=self.use_MAP_mode,
                     rangf_map=rangf_map,
                     declare_priors=self._declare_priors_biases,
                     sd_prior=self._bias_sd_prior,
@@ -2700,11 +2707,13 @@ class RNNCellBayes(RNNCell):
                     posterior_to_prior_sd_ratio=self._posterior_to_prior_sd_ratio,
                     ranef_to_fixef_prior_sd_ratio=self._ranef_to_fixef_prior_sd_ratio,
                     constraint='softplus',
-                    reuse=self._reuse,
                     epsilon=self._epsilon,
                     session=self._session,
-                    name=name + 'bias'
+                    reuse=self._reuse,
+                    name=name_cur
                 )
+
+                self._bias_layer.build([None, self._num_units * 4])
 
     def kl_penalties(self):
         out = self.kl_penalties_base
