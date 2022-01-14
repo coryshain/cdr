@@ -1271,10 +1271,6 @@ class BiasLayer(object):
             with self.session.as_default():
                 with self.session.graph.as_default():
                     with tf.variable_scope(name, reuse=self.reuse):
-                        print('bias scope')
-                        print(name)
-                        print()
-
                         self.bias = tf.get_variable(
                             name='bias',
                             shape=[units],
@@ -1383,10 +1379,6 @@ class BiasLayerBayes(BiasLayer):
             with self.session.as_default():
                 with self.session.graph.as_default():
                     with tf.variable_scope(name, reuse=self.reuse):
-                        print('bias scope')
-                        print(name)
-                        print()
-
                         bias_sd_prior = get_numerical_sd(self.sd_prior, in_dim=1, out_dim=1)
                         if self.sd_init:
                             bias_sd_posterior = get_numerical_sd(self.sd_init, in_dim=1, out_dim=1)
@@ -1565,10 +1557,6 @@ class DenseLayer(object):
             with self.session.as_default():
                 with self.session.graph.as_default():
                     with tf.variable_scope(name, reuse=self.reuse):
-                        print('dense scope')
-                        print(name)
-                        print()
-
                         sd = get_numerical_sd(self.kernel_sd_init, in_dim=in_dim, out_dim=out_dim)
 
                         kernel_init = get_initializer(
