@@ -6358,12 +6358,13 @@ class CDRModel(object):
             location = self.d0_names[min_p_ix]
 
             out += ' ' * (indent * 2) + 'Converged: %s\n' % converged
-            out += ' ' * (indent * 2) + 'Convergence n iterates: %s\n' % self.convergence_n_iterates
-            out += ' ' * (indent * 2) + 'Convergence stride: %s\n' % self.convergence_stride
-            out += ' ' * (indent * 2) + 'Convergence alpha: %s\n' % self.convergence_alpha
-            out += ' ' * (indent * 2) + 'Convergence min p of rho_t: %s\n' % min_p
-            out += ' ' * (indent * 2) + 'Convergence rho_t at min p: %s\n' % rt_at_min_p
-            out += ' ' * (indent * 2) + 'Proportion converged: %s\n' % proportion_converged
+            out += ' ' * (indent * 2) + 'Convergence n iterates:      %s\n' % self.convergence_n_iterates
+            out += ' ' * (indent * 2) + 'Convergence stride:          %s\n' % self.convergence_stride
+            out += ' ' * (indent * 2) + 'Convergence alpha:           %s\n' % self.convergence_alpha
+            out += ' ' * (indent * 2) + 'Convergence min p of rho_t:  %s\n' % min_p
+            out += ' ' * (indent * 2) + 'Convergence rho_t at min p:  %s\n' % rt_at_min_p
+            out += ' ' * (indent * 2) + 'Proportion converged:        %s\n' % proportion_converged
+            out += ' ' * (indent * 2) + 'N iterations at convergence: %s\n' % n_iter
 
             if converged:
                 out += ' ' * (indent + 2) + 'NOTE:\n'
@@ -6374,7 +6375,7 @@ class CDRModel(object):
                 out += ' ' * (indent + 4) + 'If not, consider raising **convergence_alpha** and resuming training.\n'
 
             else:
-                out += ' ' * (indent + 2) + 'Model did not reach convergence criteria in %s epochs.\n' % n_iter
+                out += ' ' * (indent + 2) + 'Model did not reach convergence criteria in %s iterations.\n' % n_iter
                 out += ' ' * (indent + 2) + 'NOTE:\n'
                 out += ' ' * (indent + 4) + 'Programmatic diagnosis of convergence in CDR is error-prone because of stochastic optimization.\n'
                 out += ' ' * (indent + 4) + 'It is possible that the convergence diagnostics used are too conservative given the stochastic dynamics of the model.\n'
