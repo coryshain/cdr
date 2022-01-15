@@ -4690,10 +4690,7 @@ class CDRModel(object):
                 self.optim = self._initialize_optimizer()
                 assert self.optim_name is not None, 'An optimizer name must be supplied'
 
-                self.train_op = control_flow_ops.group(
-                    self.optim.minimize(self.loss_func, var_list=tf.trainable_variables()),
-                    self.incr_global_batch_step
-                )
+                self.train_op = self.optim.minimize(self.loss_func, var_list=tf.trainable_variables())
 
     def _initialize_logging(self):
         with self.session.as_default():
@@ -5294,10 +5291,6 @@ class CDRModel(object):
 
                 return min_p_ix, min_p, rt_at_min_p, ra_at_min_p, p_ta_at_min_p, proportion_converged, converged
 
-
-
-
-
     def run_train_step(self, feed_dict):
         """
         Update the model from a batch of training data.
@@ -5326,6 +5319,7 @@ class CDRModel(object):
                     to_run,
                     feed_dict=feed_dict
                 )
+                self.session.run(self.incr_global_batch_step)
 
                 out_dict = {x: y for x, y in zip(to_run_names, out[-len(to_run_names):])}
 
