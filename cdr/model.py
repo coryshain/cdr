@@ -255,9 +255,6 @@ class CDRModel(object):
             self.form_str = str(form)
         form = form.categorical_transform(X)
         self.form = form
-        if self.has_nn_irf:
-            assert 'rate' in self.form.t.impulse_names(), 'Models with neural net IRFs must include a ``"rate"`` term, since rate cannot be reliably ablated.'
-        self.form = form
         if self.future_length:
             assert self.form.t.supports_non_causal(), 'If future_length > 0, causal IRF kernels (kernels which require that t > 0) cannot be used.'
 
@@ -651,13 +648,17 @@ class CDRModel(object):
         self.nn_irf_terminal_names = {}
         self.nn_irf_impulses = {}
         self.nn_irf_impulse_names = {}
+        self.nn_irf_input_names = {}
+        self.nn_irf_output_names = {}
         for nn_id in self.nn_irf_ids:
             self.nn_irf_preterminals[nn_id] = self.nns_by_id[nn_id].nodes
             self.nn_irf_preterminal_names[nn_id] = [x.name() for x in self.nn_irf_preterminals[nn_id]]
             self.nn_irf_terminals[nn_id] = [self.node_table[x] for x in self.terminal_names if self.node_table[x].p.name() in self.nn_irf_preterminal_names[nn_id]]
             self.nn_irf_terminal_names[nn_id] = [x.name() for x in self.nn_irf_terminals[nn_id]]
             self.nn_irf_impulses[nn_id] = None
-            self.nn_irf_impulse_names[nn_id] = [x.impulse.name() for x in self.nn_irf_terminals[nn_id]]
+            self.nn_irf_impulse_names[nn_id] = self.nns_by_id[nn_id].all_impulse_names()
+            self.nn_irf_input_names[nn_id] = self.nns_by_id[nn_id].input_impulse_names()
+            self.nn_irf_output_names[nn_id] = self.nns_by_id[nn_id].output_impulse_names()
 
         self.nn_impulse_ids = sorted([x for x in self.nns_by_id if self.nns_by_id[x].nn_type == 'impulse'])
         self.nn_impulse_impulses = {}
@@ -665,7 +666,7 @@ class CDRModel(object):
         for nn_id in self.nn_impulse_ids:
             self.nn_impulse_impulses[nn_id] = None
             assert len(self.nns_by_id[nn_id].nodes) == 1, 'NN impulses should have exactly 1 associated node. Got %d.' % len(self.nns_by_id[nn_id].nodes)
-            self.nn_impulse_impulse_names[nn_id] = [x.name() for x in self.nns_by_id[nn_id].nodes[0].impulses()]
+            self.nn_impulse_impulse_names[nn_id] = self.nns_by_id[nn_id].input_impulse_names()
         self.nn_transformed_impulses = []
         self.nn_transformed_impulse_t_delta = []
         self.nn_transformed_impulse_X_time = []
@@ -3398,8 +3399,12 @@ class CDRModel(object):
 
                 if nn_id in self.nn_impulse_ids:
                     impulse_names = self.nn_impulse_impulse_names[nn_id]
+                    input_names = impulse_names
+                    output_names = []
                 else:  # nn_id in self.nn_irf_ids
                     impulse_names = self.nn_irf_impulse_names[nn_id]
+                    input_names = self.nn_irf_input_names[nn_id]
+                    output_names = self.nn_irf_output_names[nn_id]
 
                 X = []
                 t_delta = []
@@ -3589,9 +3594,9 @@ class CDRModel(object):
                     X = self.input_dropout_layer[nn_id](X)
                     X_time = self.X_time_dropout_layer[nn_id](X_time)
 
-                impulse_names_no_rate = [x for x in impulse_names if x != 'rate']
-                impulse_ix = names2ix(impulse_names_no_rate, impulse_names)
-                X_in = tf.gather(X, impulse_ix, axis=2)
+                impulse_ix = names2ix([x for x in input_names if x != 'rate'], impulse_names)
+                X_gathered = tf.gather(X, impulse_ix, axis=2)
+                X_in = X_gathered
                 if nonstationary:
                     X_in = tf.concat([X_in, X_time], axis=-1)
 
@@ -3655,15 +3660,14 @@ class CDRModel(object):
                 else:  # nn_id in self.nn_irf_ids
                     # Compute IRF outputs
 
-                    impulse_ix = names2ix(self.nn_irf_impulse_names[nn_id], impulse_names)
-                    nn_irf_impulses = tf.gather(X, impulse_ix, axis=2)
+                    impulse_ix = names2ix(output_names, impulse_names)
+                    nn_irf_impulses = tf.gather(X, impulse_ix, axis=2) # IRF output dims, includes rate
 
-                    ix = 0
                     irf_out = [t_delta]
                     if nonstationary:
                         irf_out.append(X_time)
                     if input_dependent_irf:
-                        irf_out.append(nn_irf_impulses)
+                        irf_out.append(X_gathered) # IRF inputs, no rate
                     if h_rnn is not None:
                         irf_out.append(h_rnn)
                     irf_out = tf.concat(irf_out, axis=2)
@@ -3672,7 +3676,7 @@ class CDRModel(object):
                             irf_out,
                         )
 
-                    stabilizing_constant = (self.history_length + self.future_length) * len(self.terminal_names)
+                    stabilizing_constant = (self.history_length + self.future_length) * len(output_names)
                     irf_out = irf_out / stabilizing_constant
 
                     nn_irf_impulses = nn_irf_impulses[..., None, None] # Pad out for ndim of response distribution(s)
@@ -5438,7 +5442,7 @@ class CDRModel(object):
         assert nn_id in self.nn_irf_ids, 'Unrecognized nn_id for NN IRF: %s.' % nn_id
 
         n = 0
-        n_irf = len(self.nn_irf_terminals[nn_id])
+        n_irf = len(self.nn_irf_output_names[nn_id])
         for response in self.response_names:
             if self.use_distributional_regression:
                 nparam = self.get_response_nparam(response)
@@ -5465,7 +5469,7 @@ class CDRModel(object):
                 slices = {}
                 shapes = {}
                 n = 0
-                n_irf = len(self.nn_irf_terminals[nn_id])
+                n_irf = len(self.nn_irf_output_names[nn_id])
                 for response in self.response_names:
                     if self.use_distributional_regression:
                         nparam = self.get_response_nparam(response)
@@ -8667,7 +8671,6 @@ class CDRModel(object):
         self.set_predict_mode(True)
 
         names = self.impulse_names
-        names = [x for x in names if not self.has_nn_irf or x != 'rate']
 
         manipulations = []
         is_non_dirac = []
@@ -8692,8 +8695,6 @@ class CDRModel(object):
             gf_y_refs = [{None: None}]
 
         names = [get_irf_name(x, self.irf_name_map) for x in names]
-        if self.has_nn_irf:
-            names = [get_irf_name('rate', self.irf_name_map)] + names
         sort_key_dict = {x: i for i, x in enumerate(names)}
         def sort_key_fn(x, sort_key_dict=sort_key_dict):
             if x.name == 'IRF':
@@ -8923,7 +8924,9 @@ class CDRModel(object):
                 # IRF 1D
                 if generate_univariate_irf_plots:
                     names = self.impulse_names
-                    names = [x for x in names if not self.has_nn_irf or x != 'rate']
+                    has_rate = 'rate' in names
+                    if has_rate:
+                        names = [x for x in names if not self.has_nn_irf or x != 'rate']
                     if not plot_dirac:
                         names = [x for x in names if self.is_non_dirac(x)]
                     if pred_names is not None and len(pred_names) > 0:
@@ -8949,7 +8952,7 @@ class CDRModel(object):
                     names_fixed = [x for x in names if x in fixed_impulses]
                     manipulations_fixed = [x for x in manipulations if list(x.keys())[0] in fixed_impulses]
 
-                    if self.has_nn_irf:
+                    if has_rate and self.has_nn_irf:
                         names = ['rate'] + names
                         names_fixed = ['rate'] + names_fixed
 
