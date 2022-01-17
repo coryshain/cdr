@@ -24,8 +24,8 @@ Please double-check the correctness of the model formula reported at the start o
 Make sure to read :ref:`interactions` before fitting models with interactions.
 
 
-CDR Model Formulas (**not** CDRNN)
-----------------------------------
+CDR Model Formulas
+------------------
 
 .. _linear:
 Linear (DiracDelta) Predictors
@@ -454,21 +454,6 @@ Other transformations must be applied via data preprocessing.
 
 
 
-Continuous predictors
-^^^^^^^^^^^^^^^^^^^^^
-
-CDR's discrete convolution is only exact for discrete impulses (e.g. spikes of stimulus).
-Impulse streams that constitute `samples` from a continuous source signal cannot be convolved exactly because the source is generally not analytically integrable.
-However, CDR supports discrete approximation of convolution with continuous inputs through linear interpolation of the impulse between samples, performed at a fixed frequency.
-
-To flag a predictor as continuous, use the ``cont`` keyword argument in the IRF call of the model formula, as shown::
-
-    C(A, Gamma(cont=T))
-
-Be warned that, due to the need for interpolation, continuous predictors tend to impose a heavy computational burden that can dramatically slow training and prediction.
-Speedups can be obtained at the expense of accuracy by choose a small value for the **n_interp** initialization parameter, decreasing the resolution of the interpolation.
-
-
 Pseudo Non-Parametric IRFs
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -523,18 +508,29 @@ CDR is not able to recognize and flag identifiability problems and it will happi
 It is up to the user to think carefully about whether the model structure could introduce such problems.
 For example, in the BOLD example discussed above, the neural response is predictor-specific while the hemodynamic response is predictor-independent given the neural response.
 The two responses can thus be separated via parameter tying of the hemodynamic response portion (see below), requiring all predictors to share a single hemodynamic response and forcing predictor-level variation into the neural response alone.
-
+**NOTE:**: Only parametric (not neural network) IRFs can be composed in this way. Numerical integration of neural network IRFs is computationally prohibitive.
 
 
 Neural Network Components
 -------------------------
 
-CDR now allows two kinds of neural network components in the model architecture.
+CDR allows two kinds of neural network components in the model architecture.
 First, rather than using a parametric IRF kernel, you can use a deep neural network IRF, simply by using the term ``NN()`` as the second argument of a ``C()`` call::
 
     y ~ C(A + B, NN())
 
-For simplicity, ``NN()`` currently doesn't take any arguments. All NN hyperparameters are globally defined through keywords in ``[cdr_settings]``.
+NN hyperparameters can either be globally defined through keywords in ``[cdr_settings]`` or locally defined in the formula via keyword arguments to ``NN()`` (for available options, see :ref:`config`).
+The main reason to define a hyperparameter locally within the formula is if you want to override a global setting for a particular neural network component.
+For example, imagine we have two predictors ``A`` and ``B`` and we want to constrain the response to be linear on ``A`` (but not ``B``).
+We can achieve this by varying the value of the ``input_dependent_irf`` setting (which determines whether the IRF is allowed to differ at different input values, opening the possibility of non-linear responses), as follows::
+
+    [model_CDR_example]
+    input_dependent_irf = True
+    formula = y ~ C(A, NN(input_dependent_irf=False)) + C(B, NN())
+
+In the above, the default setting for ``input_dependent_irf`` is set to ``True`` in the model settings (thus, non-linear by default), but this default is overridden in the NN response to ``A`` by using the keyword argument ``input_dependent_irf=False`` in the relevant ``NN()`` call of the model formula.
+Using this definition, the IRF to ``B`` depends on the value of ``B``, but the IRF to ``A`` is independent of the value of ``A``, and thus linear.
+
 Just like other IRFs, neural network IRFs can participate in both fixed and random effects.
 For example, the following defines a single population-level neural network IRF but allows the coefficients to vary by subject::
 

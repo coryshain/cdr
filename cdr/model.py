@@ -6,7 +6,7 @@ import scipy.interpolate
 from collections import defaultdict
 from sklearn.metrics import accuracy_score, f1_score
 
-from .kwargs import MODEL_INITIALIZATION_KWARGS, BAYES_KWARGS
+from .kwargs import MODEL_INITIALIZATION_KWARGS, NN_KWARGS, NN_BAYES_KWARGS
 from .formula import *
 from .util import *
 from .data import build_CDR_impulse_data, build_CDR_response_data, corr, corr_cdr, get_first_last_obs_lists, \
@@ -14,6 +14,8 @@ from .data import build_CDR_impulse_data, build_CDR_response_data, corr, corr_cd
 from .backend import *
 from .opt import *
 from .plot import *
+
+NN_KWARG_BY_KEY = {x.key: x for x in NN_KWARGS + NN_BAYES_KWARGS}
 
 import tensorflow as tf
 if int(tf.__version__.split('.')[0]) == 1:
@@ -853,120 +855,7 @@ class CDRModel(object):
         s = np.array([s[x] for x in self.impulse_names])
         self.plot_step_arr = s
 
-        # Initialize CDRNN metadata
-
-        self.use_batch_normalization = bool(self.batch_normalization_decay)
-        self.use_layer_normalization = bool(self.layer_normalization_type)
-
-        assert not (self.use_batch_normalization and self.use_layer_normalization), 'Cannot batch normalize and layer normalize the same model.'
-
-        self.normalize_activations = self.use_batch_normalization or self.use_layer_normalization
-
-        if self.n_units_ff:
-            if isinstance(self.n_units_ff, str):
-                if self.n_units_ff.lower() == 'infer':
-                    self.n_units_ff = [len(self.terminal_names) + len(self.ablated)]
-                else:
-                    self.n_units_ff = [int(x) for x in self.n_units_ff.split()]
-            elif isinstance(self.n_units_ff, int):
-                if self.n_layers_ff is None:
-                    self.n_units_ff = [self.n_units_ff]
-                else:
-                    self.n_units_ff = [self.n_units_ff] * self.n_layers_ff
-            if self.n_layers_ff is None:
-                self.n_layers_ff = len(self.n_units_ff)
-            if len(self.n_units_ff) == 1 and self.n_layers_ff != 1:
-                self.n_units_ff = [self.n_units_ff[0]] * self.n_layers_ff
-                self.n_layers_ff = len(self.n_units_ff)
-        else:
-            self.n_units_ff = []
-            self.n_layers_ff = 0
-        assert self.n_layers_ff == len(self.n_units_ff), 'Inferred n_layers_ff and n_units_ff must have the same number of layers. Saw %d and %d, respectively.' % (self.n_layers_ff, len(self.n_units_ff))
-
-        if self.n_units_rnn:
-            if isinstance(self.n_units_rnn, str):
-                if self.n_units_rnn.lower() == 'infer':
-                    self.n_units_rnn = [len(self.terminal_names) + len(self.ablated)]
-                elif self.n_units_rnn.lower() == 'inherit':
-                    self.n_units_rnn = ['inherit']
-                else:
-                    self.n_units_rnn = [int(x) for x in self.n_units_rnn.split()]
-            elif isinstance(self.n_units_rnn, int):
-                if self.n_layers_rnn is None:
-                    self.n_units_rnn = [self.n_units_rnn]
-                else:
-                    self.n_units_rnn = [self.n_units_rnn] * self.n_layers_rnn
-            if self.n_layers_rnn is None:
-                self.n_layers_rnn = len(self.n_units_rnn)
-            if len(self.n_units_rnn) == 1 and self.n_layers_rnn != 1:
-                self.n_units_rnn = [self.n_units_rnn[0]] * self.n_layers_rnn
-                self.n_layers_rnn = len(self.n_units_rnn)
-        else:
-            self.n_units_rnn = []
-            self.n_layers_rnn = 0
-        assert self.n_layers_rnn == len(self.n_units_rnn), 'Inferred n_layers_rnn and n_units_rnn must have the same number of layers. Saw %d and %d, respectively.' % (self.n_layers_rnn, len(self.n_units_rnn))
-
-        if self.n_units_rnn_projection:
-            if isinstance(self.n_units_rnn_projection, str):
-                self.n_units_rnn_projection = [int(x) for x in self.n_units_rnn_projection.split()]
-            elif isinstance(self.n_units_rnn_projection, int):
-                if self.n_layers_rnn_projection is None:
-                    self.n_units_rnn_projection = [self.n_units_rnn_projection]
-                else:
-                    self.n_units_rnn_projection = [self.n_units_rnn_projection] * self.n_layers_rnn_projection
-            if self.n_layers_rnn_projection is None:
-                self.n_layers_rnn_projection = len(self.n_units_rnn_projection)
-            if len(self.n_units_rnn_projection) == 1 and self.n_layers_rnn_projection != 1:
-                self.n_units_rnn_projection = [self.n_units_rnn_projection[0]] * self.n_layers_rnn_projection
-                self.n_layers_rnn_projection = len(self.n_units_rnn_projection)
-        else:
-            self.n_units_rnn_projection = []
-            self.n_layers_rnn_projection = 0
-        assert self.n_layers_rnn_projection == len(self.n_units_rnn_projection), 'Inferred n_layers_rnn_projection and n_units_rnn_projection must have the same number of layers. Saw %d and %d, respectively.' % (self.n_layers_rnn_projection, len(self.n_units_rnn_projection))
-
-        if self.n_units_irf:
-            if isinstance(self.n_units_irf, str):
-                self.n_units_irf = [int(x) for x in self.n_units_irf.split()]
-            elif isinstance(self.n_units_irf, int):
-                if self.n_layers_irf is None:
-                    self.n_units_irf = [self.n_units_irf]
-                else:
-                    self.n_units_irf = [self.n_units_irf] * self.n_layers_irf
-            if self.n_layers_irf is None:
-                self.n_layers_irf = len(self.n_units_irf)
-            if len(self.n_units_irf) == 1 and self.n_layers_irf != 1:
-                self.n_units_irf = [self.n_units_irf[0]] * self.n_layers_irf
-                self.n_layers_irf = len(self.n_units_irf)
-        else:
-            self.n_units_irf = []
-            self.n_layers_irf = 0
-        assert self.n_layers_irf == len(self.n_units_irf), 'Inferred n_layers_irf and n_units_irf must have the same number of layers. Saw %d and %d, respectively.' % (self.n_layers_irf, len(self.n_units_irf))
-
-        if self.n_units_irf:
-            self.irf_l1_use_bias = True
-        else:
-            self.irf_l1_use_bias = False
-
-        if self.n_units_irf_hidden_state is None:
-            if self.n_units_irf:
-                self.n_units_irf_hidden_state = self.n_units_irf[0]
-            elif self.n_units_ff:
-                self.n_units_irf_hidden_state = self.n_units_ff[-1]
-            elif self.n_units_rnn and self.n_units_rnn[-1] != 'inherit':
-                self.n_units_irf_hidden_state = self.n_units_rnn[-1]
-            else:
-                raise ValueError("Cannot infer size of hidden state. Units are not specified for hidden state, IRF, input projection, or RNN projection.")
-        elif isinstance(self.n_units_irf_hidden_state, str):
-            if self.n_units_irf_hidden_state.lower() == 'infer':
-                self.n_units_irf_hidden_state = len(self.terminal_names) + len(self.ablated)
-            else:
-                self.n_units_irf_hidden_state = int(self.n_units_irf_hidden_state)
-
-        if self.n_units_rnn and self.n_units_rnn[-1] == 'inherit':
-            self.n_units_rnn = [self.n_units_irf_hidden_state]
-
-        if len(self.interaction_names) and self.input_dependent_irf:
-            stderr('WARNING: Be careful about interaction terms in models with input-dependent neural net IRFs. Otherwise, interactions can be implicit in the model (if one or more variables are present in both the input to the NN and the interaction), rendering explicit interaction terms uninterpretable.\n')
+        self._initialize_nn_metadata()
 
         # NN IRF layers/transforms
         self.input_dropout_layer = {}
@@ -982,7 +871,6 @@ class CDRModel(object):
         self.rnn_projection_fn = {}
         self.h_rnn_dropout_layer = {}
         self.rnn_dropout_layer = {}
-        self.hidden_state_to_irf_l1 = {}
         self.nn_irf_l1 = {}
         self.nn_irf_layers = {}
 
@@ -1027,8 +915,7 @@ class CDRModel(object):
                     self._coef_ranef_prior_sd, \
                     self._coef_ranef_posterior_sd_init = self._process_prior_sd(self.coef_prior_sd)
 
-                    assert isinstance(self.irf_param_prior_sd, str) or isinstance(self.irf_param_prior_sd,
-                                                                                  float), 'irf_param_prior_sd must either be a string or a float'
+                    assert isinstance(self.irf_param_prior_sd, str) or isinstance(self.irf_param_prior_sd, float), 'irf_param_prior_sd must either be a string or a float'
 
                     self._irf_param_prior_sd, \
                     self._irf_param_posterior_sd_init, \
@@ -1074,6 +961,143 @@ class CDRModel(object):
                     self.check_convergence = False
 
         self.predict_mode = False
+        
+    def _initialize_nn_metadata(self):
+        self.nn_meta = {}
+        nn_ids = [None] + list(self.nns_by_id.keys())
+        for nn_id in nn_ids:
+            if nn_id is None:
+                nn_meta = {}
+            else:
+                nn_meta = self.nns_by_id[nn_id].nn_config.copy()
+                for key in nn_meta:
+                    nn_meta[key] = NN_KWARG_BY_KEY[key].kwarg_from_config(nn_meta, is_cdrnn=True)
+            self.nn_meta[nn_id] = nn_meta
+            nn_meta['use_batch_normalization'] = bool(self.get_nn_meta('batch_normalization_decay', nn_id))
+            nn_meta['use_layer_normalization'] = bool(self.get_nn_meta('layer_normalization_type', nn_id))
+            assert not (self.get_nn_meta('use_batch_normalization', nn_id) and self.get_nn_meta('use_layer_normalization', 'nn_id')), 'Cannot batch normalize and layer normalize the same model.'
+            nn_meta['normalize_activations'] = nn_meta['use_batch_normalization'] or nn_meta['use_layer_normalization']
+
+            n_units_ff = self.get_nn_meta('n_units_ff', nn_id)
+            n_layers_ff = self.get_nn_meta('n_layers_ff', nn_id)
+
+            if n_units_ff:
+                if isinstance(n_units_ff, str):
+                    if n_units_ff.lower() == 'infer':
+                        nn_meta['n_units_ff'] = [len(self.terminal_names) + len(self.ablated)]
+                    else:
+                        nn_meta['n_units_ff'] = [int(x) for x in n_units_ff.split()]
+                elif isinstance(n_units_ff, int):
+                    if n_layers_ff is None:
+                        nn_meta['n_units_ff'] = [n_units_ff]
+                    else:
+                        nn_meta['n_units_ff'] = [n_units_ff] * n_layers_ff
+                else:
+                    nn_meta['n_units_ff'] = n_units_ff
+                if n_layers_ff is None:
+                    nn_meta['n_layers_ff'] = len(nn_meta['n_units_ff'])
+                else:
+                    nn_meta['n_layers_ff'] = n_layers_ff
+                if len(nn_meta['n_units_ff']) == 1 and nn_meta['n_layers_ff'] != 1:
+                    nn_meta['n_units_ff'] = nn_meta['n_units_ff'] * nn_meta['n_layers_ff']
+            else:
+                nn_meta['n_units_ff'] = []
+                nn_meta['n_layers_ff'] = 0
+            assert nn_meta['n_layers_ff'] == len(nn_meta['n_units_ff']), 'Inferred n_layers_ff and n_units_ff must have the same number of layers. Saw %d and %d, respectively.' % (nn_meta['n_layers_ff'], len(nn_meta['n_units_ff']))
+
+            n_units_rnn = self.get_nn_meta('n_units_rnn', nn_id)
+            n_layers_rnn = self.get_nn_meta('n_layers_rnn', nn_id)
+
+            if n_units_rnn:
+                if isinstance(n_units_rnn, str):
+                    if n_units_rnn.lower() == 'infer':
+                        nn_meta['n_units_rnn'] = [len(self.terminal_names) + len(self.ablated)]
+                    elif n_units_rnn.lower() == 'inherit':
+                        nn_meta['n_units_rnn'] = ['inherit']
+                    else:
+                        nn_meta['n_units_rnn'] = [int(x) for x in n_units_rnn.split()]
+                elif isinstance(n_units_rnn, int):
+                    if n_layers_rnn is None:
+                        nn_meta['n_units_rnn'] = [n_units_rnn]
+                    else:
+                        nn_meta['n_units_rnn'] = [n_units_rnn] * n_layers_rnn
+                else:
+                    nn_meta['n_units_rnn'] = n_units_rnn
+                if n_layers_rnn is None:
+                    nn_meta['n_layers_rnn'] = len(nn_meta['n_units_rnn'])
+                else:
+                    nn_meta['n_layers_rnn'] = n_layers_rnn
+                if len(nn_meta['n_units_rnn']) == 1 and nn_meta['n_layers_rnn'] != 1:
+                    nn_meta['n_units_rnn'] = nn_meta['n_units_rnn'] * nn_meta['n_layers_rnn']
+            else:
+                nn_meta['n_units_rnn'] = []
+                nn_meta['n_layers_rnn'] = 0
+            assert nn_meta['n_layers_rnn'] == len(nn_meta['n_units_rnn']), 'Inferred n_layers_rnn and n_units_rnn must have the same number of layers. Saw %d and %d, respectively.' % (nn_meta['n_layers_rnn'], len(nn_meta['n_units_rnn']))
+
+            n_units_rnn_projection = self.get_nn_meta('n_units_rnn_projection', nn_id)
+            n_layers_rnn_projection = self.get_nn_meta('n_layers_rnn_projection', nn_id)
+
+            if n_units_rnn_projection:
+                if isinstance(n_units_rnn_projection, str):
+                    if n_units_rnn_projection.lower() == 'infer':
+                        nn_meta['n_units_rnn_projection'] = [len(self.terminal_names) + len(self.ablated)]
+                    else:
+                        nn_meta['n_units_rnn_projection'] = [int(x) for x in n_units_rnn_projection.split()]
+                elif isinstance(n_units_rnn_projection, int):
+                    if n_layers_rnn_projection is None:
+                        nn_meta['n_units_rnn_projection'] = [n_units_rnn_projection]
+                    else:
+                        nn_meta['n_units_rnn_projection'] = [n_units_rnn_projection] * n_layers_rnn_projection
+                else:
+                    nn_meta['n_units_rnn_projection'] = n_units_rnn_projection
+                if n_layers_rnn_projection is None:
+                    nn_meta['n_layers_rnn_projection'] = len(nn_meta['n_units_rnn_projection'])
+                else:
+                    nn_meta['n_layers_rnn_projection'] = n_layers_rnn_projection
+                if len(nn_meta['n_units_rnn_projection']) == 1 and nn_meta['n_layers_rnn_projection'] != 1:
+                    nn_meta['n_units_rnn_projection'] = nn_meta['n_units_rnn_projection'] * nn_meta['n_layers_rnn_projection']
+            else:
+                nn_meta['n_units_rnn_projection'] = []
+                nn_meta['n_layers_rnn_projection'] = 0
+            assert nn_meta['n_layers_rnn_projection'] == len(nn_meta['n_units_rnn_projection']), 'Inferred n_layers_rnn_projection and n_units_rnn_projection must have the same number of layers. Saw %d and %d, respectively.' % (nn_meta['n_layers_rnn_projection'], len(nn_meta['n_units_rnn_projection']))
+
+            n_units_irf = self.get_nn_meta('n_units_irf', nn_id)
+            n_layers_irf = self.get_nn_meta('n_layers_irf', nn_id)
+
+            if n_units_irf:
+                if isinstance(n_units_irf, str):
+                    if n_units_irf.lower() == 'infer':
+                        nn_meta['n_units_irf'] = [len(self.terminal_names) + len(self.ablated)]
+                    else:
+                        nn_meta['n_units_irf'] = [int(x) for x in n_units_irf.split()]
+                elif isinstance(n_units_irf, int):
+                    if n_layers_irf is None:
+                        nn_meta['n_units_irf'] = [n_units_irf]
+                    else:
+                        nn_meta['n_units_irf'] = [n_units_irf] * n_layers_irf
+                else:
+                    nn_meta['n_units_irf'] = n_units_irf
+                if n_layers_irf is None:
+                    nn_meta['n_layers_irf'] = len(nn_meta['n_units_irf'])
+                else:
+                    nn_meta['n_layers_irf'] = n_layers_irf
+                if len(nn_meta['n_units_irf']) == 1 and nn_meta['n_layers_irf'] != 1:
+                    nn_meta['n_units_irf'] = nn_meta['n_units_irf'] * nn_meta['n_layers_irf']
+            else:
+                nn_meta['n_units_irf'] = []
+                nn_meta['n_layers_irf'] = 0
+            assert nn_meta['n_layers_irf'] == len(nn_meta['n_units_irf']), 'Inferred n_layers_irf and n_units_irf must have the same number of layers. Saw %d and %d, respectively.' % (nn_meta['n_layers_irf'], len(nn_meta['n_units_irf']))
+
+            if nn_meta['n_units_rnn'] and nn_meta['n_units_rnn'][-1] == 'inherit':
+                if nn_meta['n_units_ff']:
+                    nn_meta['n_units_rnn'] = nn_meta['n_units_ff'][0]
+                if nn_meta['n_units_irf']:
+                    nn_meta['n_units_rnn'] = nn_meta['n_units_irf'][0]
+                else:
+                    nn_meta['n_units_rnn'] = [len(self.terminal_names) + len(self.ablated)]
+
+            if len(self.interaction_names) and self.get_nn_meta('input_dependent_irf', nn_id):
+                stderr('WARNING: Be careful about interaction terms in models with input-dependent neural net IRFs. Interactions can be implicit in such models (if one or more variables are present in both the input to the NN and the interaction), rendering explicit interaction terms uninterpretable.\n')
 
     def _pack_metadata(self):
         md = {
@@ -1277,17 +1301,22 @@ class CDRModel(object):
                     shape=[None, len(self.rangf)],
                     name='Y_gf'
                 )
-                if self.ranef_dropout_rate:
-                    self.ranef_dropout_layer = get_dropout(
-                        self.ranef_dropout_rate,
-                        training=self.training,
-                        use_MAP_mode=tf.constant(True, dtype=tf.bool),
-                        rescale=False,
-                        constant=self.gf_defaults,
-                        name='ranef_dropout',
-                        session=self.session
-                    )
-                    self.Y_gf_dropout = self.ranef_dropout_layer(self.Y_gf)
+                self.Y_gf_dropout = {}
+                self.ranef_dropout_layer = {}
+                for nn_id in self.nns_by_id:
+                    ranef_dropout_rate = self.get_nn_meta('ranef_dropout_rate', nn_id)
+                    if ranef_dropout_rate and not ranef_dropout_rate in self.Y_gf_dropout:
+                        ranef_dropout_layer = get_dropout(
+                            ranef_dropout_rate,
+                            training=self.training,
+                            use_MAP_mode=tf.constant(True, dtype=tf.bool),
+                            rescale=False,
+                            constant=self.gf_defaults,
+                            name='ranef_dropout',
+                            session=self.session
+                        )
+                        self.ranef_dropout_layer[ranef_dropout_rate] = ranef_dropout_layer
+                        self.Y_gf_dropout[ranef_dropout_rate] = ranef_dropout_layer(self.Y_gf)
 
                 self.dirac_delta_mask = tf.cast(
                     tf.abs(self.t_delta) < self.epsilon,
@@ -1370,32 +1399,6 @@ class CDRModel(object):
                 )
                 self.training_complete_true = tf.assign(self.training_complete, True)
                 self.training_complete_false = tf.assign(self.training_complete, False)
-
-                # Initialize regularizers
-                self.regularizer = self._initialize_regularizer(
-                    self.regularizer_name,
-                    self.regularizer_scale
-                )
-
-                self.intercept_regularizer = self._initialize_regularizer(
-                    self.intercept_regularizer_name,
-                    self.intercept_regularizer_scale
-                )
-                
-                self.coefficient_regularizer = self._initialize_regularizer(
-                    self.coefficient_regularizer_name,
-                    self.coefficient_regularizer_scale
-                )
-
-                self.irf_regularizer = self._initialize_regularizer(
-                    self.irf_regularizer_name,
-                    self.irf_regularizer_scale
-                )
-                    
-                self.ranef_regularizer = self._initialize_regularizer(
-                    self.ranef_regularizer_name,
-                    self.ranef_regularizer_scale
-                )
 
                 self.loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='loss_total')
                 self.reg_loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='reg_loss_total')
@@ -1515,73 +1518,78 @@ class CDRModel(object):
                 self.set_converged = tf.assign(self.converged, self.converged_in)
 
                 # Initialize regularizers
-                if self.intercept_regularizer_name is None:
-                    self.intercept_regularizer = None
-                elif self.intercept_regularizer_name == 'inherit':
-                    self.intercept_regularizer = self.regularizer
-                else:
-                    self.intercept_regularizer = self._initialize_regularizer(
-                        self.intercept_regularizer_name,
-                        self.intercept_regularizer_scale
+                self.regularizer = self._initialize_regularizer(
+                    self.regularizer_name,
+                    self.regularizer_scale
+                )
+                self.intercept_regularizer = self._initialize_regularizer(
+                    self.intercept_regularizer_name,
+                    self.intercept_regularizer_scale
+                )
+                self.coefficient_regularizer = self._initialize_regularizer(
+                    self.coefficient_regularizer_name,
+                    self.coefficient_regularizer_scale
+                )
+                self.irf_regularizer = self._initialize_regularizer(
+                    self.irf_regularizer_name,
+                    self.irf_regularizer_scale
+                )
+                self.ranef_regularizer = self._initialize_regularizer(
+                    self.ranef_regularizer_name,
+                    self.ranef_regularizer_scale
+                )
+                self.nn_regularizer = {}
+                self.ff_regularizer = {}
+                self.rnn_projection_regularizer = {}
+                self.context_regularizer = {}
+                for nn_id in self.nns_by_id:
+                    nn_regularizer_name = self.get_nn_meta('nn_regularizer_name', nn_id)
+                    nn_regularizer_scale = self.get_nn_meta('nn_regularizer_scale', nn_id)
+                    self.nn_regularizer[nn_id] = self._initialize_regularizer(
+                        nn_regularizer_name,
+                        nn_regularizer_scale
                     )
 
-                if self.ranef_regularizer_name is None:
-                    self.ranef_regularizer = None
-                elif self.ranef_regularizer_name == 'inherit':
-                    self.ranef_regularizer = self.regularizer
-                else:
-                    self.ranef_regularizer = self._initialize_regularizer(
-                        self.ranef_regularizer_name,
-                        self.ranef_regularizer_scale
+                    ff_regularizer_name = self.get_nn_meta('ff_regularizer_name', nn_id)
+                    ff_regularizer_scale = self.get_nn_meta('ff_regularizer_scale', nn_id)
+                    if ff_regularizer_name is None:
+                        ff_regularizer_name = nn_regularizer_name
+                    if ff_regularizer_scale is None:
+                        ff_regularizer_scale = nn_regularizer_scale
+                    self.ff_regularizer[nn_id] = self._initialize_regularizer(
+                        ff_regularizer_name,
+                        ff_regularizer_scale
                     )
 
-                self.nn_regularizer = self._initialize_regularizer(
-                    self.nn_regularizer_name,
-                    self.nn_regularizer_scale
-                )
-
-                if self.ff_regularizer_name is None:
-                    ff_regularizer_name = self.nn_regularizer_name
-                else:
-                    ff_regularizer_name = self.ff_regularizer_name
-                if self.ff_regularizer_scale is None:
-                    ff_regularizer_scale = self.nn_regularizer_scale
-                else:
-                    ff_regularizer_scale = self.ff_regularizer_scale
-                if self.rnn_projection_regularizer_name is None:
-                    rnn_projection_regularizer_name = self.nn_regularizer_name
-                else:
-                    rnn_projection_regularizer_name = self.rnn_projection_regularizer_name
-                if self.rnn_projection_regularizer_scale is None:
-                    rnn_projection_regularizer_scale = self.nn_regularizer_scale
-                else:
-                    rnn_projection_regularizer_scale = self.rnn_projection_regularizer_scale
-
-                self.ff_regularizer = self._initialize_regularizer(
-                    ff_regularizer_name,
-                    ff_regularizer_scale
-                )
-                self.rnn_projection_regularizer = self._initialize_regularizer(
-                    rnn_projection_regularizer_name,
-                    rnn_projection_regularizer_scale
-                )
-
-                if self.context_regularizer_name is None:
-                    self.context_regularizer = None
-                elif self.context_regularizer_name == 'inherit':
-                    self.context_regularizer = self.regularizer
-                else:
-                    scale = self.context_regularizer_scale / (
-                        (self.history_length + self.future_length) * max(1, self.n_impulse_df_noninteraction)
-                    ) # Average over time
-                    self.context_regularizer = self._initialize_regularizer(
-                        self.context_regularizer_name,
-                        scale,
-                        per_item=True
+                    rnn_projection_regularizer_name = self.get_nn_meta('rnn_projection_regularizer_name', nn_id)
+                    rnn_projection_regularizer_scale = self.get_nn_meta('rnn_projection_regularizer_scale', nn_id)
+                    if rnn_projection_regularizer_name is None:
+                        rnn_projection_regularizer_name = nn_regularizer_name
+                    if rnn_projection_regularizer_scale is None:
+                        rnn_projection_regularizer_scale = nn_regularizer_scale
+                    self.rnn_projection_regularizer[nn_id] = self._initialize_regularizer(
+                        rnn_projection_regularizer_name,
+                        rnn_projection_regularizer_scale
                     )
 
-                self.resample_ops = [] # Only used by CDRNN, defined here for global API
-                self.regularizable_layers = [] # Only used by CDRNN, defined here for global API
+                    context_regularizer_name = self.get_nn_meta('context_regularizer_name', nn_id)
+                    context_regularizer_scale = self.get_nn_meta('context_regularizer_scale', nn_id)
+                    if context_regularizer_name is None:
+                        self.context_regularizer[nn_id] = None
+                    elif context_regularizer_name == 'inherit':
+                        self.context_regularizer[nn_id] = self.regularizer
+                    else:
+                        scale = context_regularizer_scale / (
+                            (self.history_length + self.future_length) * max(1, self.n_impulse_df_noninteraction)
+                        ) # Average over time
+                        self.context_regularizer[nn_id] = self._initialize_regularizer(
+                            context_regularizer_name,
+                            scale,
+                            per_item=True
+                        )
+
+                    self.resample_ops = [] # Only used by CDRNN, defined here for global API
+                    self.regularizable_layers = {} # Only used by CDRNN, defined here for global API
 
     def _get_prior_sd(self, response_name):
         with self.session.as_default():
@@ -2038,14 +2046,6 @@ class CDRModel(object):
                     for i, response_param in enumerate(response_params):
                         dim_names = self.expand_param_name(response, response_param)
                         _p = intercept_fixed[i]
-                        if self.standardize_response and self.is_real(response):
-                            if response_param == 'mu':
-                                _p = _p * self.Y_train_sds[response] + self.Y_train_means[response]
-                            elif response_param == 'sigma':
-                                _p = self.constraint_fn(_p) + self.epsilon
-                                _p = _p * self.Y_train_sds[response]
-                        if response_param == 'tailweight':
-                            _p = self.constraint_fn(_p) + self.epsilon
                         for j, dim_name in enumerate(dim_names):
                             val = _p[j]
                             if self.has_intercept[None]:
@@ -2075,14 +2075,8 @@ class CDRModel(object):
 
                             for j, response_param in enumerate(response_params):
                                 if j == 0 or self.use_distributional_regression:
-                                    _p = intercept_random[:, j]
-                                    if self.standardize_response and self.is_real(response):
-                                        if response_param == 'mu':
-                                            _p = _p * self.Y_train_sds[response] + self.Y_train_means[response]
-                                        elif response_param == 'sigma':
-                                            _p = self.constraint_fn(_p) + self.epsilon
-                                            _p = _p * self.Y_train_sds[response]
                                     dim_names = self.expand_param_name(response, response_param)
+                                    _p = intercept_random[:, j]
                                     for k, dim_name in enumerate(dim_names):
                                         val = _p[:, k]
                                         if self.log_random:
@@ -2242,12 +2236,8 @@ class CDRModel(object):
                     for i, coef_name in enumerate(self.coef_names):
                         self.coefficient_fixed[response][coef_name] = {}
                         for j, response_param in enumerate(response_params):
-                            _p = coefficient_fixed[:, j]
-                            if self.standardize_response and \
-                                    self.is_real(response) and \
-                                    response_param in ['mu', 'sigma']:
-                                _p = _p * self.Y_train_sds[response]
                             dim_names = self.expand_param_name(response, response_param)
+                            _p = coefficient_fixed[:, j]
                             for k, dim_name in enumerate(dim_names):
                                 val = _p[i, k]
                                 tf.summary.scalar(
@@ -2285,12 +2275,8 @@ class CDRModel(object):
                             for j, coef_name in enumerate(coefs):
                                 self.coefficient_random[response][gf][coef_name] = {}
                                 for k, response_param in enumerate(response_params):
-                                    _p = coefficient_random[:, :, k]
-                                    if self.standardize_response and \
-                                            self.is_real(response) and \
-                                            response_param in ['mu', 'sigma']:
-                                        _p = _p * self.Y_train_sds[response]
                                     dim_names = self.expand_param_name(response, response_param)
+                                    _p = coefficient_random[:, :, k]
                                     for l, dim_name in enumerate(dim_names):
                                         val = _p[:, j, l]
                                         tf.summary.histogram(
@@ -2854,6 +2840,7 @@ class CDRModel(object):
 
     def _initialize_feedforward_mle(
             self,
+            nn_id,
             units,
             use_bias=True,
             activation=None,
@@ -2869,11 +2856,16 @@ class CDRModel(object):
             name=None
     ):
         if weights_use_ranef is None:
-            weights_use_ranef = not self.ranef_bias_only
+            weights_use_ranef = not self.get_nn_meta('ranef_bias_only', nn_id)
         if biases_use_ranef is None:
             biases_use_ranef = True
         if normalizer_use_ranef is None:
-            normalizer_use_ranef = self.normalizer_use_ranef
+            normalizer_use_ranef = self.get_nn_meta('normalizer_use_ranef', nn_id)
+        normalize_after_activation = self.get_nn_meta('normalize_after_activation', nn_id)
+        shift_normalized_activations = self.get_nn_meta('shift_normalized_activations', nn_id)
+        rescale_normalized_activations = self.get_nn_meta('rescale_normalized_activations', nn_id)
+        weight_sd_init = self.get_nn_meta('weight_sd_init', nn_id)
+
         with self.session.as_default():
             with self.session.graph.as_default():
                 projection = DenseLayer(
@@ -2886,14 +2878,14 @@ class CDRModel(object):
                     maxnorm=maxnorm,
                     batch_normalization_decay=batch_normalization_decay,
                     layer_normalization_type=layer_normalization_type,
-                    normalize_after_activation=self.normalize_after_activation,
-                    shift_normalized_activations=self.shift_normalized_activations,
-                    rescale_normalized_activations=self.rescale_normalized_activations,
+                    normalize_after_activation=normalize_after_activation,
+                    shift_normalized_activations=shift_normalized_activations,
+                    rescale_normalized_activations=rescale_normalized_activations,
                     rangf_map=rangf_map,
                     weights_use_ranef=weights_use_ranef,
                     biases_use_ranef=biases_use_ranef,
                     normalizer_use_ranef=normalizer_use_ranef,
-                    kernel_sd_init=self.weight_sd_init,
+                    kernel_sd_init=weight_sd_init,
                     epsilon=self.epsilon,
                     session=self.session,
                     name=name
@@ -2903,6 +2895,7 @@ class CDRModel(object):
 
     def _initialize_feedforward_bayes(
             self,
+            nn_id,
             units,
             use_bias=True,
             activation=None,
@@ -2918,30 +2911,33 @@ class CDRModel(object):
             name=None
     ):
         if weights_use_ranef is None:
-            weights_use_ranef = not self.ranef_bias_only
+            weights_use_ranef = not self.get_nn_meta('ranef_bias_only', nn_id)
         if biases_use_ranef is None:
             biases_use_ranef = True
         if normalizer_use_ranef is None:
-            normalizer_use_ranef = self.normalizer_use_ranef
+            normalizer_use_ranef = self.get_nn_meta('normalizer_use_ranef', nn_id)
+        normalize_after_activation = self.get_nn_meta('normalize_after_activation', nn_id)
+        shift_normalized_activations = self.get_nn_meta('shift_normalized_activations', nn_id)
+        rescale_normalized_activations = self.get_nn_meta('rescale_normalized_activations', nn_id)
+        weight_sd_init = self.get_nn_meta('weight_sd_init', nn_id)
+        bias_sd_init = self.get_nn_meta('bias_sd_init', nn_id)
+        gamma_sd_init = self.get_nn_meta('gamma_sd_init', nn_id)
+        declare_priors_biases = self.get_nn_meta('declare_priors_biases', nn_id)
+        declare_priors_gamma = self.get_nn_meta('declare_priors_gamma', nn_id)
+
         with self.session.as_default():
             with self.session.graph.as_default():
                 if final:
                     weight_sd_prior = 1.
-                    weight_sd_init = self.weight_sd_init
                     bias_sd_prior = 1.
-                    bias_sd_init = self.bias_sd_init
                     gamma_sd_prior = 1.
-                    gamma_sd_init = self.gamma_sd_init
                     declare_priors_weights = self.declare_priors_fixef
                 else:
-                    weight_sd_prior = self.weight_prior_sd
-                    weight_sd_init = self.weight_sd_init
-                    bias_sd_prior = self.bias_prior_sd
-                    bias_sd_init = self.bias_sd_init
-                    gamma_sd_prior = self.gamma_prior_sd
-                    gamma_sd_init = self.gamma_sd_init
-                    declare_priors_weights = self.declare_priors_weights
-                    declare_priors_gamma = self.declare_priors_gamma
+                    weight_sd_prior = self.get_nn_meta('weight_prior_sd', nn_id)
+                    bias_sd_prior = self.get_nn_meta('bias_prior_sd', nn_id)
+                    gamma_sd_prior = self.get_nn_meta('gamma_prior_sd', nn_id)
+                    declare_priors_weights = self.get_nn_meta('declare_priors_weights', nn_id)
+                    declare_priors_gamma = self.get_nn_meta('declare_priors_gamma', nn_id)
 
                 projection = DenseLayerBayes(
                     training=self.training,
@@ -2953,16 +2949,16 @@ class CDRModel(object):
                     maxnorm=maxnorm,
                     batch_normalization_decay=batch_normalization_decay,
                     layer_normalization_type=layer_normalization_type,
-                    normalize_after_activation=self.normalize_after_activation,
-                    shift_normalized_activations=self.shift_normalized_activations,
-                    rescale_normalized_activations=self.rescale_normalized_activations,
+                    normalize_after_activation=normalize_after_activation,
+                    shift_normalized_activations=shift_normalized_activations,
+                    rescale_normalized_activations=rescale_normalized_activations,
                     rangf_map=rangf_map,
                     weights_use_ranef=weights_use_ranef,
                     biases_use_ranef=biases_use_ranef,
                     normalizer_use_ranef=normalizer_use_ranef,
                     declare_priors_weights=declare_priors_weights,
-                    declare_priors_biases=self.declare_priors_biases,
-                    declare_priors_gamma=self.declare_priors_gamma,
+                    declare_priors_biases=declare_priors_biases,
+                    declare_priors_gamma=declare_priors_gamma,
                     kernel_sd_prior=weight_sd_prior,
                     kernel_sd_init=weight_sd_init,
                     bias_sd_prior=bias_sd_prior,
@@ -2994,9 +2990,9 @@ class CDRModel(object):
             normalizer_use_ranef=None,
     ):
         if weights_use_ranef is None:
-            weights_use_ranef = not self.ranef_bias_only
+            weights_use_ranef = not self.get_nn_meta('ranef_bias_only', nn_id)
         if biases_use_ranef is None:
-            if self.ranef_l1_only:
+            if self.get_nn_meta('ranef_l1_only', nn_id):
                 if l == 0:
                     biases_use_ranef = True
                 else:
@@ -3004,28 +3000,32 @@ class CDRModel(object):
             else:
                 biases_use_ranef = True
         if normalizer_use_ranef is None:
-            normalizer_use_ranef = self.normalizer_use_ranef
-        # weights_use_ranef = False # DELETE
-        # biases_use_ranef = False # DELETE
-        # normalizer_use_ranef = False # DELETE
+            normalizer_use_ranef = self.get_nn_meta('normalizer_use_ranef', nn_id)
+        n_units_rnn = self.get_nn_meta('n_units_rnn', nn_id)
+        rnn_activation = self.get_nn_meta('rnn_activation', nn_id)
+        recurrent_activation = self.get_nn_meta('recurrent_activation', nn_id)
+        weight_sd_init = self.get_nn_meta('weight_sd_init', nn_id)
+        ff_dropout_rate = self.get_nn_meta('ff_dropout_rate', nn_id)
+        rnn_h_dropout_rate = self.get_nn_meta('rnn_h_dropout_rate', nn_id)
+        rnn_c_dropout_rate = self.get_nn_meta('rnn_c_dropout_rate', nn_id)
+
         with self.session.as_default():
             with self.session.graph.as_default():
-                units = self.n_units_rnn[l]
+                units = n_units_rnn[l]
                 rnn = RNNLayer(
                     training=self.training,
                     use_MAP_mode=self.use_MAP_mode,
                     units=units,
-                    activation=self.rnn_activation,
-                    recurrent_activation=self.recurrent_activation,
-                    kernel_sd_init=self.weight_sd_init,
+                    activation=rnn_activation,
+                    recurrent_activation=recurrent_activation,
+                    kernel_sd_init=weight_sd_init,
                     rangf_map=rangf_map,
                     weights_use_ranef=weights_use_ranef,
                     biases_use_ranef=biases_use_ranef,
                     normalizer_use_ranef=normalizer_use_ranef,
-                    bottomup_dropout=self.ff_dropout_rate,
-                    h_dropout=self.rnn_h_dropout_rate,
-                    c_dropout=self.rnn_c_dropout_rate,
-                    forget_rate=self.forget_rate,
+                    bottomup_dropout=ff_dropout_rate,
+                    h_dropout=rnn_h_dropout_rate,
+                    c_dropout=rnn_c_dropout_rate,
                     return_sequences=True,
                     name='%s_rnn_l%d' % (nn_id, l + 1),
                     epsilon=self.epsilon,
@@ -3043,10 +3043,11 @@ class CDRModel(object):
             biases_use_ranef=None,
             normalizer_use_ranef=None,
     ):
+
         if weights_use_ranef is None:
-            weights_use_ranef = not self.ranef_bias_only
+            weights_use_ranef = not self.get_nn_meta('ranef_bias_only', nn_id)
         if biases_use_ranef is None:
-            if self.ranef_l1_only:
+            if self.get_nn_meta('ranef_l1_only', nn_id):
                 if l == 0:
                     biases_use_ranef = True
                 else:
@@ -3054,34 +3055,43 @@ class CDRModel(object):
             else:
                 biases_use_ranef = True
         if normalizer_use_ranef is None:
-            normalizer_use_ranef = self.normalizer_use_ranef
-        # weights_use_ranef = False # DELETE
-        # biases_use_ranef = False # DELETE
-        # normalizer_use_ranef = False # DELETE
+            normalizer_use_ranef = self.get_nn_meta('normalizer_use_ranef', nn_id)
+        n_units_rnn = self.get_nn_meta('n_units_rnn', nn_id)
+        rnn_activation = self.get_nn_meta('rnn_activation', nn_id)
+        recurrent_activation = self.get_nn_meta('recurrent_activation', nn_id)
+        ff_dropout_rate = self.get_nn_meta('ff_dropout_rate', nn_id)
+        rnn_h_dropout_rate = self.get_nn_meta('rnn_h_dropout_rate', nn_id)
+        rnn_c_dropout_rate = self.get_nn_meta('rnn_c_dropout_rate', nn_id)
+        declare_priors_weights = self.get_nn_meta('declare_priors_weights', nn_id)
+        declare_priors_biases = self.get_nn_meta('declare_priors_biases', nn_id)
+        weight_prior_sd = self.get_nn_meta('weight_prior_sd', nn_id)
+        weight_sd_init = self.get_nn_meta('weight_sd_init', nn_id)
+        bias_prior_sd = self.get_nn_meta('bias_prior_sd', nn_id)
+        bias_sd_init = self.get_nn_meta('bias_sd_init', nn_id)
+
         with self.session.as_default():
             with self.session.graph.as_default():
-                units = self.n_units_rnn[l]
+                units = n_units_rnn[l]
                 rnn = RNNLayerBayes(
                     training=self.training,
                     use_MAP_mode=self.use_MAP_mode,
                     units=units,
-                    activation=self.rnn_activation,
-                    recurrent_activation=self.recurrent_activation,
-                    bottomup_dropout=self.ff_dropout_rate,
-                    h_dropout=self.rnn_h_dropout_rate,
-                    c_dropout=self.rnn_c_dropout_rate,
-                    forget_rate=self.forget_rate,
+                    activation=rnn_activation,
+                    recurrent_activation=recurrent_activation,
+                    bottomup_dropout=ff_dropout_rate,
+                    h_dropout=rnn_h_dropout_rate,
+                    c_dropout=rnn_c_dropout_rate,
                     return_sequences=True,
-                    declare_priors_weights=self.declare_priors_weights,
-                    declare_priors_biases=self.declare_priors_biases,
-                    kernel_sd_prior=self.weight_prior_sd,
-                    kernel_sd_init=self.weight_sd_init,
+                    declare_priors_weights=declare_priors_weights,
+                    declare_priors_biases=declare_priors_biases,
+                    kernel_sd_prior=weight_prior_sd,
+                    kernel_sd_init=weight_sd_init,
                     rangf_map=rangf_map,
                     weights_use_ranef=weights_use_ranef,
                     biases_use_ranef=biases_use_ranef,
                     normalizer_use_ranef=normalizer_use_ranef,
-                    bias_sd_prior=self.bias_prior_sd,
-                    bias_sd_init=self.bias_sd_init,
+                    bias_sd_prior=bias_prior_sd,
+                    bias_sd_init=bias_sd_init,
                     posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
                     ranef_to_fixef_prior_sd_ratio=self.ranef_to_fixef_prior_sd_ratio,
                     constraint=self.constraint,
@@ -3097,103 +3107,43 @@ class CDRModel(object):
             return self._initialize_rnn_bayes(*args, **kwargs)
         return self._initialize_rnn_mle(*args, **kwargs)
 
-    def _initialize_normalization_mle(self, rangf_map=None, name=None):
-        if name is None:
-            name = ''
-        with self.session.as_default():
-            with self.session.graph.as_default():
-                if self.use_batch_normalization:
-                    normalization_layer = BatchNormLayer(
-                        decay=self.batch_normalization_decay,
-                        shift_activations=self.shift_normalized_activations,
-                        rescale_activations=self.rescale_normalized_activations,
-                        axis=-1,
-                        rangf_map=rangf_map,
-                        training=self.training,
-                        epsilon=self.epsilon,
-                        session=self.session,
-                        name=name
-                    )
-                elif self.use_layer_normalization:
-                    normalization_layer = LayerNormLayer(
-                        normalization_type=self.layer_normalization_type,
-                        shift_activations=self.shift_normalized_activations,
-                        rescale_activations=self.rescale_normalized_activations,
-                        axis=-1,
-                        rangf_map=rangf_map,
-                        training=self.training,
-                        epsilon=self.epsilon,
-                        session=self.session,
-                        name=name
-                    )
-                else:
-                    normalization_layer = lambda x: x
-
-                return normalization_layer
-
-    def _initialize_normalization_bayes(self, rangf_map=None, name=None):
-        if name is None:
-            name = ''
-        with self.session.as_default():
-            with self.session.graph.as_default():
-                if self.use_batch_normalization:
-                    normalization_layer = BatchNormLayerBayes(
-                        decay=self.batch_normalization_decay,
-                        shift_activations=self.shift_normalized_activations,
-                        rescale_activations=self.rescale_normalized_activations,
-                        axis=-1,
-                        rangf_map=rangf_map,
-                        use_MAP_mode=self.use_MAP_mode,
-                        declare_priors_scale=self.declare_priors_gamma,
-                        declare_priors_shift=self.declare_priors_biases,
-                        scale_sd_prior=self.bias_prior_sd,
-                        scale_sd_init=self.bias_sd_init,
-                        shift_sd_prior=self.bias_prior_sd,
-                        shift_sd_init=self.bias_prior_sd,
-                        posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
-                        ranef_to_fixef_prior_sd_ratio=self.ranef_to_fixef_prior_sd_ratio,
-                        constraint=self.constraint,
-                        training=self.training,
-                        epsilon=self.epsilon,
-                        session=self.session,
-                        name='%s' % name
-                    )
-                elif self.use_layer_normalization:
-                    normalization_layer = LayerNormLayerBayes(
-                        normalization_type=self.layer_normalization_type,
-                        shift_activations=self.shift_normalized_activations,
-                        rescale_activations=self.rescale_normalized_activations,
-                        axis=-1,
-                        training=self.training,
-                        use_MAP_mode=self.use_MAP_mode,
-                        declare_priors_scale=self.declare_priors_gamma,
-                        declare_priors_shift=self.declare_priors_biases,
-                        scale_sd_prior=self.bias_prior_sd,
-                        scale_sd_init=self.bias_sd_init,
-                        shift_sd_prior=self.bias_prior_sd,
-                        shift_sd_init=self.bias_prior_sd,
-                        posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
-                        constraint=self.constraint,
-                        epsilon=self.epsilon,
-                        session=self.session,
-                        name='%s' % name
-                    )
-                else:
-                    normalization_layer = lambda x: x
-
-                return normalization_layer
-
-    def _initialize_normalization(self, *args, **kwargs):
-        if 'nn' in self.rvs:
-            return self._initialize_normalization_bayes(*args, **kwargs)
-        return self._initialize_normalization_mle(*args, **kwargs)
-
     def _initialize_nn(self, nn_id):
         with self.session.as_default():
             with self.session.graph.as_default():
+                self.regularizable_layers[nn_id] = []
+
+                # Collect metadata for this NN component
+                n_layers_ff = self.get_nn_meta('n_layers_ff', nn_id)
+                n_units_ff = self.get_nn_meta('n_units_ff', nn_id)
+                ff_inner_activation = self.get_nn_meta('ff_inner_activation', nn_id)
+                ff_activation = self.get_nn_meta('ff_activation', nn_id)
+                ff_dropout_rate = self.get_nn_meta('ff_dropout_rate', nn_id)
+                normalize_ff = self.get_nn_meta('normalize_ff', nn_id)
+                n_layers_rnn = self.get_nn_meta('n_layers_rnn', nn_id)
+                n_units_rnn = self.get_nn_meta('n_units_rnn', nn_id)
+                n_layers_rnn_projection = self.get_nn_meta('n_layers_rnn_projection', nn_id)
+                n_units_rnn_projection = self.get_nn_meta('n_units_rnn_projection', nn_id)
+                rnn_dropout_rate = self.get_nn_meta('rnn_dropout_rate', nn_id)
+                rnn_projection_inner_activation = self.get_nn_meta('rnn_projection_inner_activation', nn_id)
+                rnn_projection_activation = self.get_nn_meta('rnn_projection_activation', nn_id)
+                h_rnn_dropout_rate = self.get_nn_meta('h_rnn_dropout_rate', nn_id)
+                n_layers_irf = self.get_nn_meta('n_layers_irf', nn_id)
+                n_units_irf = self.get_nn_meta('n_units_irf', nn_id)
+                irf_inner_activation = self.get_nn_meta('irf_inner_activation', nn_id)
+                irf_activation = self.get_nn_meta('irf_activation', nn_id)
+                irf_dropout_rate = self.get_nn_meta('irf_dropout_rate', nn_id)
+                normalize_irf = self.get_nn_meta('normalize_irf', nn_id)
+                ranef_dropout_rate = self.get_nn_meta('ranef_dropout_rate', nn_id)
+                input_dropout_rate = self.get_nn_meta('input_dropout_rate', nn_id)
+                batch_normalization_decay = self.get_nn_meta('batch_normalization_decay', nn_id)
+                layer_normalization_type = self.get_nn_meta('layer_normalization_type', nn_id)
+                maxnorm = self.get_nn_meta('maxnorm', nn_id)
+                input_dependent_irf = self.get_nn_meta('input_dependent_irf', nn_id)
+                ranef_l1_only = self.get_nn_meta('ranef_l1_only', nn_id)
+
                 rangf_map = {}
-                if self.ranef_dropout_rate:
-                    Y_gf = self.Y_gf_dropout
+                if ranef_dropout_rate:
+                    Y_gf = self.Y_gf_dropout[ranef_dropout_rate]
                 else:
                     Y_gf = self.Y_gf
                 for i, gf in enumerate(self.rangf):
@@ -3201,18 +3151,18 @@ class CDRModel(object):
                         _Y_gf = Y_gf[:, i]
                         rangf_map[gf] = (self.rangf_n_levels[self.rangf.index(gf)], _Y_gf)
                 rangf_map_l1 = rangf_map
-                if self.ranef_l1_only:
+                if ranef_l1_only:
                     rangf_map_other = None
                 else:
                     rangf_map_other = rangf_map
 
                 # FEEDFORWARD ENCODER
                 if nn_id in self.nn_impulse_ids:
-                    assert self.n_layers_ff or self.n_layers_rnn, "n_layers_ff and n_layers_rnn can't both be zero in NN transforms of predictors."
+                    assert n_layers_ff or n_layers_rnn, "n_layers_ff and n_layers_rnn can't both be zero in NN transforms of predictors."
 
-                    if self.input_dropout_rate:
+                    if input_dropout_rate:
                         self.input_dropout_layer[nn_id] = get_dropout(
-                            self.input_dropout_rate,
+                            input_dropout_rate,
                             training=self.training,
                             use_MAP_mode=self.use_MAP_mode,
                             rescale=False,
@@ -3220,7 +3170,7 @@ class CDRModel(object):
                             session=self.session
                         )
                         self.X_time_dropout_layer[nn_id] = get_dropout(
-                            self.input_dropout_rate,
+                            input_dropout_rate,
                             training=self.training,
                             use_MAP_mode=self.use_MAP_mode,
                             rescale=False,
@@ -3229,37 +3179,35 @@ class CDRModel(object):
                         )
 
                     ff_layers = []
-                    if self.n_layers_ff:
-                        for l in range(self.n_layers_ff + 1):
-                            if l == 0 or not self.ranef_l1_only:
+                    if n_layers_ff:
+                        for l in range(n_layers_ff + 1):
+                            if l == 0 or not ranef_l1_only:
                                 _rangf_map = rangf_map_l1
                             else:
                                 _rangf_map = rangf_map_other
 
-                            if l < self.n_layers_ff:
-                                units = self.n_units_ff[l]
-                                activation = self.ff_inner_activation
-                                dropout = self.ff_dropout_rate
-                                if self.normalize_ff:
-                                    bn = self.batch_normalization_decay
+                            if l < n_layers_ff:
+                                units = n_units_ff[l]
+                                activation = ff_inner_activation
+                                dropout = ff_dropout_rate
+                                if normalize_ff:
+                                    bn = batch_normalization_decay
                                 else:
                                     bn = None
-                                ln = self.layer_normalization_type
+                                ln = layer_normalization_type
                                 use_bias = True
                             else:
-                                if nn_id in self.nn_irf_ids:
-                                    units = self.n_units_irf_hidden_state
-                                else:
-                                    units = 1
-                                activation = self.ff_activation
+                                units = 1
+                                activation = ff_activation
                                 dropout = None
                                 bn = None
                                 ln = None
                                 use_bias = False
-                            mn = self.maxnorm
+                            mn = maxnorm
 
                             projection = self._initialize_feedforward(
-                                units=units,
+                                nn_id,
+                                units,
                                 use_bias=use_bias,
                                 activation=activation,
                                 dropout=dropout,
@@ -3271,7 +3219,7 @@ class CDRModel(object):
                             )
                             self.layers.append(projection)
 
-                            self.regularizable_layers.append(projection)
+                            self.regularizable_layers[nn_id].append(projection)
                             ff_layers.append(make_lambda(projection, session=self.session, use_kwargs=False))
 
                     ff_fn = compose_lambdas(ff_layers)
@@ -3279,7 +3227,7 @@ class CDRModel(object):
                     self.ff_layers[nn_id] = ff_layers
                     self.ff_fn[nn_id] = ff_fn
                     self.ff_dropout_layer[nn_id] = get_dropout(
-                        self.ff_dropout_rate,
+                        ff_dropout_rate,
                         training=self.training,
                         use_MAP_mode=self.use_MAP_mode,
                         name='%s_ff_dropout' % nn_id,
@@ -3287,12 +3235,12 @@ class CDRModel(object):
                     )
 
                 # RNN ENCODER
-                if nn_id in self.nn_impulse_ids or self.input_dependent_irf:
+                if nn_id in self.nn_impulse_ids or input_dependent_irf:
                     rnn_layers = []
                     rnn_h_ema = []
                     rnn_c_ema = []
-                    for l in range(self.n_layers_rnn):
-                        units = self.n_units_rnn[l]
+                    for l in range(n_layers_rnn):
+                        units = n_units_rnn[l]
                         if l == 0:
                             _rangf_map = rangf_map_l1
                         else:
@@ -3303,7 +3251,7 @@ class CDRModel(object):
                         _rnn_c_ema = tf.Variable(tf.zeros(units), trainable=False, name='%s_rnn_c_ema_l%d' % (nn_id, l+1))
                         rnn_c_ema.append(_rnn_c_ema)
                         self.layers.append(layer)
-                        self.regularizable_layers.append(layer)
+                        self.regularizable_layers[nn_id].append(layer)
                         rnn_layers.append(make_lambda(layer, session=self.session, use_kwargs=True))
 
                     rnn_encoder = compose_lambdas(rnn_layers)
@@ -3313,28 +3261,29 @@ class CDRModel(object):
                     self.rnn_c_ema[nn_id] = rnn_c_ema
                     self.rnn_encoder[nn_id] = rnn_encoder
 
-                    if self.n_layers_rnn:
+                    if n_layers_rnn:
                         rnn_projection_layers = []
-                        for l in range(self.n_layers_rnn_projection + 1):
-                            if l < self.n_layers_rnn_projection:
-                                units = self.n_units_rnn_projection[l]
-                                activation = self.rnn_projection_inner_activation
-                                bn = self.batch_normalization_decay
-                                ln = self.layer_normalization_type
+                        for l in range(n_layers_rnn_projection + 1):
+                            if l < n_layers_rnn_projection:
+                                units = n_units_rnn_projection[l]
+                                activation = rnn_projection_inner_activation
+                                bn = batch_normalization_decay
+                                ln = layer_normalization_type
                                 use_bias = True
                             else:
                                 if nn_id in self.nn_irf_ids:
-                                    units = self.n_units_irf_hidden_state
+                                    units = self.n_impulse
                                 else:
                                     units = 1
-                                activation = self.rnn_projection_activation
+                                activation = rnn_projection_activation
                                 bn = None
                                 ln = None
                                 use_bias = False
-                            mn = self.maxnorm
+                            mn = maxnorm
 
                             projection = self._initialize_feedforward(
-                                units=units,
+                                nn_id,
+                                units,
                                 use_bias=use_bias,
                                 activation=activation,
                                 dropout=None,
@@ -3346,7 +3295,7 @@ class CDRModel(object):
                             )
                             self.layers.append(projection)
 
-                            self.regularizable_layers.append(projection)
+                            self.regularizable_layers[nn_id].append(projection)
                             rnn_projection_layers.append(make_lambda(projection, session=self.session, use_kwargs=False))
 
                         rnn_projection_fn = compose_lambdas(rnn_projection_layers)
@@ -3355,14 +3304,14 @@ class CDRModel(object):
                         self.rnn_projection_fn[nn_id] = rnn_projection_fn
 
                         self.h_rnn_dropout_layer[nn_id] = get_dropout(
-                            self.h_rnn_dropout_rate,
+                            h_rnn_dropout_rate,
                             training=self.training,
                             use_MAP_mode=self.use_MAP_mode,
                             name='%s_h_rnn_dropout' % nn_id,
                             session=self.session
                         )
                         self.rnn_dropout_layer[nn_id] = get_dropout(
-                            self.rnn_dropout_rate,
+                            rnn_dropout_rate,
                             noise_shape=[None, None, 1],
                             training=self.training,
                             use_MAP_mode=self.use_MAP_mode,
@@ -3374,28 +3323,28 @@ class CDRModel(object):
                 # IRF
                 if nn_id in self.nn_irf_ids:
                     irf_layers = []
-                    for l in range(self.n_layers_irf + 1):
-                        if l == 0 or not self.ranef_l1_only:
+                    for l in range(n_layers_irf + 1):
+                        if l == 0 or not ranef_l1_only:
                             _rangf_map = rangf_map_l1
                         else:
                             _rangf_map = rangf_map_other
 
-                        if l < self.n_layers_irf:
-                            units = self.n_units_irf[l]
-                            activation = self.irf_inner_activation
-                            dropout = self.irf_dropout_rate
-                            if self.normalize_irf:
-                                bn = self.batch_normalization_decay
-                                ln = self.layer_normalization_type
+                        if l < n_layers_irf:
+                            units = n_units_irf[l]
+                            activation = irf_inner_activation
+                            dropout = irf_dropout_rate
+                            if normalize_irf:
+                                bn = batch_normalization_decay
+                                ln = layer_normalization_type
                             else:
                                 bn = None
                                 ln = None
                             use_bias = True
                             final = False
-                            mn = self.maxnorm
+                            mn = maxnorm
                         else:
                             units = self.get_nn_irf_output_ndim(nn_id)
-                            activation = self.irf_activation
+                            activation = irf_activation
                             dropout = None
                             bn = None
                             ln = None
@@ -3404,7 +3353,8 @@ class CDRModel(object):
                             mn = None
 
                         projection = self._initialize_feedforward(
-                            units=units,
+                            nn_id,
+                            units,
                             use_bias=use_bias,
                             activation=activation,
                             dropout=dropout,
@@ -3418,8 +3368,8 @@ class CDRModel(object):
                         self.layers.append(projection)
                         irf_layers.append(projection)
 
-                        if l < self.n_layers_irf:
-                            self.regularizable_layers.append(projection)
+                        if l < n_layers_irf:
+                            self.regularizable_layers[nn_id].append(projection)
                         if l == 0:
                             self.nn_irf_l1[nn_id] = projection
 
@@ -3428,6 +3378,24 @@ class CDRModel(object):
     def _compile_nn(self, nn_id):
         with self.session.as_default():
             with self.session.graph.as_default():
+                # Collect metadata for this NN
+                center_X_time = self.get_nn_meta('center_X_time', nn_id)
+                center_t_delta = self.get_nn_meta('center_t_delta', nn_id)
+                rescale_X_time = self.get_nn_meta('rescale_X_time', nn_id)
+                rescale_t_delta = self.get_nn_meta('rescale_t_delta', nn_id)
+                n_layers_ff = self.get_nn_meta('n_layers_ff', nn_id)
+                ff_noise_sd = self.get_nn_meta('ff_noise_sd', nn_id)
+                ff_dropout_rate = self.get_nn_meta('ff_dropout_rate', nn_id)
+                n_layers_rnn = self.get_nn_meta('n_layers_rnn', nn_id)
+                rnn_dropout_rate = self.get_nn_meta('rnn_dropout_rate', nn_id)
+                h_rnn_noise_sd = self.get_nn_meta('h_rnn_noise_sd', nn_id)
+                h_rnn_dropout_rate = self.get_nn_meta('h_rnn_dropout_rate', nn_id)
+                n_layers_irf = self.get_nn_meta('n_layers_irf', nn_id)
+                input_jitter_level = self.get_nn_meta('input_jitter_level', nn_id)
+                input_dropout_rate = self.get_nn_meta('input_dropout_rate', nn_id)
+                nonstationary = self.get_nn_meta('nonstationary', nn_id)
+                input_dependent_irf = self.get_nn_meta('input_dependent_irf', nn_id)
+
                 if nn_id in self.nn_impulse_ids:
                     impulse_names = self.nn_impulse_impulse_names[nn_id]
                 else:  # nn_id in self.nn_irf_ids
@@ -3522,14 +3490,14 @@ class CDRModel(object):
                     X_time_mean = self.X_time_mean
                     X_time *= X_time_mean
 
-                if self.center_X_time:
+                if center_X_time:
                     X_time -= self.X_time_mean
-                if self.center_t_delta:
+                if center_t_delta:
                     t_delta -= self.t_delta_mean
 
-                if self.rescale_X_time:
+                if rescale_X_time:
                     X_time /= self.X_time_sd
-                if self.rescale_t_delta:
+                if rescale_t_delta:
                     t_delta /= self.t_delta_sd
 
                 # Handle multiple impulse streams with different timestamps
@@ -3599,8 +3567,8 @@ class CDRModel(object):
                     if X_mask is not None and len(X_mask.shape) == 3:
                         X_mask = X_mask[..., 0]
 
-                if self.input_jitter_level:
-                    jitter_sd = self.input_jitter_level
+                if input_jitter_level:
+                    jitter_sd = input_jitter_level
                     X = tf.cond(
                         self.training,
                         lambda: tf.random_normal(tf.shape(X), X, jitter_sd),
@@ -3617,36 +3585,37 @@ class CDRModel(object):
                         lambda: X_time
                     )
 
-                if self.input_dropout_rate:
+                if input_dropout_rate:
                     X = self.input_dropout_layer[nn_id](X)
                     X_time = self.X_time_dropout_layer[nn_id](X_time)
 
                 impulse_names_no_rate = [x for x in impulse_names if x != 'rate']
                 impulse_ix = names2ix(impulse_names_no_rate, impulse_names)
                 X_in = tf.gather(X, impulse_ix, axis=2)
-                if self.nonstationary:
+                if nonstationary:
                     X_in = tf.concat([X_in, X_time], axis=-1)
 
                 # Compute hidden state
                 h = None
-                if self.n_layers_ff or self.n_layers_rnn:
-                    if self.n_layers_ff and nn_id in self.nn_impulse_ids:
+
+                if n_layers_ff or n_layers_rnn:
+                    if n_layers_ff and nn_id in self.nn_impulse_ids:
                         h_ff = self.ff_fn[nn_id](X_in)
-                        if self.ff_noise_sd:
+                        if ff_noise_sd:
                             def ff_train_fn(ff=h_ff):
-                                return tf.random_normal(tf.shape(ff), ff, stddev=self.ff_noise_sd[nn_id])
+                                return tf.random_normal(tf.shape(ff), ff, stddev=ff_noise_sd[nn_id])
                             def ff_eval_fn(ff=h_ff):
                                 return ff
                             h_ff = tf.cond(self.training, ff_train_fn, ff_eval_fn)
-                        if self.ff_dropout_rate:
+                        if ff_dropout_rate:
                             h_ff = self.ff_dropout_layer[nn_id](h_ff)
                         h = h_ff
 
-                    if self.n_layers_rnn:
+                    if n_layers_rnn and (nn_id in self.nn_impulse_ids or input_dependent_irf):
                         _X_in = X_in
                         rnn_hidden = []
                         rnn_cell = []
-                        for l in range(self.n_layers_rnn):
+                        for l in range(n_layers_rnn):
                             _rnn_hidden, _rnn_cell = self.rnn_layers[nn_id][l](
                                 _X_in,
                                 return_state=True,
@@ -3658,16 +3627,16 @@ class CDRModel(object):
 
                         h_rnn = self.rnn_projection_fn[nn_id](rnn_hidden[-1])
 
-                        if self.rnn_dropout_rate:
+                        if rnn_dropout_rate:
                             h_rnn = self.rnn_dropout_layer[nn_id](h_rnn)
 
-                        if self.h_rnn_noise_sd:
+                        if h_rnn_noise_sd:
                             def h_rnn_train_fn(h_rnn=h_rnn):
-                                return tf.random_normal(tf.shape(h_rnn), h_rnn, stddev=self.h_rnn_noise_sd)
+                                return tf.random_normal(tf.shape(h_rnn), h_rnn, stddev=h_rnn_noise_sd)
                             def h_rnn_eval_fn(h_rnn=h_rnn):
                                 return h_rnn
                             h_rnn = tf.cond(self.training, h_rnn_train_fn, h_rnn_eval_fn)
-                        if self.h_rnn_dropout_rate:
+                        if h_rnn_dropout_rate:
                             h_rnn = self.h_rnn_dropout_layer[nn_id](h_rnn)
 
                         if h is None:
@@ -3691,14 +3660,14 @@ class CDRModel(object):
 
                     ix = 0
                     irf_out = [t_delta]
-                    if self.nonstationary:
+                    if nonstationary:
                         irf_out.append(X_time)
-                    if self.input_dependent_irf:
+                    if input_dependent_irf:
                         irf_out.append(nn_irf_impulses)
                     if h_rnn is not None:
                         irf_out.append(h_rnn)
                     irf_out = tf.concat(irf_out, axis=2)
-                    for l in range(self.n_layers_irf + 1):
+                    for l in range(n_layers_irf + 1):
                         irf_out = self.nn_irf_layers[nn_id][l](
                             irf_out,
                         )
@@ -3739,37 +3708,38 @@ class CDRModel(object):
 
                 if h_rnn is not None:
                     h_rnn_masked = h_rnn * mask
-                    self._regularize(h_rnn_masked, regtype='context', var_name=reg_name('context'))
+                    self._regularize(h_rnn_masked, regtype='context', var_name=reg_name('context'), nn_id=nn_id)
 
-                for l in range(self.n_layers_rnn):
-                    reduction_axes = list(range(len(rnn_hidden[l].shape) - 1))
+                if nn_id in self.nn_impulse_ids or input_dependent_irf:
+                    for l in range(n_layers_rnn):
+                        reduction_axes = list(range(len(rnn_hidden[l].shape) - 1))
 
-                    h_sum = tf.reduce_sum(rnn_hidden[l] * mask, axis=reduction_axes)
-                    h_mean = h_sum / (denom + self.epsilon)
-                    h_ema = self.rnn_h_ema[nn_id][l]
-                    h_ema_op = tf.assign(
-                        h_ema,
-                        ema_rate * h_ema + (1. - ema_rate) * h_mean
-                    )
-                    self.ema_ops.append(h_ema_op)
+                        h_sum = tf.reduce_sum(rnn_hidden[l] * mask, axis=reduction_axes)
+                        h_mean = h_sum / (denom + self.epsilon)
+                        h_ema = self.rnn_h_ema[nn_id][l]
+                        h_ema_op = tf.assign(
+                            h_ema,
+                            ema_rate * h_ema + (1. - ema_rate) * h_mean
+                        )
+                        self.ema_ops.append(h_ema_op)
 
-                    c_sum = tf.reduce_sum(rnn_cell[l] * mask, axis=reduction_axes)
-                    c_mean = c_sum / (denom + self.epsilon)
-                    c_ema = self.rnn_c_ema[nn_id][l]
-                    c_ema_op = tf.assign(
-                        c_ema,
-                        ema_rate * c_ema + (1. - ema_rate) * c_mean
-                    )
-                    self.ema_ops.append(c_ema_op)
+                        c_sum = tf.reduce_sum(rnn_cell[l] * mask, axis=reduction_axes)
+                        c_mean = c_sum / (denom + self.epsilon)
+                        c_ema = self.rnn_c_ema[nn_id][l]
+                        c_ema_op = tf.assign(
+                            c_ema,
+                            ema_rate * c_ema + (1. - ema_rate) * c_mean
+                        )
+                        self.ema_ops.append(c_ema_op)
 
-                if self.input_dropout_rate:
+                if input_dropout_rate:
                     self.resample_ops += self.input_dropout_layer[nn_id].resample_ops() + self.X_time_dropout_layer[nn_id].resample_ops()
-                if self.rnn_dropout_rate and self.n_layers_rnn:
+                if rnn_dropout_rate and n_layers_rnn:
                     self.resample_ops += self.h_rnn_dropout_layer[nn_id].resample_ops()
                     self.resample_ops += self.rnn_dropout_layer[nn_id].resample_ops()
-                if self.ff_dropout_rate and nn_id in self.ff_dropout_layer:
+                if ff_dropout_rate and nn_id in self.ff_dropout_layer:
                     self.resample_ops += self.ff_dropout_layer[nn_id].resample_ops()
-                if self.h_rnn_dropout_rate and self.n_layers_rnn:
+                if h_rnn_dropout_rate and n_layers_rnn and nn_id in self.h_rnn_dropout_layer:
                     self.resample_ops += self.h_rnn_dropout_layer[nn_id].resample_ops()
 
     def _concat_nn_impulses(self):
@@ -4606,10 +4576,12 @@ class CDRModel(object):
 
                     self.loss_m1_ema = tf.Variable(0., trainable=False, name='loss_m1_ema')
                     self.loss_m2_ema = tf.Variable(0., trainable=False, name='loss_m2_ema')
+                    self.n_dropped_ema = tf.Variable(0., trainable=False, name='n_dropped_ema')
 
                     # Debias
                     loss_m1_ema = self.loss_m1_ema / (1. - beta ** step)
                     loss_m2_ema = self.loss_m2_ema / (1. - beta ** step)
+                    n_dropped_ema = self.n_dropped_ema / (1. - beta ** step)
 
                     sd = tf.sqrt(loss_m2_ema - loss_m1_ema**2)
                     loss_cutoff = loss_m1_ema + n_sds * sd
@@ -4632,11 +4604,13 @@ class CDRModel(object):
 
                     loss_m1_ema_update = beta * self.loss_m1_ema + (1 - beta) * loss_m1_cur
                     loss_m2_ema_update = beta * self.loss_m2_ema + (1 - beta) * loss_m2_cur
+                    n_dropped_ema_update = beta * self.n_dropped_ema + (1 - beta) * self.n_dropped
 
                     loss_m1_ema_op = tf.assign(self.loss_m1_ema, loss_m1_ema_update)
                     loss_m2_ema_op = tf.assign(self.loss_m2_ema, loss_m2_ema_update)
+                    n_dropped_ema_op = tf.assign(self.n_dropped_ema, n_dropped_ema_update)
 
-                    self.ema_ops += [loss_m1_ema_op, loss_m2_ema_op]
+                    self.ema_ops += [loss_m1_ema_op, loss_m2_ema_op, n_dropped_ema_op]
 
                 loss_func = tf.reduce_sum(loss_func)
 
@@ -4645,32 +4619,34 @@ class CDRModel(object):
                     loss_func = loss_func * self.minibatch_scale
 
                 # Regularize
-                for l in self.regularizable_layers:
-                    if hasattr(l, 'regularizable_weights'):
-                        vars = l.regularizable_weights
-                    else:
-                        vars = [l]
-                    for v in vars:
-                        is_ranef = False
-                        for gf in self.rangf:
-                            if '_by_%s' % sn(gf) in v.name:
-                                is_ranef = True
-                                break
-                        if is_ranef:
-                            if 'nn' not in self.rvs:
-                                self._regularize(
-                                    v,
-                                    regtype='ranef',
-                                    var_name=reg_name(v.name)
-                                )
-                        elif 'bias' not in v.name:
-                            if 'ff_l%d' % (self.n_layers_ff + 1) in v.name:
-                                regtype = 'ff'
-                            elif 'rnn_projection_l%d' % (self.n_layers_rnn_projection + 1) in v.name:
-                                regtype = 'rnn_projection'
-                            else:
-                                regtype = 'nn'
-                            self._regularize(v, regtype=regtype, var_name=reg_name(v.name))
+                for nn_id in self.regularizable_layers:
+                    for l in self.regularizable_layers[nn_id]:
+                        if hasattr(l, 'regularizable_weights'):
+                            vars = l.regularizable_weights
+                        else:
+                            vars = [l]
+                        for v in vars:
+                            is_ranef = False
+                            for gf in self.rangf:
+                                if '_by_%s' % sn(gf) in v.name:
+                                    is_ranef = True
+                                    break
+                            if is_ranef:
+                                if 'nn' not in self.rvs:
+                                    self._regularize(
+                                        v,
+                                        regtype='ranef',
+                                        var_name=reg_name(v.name)
+                                    )
+                            elif 'bias' not in v.name:
+                                if 'ff_l' in v.name:
+                                    regtype = 'ff'
+                                elif 'rnn_projection_l' in v.name:
+                                    regtype = 'rnn_projection'
+                                else:
+                                    regtype = 'nn'
+                                self._regularize(v, regtype=regtype, var_name=reg_name(v.name), nn_id=nn_id)
+
                 reg_loss = tf.constant(0., dtype=self.FLOAT_TF)
                 if len(self.regularizer_losses_varnames) > 0:
                     reg_loss += tf.add_n(self.regularizer_losses)
@@ -5104,7 +5080,7 @@ class CDRModel(object):
 
         return trainable_ix, untrainable_ix
 
-    def _regularize(self, var, center=None, regtype=None, var_name=None):
+    def _regularize(self, var, center=None, regtype=None, var_name=None, nn_id=None):
         assert regtype in [
             None, 'intercept', 'coefficient', 'irf', 'ranef', 'nn', 'ff', 'rnn_projection', 'context',
             'unit_integral', 'conv_output']
@@ -5113,6 +5089,8 @@ class CDRModel(object):
             regularizer = self.regularizer
         else:
             regularizer = getattr(self, '%s_regularizer' % regtype)
+        if regtype in ['nn', 'ff', 'rnn_projection', 'context']:
+            regularizer = regularizer[nn_id]
 
         if regularizer is not None:
             with self.session.as_default():
@@ -5129,8 +5107,8 @@ class CDRModel(object):
                         if self.scale_regularizer_with_data:
                             reg_scale *= self.minibatch_size * self.minibatch_scale
                     elif regtype in ['ff', 'rnn_projection'] and getattr(self, '%s_regularizer_name' % regtype) is None:
-                        reg_name = self.nn_regularizer_name
-                        reg_scale = self.nn_regularizer_scale
+                        reg_name = self.get_nn_meta('nn_regularizer_name', nn_id)
+                        reg_scale = self.get_nn_meta('nn_regularizer_scale', nn_id)
                     elif regtype == 'unit_integral':
                         reg_name = 'l1_regularizer'
                         reg_scale = getattr(self, '%s_regularizer_scale' % regtype)
@@ -5417,20 +5395,20 @@ class CDRModel(object):
         :return: ``bool``; whether the model uses dropout.
         """
 
-        return bool(
-            (
-                self.has_nn_irf and
-                (
-                    self.ff_dropout_rate or
-                    self.rnn_h_dropout_rate or
-                    self.rnn_c_dropout_rate or
-                    self.h_rnn_dropout_rate or
-                    self.rnn_dropout_rate or
-                    self.irf_dropout_rate or
-                    self.ranef_dropout_rate
-                )
-            ) or self.has_nn_impulse and self.irf_dropout_rate
-        )
+        for nn_id in self.nns_by_id:
+            if self.has_nn_irf and (
+                        self.get_nn_meta('ff_dropout_rate', nn_id) or
+                        self.get_nn_meta('rnn_h_dropout_rate', nn_id) or
+                        self.get_nn_meta('rnn_c_dropout_rate', nn_id) or
+                        self.get_nn_meta('h_rnn_dropout_rate', nn_id) or
+                        self.get_nn_meta('rnn_dropout_rate', nn_id) or
+                        self.get_nn_meta('irf_dropout_rate', nn_id) or
+                        self.get_nn_meta('ranef_dropout_rate', nn_id)
+                    ):
+                return True
+            if self.has_nn_impulse and self.get_nn_meta('irf_dropout_rate', nn_id):
+                return True
+        return False
 
     @property
     def is_mixed_model(self):
@@ -5441,6 +5419,13 @@ class CDRModel(object):
         """
 
         return len(self.rangf) > 0
+
+    def get_nn_meta(self, key, nn_id=None):
+        if key in self.nn_meta[nn_id]:
+            return self.nn_meta[nn_id][key]
+        if key in self.nn_meta[None]:
+            return self.nn_meta[None][key]
+        return getattr(self, key)
 
     def get_nn_irf_output_ndim(self, nn_id):
         """
@@ -6359,6 +6344,22 @@ class CDRModel(object):
             out += ' ' * (indent * 2) + 'Convergence rho_t at min p:  %s\n' % rt_at_min_p
             out += ' ' * (indent * 2) + 'Proportion converged:        %s\n' % proportion_converged
             out += ' ' * (indent * 2) + 'N iterations at convergence: %s\n' % n_iter
+
+            if self.loss_filter_n_sds and self.ema_decay:
+                n_dropped = self.n_dropped_ema.eval(self.session)
+                out += '\n'
+                out += ' ' * (indent * 2) + 'Number of outlier losses dropped per iteration (exp mov avg): %.4f\n' % n_dropped
+                if n_dropped > 1:
+                    out += ' ' * (indent * 2) + 'WARNING: Moving average of outlier losses dropped per iteration'
+                    out += ' ' * (indent * 2) + '         exceeded 1 at convergence. It is possible that training data'
+                    out += ' ' * (indent * 2) + '         was systematically excluded. Check the n_dropped field of'
+                    out += ' ' * (indent * 2) + '         the TensorFlow logs to determine whether the large average'
+                    out += ' ' * (indent * 2) + '         was driven by outlier iterations. If few/no iterations near'
+                    out += ' ' * (indent * 2) + '         the end of training had n_dropped=0, some training data was'
+                    out += ' ' * (indent * 2) + '         likely ignored at every iteration. This can be corrected by'
+                    out += ' ' * (indent * 2) + '         raising `loss_filter_n_sds` or turning off loss filtering'
+                    out += ' ' * (indent * 2) + '         by setting `loss_filter_n_sds` to `None`.'
+                out += '\n'
 
             if converged:
                 out += ' ' * (indent + 2) + 'NOTE:\n'

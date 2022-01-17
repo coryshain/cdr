@@ -12,7 +12,7 @@ CDR uses machine learning to estimate continuous-time impulse response functions
 Given data and a model template specifying the functional form(s) of the IRF kernel(s), CDR finds IRF parameters that optimize some objective function.
 This approach can be generalized to account for non-stationary, non-linear, non-additive, and context-dependent response functions by implementing the IRF as a deep neural network (Shain, 2021).
 
-The ``cdr`` package documented here provides Python implementations of both CDR and CDRNN.
+The ``cdr`` package documented here provides a Python implementation of a general-purpose CDR framework that allows users to flexibly select among neural network and kernel-based approaches to continuous-time deconvolution, and even to combine both approaches within a single model.
 This package provides (1) an API for programming with CDR(NN) and (2) executables that allow users to train and evaluate CDR(NN) models out of the box, without needing to write any code.
 Source code and bug reporting tools are available on `Github <https://github.com/coryshain/cdr>`_.
 

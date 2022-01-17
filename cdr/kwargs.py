@@ -27,38 +27,23 @@ def cdr_kwarg_docstring():
     :return: ``str``; docstring snippet
     """
 
-    out = "All models\n^^^^^^^^^^\n\n"
+    out = "All Models\n^^^^^^^^^^\n\n"
 
     for kwarg in MODEL_INITIALIZATION_KWARGS:
         out += docstring_from_kwarg(kwarg)
 
-    out += "\nAll CDR models\n^^^^^^^^^^^^^^\n\n"
+    out += "\nVariational Bayes\n^^^^^^^^^^^^^^^^^\n\n"
 
-    for kwarg in CDR_INITIALIZATION_KWARGS:
+    for kwarg in BAYES_KWARGS:
         if kwarg.key not in ['history_length', 'future_length']:
             out += docstring_from_kwarg(kwarg)
 
-    out += '\nCDRMLE\n^^^^^^\n\n'
+    out += '\nNeural Network Components\n^^^^^^^^^^^^^^^^^^^^^^^^^\n\n'
 
-    for kwarg in CDRMLE_INITIALIZATION_KWARGS:
+    for kwarg in NN_KWARGS:
         out += docstring_from_kwarg(kwarg)
 
-    out += '\nCDRBayes\n^^^^^^^^\n\n'
-
-    for kwarg in CDRBAYES_INITIALIZATION_KWARGS:
-        out += docstring_from_kwarg(kwarg)
-
-    out += '\nAll CDRNN models\n^^^^^^^^^^^^^^^^\n\n'
-
-    for kwarg in CDRNN_INITIALIZATION_KWARGS:
-        out += docstring_from_kwarg(kwarg)
-
-    out += '\nCDRNNMLE\n^^^^^^^^\n\n'
-
-    for kwarg in CDRNNMLE_INITIALIZATION_KWARGS:
-        out += docstring_from_kwarg(kwarg)
-
-    out += '\nCDRNNBayes\n^^^^^^^^^^\n\n'
+    out += '\nVariational Bayesian Neural Network Components\n^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n'
 
     for kwarg in NN_BAYES_KWARGS:
         out += docstring_from_kwarg(kwarg)
@@ -174,12 +159,39 @@ class Kwarg(object):
 
         return out
 
+    def get_typed_val(self, key, dtype, settings, default=None):
+        if key in settings:
+            if isinstance(settings, dict):
+                if dtype == str:
+                    return settings.get(key)
+                elif dtype == int:
+                    return int(settings.get(key))
+                elif dtype == float:
+                    return float(settings.get(key))
+                elif dtype == bool:
+                    return bool(settings.get(key))
+                else:
+                    raise ValueError('Unrecognized dtype: %s' % dtype)
+            else:
+                if dtype == str:
+                    return settings.get(key)
+                elif dtype == int:
+                    return settings.getint(key)
+                elif dtype == float:
+                    return settings.getfloat(key)
+                elif dtype == bool:
+                    return settings.getboolean(key)
+                else:
+                    raise ValueError('Unrecognized dtype: %s' % dtype)
+        return default
+
+
     def kwarg_from_config(self, settings, is_cdrnn=False):
         """
         Given a settings object parsed from a config file, return value of kwarg cast to appropriate dtype.
         If missing from settings, return default.
 
-        :param settings: settings from a ``ConfigParser`` object.
+        :param settings: settings from a ``ConfigParser`` object or ``dict``.
         :param is_cdrnn: ``bool``; whether this is for a CDRNN model.
         :return: value of kwarg
         """
@@ -192,21 +204,12 @@ class Kwarg(object):
             default_value = self.default_value
 
         if len(self.dtypes) == 1:
-            val = {
-                str: settings.get,
-                int: settings.getint,
-                float: settings.getfloat,
-                bool: settings.getboolean
-            }[self.dtypes[0]](self.key, None)
+
+            val = self.get_typed_val(self.key, self.dtypes[0], settings, default=None)
 
             if val is None:
                 for alias in self.aliases:
-                    val = {
-                        str: settings.get,
-                        int: settings.getint,
-                        float: settings.getfloat,
-                        bool: settings.getboolean
-                    }[self.dtypes[0]](alias, default_value)
+                    val = self.get_typed_val(alias, self.dtypes[0], settings, default=default_value)
                     if val is not None:
                         break
 
@@ -247,7 +250,6 @@ class Kwarg(object):
                 assert parsed, 'Invalid value "%s" received for %s' %(from_settings, self.key)
 
         return val
-
 
 
     @staticmethod
@@ -916,6 +918,20 @@ NN_KWARGS = [
         "Number of units per hidden layer in projection of RNN state. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_units_rnn_projection** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers in RNN projection."
     ),
     Kwarg(
+        'n_layers_irf',
+        2,
+        [int, None],
+        "Number of IRF hidden layers. If ``None``, inferred from length of **n_units_irf**.",
+        aliases=['n_layers', 'n_layers_decoder']
+    ),
+    Kwarg(
+        'n_units_irf',
+        32,
+        [int, str, None],
+        "Number of units per hidden layer in IRF. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_units_irf** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers.",
+        aliases=['n_units', 'n_units_decoder']
+    ),
+    Kwarg(
         'input_dependent_irf',
         True,
         bool,
@@ -940,32 +956,11 @@ NN_KWARGS = [
         bool,
         "Whether to include random effects in normalizer layers (``True``) or not."
     ),
-    Kwarg(
-        'n_units_irf_hidden_state',
-        32,
-        [int, str],
-        "Number of units in CDRNN hidden state. Must be an ``int``.",
-        aliases=['n_units', 'n_units_encoder', 'n_units_hidden_state']
-    ),
-    Kwarg(
-        'n_layers_irf',
-        2,
-        [int, None],
-        "Number of IRF hidden layers. If ``None``, inferred from length of **n_units_irf**.",
-        aliases=['n_layers', 'n_layers_decoder']
-    ),
-    Kwarg(
-        'n_units_irf',
-        32,
-        [int, str, None],
-        "Number of units per hidden layer in IRF. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_units_irf** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers.",
-        aliases=['n_units', 'n_units_decoder']
-    ),
 
     # ACTIVATION FUNCTIONS
     Kwarg(
         'ff_inner_activation',
-        'logmod',
+        'gelu',
         [str, None],
         "Name of activation function to use for hidden layers in feedforward encoder.",
         aliases=['activation', 'input_projection_inner_activation']
@@ -991,7 +986,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'rnn_projection_inner_activation',
-        'logmod',
+        'gelu',
         [str, None],
         "Name of activation function to use for hidden layers in projection of RNN state.",
         aliases=['activation']
@@ -1003,15 +998,8 @@ NN_KWARGS = [
         "Name of activation function to use for final layer in projection of RNN state."
     ),
     Kwarg(
-        'hidden_state_activation',
-        'logmod',
-        [str, None],
-        "Name of activation function to use for CDRNN hidden state.",
-        aliases=['activation']
-    ),
-    Kwarg(
         'irf_inner_activation',
-        'logmod',
+        'gelu',
         [str, None],
         "Name of activation function to use for hidden layers in IRF.",
         aliases=['activation']
@@ -1056,12 +1044,6 @@ NN_KWARGS = [
         bool,
         "Whether to apply normalization (if applicable) to hidden layers of feedforward encoders.",
         aliases=['normalize_input_projection']
-    ),
-    Kwarg(
-        'normalize_irf_l1',
-        True,
-        bool,
-        "Whether to apply normalization (if applicable) to the first IRF layer.",
     ),
     Kwarg(
         'normalize_irf',
@@ -1166,7 +1148,7 @@ NN_KWARGS = [
         0.2,
         [float, None],
         "Rate at which to drop neurons of feedforward encoder layers.",
-        aliases=['dropout_rate', 'input_projection']
+        aliases=['dropout', 'dropout_rate', 'input_projection']
     ),
     Kwarg(
         'rnn_h_dropout_rate',
@@ -1185,52 +1167,38 @@ NN_KWARGS = [
         0.2,
         [float, None],
         "Rate at which to drop neurons of FF projection.",
-        aliases=['dropout_rate', 'h_in_dropout_rate']
+        aliases=['dropout', 'dropout_rate', 'h_in_dropout_rate']
     ),
     Kwarg(
         'h_rnn_dropout_rate',
         0.2,
         [float, None],
         "Rate at which to drop neurons of h_rnn.",
-        aliases=['dropout_rate']
+        aliases=['dropout', 'dropout_rate']
     ),
     Kwarg(
         'rnn_dropout_rate',
         None,
         [float, None],
         "Rate at which to entirely drop the RNN.",
-        aliases=['dropout_rate']
+        aliases=['dropout', 'dropout_rate']
     ),
     Kwarg(
         'irf_dropout_rate',
         0.2,
         [float, None],
         "Rate at which to drop neurons of IRF layers.",
-        aliases=['dropout_rate']
+        aliases=['dropout', 'dropout_rate']
     ),
     Kwarg(
         'ranef_dropout_rate',
         None,
         [float, None],
         "Rate at which to drop random effects indicators.",
-        aliases=['dropout_rate']
+        aliases=['dropout', 'dropout_rate']
     ),
 
     # DEPRECATED OR RARELY USED
-    Kwarg(
-        'rnn_type',
-        'LSTM',
-        str,
-        "**DEPRECATED** (only LSTM is supported).",
-        suppress=True
-    ),
-    Kwarg(
-        'forget_rate',
-        None,
-        [float, None],
-        "Rate at which to drop recurrent connection entirely.",
-        suppress=True
-    ),
     Kwarg(
         'input_jitter_level',
         None,
@@ -1251,7 +1219,7 @@ NN_KWARGS = [
         [float, None],
         "SD of white-out noise to inject into h_rnn.",
         suppress=True
-    ),
+    )
 ]
 
 
@@ -1311,12 +1279,6 @@ NN_BAYES_KWARGS = [
         None,
         [str, float, None],
         "Initial standard deviation of variational posterior over batch norm gammas. If ``None``, inferred from other hyperparams. Ignored unless batch normalization is used."
-    ),
-    Kwarg(
-        'posterior_to_prior_sd_ratio',
-        0.01,
-        float,
-        "Ratio of posterior initialization SD to prior SD. Low values are often beneficial to stability, convergence speed, and quality of final fit by avoiding erratic sampling and divergent behavior early in training."
     )
 ]
 

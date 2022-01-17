@@ -5,6 +5,7 @@ import itertools
 import numpy as np
 
 from .data import z, c, s, compute_time_mask, expand_impulse_sequence
+from .kwargs import NN_KWARGS, NN_BAYES_KWARGS
 from .util import names2ix, sn, stderr
 
 interact = re.compile('([^ ]+):([^ ]+)')
@@ -13,6 +14,15 @@ split_irf = re.compile('(.+)\(([^(]+)')
 lcg_re = re.compile('(G|S|LCG)(b([0-9]+))?$')
 starts_numeric = re.compile('^[0-9]')
 non_alphanumeric = re.compile('[^0-9a-zA-Z_]')
+
+NN_KWARG_MAP = {}
+for x in NN_KWARGS + NN_BAYES_KWARGS:
+    NN_KWARG_MAP[x.key] = [x.key]
+    for a in x.aliases:
+        if a in NN_KWARG_MAP:
+            NN_KWARG_MAP[a] += [x.key]
+        else:
+            NN_KWARG_MAP[a] = [x.key]
 
 
 def pythonize_string(s):
@@ -696,7 +706,28 @@ class Formula(object):
                 for s in subterms:
                     assert isinstance(s, Impulse) or isinstance(s, ImpulseInteraction), 'NN transforms may only dominate nodes of type Impulse or ImpulseInteraction. Got %s.' % type(s)
 
-                new = NNImpulse(subterms)
+                nn_config = {}
+                if len(t.keywords) > 0:
+                    for k in t.keywords:
+                        if k.arg in NN_KWARG_MAP:
+                            if type(k.value).__name__ == 'Constant':
+                                val = k.value.value
+                            elif type(k.value).__name__ == 'Str':
+                                val = k.value.s
+                            elif type(k.value).__name__ == 'Name':
+                                val = k.value.id
+                            elif type(k.value).__name__ == 'NameConstant':
+                                val = k.value.value
+                            elif type(k.value).__name__ == 'Num':
+                                val = k.value.n
+                            else:
+                                raise ValueError('Unrecognized type for keyword argument value: %s.' % k.value)
+                            if val is None:
+                                val = 'None'
+                            _nn_config = {x: val for x in NN_KWARG_MAP[k.arg]}
+                            nn_config.update(_nn_config)
+
+                new = NNImpulse(subterms, nn_config=nn_config)
 
                 if under_irf or under_interaction:
                     if new.name() in impulses_by_name:
@@ -820,24 +851,41 @@ class Formula(object):
         ranirf = False
         trainable = None
         param_init={}
+        nn_config = {}
         if len(t.keywords) > 0:
             for k in t.keywords:
                 if k.arg == 'irf_id':
-                    if type(k.value).__name__ == 'Str':
+                    if type(k.value).__name__ == 'Constant':
+                        assert isinstance(k.value.value, str), 'irf_id must be interpretable as a string'
+                        irf_id = k.value.value
+                    elif type(k.value).__name__ == 'Str':
                         irf_id = k.value.s
                     elif type(k.value).__name__ == 'Name':
                         irf_id = k.value.id
                     elif type(k.value).__name__ == 'Num':
                         irf_id = str(k.value.n)
+                    else:
+                        raise ValueError('Unrecognized value for irf_id: %s' % k.value)
                 elif k.arg == 'coef_id':
-                    if type(k.value).__name__ == 'Str':
+                    if type(k.value).__name__ == 'Constant':
+                        assert isinstance(k.value.value, str), 'coef_id must be interpretable as a string'
+                        coef_id = k.value.value
+                    elif type(k.value).__name__ == 'Str':
                         coef_id = k.value.s
                     elif type(k.value).__name__ == 'Name':
                         coef_id = k.value.id
                     elif type(k.value).__name__ == 'Num':
                         coef_id = str(k.value.n)
+                    else:
+                        raise ValueError('Unrecognized value for coef_id: %s' % k.value)
                 elif k.arg == 'ran':
-                    if type(k.value).__name__ == 'Str':
+                    if type(k.value).__name__ == 'Constant':
+                        if isinstance(k.value.value, str):
+                            if k.value.s in ['True', 'TRUE', 'true', 'T']:
+                                ranirf = True
+                        elif k.value.n > 0:
+                            ranirf = True
+                    elif type(k.value).__name__ == 'Str':
                         if k.value.s in ['True', 'TRUE', 'true', 'T']:
                             ranirf = True
                     elif type(k.value).__name__ == 'Name':
@@ -847,14 +895,38 @@ class Formula(object):
                         ranirf = k.value.value
                     elif type(k.value).__name__ == 'Num':
                         ranirf = k.value.n > 0
+                    else:
+                        raise ValueError('Unrecognized value for ran: %s' % k.value)
                 elif k.arg == 'trainable':
                     assert type(k.value).__name__ == 'List', 'Non-list argument provided to keyword arg "trainable"'
                     trainable = []
                     for x in k.value.elts:
-                        if type(x).__name__ == 'Name':
+                        if type(x).__name__ == 'Constant':
+                            assert isinstance(x.value, str), 'trainable variable must be interpretable as a string'
+                            trainable.append(x.value)
+                        elif type(x).__name__ == 'Name':
                             trainable.append(x.id)
                         elif type(x).__name__ == 'Str':
                             trainable.append(x.s)
+                        else:
+                            raise ValueError('Unrecognized value for element of trainable: %s' % x)
+                elif t.func.id == 'NN' and k.arg in NN_KWARG_MAP:
+                    if type(k.value).__name__ == 'Constant':
+                        val = k.value.value
+                    elif type(k.value).__name__ == 'Str':
+                        val = k.value.s
+                    elif type(k.value).__name__ == 'Name':
+                        val = k.value.id
+                    elif type(k.value).__name__ == 'NameConstant':
+                        val = k.value.value
+                    elif type(k.value).__name__ == 'Num':
+                        val = k.value.n
+                    else:
+                        raise ValueError('Unrecognized type for keyword argument value: %s.' % k.value)
+                    if val is None:
+                        val = 'None'
+                    _nn_config = {x: val for x in NN_KWARG_MAP[k.arg]}
+                    nn_config.update(_nn_config)
                 else:
                     if type(k.value).__name__ == 'Num':
                         param_init[k.arg] = k.value.n
@@ -874,7 +946,8 @@ class Formula(object):
                 rangf=rangf if ranirf else None,
                 nn_inputs=nn_inputs,
                 param_init=param_init,
-                trainable=trainable
+                trainable=trainable,
+                nn_config=nn_config
             )
 
             new.add_child(input)
@@ -1547,8 +1620,10 @@ class Formula(object):
             nodes = []
             nn_types = []
             rangf = []
+            nn_config = {}
             for node, gf in nn_meta_by_key[key]:
                 nodes.append(node)
+                nn_config.update(node.nn_config)
                 if isinstance(node, IRFNode):
                     nn_types.append('irf')
                 elif isinstance(node, NNImpulse):
@@ -1565,7 +1640,7 @@ class Formula(object):
             nn_type = tuple(nn_types)[0]
             rangf = list(rangf)
 
-            nn = NN(nn_inputs, nn_type, rangf=rangf, nn_key=key)
+            nn = NN(nn_inputs, nn_type, rangf=rangf, nn_key=key, nn_config=nn_config)
             nns_by_key[key] = nn
 
         keys = sorted(nns_by_key)
@@ -1759,17 +1834,27 @@ class NNImpulse(object):
     Data structure representing a feedforward neural network transform of one or more impulses in a CDR model.
 
     :param impulses: ``list`` of ``Impulse``; impulses to transform.
+    :param nn_config: ``dict`` or ``None``; map of NN config fields to their values for this NN node.
     """
 
-    def __init__(self, impulses):
+    def __init__(self, impulses, nn_config=None):
         self.atomic_impulses = []
         names = set()
         for x in impulses:
             names.add(x.name())
             self.atomic_impulses.append(x)
+        if nn_config is None:
+            nn_config = {}
+        self.nn_config = nn_config
         self.nn_inputs = tuple(sorted([x for x in impulses], key=lambda x: x.name()))
         self.nn_key = 'impulseNN_' + '_'.join([x.name() for x in self.nn_inputs])
-        self.name_str = 'NN(%s)' % ' + '.join([str(x) for x in self.impulses()])
+        nn_args = [' + '.join([str(x) for x in self.impulses()])]
+        for key in self.nn_config:
+            val = self.nn_config[key]
+            if isinstance(val, str) and val != 'None':
+                val = '"%s"' % val
+            nn_args += '%s=%s' % (key, val)
+        self.name_str = 'NN(%s)' % ', '.join(nn_args)
         self.ops = []
 
         self.id = ':'.join([x.id for x in sorted(self.atomic_impulses, key=lambda x: x.id)])
@@ -1837,9 +1922,11 @@ class NN(object):
     :param nodes: ``list`` of ``IRFNode``, and/or ``NNImpulse`` objects; nodes associated with this NN
     :param nn_type: ``str``; name of NN type (``'irf'`` or ``'impulse'``).
     :param rangf: ``str`` or list of ``str``; random grouping factors for which to build random effects for this NN.
+    :param nn_type: ``str`` or ``None``; key uniquely identifying this NN node (constructed automatically if ``None``).
+    :param nn_config: ``dict`` or ``None``; map of NN config fields to their values for this NN node.
     """
 
-    def __init__(self, nodes, nn_type, rangf=None, nn_key=None):
+    def __init__(self, nodes, nn_type, rangf=None, nn_key=None, nn_config=None):
         assert nn_type in ('irf', 'impulse'), 'nn_type must be either "irf" or "impulse". Got %s.' % nn_type
         _nodes = []
         names = set()
@@ -1853,6 +1940,9 @@ class NN(object):
             self.nn_key = '%sNN_' % nn_type + '_'.join([x.name() for x in self.nodes])
         else:
             self.nn_key = nn_key
+        if nn_config is None:
+            nn_config = {}
+        self.nn_config = nn_config
         if not isinstance(rangf, list):
             rangf = [rangf]
         self.rangf = rangf
@@ -2016,7 +2106,8 @@ class IRFNode(object):
             rangf=None,
             nn_inputs=None,
             param_init=None,
-            trainable=None
+            trainable=None,
+            nn_config=None
     ):
         family = Formula.normalize_irf_family(family)
         if family is None or family in ['Terminal', 'DiracDelta']:
@@ -2033,7 +2124,7 @@ class IRFNode(object):
             self.fixed = fixed
             self.rangf = []
             self.nn_inputs = None
-            self.param_init={}
+            self.param_init = {}
         else:
             self.ops = [] if ops is None else ops[:]
             self.impulse = impulse
@@ -2064,6 +2155,10 @@ class IRFNode(object):
                 if param in trainable:
                     new_trainable.append(param)
             self.trainable = new_trainable
+
+        if nn_config is None:
+            nn_config = {}
+        self.nn_config = nn_config
 
         self.children = []
         self.p = p
@@ -2270,6 +2365,12 @@ class IRFNode(object):
                 params.append(', '.join(['%s=%s' % (x, self.param_init[x]) for x in self.param_init]))
             if set(self.trainable) != set(Formula.irf_params(self.family)):
                 params.append('trainable=%s' % self.trainable)
+            if self.family == 'NN':
+                for key in self.nn_config:
+                    val = self.nn_config[key]
+                    if isinstance(val, str) and val != 'None':
+                        val = '"%s"' % val
+                    params.append('%s=%s' % (key, val))
 
             if self.p is not None:
                 inner = self.p.irf_to_formula(rangf)
@@ -2945,7 +3046,8 @@ class IRFNode(object):
                     fixed=self.fixed,
                     rangf=self.rangf[:],
                     param_init=self.param_init,
-                    trainable=self.trainable
+                    trainable=self.trainable,
+                    nn_config=self.nn_config
                 )
                 self_transformed.append(self_pc)
                 if pointers is not None:
@@ -2962,7 +3064,8 @@ class IRFNode(object):
                         fixed=self.fixed,
                         rangf=self.rangf[:],
                         param_init=self.param_init,
-                        trainable=self.trainable
+                        trainable=self.trainable,
+                        nn_config=self.nn_config
                     )
                     self_transformed.append(self_pc)
                     if pointers is not None:
@@ -3002,7 +3105,8 @@ class IRFNode(object):
                     fixed=self.fixed,
                     rangf=self.rangf,
                     param_init=self.param_init,
-                    trainable=self.trainable
+                    trainable=self.trainable,
+                    nn_config=self.nn_config
                 )
                 c_new = self_pc.add_child(c)
                 if c_new != c:
@@ -3145,7 +3249,8 @@ class IRFNode(object):
                     rangf=self.rangf[:],
                     nn_inputs=self.nn_inputs,
                     param_init=self.param_init,
-                    trainable=self.trainable
+                    trainable=self.trainable,
+                    nn_config=self.nn_config
                 )
                 irf_expansion.append(new_irf)
 
@@ -3177,7 +3282,8 @@ class IRFNode(object):
                     rangf=self.rangf,
                     nn_inputs=self.nn_inputs,
                     param_init=self.param_init,
-                    trainable=self.trainable
+                    trainable=self.trainable,
+                    nn_config=self.nn_config
                 )
                 new_irf.add_child(c)
                 self_transformed.append(new_irf)
@@ -3355,6 +3461,9 @@ class IRFNode(object):
             s += '; rangf: ' + ','.join(self.rangf)
         if len(self.trainable) > 0:
             s +=  '; trainable params: ' + ', '.join(self.trainable)
+        if self.family == 'NN':
+            for key in self.nn_config:
+                s += '; %s: %s' % (key, self.nn_config[key])
         indent = '  '
         for c in self.children:
             s += '\n%s' % indent + str(c).replace('\n', '\n%s' % indent)
