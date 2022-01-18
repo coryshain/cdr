@@ -8671,6 +8671,8 @@ class CDRModel(object):
         self.set_predict_mode(True)
 
         names = self.impulse_names
+        has_rate = 'rate' in names
+        names = [x for x in names if not self.has_nn_irf or x != 'rate']
 
         manipulations = []
         is_non_dirac = []
@@ -8695,6 +8697,8 @@ class CDRModel(object):
             gf_y_refs = [{None: None}]
 
         names = [get_irf_name(x, self.irf_name_map) for x in names]
+        if has_rate and self.has_nn_irf:
+            names = [get_irf_name('rate', self.irf_name_map)] + names
         sort_key_dict = {x: i for i, x in enumerate(names)}
         def sort_key_fn(x, sort_key_dict=sort_key_dict):
             if x.name == 'IRF':
@@ -8739,7 +8743,7 @@ class CDRModel(object):
             for _response in vals:
                 for _dim_name in vals[_response]:
                     _vals = vals[_response][_dim_name]
-                    if not self.has_nn_irf:
+                    if not self.has_nn_irf or not has_rate:
                         _vals = _vals[..., 1:]
 
                     integrals = _vals.sum(axis=1) * step
@@ -9025,7 +9029,7 @@ class CDRModel(object):
                                 _lq = None if lq is None else lq[_response][_dim_name]
                                 _uq = None if uq is None else uq[_response][_dim_name]
 
-                                if not self.has_nn_irf:
+                                if not self.has_nn_irf or not has_rate:
                                     _plot_y = _plot_y[..., 1:]
                                     _lq = None if _lq is None else _lq[..., 1:]
                                     _uq = None if _uq is None else _uq[..., 1:]
