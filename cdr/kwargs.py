@@ -654,7 +654,8 @@ MODEL_INITIALIZATION_KWARGS = [
         'plot_legend',
         True,
         bool,
-        "Whether to include a legend in plots with multiple components."
+        "Whether to include a legend in plots with multiple components.",
+        aliases=['use_legend', 'legend']
     ),
     Kwarg(
         'generate_curvature_plots',

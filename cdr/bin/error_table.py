@@ -76,6 +76,7 @@ if __name__ == '__main__':
     ''')
     argparser.add_argument('config_paths', nargs='+', help='Path(s) to config files defining models to compare.')
     argparser.add_argument('-r', '--response', default=None, help='Name of response to evaluate.')
+    argparser.add_argument('-m', '--metric', default='err', help='Metric to report. One of ``["err", "loglik"]``.')
     argparser.add_argument('-t', '--task_names', nargs='+', default=None, help='Task names to use (should be in 1-1 alignment with ``config_paths``). If not provided, names will be inferred from config paths.')
     argparser.add_argument('-b', '--baselines',  nargs='+', default=None, help='Models to treat as baselines.')
     argparser.add_argument('-B', '--baseline_names',  nargs='+', default=None, help='Names of baselines (should be in 1-1 alignment with ``baselines``. If not provided, names will be inferred from baselines.')
@@ -84,6 +85,14 @@ if __name__ == '__main__':
     args = argparser.parse_args()
 
     response = args.response
+
+    if args.metric.lower() in ['err', 'mse', 'loss']:
+        metric = 'MSE'
+    elif args.metric.lower() in ['loglik', 'll', 'likelihood']:
+        metric = 'Loglik'
+    else:
+        raise ValueError('Unrecognized metric: %s.' % args.metric)
+
     if args.task_names is None:
         task_names = [os.path.splitext(os.path.basename(p))[0] for p in args.config_paths]
     else:
@@ -133,7 +142,7 @@ if __name__ == '__main__':
                                 with open(eval_path, 'r') as f:
                                     line = f.readline()
                                     while line:
-                                        if line.strip().startswith('MSE'):
+                                        if line.strip().startswith(metric):
                                             val = float(line.strip().split()[1])
                                             if _task_name not in results:
                                                 results[_task_name] = {}
@@ -160,7 +169,7 @@ if __name__ == '__main__':
                                 with open(eval_path, 'r') as f:
                                     line = f.readline()
                                     while line:
-                                        if line.strip().startswith('MSE'):
+                                        if line.strip().startswith(metric):
                                             val = float(line.strip().split()[1])
                                             if _task_name not in results:
                                                 results[_task_name] = {}

@@ -224,7 +224,8 @@ def layout_plot_definition_menu():
                                 options=[
                                     {'label': 'Reference varies with X', 'value': 'ref_varies_with_x'},
                                     {'label': 'Reference varies with Y', 'value': 'ref_varies_with_y'},
-                                    {'label': 'Pair manipulations', 'value': 'pair_manipulations'}
+                                    {'label': 'Pair manipulations', 'value': 'pair_manipulations'},
+                                    {'label': 'Include interactions', 'value': 'include_interactions'}
                                 ],
                                 value=['ref_varies_with_y', 'pair_manipulations']
                             )
@@ -725,6 +726,10 @@ def assign_callbacks(_app):
             pair_manipulations = True
         else:
             pair_manipulations = False
+        if 'include_interactions' in switches:
+            include_interactions = True
+        else:
+            include_interactions = False
 
         if n_samples is None:
             n_samples = N_SAMPLES
@@ -758,6 +763,7 @@ def assign_callbacks(_app):
                 t_delta_ref=t_delta_ref,
                 gf_y_ref=gf_y_ref,
                 pair_manipulations=pair_manipulations,
+                include_interactions=include_interactions,
                 level=level,
                 xmin=xmin,
                 xmax=xmax,
