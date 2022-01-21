@@ -1148,8 +1148,8 @@ NN_KWARGS = [
         'ff_dropout_rate',
         0.2,
         [float, None],
-        "Rate at which to drop neurons of feedforward encoder layers.",
-        aliases=['dropout', 'dropout_rate', 'input_projection']
+        "Rate at which to drop neurons of FF projection.",
+        aliases=['dropout', 'dropout_rate', 'input_projection', 'h_in_dropout_rate']
     ),
     Kwarg(
         'rnn_h_dropout_rate',
@@ -1162,13 +1162,6 @@ NN_KWARGS = [
         None,
         [float, None],
         "Rate at which to drop neurons of RNN cell state."
-    ),
-    Kwarg(
-        'ff_dropout_rate',
-        0.2,
-        [float, None],
-        "Rate at which to drop neurons of FF projection.",
-        aliases=['dropout', 'dropout_rate', 'h_in_dropout_rate']
     ),
     Kwarg(
         'h_rnn_dropout_rate',
