@@ -253,7 +253,7 @@ As in **R**, interaction terms are designated with ``:``, as in ``A:B``.
 And as in **R**, for convenience, two-way cross-product interactions can be designated with ``*`` (e.g. ``A*B`` is shorthand for ``A + B + A:B``) and multi-way cross-product interactions can be designated with power notation ``^<INT>`` or ``**<INT>`` (e.g. ``(A+B+C)^3`` equals ``A + B + C + A:B + B:C + A:C + A:B:C``).
 The following defines an impulse-level interaction between ``A`` and ``B`` underneath a ``Normal`` IRF kernel::
 
-    C(A:B, Normal()
+    C(A:B, Normal())
 
 The following defines a response-level interaction between Normal convolutions of ``A`` and ``B``::
 
@@ -587,6 +587,6 @@ Information about one response variable can inform inferences made about other r
 To model multiple response variables, simply enter them all on the left-hand side of the model formula, delimited by ``+``.
 For example, the following jointly models ``y1`` and ``y2`` as a function of ``A`` and ``B``::
 
-    y1 + y1 ~ C(A + B, Gamma())
+    y1 + y2 ~ C(A + B, Gamma())
 
 

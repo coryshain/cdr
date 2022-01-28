@@ -3279,7 +3279,7 @@ class CDRModel(object):
                                 use_bias = True
                             else:
                                 if nn_id in self.nn_irf_ids:
-                                    units = self.n_impulse
+                                    units = len([x for x in self.nn_irf_input_names[nn_id] if x != 'rate'])
                                 else:
                                     units = 1
                                 activation = rnn_projection_activation
@@ -3673,9 +3673,10 @@ class CDRModel(object):
                     if nonstationary:
                         irf_out.append(X_time)
                     if input_dependent_irf:
-                        irf_out.append(X_gathered) # IRF inputs, no rate
-                    if h_rnn is not None:
-                        irf_out.append(h_rnn)
+                        _X_gathered = X_gathered
+                        if h_rnn is not None:
+                            _X_gathered = _X_gathered + h_rnn
+                        irf_out.append(_X_gathered)  # IRF inputs, no rate
                     irf_out = tf.concat(irf_out, axis=2)
                     for l in range(n_layers_irf + 1):
                         irf_out = self.nn_irf_layers[nn_id][l](
