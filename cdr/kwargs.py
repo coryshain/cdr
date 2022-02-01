@@ -467,6 +467,7 @@ MODEL_INITIALIZATION_KWARGS = [
         None,
         [float, None],
         "How many moving standard deviations above the moving mean of the loss to use as a cut-off for stability (suppressing large losses). If ``None``, or ``0``, no loss filtering.",
+        default_value_cdrnn=1000
     ),
     Kwarg(
         'ema_decay',
@@ -557,7 +558,7 @@ MODEL_INITIALIZATION_KWARGS = [
         'inherit',
         [str, float, 'inherit'],
         "Scale of random effects regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**. Regularization only applies to random effects without variational priors.",
-        default_value_cdrnn=10.
+        default_value_cdrnn=1.
     ),
 
     # INCREMENTAL SAVING AND LOGGING
@@ -1074,7 +1075,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'layer_normalization_type',
-        'z',
+        None,
         [str, None],
         "Type of layer normalization, one of ``['z', 'length', None]``. If ``'z'``, classical z-transform-based normalization. If ``'length'``, normalize by the norm of the activation vector. If ``None``, no layer normalization. Incompatible with batch normalization.",
     ),
@@ -1088,7 +1089,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'nn_regularizer_scale',
-        1.,
+        5.,
         [str, float, 'inherit'],
         "Scale of weight regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
@@ -1120,13 +1121,13 @@ NN_KWARGS = [
     ),
     Kwarg(
         'context_regularizer_name',
-        'l1_regularizer',
+        'l1_l2_regularizer',
         [str, 'inherit', None],
         "Name of regularizer on contribution of context (RNN) to hidden state (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
     ),
     Kwarg(
         'context_regularizer_scale',
-        1.,
+        10.,
         [float, 'inherit'],
         "Scale of weight regularizer (ignored if ``context_regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
@@ -1146,7 +1147,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'ff_dropout_rate',
-        0.2,
+        0.1,
         [float, None],
         "Rate at which to drop neurons of FF projection.",
         aliases=['dropout', 'dropout_rate', 'input_projection', 'h_in_dropout_rate']
@@ -1165,7 +1166,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'h_rnn_dropout_rate',
-        0.2,
+        0.1,
         [float, None],
         "Rate at which to drop neurons of h_rnn.",
         aliases=['dropout', 'dropout_rate']
@@ -1179,7 +1180,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'irf_dropout_rate',
-        0.2,
+        0.1,
         [float, None],
         "Rate at which to drop neurons of IRF layers.",
         aliases=['dropout', 'dropout_rate']
