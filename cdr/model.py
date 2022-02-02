@@ -352,6 +352,8 @@ class CDRModel(object):
 
         # Collect stats for impulses
         stderr('Collecting key statistics...\n')
+
+        stderr('Impulse stats\n')
         impulse_means = {}
         impulse_sds = {}
         impulse_medians = {}
@@ -364,6 +366,7 @@ class CDRModel(object):
 
         impulse_df_ix = []
         for impulse in self.form.t.impulses(include_interactions=True):
+            print(impulse)
             name = impulse.name()
             is_interaction = type(impulse).__name__ == 'ImpulseInteraction'
             found = False
@@ -425,8 +428,6 @@ class CDRModel(object):
             impulse_df_ix.append(i)
         self.impulse_df_ix = impulse_df_ix
         impulse_df_ix_unique = set(self.impulse_df_ix)
-
-        stderr('Impulse stats\n')
 
         self.impulse_means = impulse_means
         self.impulse_sds = impulse_sds
