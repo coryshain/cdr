@@ -366,8 +366,8 @@ class CDRModel(object):
 
         impulse_df_ix = []
         for impulse in self.form.t.impulses(include_interactions=True):
-            print(impulse)
             name = impulse.name()
+            stderr(name + '\n')
             is_interaction = type(impulse).__name__ == 'ImpulseInteraction'
             found = False
             i = 0
