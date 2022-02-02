@@ -426,6 +426,8 @@ class CDRModel(object):
         self.impulse_df_ix = impulse_df_ix
         impulse_df_ix_unique = set(self.impulse_df_ix)
 
+        stderr('Impulse stats\n')
+
         self.impulse_means = impulse_means
         self.impulse_sds = impulse_sds
         self.impulse_medians = impulse_medians
@@ -482,6 +484,8 @@ class CDRModel(object):
         self.X_time_max = X_time.max()
         self.X_time_mean = X_time.mean()
         self.X_time_sd = X_time.std()
+
+        stderr('Response stats\n')
 
         self.Y_time_quantiles = np.quantile(Y_time, q)
         self.Y_time_mean = Y_time.mean()
