@@ -334,9 +334,10 @@ class CDRModel(object):
                     _response = __response
                 else:
                     _response = np.concatenate(_response, axis=0)[..., None]
-                _mean = _response.mean(axis=0)
-                _sd = _response.std(axis=0)
-                _quantiles = np.quantile(_response, q, axis=0)
+                _mean = np.nanmean(_response, axis=0)
+                _sd = np.nanstd(_response, axis=0)
+                assert np.all(_sd > 0), 'Some responses (%s) had no variance. SD vector: %s.' % (_response_name, _sd)
+                _quantiles = np.nanquantile(_response, q, axis=0)
             else:
                 _mean = 0.
                 _sd = 0.
@@ -350,10 +351,6 @@ class CDRModel(object):
         self.Y_train_sds = Y_train_sds
         self.Y_train_quantiles = Y_train_quantiles
 
-        # Collect stats for impulses
-        stderr('Collecting key statistics...\n')
-
-        stderr('Impulse stats\n')
         impulse_means = {}
         impulse_sds = {}
         impulse_medians = {}
@@ -367,7 +364,6 @@ class CDRModel(object):
         impulse_df_ix = []
         for impulse in self.form.t.impulses(include_interactions=True):
             name = impulse.name()
-            stderr(name + '\n')
             is_interaction = type(impulse).__name__ == 'ImpulseInteraction'
             found = False
             i = 0
@@ -386,15 +382,16 @@ class CDRModel(object):
                 for i, df in enumerate(X + Y):
                     if name in df and not name.lower() == 'rate':
                         column = df[name].values
-                        impulse_means[name] = column.mean()
-                        impulse_sds[name] = column.std()
-                        quantiles = np.quantile(column, q)
+                        impulse_means[name] = np.nanmean(column)
+                        impulse_sds[name] = np.nanstd(column)
+                        assert impulse_sds[name] > 0, 'Predictor %s had no variance' % name
+                        quantiles = np.nanquantile(column, q)
                         impulse_quantiles[name] = quantiles
-                        impulse_medians[name] = np.quantile(column, 0.5)
-                        impulse_lq[name] = np.quantile(column, 0.1)
-                        impulse_uq[name] = np.quantile(column, 0.9)
-                        impulse_min[name] = column.min()
-                        impulse_max[name] = column.max()
+                        impulse_medians[name] = np.nanquantile(column, 0.5)
+                        impulse_lq[name] = np.nanquantile(column, 0.1)
+                        impulse_uq[name] = np.nanquantile(column, 0.9)
+                        impulse_min[name] = np.nanmin(column)
+                        impulse_max[name] = np.nanmax(column)
 
                         if self._vector_is_indicator(column):
                             indicators.add(name)
@@ -409,16 +406,17 @@ class CDRModel(object):
                                 found = False
                                 break
                         if found:
-                            column = df[impulse_names].product(axis=1)
-                            impulse_means[name] = column.mean()
-                            impulse_sds[name] = column.std()
-                            quantiles = np.quantile(column, q)
+                            column = df[impulse_names].product(axis=1).values
+                            impulse_means[name] = np.nanmean(column)
+                            impulse_sds[name] = np.nanstd(column)
+                            assert impulse_sds[name] > 0, 'Predictor %s had no variance' % name
+                            quantiles = np.nanquantile(column, q)
                             impulse_quantiles[name] = quantiles
-                            impulse_medians[name] = np.quantile(column, 0.5)
-                            impulse_lq[name] = np.quantile(column, 0.1)
-                            impulse_uq[name] = np.quantile(column, 0.9)
-                            impulse_min[name] = column.min()
-                            impulse_max[name] = column.max()
+                            impulse_medians[name] = np.nanquantile(column, 0.5)
+                            impulse_lq[name] = np.nanquantile(column, 0.1)
+                            impulse_uq[name] = np.nanquantile(column, 0.9)
+                            impulse_min[name] = np.nanmin(column)
+                            impulse_max[name] = np.nanmax(column)
 
                             if self._vector_is_indicator(column):
                                 indicators.add(name)
@@ -486,8 +484,6 @@ class CDRModel(object):
         self.X_time_mean = X_time.mean()
         self.X_time_sd = X_time.std()
 
-        stderr('Response stats\n')
-
         self.Y_time_quantiles = np.quantile(Y_time, q)
         self.Y_time_mean = Y_time.mean()
         self.Y_time_sd = Y_time.std()
@@ -532,7 +528,6 @@ class CDRModel(object):
         tf.keras.backend.set_session(self.session)
 
         if build:
-            stderr('Initializing metadata...\n')
             self._initialize_metadata()
             stderr('Building model...\n')
             self.build()
@@ -4423,8 +4418,12 @@ class CDRModel(object):
                         self.prediction[response] = prediction * Y_mask
 
                     ll = response_dist.log_prob(Y)
-                    # Mask out likelihoods of predictions for missing response variables
-                    ll *= Y_mask
+                    # Mask out likelihoods of predictions for missing response variables.
+                    # Use "nested where" trick to avoid NaN gradients in TF.
+                    zeros = tf.zeros_like(ll)
+                    sel = tf.cast(Y_mask, tf.bool)
+                    ll_safe = tf.where(sel, ll, zeros)
+                    ll *= tf.where(sel, ll_safe, zeros)
                     self.ll_by_var[response] = ll
 
                     # Define EMA over predictive distribution
@@ -5537,7 +5536,7 @@ class CDRModel(object):
 
                 return slices, shapes
 
-    def build(self, outdir=None, restore=True, report_time=True):
+    def build(self, outdir=None, restore=True, report_time=False):
         """
         Construct the CDR(NN) network and initialize/load model parameters.
         ``build()`` is called by default at initialization and unpickling, so users generally do not need to call this method.
@@ -5560,100 +5559,119 @@ class CDRModel(object):
                 t0 = pytime.time()
                 self._initialize_inputs()
                 dur = pytime.time() - t0
-                stderr('_initialize_inputs took %.2fs\n' % dur)
+                if report_time:
+                    stderr('_initialize_inputs took %.2fs\n' % dur)
 
                 t0 = pytime.time()
                 self._initialize_base_params()
                 dur = pytime.time() - t0
-                stderr('_initialize_base_params took %.2fs\n' % dur)
+                if report_time:
+                    stderr('_initialize_base_params took %.2fs\n' % dur)
 
                 for nn_id in self.nn_impulse_ids:
                     t0 = pytime.time()
                     self._initialize_nn(nn_id)
                     dur = pytime.time() - t0
-                    stderr('_initialize_nn for %s took %.2fs\n' % (nn_id, dur))
+                    if report_time:
+                        stderr('_initialize_nn for %s took %.2fs\n' % (nn_id, dur))
 
                     t0 = pytime.time()
                     self._compile_nn(nn_id)
                     dur = pytime.time() - t0
-                    stderr('_compile_nn for %s took %.2fs\n' % (nn_id, dur))
+                    if report_time:
+                        stderr('_compile_nn for %s took %.2fs\n' % (nn_id, dur))
 
                 t0 = pytime.time()
                 self._concat_nn_impulses()
                 dur = pytime.time() - t0
-                stderr('_concat_nn_impulses took %.2fs\n' % dur)
+                if report_time:
+                    stderr('_concat_nn_impulses took %.2fs\n' % dur)
 
                 t0 = pytime.time()
                 self._compile_intercepts()
                 dur = pytime.time() - t0
-                stderr('_compile_intercepts took %.2fs\n' % dur)
+                if report_time:
+                    stderr('_compile_intercepts took %.2fs\n' % dur)
 
                 t0 = pytime.time()
                 self._compile_coefficients()
                 dur = pytime.time() - t0
-                stderr('_compile_coefficients took %.2fs\n' % dur)
+                if report_time:
+                    stderr('_compile_coefficients took %.2fs\n' % dur)
 
                 t0 = pytime.time()
                 self._compile_interactions()
                 dur = pytime.time() - t0
-                stderr('_compile_interactions took %.2fs\n' % dur)
+                if report_time:
+                    stderr('_compile_interactions took %.2fs\n' % dur)
 
                 t0 = pytime.time()
                 self._compile_irf_params()
                 dur = pytime.time() - t0
-                stderr('_compile_irf_params took %.2fs\n' % dur)
+                if report_time:
+                    stderr('_compile_irf_params took %.2fs\n' % dur)
 
                 for nn_id in self.nn_irf_ids:
                     t0 = pytime.time()
                     self._initialize_nn(nn_id)
                     dur = pytime.time() - t0
-                    stderr('_initialize_nn for %s took %.2fs\n' % (nn_id, dur))
+                    if report_time:
+                        stderr('_initialize_nn for %s took %.2fs\n' % (nn_id, dur))
 
                     t0 = pytime.time()
                     self._compile_nn(nn_id)
                     dur = pytime.time() - t0
-                    stderr('_compile_nn for %s took %.2fs\n' % (nn_id, dur))
+                    if report_time:
+                        stderr('_compile_nn for %s took %.2fs\n' % (nn_id, dur))
 
                 t0 = pytime.time()
                 self._collect_layerwise_ops()
                 dur = pytime.time() - t0
-                stderr('_collect_layerwise_ops took %.2fs\n' % dur)
+                if report_time:
+                    stderr('_collect_layerwise_ops took %.2fs\n' % dur)
 
                 t0 = pytime.time()
                 self._initialize_irf_lambdas()
                 dur = pytime.time() - t0
-                stderr('_initialize_irf_lambdas took %.2fs\n' % dur)
+                if report_time:
+                    stderr('_initialize_irf_lambdas took %.2fs\n' % dur)
 
                 for response in self.response_names:
                     t0 = pytime.time()
                     self._initialize_irfs(self.t, response)
-                    stderr('_initialize_irfs for %s took %.2fs\n' % (response, dur))
                     dur = pytime.time() - t0
+                    if report_time:
+                        stderr('_initialize_irfs for %s took %.2fs\n' % (response, dur))
 
                 t0 = pytime.time()
                 self._compile_irf_impulses()
                 dur = pytime.time() - t0
-                stderr('_compile_irf_impulses took %.2fs\n' % dur)
+                if report_time:
+                    stderr('_compile_irf_impulses took %.2fs\n' % dur)
 
                 t0 = pytime.time()
                 self._compile_X_weighted_by_irf()
                 dur = pytime.time() - t0
-                stderr('_compile_X_weighted_by_irf took %.2fs\n' % dur)
+                if report_time:
+                    stderr('_compile_X_weighted_by_irf took %.2fs\n' % dur)
 
                 t0 = pytime.time()
                 self._initialize_predictive_distribution()
                 dur = pytime.time() - t0
-                stderr('_initialize_predictive_distribution took %.2fs\n' % dur)
+                if report_time:
+                    stderr('_initialize_predictive_distribution took %.2fs\n' % dur)
 
                 t0 = pytime.time()
                 self._initialize_objective()
                 dur = pytime.time() - t0
-                stderr('_initialize_objective took %.2fs\n' % dur)
+                if report_time:
+                    stderr('_initialize_objective took %.2fs\n' % dur)
 
                 t0 = pytime.time()
                 self._initialize_parameter_tables()
                 dur = pytime.time() - t0
-                stderr('_initialize_parameter_tables took %.2fs\n' % dur)
+                if report_time:
+                    stderr('_initialize_parameter_tables took %.2fs\n' % dur)
 
                 t0 = pytime.time()
                 self._initialize_logging()
@@ -5663,7 +5681,8 @@ class CDRModel(object):
                 t0 = pytime.time()
                 self._initialize_ema()
                 dur = pytime.time() - t0
-                stderr('_initialize_ema took %.2fs\n' % dur)
+                if report_time:
+                    stderr('_initialize_ema took %.2fs\n' % dur)
 
                 self.report_uninitialized = tf.report_uninitialized_variables(
                     var_list=None
@@ -5672,7 +5691,8 @@ class CDRModel(object):
                 t0 = pytime.time()
                 self._initialize_saver()
                 dur = pytime.time() - t0
-                stderr('_initialize_saver took %.2fs\n' % dur)
+                if report_time:
+                    stderr('_initialize_saver took %.2fs\n' % dur)
 
                 self.load(restore=restore)
 
