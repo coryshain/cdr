@@ -5529,7 +5529,7 @@ class CDRModel(object):
 
                 return slices, shapes
 
-    def build(self, outdir=None, restore=True):
+    def build(self, outdir=None, restore=True, report_time=True):
         """
         Construct the CDR(NN) network and initialize/load model parameters.
         ``build()`` is called by default at initialization and unpickling, so users generally do not need to call this method.
@@ -5537,6 +5537,7 @@ class CDRModel(object):
 
         :param outdir: Output directory. If ``None``, inferred.
         :param restore: Restore saved network parameters if model checkpoint exists in the output directory.
+        :param report_time: Whether to report the time taken for each initialization step.
         :return: ``None``
         """
 
@@ -5548,35 +5549,123 @@ class CDRModel(object):
 
         with self.session.as_default():
             with self.session.graph.as_default():
+                t0 = pytime.time()
                 self._initialize_inputs()
+                dur = pytime.time() - t0
+                stderr('_initialize_inputs took %.2fs' % dur)
+
+                t0 = pytime.time()
                 self._initialize_base_params()
+                dur = pytime.time() - t0
+                stderr('_initialize_base_params took %.2fs' % dur)
+
                 for nn_id in self.nn_impulse_ids:
+                    t0 = pytime.time()
                     self._initialize_nn(nn_id)
+                    dur = pytime.time() - t0
+                    stderr('_initialize_nn for %s took %.2fs' % (nn_id, dur))
+
+                    t0 = pytime.time()
                     self._compile_nn(nn_id)
+                    dur = pytime.time() - t0
+                    stderr('_compile_nn for %s took %.2fs' % (nn_id, dur))
+
+                t0 = pytime.time()
                 self._concat_nn_impulses()
+                dur = pytime.time() - t0
+                stderr('_concat_nn_impulses took %.2fs' % dur)
+
+                t0 = pytime.time()
                 self._compile_intercepts()
+                dur = pytime.time() - t0
+                stderr('_compile_intercepts took %.2fs' % dur)
+
+                t0 = pytime.time()
                 self._compile_coefficients()
+                dur = pytime.time() - t0
+                stderr('_compile_coefficients took %.2fs' % dur)
+
+                t0 = pytime.time()
                 self._compile_interactions()
+                dur = pytime.time() - t0
+                stderr('_compile_interactions took %.2fs' % dur)
+
+                t0 = pytime.time()
                 self._compile_irf_params()
+                dur = pytime.time() - t0
+                stderr('_compile_irf_params took %.2fs' % dur)
+
                 for nn_id in self.nn_irf_ids:
+                    t0 = pytime.time()
                     self._initialize_nn(nn_id)
+                    dur = pytime.time() - t0
+                    stderr('_initialize_nn for %s took %.2fs' % (nn_id, dur))
+
+                    t0 = pytime.time()
                     self._compile_nn(nn_id)
+                    dur = pytime.time() - t0
+                    stderr('_compile_nn for %s took %.2fs' % (nn_id, dur))
+
+                t0 = pytime.time()
                 self._collect_layerwise_ops()
+                dur = pytime.time() - t0
+                stderr('_collect_layerwise_ops took %.2fs' % dur)
+
+                t0 = pytime.time()
                 self._initialize_irf_lambdas()
+                dur = pytime.time() - t0
+                stderr('_initialize_irf_lambdas took %.2fs' % dur)
+
                 for response in self.response_names:
+                    t0 = pytime.time()
                     self._initialize_irfs(self.t, response)
+                    stderr('_initialize_irfs for %s took %.2fs' % (response, dur))
+                    dur = pytime.time() - t0
+
+                t0 = pytime.time()
                 self._compile_irf_impulses()
+                dur = pytime.time() - t0
+                stderr('_compile_irf_impulses took %.2fs' % dur)
+
+                t0 = pytime.time()
                 self._compile_X_weighted_by_irf()
+                dur = pytime.time() - t0
+                stderr('_compile_X_weighted_by_irf took %.2fs' % dur)
+
+                t0 = pytime.time()
                 self._initialize_predictive_distribution()
+                dur = pytime.time() - t0
+                stderr('_initialize_predictive_distribution took %.2fs' % dur)
+
+                t0 = pytime.time()
                 self._initialize_objective()
+                dur = pytime.time() - t0
+                stderr('_initialize_objective took %.2fs' % dur)
+
+                t0 = pytime.time()
                 self._initialize_parameter_tables()
+                dur = pytime.time() - t0
+                stderr('_initialize_parameter_tables took %.2fs' % dur)
+
+                t0 = pytime.time()
                 self._initialize_logging()
+                dur = pytime.time() - t0
+                stderr('_initialize_logging took %.2fs' % dur)
+
+                t0 = pytime.time()
                 self._initialize_ema()
+                dur = pytime.time() - t0
+                stderr('_initialize_ema took %.2fs' % dur)
 
                 self.report_uninitialized = tf.report_uninitialized_variables(
                     var_list=None
                 )
+
+                t0 = pytime.time()
                 self._initialize_saver()
+                dur = pytime.time() - t0
+                stderr('_initialize_saver took %.2fs' % dur)
+
                 self.load(restore=restore)
 
                 self._initialize_convergence_checking()
