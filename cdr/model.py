@@ -4419,11 +4419,9 @@ class CDRModel(object):
 
                     ll = response_dist.log_prob(Y)
                     # Mask out likelihoods of predictions for missing response variables.
-                    # Use "nested where" trick to avoid NaN gradients in TF.
                     zeros = tf.zeros_like(ll)
                     sel = tf.cast(Y_mask, tf.bool)
-                    ll_safe = tf.where(sel, ll, zeros)
-                    ll *= tf.where(sel, ll_safe, zeros)
+                    ll = tf.where(sel, ll, zeros)
                     self.ll_by_var[response] = ll
 
                     # Define EMA over predictive distribution
