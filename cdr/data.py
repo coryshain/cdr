@@ -181,9 +181,11 @@ def filter_invalid_responses(Y, dv, crossval_factor=None, crossval_fold=None):
 
     select_Y_valid = []
     for i, _Y in enumerate(Y):
-        _select_Y_valid = np.ones(len(_Y), dtype=bool)
+        _select_Y_valid_cv = np.ones(len(_Y), dtype=bool)
         if crossval_factor:
-            _select_Y_valid &= _Y[crossval_factor].isin(crossval_fold)
+            _select_Y_valid_cv &= _Y[crossval_factor].isin(crossval_fold)
+
+        _select_Y_valid_dv = np.zeros(len(_Y), dtype=bool)
         for _dv in dv:
             if _dv in _Y:
                 dtype = _Y[_dv].dtype
@@ -192,7 +194,10 @@ def filter_invalid_responses(Y, dv, crossval_factor=None, crossval_fold=None):
                 else:
                     is_numeric = False
                 if is_numeric:
-                    _select_Y_valid &= np.isfinite(_Y[_dv])
+                    _select_Y_valid_dv |= np.isfinite(_Y[_dv])
+
+        _select_Y_valid = _select_Y_valid_cv * _select_Y_valid_dv
+
         select_Y_valid.append(_select_Y_valid)
         Y[i] = _Y[_select_Y_valid]
 
@@ -400,6 +405,13 @@ def build_CDR_response_data(
     if X_in_Y_out is not None:
         X_in_Y_out = pd.concat(X_in_Y_out, axis=0)
 
+    # Find and mask non-finite response values
+    Y_finite = np.isfinite(Y_out)
+    Y_mask_out *= Y_finite
+
+    # Fill na to prevent non-finite values from entering the computation graph
+    Y_out = np.nan_to_num(Y_out)
+
     return Y_out, first_obs_out, last_obs_out, Y_time_out, Y_mask_out, Y_gf_out, X_in_Y_out
 
 
@@ -496,6 +508,13 @@ def build_CDR_impulse_data(
     X_out = X_out[:,:,ix]
     X_time_out = X_time_out[:,:,ix]
     X_mask_out = X_mask_out[:,:,ix]
+
+    # Find and mask non-finite predictor values
+    X_finite = np.isfinite(X_out)
+    X_mask_out *= X_finite
+
+    # Fill na to prevent non-finite values from entering the computation graph
+    X_out = np.nan_to_num(X_out)
 
     return X_out, X_time_out, X_mask_out
 
