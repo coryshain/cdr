@@ -7552,11 +7552,14 @@ class CDRModel(object):
                         err_col_name = error = __preds = _y = None
 
                     _ll = log_lik[_response][ix]
-                    if sel:
+                    if sel is not None:
                         __preds = __preds[sel]
                         __preds = pd.Series(__preds, index=index)
                         _ll = _ll[sel]
                         _ll = pd.Series(_ll, index=index)
+                        if err_col_name is not None and error is not None:
+                            error = error[sel]
+                            error = pd.Series(error, index=index)
                     _ll_summed = _ll.sum(axis=0)
                     metrics['log_lik'][_response][ix] = _ll_summed
                     metrics['full_log_lik'] += _ll_summed
