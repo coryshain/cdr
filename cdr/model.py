@@ -5679,7 +5679,8 @@ class CDRModel(object):
                 t0 = pytime.time()
                 self._initialize_logging()
                 dur = pytime.time() - t0
-                stderr('_initialize_logging took %.2fs\n' % dur)
+                if report_time:
+                    stderr('_initialize_logging took %.2fs\n' % dur)
 
                 t0 = pytime.time()
                 self._initialize_ema()

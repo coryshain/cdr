@@ -409,7 +409,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'use_safe_optimizer',
-        True,
+        False,
         bool,
         'Stabilize training by preventing the optimizer from applying updates involving NaN gradients (affected weights will remain unchanged after the update). Incurs slight additional computational overhead and can lead to bias in the training process.'
     ),
