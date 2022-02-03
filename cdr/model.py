@@ -7068,8 +7068,6 @@ class CDRModel(object):
                                 self.sum_outputs_along_T: sum_outputs_along_T,
                                 self.sum_outputs_along_K: sum_outputs_along_K
                             }
-                            if Y_mask is not None:
-                                fd[self.Y_mask]: _Y_mask
                             if return_loglik:
                                 fd[self.Y] = _Y
                         else:
@@ -7078,13 +7076,12 @@ class CDRModel(object):
                                 self.X_time: X_time[i:i + B],
                                 self.X_mask: X_mask[i:i + B],
                                 self.Y_time: Y_time[i:i + B],
+                                self.Y_mask: Y_mask[i:i + B],
                                 self.Y_gf: None if Y_gf is None else Y_gf[i:i + B],
                                 self.training: not self.predict_mode,
                                 self.sum_outputs_along_T: sum_outputs_along_T,
                                 self.sum_outputs_along_K: sum_outputs_along_K
                             }
-                            if Y_mask is not None:
-                                fd[self.Y_mask]: Y_mask[i:i + B]
                             if return_loglik:
                                 fd[self.Y] = Y[i:i + B]
                         _out = self.run_predict_op(
@@ -7482,8 +7479,9 @@ class CDRModel(object):
                     _Y = Y[ix]
                     if _response in _Y:
                         _y = _Y[_response]
-
-                        _preds = preds[_response][ix]
+                        sel = np.isfinite(_y)
+                        _preds = preds[_response][ix][sel]
+                        _y = _y[sel]
 
                         if self.is_binary(_response):
                             baseline = np.ones((len(_y),))

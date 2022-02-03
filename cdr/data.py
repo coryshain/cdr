@@ -339,19 +339,29 @@ def build_CDR_response_data(
                 for response in responses:
                     _Y = Y[i]
                     if response in _Y:
-                        _Y_mask.append(np.ones(len(_Y)))
+                        _Y_mask.append(np.isfinite(_Y[response]))
                     else:
                         _Y_mask.append(np.zeros(len(_Y)))
                 _Y_mask = np.stack(_Y_mask, axis=1)
         else:
-            _Y_mask = []
-            for j, response in enumerate(responses):
-                if i in response_to_df_ix[response]:
-                    _Y_mask.append(1.)
-                else:
-                    _Y_mask.append(0.)
-            # Tile
-            _Y_mask = np.array(_Y_mask)[None, ...] * np.ones((len(_Y_time), 1))
+            if Y is None:
+                _Y_mask = []
+                for response in responses:
+                    if i in response_to_df_ix[response]:
+                        _Y_mask.append(1.)
+                    else:
+                        _Y_mask.append(0.)
+                # Tile
+                _Y_mask = np.array(_Y_mask)[None, ...] * np.ones((len(_Y_time), 1))
+            else:
+                _Y_mask = []
+                for response in responses:
+                    _Y = Y[i]
+                    if i in response_to_df_ix[response]:
+                        _Y_mask.append(np.isfinite(_Y[response]))
+                    else:
+                        _Y_mask.append(np.zeros(len(_Y)))
+                _Y_mask = np.stack(_Y_mask, axis=1)
         Y_mask_out.append(_Y_mask)
 
         # Y_gf
@@ -400,7 +410,7 @@ def build_CDR_response_data(
     for i, _last_obs in enumerate(last_obs_out):
         last_obs_out[i] = np.concatenate(_last_obs, axis=0)
     Y_time_out = np.concatenate(Y_time_out, axis=0)
-    Y_mask_out = np.concatenate(Y_mask_out, axis=0)
+    Y_mask_out = np.concatenate(Y_mask_out, axis=0).astype(float)
     if Y_gf_out is not None:
         Y_gf_out = np.concatenate(Y_gf_out, axis=0)
     if X_in_Y_out is not None:
