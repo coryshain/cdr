@@ -566,15 +566,13 @@ MODEL_INITIALIZATION_KWARGS = [
         'save_freq',
         100,
         int,
-        "Frequency (in iterations) with which to save model checkpoints.",
-        default_value_cdrnn=10
+        "Frequency (in iterations) with which to save model checkpoints."
     ),
     Kwarg(
         'log_freq',
-        100,
+        1,
         int,
-        "Frequency (in iterations) with which to log model params to Tensorboard.",
-        default_value_cdrnn=1
+        "Frequency (in iterations) with which to log model params to Tensorboard."
     ),
     Kwarg(
         'log_random',
@@ -662,15 +660,13 @@ MODEL_INITIALIZATION_KWARGS = [
         'generate_curvature_plots',
         False,
         bool,
-        "Whether to plot IRF curvature at time **reference_time**.",
-        default_value_cdrnn=True
+        "Whether to plot IRF curvature at time **reference_time**."
     ),
     Kwarg(
         'generate_irf_surface_plots',
         False,
         bool,
-        "Whether to plot IRF surfaces.",
-        default_value_cdrnn=True
+        "Whether to plot IRF surfaces."
     ),
     Kwarg(
         'generate_interaction_surface_plots',
@@ -688,8 +684,7 @@ MODEL_INITIALIZATION_KWARGS = [
         'generate_nonstationarity_surface_plots',
         False,
         bool,
-        "Whether to plot IRF surfaces showing non-stationarity in the response.",
-        default_value_cdrnn=True
+        "Whether to plot IRF surfaces showing non-stationarity in the response."
     ),
     Kwarg(
         'cmap',
