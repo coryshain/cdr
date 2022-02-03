@@ -7477,9 +7477,11 @@ class CDRModel(object):
 
                 if ix in file_ix:
                     _Y = Y[ix]
+                    sel = None
                     if _response in _Y:
                         _y = _Y[_response]
                         sel = np.isfinite(_y)
+                        index = _y.index[sel]
                         _preds = preds[_response][ix][sel]
                         _y = _y[sel]
 
@@ -7550,6 +7552,11 @@ class CDRModel(object):
                         err_col_name = error = __preds = _y = None
 
                     _ll = log_lik[_response][ix]
+                    if sel:
+                        __preds = __preds[sel]
+                        __preds = pd.Series(__preds, index=index)
+                        _ll = _ll[sel]
+                        _ll = pd.Series(_ll, index=index)
                     _ll_summed = _ll.sum(axis=0)
                     metrics['log_lik'][_response][ix] = _ll_summed
                     metrics['full_log_lik'] += _ll_summed
