@@ -59,10 +59,15 @@ def get_clipped_optimizer_class(base_optimizer_class, session=None):
                     self.max_global_norm = max_global_norm
 
                 def apply_gradients(self, grads_and_vars, **kwargs):
+                    grads_and_vars_tmp = grads_and_vars
+                    grads_and_vars = []
+                    for g, v in grads_and_vars_tmp:
+                        g = tf.where(tf.is_finite(g), g, tf.zeros_like(g))
+                        grads_and_vars.append((g, v))
                     if self.max_global_norm is None:
                         return grads_and_vars
                     grads, _ = tf.clip_by_global_norm([g for g, _ in grads_and_vars], self.max_global_norm)
-                    with tf.control_dependencies([tf_check_numerics(g, 'Numerics check failed in gradient') for g in grads if g is not None]):
+                    with tf.control_dependencies([tf_check_numerics(g, 'Numerics check failed in gradient to variable %s' % v.name) for g, v in grads_and_vars if g is not None]):
                         vars = [v for _, v in grads_and_vars]
                     grads_and_vars = []
                     for grad, var in zip(grads, vars):
