@@ -4420,7 +4420,8 @@ class CDRModel(object):
                     ll = response_dist.log_prob(Y)
                     # Mask out likelihoods of predictions for missing response variables.
                     zeros = tf.zeros_like(ll)
-                    sel = tf.cast(Y_mask, tf.bool)
+                    isfinite = tf.is_finite(ll)
+                    sel = tf.logical_and(tf.cast(Y_mask, tf.bool), tf.cast(isfinite, tf.bool))
                     ll = tf.where(sel, ll, zeros)
                     self.ll_by_var[response] = ll
 
