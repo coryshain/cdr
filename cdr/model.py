@@ -7567,7 +7567,7 @@ class CDRModel(object):
                         else:
                             name_base = '%s%s' % (sn(_response), partition_str)
 
-                        df = {}
+                        df = pd.DataFrame()
                         if err_col_name is not None and error is not None:
                             df[err_col_name] = error
                         if __preds is not None:
@@ -7575,7 +7575,6 @@ class CDRModel(object):
                         if _y is not None:
                             df['CDRobs'] = _y
                         df['CDRloglik'] = np.squeeze(_ll)
-                        df = pd.DataFrame(df)
 
                         if extra_cols:
                             df = pd.concat([_Y.reset_index(drop=True), df.reset_index(drop=True)], axis=1)
