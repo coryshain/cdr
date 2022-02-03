@@ -62,7 +62,7 @@ def get_clipped_optimizer_class(base_optimizer_class, session=None):
                     grads_and_vars_tmp = grads_and_vars
                     grads_and_vars = []
                     for g, v in grads_and_vars_tmp:
-                        g = tf.where(tf.is_finite(g), g, tf.zeros_like(g))
+                        g = tf.where(tf.logical_not(tf.is_nan(g)), g, tf.zeros_like(g))
                         grads_and_vars.append((g, v))
                     if self.max_global_norm is None:
                         return grads_and_vars
