@@ -4419,7 +4419,7 @@ class CDRModel(object):
 
                     # Get elementwise log likelihood
                     ll = response_dist.log_prob(Y)
-                    
+
                     # Mask out likelihoods of predictions for missing response variables.
                     zeros = tf.zeros_like(ll)
                     sel = tf.cast(Y_mask, tf.bool)
@@ -7068,9 +7068,10 @@ class CDRModel(object):
                                 self.sum_outputs_along_T: sum_outputs_along_T,
                                 self.sum_outputs_along_K: sum_outputs_along_K
                             }
+                            if Y_mask is not None:
+                                fd[self.Y_mask]: _Y_mask
                             if return_loglik:
                                 fd[self.Y] = _Y
-                                fd[self.Y_mask]: _Y_mask
                         else:
                             fd = {
                                 self.X: X[i:i + B],
