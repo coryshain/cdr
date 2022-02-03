@@ -4417,11 +4417,12 @@ class CDRModel(object):
                     else: # Treat as continuous regression, use the first (location) parameter
                         self.prediction[response] = prediction * Y_mask
 
+                    # Get elementwise log likelihood
                     ll = response_dist.log_prob(Y)
+                    
                     # Mask out likelihoods of predictions for missing response variables.
                     zeros = tf.zeros_like(ll)
-                    isfinite = tf.is_finite(ll)
-                    sel = tf.logical_and(tf.cast(Y_mask, tf.bool), tf.cast(isfinite, tf.bool))
+                    sel = tf.cast(Y_mask, tf.bool)
                     ll = tf.where(sel, ll, zeros)
                     self.ll_by_var[response] = ll
 
@@ -7081,9 +7082,10 @@ class CDRModel(object):
                                 self.sum_outputs_along_T: sum_outputs_along_T,
                                 self.sum_outputs_along_K: sum_outputs_along_K
                             }
+                            if Y_mask is not None:
+                                fd[self.Y_mask]: Y_mask[i:i + B]
                             if return_loglik:
                                 fd[self.Y] = Y[i:i + B]
-                                fd[self.Y_mask]: Y_mask[i:i + B]
                         _out = self.run_predict_op(
                             fd,
                             responses=responses,
