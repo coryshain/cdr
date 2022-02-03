@@ -4535,6 +4535,7 @@ class CDRModel(object):
     def _initialize_optimizer(self):
         name = self.optim_name.lower()
         use_jtps = self.use_jtps
+        safe_mode = self.use_safe_optimizer
 
         with self.session.as_default():
             with self.session.graph.as_default():
@@ -4601,6 +4602,9 @@ class CDRModel(object):
                 if use_jtps:
                     optimizer_class = get_JTPS_optimizer_class(optimizer_class, session=self.session)
                     optimizer_kwargs['meta_learning_rate'] = 1
+
+                if safe_mode:
+                    optimizer_class = get_safe_optimizer_class(optimizer_class, session=self.session)
 
                 optim = optimizer_class(*optimizer_args, **optimizer_kwargs)
 

@@ -408,6 +408,12 @@ MODEL_INITIALIZATION_KWARGS = [
         'Maximum allowable value for the global norm of the gradient, which will be clipped as needed. If ``None``, no gradient clipping.'
     ),
     Kwarg(
+        'use_safe_optimizer',
+        True,
+        bool,
+        'Stabilize training by preventing the optimizer from applying updates involving NaN gradients (affected weights will remain unchanged after the update). Incurs slight additional computational overhead and can lead to bias in the training process.'
+    ),
+    Kwarg(
         'epsilon',
         1e-5,
         float,
