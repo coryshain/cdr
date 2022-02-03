@@ -7555,7 +7555,7 @@ class CDRModel(object):
                     if sel is not None:
                         __preds = pd.Series(__preds, index=index)
                         _ll = _ll[sel]
-                        _ll = pd.Series(_ll, index=index)
+                        _ll = pd.Series(np.squeeze(_ll), index=index)
                         if err_col_name is not None and error is not None:
                             error = pd.Series(error, index=index)
                     _ll_summed = _ll.sum(axis=0)
@@ -7575,7 +7575,7 @@ class CDRModel(object):
                             df['CDRpreds'] = __preds
                         if _y is not None:
                             df['CDRobs'] = _y
-                        df['CDRloglik'] = np.squeeze(_ll)
+                        df['CDRloglik'] = _ll
 
                         if extra_cols:
                             df = pd.concat([_Y.reset_index(drop=True), df.reset_index(drop=True)], axis=1)
