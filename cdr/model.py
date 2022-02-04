@@ -6685,6 +6685,7 @@ class CDRModel(object):
                     # Counter for number of times an attempted iteration has failed due to outlier
                     # losses or failed numerics checks
                     n_failed = 0
+                    failed = False
 
                     while not self.has_converged() and self.global_step.eval(session=self.session) < n_iter:
                         if n_failed:
@@ -6821,6 +6822,8 @@ class CDRModel(object):
                         if self.check_convergence:
                             stderr('Convergence:    %.2f%%\n' % (100 * self.session.run(self.proportion_converged) / self.convergence_alpha))
                         stderr('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
+
+                    assert not failed, 'Training loop completed without passing stability checks. Model training has failed.'
 
                     self.save()
 
