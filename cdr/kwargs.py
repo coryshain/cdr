@@ -470,7 +470,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'filter_outlier_losses',
-        None,
+        False,
         [float, bool, None],
         "Whether outlier large losses are filtered out while training continues. If ``False``, outlier losses trigger a restart from the most recent save point. Ignored unless *loss_cutoff_n_sds* is specified. Using this option avoids restarts, but can lead to bias if training instances are systematically dropped. If ``None``, ``False``, or ``0``, no loss filtering.",
         aliases=['loss_filter_n_sds']
