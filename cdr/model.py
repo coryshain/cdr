@@ -6788,7 +6788,7 @@ class CDRModel(object):
                         if failed:
                             n_failed += 1
                             assert n_failed <= 10, '10 iterations in a row failed to pass stability checks. Model training has failed.'
-                            break
+                            continue
                         else:
                             n_failed = 0
 
