@@ -6790,7 +6790,7 @@ class CDRModel(object):
 
                         if failed:
                             n_failed += 1
-                            assert n_failed <= 10, '10 restarts in a row from the same save point failed to pass stability checks. Model training has failed.'
+                            assert n_failed <= 100, '100 restarts in a row from the same save point failed to pass stability checks. Model training has failed.'
                             continue
 
                         self.session.run(self.incr_global_step)
