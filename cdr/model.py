@@ -6756,12 +6756,18 @@ class CDRModel(object):
 
                             info_dict = self.run_train_step(fd)
 
-                            self.check_numerics()
+                            try:
+                                self.check_numerics()
+                            except tf.errors.InvalidArgumentError as e:
+                                failed = True
+                                stderr('\nFailed stability check due to non-finite parameter values.\n\n')
+                                break
 
                             if self.loss_cutoff_n_sds:
                                 n_dropped += info_dict['n_dropped']
                                 if not self.filter_outlier_losses and n_dropped:
                                     failed = True
+                                    stderr('\nFailed stability check due to large outlier losses.\n\n')
                                     break
 
                             loss_cur = info_dict['loss']
@@ -6782,10 +6788,7 @@ class CDRModel(object):
                             pb.update((i/minibatch_size) + 1, values=pb_update)
 
                         if self.check_convergence:
-                            try:
-                                self.run_convergence_check(verbose=False, feed_dict={self.loss_total: loss_total/n_minibatch})
-                            except tf.errors.InvalidArgumentError as e:
-                                failed = True
+                            self.run_convergence_check(verbose=False, feed_dict={self.loss_total: loss_total/n_minibatch})
 
                         if failed:
                             n_failed += 1
