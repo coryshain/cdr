@@ -570,9 +570,15 @@ MODEL_INITIALIZATION_KWARGS = [
     # INCREMENTAL SAVING AND LOGGING
     Kwarg(
         'save_freq',
-        100,
+        10,
         int,
         "Frequency (in iterations) with which to save model checkpoints."
+    ),
+    Kwarg(
+        'plot_freq',
+        100,
+        int,
+        "Frequency (in iterations) with which to plot model estimates (or ``0`` to turn off incremental plotting)."
     ),
     Kwarg(
         'log_freq',

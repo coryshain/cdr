@@ -6682,7 +6682,13 @@ class CDRModel(object):
                         stderr('Saving initial weights...\n')
                         self.save()
 
+                    # Counter for number of times an attempted iteration has failed due to outlier
+                    # losses or failed numerics checks
+                    n_failed = 0
+
                     while not self.has_converged() and self.global_step.eval(session=self.session) < n_iter:
+                        if n_failed:
+                            self.load() # Reload from previous save point
                         p, p_inv = get_random_permutation(n)
                         t0_iter = pytime.time()
                         stderr('-' * 50 + '\n')
@@ -6700,6 +6706,7 @@ class CDRModel(object):
                         if self.loss_filter_n_sds:
                             n_dropped = 0.
 
+                        failed = False
                         for i in range(0, n, minibatch_size):
                             indices = p[i:i+minibatch_size]
                             if optimize_memory:
@@ -6750,6 +6757,9 @@ class CDRModel(object):
 
                             if self.loss_filter_n_sds:
                                 n_dropped += info_dict['n_dropped']
+                            if n_dropped:
+                                failed = True
+                                break
 
                             loss_cur = info_dict['loss']
                             if not np.isfinite(loss_cur):
@@ -6768,14 +6778,20 @@ class CDRModel(object):
 
                             pb.update((i/minibatch_size) + 1, values=pb_update)
 
-                            # if self.global_batch_step.eval(session=self.sess) % 1000 == 0:
-                            #     self.save()
-                            #     self.make_plots(prefix='plt')
+                        if self.check_convergence:
+                            try:
+                                self.run_convergence_check(verbose=False, feed_dict={self.loss_total: loss_total/n_minibatch})
+                            except tf.errors.InvalidArgumentError as e:
+                                failed = True
+
+                        if failed:
+                            n_failed += 1
+                            assert n_failed <= 10, '10 iterations in a row failed to pass stability checks. Model training has failed.'
+                            break
+                        else:
+                            n_failed = 0
 
                         self.session.run(self.incr_global_step)
-
-                        if self.check_convergence:
-                            self.run_convergence_check(verbose=False, feed_dict={self.loss_total: loss_total/n_minibatch})
 
                         if self.log_freq > 0 and self.global_step.eval(session=self.session) % self.log_freq == 0:
                             loss_total /= n_minibatch
@@ -6797,6 +6813,7 @@ class CDRModel(object):
 
                         if self.save_freq > 0 and self.global_step.eval(session=self.session) % self.save_freq == 0:
                             self.save()
+                        if self.plot_freq > 0 and self.global_step.eval(session=self.session) % self.plot_freq == 0:
                             self.make_plots(prefix='plt')
 
                         t1_iter = pytime.time()
