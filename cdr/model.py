@@ -529,7 +529,6 @@ class CDRModel(object):
 
         if build:
             self._initialize_metadata()
-            stderr('Building model...\n')
             self.build()
 
     def __getstate__(self):
