@@ -6689,7 +6689,7 @@ class CDRModel(object):
                     failed = False
 
                     while not self.has_converged() and self.global_step.eval(session=self.session) < n_iter:
-                        if n_failed:
+                        if failed:
                             stderr('\n\nTraining failed to pass stability checks. Restart #%d from most recent save point.\n\n' % n_failed)
                             self.load() # Reload from previous save point
                         p, p_inv = get_random_permutation(n)
