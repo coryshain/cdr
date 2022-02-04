@@ -4620,10 +4620,11 @@ class CDRModel(object):
                 loss_func /= self.n_response
 
                 # Filter
-                if self.loss_filter_n_sds and self.ema_decay:
+                if self.loss_cutoff_n_sds:
+                    assert self.ema_decay, '``ema_decay`` must be provided if ``loss_cutoff_n_sds`` is used'
                     beta = self.ema_decay
                     ema_warm_up = 0
-                    n_sds = self.loss_filter_n_sds
+                    n_sds = self.loss_cutoff_n_sds
                     step = tf.cast(self.global_batch_step, self.FLOAT_TF)
 
                     self.loss_m1_ema = tf.Variable(0., trainable=False, name='loss_m1_ema')
@@ -4633,7 +4634,6 @@ class CDRModel(object):
                     # Debias
                     loss_m1_ema = self.loss_m1_ema / (1. - beta ** step)
                     loss_m2_ema = self.loss_m2_ema / (1. - beta ** step)
-                    n_dropped_ema = self.n_dropped_ema / (1. - beta ** step)
 
                     sd = tf.sqrt(loss_m2_ema - loss_m1_ema**2)
                     loss_cutoff = loss_m1_ema + n_sds * sd
@@ -4727,7 +4727,7 @@ class CDRModel(object):
                 tf.summary.scalar('opt/reg_loss_by_iter', self.reg_loss_total, collections=['opt'])
                 if self.is_bayesian:
                     tf.summary.scalar('opt/kl_loss_by_iter', self.kl_loss_total, collections=['opt'])
-                if self.loss_filter_n_sds:
+                if self.filter_outlier_losses and self.loss_cutoff_n_sds:
                     tf.summary.scalar('opt/n_dropped', self.n_dropped_in, collections=['opt'])
                 if self.log_graph:
                     self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/cdr', self.session.graph)
@@ -5337,7 +5337,7 @@ class CDRModel(object):
                 to_run += [self.loss_func, self.reg_loss]
                 to_run_names = ['loss', 'reg_loss']
 
-                if self.loss_filter_n_sds:
+                if self.loss_cutoff_n_sds:
                     to_run_names.append('n_dropped')
                     to_run.append(self.n_dropped)
 
@@ -6515,7 +6515,7 @@ class CDRModel(object):
             out += ' ' * (indent * 2) + 'Proportion converged:        %s\n' % proportion_converged
             out += ' ' * (indent * 2) + 'N iterations at convergence: %s\n' % n_iter
 
-            if self.loss_filter_n_sds and self.ema_decay:
+            if self.filter_outlier_losses and self.loss_cutoff_n_sds:
                 n_dropped = self.n_dropped_ema.eval(self.session)
                 out += '\n'
                 out += ' ' * (indent * 2) + 'Number of outlier losses dropped per iteration (exp mov avg): %.4f\n' % n_dropped
@@ -6526,9 +6526,10 @@ class CDRModel(object):
                     out += ' ' * (indent * 2) + '         the TensorFlow logs to determine whether the large average'
                     out += ' ' * (indent * 2) + '         was driven by outlier iterations. If few/no iterations near'
                     out += ' ' * (indent * 2) + '         the end of training had n_dropped=0, some training data was'
-                    out += ' ' * (indent * 2) + '         likely ignored at every iteration. This can be corrected by'
-                    out += ' ' * (indent * 2) + '         raising `loss_filter_n_sds` or turning off loss filtering'
-                    out += ' ' * (indent * 2) + '         by setting `loss_filter_n_sds` to `None`.'
+                    out += ' ' * (indent * 2) + '         likely ignored at every iteration. Consider using'
+                    out += ' ' * (indent * 2) + '         setting filter_outlier_losses to ``False``, which '
+                    out += ' ' * (indent * 2) + '         restarts training from the last checkpoint after encountering'
+                    out += ' ' * (indent * 2) + '         outlier losses rather than removing them, avoiding bias.'
                 out += '\n'
 
             if converged:
@@ -6685,11 +6686,12 @@ class CDRModel(object):
                     # Counter for number of times an attempted iteration has failed due to outlier
                     # losses or failed numerics checks
                     n_failed = 0
+                    current_save_point = self.global_step.eval(session=self.session)
                     failed = False
 
                     while not self.has_converged() and self.global_step.eval(session=self.session) < n_iter:
                         if n_failed:
-                            stderr('Training failed to pass stability checks. Restarting training from most recent save point.\n')
+                            stderr('\n\nTraining failed to pass stability checks. Restarting training from most recent save point.\n\n')
                             self.load() # Reload from previous save point
                         p, p_inv = get_random_permutation(n)
                         t0_iter = pytime.time()
@@ -6705,7 +6707,7 @@ class CDRModel(object):
                         reg_loss_total = 0.
                         if self.is_bayesian:
                             kl_loss_total = 0.
-                        if self.loss_filter_n_sds:
+                        if self.loss_cutoff_n_sds:
                             n_dropped = 0.
 
                         failed = False
@@ -6757,11 +6759,11 @@ class CDRModel(object):
 
                             self.check_numerics()
 
-                            if self.loss_filter_n_sds:
+                            if self.loss_cutoff_n_sds:
                                 n_dropped += info_dict['n_dropped']
-                            if n_dropped:
-                                failed = True
-                                break
+                                if not self.filter_outlier_losses and n_dropped:
+                                    failed = True
+                                    break
 
                             loss_cur = info_dict['loss']
                             if not np.isfinite(loss_cur):
@@ -6788,10 +6790,8 @@ class CDRModel(object):
 
                         if failed:
                             n_failed += 1
-                            assert n_failed <= 10, '10 iterations in a row failed to pass stability checks. Model training has failed.'
+                            assert n_failed <= 10, '10 restarts in a row from the same save point failed to pass stability checks. Model training has failed.'
                             continue
-                        else:
-                            n_failed = 0
 
                         self.session.run(self.incr_global_step)
 
@@ -6802,7 +6802,7 @@ class CDRModel(object):
                             if self.is_bayesian:
                                 kl_loss_total /= n_minibatch
                                 log_fd[self.kl_loss_total] = kl_loss_total
-                            if self.loss_filter_n_sds:
+                            if self.filter_outlier_losses and self.loss_cutoff_n_sds:
                                 log_fd[self.n_dropped_in] = n_dropped
                             summary_train_loss = self.session.run(self.summary_opt, feed_dict=log_fd)
                             self.writer.add_summary(summary_train_loss, self.global_step.eval(session=self.session))
@@ -6814,6 +6814,8 @@ class CDRModel(object):
                             self.writer.flush()
 
                         if self.save_freq > 0 and self.global_step.eval(session=self.session) % self.save_freq == 0:
+                            current_save_point = self.global_step.eval(session=self.session)
+                            n_failed = 0
                             self.save()
                         if self.plot_freq > 0 and self.global_step.eval(session=self.session) % self.plot_freq == 0:
                             self.make_plots(prefix='plt')

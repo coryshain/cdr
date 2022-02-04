@@ -469,11 +469,17 @@ MODEL_INITIALIZATION_KWARGS = [
         "Keep learning rate flat between ``lr_decay_steps`` (ignored if ``lr_decay_family==None``)."
     ),
     Kwarg(
-        'loss_filter_n_sds',
+        'filter_outlier_losses',
         None,
+        [float, bool, None],
+        "Whether outlier large losses are filtered out while training continues. If ``False``, outlier losses trigger a restart from the most recent save point. Ignored unless *loss_cutoff_n_sds* is specified. Using this option avoids restarts, but can lead to bias if training instances are systematically dropped. If ``None``, ``False``, or ``0``, no loss filtering.",
+        aliases=['loss_filter_n_sds']
+    ),
+    Kwarg(
+        'loss_cutoff_n_sds',
+        1000,
         [float, None],
-        "How many moving standard deviations above the moving mean of the loss to use as a cut-off for stability (suppressing large losses). If ``None``, or ``0``, no loss filtering.",
-        default_value_cdrnn=1000
+        "How many moving standard deviations above the moving mean of the loss to use as a cut-off for stability (if outlier large losses are detected, training restarts from the preceding checkpoint). If ``None``, or ``0``, no loss cut-off."
     ),
     Kwarg(
         'ema_decay',
