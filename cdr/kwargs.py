@@ -477,7 +477,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'loss_cutoff_n_sds',
-        10000,
+        1000,
         [float, None],
         "How many moving standard deviations above the moving mean of the loss to use as a cut-off for stability (if outlier large losses are detected, training restarts from the preceding checkpoint). If ``None``, or ``0``, no loss cut-off."
     ),
