@@ -838,7 +838,7 @@ class CDRModel(object):
         self.reference_map = reference_map
         for x in self.impulse_names:
             if not x in self.reference_map:
-                if self.default_reference_type == 'mean' and not x in self.indicators:
+                if self.default_reference_type == 'mean':
                     self.reference_map[x] = self.impulse_means[x]
                 else:
                     self.reference_map[x] = 0.
@@ -855,7 +855,7 @@ class CDRModel(object):
         for x in self.impulse_names:
             if not x in self.plot_step_map:
                 if x in self.indicators:
-                    self.plot_step_map[x] = 1
+                    self.plot_step_map[x] = 1 - self.reference_map[x]
                 elif isinstance(self.plot_step_default, str) and self.plot_step_default.lower() == 'sd':
                     self.plot_step_map[x] = self.impulse_sds[x]
                 else:
@@ -6690,7 +6690,7 @@ class CDRModel(object):
 
                     while not self.has_converged() and self.global_step.eval(session=self.session) < n_iter:
                         if failed:
-                            stderr('\n\nTraining failed to pass stability checks. Restart #%d from most recent save point.\n\n' % n_failed)
+                            stderr('\nTraining failed to pass stability checks.\nRestarting from most recent checkpoint (restart #%d from this checkpoint).\n\n' % n_failed)
                             self.load() # Reload from previous save point
                         p, p_inv = get_random_permutation(n)
                         t0_iter = pytime.time()
@@ -6760,14 +6760,14 @@ class CDRModel(object):
                                 self.check_numerics()
                             except tf.errors.InvalidArgumentError as e:
                                 failed = True
-                                stderr('\nFailed stability check due to non-finite parameter values.\n\n')
+                                stderr('\nFailed stability check due to non-finite parameter values.\n')
                                 break
 
                             if self.loss_cutoff_n_sds:
                                 n_dropped += info_dict['n_dropped']
                                 if not self.filter_outlier_losses and n_dropped:
                                     failed = True
-                                    stderr('\nFailed stability check due to large outlier losses.\n\n')
+                                    stderr('\nFailed stability check due to large outlier losses.\n')
                                     break
 
                             loss_cur = info_dict['loss']
@@ -6840,7 +6840,6 @@ class CDRModel(object):
                     if self.is_bayesian or self.has_dropout:
                         # Generate plots with 95% credible intervals
                         self.make_plots(n_samples=self.n_samples_eval, prefix='plt')
-
 
                 if not self.training_complete.eval(session=self.session) or force_training_evaluation:
                     # Extract and save predictions
