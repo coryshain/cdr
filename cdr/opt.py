@@ -284,13 +284,6 @@ def get_JTPS_optimizer_class(base_optimizer_class, session=None):
                                     else:
                                         assert self.granularity == 'cell', 'Unrecognized granularity type "%s"' % self.granularity
 
-                                    print(lambda_grad_cur)
-                                    print(lambda_v)
-                                    print(lambda_v.dtype._is_ref_dtype)
-                                    print(isinstance(lambda_v, tf.Tensor) and hasattr(lambda_v, 'assign'))
-                                    print()
-                                    print()
-
                                     lambda_update_op += [
                                         self.lambda_optimizer._apply_dense(lambda_grad_cur, lambda_v),
                                     ]

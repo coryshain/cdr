@@ -6787,13 +6787,13 @@ class CDRModel(object):
 
                             pb.update((i/minibatch_size) + 1, values=pb_update)
 
-                        if self.check_convergence:
-                            self.run_convergence_check(verbose=False, feed_dict={self.loss_total: loss_total/n_minibatch})
-
                         if failed:
                             n_failed += 1
                             assert n_failed <= 100, '100 restarts in a row from the same save point failed to pass stability checks. Model training has failed.'
                             continue
+
+                        if self.check_convergence:
+                            self.run_convergence_check(verbose=False, feed_dict={self.loss_total: loss_total/n_minibatch})
 
                         self.session.run(self.incr_global_step)
 
