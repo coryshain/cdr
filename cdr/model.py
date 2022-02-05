@@ -360,8 +360,9 @@ class CDRModel(object):
         impulse_min = {}
         impulse_max = {}
         indicators = set()
+        X_in_Y = set()
 
-        impulse_df_ix = []
+        impulse_df_ix = {}
         for impulse in self.form.t.impulses(include_interactions=True):
             name = impulse.name()
             is_interaction = type(impulse).__name__ == 'ImpulseInteraction'
@@ -397,6 +398,8 @@ class CDRModel(object):
                             indicators.add(name)
 
                         found = True
+                        if i >= len(X): # Found in Y, not X
+                            X_in_Y.add(name)
                         break
                     elif is_interaction:
                         found = True
@@ -420,12 +423,16 @@ class CDRModel(object):
 
                             if self._vector_is_indicator(column):
                                 indicators.add(name)
+
+                            if i >= len(X):  # Found in Y, not X
+                                X_in_Y.add(name)
             if not found:
                 raise ValueError('Impulse %s was not found in an input file.' % name)
 
-            impulse_df_ix.append(i)
+            if name not in X_in_Y:
+                impulse_df_ix[name] = i
         self.impulse_df_ix = impulse_df_ix
-        impulse_df_ix_unique = set(self.impulse_df_ix)
+        self.impulse_df_ix_unique = set([self.impulse_df_ix[x] for x in self.impulse_df_ix])
 
         self.impulse_means = impulse_means
         self.impulse_sds = impulse_sds
@@ -436,6 +443,7 @@ class CDRModel(object):
         self.impulse_min = impulse_min
         self.impulse_max = impulse_max
         self.indicators = indicators
+        self.X_in_Y_names = [x for x in form.t.impulse_names(include_interactions=True) if x in X_in_Y]
 
         self.response_to_df_ix = {}
         for _response in response_names:
@@ -454,7 +462,7 @@ class CDRModel(object):
             _Y_time = _Y.time.values
             Y_time.append(_Y_time)
             for i, cols in enumerate(zip(first_obs, last_obs)):
-                if i in impulse_df_ix_unique or (not impulse_df_ix_unique and i == 0):
+                if i in self.impulse_df_ix_unique or (not self.impulse_df_ix_unique and i == 0):
                     _first_obs, _last_obs = cols
                     _first_obs = np.array(_first_obs, dtype=getattr(np, self.int_type))
                     _last_obs = np.array(_last_obs, dtype=getattr(np, self.int_type))
@@ -611,6 +619,7 @@ class CDRModel(object):
         for i, x in enumerate(self.impulse_names):
             self.impulse_names_to_ix[x] = i
             self.impulse_names_printable[x] = ':'.join([get_irf_name(x, self.irf_name_map) for y in x.split(':')])
+        self.terminals = t.terminals()
         self.terminal_names = t.terminal_names()
         self.terminals_by_name = t.terminals_by_name()
         self.terminal_names_to_ix = {}
@@ -762,15 +771,17 @@ class CDRModel(object):
 
         # Initialize objects derived from training data stats
 
+        impulse_names_not_in_Y = [x for x in self.impulse_names if x not in self.X_in_Y_names]
         if self.impulse_df_ix is None:
-            self.impulse_df_ix = np.zeros(len(self.impulse_names))
-        self.impulse_df_ix = np.array(self.impulse_df_ix, dtype=self.INT_NP)
-        self.impulse_df_ix_unique = sorted(list(set(self.impulse_df_ix)))
+            self.impulse_df_ix = {x: 0 for x in impulse_names_not_in_Y}
         self.n_impulse_df = len(self.impulse_df_ix_unique)
         self.impulse_indices = []
         for i in range(max(self.impulse_df_ix_unique) + 1):
-            arange = np.arange(len(self.form.t.impulses(include_interactions=True)))
-            ix = arange[np.where(self.impulse_df_ix == i)[0]]
+            ix = []
+            for j, name in enumerate(self.form.t.impulse_names(include_interactions=True)):
+                if name in self.impulse_df_ix and self.impulse_df_ix[name] == i:
+                    ix.append(j)
+            ix = np.array(ix)
             self.impulse_indices.append(ix)
         if self.response_to_df_ix is None:
             self.response_to_df_ix = {x: [0] for x in self.response_names}
@@ -783,8 +794,8 @@ class CDRModel(object):
         terminal_names = [x for x in self.terminal_names if self.node_table[x].p.family == 'NN']
         for x in terminal_names:
             impulse = self.terminal2impulse[x][0]
-            ix = self.impulse_names.index(impulse)
-            df_ix = self.impulse_df_ix[ix]
+            if impulse in self.impulse_df_ix:
+                df_ix = self.impulse_df_ix[impulse]
             impulse_dfs_noninteraction.add(df_ix)
         self.n_impulse_df_noninteraction = len(impulse_dfs_noninteraction)
 
@@ -1148,6 +1159,7 @@ class CDRModel(object):
             'impulse_min': self.impulse_min,
             'impulse_max': self.impulse_max,
             'indicators': self.indicators,
+            'X_in_Y_names': self.X_in_Y_names,
             'outdir': self.outdir,
             'crossval_factor': self.crossval_factor,
             'crossval_fold': self.crossval_fold,
@@ -1176,7 +1188,11 @@ class CDRModel(object):
         self.t_delta_mean = md.pop('t_delta_mean', 1.)
         self.t_delta_quantiles = md.pop('t_delta_quantiles', None)
         self.t_delta_limit = md.pop('t_delta_limit', self.t_delta_max)
-        self.impulse_df_ix = md.pop('impulse_df_ix', None)
+        impulse_df_ix = md.pop('impulse_df_ix', None)
+        if not isinstance(impulse_df_ix, dict): # Old style impulse_df_ix, update
+            impulse_names = self.form.impulse_names(include_interactions=True)
+            impulse_df_ix = {x: impulse_df_ix[i] for i, x in enumerate(impulse_names)}
+        self.impulse_df_ix = impulse_df_ix
         self.response_to_df_ix = md.pop('response_to_df_ix', None)
         self.X_time_max = md.pop('X_time_max', md.pop('time_X_max', md.pop('max_time_X', None)))
         self.X_time_sd = md.pop('X_time_sd', md.pop('time_X_sd', 1.))
@@ -1197,6 +1213,7 @@ class CDRModel(object):
         self.impulse_min = md.pop('impulse_min', {})
         self.impulse_max = md.pop('impulse_max', {})
         self.indicators = md.pop('indicators', set())
+        self.X_in_Y_names = md.pop('X_in_Y_names', [])
         self.outdir = md.pop('outdir', './cdr_model/')
         self.crossval_factor = md.pop('crossval_factor', None)
         self.crossval_fold = md.pop('crossval_fold', [])
@@ -1230,8 +1247,10 @@ class CDRModel(object):
                 self.sum_outputs_along_K = tf.placeholder_with_default(tf.constant(True, dtype=tf.bool), shape=[], name='reduce_preds_along_K')
 
                 # Impulses
+                impulse_not_in_Y = [x for x in self.impulse_names if x not in self.X_in_Y_names]
+                n_impulse_not_in_Y = len(impulse_not_in_Y)
                 self.X = tf.placeholder(
-                    shape=[None, None, self.n_impulse],
+                    shape=[None, None, n_impulse_not_in_Y],
                     dtype=self.FLOAT_TF,
                     name='X'
                 )
@@ -1246,28 +1265,48 @@ class CDRModel(object):
                     scale = np.where(scale != 0, scale, 1.)
                     X_processed /= scale
                 self.X_processed = X_processed
+
+                self.X_in_Y = tf.placeholder(
+                    shape=[None, len(self.X_in_Y_names)],
+                    dtype=self.FLOAT_TF,
+                    name='X_in_Y'
+                )
+                X_in_Y_processed = self.X_in_Y
+                X_in_Y_ix = names2ix(self.X_in_Y_names, self.impulse_names)
+                if self.center_inputs:
+                    shift = tf.cast(self.impulse_shift_arr_expanded, dtype=self.FLOAT_TF)
+                    shift = tf.gather(shift, X_in_Y_ix, axis=-1)
+                    X_in_Y_processed -= shift
+                if self.rescale_inputs:
+                    scale = self.impulse_scale_arr_expanded
+                    scale = tf.cast(np.where(scale != 0, scale, 1.), dtype=self.FLOAT_TF)
+                    scale = tf.gather(scale, X_in_Y_ix, axis=-1)
+                    X_in_Y_processed /= scale
+                self.X_in_Y_processed = X_in_Y_processed
+
                 self.X_time = tf.placeholder_with_default(
                     tf.zeros(
                         tf.convert_to_tensor([
                             self.X_batch_dim,
                             self.history_length + self.future_length,
-                            max(self.n_impulse, 1)
+                            max(n_impulse_not_in_Y, 1)
                         ]),
                         dtype=self.FLOAT_TF
                     ),
-                    shape=[None, None, max(self.n_impulse, 1)],
+                    shape=[None, None, max(n_impulse_not_in_Y, 1)],
                     name='X_time'
                 )
+
                 self.X_mask = tf.placeholder_with_default(
                     tf.ones(
                         tf.convert_to_tensor([
                             self.X_batch_dim,
                             self.history_length + self.future_length,
-                            max(self.n_impulse, 1)
+                            max(n_impulse_not_in_Y, 1)
                         ]),
                         dtype=self.FLOAT_TF
                     ),
-                    shape=[None, None, max(self.n_impulse, 1)],
+                    shape=[None, None, max(n_impulse_not_in_Y, 1)],
                     name='X_mask'
                 )
 
@@ -1599,6 +1638,14 @@ class CDRModel(object):
 
                 self.resample_ops = [] # Only used by CDRNN, defined here for global API
                 self.regularizable_layers = {} # Only used by CDRNN, defined here for global API
+
+                print(self.impulse_df_ix)
+                print(self.impulse_df_ix_unique)
+                print(self.impulse_indices)
+                print(self.impulse_indices)
+                print(self.n_impulse_df)
+                print(self.n_impulse_df_noninteraction)
+                print()
 
     def _get_prior_sd(self, response_name):
         with self.session.as_default():
@@ -3421,13 +3468,35 @@ class CDRModel(object):
                 impulse_names_ordered = []
 
                 # Collect non-neural impulses
-                non_nn_impulse_names = [x for x in impulse_names if x in self.impulse_names]
+                impulse_names_not_in_Y = [x for x in self.impulse_names if not x in self.X_in_Y_names]
+                non_nn_impulse_names = [x for x in impulse_names if x in impulse_names_not_in_Y]
                 if len(non_nn_impulse_names):
-                    impulse_ix = names2ix(non_nn_impulse_names, self.impulse_names)
+                    impulse_ix = names2ix(non_nn_impulse_names, impulse_names_not_in_Y)
                     X.append(tf.gather(self.X_processed, impulse_ix, axis=2))
                     t_delta.append(tf.gather(self.t_delta, impulse_ix, axis=2))
                     X_time.append(tf.gather(self.X_time, impulse_ix, axis=2))
                     X_mask.append(tf.gather(self.X_mask, impulse_ix, axis=2))
+                    impulse_names_ordered += non_nn_impulse_names
+
+                # Collect X in Y (response-aligned variables)
+                impulse_names_in_Y = [x for x in self.impulse_names if x in self.X_in_Y_names]
+                X_in_Y_names = [x for x in impulse_names if x in impulse_names_in_Y]
+                if len(X_in_Y_names):
+                    impulse_ix = names2ix(X_in_Y_names, impulse_names_in_Y)
+                    X_in_Y = tf.expand_dims(tf.gather(self.X_in_Y_processed, impulse_ix, axis=1), axis=1)
+                    X_in_Y = tf.tile(
+                        X_in_Y,
+                        [1, self.X_time_dim, 1]
+                    )
+                    X.append(X_in_Y)
+                    _t_delta = tf.zeros((self.X_batch_dim, self.X_time_dim, len(X_in_Y_names)))
+                    t_delta.append(_t_delta)
+                    _X_time = self.Y_time[..., None, None]
+                    _X_time = tf.tile(
+                        _X_time,
+                        [1, self.X_time_dim, len(X_in_Y_names)]
+                    )
+                    X_time.append(_X_time)
                     impulse_names_ordered += non_nn_impulse_names
 
                 # Collect neurally transformed impulses
@@ -3529,6 +3598,9 @@ class CDRModel(object):
                         if len(ix) > 0:
                             dim_mask = np.zeros(len(self.impulse_names))
                             dim_mask[ix] = 1
+                            if self.X_in_Y_names:
+                                X_in_Y_ix = names2ix(self.X_in_Y_names, self.impulse_names)
+                            dim_mask[X_in_Y_ix] = 1
                             dim_mask = tf.constant(dim_mask, dtype=self.FLOAT_TF)
                             while len(dim_mask.shape) < len(X.shape):
                                 dim_mask = dim_mask[None, ...]
@@ -3575,10 +3647,17 @@ class CDRModel(object):
                     if X_mask is not None:
                         X_mask = tf.gather_nd(X_mask_cdrnn, gather_ix)
                 else:
-                    t_delta = t_delta[..., :1]
-                    X_time = X_time[..., :1]
+                    found = False
+                    for ix, impulse_name in enumerate(impulse_names):
+                        if impulse_name not in self.X_in_Y_names:
+                            found = True
+                            break
+                    if not found:
+                        ix = 0
+                    t_delta = t_delta[..., ix:ix+1]
+                    X_time = X_time[..., ix:ix+1]
                     if X_mask is not None and len(X_mask.shape) == 3:
-                        X_mask = X_mask[..., 0]
+                        X_mask = X_mask[..., ix]
 
                 if input_jitter_level:
                     jitter_sd = input_jitter_level
@@ -4031,8 +4110,12 @@ class CDRModel(object):
                         if len(dirac_delta_input_names):
                             dd_key = tuple(dirac_delta_input_names)
                             if dd_key not in dd:
-                                dirac_delta_input_ix = names2ix(dirac_delta_input_names, impulse_names)
                                 dirac_delta_inputs = self.X_processed[:,-1]
+                                dd_names = [x for x in dirac_delta_input_names if not x in self.X_in_Y_names]
+                                if self.X_in_Y_names:
+                                    dirac_delta_inputs = tf.concat([dirac_delta_inputs, self.X_in_Y_processed])
+                                    dd_names += [x for x in dirac_delta_input_names if x in self.X_in_Y_names]
+                                dirac_delta_input_ix = names2ix(dirac_delta_input_names, dd_names)
                                 # Expand out response_param and response_param_dim axes
                                 dirac_delta_inputs = tf.gather(dirac_delta_inputs, dirac_delta_input_ix, axis=1)
                                 dirac_delta_inputs = dirac_delta_inputs[..., None, None]
@@ -4063,7 +4146,7 @@ class CDRModel(object):
                 # Parametric IRFs with non-neural impulses
                 irf_impulses = []
                 terminal_names = []
-                parametric_terminals = [x for x in self.parametric_irf_terminals if not x.impulse.is_nn_impulse()]
+                parametric_terminals = [x for x in self.parametric_irf_terminals if (not x.impulse.is_nn_impulse() and not x.impulse.name() in self.X_in_Y_names)]
                 parametric_terminal_names = [x.name() for x in parametric_terminals]
                 impulse_names = [x.impulse.name() for x in parametric_terminals]
                 if len(impulse_names):
@@ -4105,7 +4188,8 @@ class CDRModel(object):
                 assert irf_impulses.shape[2] == len(self.terminal_names), 'There should be exactly 1 IRF impulse per terminal. Got %d impulses and %d terminals.' % (irf_impulses.shape[2], len(self.terminal_names))
 
                 if irf_impulses is not None:
-                    terminal_ix = names2ix(self.terminal_names, terminal_names)
+                    terminals_not_in_Y = [x for x in self.terminal_names if not x in self.X_in_Y_names]
+                    terminal_ix = names2ix(terminals_not_in_Y, terminal_names)
                     irf_impulses = tf.gather(irf_impulses, terminal_ix, axis=2)
                 
                 self.irf_impulses = irf_impulses
@@ -4119,7 +4203,9 @@ class CDRModel(object):
                     irf_weights = []
                     terminal_names = []
                     nparam = self.get_response_nparam(response)
-                    for name in self.parametric_irf_terminal_names:
+                    parametric_terminals = [x for x in self.parametric_irf_terminals if not x.impulse.name() in self.X_in_Y_names]
+                    parametric_terminal_names = [x.name() for x in parametric_terminals]
+                    for name in parametric_terminal_names:
                         terminal_names.append(name)
                         t = self.node_table[name]
                         if type(t.impulse).__name__ == 'NNImpulse':
@@ -4177,12 +4263,45 @@ class CDRModel(object):
                     else:
                         irf_weights = None
 
+                    X_weighted_by_irf =None
+
+                    terminals_not_in_Y = [x.name() for x in self.terminals if not x.impulse.name() in self.X_in_Y_names]
                     if irf_weights is not None:
-                        terminal_ix = names2ix(self.terminal_names, terminal_names)
+                        terminal_ix = names2ix(terminals_not_in_Y, terminal_names)
                         irf_weights = tf.gather(irf_weights, terminal_ix, axis=2)
                         X_weighted_by_irf = self.irf_impulses * irf_weights
-                    else:
+
+                    print(X_weighted_by_irf)
+
+                    terminals_in_Y = [x.name() for x in self.terminals if x.impulse.name() in self.X_in_Y_names]
+                    if len(self.X_in_Y_names):
+                        X_in_Y_ix = names2ix(terminals_in_Y, self.terminal_names)
+                        if self.use_distributional_regression:
+                            param_pad = nparam - 1
+                        else:
+                            param_pad = 0
+                        X_in_Y = tf.gather(self.X_in_Y_processed, X_in_Y_ix, axis=1)
+                        X_in_Y = tf.expand_dims(self.X_in_Y_processed, axis=1)[..., None, None]
+                        X_in_Y = tf.pad(
+                            X_in_Y,
+                            paddings=[
+                                (0, 0),
+                                (self.X_time_dim - 1, 0),
+                                (0, 0),
+                                (0, param_pad),
+                                (0, 0)
+                            ]
+                        )
+                        X_weighted_by_irf = tf.concat([X_weighted_by_irf, X_in_Y], axis=2)
+
+                    if X_weighted_by_irf is None:
                         X_weighted_by_irf = tf.zeros((1, 1, 1, 1, 1), dtype=self.FLOAT_TF)
+                    else:
+                        X_ix = names2ix(terminals_not_in_Y + terminals_in_Y, self.terminal_names)
+                        print(X_ix)
+                        X_weighted_by_irf = tf.gather(X_weighted_by_irf, X_ix, axis=2)
+
+                    print(X_weighted_by_irf)
 
                     if not self.use_distributional_regression:
                         X_weighted_by_irf = tf.pad(
@@ -6635,7 +6754,7 @@ class CDRModel(object):
         )
 
         if not optimize_memory:
-            X, X_time, X_mask = build_CDR_impulse_data(
+            X, X_time, X_mask, X_in_Y = build_CDR_impulse_data(
                 X_in,
                 first_obs,
                 last_obs,
@@ -6720,7 +6839,7 @@ class CDRModel(object):
                                 _Y_mask = Y_mask[indices]
                                 _Y_gf = None if Y_gf is None else Y_gf[indices]
                                 _X_in_Y = None if X_in_Y is None else X_in_Y[indices]
-                                _X, _X_time, _X_mask = build_CDR_impulse_data(
+                                _X, _X_time, _X_mask, _X_in_Y = build_CDR_impulse_data(
                                     X_in,
                                     _first_obs,
                                     _last_obs,
@@ -6734,6 +6853,7 @@ class CDRModel(object):
                                 )
                                 fd = {
                                     self.X: _X,
+                                    self.X_in_Y: _X_in_Y,
                                     self.X_time: _X_time,
                                     self.X_mask: _X_mask,
                                     self.Y: _Y,
@@ -6745,6 +6865,7 @@ class CDRModel(object):
                             else:
                                 fd = {
                                     self.X: X[indices],
+                                    self.X_in_Y: X_in_Y[indices],
                                     self.X_time: X_time[indices],
                                     self.X_mask: X_mask[indices],
                                     self.Y: Y[indices],
@@ -7018,7 +7139,7 @@ class CDRModel(object):
         )
 
         if not optimize_memory:
-            X, X_time, X_mask = build_CDR_impulse_data(
+            X, X_time, X_mask, X_in_Y = build_CDR_impulse_data(
                 X_in,
                 first_obs,
                 last_obs,
@@ -7069,7 +7190,7 @@ class CDRModel(object):
                             _Y_gf = None if Y_gf is None else Y_gf[i:i + B]
                             _X_in_Y = None if X_in_Y is None else X_in_Y[i:i + B]
 
-                            _X, _X_time, _X_mask = build_CDR_impulse_data(
+                            _X, _X_time, _X_mask, _X_in_Y = build_CDR_impulse_data(
                                 X_in,
                                 _first_obs,
                                 _last_obs,
@@ -7083,6 +7204,7 @@ class CDRModel(object):
                             )
                             fd = {
                                 self.X: _X,
+                                self.X_in_Y: _X_in_Y,
                                 self.X_time: _X_time,
                                 self.X_mask: _X_mask,
                                 self.Y_time: _Y_time,
@@ -7097,6 +7219,7 @@ class CDRModel(object):
                         else:
                             fd = {
                                 self.X: X[i:i + B],
+                                self.X_in_Y: X_in_Y[i:i + B],
                                 self.X_time: X_time[i:i + B],
                                 self.X_mask: X_mask[i:i + B],
                                 self.Y_time: Y_time[i:i + B],
@@ -7743,7 +7866,7 @@ class CDRModel(object):
         )
 
         if not optimize_memory:
-            X, X_time, X_mask = build_CDR_impulse_data(
+            X, X_time, X_mask, X_in_Y = build_CDR_impulse_data(
                 X_in,
                 first_obs,
                 last_obs,
@@ -7779,7 +7902,7 @@ class CDRModel(object):
                         _Y_gf = None if Y_gf is None else Y_gf[i:i + B]
                         _X_in_Y = None if X_in_Y is None else X_in_Y[i:i + B]
 
-                        _X, _X_time, _X_mask = build_CDR_impulse_data(
+                        _X, _X_time, _X_mask, _X_in_Y = build_CDR_impulse_data(
                             X_in,
                             _first_obs,
                             _last_obs,
@@ -7796,6 +7919,7 @@ class CDRModel(object):
 
                         fd = {
                             self.X: _X,
+                            self.X_in_Y: _X_in_Y,
                             self.X_time: _X_time,
                             self.X_mask: _X_mask,
                             self.Y: _Y,
@@ -7807,6 +7931,7 @@ class CDRModel(object):
                     else:
                         fd = {
                             self.X: X[i:i + B],
+                            self.X_in_Y: X_in_Y[i:i + B],
                             self.X_time: X_time[i:i + B],
                             self.X_mask: X_mask[i:i + B],
                             self.Y_time: Y_time[i:i + B],
@@ -7996,7 +8121,7 @@ class CDRModel(object):
         )
 
         if not optimize_memory or not np.isfinite(self.minibatch_size):
-            X, X_time, X_mask = build_CDR_impulse_data(
+            X, X_time, X_mask, X_in_Y = build_CDR_impulse_data(
                 X_in,
                 first_obs,
                 last_obs,
@@ -8035,7 +8160,7 @@ class CDRModel(object):
                         _Y_gf = None if Y_gf is None else Y_gf[i:i + B]
                         _X_in_Y = None if X_in_Y is None else X_in_Y[i:i + B]
 
-                        _X, _X_time, _X_mask = build_CDR_impulse_data(
+                        _X, _X_time, _X_mask, _X_in_Y = build_CDR_impulse_data(
                             X_in,
                             _first_obs,
                             _last_obs,
@@ -8049,6 +8174,7 @@ class CDRModel(object):
                         )
                         fd = {
                             self.X: _X,
+                            self.X_in_Y: _X_in_Y,
                             self.X_time: _X_time,
                             self.X_mask: _X_mask,
                             self.Y_time: _Y_time,
@@ -8059,6 +8185,7 @@ class CDRModel(object):
                     else:
                         fd = {
                             self.X: X[i:i + B],
+                            self.X_in_Y: X_in_Y[i:i + B],
                             self.X_time: X_time[i:i + B],
                             self.X_mask: X_mask[i:i + B],
                             self.Y_time: Y_time[i:i + B],

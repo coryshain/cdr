@@ -498,20 +498,10 @@ def build_CDR_impulse_data(
     X_time_out = np.concatenate(X_time_out, axis=-1)
     X_mask_out = np.concatenate(X_mask_out, axis=-1)
 
+    X_in_Y_out = None
     if X_in_Y_names:
         assert X_in_Y is not None, 'X_in_Y must be provided if X_in_Y_names is not ``None``.'
-        X_in_Y_shape = (X_out.shape[0], X_out.shape[1], len(X_in_Y_names))
-        _X_in_Y = np.zeros(X_in_Y_shape)
-        _X_in_Y[:, -1, :] = X_in_Y[X_in_Y_names].values
-        X_out = np.concatenate([X_out, _X_in_Y], axis=2)
-
-        time_X_2d_new = np.zeros(X_in_Y_shape)
-        time_X_2d_new[:, -1, :] = X_in_Y.time.values[..., None]
-        X_time_out = np.concatenate([X_time_out, time_X_2d_new], axis=2)
-
-        time_mask_new = np.zeros(X_in_Y_shape)
-        time_mask_new[:,-1,:] = 1.
-        X_mask_out = np.concatenate([X_mask_out, time_mask_new], axis=2)
+        X_in_Y_out = X_in_Y[X_in_Y_names].values
 
     # Ensure that impulses are properly aligned
     impulse_names_cur = impulse_names_X + X_in_Y_names
@@ -527,7 +517,7 @@ def build_CDR_impulse_data(
     # Fill na to prevent non-finite values from entering the computation graph
     X_out = np.nan_to_num(X_out)
 
-    return X_out, X_time_out, X_mask_out
+    return X_out, X_time_out, X_mask_out, X_in_Y_out
 
 
 def get_rangf_array(
