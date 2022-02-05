@@ -6754,7 +6754,12 @@ class CDRModel(object):
                                     self.training: not self.predict_mode
                                 }
 
-                            info_dict = self.run_train_step(fd)
+                            try:
+                                info_dict = self.run_train_step(fd)
+                            except tf.errors.InvalidArgumentError as e:
+                                failed = True
+                                stderr('\nFailed stability check due to non-finite gradients.\n')
+                                break
 
                             try:
                                 self.check_numerics()
