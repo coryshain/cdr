@@ -576,7 +576,7 @@ MODEL_INITIALIZATION_KWARGS = [
     # INCREMENTAL SAVING AND LOGGING
     Kwarg(
         'save_freq',
-        10,
+        1,
         int,
         "Frequency (in iterations) with which to save model checkpoints."
     ),

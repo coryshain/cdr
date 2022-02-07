@@ -6758,21 +6758,21 @@ class CDRModel(object):
                                 info_dict = self.run_train_step(fd)
                             except tf.errors.InvalidArgumentError as e:
                                 failed = True
-                                stderr('\nFailed stability check due to non-finite gradients.\n')
+                                stderr('\nDid not pass stability check.\nNon-finite gradients.\n')
                                 break
 
                             try:
                                 self.check_numerics()
                             except tf.errors.InvalidArgumentError as e:
                                 failed = True
-                                stderr('\nFailed stability check due to non-finite parameter values.\n')
+                                stderr('\nDid not pass stability check.\nNon-finite parameter values.\n')
                                 break
 
                             if self.loss_cutoff_n_sds:
                                 n_dropped += info_dict['n_dropped']
                                 if not self.filter_outlier_losses and n_dropped:
                                     failed = True
-                                    stderr('\nFailed stability check due to large outlier losses.\n')
+                                    stderr('\nDid not pass stability check.\nLarge outlier losses.\n')
                                     break
 
                             loss_cur = info_dict['loss']
