@@ -6690,7 +6690,7 @@ class CDRModel(object):
 
                     while not self.has_converged() and self.global_step.eval(session=self.session) < n_iter:
                         if failed:
-                            stderr('Restarting from most recent checkpoint (restart #%d from this checkpoint).\n\n' % n_failed)
+                            stderr('Restarting from most recent checkpoint (restart #%d from this checkpoint).\n' % n_failed)
                             self.load() # Reload from previous save point
                         p, p_inv = get_random_permutation(n)
                         t0_iter = pytime.time()
