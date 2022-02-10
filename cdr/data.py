@@ -736,7 +736,7 @@ def compute_filter(y, field, cond):
         op = '<='
         var = cond[2:].strip()
     elif cond.startswith('>='):
-        op = '<='
+        op = '>='
         var = cond[2:].strip()
     elif cond.startswith('<'):
         op = '<'
