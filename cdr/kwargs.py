@@ -370,7 +370,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'minibatch_size',
-        512,
+        1024,
         [int, None],
         "Size of minibatches to use for fitting (full-batch if ``None``)."
     ),
