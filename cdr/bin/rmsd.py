@@ -16,7 +16,7 @@ if __name__ == '__main__':
     argparser.add_argument('-r', '--resolution', type=float, default=1000, help='Number of points to use for computing RMSD.')
     argparser.add_argument('-a', '--algorithm', type=str, default='MAP', help='Algorithm ("sampling" or "MAP") to use for extracting predictions from CDRBayes. Ignored for CDRMLE.')
     argparser.add_argument('--cpu_only', action='store_true', help='Use CPU implementation even if GPU is available.')
-    args, unknown = argparser.parse_known_args()
+    args = argparser.parse_args()
 
     for path in args.paths:
         p = Config(path)

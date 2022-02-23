@@ -24,7 +24,7 @@ if __name__ == '__main__':
     argparser.add_argument('df2_path', help='Path to second set of predictions')
     argparser.add_argument('-o', '--obs_path', help='Path to set of observations. If omitted, df1_path must point to a table containing both predictions and observations')
     argparser.add_argument('-T', '--permutation_test', action='store_true', help='Use a permutation test of correlation difference. If ``False``, use a parametric test (Steiger, 1980).')
-    args, unknown = argparser.parse_known_args()
+    args = argparser.parse_args()
 
     df1_path = args.df1_path
     df2_path = args.df2_path

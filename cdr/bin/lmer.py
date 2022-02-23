@@ -21,7 +21,7 @@ if __name__ == '__main__':
     argparser.add_argument('-u', '--uncorrelated', action='store_true', help='Use uncorrelated random intercepts and slopes. Simplifies the model and can help avoid convergence problems.')
     argparser.add_argument('-A', '--ablated_models', action='store_true', help='Fit ablated models to data convolved using the ablated model. Otherwise fits ablated models to data convolved using the full model.')
     argparser.add_argument('-f', '--force', action='store_true', help='Refit and overwrite any previously trained models. Otherwise, previously trained models are skipped.')
-    args, unknown = argparser.parse_known_args()
+    args = argparser.parse_args()
 
     for path in args.config_paths:
 

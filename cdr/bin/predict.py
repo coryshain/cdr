@@ -109,7 +109,7 @@ if __name__ == '__main__':
     argparser.add_argument('-e', '--extra_cols', action='store_true', help='For prediction from CDR models, dump prediction outputs and response metadata to a single csv.')
     argparser.add_argument('-O', '--optimize_memory', action='store_true', help="Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).")
     argparser.add_argument('--cpu_only', action='store_true', help='Use CPU implementation even if GPU is available.')
-    args, unknown = argparser.parse_known_args()
+    args = argparser.parse_args()
 
     p = Config(args.config_path)
 

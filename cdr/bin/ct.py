@@ -31,7 +31,7 @@ if __name__ == '__main__':
     argparser.add_argument('-T', '--permutation_test', action='store_true', help='Use a permutation test of correlation difference. If ``False``, use a parametric test (Steiger, 1980).')
     argparser.add_argument('-r', '--response', nargs='*', default=None, help='Name(s) of response(s) to test. If left unspecified, tests all responses.')
     argparser.add_argument('-o', '--outdir', default=None, help='Output directory. If ``None``, placed in same directory as the config.')
-    args, unknown = argparser.parse_known_args()
+    args = argparser.parse_args()
 
     if args.pool:
         args.ablation = True

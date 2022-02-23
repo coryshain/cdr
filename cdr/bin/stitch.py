@@ -37,7 +37,7 @@ if __name__ == '__main__':
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of models for which to stitch plots. Regex permitted. If unspecified, stitches all CDR models.')
     argparser.add_argument('-i', '--image_names', nargs='+', default=['irf_atomic_scaled.png'], help='Name(s) of image file(s) to search for in each output directory. Regex matching supported.')
     argparser.add_argument('-o', '--output_name', type=str, default='CDR_plots_stitched.pdf', help='Name of output file.')
-    args, unknown = argparser.parse_known_args()
+    args = argparser.parse_args()
 
     p = Config(args.config_path)
 

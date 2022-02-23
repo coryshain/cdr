@@ -23,7 +23,7 @@ if __name__ == '__main__':
     argparser.add_argument('df1_path', help='Path to first set of predictions')
     argparser.add_argument('df2_path', help='Path to second set of predictions')
     argparser.add_argument('-T', '--tails', type=int, default=2, help='Number of tails (1 or 2)')
-    args, unknown = argparser.parse_known_args()
+    args = argparser.parse_args()
 
     df1_path = args.df1_path
     df2_path = args.df2_path

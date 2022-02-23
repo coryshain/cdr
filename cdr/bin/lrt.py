@@ -18,7 +18,7 @@ if __name__ == '__main__':
     argparser.add_argument('-a', '--ablation', action='store_true', help='Only compare models within an ablation set (those defined using the "ablate" param in the config file)')
     argparser.add_argument('-A', '--ablation_components', type=str, nargs='*', help='Names of variables to consider in ablative tests. Useful for excluding some ablated models from consideration')
     argparser.add_argument('-p', '--partition', type=str, default='train', help='Name of partition to use (one of "train", "dev", "test")')
-    args, unknown = argparser.parse_known_args()
+    args = argparser.parse_args()
 
     p = Config(args.config_path)
 
