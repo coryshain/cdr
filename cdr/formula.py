@@ -3340,7 +3340,7 @@ class IRFNode(object):
 
                 new_impulses = [ImpulseInteraction(x, ops=self.impulse.ops) for x in itertools.product(*expanded_atomic_impulses)]
 
-            if type(self.impulse).__name__ == 'NNImpulse':
+            elif type(self.impulse).__name__ == 'NNImpulse':
                 expanded_atomic_impulses = []
                 for x in self.impulse.impulses():
                     if x.name() not in expansion_map:
