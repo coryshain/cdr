@@ -2799,9 +2799,9 @@ class CDRModel(object):
                 bases,
                 int_type=int_type,
                 float_type=float_type,
-                session=session,
                 support_lb=support_lb,
                 support_ub=support_ub,
+                session=session,
                 **params
             )
 

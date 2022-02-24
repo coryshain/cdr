@@ -42,6 +42,8 @@ class SyntheticModel(object):
     :param n_pred: ``int``; Number of predictors in the synthetic model.
     :param irf_name: ``str``; Name of IRF kernel to use. One of ``['Exp', 'Normal', 'Gamma', 'ShiftedGamma']``.
     :param irf_params: ``dict`` or ``None``; Dictionary of IRF parameters to use, with parameter names as keys and numeric arrays as values. Values must each have **n_pred** cells. If ``None``, parameter values will be randomly sampled.
+    :param ranef_range: ``float`` or ``None``; Maximum magnitude of simulated random effects. If ``0`` or ``None``, no random effects.
+    :param n_ranef_levels: ``int`` or ``None``; Number of random effects levels. If ``0`` or ``None``, no random effects.
     :param coefs: numpy array or ``None``; Vector of coefficients to use, where ``len(coefs) == n_pred``. If ``None``, coefficients will be randomly sampled.
     """
 
@@ -68,6 +70,8 @@ class SyntheticModel(object):
             n_pred,
             irf_name,
             irf_params=None,
+            ranef_range=None,
+            n_ranef_levels=None,
             coefs=None
     ):
         self.n_pred = n_pred
@@ -78,27 +82,46 @@ class SyntheticModel(object):
                 l, u = SyntheticModel.IRF_BOUNDS[irf_name][x]
                 irf_params[x] = np.random.uniform(l, u, (self.n_pred,))
         self.irf_params = irf_params
-        self.irf_name = irf_name
 
         if coefs is None:
             coefs = np.random.uniform(-10, 10, (self.n_pred,))
         self.coefs = coefs
 
-    def irf(self, x, coefs=False):
+        self.ranef_range = ranef_range
+        self.n_ranef_levels = n_ranef_levels
+        self.ranef_irf = {}
+        self.ranef_coef = {}
+        if ranef_range and n_ranef_levels:
+            for i in range(n_ranef_levels):
+                _ranef_irf = {k: np.random.uniform(-ranef_range, ranef_range, (self.n_pred,)) for k in irf_params}
+                _ranef_coef = np.random.uniform(-ranef_range, ranef_range, (self.n_pred,))
+                self.ranef_irf['r%d' % i] = _ranef_irf
+                self.ranef_coef['r%d' % i] = _ranef_coef
+        self.ranef_levels = sorted(self.ranef_irf.keys())
+
+    def irf(self, x, coefs=False, ranef_level=None):
         """
         Computes the values of the model's IRFs elementwise over a vector of timepoints.
 
         :param x: numpy array; 1-D array with shape ``[N]`` containing timepoints at which to query the IRFs.
         :param coefs: ``bool``; Whether to rescale responses by coefficients
+        :param ranef_level: ``str`` or ``None``; Random effects level to use (or ``None`` to use population-level effect)
         :return: numpy array; 2-D array with shape ``[N, K]`` containing values of the model's ``K`` IRFs evaluated at the timepoints in **x**.
         """
 
         if coefs:
             coefs = self.coefs
+            if ranef_level:
+                coefs += self.ranef_coef[ranef_level]
         else:
             coefs = None
 
-        return irf(x, self.irf_name, self.irf_params, coefs=coefs)
+        irf_params = self.irf_params.copy()
+        if ranef_level:
+            for k in irf_params:
+                irf_params[k] += self.ranef_irfs[ranef_level][k]
+
+        return irf(x, self.irf_name, irf_params, coefs=coefs)
 
     def sample_data(self, m, n=None, X_interval=None, y_interval=None, rho=None, align_X_y=True):
         """
@@ -143,7 +166,17 @@ class SyntheticModel(object):
 
         return X, t_X, t_y
 
-    def convolve(self, X, t_X, t_y, history_length=None, err_sd=None, allow_instantaneous=True, verbose=True):
+    def convolve(
+            self,
+            X,
+            t_X,
+            t_y,
+            history_length=None,
+            err_sd=None,
+            allow_instantaneous=True,
+            ranef_level=None,
+            verbose=True
+    ):
         """
         Convolve data using the model's IRFs.
 
@@ -153,6 +186,7 @@ class SyntheticModel(object):
         :param history_length: ``int`` or ``None``; Drop preceding events more than ``history_length`` steps into the past. If ``None``, no history clipping.
         :param err_sd: ``float`` or ``None``; Standard deviation of Gaussian noise to inject into responses. If ``None``, use the empirical standard deviation of the response vector.
         :param allow_instantaneous: ``bool``; Whether to compute responses when ``t==0``.
+        :param ranef_level: ``str`` or ``None``; Random effects level to use (or ``None`` to use population-level effect)
         :param verbose: ``bool``; Verbosity.
         :return: (2-D numpy array, 1-D numpy array); Matrix of convolved predictors, vector of responses
         """
@@ -183,7 +217,8 @@ class SyntheticModel(object):
             else:
                 s_ix = 0
             t_delta = t_y[j] - t_X[s_ix:i]
-            X_conv[j] = np.sum(self.irf(t_delta) * X[s_ix:i], axis=0, keepdims=True) * self.coefs[None, ...]
+            _X_conv = self.irf(t_delta, ranef_level=ranef_level)
+            X_conv[j] = np.sum(_X_conv * X[s_ix:i], axis=0, keepdims=True) * self.coefs[None, ...]
             y[j] = X_conv[j].sum(axis=-1)
             j += 1
 
@@ -230,20 +265,23 @@ class SyntheticModel(object):
     def get_curves(
             self,
             n_time_units=None,
-            n_time_points=None
+            n_time_points=None,
+            ranef_level=None
     ):
         """
         Extract response curves as an array.
 
         :param n_time_units: ``float``; Number of units of time over which to extract curves.
         :param n_time_points: ``int``; Number of samples to extract for each curve (resolution of curve)
+        :param ranef_level: ``str`` or ``None``; Random effects level to use (or ``None`` to use population-level effect)
+
         :return: numpy array; 2-D numpy array with shape ``[T, K]``, where ``T`` is **n_time_points** and ``K`` is the number of predictors in the model.
         """
 
         a = 5 if n_time_units is None else n_time_units
         b = 1000 if n_time_points is None else n_time_points
         plot_x = np.linspace(0, a, b)
-        plot_y = self.irf(plot_x, coefs=True)
+        plot_y = self.irf(plot_x, coefs=True, ranef_level=ranef_level)
 
         return plot_x, plot_y
 
@@ -307,3 +345,26 @@ class SyntheticModel(object):
             use_line_markers=use_line_markers,
             transparent_background=transparent_background
         )
+
+        for ranef_level in self.ranef_levels:
+            plot_x, plot_y = self.get_curves(
+                n_time_units=n_time_units,
+                n_time_points=n_time_points,
+                ranef_level=ranef_level
+            )
+
+            plot_irf(
+                plot_x,
+                plot_y,
+                string.ascii_lowercase[:self.n_pred],
+                dir=dir,
+                filename='%s_' % ranef_level + filename,
+                plot_x_inches=plot_x_inches,
+                plot_y_inches=plot_y_inches,
+                cmap=cmap,
+                legend=legend,
+                xlab=xlab,
+                ylab=ylab,
+                use_line_markers=use_line_markers,
+                transparent_background=transparent_background
+            )
