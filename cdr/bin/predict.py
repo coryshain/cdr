@@ -13,7 +13,7 @@ from cdr.config import Config
 from cdr.io import read_tabular_data
 from cdr.formula import Formula
 from cdr.data import add_responses, filter_invalid_responses, preprocess_data, compute_splitID, compute_partition, s, c, z, split_cdr_outputs
-from cdr.ensemble import CDREnsemble
+from cdr.model import CDREnsemble
 from cdr.util import mse, mae, percent_variance_explained
 from cdr.util import filter_models, get_partition_list, paths_from_partition_cliarg, stderr, sn
 from cdr.plot import plot_qq

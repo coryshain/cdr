@@ -58,6 +58,873 @@ tf_config.gpu_options.allow_growth = True
 pd.options.mode.chained_assignment = None
 
 
+def predict(
+        model,
+        X,
+        Y=None,
+        first_obs=None,
+        last_obs=None,
+        Y_time=None,
+        Y_gf=None,
+        responses=None,
+        X_in_Y_names=None,
+        X_in_Y=None,
+        n_samples=None,
+        algorithm='MAP',
+        return_preds=True,
+        return_loglik=False,
+        sum_outputs_along_T=True,
+        sum_outputs_along_K=True,
+        dump=False,
+        extra_cols=False,
+        partition=None,
+        optimize_memory=False,
+        verbose=True
+):
+    """
+    Predict from the pre-trained CDR model.
+    Predictions are averaged over ``self.n_samples_eval`` samples from the predictive posterior for each regression target.
+    Can also be used to generate log likelihoods when targets **Y** are provided (see options below).
+
+    :param model: ``CDRModel`` or ``CDREnsemble``; CDR object
+    :param X: list of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+        Each element of **X** must contain the following columns (additional columns are ignored):
+
+        * ``time``: Timestamp associated with each observation in **X**
+
+        Across all elements of **X**, there must be a column for each independent variable in the CDR ``form_str`` provided at initialization.
+
+    :param Y (optional): ``list`` of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+        This parameter is optional and responses are not directly used. It simply allows the user to omit the
+        inputs **Y_time**, **Y_gf**, **first_obs**, and **last_obs**, since they can be inferred from **Y**
+        If supplied, each element of **Y** must contain the following columns (additional columns are ignored):
+
+        * ``time``: Timestamp associated with each observation in **y**
+        * ``first_obs``:  Index in the design matrix **X** of the first observation in the time series associated with each entry in **y**
+        * ``last_obs``:  Index in the design matrix **X** of the immediately preceding observation in the time series associated with each entry in **y**
+        * Columns with a subset of the names of the DVs specified in ``form_str`` (all DVs should be represented somewhere in **y**)
+        * A column for each random grouping factor in the model formula
+
+    :param first_obs: ``list`` of ``list`` of index vectors (``list``, ``pandas`` series, or ``numpy`` vector) of first observations; the list contains one element for each response array. Inner lists contain vectors of row indices, one for each element of **X**, of the first impulse in the time series associated with each response. If ``None``, inferred from **Y**.
+        Sort order and number of observations must be identical to that of ``y_time``.
+    :param last_obs: ``list`` of ``list`` of index vectors (``list``, ``pandas`` series, or ``numpy`` vector) of last observations; the list contains one element for each response array. Inner lists contain vectors of row indices, one for each element of **X**, of the last impulse in the time series associated with each response. If ``None``, inferred from **Y**.
+        Sort order and number of observations must be identical to that of ``y_time``.
+    :param Y_time: ``list`` of response timestamp vectors (``list``, ``pandas`` series, or ``numpy`` vector); vector(s) of response timestamps, one for each response array. Needed to timestamp any response-aligned predictors (ignored if none in model).
+    :param Y_gf: ``list`` of random grouping factor values (``list``, ``pandas`` series, or ``numpy`` vector); random grouping factor values (if applicable), one for each response dataframe.
+        Can be of type ``str`` or ``int``.
+        Sort order and number of observations must be identical to that of ``y_time``.
+    :param responses: ``list`` of ``str``, ``str``, or ``None``; Name(s) of response(s) to predict. If ``None``, predicts all responses.
+    :param X_in_Y_names: ``list`` of ``str``; names of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, no such predictors.
+    :param X_in_Y: ``list`` of ``pandas`` ``DataFrame`` or ``None``; tables (one per response array) of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, inferred from **Y** and **X_in_Y_names**.
+    :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+    :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
+    :param return_preds: ``bool``; whether to return predictions.
+    :param return_loglik: ``bool``; whether to return elementwise log likelihoods. Requires that **Y** is not ``None``.
+    :param sum_outputs_along_T: ``bool``; whether to sum IRF-weighted predictors along the time dimension. Must be ``True`` for valid convolution. Setting to ``False`` is useful for timestep-specific evaluation.
+    :param sum_outputs_along_K: ``bool``; whether to sum IRF-weighted predictors along the predictor dimension. Must be ``True`` for valid convolution. Setting to ``False`` is useful for impulse-specific evaluation.
+    :param dump: ``bool``; whether to save generated predictions (and log likelihood vectors if applicable) to disk.
+    :param extra_cols: ``bool``; whether to include columns from **Y** in output tables. Ignored unless **dump** is ``True``.
+    :param partition: ``str`` or ``None``; name of data partition (or ``None`` if no partition name), used for output file naming. Ignored unless **dump** is ``True``.
+    :param verbose: ``bool``; Report progress and metrics to standard error.
+    :param optimize_memory: ``bool``; Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).
+    :return: 1D ``numpy`` array; mean network predictions for regression targets (same length and sort order as ``y_time``).
+    """
+
+    assert isinstance(model, CDRModel) or isinstance(model, CDREnsemble), 'predict may only be called on CDRModel or CDREnsemble'
+    assert Y is not None or not return_loglik, 'Cannot return log likelihood when Y is not provided.'
+    assert not dump or (
+                sum_outputs_along_T and sum_outputs_along_K), 'dump=True is only supported if sum_outputs_along_T=True and sum_outputs_along_K=True'
+
+    if verbose:
+        usingGPU = tf.test.is_gpu_available()
+        stderr('Using GPU: %s\n' % usingGPU)
+        stderr('Computing predictions...\n')
+
+    if responses is None:
+        responses = model.response_names
+    if not isinstance(responses, list):
+        responses = [responses]
+
+    if algorithm.lower() == 'map':
+        for response in responses:
+            dist_name = model.get_response_dist_name(response)
+            if dist_name.lower() == 'exgaussian':
+                stderr('WARNING: The exact mode of the ExGaussian distribution is currently not implemented,\n' +
+                       'and an approximation is used that degrades when the skew is larger than the scale.\n' +
+                       'Predictions/errors from ExGaussian models should be treated with caution.\n')
+                break
+
+    # Preprocess data
+    if not isinstance(X, list):
+        X = [X]
+    X_in = X
+    if Y is None:
+        assert Y_time is not None, 'Either Y or Y_time must be provided.'
+        lengths = [len(_Y_time) for _Y_time in Y_time]
+    else:
+        if not isinstance(Y, list):
+            Y = [Y]
+        lengths = [len(_Y) for _Y in Y]
+    n = sum(lengths)
+    Y_in = Y
+    if Y_time is None:
+        Y_time_in = [_Y.time for _Y in Y]
+    else:
+        Y_time_in = Y_time
+    if Y_gf is None:
+        assert Y is not None, 'Either Y or Y_gf must be provided.'
+        Y_gf_in = Y
+    else:
+        Y_gf_in = Y_gf
+    if X_in_Y_names:
+        X_in_Y_names = [x for x in X_in_Y_names if x in model.impulse_names]
+    X_in_Y_in = X_in_Y
+
+    Y, first_obs, last_obs, Y_time, Y_mask, Y_gf, X_in_Y = build_CDR_response_data(
+        model.response_names,
+        Y=Y_in,
+        first_obs=first_obs,
+        last_obs=last_obs,
+        Y_gf=Y_gf_in,
+        X_in_Y_names=X_in_Y_names,
+        X_in_Y=X_in_Y_in,
+        Y_category_map=model.response_category_to_ix,
+        response_to_df_ix=model.response_to_df_ix,
+        gf_names=model.rangf,
+        gf_map=model.rangf_map
+    )
+
+    if not optimize_memory:
+        X, X_time, X_mask = build_CDR_impulse_data(
+            X_in,
+            first_obs,
+            last_obs,
+            X_in_Y_names=X_in_Y_names,
+            X_in_Y=X_in_Y,
+            history_length=model.history_length,
+            future_length=model.future_length,
+            impulse_names=model.impulse_names,
+            int_type=model.int_type,
+            float_type=model.float_type,
+        )
+
+    if return_preds or return_loglik:
+        with model.session.as_default():
+            with model.session.graph.as_default():
+                model.set_predict_mode(True)
+
+                out = {}
+                out_shape = (n,)
+                if not sum_outputs_along_T:
+                    out_shape = out_shape + (model.history_length + model.future_length,)
+                if not sum_outputs_along_K:
+                    n_impulse = model.n_impulse
+                    out_shape = out_shape + (n_impulse,)
+
+                if return_preds:
+                    out['preds'] = {}
+                    for _response in responses:
+                        if model.is_real(_response):
+                            dtype = model.FLOAT_NP
+                        else:
+                            dtype = model.INT_NP
+                        out['preds'][_response] = np.zeros(out_shape, dtype=dtype)
+                if return_loglik:
+                    out['log_lik'] = {x: np.zeros(out_shape) for x in responses}
+
+                B = model.eval_minibatch_size
+                n_eval_minibatch = math.ceil(n / B)
+                for i in range(0, n, B):
+                    if verbose:
+                        stderr('\rMinibatch %d/%d' % ((i / B) + 1, n_eval_minibatch))
+                    if optimize_memory:
+                        _Y = None if Y is None else Y[i:i + B]
+                        _first_obs = [x[i:i + B] for x in first_obs]
+                        _last_obs = [x[i:i + B] for x in last_obs]
+                        _Y_time = Y_time[i:i + B]
+                        _Y_mask = Y_mask[i:i + B]
+                        _Y_gf = None if Y_gf is None else Y_gf[i:i + B]
+                        _X_in_Y = None if X_in_Y is None else X_in_Y[i:i + B]
+
+                        _X, _X_time, _X_mask = build_CDR_impulse_data(
+                            X_in,
+                            _first_obs,
+                            _last_obs,
+                            X_in_Y_names=X_in_Y_names,
+                            X_in_Y=_X_in_Y,
+                            history_length=model.history_length,
+                            future_length=model.future_length,
+                            impulse_names=model.impulse_names,
+                            int_type=model.int_type,
+                            float_type=model.float_type,
+                        )
+                        fd = {
+                            model.X: _X,
+                            model.X_time: _X_time,
+                            model.X_mask: _X_mask,
+                            model.Y_time: _Y_time,
+                            model.Y_mask: _Y_mask,
+                            model.Y_gf: _Y_gf,
+                            model.training: not model.predict_mode,
+                            model.sum_outputs_along_T: sum_outputs_along_T,
+                            model.sum_outputs_along_K: sum_outputs_along_K
+                        }
+                        if return_loglik:
+                            fd[model.Y] = _Y
+                    else:
+                        fd = {
+                            model.X: X[i:i + B],
+                            model.X_time: X_time[i:i + B],
+                            model.X_mask: X_mask[i:i + B],
+                            model.Y_time: Y_time[i:i + B],
+                            model.Y_mask: Y_mask[i:i + B],
+                            model.Y_gf: None if Y_gf is None else Y_gf[i:i + B],
+                            model.training: not model.predict_mode,
+                            model.sum_outputs_along_T: sum_outputs_along_T,
+                            model.sum_outputs_along_K: sum_outputs_along_K
+                        }
+                        if return_loglik:
+                            fd[model.Y] = Y[i:i + B]
+                    _out = model.run_predict_op(
+                        fd,
+                        responses=responses,
+                        n_samples=n_samples,
+                        algorithm=algorithm,
+                        return_preds=return_preds,
+                        return_loglik=return_loglik,
+                        verbose=verbose
+                    )
+
+                    if return_preds:
+                        for _response in _out['preds']:
+                            out['preds'][_response][i:i + B] = _out['preds'][_response]
+                    if return_loglik:
+                        for _response in _out['log_lik']:
+                            out['log_lik'][_response][i:i + B] = _out['log_lik'][_response]
+
+                # Convert predictions to category labels, if applicable
+                for _response in out['preds']:
+                    if model.is_categorical(_response):
+                        mapper = np.vectorize(lambda x: model.response_ix_to_category[_response].get(x, x))
+                        out['preds'][_response] = mapper(out['preds'][_response])
+
+                # Split into per-file predictions.
+                # Exclude the length of last file because it will be inferred.
+                out = split_cdr_outputs(out, [x for x in lengths[:-1]])
+
+                if verbose:
+                    stderr('\n\n')
+
+                model.set_predict_mode(False)
+
+                if dump:
+                    response_keys = responses[:]
+
+                    if partition and not partition.startswith('_'):
+                        partition_str = '_' + partition
+                    else:
+                        partition_str = ''
+
+                    for _response in response_keys:
+                        file_ix = model.response_to_df_ix[_response]
+                        multiple_files = len(file_ix) > 1
+                        for ix in file_ix:
+                            df = {}
+                            if return_preds and _response in out['preds']:
+                                df['CDRpreds'] = out['preds'][_response][ix]
+                            if return_loglik:
+                                df['CDRloglik'] = out['log_lik'][_response][ix]
+                            if Y is not None and _response in Y[ix]:
+                                df['CDRobs'] = Y[ix][_response]
+                            df = pd.DataFrame(df)
+                            if extra_cols:
+                                if Y is None:
+                                    df_new = {x: Y_gf_in[i] for i, x in enumerate(model.rangf)}
+                                    df_new['time'] = Y_time_in[ix]
+                                    df_new = pd.DataFrame(df_new)
+                                else:
+                                    df_new = Y[ix]
+                                df = pd.concat([df.reset_index(drop=True), df_new.reset_index(drop=True)], axis=1)
+
+                            if multiple_files:
+                                name_base = '%s_f%s%s' % (sn(_response), ix, partition_str)
+                            else:
+                                name_base = '%s%s' % (sn(_response), partition_str)
+                            df.to_csv(model.outdir + '/CDRpreds_%s.csv' % name_base, sep=' ', na_rep='NaN', index=False)
+    else:
+        out = {}
+
+    return out
+
+
+def log_lik(
+        model,
+        X,
+        Y,
+        sum_outputs_along_T=True,
+        sum_outputs_along_K=True,
+        dump=False,
+        extra_cols=False,
+        partition=None,
+        **kwargs
+):
+    """
+    Compute log-likelihood of data from predictive posterior.
+
+    :param model: ``CDRModel`` or ``CDREnsemble``; CDR object
+    :param X: list of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+        Each element of **X** must contain the following columns (additional columns are ignored):
+
+        * ``time``: Timestamp associated with each observation in **X**
+
+        Across all elements of **X**, there must be a column for each independent variable in the CDR ``form_str`` provided at initialization.
+
+    :param Y: ``list`` of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+        Each element of **Y** must contain the following columns (additional columns are ignored):
+
+        * ``time``: Timestamp associated with each observation in ``y``
+        * ``first_obs_<K>``:  Index in the Kth (zero-indexed) element of `X` of the first observation in the time series associated with each entry in ``y``
+        * ``last_obs_<K>``:  Index in the Kth (zero-indexed) element of `X` of the immediately preceding observation in the time series associated with each entry in ``y``
+        * Columns with a subset of the names of the DVs specified in ``form_str`` (all DVs should be represented somewhere in **y**)
+        * A column for each random grouping factor in the model specified in ``form_str``.
+
+    :param extra_cols: ``bool``; whether to include columns from **Y** in output tables.`
+    :param sum_outputs_along_T: ``bool``; whether to sum IRF-weighted predictors along the time dimension. Must be ``True`` for valid convolution. Setting to ``False`` is useful for timestep-specific evaluation.
+    :param sum_outputs_along_K: ``bool``; whether to sum IRF-weighted predictors along the predictor dimension. Must be ``True`` for valid convolution. Setting to ``False`` is useful for impulse-specific evaluation.
+    :param dump; ``bool``; whether to save generated log likelihood vectors to disk.
+    :param extra_cols: ``bool``; whether to include columns from **Y** in output tables. Ignored unless **dump** is ``True``.
+    :param partition: ``str`` or ``None``; name of data partition (or ``None`` if no partition name), used for output file naming. Ignored unless **dump** is ``True``.
+    :param **kwargs; Any additional keyword arguments accepted by ``predict()`` (see docs for ``predict()`` for details).
+    :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
+    """
+
+    assert isinstance(model, CDRModel) or isinstance(model, CDREnsemble), 'log_lik may only be called on CDRModel or CDREnsemble'
+    assert not dump or (sum_outputs_along_T and sum_outputs_along_K), 'dump=True is only supported if sum_outputs_along_T=True and sum_outputs_along_K=True'
+
+    out = model.predict(
+        X,
+        Y=Y,
+        return_preds=False,
+        return_loglik=True,
+        sum_outputs_along_T=sum_outputs_along_T,
+        sum_outputs_along_K=sum_outputs_along_K,
+        dump=False,
+        **kwargs
+    )['log_lik']
+
+    if dump:
+        response_keys = list(out['log_lik'].keys())
+
+        Y_gf = [_Y[model.rangf] for _Y in Y]
+        Y_time = [_Y.time for _Y in Y]
+
+        if partition and not partition.startswith('_'):
+            partition_str = '_' + partition
+        else:
+            partition_str = ''
+
+        for _response in response_keys:
+            file_ix = model.response_to_df_ix[_response]
+            multiple_files = len(file_ix) > 1
+            for ix in file_ix:
+                df = {'CDRloglik': out[_response][ix]}
+                if extra_cols:
+                    if Y is None:
+                        df_new = {x: Y_gf[i] for i, x in enumerate(model.rangf)}
+                        df_new['time'] = Y_time[ix]
+                        df_new = pd.DataFrame(df_new)
+                    else:
+                        df_new = Y[ix]
+                    df = pd.concat([df.reset_index(drop=True), df_new.reset_index(drop=True)], axis=1)
+
+                if multiple_files:
+                    name_base = '%s_f%s%s' % (sn(_response), ix, partition_str)
+                else:
+                    name_base = '%s%s' % (sn(_response), partition_str)
+                df.to_csv(model.outdir + '/output_%s.csv' % name_base, sep=' ', na_rep='NaN', index=False)
+
+    return out
+
+
+def loss(
+        model,
+        X,
+        Y,
+        X_in_Y_names=None,
+        n_samples=None,
+        algorithm='MAP',
+        training=None,
+        optimize_memory=False,
+        verbose=True
+):
+    """
+    Compute the elementsize loss over a dataset using the model's optimization objective.
+
+    :param model: ``CDRModel`` or ``CDREnsemble``; CDR object
+    :param X: list of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+        Each element of **X** must contain the following columns (additional columns are ignored):
+
+        * ``time``: Timestamp associated with each observation in **X**
+
+        Across all elements of **X**, there must be a column for each independent variable in the CDR ``form_str`` provided at initialization.
+
+    :param Y: ``list`` of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+        Each element of **Y** must contain the following columns (additional columns are ignored):
+
+        * ``time``: Timestamp associated with each observation in ``y``
+        * ``first_obs_<K>``:  Index in the Kth (zero-indexed) element of `X` of the first observation in the time series associated with each entry in ``y``
+        * ``last_obs_<K>``:  Index in the Kth (zero-indexed) element of `X` of the immediately preceding observation in the time series associated with each entry in ``y``
+        * Columns with a subset of the names of the DVs specified in ``form_str`` (all DVs should be represented somewhere in **y**)
+        * A column for each random grouping factor in the model specified in ``form_str``.
+
+    :param X_in_Y_names: ``list`` of ``str``; names of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, no such predictors.
+    :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+    :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
+    :param training: ``bool``; Whether to compute loss in training mode.
+    :param optimize_memory: ``bool``; Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).
+    :param verbose: ``bool``; Report progress and metrics to standard error.
+    :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
+    """
+
+    assert isinstance(model, CDRModel) or isinstance(model, CDREnsemble), 'loss may only be called on CDRModel or CDREnsemble'
+
+    if verbose:
+        usingGPU = tf.test.is_gpu_available()
+        stderr('Using GPU: %s\n' % usingGPU)
+        stderr('Computing loss...\n')
+
+    # Preprocess data
+    if not isinstance(X, list):
+        X = [X]
+    X_in = X
+    if Y is not None and not isinstance(Y, list):
+        Y = [Y]
+    lengths = [len(_Y) for _Y in Y]
+    n = sum(lengths)
+    Y_in = Y
+    if X_in_Y_names:
+        X_in_Y_names = [x for x in X_in_Y_names if x in model.impulse_names]
+
+    Y, first_obs, last_obs, Y_time, Y_mask, Y_gf, X_in_Y = build_CDR_response_data(
+        model.response_names,
+        Y=Y_in,
+        X_in_Y_names=X_in_Y_names,
+        Y_category_map=model.response_category_to_ix,
+        response_to_df_ix=model.response_to_df_ix,
+        gf_names=model.rangf,
+        gf_map=model.rangf_map
+    )
+
+    if not optimize_memory:
+        X, X_time, X_mask = build_CDR_impulse_data(
+            X_in,
+            first_obs,
+            last_obs,
+            X_in_Y_names=X_in_Y_names,
+            X_in_Y=X_in_Y,
+            history_length=model.history_length,
+            future_length=model.future_length,
+            impulse_names=model.impulse_names,
+            int_type=model.int_type,
+            float_type=model.float_type,
+        )
+
+    with model.session.as_default():
+        with model.session.graph.as_default():
+            model.set_predict_mode(True)
+
+            if training is None:
+                training = not model.predict_mode
+
+            B = model.eval_minibatch_size
+            n = sum([len(_Y) for _Y in Y])
+            n_minibatch = math.ceil(n / B)
+            loss = np.zeros((n,))
+            for i in range(0, n, B):
+                if verbose:
+                    stderr('\rMinibatch %d/%d' % (i + 1, n_minibatch))
+                if optimize_memory:
+                    _Y = Y[i:i + B]
+                    _first_obs = [x[i:i + B] for x in first_obs]
+                    _last_obs = [x[i:i + B] for x in last_obs]
+                    _Y_time = Y_time[i:i + B]
+                    _Y_mask = Y_mask[i:i + B]
+                    _Y_gf = None if Y_gf is None else Y_gf[i:i + B]
+                    _X_in_Y = None if X_in_Y is None else X_in_Y[i:i + B]
+
+                    _X, _X_time, _X_mask = build_CDR_impulse_data(
+                        X_in,
+                        _first_obs,
+                        _last_obs,
+                        X_in_Y_names=X_in_Y_names,
+                        X_in_Y=_X_in_Y,
+                        history_length=model.history_length,
+                        future_length=model.future_length,
+                        impulse_names=model.impulse_names,
+                        int_type=model.int_type,
+                        float_type=model.float_type,
+                    )
+                    _Y = None if Y is None else [_y[i:i + B] for _y in Y]
+                    _Y_gf = None if Y_gf is None else Y_gf[i:i + B]
+
+                    fd = {
+                        model.X: _X,
+                        model.X_time: _X_time,
+                        model.X_mask: _X_mask,
+                        model.Y: _Y,
+                        model.Y_time: _Y_time,
+                        model.Y_mask: _Y_mask,
+                        model.Y_gf: _Y_gf,
+                        model.training: not model.predict_mode
+                    }
+                else:
+                    fd = {
+                        model.X: X[i:i + B],
+                        model.X_time: X_time[i:i + B],
+                        model.X_mask: X_mask[i:i + B],
+                        model.Y_time: Y_time[i:i + B],
+                        model.Y_mask: Y_mask[i:i + B],
+                        model.Y_gf: None if Y_gf is None else Y_gf[i:i + B],
+                        model.Y: Y[i:i + B],
+                        model.training: training
+                    }
+                loss[i:i + B] = model.run_loss_op(
+                    fd,
+                    n_samples=n_samples,
+                    algorithm=algorithm,
+                    verbose=verbose
+                )
+            loss = loss.mean()
+
+            if verbose:
+                stderr('\n\n')
+
+            model.set_predict_mode(False)
+
+            return loss
+
+
+def evaluate(
+        model,
+        X,
+        Y,
+        X_in_Y_names=None,
+        n_samples=None,
+        algorithm='MAP',
+        sum_outputs_along_T=True,
+        sum_outputs_along_K=True,
+        dump=False,
+        extra_cols=False,
+        partition=None,
+        optimize_memory=False,
+        verbose=True
+):
+    """
+    Compute and evaluate CDR model outputs relative to targets, optionally saving generated data and evaluations to disk.
+
+    :param model: ``CDRModel`` or ``CDREnsemble``; CDR object
+    :param X: list of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+        Each element of **X** must contain the following columns (additional columns are ignored):
+
+        * ``time``: Timestamp associated with each observation in **X**
+
+        Across all elements of **X**, there must be a column for each independent variable in the CDR ``form_str`` provided at initialization.
+
+    :param Y: ``list`` of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+        Each element of **Y** must contain the following columns (additional columns are ignored):
+
+        * ``time``: Timestamp associated with each observation in ``y``
+        * ``first_obs_<K>``:  Index in the Kth (zero-indexed) element of `X` of the first observation in the time series associated with each entry in ``y``
+        * ``last_obs_<K>``:  Index in the Kth (zero-indexed) element of `X` of the immediately preceding observation in the time series associated with each entry in ``y``
+        * Columns with a subset of the names of the DVs specified in ``form_str`` (all DVs should be represented somewhere in **y**)
+        * A column for each random grouping factor in the model specified in ``form_str``.
+
+    :param X_in_Y_names: ``list`` of ``str``; names of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, no such predictors.
+    :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+    :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
+    :param sum_outputs_along_T: ``bool``; whether to sum IRF-weighted predictors along the time dimension. Must be ``True`` for valid convolution. Setting to ``False`` is useful for timestep-specific evaluation.
+    :param sum_outputs_along_K: ``bool``; whether to sum IRF-weighted predictors along the predictor dimension. Must be ``True`` for valid convolution. Setting to ``False`` is useful for impulse-specific evaluation.
+    :param dump: ``bool``; whether to save generated data and evaluations to disk.
+    :param extra_cols: ``bool``; whether to include columns from **Y** in output tables. Ignored unless **dump** is ``True``.
+    :param partition: ``str`` or ``None``; name of data partition (or ``None`` if no partition name), used for output file naming. Ignored unless **dump** is ``True``.
+    :param optimize_memory: ``bool``; Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).
+    :param verbose: ``bool``; Report progress and metrics to standard error.
+    :return: pair of <``dict``, ``str``>; Dictionary of evaluation metrics, human-readable evaluation summary string.
+    """
+
+    assert isinstance(model, CDRModel) or isinstance(model, CDREnsemble), 'evaluate may only be called on CDRModel or CDREnsemble'
+
+    assert not dump or (sum_outputs_along_T and sum_outputs_along_K), 'dump=True is only supported if sum_outputs_along_T=True and sum_outputs_along_K=True'
+
+    if partition and not partition.startswith('_'):
+        partition_str = '_' + partition
+    else:
+        partition_str = ''
+
+    cdr_out = model.predict(
+        X,
+        Y=Y,
+        X_in_Y_names=X_in_Y_names,
+        n_samples=n_samples,
+        algorithm=algorithm,
+        return_preds=True,
+        return_loglik=True,
+        sum_outputs_along_T=sum_outputs_along_T,
+        sum_outputs_along_K=sum_outputs_along_K,
+        dump=False,
+        optimize_memory=optimize_memory,
+        verbose=verbose
+    )
+
+    preds = cdr_out['preds']
+    log_lik = cdr_out['log_lik']
+
+    # Expand arrays to be B x T x K
+    for response in preds:
+        for ix in preds[response]:
+            arr = preds[response][ix]
+            while len(arr.shape) < 3:
+                arr = arr[..., None]
+            preds[response][ix] = arr
+    for response in log_lik:
+        for ix in log_lik[response]:
+            arr = log_lik[response][ix]
+            while len(arr.shape) < 3:
+                arr = arr[..., None]
+            log_lik[response][ix] = arr
+
+    if sum_outputs_along_T:
+        T = 1
+    else:
+        T = model.history_length + model.future_length
+
+    if sum_outputs_along_K:
+        K = 1
+    else:
+        K = model.n_impulse
+
+    metrics = {
+        'mse': {},
+        'rho': {},
+        'f1': {},
+        'f1_baseline': {},
+        'acc': {},
+        'acc_baseline': {},
+        'log_lik': {},
+        'percent_variance_explained': {},
+        'true_variance': {},
+        'ks_results': {},
+        'full_log_lik': 0.
+    }
+
+    response_names = model.response_names[:]
+    for _response in response_names:
+        metrics['mse'][_response] = {}
+        metrics['rho'][_response] = {}
+        metrics['f1'][_response] = {}
+        metrics['f1_baseline'][_response] = {}
+        metrics['acc'][_response] = {}
+        metrics['acc_baseline'][_response] = {}
+        metrics['log_lik'][_response] = {}
+        metrics['percent_variance_explained'][_response] = {}
+        metrics['true_variance'][_response] = {}
+        metrics['ks_results'][_response] = {}
+
+        file_ix_all = list(range(len(Y)))
+        file_ix = model.response_to_df_ix[_response]
+        multiple_files = len(file_ix_all) > 1
+
+        for ix in file_ix_all:
+            metrics['mse'][_response][ix] = None
+            metrics['rho'][_response][ix] = None
+            metrics['f1'][_response][ix] = None
+            metrics['f1_baseline'][_response][ix] = None
+            metrics['acc'][_response][ix] = None
+            metrics['acc_baseline'][_response][ix] = None
+            metrics['log_lik'][_response][ix] = None
+            metrics['percent_variance_explained'][_response][ix] = None
+            metrics['true_variance'][_response][ix] = None
+            metrics['ks_results'][_response][ix] = None
+
+            if ix in file_ix:
+                _Y = Y[ix]
+                sel = None
+                if _response in _Y:
+                    _y = _Y[_response]
+                    sel = np.isfinite(_y)
+                    index = _y.index[sel]
+                    _preds = preds[_response][ix][sel]
+                    _y = _y[sel]
+
+                    if model.is_binary(_response):
+                        baseline = np.ones((len(_y),))
+                        metrics['f1_baseline'][_response][ix] = f1_score(_y, baseline, average='binary')
+                        metrics['acc_baseline'][_response][ix] = accuracy_score(_y, baseline)
+                        err_col_name = 'CDRcorrect'
+                        for t in range(T):
+                            for k in range(K):
+                                __preds = _preds[:, t, k]
+                                error = (_y == __preds).astype('int')
+                                if metrics['f1'][_response][ix] is None:
+                                    metrics['f1'][_response][ix] = np.zeros((T, K))
+                                metrics['f1'][_response][ix][t, k] = f1_score(_y, __preds, average='binary')
+                                if metrics['acc'][_response][ix] is None:
+                                    metrics['acc'][_response][ix] = np.zeros((T, K))
+                                metrics['acc'][_response][ix][t, k] = accuracy_score(_y, __preds)
+                    elif model.is_categorical(_response):
+                        classes, counts = np.unique(_y, return_counts=True)
+                        majority = classes[np.argmax(counts)]
+                        baseline = [majority] * len(_y)
+                        metrics['f1_baseline'][_response][ix] = f1_score(_y, baseline, average='macro')
+                        metrics['acc_baseline'][_response][ix] = accuracy_score(_y, baseline)
+                        err_col_name = 'CDRcorrect'
+                        for t in range(T):
+                            for k in range(K):
+                                __preds = _preds[:, t, k]
+                                error = (_y == __preds).astype('int')
+                                if metrics['f1'][_response][ix] is None:
+                                    metrics['f1'][_response][ix] = np.zeros((T, K))
+                                metrics['f1'][_response][ix][t, k] = f1_score(_y, __preds, average='macro')
+                                if metrics['acc'][_response][ix] is None:
+                                    metrics['acc'][_response][ix] = np.zeros((T, K))
+                                metrics['acc'][_response][ix][t, k] = accuracy_score(_y, __preds)
+                    else:
+                        err_col_name = 'CDRsquarederror'
+                        metrics['true_variance'][_response][ix] = np.std(_y) ** 2
+                        for t in range(T):
+                            for k in range(K):
+                                __preds = _preds[:, t, k]
+                                error = np.array(_y - __preds) ** 2
+                                score = error.mean()
+                                resid = np.sort(_y - __preds)
+                                if model.error_distribution_theoretical_quantiles[_response] is None:
+                                    resid_theoretical_q = None
+                                else:
+                                    resid_theoretical_q = model.error_theoretical_quantiles(len(resid), _response)
+                                    valid = np.isfinite(resid_theoretical_q)
+                                    resid = resid[valid]
+                                    resid_theoretical_q = resid_theoretical_q[valid]
+                                D, p_value = model.error_ks_test(resid, _response)
+
+                                if metrics['mse'][_response][ix] is None:
+                                    metrics['mse'][_response][ix] = np.zeros((T, K))
+                                metrics['mse'][_response][ix][t, k] = score
+                                if metrics['rho'][_response][ix] is None:
+                                    metrics['rho'][_response][ix] = np.zeros((T, K))
+                                metrics['rho'][_response][ix][t, k] = np.corrcoef(_y, __preds, rowvar=False)[0, 1]
+                                if metrics['percent_variance_explained'][_response][ix] is None:
+                                    metrics['percent_variance_explained'][_response][ix] = np.zeros((T, K))
+                                metrics['percent_variance_explained'][_response][ix][t, k] = percent_variance_explained(
+                                    _y, __preds)
+                                if metrics['ks_results'][_response][ix] is None:
+                                    metrics['ks_results'][_response][ix] = (np.zeros((T, K)), np.zeros((T, K)))
+                                metrics['ks_results'][_response][ix][0][t, k] = D
+                                metrics['ks_results'][_response][ix][1][t, k] = p_value
+                else:
+                    err_col_name = error = __preds = _y = None
+
+                _ll = log_lik[_response][ix]
+                if sel is not None:
+                    __preds = pd.Series(__preds, index=index)
+                    _ll = _ll[sel]
+                    _ll = pd.Series(np.squeeze(_ll), index=index)
+                    if err_col_name is not None and error is not None:
+                        error = pd.Series(error, index=index)
+                _ll_summed = _ll.sum(axis=0)
+                metrics['log_lik'][_response][ix] = _ll_summed
+                metrics['full_log_lik'] += _ll_summed
+
+                if dump:
+                    if multiple_files:
+                        name_base = '%s_f%s%s' % (sn(_response), ix, partition_str)
+                    else:
+                        name_base = '%s%s' % (sn(_response), partition_str)
+
+                    df = pd.DataFrame()
+                    if err_col_name is not None and error is not None:
+                        df[err_col_name] = error
+                    if __preds is not None:
+                        df['CDRpreds'] = __preds
+                    if _y is not None:
+                        df['CDRobs'] = _y
+                    df['CDRloglik'] = _ll
+
+                    if extra_cols:
+                        df = pd.concat([_Y.reset_index(drop=True), df.reset_index(drop=True)], axis=1)
+
+                    preds_outfile = model.outdir + '/output_%s.csv' % name_base
+                    df.to_csv(preds_outfile, sep=' ', na_rep='NaN', index=False)
+
+                    if _response in model.predictive_distribution_config and \
+                            model.is_real(_response) and resid_theoretical_q is not None:
+                        plot_qq(
+                            resid_theoretical_q,
+                            resid,
+                            dir=model.outdir,
+                            filename='error_qq_plot_%s.png' % name_base,
+                            xlab='Theoretical',
+                            ylab='Empirical'
+                        )
+
+    summary = ''
+    if sum_outputs_along_T and sum_outputs_along_K:
+        summary_header = '=' * 50 + '\n'
+        summary_header += 'CDR regression\n\n'
+        summary_header += 'Model name: %s\n\n' % model.name
+        summary_header += 'Formula:\n'
+        summary_header += '  ' + model.form_str + '\n\n'
+        summary_header += 'Partition: %s\n' % partition
+        summary_header += 'Training iterations completed: %d\n\n' % model.global_step.eval(session=model.session)
+        summary_header += 'Full log likelihood: %s\n\n' % np.squeeze(metrics['full_log_lik'])
+
+        summary += summary_header
+
+        for _response in response_names:
+            file_ix = model.response_to_df_ix[_response]
+            multiple_files = len(file_ix) > 1
+            for ix in file_ix:
+                summary += 'Response variable: %s\n\n' % _response
+                if dump:
+                    _summary = summary_header
+                    _summary += 'Response variable: %s\n\n' % _response
+
+                if multiple_files:
+                    summary += 'File index: %s\n\n' % ix
+                    if dump:
+                        name_base = '%s_f%s%s' % (sn(_response), ix, partition_str)
+                        _summary += 'File index: %s\n\n' % ix
+                elif dump:
+                    name_base = '%s%s' % (sn(_response), partition_str)
+                _summary = summary_header
+
+                summary_eval = model.report_evaluation(
+                    mse=metrics['mse'][_response][ix],
+                    f1=metrics['f1'][_response][ix],
+                    f1_baseline=metrics['f1_baseline'][_response][ix],
+                    acc=metrics['acc'][_response][ix],
+                    acc_baseline=metrics['acc_baseline'][_response][ix],
+                    rho=metrics['rho'][_response][ix],
+                    loglik=metrics['log_lik'][_response][ix],
+                    percent_variance_explained=metrics['percent_variance_explained'][_response][ix],
+                    true_variance=metrics['true_variance'][_response][ix],
+                    ks_results=metrics['ks_results'][_response][ix]
+                )
+
+                summary += summary_eval
+                if dump:
+                    _summary += summary_eval
+                    _summary += '=' * 50 + '\n'
+                    with open(model.outdir + '/eval_%s.txt' % name_base, 'w') as f_out:
+                        f_out.write(_summary)
+
+        summary += '=' * 50 + '\n'
+        if verbose:
+            stderr(summary)
+            stderr('\n\n')
+
+    return metrics, summary
+
+
 class CDRModel(object):
     _INITIALIZATION_KWARGS = MODEL_INITIALIZATION_KWARGS
 
@@ -6971,300 +7838,8 @@ class CDRModel(object):
 
                     self.save()
 
-    def predict(
-            self,
-            X,
-            Y=None,
-            first_obs=None,
-            last_obs=None,
-            Y_time=None,
-            Y_gf=None,
-            responses=None,
-            X_in_Y_names=None,
-            X_in_Y=None,
-            n_samples=None,
-            algorithm='MAP',
-            return_preds=True,
-            return_loglik=False,
-            sum_outputs_along_T=True,
-            sum_outputs_along_K=True,
-            dump=False,
-            extra_cols=False,
-            partition=None,
-            optimize_memory=False,
-            verbose=True
-    ):
-        """
-        Predict from the pre-trained CDR model.
-        Predictions are averaged over ``self.n_samples_eval`` samples from the predictive posterior for each regression target.
-        Can also be used to generate log likelihoods when targets **Y** are provided (see options below).
-
-        :param X: list of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
-            Each element of **X** must contain the following columns (additional columns are ignored):
-
-            * ``time``: Timestamp associated with each observation in **X**
-
-            Across all elements of **X**, there must be a column for each independent variable in the CDR ``form_str`` provided at initialization.
-
-        :param Y (optional): ``list`` of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
-            This parameter is optional and responses are not directly used. It simply allows the user to omit the
-            inputs **Y_time**, **Y_gf**, **first_obs**, and **last_obs**, since they can be inferred from **Y**
-            If supplied, each element of **Y** must contain the following columns (additional columns are ignored):
-
-            * ``time``: Timestamp associated with each observation in **y**
-            * ``first_obs``:  Index in the design matrix **X** of the first observation in the time series associated with each entry in **y**
-            * ``last_obs``:  Index in the design matrix **X** of the immediately preceding observation in the time series associated with each entry in **y**
-            * Columns with a subset of the names of the DVs specified in ``form_str`` (all DVs should be represented somewhere in **y**)
-            * A column for each random grouping factor in the model formula
-
-        :param first_obs: ``list`` of ``list`` of index vectors (``list``, ``pandas`` series, or ``numpy`` vector) of first observations; the list contains one element for each response array. Inner lists contain vectors of row indices, one for each element of **X**, of the first impulse in the time series associated with each response. If ``None``, inferred from **Y**.
-            Sort order and number of observations must be identical to that of ``y_time``.
-        :param last_obs: ``list`` of ``list`` of index vectors (``list``, ``pandas`` series, or ``numpy`` vector) of last observations; the list contains one element for each response array. Inner lists contain vectors of row indices, one for each element of **X**, of the last impulse in the time series associated with each response. If ``None``, inferred from **Y**.
-            Sort order and number of observations must be identical to that of ``y_time``.
-        :param Y_time: ``list`` of response timestamp vectors (``list``, ``pandas`` series, or ``numpy`` vector); vector(s) of response timestamps, one for each response array. Needed to timestamp any response-aligned predictors (ignored if none in model).
-        :param Y_gf: ``list`` of random grouping factor values (``list``, ``pandas`` series, or ``numpy`` vector); random grouping factor values (if applicable), one for each response dataframe.
-            Can be of type ``str`` or ``int``.
-            Sort order and number of observations must be identical to that of ``y_time``.
-        :param responses: ``list`` of ``str``, ``str``, or ``None``; Name(s) of response(s) to predict. If ``None``, predicts all responses.
-        :param X_in_Y_names: ``list`` of ``str``; names of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, no such predictors.
-        :param X_in_Y: ``list`` of ``pandas`` ``DataFrame`` or ``None``; tables (one per response array) of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, inferred from **Y** and **X_in_Y_names**.
-        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
-        :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
-        :param return_preds: ``bool``; whether to return predictions.
-        :param return_loglik: ``bool``; whether to return elementwise log likelihoods. Requires that **Y** is not ``None``.
-        :param sum_outputs_along_T: ``bool``; whether to sum IRF-weighted predictors along the time dimension. Must be ``True`` for valid convolution. Setting to ``False`` is useful for timestep-specific evaluation.
-        :param sum_outputs_along_K: ``bool``; whether to sum IRF-weighted predictors along the predictor dimension. Must be ``True`` for valid convolution. Setting to ``False`` is useful for impulse-specific evaluation.
-        :param dump: ``bool``; whether to save generated predictions (and log likelihood vectors if applicable) to disk.
-        :param extra_cols: ``bool``; whether to include columns from **Y** in output tables. Ignored unless **dump** is ``True``.
-        :param partition: ``str`` or ``None``; name of data partition (or ``None`` if no partition name), used for output file naming. Ignored unless **dump** is ``True``.
-        :param verbose: ``bool``; Report progress and metrics to standard error.
-        :param optimize_memory: ``bool``; Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).
-        :return: 1D ``numpy`` array; mean network predictions for regression targets (same length and sort order as ``y_time``).
-        """
-
-        assert Y is not None or not return_loglik, 'Cannot return log likelihood when Y is not provided.'
-        assert not dump or (sum_outputs_along_T and sum_outputs_along_K), 'dump=True is only supported if sum_outputs_along_T=True and sum_outputs_along_K=True'
-
-        if verbose:
-            usingGPU = tf.test.is_gpu_available()
-            stderr('Using GPU: %s\n' % usingGPU)
-            stderr('Computing predictions...\n')
-
-        if responses is None:
-            responses = self.response_names
-        if not isinstance(responses, list):
-            responses = [responses]
-
-        if algorithm.lower() == 'map':
-            for response in responses:
-                dist_name = self.get_response_dist_name(response)
-                if dist_name.lower() == 'exgaussian':
-                    stderr('WARNING: The exact mode of the ExGaussian distribution is currently not implemented,\n' +
-                           'and an approximation is used that degrades when the skew is larger than the scale.\n' +
-                           'Predictions/errors from ExGaussian models should be treated with caution.\n')
-                    break
-
-        # Preprocess data
-        if not isinstance(X, list):
-            X = [X]
-        X_in = X
-        if Y is None:
-            assert Y_time is not None, 'Either Y or Y_time must be provided.'
-            lengths = [len(_Y_time) for _Y_time in Y_time]
-        else:
-            if not isinstance(Y, list):
-                Y = [Y]
-            lengths = [len(_Y) for _Y in Y]
-        n = sum(lengths)
-        Y_in = Y
-        if Y_time is None:
-            Y_time_in = [_Y.time for _Y in Y]
-        else:
-            Y_time_in = Y_time
-        if Y_gf is None:
-            assert Y is not None, 'Either Y or Y_gf must be provided.'
-            Y_gf_in = Y
-        else:
-            Y_gf_in = Y_gf
-        if X_in_Y_names:
-            X_in_Y_names = [x for x in X_in_Y_names if x in self.impulse_names]
-        X_in_Y_in = X_in_Y
-
-        Y, first_obs, last_obs, Y_time, Y_mask, Y_gf, X_in_Y = build_CDR_response_data(
-            self.response_names,
-            Y=Y_in,
-            first_obs=first_obs,
-            last_obs=last_obs,
-            Y_gf=Y_gf_in,
-            X_in_Y_names=X_in_Y_names,
-            X_in_Y=X_in_Y_in,
-            Y_category_map=self.response_category_to_ix,
-            response_to_df_ix=self.response_to_df_ix,
-            gf_names=self.rangf,
-            gf_map=self.rangf_map
-        )
-
-        if not optimize_memory:
-            X, X_time, X_mask = build_CDR_impulse_data(
-                X_in,
-                first_obs,
-                last_obs,
-                X_in_Y_names=X_in_Y_names,
-                X_in_Y=X_in_Y,
-                history_length=self.history_length,
-                future_length=self.future_length,
-                impulse_names=self.impulse_names,
-                int_type=self.int_type,
-                float_type=self.float_type,
-            )
-
-        if return_preds or return_loglik:
-            with self.session.as_default():
-                with self.session.graph.as_default():
-                    self.set_predict_mode(True)
-
-                    out = {}
-                    out_shape = (n,)
-                    if not sum_outputs_along_T:
-                        out_shape = out_shape + (self.history_length + self.future_length,)
-                    if not sum_outputs_along_K:
-                        n_impulse = self.n_impulse
-                        out_shape = out_shape + (n_impulse,)
-
-                    if return_preds:
-                        out['preds'] = {}
-                        for _response in responses:
-                            if self.is_real(_response):
-                                dtype = self.FLOAT_NP
-                            else:
-                                dtype = self.INT_NP
-                            out['preds'][_response] = np.zeros(out_shape, dtype=dtype)
-                    if return_loglik:
-                        out['log_lik'] = {x: np.zeros(out_shape) for x in responses}
-
-                    B = self.eval_minibatch_size
-                    n_eval_minibatch = math.ceil(n / B)
-                    for i in range(0, n, B):
-                        if verbose:
-                            stderr('\rMinibatch %d/%d' %((i / B) + 1, n_eval_minibatch))
-                        if optimize_memory:
-                            _Y = None if Y is None else Y[i:i + B]
-                            _first_obs = [x[i:i + B] for x in first_obs]
-                            _last_obs = [x[i:i + B] for x in last_obs]
-                            _Y_time = Y_time[i:i + B]
-                            _Y_mask = Y_mask[i:i + B]
-                            _Y_gf = None if Y_gf is None else Y_gf[i:i + B]
-                            _X_in_Y = None if X_in_Y is None else X_in_Y[i:i + B]
-
-                            _X, _X_time, _X_mask = build_CDR_impulse_data(
-                                X_in,
-                                _first_obs,
-                                _last_obs,
-                                X_in_Y_names=X_in_Y_names,
-                                X_in_Y=_X_in_Y,
-                                history_length=self.history_length,
-                                future_length=self.future_length,
-                                impulse_names=self.impulse_names,
-                                int_type=self.int_type,
-                                float_type=self.float_type,
-                            )
-                            fd = {
-                                self.X: _X,
-                                self.X_time: _X_time,
-                                self.X_mask: _X_mask,
-                                self.Y_time: _Y_time,
-                                self.Y_mask: _Y_mask,
-                                self.Y_gf: _Y_gf,
-                                self.training: not self.predict_mode,
-                                self.sum_outputs_along_T: sum_outputs_along_T,
-                                self.sum_outputs_along_K: sum_outputs_along_K
-                            }
-                            if return_loglik:
-                                fd[self.Y] = _Y
-                        else:
-                            fd = {
-                                self.X: X[i:i + B],
-                                self.X_time: X_time[i:i + B],
-                                self.X_mask: X_mask[i:i + B],
-                                self.Y_time: Y_time[i:i + B],
-                                self.Y_mask: Y_mask[i:i + B],
-                                self.Y_gf: None if Y_gf is None else Y_gf[i:i + B],
-                                self.training: not self.predict_mode,
-                                self.sum_outputs_along_T: sum_outputs_along_T,
-                                self.sum_outputs_along_K: sum_outputs_along_K
-                            }
-                            if return_loglik:
-                                fd[self.Y] = Y[i:i + B]
-                        _out = self.run_predict_op(
-                            fd,
-                            responses=responses,
-                            n_samples=n_samples,
-                            algorithm=algorithm,
-                            return_preds=return_preds,
-                            return_loglik=return_loglik,
-                            verbose=verbose
-                        )
-
-                        if return_preds:
-                            for _response in _out['preds']:
-                                out['preds'][_response][i:i + B] = _out['preds'][_response]
-                        if return_loglik:
-                            for _response in _out['log_lik']:
-                                out['log_lik'][_response][i:i + B] = _out['log_lik'][_response]
-
-                    # Convert predictions to category labels, if applicable
-                    for _response in out['preds']:
-                        if self.is_categorical(_response):
-                            mapper = np.vectorize(lambda x: self.response_ix_to_category[_response].get(x, x))
-                            out['preds'][_response] = mapper(out['preds'][_response])
-
-                    # Split into per-file predictions.
-                    # Exclude the length of last file because it will be inferred.
-                    out = split_cdr_outputs(out, [x for x in lengths[:-1]])
-
-                    if verbose:
-                        stderr('\n\n')
-
-                    self.set_predict_mode(False)
-
-                    if dump:
-                        response_keys = responses[:]
-
-                        if partition and not partition.startswith('_'):
-                            partition_str = '_' + partition
-                        else:
-                            partition_str = ''
-
-                        for _response in response_keys:
-                            file_ix = self.response_to_df_ix[_response]
-                            multiple_files = len(file_ix) > 1
-                            for ix in file_ix:
-                                df = {}
-                                if return_preds and _response in out['preds']:
-                                    df['CDRpreds'] = out['preds'][_response][ix]
-                                if return_loglik:
-                                    df['CDRloglik'] = out['log_lik'][_response][ix]
-                                if Y is not None and _response in Y[ix]:
-                                    df['CDRobs'] = Y[ix][_response]
-                                df = pd.DataFrame(df)
-                                if extra_cols:
-                                    if Y is None:
-                                        df_new = {x: Y_gf_in[i] for i, x in enumerate(self.rangf)}
-                                        df_new['time'] = Y_time_in[ix]
-                                        df_new = pd.DataFrame(df_new)
-                                    else:
-                                        df_new = Y[ix]
-                                    df = pd.concat([df.reset_index(drop=True), df_new.reset_index(drop=True)], axis=1)
-
-                                if multiple_files:
-                                    name_base = '%s_f%s%s' % (sn(_response), ix, partition_str)
-                                else:
-                                    name_base = '%s%s' % (sn(_response), partition_str)
-                                df.to_csv(self.outdir + '/CDRpreds_%s.csv' % name_base, sep=' ', na_rep='NaN', index=False)
-        else:
-            out = {}
-
-        return out
+    def predict(self, *args, **kwargs):
+        return predict(self, *args, **kwargs)
 
     def run_predict_op(
             self,
@@ -7361,561 +7936,11 @@ class CDRModel(object):
 
                     return out
 
-    def log_lik(
-            self,
-            X,
-            Y,
-            sum_outputs_along_T=True,
-            sum_outputs_along_K=True,
-            dump=False,
-            extra_cols=False,
-            partition=None,
-            **kwargs
-    ):
-        """
-        Compute log-likelihood of data from predictive posterior.
-
-        :param X: list of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
-            Each element of **X** must contain the following columns (additional columns are ignored):
-
-            * ``time``: Timestamp associated with each observation in **X**
-
-            Across all elements of **X**, there must be a column for each independent variable in the CDR ``form_str`` provided at initialization.
-
-        :param Y: ``list`` of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
-            Each element of **Y** must contain the following columns (additional columns are ignored):
-
-            * ``time``: Timestamp associated with each observation in ``y``
-            * ``first_obs_<K>``:  Index in the Kth (zero-indexed) element of `X` of the first observation in the time series associated with each entry in ``y``
-            * ``last_obs_<K>``:  Index in the Kth (zero-indexed) element of `X` of the immediately preceding observation in the time series associated with each entry in ``y``
-            * Columns with a subset of the names of the DVs specified in ``form_str`` (all DVs should be represented somewhere in **y**)
-            * A column for each random grouping factor in the model specified in ``form_str``.
-
-        :param extra_cols: ``bool``; whether to include columns from **Y** in output tables.`
-        :param sum_outputs_along_T: ``bool``; whether to sum IRF-weighted predictors along the time dimension. Must be ``True`` for valid convolution. Setting to ``False`` is useful for timestep-specific evaluation.
-        :param sum_outputs_along_K: ``bool``; whether to sum IRF-weighted predictors along the predictor dimension. Must be ``True`` for valid convolution. Setting to ``False`` is useful for impulse-specific evaluation.
-        :param dump; ``bool``; whether to save generated log likelihood vectors to disk.
-        :param extra_cols: ``bool``; whether to include columns from **Y** in output tables. Ignored unless **dump** is ``True``.
-        :param partition: ``str`` or ``None``; name of data partition (or ``None`` if no partition name), used for output file naming. Ignored unless **dump** is ``True``.
-        :param **kwargs; Any additional keyword arguments accepted by ``predict()`` (see docs for ``predict()`` for details).
-        :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
-        """
-
-        assert not dump or (sum_outputs_along_T and sum_outputs_along_K), 'dump=True is only supported if sum_outputs_along_T=True and sum_outputs_along_K=True'
-
-        out = self.predict(
-            X,
-            Y=Y,
-            return_preds=False,
-            return_loglik=True,
-            sum_outputs_along_T=sum_outputs_along_T,
-            sum_outputs_along_K=sum_outputs_along_K,
-            dump=False,
-            **kwargs
-        )['log_lik']
-
-        if dump:
-            response_keys = list(out['log_lik'].keys())
-
-            Y_gf = [_Y[self.rangf] for _Y in Y]
-            Y_time = [_Y.time for _Y in Y]
-
-            if partition and not partition.startswith('_'):
-                partition_str = '_' + partition
-            else:
-                partition_str = ''
-
-            for _response in response_keys:
-                file_ix = self.response_to_df_ix[_response]
-                multiple_files = len(file_ix) > 1
-                for ix in file_ix:
-                    df = {'CDRloglik': out[_response][ix]}
-                    if extra_cols:
-                        if Y is None:
-                            df_new = {x: Y_gf[i] for i, x in enumerate(self.rangf)}
-                            df_new['time'] = Y_time[ix]
-                            df_new = pd.DataFrame(df_new)
-                        else:
-                            df_new = Y[ix]
-                        df = pd.concat([df.reset_index(drop=True), df_new.reset_index(drop=True)], axis=1)
-
-                    if multiple_files:
-                        name_base = '%s_f%s%s' % (sn(_response), ix, partition_str)
-                    else:
-                        name_base = '%s%s' % (sn(_response), partition_str)
-                    df.to_csv(self.outdir + '/output_%s.csv' % name_base, sep=' ', na_rep='NaN', index=False)
-
-        return out
-
-    def evaluate(
-            self,
-            X,
-            Y,
-            X_in_Y_names=None,
-            n_samples=None,
-            algorithm='MAP',
-            sum_outputs_along_T=True,
-            sum_outputs_along_K=True,
-            dump=False,
-            extra_cols=False,
-            partition=None,
-            optimize_memory=False,
-            verbose=True
-    ):
-        """
-        Compute and evaluate CDR model outputs relative to targets, optionally saving generated data and evaluations to disk.
-
-        :param X: list of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
-            Each element of **X** must contain the following columns (additional columns are ignored):
-
-            * ``time``: Timestamp associated with each observation in **X**
-
-            Across all elements of **X**, there must be a column for each independent variable in the CDR ``form_str`` provided at initialization.
-
-        :param Y: ``list`` of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
-            Each element of **Y** must contain the following columns (additional columns are ignored):
-
-            * ``time``: Timestamp associated with each observation in ``y``
-            * ``first_obs_<K>``:  Index in the Kth (zero-indexed) element of `X` of the first observation in the time series associated with each entry in ``y``
-            * ``last_obs_<K>``:  Index in the Kth (zero-indexed) element of `X` of the immediately preceding observation in the time series associated with each entry in ``y``
-            * Columns with a subset of the names of the DVs specified in ``form_str`` (all DVs should be represented somewhere in **y**)
-            * A column for each random grouping factor in the model specified in ``form_str``.
-
-        :param X_in_Y_names: ``list`` of ``str``; names of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, no such predictors.
-        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
-        :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
-        :param sum_outputs_along_T: ``bool``; whether to sum IRF-weighted predictors along the time dimension. Must be ``True`` for valid convolution. Setting to ``False`` is useful for timestep-specific evaluation.
-        :param sum_outputs_along_K: ``bool``; whether to sum IRF-weighted predictors along the predictor dimension. Must be ``True`` for valid convolution. Setting to ``False`` is useful for impulse-specific evaluation.
-        :param dump: ``bool``; whether to save generated data and evaluations to disk.
-        :param extra_cols: ``bool``; whether to include columns from **Y** in output tables. Ignored unless **dump** is ``True``.
-        :param partition: ``str`` or ``None``; name of data partition (or ``None`` if no partition name), used for output file naming. Ignored unless **dump** is ``True``.
-        :param optimize_memory: ``bool``; Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).
-        :param verbose: ``bool``; Report progress and metrics to standard error.
-        :return: pair of <``dict``, ``str``>; Dictionary of evaluation metrics, human-readable evaluation summary string.
-        """
-
-        assert not dump or (sum_outputs_along_T and sum_outputs_along_K), 'dump=True is only supported if sum_outputs_along_T=True and sum_outputs_along_K=True'
-
-        if partition and not partition.startswith('_'):
-            partition_str = '_' + partition
-        else:
-            partition_str = ''
-
-        cdr_out = self.predict(
-            X,
-            Y=Y,
-            X_in_Y_names=X_in_Y_names,
-            n_samples=n_samples,
-            algorithm=algorithm,
-            return_preds=True,
-            return_loglik=True,
-            sum_outputs_along_T=sum_outputs_along_T,
-            sum_outputs_along_K=sum_outputs_along_K,
-            dump=False,
-            optimize_memory=optimize_memory,
-            verbose=verbose
-        )
-
-        preds = cdr_out['preds']
-        log_lik = cdr_out['log_lik']
-
-        # Expand arrays to be B x T x K
-        for response in preds:
-            for ix in preds[response]:
-                arr = preds[response][ix]
-                while len(arr.shape) < 3:
-                    arr = arr[..., None]
-                preds[response][ix] = arr
-        for response in log_lik:
-            for ix in log_lik[response]:
-                arr = log_lik[response][ix]
-                while len(arr.shape) < 3:
-                    arr = arr[..., None]
-                log_lik[response][ix] = arr
-
-        if sum_outputs_along_T:
-            T = 1
-        else:
-            T = self.history_length + self.future_length
-
-        if sum_outputs_along_K:
-            K = 1
-        else:
-            K = self.n_impulse
-
-        metrics = {
-            'mse': {},
-            'rho': {},
-            'f1': {},
-            'f1_baseline': {},
-            'acc': {},
-            'acc_baseline': {},
-            'log_lik': {},
-            'percent_variance_explained': {},
-            'true_variance': {},
-            'ks_results': {},
-            'full_log_lik': 0.
-        }
-
-        response_names = self.response_names[:]
-        for _response in response_names:
-            metrics['mse'][_response] = {}
-            metrics['rho'][_response] = {}
-            metrics['f1'][_response] = {}
-            metrics['f1_baseline'][_response] = {}
-            metrics['acc'][_response] = {}
-            metrics['acc_baseline'][_response] = {}
-            metrics['log_lik'][_response] = {}
-            metrics['percent_variance_explained'][_response] = {}
-            metrics['true_variance'][_response] = {}
-            metrics['ks_results'][_response] = {}
-
-            file_ix_all = list(range(len(Y)))
-            file_ix = self.response_to_df_ix[_response]
-            multiple_files = len(file_ix_all) > 1
-
-            for ix in file_ix_all:
-                metrics['mse'][_response][ix] = None
-                metrics['rho'][_response][ix] = None
-                metrics['f1'][_response][ix] = None
-                metrics['f1_baseline'][_response][ix] = None
-                metrics['acc'][_response][ix] = None
-                metrics['acc_baseline'][_response][ix] = None
-                metrics['log_lik'][_response][ix] = None
-                metrics['percent_variance_explained'][_response][ix] = None
-                metrics['true_variance'][_response][ix] = None
-                metrics['ks_results'][_response][ix] = None
-
-                if ix in file_ix:
-                    _Y = Y[ix]
-                    sel = None
-                    if _response in _Y:
-                        _y = _Y[_response]
-                        sel = np.isfinite(_y)
-                        index = _y.index[sel]
-                        _preds = preds[_response][ix][sel]
-                        _y = _y[sel]
-
-                        if self.is_binary(_response):
-                            baseline = np.ones((len(_y),))
-                            metrics['f1_baseline'][_response][ix] = f1_score(_y, baseline, average='binary')
-                            metrics['acc_baseline'][_response][ix] = accuracy_score(_y, baseline)
-                            err_col_name = 'CDRcorrect'
-                            for t in range(T):
-                                for k in range(K):
-                                    __preds = _preds[:,t,k]
-                                    error = (_y == __preds).astype('int')
-                                    if metrics['f1'][_response][ix] is None:
-                                        metrics['f1'][_response][ix] = np.zeros((T, K))
-                                    metrics['f1'][_response][ix][t,k] = f1_score(_y, __preds, average='binary')
-                                    if metrics['acc'][_response][ix] is None:
-                                        metrics['acc'][_response][ix] = np.zeros((T, K))
-                                    metrics['acc'][_response][ix][t,k] = accuracy_score(_y, __preds)
-                        elif self.is_categorical(_response):
-                            classes, counts = np.unique(_y, return_counts=True)
-                            majority = classes[np.argmax(counts)]
-                            baseline = [majority] * len(_y)
-                            metrics['f1_baseline'][_response][ix] = f1_score(_y, baseline, average='macro')
-                            metrics['acc_baseline'][_response][ix] = accuracy_score(_y, baseline)
-                            err_col_name = 'CDRcorrect'
-                            for t in range(T):
-                                for k in range(K):
-                                    __preds = _preds[:,t,k]
-                                    error = (_y == __preds).astype('int')
-                                    if metrics['f1'][_response][ix] is None:
-                                        metrics['f1'][_response][ix] = np.zeros((T, K))
-                                    metrics['f1'][_response][ix][t,k] = f1_score(_y, __preds, average='macro')
-                                    if metrics['acc'][_response][ix] is None:
-                                        metrics['acc'][_response][ix] = np.zeros((T, K))
-                                    metrics['acc'][_response][ix][t,k] = accuracy_score(_y, __preds)
-                        else:
-                            err_col_name = 'CDRsquarederror'
-                            metrics['true_variance'][_response][ix] = np.std(_y) ** 2
-                            for t in range(T):
-                                for k in range(K):
-                                    __preds = _preds[:,t,k]
-                                    error = np.array(_y - __preds) ** 2
-                                    score = error.mean()
-                                    resid = np.sort(_y - __preds)
-                                    if self.error_distribution_theoretical_quantiles[_response] is None:
-                                        resid_theoretical_q = None
-                                    else:
-                                        resid_theoretical_q = self.error_theoretical_quantiles(len(resid), _response)
-                                        valid = np.isfinite(resid_theoretical_q)
-                                        resid = resid[valid]
-                                        resid_theoretical_q = resid_theoretical_q[valid]
-                                    D, p_value = self.error_ks_test(resid, _response)
-
-                                    if metrics['mse'][_response][ix] is None:
-                                        metrics['mse'][_response][ix] = np.zeros((T, K))
-                                    metrics['mse'][_response][ix][t,k] = score
-                                    if metrics['rho'][_response][ix] is None:
-                                        metrics['rho'][_response][ix] = np.zeros((T, K))
-                                    metrics['rho'][_response][ix][t,k] = np.corrcoef(_y, __preds, rowvar=False)[0, 1]
-                                    if metrics['percent_variance_explained'][_response][ix] is None:
-                                        metrics['percent_variance_explained'][_response][ix] = np.zeros((T, K))
-                                    metrics['percent_variance_explained'][_response][ix][t,k] = percent_variance_explained(_y, __preds)
-                                    if metrics['ks_results'][_response][ix] is None:
-                                        metrics['ks_results'][_response][ix] = (np.zeros((T, K)), np.zeros((T, K)))
-                                    metrics['ks_results'][_response][ix][0][t,k] = D
-                                    metrics['ks_results'][_response][ix][1][t,k] = p_value
-                    else:
-                        err_col_name = error = __preds = _y = None
-
-                    _ll = log_lik[_response][ix]
-                    if sel is not None:
-                        __preds = pd.Series(__preds, index=index)
-                        _ll = _ll[sel]
-                        _ll = pd.Series(np.squeeze(_ll), index=index)
-                        if err_col_name is not None and error is not None:
-                            error = pd.Series(error, index=index)
-                    _ll_summed = _ll.sum(axis=0)
-                    metrics['log_lik'][_response][ix] = _ll_summed
-                    metrics['full_log_lik'] += _ll_summed
-
-                    if dump:
-                        if multiple_files:
-                            name_base = '%s_f%s%s' % (sn(_response), ix, partition_str)
-                        else:
-                            name_base = '%s%s' % (sn(_response), partition_str)
-
-                        df = pd.DataFrame()
-                        if err_col_name is not None and error is not None:
-                            df[err_col_name] = error
-                        if __preds is not None:
-                            df['CDRpreds'] = __preds
-                        if _y is not None:
-                            df['CDRobs'] = _y
-                        df['CDRloglik'] = _ll
-
-                        if extra_cols:
-                            df = pd.concat([_Y.reset_index(drop=True), df.reset_index(drop=True)], axis=1)
-
-                        preds_outfile = self.outdir + '/output_%s.csv' % name_base
-                        df.to_csv(preds_outfile, sep=' ', na_rep='NaN', index=False)
-
-                        if _response in self.predictive_distribution_config and \
-                                self.is_real(_response) and resid_theoretical_q is not None:
-                            plot_qq(
-                                resid_theoretical_q,
-                                resid,
-                                dir=self.outdir,
-                                filename='error_qq_plot_%s.png' % name_base,
-                                xlab='Theoretical',
-                                ylab='Empirical'
-                            )
-
-        summary = ''
-        if sum_outputs_along_T and sum_outputs_along_K:
-            summary_header = '=' * 50 + '\n'
-            summary_header += 'CDR regression\n\n'
-            summary_header += 'Model name: %s\n\n' % self.name
-            summary_header += 'Formula:\n'
-            summary_header += '  ' + self.form_str + '\n\n'
-            summary_header += 'Partition: %s\n' % partition
-            summary_header += 'Training iterations completed: %d\n\n' % self.global_step.eval(session=self.session)
-            summary_header += 'Full log likelihood: %s\n\n' % np.squeeze(metrics['full_log_lik'])
-
-            summary += summary_header
-
-            for _response in response_names:
-                file_ix = self.response_to_df_ix[_response]
-                multiple_files = len(file_ix) > 1
-                for ix in file_ix:
-                    summary += 'Response variable: %s\n\n' % _response
-                    if dump:
-                        _summary = summary_header
-                        _summary += 'Response variable: %s\n\n' % _response
-
-                    if multiple_files:
-                        summary += 'File index: %s\n\n' % ix
-                        if dump:
-                            name_base = '%s_f%s%s' % (sn(_response), ix, partition_str)
-                            _summary += 'File index: %s\n\n' % ix
-                    elif dump:
-                        name_base = '%s%s' % (sn(_response), partition_str)
-                    _summary = summary_header
-
-                    summary_eval = self.report_evaluation(
-                        mse=metrics['mse'][_response][ix],
-                        f1=metrics['f1'][_response][ix],
-                        f1_baseline=metrics['f1_baseline'][_response][ix],
-                        acc=metrics['acc'][_response][ix],
-                        acc_baseline=metrics['acc_baseline'][_response][ix],
-                        rho=metrics['rho'][_response][ix],
-                        loglik=metrics['log_lik'][_response][ix],
-                        percent_variance_explained=metrics['percent_variance_explained'][_response][ix],
-                        true_variance=metrics['true_variance'][_response][ix],
-                        ks_results=metrics['ks_results'][_response][ix]
-                    )
-
-                    summary += summary_eval
-                    if dump:
-                        _summary += summary_eval
-                        _summary += '=' * 50 + '\n'
-                        with open(self.outdir + '/eval_%s.txt' % name_base, 'w') as f_out:
-                            f_out.write(_summary)
-
-            summary += '=' * 50 + '\n'
-            if verbose:
-                stderr(summary)
-                stderr('\n\n')
-
-        return metrics, summary
-
-    def loss(
-            self,
-            X,
-            Y,
-            X_in_Y_names=None,
-            n_samples=None,
-            algorithm='MAP',
-            training=None,
-            optimize_memory=False,
-            verbose=True
-    ):
-        """
-        Compute the elementsize loss over a dataset using the model's optimization objective.
-
-        :param X: list of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
-            Each element of **X** must contain the following columns (additional columns are ignored):
-
-            * ``time``: Timestamp associated with each observation in **X**
-
-            Across all elements of **X**, there must be a column for each independent variable in the CDR ``form_str`` provided at initialization.
-
-        :param Y: ``list`` of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
-            Each element of **Y** must contain the following columns (additional columns are ignored):
-
-            * ``time``: Timestamp associated with each observation in ``y``
-            * ``first_obs_<K>``:  Index in the Kth (zero-indexed) element of `X` of the first observation in the time series associated with each entry in ``y``
-            * ``last_obs_<K>``:  Index in the Kth (zero-indexed) element of `X` of the immediately preceding observation in the time series associated with each entry in ``y``
-            * Columns with a subset of the names of the DVs specified in ``form_str`` (all DVs should be represented somewhere in **y**)
-            * A column for each random grouping factor in the model specified in ``form_str``.
-
-        :param X_in_Y_names: ``list`` of ``str``; names of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, no such predictors.
-        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
-        :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
-        :param training: ``bool``; Whether to compute loss in training mode.
-        :param optimize_memory: ``bool``; Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).
-        :param verbose: ``bool``; Report progress and metrics to standard error.
-        :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
-        """
-
-        if verbose:
-            usingGPU = tf.test.is_gpu_available()
-            stderr('Using GPU: %s\n' % usingGPU)
-            stderr('Computing loss...\n')
-
-        # Preprocess data
-        if not isinstance(X, list):
-            X = [X]
-        X_in = X
-        if Y is not None and not isinstance(Y, list):
-            Y = [Y]
-        lengths = [len(_Y) for _Y in Y]
-        n = sum(lengths)
-        Y_in = Y
-        if X_in_Y_names:
-            X_in_Y_names = [x for x in X_in_Y_names if x in self.impulse_names]
-
-        Y, first_obs, last_obs, Y_time, Y_mask, Y_gf, X_in_Y = build_CDR_response_data(
-            self.response_names,
-            Y=Y_in,
-            X_in_Y_names=X_in_Y_names,
-            Y_category_map=self.response_category_to_ix,
-            response_to_df_ix=self.response_to_df_ix,
-            gf_names=self.rangf,
-            gf_map=self.rangf_map
-        )
-
-        if not optimize_memory:
-            X, X_time, X_mask = build_CDR_impulse_data(
-                X_in,
-                first_obs,
-                last_obs,
-                X_in_Y_names=X_in_Y_names,
-                X_in_Y=X_in_Y,
-                history_length=self.history_length,
-                future_length=self.future_length,
-                impulse_names=self.impulse_names,
-                int_type=self.int_type,
-                float_type=self.float_type,
-            )
-
-        with self.session.as_default():
-            with self.session.graph.as_default():
-                self.set_predict_mode(True)
-
-                if training is None:
-                    training = not self.predict_mode
-                    
-                B = self.eval_minibatch_size
-                n = sum([len(_Y) for _Y in Y])
-                n_minibatch = math.ceil(n / B)
-                loss = np.zeros((n,))
-                for i in range(0, n, B):
-                    if verbose:
-                        stderr('\rMinibatch %d/%d' %(i + 1, n_minibatch))
-                    if optimize_memory:
-                        _Y = Y[i:i + B]
-                        _first_obs = [x[i:i + B] for x in first_obs]
-                        _last_obs = [x[i:i + B] for x in last_obs]
-                        _Y_time = Y_time[i:i + B]
-                        _Y_mask = Y_mask[i:i + B]
-                        _Y_gf = None if Y_gf is None else Y_gf[i:i + B]
-                        _X_in_Y = None if X_in_Y is None else X_in_Y[i:i + B]
-
-                        _X, _X_time, _X_mask = build_CDR_impulse_data(
-                            X_in,
-                            _first_obs,
-                            _last_obs,
-                            X_in_Y_names=X_in_Y_names,
-                            X_in_Y=_X_in_Y,
-                            history_length=self.history_length,
-                            future_length=self.future_length,
-                            impulse_names=self.impulse_names,
-                            int_type=self.int_type,
-                            float_type=self.float_type,
-                        )
-                        _Y = None if Y is None else [_y[i:i + B] for _y in Y]
-                        _Y_gf = None if Y_gf is None else Y_gf[i:i + B]
-
-                        fd = {
-                            self.X: _X,
-                            self.X_time: _X_time,
-                            self.X_mask: _X_mask,
-                            self.Y: _Y,
-                            self.Y_time: _Y_time,
-                            self.Y_mask: _Y_mask,
-                            self.Y_gf: _Y_gf,
-                            self.training: not self.predict_mode
-                        }
-                    else:
-                        fd = {
-                            self.X: X[i:i + B],
-                            self.X_time: X_time[i:i + B],
-                            self.X_mask: X_mask[i:i + B],
-                            self.Y_time: Y_time[i:i + B],
-                            self.Y_mask: Y_mask[i:i + B],
-                            self.Y_gf: None if Y_gf is None else Y_gf[i:i + B],
-                            self.Y: Y[i:i + B],
-                            self.training: training
-                        }
-                    loss[i:i + B] = self.run_loss_op(
-                        fd,
-                        n_samples=n_samples,
-                        algorithm=algorithm,
-                        verbose=verbose
-                    )
-                loss = loss.mean()
-
-                if verbose:
-                    stderr('\n\n')
-
-                self.set_predict_mode(False)
-
-                return loss
+    def log_lik(self, *args, **kwargs):
+        return log_lik(self, *args, **kwargs)
+
+    def loss(self, *args, **kwargs):
+        return loss(self, *args, **kwargs)
 
     def run_loss_op(self, feed_dict, n_samples=None, algorithm='MAP', verbose=True):
         """
@@ -7955,6 +7980,9 @@ class CDRModel(object):
                     loss = loss.mean(axis=1)
 
                 return loss
+
+    def evaluate(self, *args, **kwargs):
+        return evaluate(self, *args, **kwargs)
 
     def convolve_inputs(
             self,
@@ -9717,3 +9745,106 @@ class CDRModel(object):
             outname = outfile
 
         irf_integrals.to_csv(outname, index=False)
+
+
+class CDREnsemble(object):
+    def __init__(self, outdir, name):
+        self.outdir = outdir
+        self.name = name
+        mpaths = [
+            os.path.join(self.outdir,x) for x in os.listdir(self.outdir) if
+            (x.startswith(name) and os.path.isdir(os.path.join(self.outdir,x)))
+        ]
+        self.models = []
+        for i, mpath in enumerate(mpaths):
+            self.models.append(load_cdr(mpath))
+
+    @property
+    def n_ensemble(self):
+        return len(self.models)
+
+    def __getattribute__(self, item):
+        try:
+            return object.__getattribute__(self, item)
+        except AttributeError:
+            return getattr(self.models[0], item)
+
+    def model_weights(self, response=None, file_ix=0, uniform=False):
+        if uniform:
+            return np.ones(len(self.n_ensemble)) / self.n_ensemble
+        else:
+            lls = []
+            for m in self.models:
+                if response is None:
+                    ll = m.training_loglik_full
+                else:
+                    ll = m.training_loglik(response, file_ix)
+                lls.append(ll)
+
+            weights = logsumexp(lls)
+
+        return weights
+
+    def predict(self, *args, **kwargs):
+        if self.n_ensemble == 1:
+            return self.models[0].predict(*args, **kwargs)
+
+    def log_lik(self, *args, **kwargs):
+        if self.n_ensemble == 1:
+            return self.models[0].log_lik(*args, **kwargs)
+
+    def evaluate(self, *args, **kwargs):
+        if self.n_ensemble == 1:
+            return self.models[0].evaluate(*args, **kwargs)
+
+    def loss(self, *args, **kwargs):
+        if self.n_ensemble == 1:
+            return self.models[0].loss(*args, **kwargs)
+
+    def convolve_inputs(self, *args, **kwargs):
+        if self.n_ensemble == 1:
+            return self.models[0].convolve_inputs(*args, **kwargs)
+
+    def error_theoretical_quantiles(self, *args, **kwargs):
+        if self.n_ensemble == 1:
+            return self.models[0].error_theoretical_quantiles(*args, **kwargs)
+
+    def error_theoretical_cdf(self, *args, **kwargs):
+        if self.n_ensemble == 1:
+            return self.models[0].error_theoretical_cdf(*args, **kwargs)
+
+    def error_ks_test(self, *args, **kwargs):
+        if self.n_ensemble == 1:
+            return self.models[0].error_ks_test(*args, **kwargs)
+
+    def get_plot_data(self, *args, **kwargs):
+        if self.n_ensemble == 1:
+            return self.models[0].get_plot_data(*args, **kwargs)
+
+    def irf_rmsd(self, *args, **kwargs):
+        if self.n_ensemble == 1:
+            return self.models[0].irf_rmsd(*args, **kwargs)
+
+    def irf_integrals(self, *args, **kwargs):
+        if self.n_ensemble == 1:
+            return self.models[0].irf_integrals(*args, **kwargs)
+
+    def make_plots(self, *args, **kwargs):
+        if self.n_ensemble == 1:
+            return self.models[0].make_plots(*args, **kwargs)
+
+    def parameter_table(self, *args, **kwargs):
+        if self.n_ensemble == 1:
+            return self.models[0].parameter_table(*args, **kwargs)
+
+    def save_parameter_table(self, *args, **kwargs):
+        if self.n_ensemble == 1:
+            return self.models[0].save_parameter_table(*args, **kwargs)
+
+    def save_integral_table(self, *args, **kwargs):
+        if self.n_ensemble == 1:
+            return self.models[0].save_integral_table(*args, **kwargs)
+
+    def summary(self, *args, **kwargs):
+        if self.n_ensemble == 1:
+            return self.models[0].summary(*args, **kwargs)

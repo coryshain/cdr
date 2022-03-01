@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from cdr.config import Config, PlotConfig
 from cdr.kwargs import plot_kwarg_docstring
-from cdr.ensemble import CDREnsemble
+from cdr.model import CDREnsemble
 from cdr.util import filter_models, stderr
 from cdr.plot import plot_irf, plot_qq
 

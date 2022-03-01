@@ -6,7 +6,7 @@ from cdr.config import Config
 from cdr.io import read_tabular_data
 from cdr.formula import Formula
 from cdr.data import preprocess_data, filter_invalid_responses
-from cdr.ensemble import CDREnsemble
+from cdr.model import CDREnsemble
 from cdr.util import filter_models, get_partition_list, paths_from_partition_cliarg, stderr
 
 pd.options.mode.chained_assignment = None

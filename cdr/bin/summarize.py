@@ -1,7 +1,7 @@
 import argparse
 import os
 from cdr.config import Config
-from cdr.ensemble import CDREnsemble
+from cdr.model import CDREnsemble
 from cdr.util import filter_models, stderr
 
 if __name__ == '__main__':
