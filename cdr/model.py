@@ -6397,7 +6397,7 @@ class CDRModel(object):
             X,
             Y,
             X_in_Y_names=None,
-            n_iter=10000,
+            n_iter=None,
             force_training_evaluation=True,
             optimize_memory=False
             ):
@@ -6422,7 +6422,7 @@ class CDRModel(object):
 
             In general, **Y** will be identical to the parameter **Y** provided at model initialization.
         :param X_in_Y_names: ``list`` of ``str``; names of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, no such predictors.
-        :param n_iter: ``int``; maximum number of training iterations. Training will stop either at convergence or **n_iter**, whichever happens first.
+        :param n_iter: ``int`` or ``None``; maximum number of training iterations. Training will stop either at convergence or **n_iter**, whichever happens first. If ``None``, uses model default.
         :param force_training_evaluation: ``bool``; (Re-)run post-fitting evaluation, even if resuming a model whose training is already complete.
         :param optimize_memory: ``bool``; Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).
         """
@@ -6441,6 +6441,9 @@ class CDRModel(object):
 
         usingGPU = tf.test.is_gpu_available()
         stderr('Using GPU: %s\nNumber of training samples: %d\n\n' % (usingGPU, n))
+
+        if not n_iter:
+            n_iter = self.n_iter
 
         # Preprocess data
         if not isinstance(X, list):
