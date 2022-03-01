@@ -1135,6 +1135,8 @@ def double_gamma_5_irf_factory(
 
 def LCG_irf_factory(
         bases,
+        int_type=tf.int32,
+        float_type=tf.float32,
         support_lb=0.,
         support_ub=None,
         epsilon=4 * np.finfo('float32').eps,

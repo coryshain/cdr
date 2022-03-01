@@ -61,7 +61,10 @@ class Config(object):
         self.sep = sep
 
         series_ids = data.get('series_ids')
-        self.series_ids = series_ids.strip().split()
+        if series_ids:
+            self.series_ids = series_ids.strip().split()
+        else:
+            self.series_ids = []
         self.modulus = data.getint('modulus', 4)
         split_ids = data.get('split_ids', '')
         self.split_ids = split_ids.strip().split()

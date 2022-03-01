@@ -30,7 +30,7 @@ if __name__ == '__main__':
     argparser.add_argument('-M', '--metric', type=str, default='loss', help='Metric to use for comparison (either "loss" or "loglik")')
     argparser.add_argument('-t', '--tails', type=int, default=2, help='Number of tails (1 or 2)')
     argparser.add_argument('-o', '--outdir', type=str, default='./', help='Path to output directory')
-    args, unknown = argparser.parse_known_args()
+    args = argparser.parse_args()
 
     assert args.metric in ['loss', 'loglik'], 'Metric must be one of ["loss", "loglik"].'
 

@@ -91,6 +91,23 @@ def layout():
 
 
 def viewport_layout():
+    graph = dcc.Graph(
+        id='graph',
+        config=dict(
+            editable=True,
+            displaylogo=False,
+            modeBarButtonsToRemove=['resetCameraDefault3d'],
+            toImageButtonOptions=dict(
+                format='png',
+                filename='cdr_plot',
+                width=PLOT_WIDTH * SCREEN_DPI,
+                height=PLOT_HEIGHT * SCREEN_DPI,
+                scale=PLOT_DPI / SCREEN_DPI
+            )
+        ),
+        style={'width': '70vw', 'height': '100vh'}
+    )
+
     return html.Div(
         id="viewport-wrapper",
         children=dcc.Loading(
@@ -102,22 +119,7 @@ def viewport_layout():
                 'top': '50vh',
                 'left': '65vw',
             },
-            children=dcc.Graph(
-                id='graph',
-                config=dict(
-                    editable=True,
-                    displaylogo=False,
-                    modeBarButtonsToRemove=['resetCameraDefault3d'],
-                    toImageButtonOptions=dict(
-                        format='png',
-                        filename='cdr_plot',
-                        width=PLOT_WIDTH * SCREEN_DPI,
-                        height=PLOT_HEIGHT * SCREEN_DPI,
-                        scale=PLOT_DPI / SCREEN_DPI
-                    )
-                ),
-                style={'width': '70vw', 'height': '100vh'}
-            )
+            children=graph
         )
     )
 
@@ -174,7 +176,7 @@ def layout_plot_definition_menu():
                                 id='dropdown_x',
                                 options=[{'label': get_irf_name(i, model.irf_name_map), 'value': i} for
                                          i in xy_axis_options],
-                                value=xy_axis_options[0],
+                                value=xy_axis_options[xy_axis_options.index('t_delta')],
                                 clearable=False
                             )
                         ]
@@ -186,7 +188,7 @@ def layout_plot_definition_menu():
                                 id='dropdown_y',
                                 options=[{'label': get_irf_name(i, model.irf_name_map), 'value': i} for
                                          i in xy_axis_options],
-                                value=xy_axis_options[xy_axis_options.index('t_delta')],
+                                value=xy_axis_options[0],
                                 clearable=True
                             )
                         ]
@@ -224,9 +226,10 @@ def layout_plot_definition_menu():
                                 options=[
                                     {'label': 'Reference varies with X', 'value': 'ref_varies_with_x'},
                                     {'label': 'Reference varies with Y', 'value': 'ref_varies_with_y'},
-                                    {'label': 'Pair manipulations', 'value': 'pair_manipulations'}
+                                    {'label': 'Pair manipulations', 'value': 'pair_manipulations'},
+                                    {'label': 'Include interactions', 'value': 'include_interactions'}
                                 ],
-                                value=['ref_varies_with_y', 'pair_manipulations']
+                                value=['ref_varies_with_x', 'pair_manipulations']
                             )
                         ]
                     )
@@ -660,6 +663,7 @@ def assign_callbacks(_app):
 
     @_app.callback(
         Output('graph', 'figure'),
+        Output('graph', 'relayoutData'),
         Output('x-min-lab', 'children'),
         Output('x-max-lab', 'children'),
         Output('y-min-lab', 'children'),
@@ -674,8 +678,6 @@ def assign_callbacks(_app):
         kwargs = dict(zip([x.component_id for x in update_args], args))
         n_clicks = kwargs['update-button']
         relayout_data = kwargs['graph']
-        if relayout_data is not None:
-            print(relayout_data)
         xvar = kwargs['dropdown_x']
         yvar = kwargs['dropdown_y']
         response = kwargs['dropdown_response']
@@ -725,6 +727,10 @@ def assign_callbacks(_app):
             pair_manipulations = True
         else:
             pair_manipulations = False
+        if 'include_interactions' in switches:
+            include_interactions = True
+        else:
+            include_interactions = False
 
         if n_samples is None:
             n_samples = N_SAMPLES
@@ -758,6 +764,7 @@ def assign_callbacks(_app):
                 t_delta_ref=t_delta_ref,
                 gf_y_ref=gf_y_ref,
                 pair_manipulations=pair_manipulations,
+                include_interactions=include_interactions,
                 level=level,
                 xmin=xmin,
                 xmax=xmax,
@@ -886,7 +893,7 @@ def assign_callbacks(_app):
 
                 fig.add_traces(traces)
 
-                fig.update_layout(
+                layout_kwargs = dict(
                     font_family='Helvetica',
                     title_font_family='Helvetica',
                     title=plot_title,
@@ -896,7 +903,8 @@ def assign_callbacks(_app):
                         zaxis_title=zlab,
                         xaxis=dict(range=[xmin, xmax], gridcolor='rgb(200, 200, 200)', showbackground=False,
                                    autorange='reversed'),
-                        yaxis=dict(range=[ymin, ymax], gridcolor='rgb(200, 200, 200)', showbackground=False),
+                        yaxis=dict(range=[ymin, ymax], gridcolor='rgb(200, 200, 200)', showbackground=False,
+                                   autorange='reversed'),
                         zaxis=dict(range=[zmin, zmax], gridcolor='rgb(200, 200, 200)', showbackground=False)
                     ),
                     plot_bgcolor='rgb(255, 255, 255)',
@@ -906,14 +914,16 @@ def assign_callbacks(_app):
                     margin=dict(r=20, l=20, b=20, t=20),
                     showlegend=False
                 )
-                fig = fig.to_dict()
-                fig['layout']['uirevision'] = True
-                if n_clicks == 0:
-                    fig['layout']['camera'] = dict(
+                if False and n_clicks == 0:
+                    layout_kwargs['scene_camera'] = dict(
                         up=dict(x=0, y=0, z=1),
                         center=dict(x=0, y=0, z=0),
                         eye=dict(x=1.25, y=-1.25, z=1)
                     )
+
+                fig.update_layout(**layout_kwargs)
+                fig = fig.to_dict()
+                fig['layout']['uirevision'] = True
 
         except AssertionError as e:
             msg = ''
@@ -968,7 +978,7 @@ def assign_callbacks(_app):
         z_min_lab = '%s, %s min' % (get_irf_name(response, model.irf_name_map), resparam)
         z_max_lab = '%s, %s max' % (get_irf_name(response, model.irf_name_map), resparam)
 
-        return fig, x_min_lab, x_max_lab, y_min_lab, y_max_lab, z_min_lab, z_max_lab
+        return fig, relayout_data, x_min_lab, x_max_lab, y_min_lab, y_max_lab, z_min_lab, z_max_lab
 
     @_app.callback(
         Output('graph', 'config'),
@@ -1004,8 +1014,6 @@ def assign_callbacks(_app):
         graph_config['toImageButtonOptions']['height'] = plot_height
         graph_config['toImageButtonOptions']['scale'] = plot_scale
         graph_config['toImageButtonOptions']['filename'] = filename
-
-        print(graph_config)
 
         return graph_config
 

@@ -255,9 +255,6 @@ class CDRModel(object):
             self.form_str = str(form)
         form = form.categorical_transform(X)
         self.form = form
-        if self.has_nn_irf:
-            assert 'rate' in self.form.t.impulse_names(), 'Models with neural net IRFs must include a ``"rate"`` term, since rate cannot be reliably ablated.'
-        self.form = form
         if self.future_length:
             assert self.form.t.supports_non_causal(), 'If future_length > 0, causal IRF kernels (kernels which require that t > 0) cannot be used.'
 
@@ -337,9 +334,10 @@ class CDRModel(object):
                     _response = __response
                 else:
                     _response = np.concatenate(_response, axis=0)[..., None]
-                _mean = _response.mean(axis=0)
-                _sd = _response.std(axis=0)
-                _quantiles = np.quantile(_response, q, axis=0)
+                _mean = np.nanmean(_response, axis=0)
+                _sd = np.nanstd(_response, axis=0)
+                assert np.all(_sd > 0), 'Some responses (%s) had no variance. SD vector: %s.' % (_response_name, _sd)
+                _quantiles = np.nanquantile(_response, q, axis=0)
             else:
                 _mean = 0.
                 _sd = 0.
@@ -353,7 +351,6 @@ class CDRModel(object):
         self.Y_train_sds = Y_train_sds
         self.Y_train_quantiles = Y_train_quantiles
 
-        # Collect stats for impulses
         impulse_means = {}
         impulse_sds = {}
         impulse_medians = {}
@@ -385,15 +382,16 @@ class CDRModel(object):
                 for i, df in enumerate(X + Y):
                     if name in df and not name.lower() == 'rate':
                         column = df[name].values
-                        impulse_means[name] = column.mean()
-                        impulse_sds[name] = column.std()
-                        quantiles = np.quantile(column, q)
+                        impulse_means[name] = np.nanmean(column)
+                        impulse_sds[name] = np.nanstd(column)
+                        assert impulse_sds[name] > 0, 'Predictor %s had no variance' % name
+                        quantiles = np.nanquantile(column, q)
                         impulse_quantiles[name] = quantiles
-                        impulse_medians[name] = np.quantile(column, 0.5)
-                        impulse_lq[name] = np.quantile(column, 0.1)
-                        impulse_uq[name] = np.quantile(column, 0.9)
-                        impulse_min[name] = column.min()
-                        impulse_max[name] = column.max()
+                        impulse_medians[name] = np.nanquantile(column, 0.5)
+                        impulse_lq[name] = np.nanquantile(column, 0.1)
+                        impulse_uq[name] = np.nanquantile(column, 0.9)
+                        impulse_min[name] = np.nanmin(column)
+                        impulse_max[name] = np.nanmax(column)
 
                         if self._vector_is_indicator(column):
                             indicators.add(name)
@@ -408,16 +406,17 @@ class CDRModel(object):
                                 found = False
                                 break
                         if found:
-                            column = df[impulse_names].product(axis=1)
-                            impulse_means[name] = column.mean()
-                            impulse_sds[name] = column.std()
-                            quantiles = np.quantile(column, q)
+                            column = df[impulse_names].product(axis=1).values
+                            impulse_means[name] = np.nanmean(column)
+                            impulse_sds[name] = np.nanstd(column)
+                            assert impulse_sds[name] > 0, 'Predictor %s had no variance' % name
+                            quantiles = np.nanquantile(column, q)
                             impulse_quantiles[name] = quantiles
-                            impulse_medians[name] = np.quantile(column, 0.5)
-                            impulse_lq[name] = np.quantile(column, 0.1)
-                            impulse_uq[name] = np.quantile(column, 0.9)
-                            impulse_min[name] = column.min()
-                            impulse_max[name] = column.max()
+                            impulse_medians[name] = np.nanquantile(column, 0.5)
+                            impulse_lq[name] = np.nanquantile(column, 0.1)
+                            impulse_uq[name] = np.nanquantile(column, 0.9)
+                            impulse_min[name] = np.nanmin(column)
+                            impulse_max[name] = np.nanmax(column)
 
                             if self._vector_is_indicator(column):
                                 indicators.add(name)
@@ -518,7 +517,7 @@ class CDRModel(object):
                     sd * 2, mu)
                     for t in too_few:
                         report += ' ' * 4 + str(t[0]) + ': %d\n' % t[1]
-                    report += 'Having too few instances for some levels can lead to degenerate random effects estimates.\n'
+                    report += 'Having too few instances for some levels can lead to poor quality random effects estimates.\n'
                     stderr(report)
             vals = np.arange(len(keys), dtype=getattr(np, self.int_type))
             rangf_map = pd.DataFrame({'id': vals}, index=keys).to_dict()['id']
@@ -570,7 +569,13 @@ class CDRModel(object):
         self.ranef_group2ix = {x: i for i, x in enumerate(self.rangf)}
 
         self.X_weighted_unscaled = {}  # Key order: <response>; Value: nbatch x ntime x ncoef x nparam x ndim tensor of IRF-weighted values at each timepoint of each predictor for each predictive distribution parameter of the response
+        self.X_weighted_unscaled_sumT = {}  # Key order: <response>; Value: nbatch x ncoef x nparam x ndim tensor of IRF-weighted values of each predictor for each predictive distribution parameter of the response
+        self.X_weighted_unscaled_sumK = {}  # Key order: <response>; Value: nbatch x time x nparam x ndim tensor of IRF-weighted values at each timepoint for each predictive distribution parameter of the response
+        self.X_weighted_unscaled_sumTK = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of IRF-weighted values for each predictive distribution parameter of the response
         self.X_weighted = {}  # Key order: <response>; Value: nbatch x ntime x ncoef x nparam x ndim tensor of IRF-weighted values at each timepoint of each predictor for each predictive distribution parameter of the response
+        self.X_weighted_sumT = {}  # Key order: <response>; Value: nbatch x ncoef x nparam x ndim tensor of IRF-weighted values of each predictor for each predictive distribution parameter of the response
+        self.X_weighted_sumK = {}  # Key order: <response>; Value: nbatch x ntime x nparam x ndim tensor of IRF-weighted values at each timepoint for each predictive distribution parameter of the response
+        self.X_weighted_sumTK = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of IRF-weighted values for each predictive distribution parameter of the response
         self.layers = [] # List of NN layers
         self.kl_penalties = {} # Key order: <variable>; Value: scalar KL divergence
         self.ema_ops = [] # Container for any exponential moving average updates to run at each training step
@@ -651,13 +656,17 @@ class CDRModel(object):
         self.nn_irf_terminal_names = {}
         self.nn_irf_impulses = {}
         self.nn_irf_impulse_names = {}
+        self.nn_irf_input_names = {}
+        self.nn_irf_output_names = {}
         for nn_id in self.nn_irf_ids:
             self.nn_irf_preterminals[nn_id] = self.nns_by_id[nn_id].nodes
             self.nn_irf_preterminal_names[nn_id] = [x.name() for x in self.nn_irf_preterminals[nn_id]]
             self.nn_irf_terminals[nn_id] = [self.node_table[x] for x in self.terminal_names if self.node_table[x].p.name() in self.nn_irf_preterminal_names[nn_id]]
             self.nn_irf_terminal_names[nn_id] = [x.name() for x in self.nn_irf_terminals[nn_id]]
             self.nn_irf_impulses[nn_id] = None
-            self.nn_irf_impulse_names[nn_id] = [x.impulse.name() for x in self.nn_irf_terminals[nn_id]]
+            self.nn_irf_impulse_names[nn_id] = self.nns_by_id[nn_id].all_impulse_names()
+            self.nn_irf_input_names[nn_id] = self.nns_by_id[nn_id].input_impulse_names()
+            self.nn_irf_output_names[nn_id] = self.nns_by_id[nn_id].output_impulse_names()
 
         self.nn_impulse_ids = sorted([x for x in self.nns_by_id if self.nns_by_id[x].nn_type == 'impulse'])
         self.nn_impulse_impulses = {}
@@ -665,7 +674,7 @@ class CDRModel(object):
         for nn_id in self.nn_impulse_ids:
             self.nn_impulse_impulses[nn_id] = None
             assert len(self.nns_by_id[nn_id].nodes) == 1, 'NN impulses should have exactly 1 associated node. Got %d.' % len(self.nns_by_id[nn_id].nodes)
-            self.nn_impulse_impulse_names[nn_id] = [x.name() for x in self.nns_by_id[nn_id].nodes[0].impulses()]
+            self.nn_impulse_impulse_names[nn_id] = self.nns_by_id[nn_id].input_impulse_names()
         self.nn_transformed_impulses = []
         self.nn_transformed_impulse_t_delta = []
         self.nn_transformed_impulse_X_time = []
@@ -829,7 +838,7 @@ class CDRModel(object):
         self.reference_map = reference_map
         for x in self.impulse_names:
             if not x in self.reference_map:
-                if self.default_reference_type == 'mean' and not x in self.indicators:
+                if self.default_reference_type == 'mean':
                     self.reference_map[x] = self.impulse_means[x]
                 else:
                     self.reference_map[x] = 0.
@@ -846,7 +855,7 @@ class CDRModel(object):
         for x in self.impulse_names:
             if not x in self.plot_step_map:
                 if x in self.indicators:
-                    self.plot_step_map[x] = 1
+                    self.plot_step_map[x] = 1 - self.reference_map[x]
                 elif isinstance(self.plot_step_default, str) and self.plot_step_default.lower() == 'sd':
                     self.plot_step_map[x] = self.impulse_sds[x]
                 else:
@@ -1096,7 +1105,7 @@ class CDRModel(object):
                 else:
                     nn_meta['n_units_rnn'] = [len(self.terminal_names) + len(self.ablated)]
 
-            if len(self.interaction_names) and self.get_nn_meta('input_dependent_irf', nn_id):
+            if self.has_nn_irf and len(self.interaction_names) and self.get_nn_meta('input_dependent_irf', nn_id):
                 stderr('WARNING: Be careful about interaction terms in models with input-dependent neural net IRFs. Interactions can be implicit in such models (if one or more variables are present in both the input to the NN and the interaction), rendering explicit interaction terms uninterpretable.\n')
 
     def _pack_metadata(self):
@@ -1588,8 +1597,8 @@ class CDRModel(object):
                             per_item=True
                         )
 
-                    self.resample_ops = [] # Only used by CDRNN, defined here for global API
-                    self.regularizable_layers = {} # Only used by CDRNN, defined here for global API
+                self.resample_ops = [] # Only used by CDRNN, defined here for global API
+                self.regularizable_layers = {} # Only used by CDRNN, defined here for global API
 
     def _get_prior_sd(self, response_name):
         with self.session.as_default():
@@ -2790,9 +2799,9 @@ class CDRModel(object):
                 bases,
                 int_type=int_type,
                 float_type=float_type,
-                session=session,
                 support_lb=support_lb,
                 support_ub=support_ub,
+                session=session,
                 **params
             )
 
@@ -3272,7 +3281,7 @@ class CDRModel(object):
                                 use_bias = True
                             else:
                                 if nn_id in self.nn_irf_ids:
-                                    units = self.n_impulse
+                                    units = len([x for x in self.nn_irf_input_names[nn_id] if x != 'rate'])
                                 else:
                                     units = 1
                                 activation = rnn_projection_activation
@@ -3398,8 +3407,12 @@ class CDRModel(object):
 
                 if nn_id in self.nn_impulse_ids:
                     impulse_names = self.nn_impulse_impulse_names[nn_id]
+                    input_names = impulse_names
+                    output_names = []
                 else:  # nn_id in self.nn_irf_ids
                     impulse_names = self.nn_irf_impulse_names[nn_id]
+                    input_names = self.nn_irf_input_names[nn_id]
+                    output_names = self.nn_irf_output_names[nn_id]
 
                 X = []
                 t_delta = []
@@ -3589,9 +3602,9 @@ class CDRModel(object):
                     X = self.input_dropout_layer[nn_id](X)
                     X_time = self.X_time_dropout_layer[nn_id](X_time)
 
-                impulse_names_no_rate = [x for x in impulse_names if x != 'rate']
-                impulse_ix = names2ix(impulse_names_no_rate, impulse_names)
-                X_in = tf.gather(X, impulse_ix, axis=2)
+                impulse_ix = names2ix([x for x in input_names if x != 'rate'], impulse_names)
+                X_gathered = tf.gather(X, impulse_ix, axis=2)
+                X_in = X_gathered
                 if nonstationary:
                     X_in = tf.concat([X_in, X_time], axis=-1)
 
@@ -3655,24 +3668,24 @@ class CDRModel(object):
                 else:  # nn_id in self.nn_irf_ids
                     # Compute IRF outputs
 
-                    impulse_ix = names2ix(self.nn_irf_impulse_names[nn_id], impulse_names)
-                    nn_irf_impulses = tf.gather(X, impulse_ix, axis=2)
+                    impulse_ix = names2ix(output_names, impulse_names)
+                    nn_irf_impulses = tf.gather(X, impulse_ix, axis=2) # IRF output dims, includes rate
 
-                    ix = 0
                     irf_out = [t_delta]
                     if nonstationary:
                         irf_out.append(X_time)
                     if input_dependent_irf:
-                        irf_out.append(nn_irf_impulses)
-                    if h_rnn is not None:
-                        irf_out.append(h_rnn)
+                        _X_gathered = X_gathered
+                        if h_rnn is not None:
+                            _X_gathered = _X_gathered + h_rnn
+                        irf_out.append(_X_gathered)  # IRF inputs, no rate
                     irf_out = tf.concat(irf_out, axis=2)
                     for l in range(n_layers_irf + 1):
                         irf_out = self.nn_irf_layers[nn_id][l](
                             irf_out,
                         )
 
-                    stabilizing_constant = (self.history_length + self.future_length) * len(self.terminal_names)
+                    stabilizing_constant = (self.history_length + self.future_length) * len(output_names)
                     irf_out = irf_out / stabilizing_constant
 
                     nn_irf_impulses = nn_irf_impulses[..., None, None] # Pad out for ndim of response distribution(s)
@@ -3976,16 +3989,18 @@ class CDRModel(object):
 
                         self.interaction[response] = interaction
 
-    def _sum_interactions(self, response):
+    def _apply_interactions(self, response):
         with self.session.as_default():
             with self.session.graph.as_default():
                 if len(self.interaction_names) > 0:
                     interaction_coefs = self.interaction[response]
-                    interaction_coefs = tf.expand_dims(interaction_coefs, axis=1)  # Add "time" dimension
                     interaction_inputs = []
                     terminal_names = self.terminal_names[:]
                     impulse_names = self.impulse_names
                     nn_impulse_names = [self.nns_by_id[x].name() for x in self.nn_impulse_ids]
+                    nparam = self.get_response_nparam(response)
+                    ndim = self.get_response_ndim(response)
+                    dd = {}
 
                     for i, interaction in enumerate(self.interaction_list):
                         assert interaction.name() == self.interaction_names[i], 'Mismatched sort order between self.interaction_names and self.interaction_list. This should not have happened, so please report it in issue tracker on Github.'
@@ -3993,50 +4008,54 @@ class CDRModel(object):
                         nn_impulse_input_names = [x.name() for x in interaction.nn_impulse_responses()]
                         dirac_delta_input_names = [x.name() for x in interaction.dirac_delta_responses()]
 
-                        inputs_cur = None
+                        inputs_cur = []
 
                         if len(irf_input_names) > 0:
                             irf_input_ix = names2ix(irf_input_names, terminal_names)
-                            irf_inputs = self.X_weighted_unscaled[response]
-                            irf_inputs = tf.reduce_sum(irf_inputs, axis=1, keepdims=True)
+                            irf_inputs = self.X_weighted_unscaled_sumT[response]
                             irf_inputs = tf.gather(
                                 irf_inputs,
                                 irf_input_ix,
-                                axis=2
+                                axis=1
                             )
-                            if len(irf_input_ix) > 1:
-                                inputs_cur = tf.reduce_prod(irf_inputs, axis=2, keepdims=True)
+                            inputs_cur.append(irf_inputs)
 
                         if len(nn_impulse_input_names):
                             nn_impulse_input_ix = names2ix(nn_impulse_input_names, nn_impulse_names)
-                            nn_impulse_inputs = self.X_processed[:,-1:]
+                            nn_impulse_inputs = self.nn_transformed_impulses[:,-1]
                             # Expand out response_param and response_param_dim axes
-                            nn_impulse_inputs = tf.gather(nn_impulse_inputs, nn_impulse_input_ix, axis=2)
-                            if len(nn_impulse_input_ix) > 1:
-                                nn_impulse_inputs = tf.reduce_prod(nn_impulse_inputs, axis=2, keepdims=True)
+                            nn_impulse_inputs = tf.gather(nn_impulse_inputs, nn_impulse_input_ix, axis=1)
                             nn_impulse_inputs = nn_impulse_inputs[..., None, None]
-                            if inputs_cur is not None:
-                                inputs_cur = inputs_cur * nn_impulse_inputs
-                            else:
-                                inputs_cur = nn_impulse_inputs
+                            inputs_cur.append(nn_impulse_inputs)
                                 
                         if len(dirac_delta_input_names):
-                            dirac_delta_input_ix = names2ix(dirac_delta_input_names, impulse_names)
-                            dirac_delta_inputs = self.X_processed[:,-1:]
-                            # Expand out response_param and response_param_dim axes
-                            dirac_delta_inputs = tf.gather(dirac_delta_inputs, dirac_delta_input_ix, axis=2)
-                            if len(dirac_delta_input_ix) > 1:
-                                dirac_delta_inputs = tf.reduce_prod(dirac_delta_inputs, axis=2, keepdims=True)
-                            dirac_delta_inputs = dirac_delta_inputs[..., None, None]
-                            if inputs_cur is not None:
-                                inputs_cur = inputs_cur * dirac_delta_inputs
-                            else:
-                                inputs_cur = dirac_delta_inputs
+                            dd_key = tuple(dirac_delta_input_names)
+                            if dd_key not in dd:
+                                dirac_delta_input_ix = names2ix(dirac_delta_input_names, impulse_names)
+                                dirac_delta_inputs = self.X_processed[:,-1]
+                                # Expand out response_param and response_param_dim axes
+                                dirac_delta_inputs = tf.gather(dirac_delta_inputs, dirac_delta_input_ix, axis=1)
+                                dirac_delta_inputs = dirac_delta_inputs[..., None, None]
+                                dirac_delta_inputs = tf.pad(
+                                    dirac_delta_inputs,
+                                    paddings=[
+                                        (0, 0),
+                                        (0, 0),
+                                        (0, nparam - 1),
+                                        (0, ndim - 1)
+                                    ]
+                                )
+                                dd[dd_key] = dirac_delta_inputs
+                            dirac_delta_inputs = dd[dd_key]
+                            inputs_cur.append(dirac_delta_inputs)
+
+                        inputs_cur = tf.concat(inputs_cur, axis=1)
+                        inputs_cur = tf.reduce_prod(inputs_cur, axis=1)
 
                         interaction_inputs.append(inputs_cur)
-                    interaction_inputs = tf.concat(interaction_inputs, axis=2)
+                    interaction_inputs = tf.stack(interaction_inputs, axis=1)
 
-                    return tf.reduce_sum(interaction_coefs * interaction_inputs, axis=2, keepdims=True)
+                    return interaction_coefs * interaction_inputs
 
     def _compile_irf_impulses(self):
         with self.session.as_default():
@@ -4099,6 +4118,7 @@ class CDRModel(object):
                     self.X_weighted_by_irf[response] = {}
                     irf_weights = []
                     terminal_names = []
+                    nparam = self.get_response_nparam(response)
                     for name in self.parametric_irf_terminal_names:
                         terminal_names.append(name)
                         t = self.node_table[name]
@@ -4110,15 +4130,14 @@ class CDRModel(object):
 
                         if t.p.family == 'DiracDelta':
                             if self.use_distributional_regression:
-                                nparam = self.get_response_nparam(response)
+                                _nparam = nparam
                             else:
-                                nparam = 1
+                                _nparam = 1
                             ndim = self.get_response_ndim(response)
                             irf_seq = tf.gather(self.dirac_delta_mask, impulse_ix, axis=2)
-                            if len(impulse_ix) > 1:
-                                irf_seq = tf.reduce_prod(irf_seq, axis=2, keepdims=True)
+                            t_delta = tf.gather(self.t_delta, impulse_ix, axis=2)
                             irf_seq = irf_seq[..., None, None]
-                            irf_seq = tf.tile(irf_seq, [1, 1, 1, nparam, ndim])
+                            irf_seq = tf.tile(irf_seq, [1, 1, 1, _nparam, ndim])
                         else:
                             t_delta = self.t_delta[:,:,impulse_ix[0]]
 
@@ -4165,23 +4184,51 @@ class CDRModel(object):
                     else:
                         X_weighted_by_irf = tf.zeros((1, 1, 1, 1, 1), dtype=self.FLOAT_TF)
 
-                    self.X_weighted_unscaled[response] = X_weighted_by_irf
+                    if not self.use_distributional_regression:
+                        X_weighted_by_irf = tf.pad(
+                            X_weighted_by_irf,
+                            paddings=[
+                                (0, 0),
+                                (0, 0),
+                                (0, 0),
+                                (0, nparam - 1),
+                                (0, 0)
+                            ]
+                        )
 
-                    X_weighted = X_weighted_by_irf
+                    X_weighted_unscaled = X_weighted_by_irf
+                    X_weighted_unscaled_sumT = tf.reduce_sum(X_weighted_by_irf, axis=1)
+                    X_weighted_unscaled_sumK = tf.reduce_sum(X_weighted_by_irf, axis=2)
+                    X_weighted_unscaled_sumTK = tf.reduce_sum(X_weighted_unscaled_sumT, axis=1)
+                    self.X_weighted_unscaled[response] = X_weighted_unscaled
+                    self.X_weighted_unscaled_sumT[response] = X_weighted_unscaled_sumT
+                    self.X_weighted_unscaled_sumK[response] = X_weighted_unscaled_sumK
+                    self.X_weighted_unscaled_sumTK[response] = X_weighted_unscaled_sumTK
+
                     coef_names = [self.node_table[x].coef_id() for x in self.terminal_names]
                     coef_ix = names2ix(coef_names, self.coef_names)
                     coef = tf.gather(self.coefficient[response], coef_ix, axis=1)
+                    X_weighted_sumT = X_weighted_unscaled_sumT * coef
+                    X_weighted = X_weighted_unscaled
                     coef = tf.expand_dims(coef, axis=1)
                     X_weighted = X_weighted * coef
+                    X_weighted_sumK = tf.reduce_sum(X_weighted, axis=2)
+                    X_weighted_sumTK = tf.reduce_sum(X_weighted_sumT, axis=1)
                     self.X_weighted[response] = X_weighted
+                    self.X_weighted_sumT[response] = X_weighted_sumT
+                    self.X_weighted_sumK[response] = X_weighted_sumK
+                    self.X_weighted_sumTK[response] = X_weighted_sumTK
 
     def _initialize_predictive_distribution(self):
         with self.session.as_default():
             with self.session.graph.as_default():
                 self.output_delta = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of stimulus-driven offsets at predictive distribution parameter of the response (summing over predictors and time)
+                self.output_delta_w_interactions = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of stimulus-driven offsets (including interactions) at predictive distribution parameter of the response (summing over predictors and time)
+                self.interaction_delta = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of interaction-driven offsets at predictive distribution parameter of the response (summing over predictors and time)
                 self.output = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of predictoins at predictive distribution parameter of the response (summing over predictors and time)
                 self.predictive_distribution = {}
                 self.predictive_distribution_delta = {} # IRF-driven changes in each parameter of the predictive distribution
+                self.predictive_distribution_delta_w_interactions = {} # IRF-driven changes in each parameter of the predictive distribution
                 self.prediction = {}
                 self.prediction_over_time = {}
                 self.ll_by_var = {}
@@ -4196,9 +4243,9 @@ class CDRModel(object):
                 self.X_conv_ema_debiased = {}
 
                 for i, response in enumerate(self.response_names):
-                    self.output_delta[response] = {}
                     self.predictive_distribution[response] = {}
                     self.predictive_distribution_delta[response] = {}
+                    self.predictive_distribution_delta_w_interactions[response] = {}
                     self.ll_by_var[response] = {}
                     self.error_distribution[response] = {}
                     self.error_distribution_theoretical_quantiles[response] = {}
@@ -4210,27 +4257,17 @@ class CDRModel(object):
                     response_params = self.intercept[response] # (batch, param, dim)
 
                     # Base output deltas
-                    X_weighted_delta = self.X_weighted[response] # (batch, time, impulse, param, dim)
+                    X_weighted = self.X_weighted[response] # (batch, time, impulse, param, dim)
+                    X_weighted_sumT = self.X_weighted_sumT[response] # (batch, impulse, param, dim)
+                    X_weighted_sumK = self.X_weighted_sumK[response] # (batch, time, param, dim)
+                    X_weighted_sumTK = self.X_weighted_sumTK[response] # (batch, param, dim)
                     nparam = int(response_params.shape[-2])
-                    if not self.use_distributional_regression:
-                        # Pad out other predictive params
-                        X_weighted_delta = tf.pad(
-                            X_weighted_delta,
-                            paddings = [
-                                (0, 0),
-                                (0, 0),
-                                (0, 0),
-                                (0, nparam - 1),
-                                (0, 0)
-                            ]
-                        )
-                    output_delta = X_weighted_delta
 
                     # Interactions
                     if len(self.interaction_names):
-                        interactions = self._sum_interactions(response)
+                        interaction_delta = self._apply_interactions(response)
                     else:
-                        interactions = None
+                        interaction_delta = None
 
                     # Prediction targets
                     Y = self.Y[..., i]
@@ -4239,17 +4276,23 @@ class CDRModel(object):
                         Yz = (Y - self.Y_train_means[response]) / self.Y_train_sds[response]
                         Y = tf.cond(self.training, lambda: Yz, lambda: Y)
 
-                    # Conditionally reduce along T (time, axis 1)
+                    # Get output deltas
                     output_delta = tf.cond(
-                        self.sum_outputs_along_T,
-                        lambda: tf.reduce_sum(output_delta, axis=1),
-                        lambda: output_delta
-                    )
-                    if interactions is not None:
-                        interactions = tf.cond(
+                        self.sum_outputs_along_K,
+                        lambda: tf.cond(
                             self.sum_outputs_along_T,
-                            lambda: tf.reduce_sum(interactions, axis=1),
-                            lambda: interactions
+                            lambda: X_weighted_sumTK,
+                            lambda: X_weighted_sumK
+                        ),
+                        lambda: X_weighted
+                    )
+
+                    # Conditionally reduce along T (time, axis 1)
+                    if interaction_delta is not None:
+                        interaction_delta = tf.cond(
+                            self.sum_outputs_along_T,
+                            lambda: interaction_delta,
+                            lambda: tf.expand_dims(interaction_delta, axis=1)
                         )
                     response_params = tf.cond(
                         self.sum_outputs_along_T,
@@ -4269,16 +4312,11 @@ class CDRModel(object):
                     )
 
                     # Conditionally reduce along K (impulses, axis -3)
-                    output_delta = tf.cond(
-                        self.sum_outputs_along_K,
-                        lambda: tf.reduce_sum(output_delta, axis=-3),
-                        lambda: output_delta
-                    )
-                    if interactions is not None:
-                        interactions = tf.cond(
+                    if interaction_delta is not None:
+                        interaction_delta = tf.cond(
                             self.sum_outputs_along_K,
-                            lambda: tf.reduce_sum(interactions, axis=-3),
-                            lambda: interactions
+                            lambda: tf.reduce_sum(interaction_delta, axis=1),
+                            lambda: interaction_delta
                         )
                     response_params = tf.cond(
                         self.sum_outputs_along_K,
@@ -4302,17 +4340,22 @@ class CDRModel(object):
                         lambda: tf.tile(Y_mask[..., None], tile_shape)
                     )
 
-                    if interactions is not None:
-                        output_delta += interactions
-                    response_params += output_delta
+                    output_delta_w_interactions = output_delta
+                    if interaction_delta is not None:
+                        output_delta_w_interactions += interaction_delta
+
+                    response_params += output_delta_w_interactions
 
                     self.output_delta[response] = output_delta
+                    self.output_delta_w_interactions[response] = output_delta_w_interactions
+                    self.interaction_delta[response] = interaction_delta
                     self.output[response] = response_params
 
                     for j, response_param_name in enumerate(response_param_names):
                         dim_names = self.expand_param_name(response, response_param_name)
                         for k, dim_name in enumerate(dim_names):
                             self.predictive_distribution_delta[response][dim_name] = output_delta[:, j, k]
+                            self.predictive_distribution_delta_w_interactions[response][dim_name] = output_delta_w_interactions[:, j, k]
 
                     response_params = [response_params[..., j, :] for j in range(nparam)]
 
@@ -4373,9 +4416,13 @@ class CDRModel(object):
                     else: # Treat as continuous regression, use the first (location) parameter
                         self.prediction[response] = prediction * Y_mask
 
+                    # Get elementwise log likelihood
                     ll = response_dist.log_prob(Y)
-                    # Mask out likelihoods of predictions for missing response variables
-                    ll *= Y_mask
+
+                    # Mask out likelihoods of predictions for missing response variables.
+                    zeros = tf.zeros_like(ll)
+                    sel = tf.cast(Y_mask, tf.bool)
+                    ll = tf.where(sel, ll, zeros)
                     self.ll_by_var[response] = ll
 
                     # Define EMA over predictive distribution
@@ -4488,6 +4535,7 @@ class CDRModel(object):
     def _initialize_optimizer(self):
         name = self.optim_name.lower()
         use_jtps = self.use_jtps
+        safe_mode = self.use_safe_optimizer
 
         with self.session.as_default():
             with self.session.graph.as_default():
@@ -4555,6 +4603,9 @@ class CDRModel(object):
                     optimizer_class = get_JTPS_optimizer_class(optimizer_class, session=self.session)
                     optimizer_kwargs['meta_learning_rate'] = 1
 
+                if safe_mode:
+                    optimizer_class = get_safe_optimizer_class(optimizer_class, session=self.session)
+
                 optim = optimizer_class(*optimizer_args, **optimizer_kwargs)
 
                 return optim
@@ -4568,10 +4619,11 @@ class CDRModel(object):
                 loss_func /= self.n_response
 
                 # Filter
-                if self.loss_filter_n_sds and self.ema_decay:
+                if self.loss_cutoff_n_sds:
+                    assert self.ema_decay, '``ema_decay`` must be provided if ``loss_cutoff_n_sds`` is used'
                     beta = self.ema_decay
                     ema_warm_up = 0
-                    n_sds = self.loss_filter_n_sds
+                    n_sds = self.loss_cutoff_n_sds
                     step = tf.cast(self.global_batch_step, self.FLOAT_TF)
 
                     self.loss_m1_ema = tf.Variable(0., trainable=False, name='loss_m1_ema')
@@ -4581,7 +4633,6 @@ class CDRModel(object):
                     # Debias
                     loss_m1_ema = self.loss_m1_ema / (1. - beta ** step)
                     loss_m2_ema = self.loss_m2_ema / (1. - beta ** step)
-                    n_dropped_ema = self.n_dropped_ema / (1. - beta ** step)
 
                     sd = tf.sqrt(loss_m2_ema - loss_m1_ema**2)
                     loss_cutoff = loss_m1_ema + n_sds * sd
@@ -4675,7 +4726,7 @@ class CDRModel(object):
                 tf.summary.scalar('opt/reg_loss_by_iter', self.reg_loss_total, collections=['opt'])
                 if self.is_bayesian:
                     tf.summary.scalar('opt/kl_loss_by_iter', self.kl_loss_total, collections=['opt'])
-                if self.loss_filter_n_sds:
+                if self.filter_outlier_losses and self.loss_cutoff_n_sds:
                     tf.summary.scalar('opt/n_dropped', self.n_dropped_in, collections=['opt'])
                 if self.log_graph:
                     self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/cdr', self.session.graph)
@@ -5285,7 +5336,7 @@ class CDRModel(object):
                 to_run += [self.loss_func, self.reg_loss]
                 to_run_names = ['loss', 'reg_loss']
 
-                if self.loss_filter_n_sds:
+                if self.loss_cutoff_n_sds:
                     to_run_names.append('n_dropped')
                     to_run.append(self.n_dropped)
 
@@ -5310,8 +5361,11 @@ class CDRModel(object):
     ######################################################
 
     def _extract_parameter_values(self, fixed=True, level=95, n_samples=None):
-        if n_samples is None:
-            n_samples = self.n_samples_eval
+        if n_samples:
+            MAP_mode = False
+        else:
+            n_samples = 1
+            MAP_mode = True
 
         alpha = 100 - float(level)
 
@@ -5328,7 +5382,7 @@ class CDRModel(object):
                 for i in range(n_samples):
                     if self.resample_ops:
                         self.session.run(self.resample_ops)
-                    samples.append(self.session.run(param_vector, feed_dict={self.use_MAP_mode: False}))
+                    samples.append(self.session.run(param_vector, feed_dict={self.use_MAP_mode: MAP_mode}))
                 samples = np.stack(samples, axis=1)
 
                 mean = samples.mean(axis=1)
@@ -5438,7 +5492,7 @@ class CDRModel(object):
         assert nn_id in self.nn_irf_ids, 'Unrecognized nn_id for NN IRF: %s.' % nn_id
 
         n = 0
-        n_irf = len(self.nn_irf_terminals[nn_id])
+        n_irf = len(self.nn_irf_output_names[nn_id])
         for response in self.response_names:
             if self.use_distributional_regression:
                 nparam = self.get_response_nparam(response)
@@ -5465,7 +5519,7 @@ class CDRModel(object):
                 slices = {}
                 shapes = {}
                 n = 0
-                n_irf = len(self.nn_irf_terminals[nn_id])
+                n_irf = len(self.nn_irf_output_names[nn_id])
                 for response in self.response_names:
                     if self.use_distributional_regression:
                         nparam = self.get_response_nparam(response)
@@ -5485,7 +5539,7 @@ class CDRModel(object):
 
                 return slices, shapes
 
-    def build(self, outdir=None, restore=True):
+    def build(self, outdir=None, restore=True, report_time=False):
         """
         Construct the CDR(NN) network and initialize/load model parameters.
         ``build()`` is called by default at initialization and unpickling, so users generally do not need to call this method.
@@ -5493,6 +5547,7 @@ class CDRModel(object):
 
         :param outdir: Output directory. If ``None``, inferred.
         :param restore: Restore saved network parameters if model checkpoint exists in the output directory.
+        :param report_time: Whether to report the time taken for each initialization step.
         :return: ``None``
         """
 
@@ -5504,35 +5559,145 @@ class CDRModel(object):
 
         with self.session.as_default():
             with self.session.graph.as_default():
+                t0 = pytime.time()
                 self._initialize_inputs()
+                dur = pytime.time() - t0
+                if report_time:
+                    stderr('_initialize_inputs took %.2fs\n' % dur)
+
+                t0 = pytime.time()
                 self._initialize_base_params()
+                dur = pytime.time() - t0
+                if report_time:
+                    stderr('_initialize_base_params took %.2fs\n' % dur)
+
                 for nn_id in self.nn_impulse_ids:
+                    t0 = pytime.time()
                     self._initialize_nn(nn_id)
+                    dur = pytime.time() - t0
+                    if report_time:
+                        stderr('_initialize_nn for %s took %.2fs\n' % (nn_id, dur))
+
+                    t0 = pytime.time()
                     self._compile_nn(nn_id)
+                    dur = pytime.time() - t0
+                    if report_time:
+                        stderr('_compile_nn for %s took %.2fs\n' % (nn_id, dur))
+
+                t0 = pytime.time()
                 self._concat_nn_impulses()
+                dur = pytime.time() - t0
+                if report_time:
+                    stderr('_concat_nn_impulses took %.2fs\n' % dur)
+
+                t0 = pytime.time()
                 self._compile_intercepts()
+                dur = pytime.time() - t0
+                if report_time:
+                    stderr('_compile_intercepts took %.2fs\n' % dur)
+
+                t0 = pytime.time()
                 self._compile_coefficients()
+                dur = pytime.time() - t0
+                if report_time:
+                    stderr('_compile_coefficients took %.2fs\n' % dur)
+
+                t0 = pytime.time()
                 self._compile_interactions()
+                dur = pytime.time() - t0
+                if report_time:
+                    stderr('_compile_interactions took %.2fs\n' % dur)
+
+                t0 = pytime.time()
                 self._compile_irf_params()
+                dur = pytime.time() - t0
+                if report_time:
+                    stderr('_compile_irf_params took %.2fs\n' % dur)
+
                 for nn_id in self.nn_irf_ids:
+                    t0 = pytime.time()
                     self._initialize_nn(nn_id)
+                    dur = pytime.time() - t0
+                    if report_time:
+                        stderr('_initialize_nn for %s took %.2fs\n' % (nn_id, dur))
+
+                    t0 = pytime.time()
                     self._compile_nn(nn_id)
+                    dur = pytime.time() - t0
+                    if report_time:
+                        stderr('_compile_nn for %s took %.2fs\n' % (nn_id, dur))
+
+                t0 = pytime.time()
                 self._collect_layerwise_ops()
+                dur = pytime.time() - t0
+                if report_time:
+                    stderr('_collect_layerwise_ops took %.2fs\n' % dur)
+
+                t0 = pytime.time()
                 self._initialize_irf_lambdas()
+                dur = pytime.time() - t0
+                if report_time:
+                    stderr('_initialize_irf_lambdas took %.2fs\n' % dur)
+
                 for response in self.response_names:
+                    t0 = pytime.time()
                     self._initialize_irfs(self.t, response)
+                    dur = pytime.time() - t0
+                    if report_time:
+                        stderr('_initialize_irfs for %s took %.2fs\n' % (response, dur))
+
+                t0 = pytime.time()
                 self._compile_irf_impulses()
+                dur = pytime.time() - t0
+                if report_time:
+                    stderr('_compile_irf_impulses took %.2fs\n' % dur)
+
+                t0 = pytime.time()
                 self._compile_X_weighted_by_irf()
+                dur = pytime.time() - t0
+                if report_time:
+                    stderr('_compile_X_weighted_by_irf took %.2fs\n' % dur)
+
+                t0 = pytime.time()
                 self._initialize_predictive_distribution()
+                dur = pytime.time() - t0
+                if report_time:
+                    stderr('_initialize_predictive_distribution took %.2fs\n' % dur)
+
+                t0 = pytime.time()
                 self._initialize_objective()
+                dur = pytime.time() - t0
+                if report_time:
+                    stderr('_initialize_objective took %.2fs\n' % dur)
+
+                t0 = pytime.time()
                 self._initialize_parameter_tables()
+                dur = pytime.time() - t0
+                if report_time:
+                    stderr('_initialize_parameter_tables took %.2fs\n' % dur)
+
+                t0 = pytime.time()
                 self._initialize_logging()
+                dur = pytime.time() - t0
+                if report_time:
+                    stderr('_initialize_logging took %.2fs\n' % dur)
+
+                t0 = pytime.time()
                 self._initialize_ema()
+                dur = pytime.time() - t0
+                if report_time:
+                    stderr('_initialize_ema took %.2fs\n' % dur)
 
                 self.report_uninitialized = tf.report_uninitialized_variables(
                     var_list=None
                 )
+
+                t0 = pytime.time()
                 self._initialize_saver()
+                dur = pytime.time() - t0
+                if report_time:
+                    stderr('_initialize_saver took %.2fs\n' % dur)
+
                 self.load(restore=restore)
 
                 self._initialize_convergence_checking()
@@ -5924,6 +6089,10 @@ class CDRModel(object):
 
         pd.set_option("display.max_colwidth", 10000)
         out = ' ' * indent + 'FITTED PARAMETER VALUES:\n'
+        out += ' ' * indent + 'NOTE: Parameters are reported on the training set scale, so if you used\n'
+        out += ' ' * indent + '      `standardize_response=True`, coefficients and interactions will be shown\n'
+        out += ' ' * indent + '      in standard units of the response. To rescale them to source units,\n'
+        out += ' ' * indent + '      "unstandardize" the estimates using the training set response SD.\n'
         out += ' ' * indent + 'NOTE: Fixed effects for bounded parameters are reported on the constrained space, but\n'
         out += ' ' * indent + '      random effects for bounded parameters are reported on the unconstrained space.\n'
         out += ' ' * indent + '      Therefore, they cannot be directly added. To obtain parameter estimates\n'
@@ -6345,7 +6514,7 @@ class CDRModel(object):
             out += ' ' * (indent * 2) + 'Proportion converged:        %s\n' % proportion_converged
             out += ' ' * (indent * 2) + 'N iterations at convergence: %s\n' % n_iter
 
-            if self.loss_filter_n_sds and self.ema_decay:
+            if self.filter_outlier_losses and self.loss_cutoff_n_sds:
                 n_dropped = self.n_dropped_ema.eval(self.session)
                 out += '\n'
                 out += ' ' * (indent * 2) + 'Number of outlier losses dropped per iteration (exp mov avg): %.4f\n' % n_dropped
@@ -6356,9 +6525,10 @@ class CDRModel(object):
                     out += ' ' * (indent * 2) + '         the TensorFlow logs to determine whether the large average'
                     out += ' ' * (indent * 2) + '         was driven by outlier iterations. If few/no iterations near'
                     out += ' ' * (indent * 2) + '         the end of training had n_dropped=0, some training data was'
-                    out += ' ' * (indent * 2) + '         likely ignored at every iteration. This can be corrected by'
-                    out += ' ' * (indent * 2) + '         raising `loss_filter_n_sds` or turning off loss filtering'
-                    out += ' ' * (indent * 2) + '         by setting `loss_filter_n_sds` to `None`.'
+                    out += ' ' * (indent * 2) + '         likely ignored at every iteration. Consider using'
+                    out += ' ' * (indent * 2) + '         setting filter_outlier_losses to ``False``, which '
+                    out += ' ' * (indent * 2) + '         restarts training from the last checkpoint after encountering'
+                    out += ' ' * (indent * 2) + '         outlier losses rather than removing them, avoiding bias.'
                 out += '\n'
 
             if converged:
@@ -6515,7 +6685,16 @@ class CDRModel(object):
                         stderr('Saving initial weights...\n')
                         self.save()
 
+                    # Counter for number of times an attempted iteration has failed due to outlier
+                    # losses or failed numerics checks
+                    n_failed = 0
+                    current_save_point = self.global_step.eval(session=self.session)
+                    failed = False
+
                     while not self.has_converged() and self.global_step.eval(session=self.session) < n_iter:
+                        if failed:
+                            stderr('Restarting from most recent checkpoint (restart #%d from this checkpoint).\n' % n_failed)
+                            self.load() # Reload from previous save point
                         p, p_inv = get_random_permutation(n)
                         t0_iter = pytime.time()
                         stderr('-' * 50 + '\n')
@@ -6530,9 +6709,10 @@ class CDRModel(object):
                         reg_loss_total = 0.
                         if self.is_bayesian:
                             kl_loss_total = 0.
-                        if self.loss_filter_n_sds:
+                        if self.loss_cutoff_n_sds:
                             n_dropped = 0.
 
+                        failed = False
                         for i in range(0, n, minibatch_size):
                             indices = p[i:i+minibatch_size]
                             if optimize_memory:
@@ -6577,12 +6757,26 @@ class CDRModel(object):
                                     self.training: not self.predict_mode
                                 }
 
-                            info_dict = self.run_train_step(fd)
+                            try:
+                                info_dict = self.run_train_step(fd)
+                            except tf.errors.InvalidArgumentError as e:
+                                failed = True
+                                stderr('\nDid not pass stability check.\nNon-finite gradients.\n')
+                                break
 
-                            self.check_numerics()
+                            try:
+                                self.check_numerics()
+                            except tf.errors.InvalidArgumentError as e:
+                                failed = True
+                                stderr('\nDid not pass stability check.\nNon-finite parameter values.\n')
+                                break
 
-                            if self.loss_filter_n_sds:
+                            if self.loss_cutoff_n_sds:
                                 n_dropped += info_dict['n_dropped']
+                                if not self.filter_outlier_losses and n_dropped:
+                                    failed = True
+                                    stderr('\nDid not pass stability check.\nLarge outlier losses.\n')
+                                    break
 
                             loss_cur = info_dict['loss']
                             if not np.isfinite(loss_cur):
@@ -6601,14 +6795,15 @@ class CDRModel(object):
 
                             pb.update((i/minibatch_size) + 1, values=pb_update)
 
-                            # if self.global_batch_step.eval(session=self.sess) % 1000 == 0:
-                            #     self.save()
-                            #     self.make_plots(prefix='plt')
-
-                        self.session.run(self.incr_global_step)
+                        if failed:
+                            n_failed += 1
+                            assert n_failed <= 100, '100 restarts in a row from the same save point failed to pass stability checks. Model training has failed.'
+                            continue
 
                         if self.check_convergence:
                             self.run_convergence_check(verbose=False, feed_dict={self.loss_total: loss_total/n_minibatch})
+
+                        self.session.run(self.incr_global_step)
 
                         if self.log_freq > 0 and self.global_step.eval(session=self.session) % self.log_freq == 0:
                             loss_total /= n_minibatch
@@ -6617,7 +6812,7 @@ class CDRModel(object):
                             if self.is_bayesian:
                                 kl_loss_total /= n_minibatch
                                 log_fd[self.kl_loss_total] = kl_loss_total
-                            if self.loss_filter_n_sds:
+                            if self.filter_outlier_losses and self.loss_cutoff_n_sds:
                                 log_fd[self.n_dropped_in] = n_dropped
                             summary_train_loss = self.session.run(self.summary_opt, feed_dict=log_fd)
                             self.writer.add_summary(summary_train_loss, self.global_step.eval(session=self.session))
@@ -6629,13 +6824,18 @@ class CDRModel(object):
                             self.writer.flush()
 
                         if self.save_freq > 0 and self.global_step.eval(session=self.session) % self.save_freq == 0:
+                            current_save_point = self.global_step.eval(session=self.session)
+                            n_failed = 0
                             self.save()
+                        if self.plot_freq > 0 and self.global_step.eval(session=self.session) % self.plot_freq == 0:
                             self.make_plots(prefix='plt')
 
                         t1_iter = pytime.time()
                         if self.check_convergence:
                             stderr('Convergence:    %.2f%%\n' % (100 * self.session.run(self.proportion_converged) / self.convergence_alpha))
                         stderr('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
+
+                    assert not failed, 'Training loop completed without passing stability checks. Model training has failed.'
 
                     self.save()
 
@@ -6648,7 +6848,6 @@ class CDRModel(object):
                     if self.is_bayesian or self.has_dropout:
                         # Generate plots with 95% credible intervals
                         self.make_plots(n_samples=self.n_samples_eval, prefix='plt')
-
 
                 if not self.training_complete.eval(session=self.session) or force_training_evaluation:
                     # Extract and save predictions
@@ -6903,13 +7102,13 @@ class CDRModel(object):
                             }
                             if return_loglik:
                                 fd[self.Y] = _Y
-                                fd[self.Y_mask]: _Y_mask
                         else:
                             fd = {
                                 self.X: X[i:i + B],
                                 self.X_time: X_time[i:i + B],
                                 self.X_mask: X_mask[i:i + B],
                                 self.Y_time: Y_time[i:i + B],
+                                self.Y_mask: Y_mask[i:i + B],
                                 self.Y_gf: None if Y_gf is None else Y_gf[i:i + B],
                                 self.training: not self.predict_mode,
                                 self.sum_outputs_along_T: sum_outputs_along_T,
@@ -6917,7 +7116,6 @@ class CDRModel(object):
                             }
                             if return_loglik:
                                 fd[self.Y] = Y[i:i + B]
-                                fd[self.Y_mask]: Y_mask[i:i + B]
                         _out = self.run_predict_op(
                             fd,
                             responses=responses,
@@ -7311,10 +7509,13 @@ class CDRModel(object):
 
                 if ix in file_ix:
                     _Y = Y[ix]
+                    sel = None
                     if _response in _Y:
                         _y = _Y[_response]
-
-                        _preds = preds[_response][ix]
+                        sel = np.isfinite(_y)
+                        index = _y.index[sel]
+                        _preds = preds[_response][ix][sel]
+                        _y = _y[sel]
 
                         if self.is_binary(_response):
                             baseline = np.ones((len(_y),))
@@ -7383,6 +7584,12 @@ class CDRModel(object):
                         err_col_name = error = __preds = _y = None
 
                     _ll = log_lik[_response][ix]
+                    if sel is not None:
+                        __preds = pd.Series(__preds, index=index)
+                        _ll = _ll[sel]
+                        _ll = pd.Series(np.squeeze(_ll), index=index)
+                        if err_col_name is not None and error is not None:
+                            error = pd.Series(error, index=index)
                     _ll_summed = _ll.sum(axis=0)
                     metrics['log_lik'][_response][ix] = _ll_summed
                     metrics['full_log_lik'] += _ll_summed
@@ -7393,15 +7600,14 @@ class CDRModel(object):
                         else:
                             name_base = '%s%s' % (sn(_response), partition_str)
 
-                        df = {}
+                        df = pd.DataFrame()
                         if err_col_name is not None and error is not None:
                             df[err_col_name] = error
                         if __preds is not None:
                             df['CDRpreds'] = __preds
                         if _y is not None:
                             df['CDRobs'] = _y
-                        df['CDRloglik'] = np.squeeze(_ll)
-                        df = pd.DataFrame(df)
+                        df['CDRloglik'] = _ll
 
                         if extra_cols:
                             df = pd.concat([_Y.reset_index(drop=True), df.reset_index(drop=True)], axis=1)
@@ -8065,6 +8271,7 @@ class CDRModel(object):
             ref_varies_with_y=False,
             manipulations=None,
             pair_manipulations=False,
+            include_interactions=False,
             reference_type=None,
             xaxis=None,
             xmin=None,
@@ -8112,6 +8319,7 @@ class CDRModel(object):
         :param ref_varies_with_y: ``bool``; Whether the reference varies along the y-axis. If ``False``, use the scalar reference value for the y-axis. Ignored if **yvar** is ``None``.
         :param manipulations: ``list`` of ``dict``; A list of manipulations, where each manipulation is constructed as a dictionary mapping a variable name (e.g. ``'predictorX'``, ``'t_delta'``) to either a float offset or a function that transforms the reference value for that variable (e.g. multiplies it by ``2``). Alternatively, the keyword ``'ranef'`` can be used to manipulate random effects. The ``'ranef'`` entry must map to a ``dict`` that itself maps random grouping factor names (e.g. ``'subject'``) to levels (e.g. ``'subjectA'``).
         :param pair_manipulations: ``bool``; Whether to apply the manipulations to the reference input. If ``False``, all manipulations are compared to the same reference. For example, when plotting by-subject IRFs by subject, each subject might have a difference base response. In this case, set **pair_manipulations** to ``True`` in order to match the random effects used to compute the reference response and the response of interest.
+        :param include_interactions: ``bool``; Whether to include interaction terms in plotting the influence of a manipulation.
         :param reference_type: ``bool``; Type of reference to use. If ``0``, use a zero-valued reference. If ``'mean'``, use the training set mean for all variables. If ``None``, use the default reference vector specified in the model's configuration file.
         :param xaxis: ``list``, ``numpy`` vector, or ``None``; Vector of values to use for the x-axis. If ``None``, inferred.
         :param xmin: ``float`` or ``None``; Minimum value for x-axis (if axis inferred). If ``None``, inferred.
@@ -8524,6 +8732,10 @@ class CDRModel(object):
                 alpha = 100-float(level)
 
                 samples = {}
+                if include_interactions:
+                    delta = self.predictive_distribution_delta_w_interactions
+                else:
+                    delta = self.predictive_distribution_delta
                 for i in range(n_samples):
                     to_run = {}
                     for response in responses:
@@ -8531,7 +8743,7 @@ class CDRModel(object):
                         for response_param in response_params:
                             dim_names = self.expand_param_name(response, response_param)
                             for dim_name in dim_names:
-                                to_run[response][dim_name] = self.predictive_distribution_delta[response][dim_name]
+                                to_run[response][dim_name] = delta[response][dim_name]
 
                     if self.resample_ops:
                         self.session.run(self.resample_ops)
@@ -8661,30 +8873,42 @@ class CDRModel(object):
         :return: ``pandas`` DataFrame; IRF integrals, one IRF per row. If Bayesian, array also contains credible interval bounds.
         """
 
+        assert n_time_points > 0, 'n_time_points must be positive.'
+
         if n_time_units is None:
             n_time_units = self.t_delta_limit
 
-        step = float(n_time_units) / n_time_points
         alpha = 100 - float(level)
+        if self.future_length:
+            xmin = -n_time_units / 2.
+            xmax = n_time_units / 2.
+        else:
+            xmin = 0.
+            xmax = n_time_units
 
         self.set_predict_mode(True)
 
         names = self.impulse_names
+        has_rate = 'rate' in names
         names = [x for x in names if not self.has_nn_irf or x != 'rate']
 
         manipulations = []
-        is_non_dirac = []
-        if self.has_nn_irf:
-            is_non_dirac.append(1.)
+        step_size = []
+        if self.has_nn_irf and has_rate:
+            step_size.append(np.ones(n_time_points) * float(n_time_units) / n_time_points)
         for x in names:
             if self.is_non_dirac(x):
-                is_non_dirac.append(1.)
+                step_size.append(np.ones(n_time_points) * float(n_time_units) / n_time_points)
             else:
-                is_non_dirac.append(0.)
+                timepoints = np.linspace(xmin, xmax, n_time_points)
+                steps = np.abs(timepoints) < self.epsilon
+                n_steps = steps.sum()
+                if n_steps > 1:
+                    steps = steps / n_steps
+                step_size.append(steps)
             delta = self.plot_step_map[x]
             manipulations.append({x: delta})
-        is_non_dirac = np.array(is_non_dirac)[None, ...] # Add sample dim
-        step = np.where(is_non_dirac, step, 1.)
+        step_size = np.stack(step_size, axis=1)[None, ...] # Add sample dim
 
         if random:
             ranef_group_names = self.ranef_group_names
@@ -8695,7 +8919,7 @@ class CDRModel(object):
             gf_y_refs = [{None: None}]
 
         names = [get_irf_name(x, self.irf_name_map) for x in names]
-        if self.has_nn_irf:
+        if has_rate and self.has_nn_irf:
             names = [get_irf_name('rate', self.irf_name_map)] + names
         sort_key_dict = {x: i for i, x in enumerate(names)}
         def sort_key_fn(x, sort_key_dict=sort_key_dict):
@@ -8713,11 +8937,6 @@ class CDRModel(object):
                 response_params.add(self.get_response_params(_response)[0])
             response_params = sorted(list(response_params))
 
-        if self.future_length:
-            xmin = -n_time_units
-        else:
-            xmin = 0.
-
         for g, gf_y_ref in enumerate(gf_y_refs):
             _, _, _, _, vals = self.get_plot_data(
                 xvar='t_delta',
@@ -8732,7 +8951,7 @@ class CDRModel(object):
                 pair_manipulations=False,
                 xaxis=None,
                 xmin=xmin,
-                xmax=n_time_units,
+                xmax=xmax,
                 xres=n_time_points,
                 n_samples=n_samples,
                 level=level,
@@ -8741,10 +8960,10 @@ class CDRModel(object):
             for _response in vals:
                 for _dim_name in vals[_response]:
                     _vals = vals[_response][_dim_name]
-                    if not self.has_nn_irf:
+                    if not self.has_nn_irf or not has_rate:
                         _vals = _vals[..., 1:]
 
-                    integrals = _vals.sum(axis=1) * step
+                    integrals = (_vals * step_size).sum(axis=1)
 
                     group_name = list(gf_y_ref.keys())[0]
                     level_name = gf_y_ref[group_name]
@@ -8926,7 +9145,9 @@ class CDRModel(object):
                 # IRF 1D
                 if generate_univariate_irf_plots:
                     names = self.impulse_names
-                    names = [x for x in names if not self.has_nn_irf or x != 'rate']
+                    has_rate = 'rate' in names
+                    if has_rate:
+                        names = [x for x in names if not self.has_nn_irf or x != 'rate']
                     if not plot_dirac:
                         names = [x for x in names if self.is_non_dirac(x)]
                     if pred_names is not None and len(pred_names) > 0:
@@ -8952,7 +9173,7 @@ class CDRModel(object):
                     names_fixed = [x for x in names if x in fixed_impulses]
                     manipulations_fixed = [x for x in manipulations if list(x.keys())[0] in fixed_impulses]
 
-                    if self.has_nn_irf:
+                    if has_rate and self.has_nn_irf:
                         names = ['rate'] + names
                         names_fixed = ['rate'] + names_fixed
 
@@ -9025,7 +9246,7 @@ class CDRModel(object):
                                 _lq = None if lq is None else lq[_response][_dim_name]
                                 _uq = None if uq is None else uq[_response][_dim_name]
 
-                                if not self.has_nn_irf:
+                                if not self.has_nn_irf or not has_rate:
                                     _plot_y = _plot_y[..., 1:]
                                     _lq = None if _lq is None else _lq[..., 1:]
                                     _uq = None if _uq is None else _uq[..., 1:]
@@ -9290,6 +9511,8 @@ class CDRModel(object):
         if n_samples == 'default':
             if self.is_bayesian or self.has_dropout:
                 n_samples = self.n_samples_eval
+            else:
+                n_samples = None
 
         with self.session.as_default():
             with self.session.graph.as_default():
@@ -9331,8 +9554,12 @@ class CDRModel(object):
                         out['Response'] = responses
                     out['ResponseParam'] = response_params
 
-                columns = ['Mean', '2.5%', '97.5%']
-                out = pd.concat([out, pd.DataFrame(values, columns=columns)], axis=1)
+                if n_samples:
+                    columns = ['Mean', '2.5%', '97.5%']
+                    out = pd.concat([out, pd.DataFrame(values, columns=columns)], axis=1)
+                else:
+                    columns = ['Estimate']
+                    out = pd.concat([out, pd.DataFrame(values[:, 0], columns=columns)], axis=1)
 
                 self.set_predict_mode(False)
 

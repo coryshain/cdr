@@ -93,6 +93,9 @@ def read_tabular_data(X_paths, Y_paths, series_ids, categorical_columns=None, se
         assert not 'rate' in _X, '"rate" is a reserved column name in CDR. Rename your input column...'
         _X['rate'] = 1.
         if 'trial' not in _X:
-            _X['trial'] = _X.groupby(series_ids).rate.cumsum()
+            if series_ids:
+                _X['trial'] = _X.groupby(series_ids).rate.cumsum()
+            else:
+                _X['trial'] = _X.rate.cumsum()
 
     return X, Y

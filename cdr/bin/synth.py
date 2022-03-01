@@ -36,7 +36,7 @@ if __name__ == '__main__':
     argparser.add_argument('-t', '--transparent_background', action='store_true', help='Use transparent background (otherwise white background)')
     argparser.add_argument('-o', '--outdir', type=str, default='.', help='Output directory in which to save synthetic data tables (randomly sampled by default)')
 
-    args, unknown = argparser.parse_known_args()
+    args = argparser.parse_args()
 
     history_length = [None if x.lower() == 'none' else int(x) for x in args.history_length]
 

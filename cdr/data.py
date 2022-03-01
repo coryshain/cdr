@@ -181,9 +181,11 @@ def filter_invalid_responses(Y, dv, crossval_factor=None, crossval_fold=None):
 
     select_Y_valid = []
     for i, _Y in enumerate(Y):
-        _select_Y_valid = np.ones(len(_Y), dtype=bool)
+        _select_Y_valid_cv = np.ones(len(_Y), dtype=bool)
         if crossval_factor:
-            _select_Y_valid &= _Y[crossval_factor].isin(crossval_fold)
+            _select_Y_valid_cv &= _Y[crossval_factor].isin(crossval_fold)
+
+        _select_Y_valid_dv = np.zeros(len(_Y), dtype=bool)
         for _dv in dv:
             if _dv in _Y:
                 dtype = _Y[_dv].dtype
@@ -192,7 +194,11 @@ def filter_invalid_responses(Y, dv, crossval_factor=None, crossval_fold=None):
                 else:
                     is_numeric = False
                 if is_numeric:
-                    _select_Y_valid &= np.isfinite(_Y[_dv])
+                    finite = np.isfinite(_Y[_dv])
+                    _select_Y_valid_dv |= finite
+
+        _select_Y_valid = _select_Y_valid_cv * _select_Y_valid_dv
+
         select_Y_valid.append(_select_Y_valid)
         Y[i] = _Y[_select_Y_valid]
 
@@ -333,19 +339,29 @@ def build_CDR_response_data(
                 for response in responses:
                     _Y = Y[i]
                     if response in _Y:
-                        _Y_mask.append(np.ones(len(_Y)))
+                        _Y_mask.append(np.isfinite(_Y[response]))
                     else:
                         _Y_mask.append(np.zeros(len(_Y)))
                 _Y_mask = np.stack(_Y_mask, axis=1)
         else:
-            _Y_mask = []
-            for j, response in enumerate(responses):
-                if i in response_to_df_ix[response]:
-                    _Y_mask.append(1.)
-                else:
-                    _Y_mask.append(0.)
-            # Tile
-            _Y_mask = np.array(_Y_mask)[None, ...] * np.ones((len(_Y_time), 1))
+            if Y is None:
+                _Y_mask = []
+                for response in responses:
+                    if i in response_to_df_ix[response]:
+                        _Y_mask.append(1.)
+                    else:
+                        _Y_mask.append(0.)
+                # Tile
+                _Y_mask = np.array(_Y_mask)[None, ...] * np.ones((len(_Y_time), 1))
+            else:
+                _Y_mask = []
+                for response in responses:
+                    _Y = Y[i]
+                    if i in response_to_df_ix[response]:
+                        _Y_mask.append(np.isfinite(_Y[response]))
+                    else:
+                        _Y_mask.append(np.zeros(len(_Y)))
+                _Y_mask = np.stack(_Y_mask, axis=1)
         Y_mask_out.append(_Y_mask)
 
         # Y_gf
@@ -372,16 +388,18 @@ def build_CDR_response_data(
         if X_in_Y_out is not None:
             if X_in_Y is None:  # X_in_Y_names was provided
                 assert Y is not None, 'Could not compute response-aligned predictors %s because neither Y nor X_in_Y were provided.' % (X_in_Y_names)
-                _X_in_Y = Y[i][X_in_Y_names]
+                _X_in_Y = Y[i][X_in_Y_names + ['time']]
             else:
                 if X_in_Y_names is None:
                     _X_in_Y = X_in_Y[i]
                 else:
-                    _X_in_Y = X_in_Y[i][X_in_Y_names]
+                    _X_in_Y = X_in_Y[i][X_in_Y_names + ['time']]
             if X_in_Y_names is None:
                 _X_in_Y_names = list(_X_in_Y.columns)
             else:
                 _X_in_Y_names = X_in_Y_names
+                if 'time' not in _X_in_Y_names:
+                    _X_in_Y_names.append('time')
             _X_in_Y = _X_in_Y[_X_in_Y_names]
             X_in_Y_out.append(_X_in_Y)
 
@@ -392,11 +410,18 @@ def build_CDR_response_data(
     for i, _last_obs in enumerate(last_obs_out):
         last_obs_out[i] = np.concatenate(_last_obs, axis=0)
     Y_time_out = np.concatenate(Y_time_out, axis=0)
-    Y_mask_out = np.concatenate(Y_mask_out, axis=0)
+    Y_mask_out = np.concatenate(Y_mask_out, axis=0).astype(float)
     if Y_gf_out is not None:
         Y_gf_out = np.concatenate(Y_gf_out, axis=0)
     if X_in_Y_out is not None:
-        X_in_Y_out = np.concatenate(X_in_Y_out, axis=0)
+        X_in_Y_out = pd.concat(X_in_Y_out, axis=0)
+
+    # Find and mask non-finite response values
+    Y_finite = np.isfinite(Y_out)
+    Y_mask_out *= Y_finite
+
+    # Fill na to prevent non-finite values from entering the computation graph
+    Y_out = np.nan_to_num(Y_out)
 
     return Y_out, first_obs_out, last_obs_out, Y_time_out, Y_mask_out, Y_gf_out, X_in_Y_out
 
@@ -428,11 +453,6 @@ def build_CDR_impulse_data(
     :param float_type: ``str``; name of float type.
     :return: triple of ``numpy`` arrays; let N, T, I, R respectively be the number of rows in **Y**, history length, number of impulse dimensions, and number of response dimensions. Outputs are (1) impulses with shape (N, T, I), (2) impulse timestamps with shape (N, T, I), and impulse mask with shape (N, T, I).
     """
-
-    # # Check prerequisites
-    # assert isinstance(X, list) and not [_X for _X in X if not isinstance(_X, pd.DataFrame)], "X must be a list of pandas DataFrames"
-    # assert isinstance(first_obs, list), "first_obs must be a list"
-    # assert isinstance(last_obs, list), "last_obs must be a list"
 
     if not (impulse_names):  # Empty (intercept-only) model
         impulse_names = ['time']
@@ -479,12 +499,14 @@ def build_CDR_impulse_data(
     X_mask_out = np.concatenate(X_mask_out, axis=-1)
 
     if X_in_Y_names:
+        assert X_in_Y is not None, 'X_in_Y must be provided if X_in_Y_names is not ``None``.'
         X_in_Y_shape = (X_out.shape[0], X_out.shape[1], len(X_in_Y_names))
         _X_in_Y = np.zeros(X_in_Y_shape)
-        _X_in_Y[:, -1, :] = X_in_Y
+        _X_in_Y[:, -1, :] = X_in_Y[X_in_Y_names].values
         X_out = np.concatenate([X_out, _X_in_Y], axis=2)
 
         time_X_2d_new = np.zeros(X_in_Y_shape)
+        time_X_2d_new[:, -1, :] = X_in_Y.time.values[..., None]
         X_time_out = np.concatenate([X_time_out, time_X_2d_new], axis=2)
 
         time_mask_new = np.zeros(X_in_Y_shape)
@@ -497,6 +519,13 @@ def build_CDR_impulse_data(
     X_out = X_out[:,:,ix]
     X_time_out = X_time_out[:,:,ix]
     X_mask_out = X_mask_out[:,:,ix]
+
+    # Find and mask non-finite predictor values
+    X_finite = np.isfinite(X_out)
+    X_mask_out *= X_finite
+
+    # Fill na to prevent non-finite values from entering the computation graph
+    X_out = np.nan_to_num(X_out)
 
     return X_out, X_time_out, X_mask_out
 
@@ -577,12 +606,16 @@ def get_time_windows(
     X_id_vectors = []
     Y_id_vectors = []
 
-    for i in range(len(series_ids)):
-        col = series_ids[i]
-        X_id_vectors.append(np.array(X[col]))
-        Y_id_vectors.append(np.array(Y[col]))
-    X_id_vectors = np.stack(X_id_vectors, axis=1)
-    Y_id_vectors = np.stack(Y_id_vectors, axis=1)
+    if series_ids:
+        for i in range(len(series_ids)):
+            col = series_ids[i]
+            X_id_vectors.append(np.array(X[col]))
+            Y_id_vectors.append(np.array(Y[col]))
+        X_id_vectors = np.stack(X_id_vectors, axis=1)
+        Y_id_vectors = np.stack(Y_id_vectors, axis=1)
+    else:
+        X_id_vectors = np.ones((len(X), 1))
+        Y_id_vectors = np.ones((len(Y), 1))
 
     Y_id = Y_id_vectors[0]
 
@@ -703,7 +736,7 @@ def compute_filter(y, field, cond):
         op = '<='
         var = cond[2:].strip()
     elif cond.startswith('>='):
-        op = '<='
+        op = '>='
         var = cond[2:].strip()
     elif cond.startswith('<'):
         op = '<'

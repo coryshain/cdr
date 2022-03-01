@@ -50,6 +50,7 @@ def plot_irf(
         xlab=None,
         ylab=None,
         use_line_markers=False,
+        use_grid=True,
         transparent_background=False,
         dpi=300,
         dump_source=False
@@ -76,6 +77,7 @@ def plot_irf(
     :param xlab: ``str`` or ``None``; x-axis label. If ``None``, no label.
     :param ylab: ``str`` or ``None``; y-axis label. If ``None``, no label.
     :param use_line_markers: ``bool``; add markers to IRF lines.
+    :param use_grid: ``bool``; whether to show a background grid.
     :param transparent_background: ``bool``; use a transparent background. If ``False``, uses a white background.
     :param dpi: ``int``; dots per inch.
     :param dump_source: ``bool``; Whether to dump the plot source array to a csv file.
@@ -120,7 +122,8 @@ def plot_irf(
     ax.tick_params(top='off', bottom='off', left='off', right='off', labelleft='on', labelbottom='on')
     ax.xaxis.set_ticks_position('none')
     ax.yaxis.set_ticks_position('none')
-    ax.grid(b=True, which='major', axis='both', ls='--', lw=.5, c='k', alpha=.3)
+    if use_grid:
+        ax.grid(b=True, which='major', axis='both', ls='--', lw=.5, c='k', alpha=.3)
     ax.axhline(y=0, lw=1, c='gray', alpha=1)
     ax.axvline(x=0, lw=1, c='gray', alpha=1)
     if density is not None:

@@ -13,9 +13,14 @@ if __name__ == '__main__':
     argparser.add_argument('-n', '--n', type=int, default=3, help='Arity of partition')
     argparser.add_argument('-f', '--fields', nargs='+', default=['subject', 'sentid'], help='Field names to use as split IDs')
     argparser.add_argument('-p', '--partition', type=str, default=None, help='ID of partition to send to stdout ("train", "dev", "test", or integer). If unspecified, saves all elements of the partition to separate files in the source directory.')
-    args, unknown = argparser.parse_known_args()
+    argparser.add_argument('-s', '--sep', type=str, default=None, help='Column separator. If unspecified, assumes space-delimited.')
+    args = argparser.parse_args()
 
-    df = pd.read_csv(args.path, sep=' ', skipinitialspace=True)
+    if args.sep:
+        sep = args.sep
+    else:
+        sep = ','
+    df = pd.read_csv(args.path, sep=sep, skipinitialspace=True)
     for f in args.fields:
         df[f] = df[f].astype('category')
     cols = df.columns
@@ -34,10 +39,10 @@ if __name__ == '__main__':
         for i in range(len(names)):
             outpath, ext = os.path.splitext(args.path)
             outpath += '_' + names[i] + ext
-            df[select[i]].to_csv(outpath, sep=' ', index=False, na_rep='nan', columns=cols)
+            df[select[i]].to_csv(outpath, sep=sep, index=False, na_rep='nan', columns=cols)
     else:
         try:
             i = int(args.partition)
         except:
             i = names.index(args.partition)
-        df[select[i]].to_csv(sys.stdout, sep=' ', index=False, na_rep='nan', columns=cols)
+        df[select[i]].to_csv(sys.stdout, sep=sep, index=False, na_rep='nan', columns=cols)

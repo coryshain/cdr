@@ -26,7 +26,7 @@ if __name__ == '__main__':
     argparser.add_argument('-e', '--extra_cols', action='store_true', help='Whether to include columns from the response dataframe in the outputs.')
     argparser.add_argument('-O', '--optimize_memory', action='store_true', help="Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).")
     argparser.add_argument('--cpu_only', action='store_true', help='Use CPU implementation even if GPU is available.')
-    args, unknown = argparser.parse_known_args()
+    args = argparser.parse_args()
 
     for path in args.config_paths:
         p = Config(path)

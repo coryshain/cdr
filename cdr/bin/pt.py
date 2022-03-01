@@ -35,7 +35,7 @@ if __name__ == '__main__':
     argparser.add_argument('-T', '--tails', type=int, default=2, help='Number of tails (1 or 2)')
     argparser.add_argument('-r', '--response', nargs='*', default=None, help='Name(s) of response(s) to test. If left unspecified, tests all responses.')
     argparser.add_argument('-o', '--outdir', default=None, help='Output directory. If ``None``, placed in same directory as the config.')
-    args, unknown = argparser.parse_known_args()
+    args = argparser.parse_args()
 
     metric = args.metric
     if metric == 'err':

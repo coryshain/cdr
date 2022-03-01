@@ -371,7 +371,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'minibatch_size',
-        512,
+        1024,
         [int, None],
         "Size of minibatches to use for fitting (full-batch if ``None``)."
     ),
@@ -407,6 +407,12 @@ MODEL_INITIALIZATION_KWARGS = [
         1.,
         [float, None],
         'Maximum allowable value for the global norm of the gradient, which will be clipped as needed. If ``None``, no gradient clipping.'
+    ),
+    Kwarg(
+        'use_safe_optimizer',
+        False,
+        bool,
+        'Stabilize training by preventing the optimizer from applying updates involving NaN gradients (affected weights will remain unchanged after the update). Incurs slight additional computational overhead and can lead to bias in the training process.'
     ),
     Kwarg(
         'epsilon',
@@ -464,10 +470,17 @@ MODEL_INITIALIZATION_KWARGS = [
         "Keep learning rate flat between ``lr_decay_steps`` (ignored if ``lr_decay_family==None``)."
     ),
     Kwarg(
-        'loss_filter_n_sds',
-        None,
+        'filter_outlier_losses',
+        False,
+        [float, bool, None],
+        "Whether outlier large losses are filtered out while training continues. If ``False``, outlier losses trigger a restart from the most recent save point. Ignored unless *loss_cutoff_n_sds* is specified. Using this option avoids restarts, but can lead to bias if training instances are systematically dropped. If ``None``, ``False``, or ``0``, no loss filtering.",
+        aliases=['loss_filter_n_sds']
+    ),
+    Kwarg(
+        'loss_cutoff_n_sds',
+        1000,
         [float, None],
-        "How many moving standard deviations above the moving mean of the loss to use as a cut-off for stability (suppressing large losses). If ``None``, or ``0``, no loss filtering.",
+        "How many moving standard deviations above the moving mean of the loss to use as a cut-off for stability (if outlier large losses are detected, training restarts from the preceding checkpoint). If ``None``, or ``0``, no loss cut-off."
     ),
     Kwarg(
         'ema_decay',
@@ -558,23 +571,27 @@ MODEL_INITIALIZATION_KWARGS = [
         'inherit',
         [str, float, 'inherit'],
         "Scale of random effects regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**. Regularization only applies to random effects without variational priors.",
-        default_value_cdrnn=10.
+        default_value_cdrnn=1.
     ),
 
     # INCREMENTAL SAVING AND LOGGING
     Kwarg(
         'save_freq',
+        1,
+        int,
+        "Frequency (in iterations) with which to save model checkpoints."
+    ),
+    Kwarg(
+        'plot_freq',
         100,
         int,
-        "Frequency (in iterations) with which to save model checkpoints.",
-        default_value_cdrnn=10
+        "Frequency (in iterations) with which to plot model estimates (or ``0`` to turn off incremental plotting)."
     ),
     Kwarg(
         'log_freq',
-        100,
+        1,
         int,
-        "Frequency (in iterations) with which to log model params to Tensorboard.",
-        default_value_cdrnn=1
+        "Frequency (in iterations) with which to log model params to Tensorboard."
     ),
     Kwarg(
         'log_random',
@@ -655,21 +672,20 @@ MODEL_INITIALIZATION_KWARGS = [
         'plot_legend',
         True,
         bool,
-        "Whether to include a legend in plots with multiple components."
+        "Whether to include a legend in plots with multiple components.",
+        aliases=['use_legend', 'legend']
     ),
     Kwarg(
         'generate_curvature_plots',
         False,
         bool,
-        "Whether to plot IRF curvature at time **reference_time**.",
-        default_value_cdrnn=True
+        "Whether to plot IRF curvature at time **reference_time**."
     ),
     Kwarg(
         'generate_irf_surface_plots',
         False,
         bool,
-        "Whether to plot IRF surfaces.",
-        default_value_cdrnn=True
+        "Whether to plot IRF surfaces."
     ),
     Kwarg(
         'generate_interaction_surface_plots',
@@ -687,8 +703,7 @@ MODEL_INITIALIZATION_KWARGS = [
         'generate_nonstationarity_surface_plots',
         False,
         bool,
-        "Whether to plot IRF surfaces showing non-stationarity in the response.",
-        default_value_cdrnn=True
+        "Whether to plot IRF surfaces showing non-stationarity in the response."
     ),
     Kwarg(
         'cmap',
@@ -1074,7 +1089,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'layer_normalization_type',
-        'z',
+        None,
         [str, None],
         "Type of layer normalization, one of ``['z', 'length', None]``. If ``'z'``, classical z-transform-based normalization. If ``'length'``, normalize by the norm of the activation vector. If ``None``, no layer normalization. Incompatible with batch normalization.",
     ),
@@ -1088,7 +1103,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'nn_regularizer_scale',
-        1.,
+        5.,
         [str, float, 'inherit'],
         "Scale of weight regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
@@ -1120,13 +1135,13 @@ NN_KWARGS = [
     ),
     Kwarg(
         'context_regularizer_name',
-        'l1_regularizer',
+        'l1_l2_regularizer',
         [str, 'inherit', None],
         "Name of regularizer on contribution of context (RNN) to hidden state (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
     ),
     Kwarg(
         'context_regularizer_scale',
-        1.,
+        10.,
         [float, 'inherit'],
         "Scale of weight regularizer (ignored if ``context_regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
@@ -1146,10 +1161,10 @@ NN_KWARGS = [
     ),
     Kwarg(
         'ff_dropout_rate',
-        0.2,
+        0.1,
         [float, None],
-        "Rate at which to drop neurons of feedforward encoder layers.",
-        aliases=['dropout', 'dropout_rate', 'input_projection']
+        "Rate at which to drop neurons of FF projection.",
+        aliases=['dropout', 'dropout_rate', 'input_projection', 'h_in_dropout_rate']
     ),
     Kwarg(
         'rnn_h_dropout_rate',
@@ -1164,15 +1179,8 @@ NN_KWARGS = [
         "Rate at which to drop neurons of RNN cell state."
     ),
     Kwarg(
-        'ff_dropout_rate',
-        0.2,
-        [float, None],
-        "Rate at which to drop neurons of FF projection.",
-        aliases=['dropout', 'dropout_rate', 'h_in_dropout_rate']
-    ),
-    Kwarg(
         'h_rnn_dropout_rate',
-        0.2,
+        0.1,
         [float, None],
         "Rate at which to drop neurons of h_rnn.",
         aliases=['dropout', 'dropout_rate']
@@ -1186,7 +1194,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'irf_dropout_rate',
-        0.2,
+        0.1,
         [float, None],
         "Rate at which to drop neurons of IRF layers.",
         aliases=['dropout', 'dropout_rate']

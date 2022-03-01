@@ -31,7 +31,7 @@ if __name__ == '__main__':
     argparser.add_argument('-M', '--metric', type=str, default='err', help='Metric to use for comparison ("err", "loglik", or "corr")')
     argparser.add_argument('-r', '--response', nargs='*', default=None, help='Name(s) of response(s) to test. If left unspecified, tests all responses.')
     argparser.add_argument('-o', '--outdir', default=None, help='Output directory. If ``None``, placed in same directory as the config.')
-    args, unknown = argparser.parse_known_args()
+    args = argparser.parse_args()
 
     metric = args.metric
     if metric == 'err':

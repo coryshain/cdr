@@ -94,7 +94,7 @@ if __name__ == '__main__':
     argparser.add_argument('-M', '--mode', type=str, default='pt', help='Type of significance test to use (one of ["pt", "2step"] for permutation testing or 2-step LME/LRT, respectively).')
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
     argparser.add_argument('-H', '--human_readable', action='store_true', help='Return table in human readable format (otherwise return as CSV)')
-    args, unknown = argparser.parse_known_args()
+    args = argparser.parse_args()
 
     p = Config(args.config_path)
 
