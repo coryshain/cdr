@@ -112,9 +112,10 @@ class Config(object):
         # Model(s) #
         ############
 
-        # Add ablations
+        # Add ablations and crossval folds
         self.models = {}
         self.model_list = []
+        self.ensemble_list = []
         for model_field in [m for m in config.keys() if m.startswith('model_')]:
             model_name = model_field[6:]
             formula = Formula(config[model_field]['formula'])
@@ -138,6 +139,8 @@ class Config(object):
                     model_configs[fold_name] = model_config
             else:
                 model_configs = {model_name: config[model_field]}
+            _models = {}
+            _model_list = []
             for model_name in model_configs:
                 model_config = model_configs[model_name]
                 model_settings = self.build_cdr_settings(
@@ -146,10 +149,10 @@ class Config(object):
                     is_cdr=reg_type=='cdr',
                     is_cdrnn=is_cdrnn
                 )
-                self.models[model_name] = model_settings
+                _models[model_name] = model_settings
                 if reg_type == 'lme':
                     self.models[model_name]['correlated'] = config[model_field].getboolean('correlated', True)
-                self.model_list.append(model_name)
+                _model_list.append(model_name)
                 if 'ablate' in config[model_field]:
                     for ablated in powerset(config[model_field]['ablate'].strip().split()):
                         ablated = list(ablated)
@@ -168,8 +171,23 @@ class Config(object):
                         else:
                             raise ValueError('Ablation with reg_type "%s" not currently supported.' % reg_type)
                         new_model['ablated'] = set(ablated)
-                        self.models[new_name] = new_model
-                        self.model_list.append(new_name)
+                        _models[new_name] = new_model
+                        _model_list.append(new_name)
+                if 'n_ensemble' in config[model_field]:
+                    __models = {}
+                    __model_list = []
+                    for _m in _models:
+                        for i in range(config[model_field].getint('n_ensemble')):
+                            __models[_m + '_m%d' % i] = _models[_m]
+                    for _m in _model_list:
+                        for i in range(config[model_field].getint('n_ensemble')):
+                            __model_list.append(_m + '_m%d' % i)
+                    _models = __models
+                    _model_list = __model_list
+                self.ensemble_list.append(model_field)
+
+                self.models.update(_models)
+                self.model_list += _model_list
 
         self.irf_name_map = {
             't_delta': 'Delay (s)',

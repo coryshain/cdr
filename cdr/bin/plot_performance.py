@@ -13,7 +13,8 @@ from cdr.config import Config
 from cdr.io import read_tabular_data
 from cdr.formula import Formula
 from cdr.data import add_responses, filter_invalid_responses, preprocess_data, compute_splitID, compute_partition, s, c, z, split_cdr_outputs
-from cdr.util import load_cdr, filter_models, get_partition_list, paths_from_partition_cliarg, stderr, sn
+from cdr.ensemble import CDREnsemble
+from cdr.util import filter_models, get_partition_list, paths_from_partition_cliarg, stderr, sn
 from cdr.plot import plot_irf
 
 if __name__ == '__main__':
@@ -32,7 +33,8 @@ if __name__ == '__main__':
 
     p = Config(args.config_path)
 
-    models = filter_models(p.model_list, args.models, cdr_only=True)
+    model_list = sorted(set(p.model_list) | set(p.ensemble_list))
+    models = filter_models(model_list, args.models, cdr_only=True)
 
     model_cache = {}
     model_cache_twostep = {}
@@ -93,7 +95,7 @@ if __name__ == '__main__':
                 _model = model_cache[m]
             else:
                 stderr('Retrieving saved model %s...\n' % m)
-                _model = load_cdr(p.outdir + '/' + m_path)
+                _model = CDREnsemble(p.outdir, m_path)
                 model_cache[m] = _model
 
             if not p.use_gpu_if_available or args.cpu_only:

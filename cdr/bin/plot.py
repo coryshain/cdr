@@ -7,7 +7,8 @@ import numpy as np
 import pandas as pd
 from cdr.config import Config, PlotConfig
 from cdr.kwargs import plot_kwarg_docstring
-from cdr.util import load_cdr, filter_models, stderr
+from cdr.ensemble import CDREnsemble
+from cdr.util import filter_models, stderr
 from cdr.plot import plot_irf, plot_qq
 
 if __name__ == '__main__':
@@ -35,7 +36,8 @@ if __name__ == '__main__':
         if not p.use_gpu_if_available or args.cpu_only:
             os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
-        models = filter_models(p.model_list, args.models, cdr_only=True)
+        model_list = sorted(set(p.model_list) | set(p.ensemble_list))
+        models = filter_models(model_list, args.models, cdr_only=True)
 
         prefix = plot_config.get('prefix', None)
         if prefix is None:
@@ -93,7 +95,7 @@ if __name__ == '__main__':
             p.set_model(m)
 
             stderr('Retrieving saved model %s...\n' % m)
-            cdr_model = load_cdr(p.outdir + '/' + m_path)
+            cdr_model = CDREnsemble(p.outdir, m_path)
 
             stderr('Plotting...\n')
 

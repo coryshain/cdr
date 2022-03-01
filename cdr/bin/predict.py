@@ -13,8 +13,9 @@ from cdr.config import Config
 from cdr.io import read_tabular_data
 from cdr.formula import Formula
 from cdr.data import add_responses, filter_invalid_responses, preprocess_data, compute_splitID, compute_partition, s, c, z, split_cdr_outputs
+from cdr.ensemble import CDREnsemble
 from cdr.util import mse, mae, percent_variance_explained
-from cdr.util import load_cdr, filter_models, get_partition_list, paths_from_partition_cliarg, stderr, sn
+from cdr.util import filter_models, get_partition_list, paths_from_partition_cliarg, stderr, sn
 from cdr.plot import plot_qq
 
 
@@ -113,7 +114,8 @@ if __name__ == '__main__':
 
     p = Config(args.config_path)
 
-    models = filter_models(p.model_list, args.models)
+    model_list = sorted(set(p.model_list) | set(p.ensemble_list))
+    models = filter_models(model_list, args.models)
 
     model_cache = {}
     model_cache_twostep = {}
@@ -245,7 +247,7 @@ if __name__ == '__main__':
             else:
                 stderr('Retrieving saved model %s...\n' % m)
                 if (m.startswith('CDR') or m.startswith('DTSR')):
-                    _model = load_cdr(p.outdir + '/' + m_path)
+                    _model = CDREnsemble(p.outdir, m_path)
                 else:
                     with open(p.outdir + '/' + m_path + '/m.obj', 'rb') as m_file:
                         _model = pickle.load(m_file)

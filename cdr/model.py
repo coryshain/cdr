@@ -1422,27 +1422,27 @@ class CDRModel(object):
                     shape=[],
                     name='training_loglik_full_in'
                 )
-                self.training_loglik_full = tf.Variable(
+                self.training_loglik_full_tf = tf.Variable(
                     np.nan,
                     dtype=self.FLOAT_TF,
                     trainable=False,
                     name='training_loglik_full'
                 )
-                self.set_training_loglik_full = tf.assign(self.training_loglik_full, self.training_loglik_full_in)
+                self.set_training_loglik_full = tf.assign(self.training_loglik_full_tf, self.training_loglik_full_in)
                 self.training_loglik_in = {}
-                self.training_loglik = {}
+                self.training_loglik_tf = {}
                 self.set_training_loglik = {}
                 self.training_mse_in = {}
-                self.training_mse = {}
+                self.training_mse_tf = {}
                 self.set_training_mse = {}
-                self.training_percent_variance_explained = {}
+                self.training_percent_variance_explained_tf = {}
                 self.training_rho_in = {}
-                self.training_rho = {}
+                self.training_rho_tf = {}
                 self.set_training_rho = {}
                 for response in self.response_names:
                     # log likelihood
                     self.training_loglik_in[response] = {}
-                    self.training_loglik[response] = {}
+                    self.training_loglik_tf[response] = {}
                     self.set_training_loglik[response] = {}
 
                     file_ix = self.response_to_df_ix[response]
@@ -1457,24 +1457,24 @@ class CDRModel(object):
                             shape=[],
                             name='training_loglik_in_%s' % name_base
                         )
-                        self.training_loglik[response][ix] = tf.Variable(
+                        self.training_loglik_tf[response][ix] = tf.Variable(
                             np.nan,
                             dtype=self.FLOAT_TF,
                             trainable=False,
                             name='training_loglik_%s' % name_base
                         )
                         self.set_training_loglik[response][ix] = tf.assign(
-                            self.training_loglik[response][ix],
+                            self.training_loglik_tf[response][ix],
                             self.training_loglik_in[response][ix]
                         )
 
                     if self.is_real(response):
                         self.training_mse_in[response] = {}
-                        self.training_mse[response] = {}
+                        self.training_mse_tf[response] = {}
                         self.set_training_mse[response] = {}
-                        self.training_percent_variance_explained[response] = {}
+                        self.training_percent_variance_explained_tf[response] = {}
                         self.training_rho_in[response] = {}
-                        self.training_rho[response] = {}
+                        self.training_rho_tf[response] = {}
                         self.set_training_rho[response] = {}
 
                         for ix in range(self.n_response_df):
@@ -1484,14 +1484,14 @@ class CDRModel(object):
                                 shape=[],
                                 name='training_mse_in_%s' % name_base
                             )
-                            self.training_mse[response][ix] = tf.Variable(
+                            self.training_mse_tf[response][ix] = tf.Variable(
                                 np.nan,
                                 dtype=self.FLOAT_TF,
                                 trainable=False,
                                 name='training_mse_%s' % name_base
                             )
                             self.set_training_mse[response][ix] = tf.assign(
-                                self.training_mse[response][ix],
+                                self.training_mse_tf[response][ix],
                                 self.training_mse_in[response][ix]
                             )
 
@@ -1499,9 +1499,9 @@ class CDRModel(object):
                             full_variance = self.Y_train_sds[response] ** 2
                             if self.get_response_ndim(response) == 1:
                                 full_variance = np.squeeze(full_variance, axis=-1)
-                            self.training_percent_variance_explained[response][ix] = tf.maximum(
+                            self.training_percent_variance_explained_tf[response][ix] = tf.maximum(
                                 0.,
-                                (1. - self.training_mse[response][ix] / full_variance) * 100.
+                                (1. - self.training_mse_tf[response][ix] / full_variance) * 100.
                             )
 
                             # rho
@@ -1509,14 +1509,14 @@ class CDRModel(object):
                                 self.FLOAT_TF,
                                 shape=[], name='training_rho_in_%s' % name_base
                             )
-                            self.training_rho[response][ix] = tf.Variable(
+                            self.training_rho_tf[response][ix] = tf.Variable(
                                 np.nan,
                                 dtype=self.FLOAT_TF,
                                 trainable=False,
                                 name='training_rho_%s' % name_base
                             )
                             self.set_training_rho[response][ix] = tf.assign(
-                                self.training_rho[response][ix],
+                                self.training_rho_tf[response][ix],
                                 self.training_rho_in[response][ix]
                             )
 
@@ -5474,6 +5474,80 @@ class CDRModel(object):
 
         return len(self.rangf) > 0
 
+    @property
+    def training_loglik_full(self):
+        """
+        Overall training likelihood
+
+        :return: ``float``; Overall training likelihood.
+        """
+
+        return self.training_loglik_full_tf.eval(session=self.session)
+
+    @property
+    def training_loglik(self):
+        """
+        Response-wise training likelihood
+
+        :return: ``dict`` of ``list``; Dictionary of training likelihoods, one for each response variable, for each file in the response data.
+        """
+
+        out = {}
+        for x in self.training_loglik_tf:
+            out[x] = {}
+            for y in self.training_loglik_tf[x]:
+                out[x][y] = self.training_loglik_tf[x][y].eval(session=self.session)
+
+        return out
+
+    @property
+    def training_mse(self):
+        """
+        Response-wise training mean squared error
+
+        :return: ``dict`` of ``list``; Dictionary of training MSEs, one for each response variable, for each file in the response data.
+        """
+
+        out = {}
+        for x in self.training_mse_tf:
+            out[x] = {}
+        for y in self.training_mse_tf[x]:
+            out[x][y] = self.training_mse_tf[x][y].eval(session=self.session)
+
+        return out
+
+    @property
+    def training_rho(self):
+        """
+        Response-wise training rho (prediction-response correlation)
+
+        :return: ``dict`` of ``list``; Dictionary of training rhos, one for each response variable, for each file in the response data.
+        """
+
+        out = {}
+        for x in self.training_rho_tf:
+            out[x] = {}
+        for y in self.training_rho_tf[x]:
+            out[x][y] = self.training_rho_tf[x][y].eval(session=self.session)
+
+        return out
+
+    @property
+    def training_percent_variance_explained(self):
+        """
+        Response-wise training percent variance explained
+
+        :return: ``dict`` of ``list``; Dictionary of training training percent variance explained, one for each response variable, for each file in the response data.
+        """
+
+        out = {}
+        for x in self.training_percent_variance_explained_tf:
+            out[x] = {}
+        for y in self.training_percent_variance_explained_tf[x]:
+            out[x][y] = self.training_percent_variance_explained_tf[x][y].eval(session=self.session)
+
+        return out
+
     def get_nn_meta(self, key, nn_id=None):
         if key in self.nn_meta[nn_id]:
             return self.nn_meta[nn_id][key]
@@ -6467,7 +6541,12 @@ class CDRModel(object):
         out += ' ' * indent + '---------------------------\n\n'
 
         if len(self.response_names) > 1:
-            out += ' ' * indent + 'Full loglik: %s\n\n' % self.training_loglik_full.eval(session=self.session)
+            out += ' ' * indent + 'Full loglik: %s\n\n' % self.training_loglik_full
+
+        training_loglik = self.training_loglik
+        training_mse = self.training_mse
+        training_rho = self.training_rho
+        training_percent_variance_explained = self.training_percent_variance_explained
 
         for response in self.response_names:
             file_ix = self.response_to_df_ix[response]
@@ -6477,13 +6556,13 @@ class CDRModel(object):
                 if multiple_files:
                     out += ' ' * indent + 'File: %s\n\n' % ix
                 out += ' ' * indent + 'MODEL EVALUATION STATISTICS:\n'
-                out += ' ' * indent +     'Loglik:        %s\n' % self.training_loglik[response][ix].eval(session=self.session)
-                if response in self.training_mse:
-                    out += ' ' * indent + 'MSE:           %s\n' % self.training_mse[response][ix].eval(session=self.session)
-                if response in self.training_rho:
-                    out += ' ' * indent + 'r(true, pred): %s\n' % self.training_rho[response][ix].eval(session=self.session)
-                if response in self.training_percent_variance_explained:
-                    out += ' ' * indent + '%% var expl:    %s\n' % self.training_percent_variance_explained[response][ix].eval(session=self.session)
+                out += ' ' * indent +     'Loglik:        %s\n' % training_loglik[response][ix]
+                if response in self.training_mse_tf:
+                    out += ' ' * indent + 'MSE:           %s\n' % training_mse[response][ix]
+                if response in self.training_rho_tf:
+                    out += ' ' * indent + 'r(true, pred): %s\n' % training_rho[response][ix]
+                if response in self.training_percent_variance_explained_tf:
+                    out += ' ' * indent + '%% var expl:    %s\n' % training_percent_variance_explained[response][ix]
                 out += '\n'
 
         return out

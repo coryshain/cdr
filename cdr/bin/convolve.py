@@ -6,7 +6,8 @@ from cdr.config import Config
 from cdr.io import read_tabular_data
 from cdr.formula import Formula
 from cdr.data import preprocess_data, filter_invalid_responses
-from cdr.util import load_cdr, filter_models, get_partition_list, paths_from_partition_cliarg, stderr
+from cdr.ensemble import CDREnsemble
+from cdr.util import filter_models, get_partition_list, paths_from_partition_cliarg, stderr
 
 pd.options.mode.chained_assignment = None
 
@@ -34,7 +35,8 @@ if __name__ == '__main__':
         if not p.use_gpu_if_available or args.cpu_only:
             os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
-        models = filter_models(p.model_list, args.models)
+        model_list = sorted(set(p.model_list) | set(p.ensemble_list))
+        models = filter_models(model_list, args.models, cdr_only=True)
 
         cdr_formula_list = [Formula(p.models[m]['formula']) for m in models if (m.startswith('CDR') or m.startswith('DTSR'))]
         cdr_models = [m for m in models if (m.startswith('CDR') or m.startswith('DTSR'))]
@@ -94,7 +96,7 @@ if __name__ == '__main__':
                 Y_valid, select_Y_valid = filter_invalid_responses(Y, dv)
 
                 stderr('Retrieving saved model %s...\n' % m)
-                cdr_model = load_cdr(p.outdir + '/' + m_path)
+                cdr_model = CDREnsemble(p.outdir, m_path)
 
                 stderr('Convolving %s...\n' % m)
                 cdr_model.convolve_inputs(

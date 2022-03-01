@@ -1,7 +1,8 @@
 import argparse
 import os
 from cdr.config import Config
-from cdr.util import load_cdr, filter_models, stderr
+from cdr.ensemble import CDREnsemble
+from cdr.util import filter_models, stderr
 
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser('''
@@ -31,13 +32,14 @@ if __name__ == '__main__':
         if not p.use_gpu_if_available or args.cpu_only:
             os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
-        models = filter_models(p.model_list, args.models, cdr_only=True)
+        model_list = sorted(set(p.model_list) | set(p.ensemble_list))
+        models = filter_models(model_list, args.models)
 
         for m in models:
             m_path = m.replace(':', '+')
 
             stderr('Retrieving saved model %s...\n' % m)
-            cdr_model = load_cdr(p.outdir + '/' + m_path)
+            cdr_model = CDREnsemble(p.outdir, m_path)
 
             stderr('Resampling summary statistics...\n')
             summary = cdr_model.summary(
