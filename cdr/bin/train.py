@@ -244,7 +244,7 @@ if __name__ == '__main__':
 
             kwargs = {}
             for kwarg in MODEL_INITIALIZATION_KWARGS:
-                if kwarg.key not in ['outdir', 'history_length', 'future_length']:
+                if kwarg.key not in ['outdir', 'history_length', 'future_length', 't_delta_cutoff']:
                     kwargs[kwarg.key] = p[kwarg.key]
             kwargs['crossval_factor'] = p['crossval_factor']
             kwargs['crossval_fold'] = p['crossval_fold']
