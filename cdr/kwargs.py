@@ -327,6 +327,12 @@ MODEL_INITIALIZATION_KWARGS = [
         int,
         "Length of the future (forward) window (in timesteps). Note that causal IRF kernels cannot be used if **future_length** > 0."
     ),
+    Kwarg(
+        't_delta_cutoff',
+        None,
+        [float, None],
+        "Maximum distance in time to consider (can help improve training stability on data with large gaps in time). If ``0`` or ``None``, no cutoff."
+    ),
 
     # MODEL DEFINITION
     Kwarg(

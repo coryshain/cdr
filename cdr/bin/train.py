@@ -258,6 +258,7 @@ if __name__ == '__main__':
                 outdir=p.outdir + '/' + m_path,
                 history_length=p.history_length,
                 future_length=p.future_length,
+                t_delta_cutoff=p.t_delta_cutoff,
                 **kwargs
             )
 
