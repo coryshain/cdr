@@ -4583,6 +4583,8 @@ class CDRModel(object):
                 optimizer_kwargs = {}
                 if name == 'momentum':
                     optimizer_args += [0.9]
+                if name in ('adagrad', 'adadelta', 'adam', 'nadam'):
+                    optimizer_kwargs['epsilon'] = self.optim_epsilon
 
                 optimizer_class = {
                     'sgd': tf.train.GradientDescentOptimizer,
