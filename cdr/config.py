@@ -82,6 +82,7 @@ class Config(object):
 
         self.history_length = data.getint('history_length', 128)
         self.future_length = data.getint('future_length', 0)
+        self.t_delta_cutoff = data.getfloat('t_delta_cutoff', None)
 
         self.merge_cols = data.get('merge_cols', None)
         if self.merge_cols is not None:

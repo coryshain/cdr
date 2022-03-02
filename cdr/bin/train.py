@@ -75,6 +75,7 @@ if __name__ == '__main__':
         filters=p.filters,
         history_length=p.history_length,
         future_length=p.future_length,
+        t_delta_cutoff=p.t_delta_cutoff,
         all_interactions=all_interactions
     )
 
