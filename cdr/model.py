@@ -4586,7 +4586,7 @@ class CDRModel(object):
                 if name in ('adagrad', 'adadelta', 'adam', 'nadam'):
                     optimizer_kwargs['epsilon'] = self.optim_epsilon
                     if name in ('adam', 'nadam'):
-                        optimizer_kwargs['beta_2'] = 0.9
+                        optimizer_kwargs['beta2'] = 0.9
 
                 optimizer_class = {
                     'sgd': tf.train.GradientDescentOptimizer,
