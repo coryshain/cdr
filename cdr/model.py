@@ -9772,11 +9772,11 @@ class CDREnsemble(object):
         try:
             return object.__getattribute__(self, item)
         except AttributeError:
-            w = self.model_weights()
-            if self.sampling_mode:
-                ix = np.random.multinomial(1, w).argmax()
+            if len(self.models) == 1:
+                ix = 0
             else:
-                ix = w.argmax()
+                w = self.model_weights()
+                ix = np.random.multinomial(1, w).argmax()
             return getattr(self.models[ix], item)
 
     @property
