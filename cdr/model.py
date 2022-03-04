@@ -1,3 +1,4 @@
+import re
 import textwrap
 import time as pytime
 import scipy.stats
@@ -16,6 +17,7 @@ from .opt import *
 from .plot import *
 
 NN_KWARG_BY_KEY = {x.key: x for x in NN_KWARGS + NN_BAYES_KWARGS}
+ENSEMBLE = re.compile('_md+')
 
 import tensorflow as tf
 if int(tf.__version__.split('.')[0]) == 1:
@@ -9762,8 +9764,14 @@ class CDREnsemble(object):
         self.name = name
         mpaths = [
             os.path.join(self.outdir,x) for x in os.listdir(self.outdir) if
-            (x.startswith(name) and os.path.isdir(os.path.join(self.outdir,x)))
+            (
+                x.startswith(name) and
+                ENSEMBLE.match(x[len(name):]) and
+                os.path.isdir(os.path.join(self.outdir,x))
+            )
         ]
+        if not len(mpaths):
+            mpaths = [os.path.join(self.outdir, name)]
         self.models = []
         for i, mpath in enumerate(mpaths):
             self.models.append(load_cdr(mpath))
