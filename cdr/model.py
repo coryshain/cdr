@@ -3393,6 +3393,7 @@ class CDRModel(object):
                 center_t_delta = self.get_nn_meta('center_t_delta', nn_id)
                 rescale_X_time = self.get_nn_meta('rescale_X_time', nn_id)
                 rescale_t_delta = self.get_nn_meta('rescale_t_delta', nn_id)
+                log_transform_t_delta = self.get_nn_meta('log_transform_t_delta', nn_id)
                 n_layers_ff = self.get_nn_meta('n_layers_ff', nn_id)
                 ff_noise_sd = self.get_nn_meta('ff_noise_sd', nn_id)
                 ff_dropout_rate = self.get_nn_meta('ff_dropout_rate', nn_id)
@@ -3513,6 +3514,8 @@ class CDRModel(object):
                     X_time /= self.X_time_sd
                 if rescale_t_delta:
                     t_delta /= self.t_delta_sd
+                if log_transform_t_delta:
+                    t_delta = tf.sign(t_delta) * tf.log1p(tf.abs(t_delta))
 
                 # Handle multiple impulse streams with different timestamps
                 # by interleaving the impulses in temporal order

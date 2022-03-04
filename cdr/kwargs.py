@@ -894,6 +894,12 @@ NN_KWARGS = [
         aliases=['rescale_time', 'rescale_tdelta']
     ),
     Kwarg(
+        'log_transform_t_delta',
+        False,
+        bool,
+        "Whether to log transform time offset values for stability under the hood. Offsets are automatically reconverted back to the source scale for plotting and model criticism."
+    ),
+    Kwarg(
         'nonstationary',
         True,
         bool,
