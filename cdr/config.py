@@ -116,6 +116,7 @@ class Config(object):
         # Add ablations and crossval folds
         self.models = {}
         self.model_list = []
+        self.ensembles = {}
         self.ensemble_list = []
         for model_field in [m for m in config.keys() if m.startswith('model_')]:
             model_name = model_field[6:]
@@ -183,9 +184,10 @@ class Config(object):
                     for _m in _model_list:
                         for i in range(config[model_field].getint('n_ensemble')):
                             __model_list.append(_m + '_m%d' % i)
-                    _models = __models
+                    _models.update(__models)
                     _model_list = __model_list
-                self.ensemble_list.append(model_field)
+                self.ensemble_list.append(model_name)
+                self.ensembles[model_name] = model_settings
 
                 self.models.update(_models)
                 self.model_list += _model_list

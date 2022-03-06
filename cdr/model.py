@@ -17,7 +17,7 @@ from .opt import *
 from .plot import *
 
 NN_KWARG_BY_KEY = {x.key: x for x in NN_KWARGS + NN_BAYES_KWARGS}
-ENSEMBLE = re.compile('_md+')
+ENSEMBLE = re.compile('_m\d+')
 
 import tensorflow as tf
 if int(tf.__version__.split('.')[0]) == 1:
@@ -9762,6 +9762,11 @@ class CDREnsemble(object):
 
         self.outdir = outdir
         self.name = name
+        for x in os.listdir(self.outdir):
+            print(x.startswith(name))
+            print(ENSEMBLE.match(x[len(name):]))
+            print(x[len(name):])
+            print(os.path.isdir(os.path.join(self.outdir,x)))
         mpaths = [
             os.path.join(self.outdir,x) for x in os.listdir(self.outdir) if
             (
@@ -9770,6 +9775,8 @@ class CDREnsemble(object):
                 os.path.isdir(os.path.join(self.outdir,x))
             )
         ]
+        print(name)
+        print(mpaths)
         if not len(mpaths):
             mpaths = [os.path.join(self.outdir, name)]
         self.models = []
