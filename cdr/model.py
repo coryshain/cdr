@@ -4582,6 +4582,8 @@ class CDRModel(object):
                 optimizer_kwargs = {}
                 if name == 'momentum':
                     optimizer_args += [0.9]
+                if name.endswith('fast'):
+                    optimizer_kwargs['beta2'] = 0.9
 
                 optimizer_class = {
                     'sgd': tf.train.GradientDescentOptimizer,
@@ -4591,7 +4593,9 @@ class CDRModel(object):
                     'ftrl': tf.train.FtrlOptimizer,
                     'rmsprop': tf.train.RMSPropOptimizer,
                     'adam': tf.train.AdamOptimizer,
+                    'adamfast': tf.train.AdamOptimizer,
                     'nadam': NadamOptimizer,
+                    'nadamfast': NadamOptimizer,
                     'amsgrad': AMSGradOptimizer
                 }[name]
 

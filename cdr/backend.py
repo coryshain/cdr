@@ -1524,7 +1524,7 @@ class DenseLayer(object):
                 self.normalization_gamma = None
 
                 if batch_normalization_decay and dropout:
-                    stderr('WARNING: Batch normalization and dropout are being applied simultaneously in layer %s.\n         This is usually not a good idea.')
+                    stderr('WARNING: Batch normalization and dropout are being applied simultaneously in layer %s.\n         This is usually not a good idea.\n' % self.name)
 
                 self.built = False
 
@@ -3627,6 +3627,7 @@ class LayerNormLayerBayes(LayerNormLayer):
                 return self.kl_penalties_base.copy()
 
     def resample_ops(self):
+        out = super(LayerNormLayerBayes, self).resample_ops()
         out = super(LayerNormLayerBayes, self).resample_ops()
         if self.built:
             if self.shift_activations:
