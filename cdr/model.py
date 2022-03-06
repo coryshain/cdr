@@ -1,3 +1,4 @@
+import re
 import textwrap
 import time as pytime
 import scipy.stats
@@ -16,6 +17,7 @@ from .opt import *
 from .plot import *
 
 NN_KWARG_BY_KEY = {x.key: x for x in NN_KWARGS + NN_BAYES_KWARGS}
+ENSEMBLE = re.compile('_m\d+')
 
 import tensorflow as tf
 if int(tf.__version__.split('.')[0]) == 1:
@@ -225,6 +227,7 @@ class CDRModel(object):
     }
 
     def __init__(self, form, X, Y, ablated=None, build=True, **kwargs):
+        super(CDRModel, self).__init__()
 
         ## Store initialization settings
         for kwarg in CDRModel._INITIALIZATION_KWARGS:
@@ -984,7 +987,7 @@ class CDRModel(object):
             self.nn_meta[nn_id] = nn_meta
             nn_meta['use_batch_normalization'] = bool(self.get_nn_meta('batch_normalization_decay', nn_id))
             nn_meta['use_layer_normalization'] = bool(self.get_nn_meta('layer_normalization_type', nn_id))
-            assert not (self.get_nn_meta('use_batch_normalization', nn_id) and self.get_nn_meta('use_layer_normalization', 'nn_id')), 'Cannot batch normalize and layer normalize the same model.'
+            assert not (self.get_nn_meta('use_batch_normalization', nn_id) and self.get_nn_meta('use_layer_normalization', nn_id)), 'Cannot batch normalize and layer normalize the same model.'
             nn_meta['normalize_activations'] = nn_meta['use_batch_normalization'] or nn_meta['use_layer_normalization']
 
             n_units_ff = self.get_nn_meta('n_units_ff', nn_id)
@@ -1422,27 +1425,27 @@ class CDRModel(object):
                     shape=[],
                     name='training_loglik_full_in'
                 )
-                self.training_loglik_full = tf.Variable(
+                self.training_loglik_full_tf = tf.Variable(
                     np.nan,
                     dtype=self.FLOAT_TF,
                     trainable=False,
                     name='training_loglik_full'
                 )
-                self.set_training_loglik_full = tf.assign(self.training_loglik_full, self.training_loglik_full_in)
+                self.set_training_loglik_full = tf.assign(self.training_loglik_full_tf, self.training_loglik_full_in)
                 self.training_loglik_in = {}
-                self.training_loglik = {}
+                self.training_loglik_tf = {}
                 self.set_training_loglik = {}
                 self.training_mse_in = {}
-                self.training_mse = {}
+                self.training_mse_tf = {}
                 self.set_training_mse = {}
-                self.training_percent_variance_explained = {}
+                self.training_percent_variance_explained_tf = {}
                 self.training_rho_in = {}
-                self.training_rho = {}
+                self.training_rho_tf = {}
                 self.set_training_rho = {}
                 for response in self.response_names:
                     # log likelihood
                     self.training_loglik_in[response] = {}
-                    self.training_loglik[response] = {}
+                    self.training_loglik_tf[response] = {}
                     self.set_training_loglik[response] = {}
 
                     file_ix = self.response_to_df_ix[response]
@@ -1457,24 +1460,24 @@ class CDRModel(object):
                             shape=[],
                             name='training_loglik_in_%s' % name_base
                         )
-                        self.training_loglik[response][ix] = tf.Variable(
+                        self.training_loglik_tf[response][ix] = tf.Variable(
                             np.nan,
                             dtype=self.FLOAT_TF,
                             trainable=False,
                             name='training_loglik_%s' % name_base
                         )
                         self.set_training_loglik[response][ix] = tf.assign(
-                            self.training_loglik[response][ix],
+                            self.training_loglik_tf[response][ix],
                             self.training_loglik_in[response][ix]
                         )
 
                     if self.is_real(response):
                         self.training_mse_in[response] = {}
-                        self.training_mse[response] = {}
+                        self.training_mse_tf[response] = {}
                         self.set_training_mse[response] = {}
-                        self.training_percent_variance_explained[response] = {}
+                        self.training_percent_variance_explained_tf[response] = {}
                         self.training_rho_in[response] = {}
-                        self.training_rho[response] = {}
+                        self.training_rho_tf[response] = {}
                         self.set_training_rho[response] = {}
 
                         for ix in range(self.n_response_df):
@@ -1484,14 +1487,14 @@ class CDRModel(object):
                                 shape=[],
                                 name='training_mse_in_%s' % name_base
                             )
-                            self.training_mse[response][ix] = tf.Variable(
+                            self.training_mse_tf[response][ix] = tf.Variable(
                                 np.nan,
                                 dtype=self.FLOAT_TF,
                                 trainable=False,
                                 name='training_mse_%s' % name_base
                             )
                             self.set_training_mse[response][ix] = tf.assign(
-                                self.training_mse[response][ix],
+                                self.training_mse_tf[response][ix],
                                 self.training_mse_in[response][ix]
                             )
 
@@ -1499,9 +1502,9 @@ class CDRModel(object):
                             full_variance = self.Y_train_sds[response] ** 2
                             if self.get_response_ndim(response) == 1:
                                 full_variance = np.squeeze(full_variance, axis=-1)
-                            self.training_percent_variance_explained[response][ix] = tf.maximum(
+                            self.training_percent_variance_explained_tf[response][ix] = tf.maximum(
                                 0.,
-                                (1. - self.training_mse[response][ix] / full_variance) * 100.
+                                (1. - self.training_mse_tf[response][ix] / full_variance) * 100.
                             )
 
                             # rho
@@ -1509,14 +1512,14 @@ class CDRModel(object):
                                 self.FLOAT_TF,
                                 shape=[], name='training_rho_in_%s' % name_base
                             )
-                            self.training_rho[response][ix] = tf.Variable(
+                            self.training_rho_tf[response][ix] = tf.Variable(
                                 np.nan,
                                 dtype=self.FLOAT_TF,
                                 trainable=False,
                                 name='training_rho_%s' % name_base
                             )
                             self.set_training_rho[response][ix] = tf.assign(
-                                self.training_rho[response][ix],
+                                self.training_rho_tf[response][ix],
                                 self.training_rho_in[response][ix]
                             )
 
@@ -3392,6 +3395,7 @@ class CDRModel(object):
                 center_t_delta = self.get_nn_meta('center_t_delta', nn_id)
                 rescale_X_time = self.get_nn_meta('rescale_X_time', nn_id)
                 rescale_t_delta = self.get_nn_meta('rescale_t_delta', nn_id)
+                log_transform_t_delta = self.get_nn_meta('log_transform_t_delta', nn_id)
                 n_layers_ff = self.get_nn_meta('n_layers_ff', nn_id)
                 ff_noise_sd = self.get_nn_meta('ff_noise_sd', nn_id)
                 ff_dropout_rate = self.get_nn_meta('ff_dropout_rate', nn_id)
@@ -3512,6 +3516,8 @@ class CDRModel(object):
                     X_time /= self.X_time_sd
                 if rescale_t_delta:
                     t_delta /= self.t_delta_sd
+                if log_transform_t_delta:
+                    t_delta = tf.sign(t_delta) * tf.log1p(tf.abs(t_delta))
 
                 # Handle multiple impulse streams with different timestamps
                 # by interleaving the impulses in temporal order
@@ -4584,6 +4590,11 @@ class CDRModel(object):
                     optimizer_args += [0.9]
                 if name.endswith('fast'):
                     optimizer_kwargs['beta2'] = 0.9
+                if name in ('adagrad', 'adadelta', 'adam', 'nadam'):
+                    optimizer_kwargs['epsilon'] = self.optim_epsilon
+                    # if name in ('adam', 'nadam'):
+                    #     optimizer_kwargs['beta2'] = 0.9
+                    
 
                 optimizer_class = {
                     'sgd': tf.train.GradientDescentOptimizer,
@@ -5477,6 +5488,80 @@ class CDRModel(object):
         """
 
         return len(self.rangf) > 0
+
+    @property
+    def training_loglik_full(self):
+        """
+        Overall training likelihood
+
+        :return: ``float``; Overall training likelihood.
+        """
+
+        return self.training_loglik_full_tf.eval(session=self.session)
+
+    @property
+    def training_loglik(self):
+        """
+        Response-wise training likelihood
+
+        :return: ``dict`` of ``list``; Dictionary of training likelihoods, one for each response variable, for each file in the response data.
+        """
+
+        out = {}
+        for x in self.training_loglik_tf:
+            out[x] = {}
+            for y in self.training_loglik_tf[x]:
+                out[x][y] = self.training_loglik_tf[x][y].eval(session=self.session)
+
+        return out
+
+    @property
+    def training_mse(self):
+        """
+        Response-wise training mean squared error
+
+        :return: ``dict`` of ``list``; Dictionary of training MSEs, one for each response variable, for each file in the response data.
+        """
+
+        out = {}
+        for x in self.training_mse_tf:
+            out[x] = {}
+        for y in self.training_mse_tf[x]:
+            out[x][y] = self.training_mse_tf[x][y].eval(session=self.session)
+
+        return out
+
+    @property
+    def training_rho(self):
+        """
+        Response-wise training rho (prediction-response correlation)
+
+        :return: ``dict`` of ``list``; Dictionary of training rhos, one for each response variable, for each file in the response data.
+        """
+
+        out = {}
+        for x in self.training_rho_tf:
+            out[x] = {}
+        for y in self.training_rho_tf[x]:
+            out[x][y] = self.training_rho_tf[x][y].eval(session=self.session)
+
+        return out
+
+    @property
+    def training_percent_variance_explained(self):
+        """
+        Response-wise training percent variance explained
+
+        :return: ``dict`` of ``list``; Dictionary of training training percent variance explained, one for each response variable, for each file in the response data.
+        """
+
+        out = {}
+        for x in self.training_percent_variance_explained_tf:
+            out[x] = {}
+        for y in self.training_percent_variance_explained_tf[x]:
+            out[x][y] = self.training_percent_variance_explained_tf[x][y].eval(session=self.session)
+
+        return out
 
     def get_nn_meta(self, key, nn_id=None):
         if key in self.nn_meta[nn_id]:
@@ -6471,7 +6556,12 @@ class CDRModel(object):
         out += ' ' * indent + '---------------------------\n\n'
 
         if len(self.response_names) > 1:
-            out += ' ' * indent + 'Full loglik: %s\n\n' % self.training_loglik_full.eval(session=self.session)
+            out += ' ' * indent + 'Full loglik: %s\n\n' % self.training_loglik_full
+
+        training_loglik = self.training_loglik
+        training_mse = self.training_mse
+        training_rho = self.training_rho
+        training_percent_variance_explained = self.training_percent_variance_explained
 
         for response in self.response_names:
             file_ix = self.response_to_df_ix[response]
@@ -6481,13 +6571,13 @@ class CDRModel(object):
                 if multiple_files:
                     out += ' ' * indent + 'File: %s\n\n' % ix
                 out += ' ' * indent + 'MODEL EVALUATION STATISTICS:\n'
-                out += ' ' * indent +     'Loglik:        %s\n' % self.training_loglik[response][ix].eval(session=self.session)
-                if response in self.training_mse:
-                    out += ' ' * indent + 'MSE:           %s\n' % self.training_mse[response][ix].eval(session=self.session)
-                if response in self.training_rho:
-                    out += ' ' * indent + 'r(true, pred): %s\n' % self.training_rho[response][ix].eval(session=self.session)
-                if response in self.training_percent_variance_explained:
-                    out += ' ' * indent + '%% var expl:    %s\n' % self.training_percent_variance_explained[response][ix].eval(session=self.session)
+                out += ' ' * indent +     'Loglik:        %s\n' % training_loglik[response][ix]
+                if response in self.training_mse_tf:
+                    out += ' ' * indent + 'MSE:           %s\n' % training_mse[response][ix]
+                if response in self.training_rho_tf:
+                    out += ' ' * indent + 'r(true, pred): %s\n' % training_rho[response][ix]
+                if response in self.training_percent_variance_explained_tf:
+                    out += ' ' * indent + '%% var expl:    %s\n' % training_percent_variance_explained[response][ix]
                 out += '\n'
 
         return out
@@ -6896,6 +6986,215 @@ class CDRModel(object):
 
                     self.save()
 
+    def run_predict_op(
+            self,
+            feed_dict,
+            responses=None,
+            n_samples=None,
+            algorithm='MAP',
+            return_preds=True,
+            return_loglik=False,
+            verbose=True
+    ):
+        """
+        Generate predictions from a batch of data.
+
+        :param feed_dict: ``dict``; A dictionary of predictor values.
+        :param responses: ``list`` of ``str``, ``str``, or ``None``; Name(s) of response variable(s) to predict. If ``None``, predicts all responses.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
+        :param return_preds: ``bool``; whether to return predictions.
+        :param return_loglik: ``bool``; whether to return elementwise log likelihoods. Requires that **Y** is not ``None``.
+        :param verbose: ``bool``; Send progress reports to standard error.
+        :return: ``dict`` of ``numpy`` arrays; Predicted responses and/or log likelihoods, one for each training sample. Key order: <('preds'|'log_lik'), response>.
+        """
+
+        assert self.Y in feed_dict or not return_loglik, 'Cannot return log likelihood when Y is not provided.'
+
+        use_MAP_mode = algorithm in ['map', 'MAP']
+        feed_dict[self.use_MAP_mode] = use_MAP_mode
+
+        if responses is None:
+            responses = self.response_names
+        if not isinstance(responses, list):
+            responses = [responses]
+
+        to_run = {}
+        if return_preds:
+            to_run_preds = {x: self.prediction[x] for x in responses}
+            to_run['preds'] = to_run_preds
+        if return_loglik:
+            to_run_loglik = {x: self.ll_by_var[x] for x in responses}
+            to_run['log_lik'] = to_run_loglik
+
+        if to_run:
+            with self.session.as_default():
+                with self.session.graph.as_default():
+                    if use_MAP_mode:
+                        out = self.session.run(to_run, feed_dict=feed_dict)
+                    else:
+                        feed_dict[self.use_MAP_mode] = False
+                        if n_samples is None:
+                            n_samples = self.n_samples_eval
+
+                        if verbose:
+                            pb = keras.utils.Progbar(n_samples)
+
+                        out = {}
+                        if return_preds:
+                            out['preds'] = {x: np.zeros((len(feed_dict[self.Y_time]), n_samples)) for x in to_run_preds}
+                        if return_loglik:
+                            out['log_lik'] = {x: np.zeros((len(feed_dict[self.Y_time]), n_samples)) for x in
+                                              to_run_loglik}
+
+                        for i in range(n_samples):
+                            if self.resample_ops:
+                                self.session.run(self.resample_ops)
+
+                            _out = self.session.run(to_run, feed_dict=feed_dict)
+                            if to_run_preds:
+                                _preds = _out['preds']
+                                for _response in _preds:
+                                    out['preds'][_response][:, i] = _preds[_response]
+                            if to_run_loglik:
+                                _log_lik = _out['log_lik']
+                                for _response in _log_lik:
+                                    out['log_lik'][_response][:, i] = _log_lik[_response]
+                            if verbose:
+                                pb.update(i + 1)
+
+                        if return_preds:
+                            for _response in out['preds']:
+                                _preds = out['preds'][_response]
+                                dist_name = self.get_response_dist_name(_response)
+                                if dist_name == 'bernoulli':  # Majority vote
+                                    _preds = np.round(np.mean(_preds, axis=1)).astype('int')
+                                elif dist_name == 'categorical':  # Majority vote
+                                    _preds = scipy.stats.mode(_preds, axis=1)
+                                else:  # Average
+                                    _preds = _preds.mean(axis=1)
+                                out['preds'][_response] = _preds
+
+                        if return_loglik:
+                            for _response in out['log_lik']:
+                                out['log_lik'][_response] = out['log_lik'][_response].mean(axis=1)
+
+                    return out
+
+    def run_loss_op(self, feed_dict, n_samples=None, algorithm='MAP', verbose=True):
+        """
+        Compute the elementwise training loss of a batch of data.
+
+        :param feed_dict: ``dict``; A dictionary of predictor and response values
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
+        :param verbose: ``bool``; Send progress reports to standard error.
+        :return: ``numpy`` array; total training loss for batch
+        """
+
+        use_MAP_mode = algorithm in ['map', 'MAP']
+        feed_dict[self.use_MAP_mode] = use_MAP_mode
+
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                if use_MAP_mode:
+                    loss = self.session.run(self.loss_func, feed_dict=feed_dict)
+                else:
+                    feed_dict[self.use_MAP_mode] = False
+                    if n_samples is None:
+                        n_samples = self.n_samples_eval
+
+                    if verbose:
+                        pb = keras.utils.Progbar(n_samples)
+
+                    loss = np.zeros((len(feed_dict[self.Y_time]), n_samples))
+
+                    for i in range(n_samples):
+                        if self.resample_ops:
+                            self.session.run(self.resample_ops)
+                        loss[:, i] = self.session.run(self.loss_func, feed_dict=feed_dict)
+                        if verbose:
+                            pb.update(i + 1)
+
+                    loss = loss.mean(axis=1)
+
+                return loss
+
+    def run_conv_op(self, feed_dict, responses=None, response_param=None, n_samples=None, algorithm='MAP', verbose=True):
+        """
+        Convolve a batch of data in feed_dict with the model's latent IRF.
+
+        :param feed_dict: ``dict``; A dictionary of predictor variables
+        :param responses: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to convolve toward. If ``None``, convolves toward all univariate responses. Multivariate convolution (e.g. of categorical responses) is supported but turned off by default to avoid excessive computation. When convolving toward a multivariate response, a set of convolved predictors will be generated for each dimension of the response.
+        :param response_param: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of predictive distribution(s) to convolve toward per response variable. Any param names not used by the predictive distribution for a given response will be ignored. If ``None``, convolves toward the first parameter of each response distribution.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
+        :param verbose: ``bool``; Send progress reports to standard error.
+        :return: ``dict`` of ``numpy`` arrays; The convolved inputs, one per **response_param** per **response**. Each element has shape (batch, terminals)
+        """
+
+        use_MAP_mode = algorithm in ['map', 'MAP']
+        feed_dict[self.use_MAP_mode] = use_MAP_mode
+
+        if responses is None:
+            responses = [x for x in self.response_names if self.get_response_ndim(x) == 1]
+        if isinstance(responses, str):
+            responses = [responses]
+
+        if response_param is None:
+            response_param = set()
+            for _response in responses:
+                response_param.add(self.get_response_params(_response)[0])
+            response_param = sorted(list(response_param))
+        if isinstance(response_param, str):
+            response_param = [response_param]
+
+        to_run = {}
+        for _response in responses:
+            to_run[_response] = self.X_conv_delta[_response]
+
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                if use_MAP_mode:
+                    X_conv = self.session.run(to_run, feed_dict=feed_dict)
+                else:
+                    X_conv = {}
+                    for _response in to_run:
+                        nparam = self.get_response_nparam(_response)
+                        ndim = self.get_response_ndim(_response)
+                        X_conv[_response] = np.zeros(
+                            (len(feed_dict[self.Y_time]), len(self.terminal_names), nparam, ndim, n_samples)
+                        )
+
+                    if n_samples is None:
+                        n_samples = self.n_samples_eval
+                    if verbose:
+                        pb = keras.utils.Progbar(n_samples)
+
+                    for i in range(0, n_samples):
+                        _X_conv = self.session.run(to_run, feed_dict=feed_dict)
+                        for _response in _X_conv:
+                            X_conv[_response][..., i] = _X_conv[_response]
+                        if verbose:
+                            pb.update(i + 1, force=True)
+
+                    for _response in X_conv:
+                        X_conv[_response] = X_conv[_response].mean(axis=2)
+
+                # Break things out by response dimension
+                out = {}
+                for _response in X_conv:
+                    for i, _response_param in enumerate(response_param):
+                        if self.has_param(_response, _response_param):
+                            dim_names = self.expand_param_name(_response, _response_param)
+                            for j, _dim_name in enumerate(dim_names):
+                                if _response not in out:
+                                    out[_response] = {}
+                                out[_response][_dim_name] = X_conv[_response][..., i, j]
+
+                return out
+
+
     def predict(
             self,
             X,
@@ -6967,8 +7266,11 @@ class CDRModel(object):
         :return: 1D ``numpy`` array; mean network predictions for regression targets (same length and sort order as ``y_time``).
         """
 
+        assert isinstance(self, CDRModel) or isinstance(self,
+                                                        CDREnsemble), 'predict may only be called on CDRModel or CDREnsemble'
         assert Y is not None or not return_loglik, 'Cannot return log likelihood when Y is not provided.'
-        assert not dump or (sum_outputs_along_T and sum_outputs_along_K), 'dump=True is only supported if sum_outputs_along_T=True and sum_outputs_along_K=True'
+        assert not dump or (
+                sum_outputs_along_T and sum_outputs_along_K), 'dump=True is only supported if sum_outputs_along_T=True and sum_outputs_along_K=True'
 
         if verbose:
             usingGPU = tf.test.is_gpu_available()
@@ -7071,7 +7373,7 @@ class CDRModel(object):
                     n_eval_minibatch = math.ceil(n / B)
                     for i in range(0, n, B):
                         if verbose:
-                            stderr('\rMinibatch %d/%d' %((i / B) + 1, n_eval_minibatch))
+                            stderr('\rMinibatch %d/%d' % ((i / B) + 1, n_eval_minibatch))
                         if optimize_memory:
                             _Y = None if Y is None else Y[i:i + B]
                             _first_obs = [x[i:i + B] for x in first_obs]
@@ -7185,106 +7487,12 @@ class CDRModel(object):
                                     name_base = '%s_f%s%s' % (sn(_response), ix, partition_str)
                                 else:
                                     name_base = '%s%s' % (sn(_response), partition_str)
-                                df.to_csv(self.outdir + '/CDRpreds_%s.csv' % name_base, sep=' ', na_rep='NaN', index=False)
+                                df.to_csv(self.outdir + '/CDRpreds_%s.csv' % name_base, sep=' ', na_rep='NaN',
+                                          index=False)
         else:
             out = {}
 
         return out
-
-    def run_predict_op(
-            self,
-            feed_dict,
-            responses=None,
-            n_samples=None,
-            algorithm='MAP',
-            return_preds=True,
-            return_loglik=False,
-            verbose=True
-    ):
-        """
-        Generate predictions from a batch of data.
-
-        :param feed_dict: ``dict``; A dictionary of predictor values.
-        :param responses: ``list`` of ``str``, ``str``, or ``None``; Name(s) of response variable(s) to predict. If ``None``, predicts all responses.
-        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
-        :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
-        :param return_preds: ``bool``; whether to return predictions.
-        :param return_loglik: ``bool``; whether to return elementwise log likelihoods. Requires that **Y** is not ``None``.
-        :param verbose: ``bool``; Send progress reports to standard error.
-        :return: ``dict`` of ``numpy`` arrays; Predicted responses and/or log likelihoods, one for each training sample. Key order: <('preds'|'log_lik'), response>.
-        """
-
-        assert self.Y in feed_dict or not return_loglik, 'Cannot return log likelihood when Y is not provided.'
-
-        use_MAP_mode = algorithm in ['map', 'MAP']
-        feed_dict[self.use_MAP_mode] = use_MAP_mode
-
-        if responses is None:
-            responses = self.response_names
-        if not isinstance(responses, list):
-            responses = [responses]
-
-        to_run = {}
-        if return_preds:
-            to_run_preds = {x: self.prediction[x] for x in responses}
-            to_run['preds'] = to_run_preds
-        if return_loglik:
-            to_run_loglik = {x: self.ll_by_var[x] for x in responses}
-            to_run['log_lik'] = to_run_loglik
-
-        if to_run:
-            with self.session.as_default():
-                with self.session.graph.as_default():
-                    if use_MAP_mode:
-                        out = self.session.run(to_run, feed_dict=feed_dict)
-                    else:
-                        feed_dict[self.use_MAP_mode] = False
-                        if n_samples is None:
-                            n_samples = self.n_samples_eval
-
-                        if verbose:
-                            pb = keras.utils.Progbar(n_samples)
-
-                        out = {}
-                        if return_preds:
-                            out['preds'] = {x: np.zeros((len(feed_dict[self.Y_time]), n_samples)) for x in to_run_preds}
-                        if return_loglik:
-                            out['log_lik'] = {x: np.zeros((len(feed_dict[self.Y_time]), n_samples)) for x in
-                                              to_run_loglik}
-
-                        for i in range(n_samples):
-                            if self.resample_ops:
-                                self.session.run(self.resample_ops)
-
-                            _out = self.session.run(to_run, feed_dict=feed_dict)
-                            if to_run_preds:
-                                _preds = _out['preds']
-                                for _response in _preds:
-                                    out['preds'][_response][:, i] = _preds[_response]
-                            if to_run_loglik:
-                                _log_lik = _out['log_lik']
-                                for _response in _log_lik:
-                                    out['log_lik'][_response][:, i] = _log_lik[_response]
-                            if verbose:
-                                pb.update(i + 1)
-
-                        if return_preds:
-                            for _response in out['preds']:
-                                _preds = out['preds'][_response]
-                                dist_name = self.get_response_dist_name(_response)
-                                if dist_name == 'bernoulli':  # Majority vote
-                                    _preds = np.round(np.mean(_preds, axis=1)).astype('int')
-                                elif dist_name == 'categorical':  # Majority vote
-                                    _preds = scipy.stats.mode(_preds, axis=1)
-                                else:  # Average
-                                    _preds = _preds.mean(axis=1)
-                                out['preds'][_response] = _preds
-
-                        if return_loglik:
-                            for _response in out['log_lik']:
-                                out['log_lik'][_response] = out['log_lik'][_response].mean(axis=1)
-
-                    return out
 
     def log_lik(
             self,
@@ -7326,7 +7534,10 @@ class CDRModel(object):
         :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
         """
 
-        assert not dump or (sum_outputs_along_T and sum_outputs_along_K), 'dump=True is only supported if sum_outputs_along_T=True and sum_outputs_along_K=True'
+        assert isinstance(self, CDRModel) or isinstance(self,
+                                                        CDREnsemble), 'log_lik may only be called on CDRModel or CDREnsemble'
+        assert not dump or (
+                    sum_outputs_along_T and sum_outputs_along_K), 'dump=True is only supported if sum_outputs_along_T=True and sum_outputs_along_K=True'
 
         out = self.predict(
             X,
@@ -7371,6 +7582,163 @@ class CDRModel(object):
                     df.to_csv(self.outdir + '/output_%s.csv' % name_base, sep=' ', na_rep='NaN', index=False)
 
         return out
+
+    def loss(
+            self,
+            X,
+            Y,
+            X_in_Y_names=None,
+            n_samples=None,
+            algorithm='MAP',
+            training=None,
+            optimize_memory=False,
+            verbose=True
+    ):
+        """
+        Compute the elementsize loss over a dataset using the model's optimization objective.
+
+        :param X: list of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+            Each element of **X** must contain the following columns (additional columns are ignored):
+
+            * ``time``: Timestamp associated with each observation in **X**
+
+            Across all elements of **X**, there must be a column for each independent variable in the CDR ``form_str`` provided at initialization.
+
+        :param Y: ``list`` of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+            Each element of **Y** must contain the following columns (additional columns are ignored):
+
+            * ``time``: Timestamp associated with each observation in ``y``
+            * ``first_obs_<K>``:  Index in the Kth (zero-indexed) element of `X` of the first observation in the time series associated with each entry in ``y``
+            * ``last_obs_<K>``:  Index in the Kth (zero-indexed) element of `X` of the immediately preceding observation in the time series associated with each entry in ``y``
+            * Columns with a subset of the names of the DVs specified in ``form_str`` (all DVs should be represented somewhere in **y**)
+            * A column for each random grouping factor in the model specified in ``form_str``.
+
+        :param X_in_Y_names: ``list`` of ``str``; names of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, no such predictors.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
+        :param training: ``bool``; Whether to compute loss in training mode.
+        :param optimize_memory: ``bool``; Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).
+        :param verbose: ``bool``; Report progress and metrics to standard error.
+        :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
+        """
+
+        assert isinstance(self, CDRModel) or isinstance(self,
+                                                        CDREnsemble), 'loss may only be called on CDRModel or CDREnsemble'
+
+        if verbose:
+            usingGPU = tf.test.is_gpu_available()
+            stderr('Using GPU: %s\n' % usingGPU)
+            stderr('Computing loss...\n')
+
+        # Preprocess data
+        if not isinstance(X, list):
+            X = [X]
+        X_in = X
+        if Y is not None and not isinstance(Y, list):
+            Y = [Y]
+        lengths = [len(_Y) for _Y in Y]
+        n = sum(lengths)
+        Y_in = Y
+        if X_in_Y_names:
+            X_in_Y_names = [x for x in X_in_Y_names if x in self.impulse_names]
+
+        Y, first_obs, last_obs, Y_time, Y_mask, Y_gf, X_in_Y = build_CDR_response_data(
+            self.response_names,
+            Y=Y_in,
+            X_in_Y_names=X_in_Y_names,
+            Y_category_map=self.response_category_to_ix,
+            response_to_df_ix=self.response_to_df_ix,
+            gf_names=self.rangf,
+            gf_map=self.rangf_map
+        )
+
+        if not optimize_memory:
+            X, X_time, X_mask = build_CDR_impulse_data(
+                X_in,
+                first_obs,
+                last_obs,
+                X_in_Y_names=X_in_Y_names,
+                X_in_Y=X_in_Y,
+                history_length=self.history_length,
+                future_length=self.future_length,
+                impulse_names=self.impulse_names,
+                int_type=self.int_type,
+                float_type=self.float_type,
+            )
+
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                self.set_predict_mode(True)
+
+                if training is None:
+                    training = not self.predict_mode
+
+                B = self.eval_minibatch_size
+                n = sum([len(_Y) for _Y in Y])
+                n_minibatch = math.ceil(n / B)
+                loss = np.zeros((n,))
+                for i in range(0, n, B):
+                    if verbose:
+                        stderr('\rMinibatch %d/%d' % (i + 1, n_minibatch))
+                    if optimize_memory:
+                        _Y = Y[i:i + B]
+                        _first_obs = [x[i:i + B] for x in first_obs]
+                        _last_obs = [x[i:i + B] for x in last_obs]
+                        _Y_time = Y_time[i:i + B]
+                        _Y_mask = Y_mask[i:i + B]
+                        _Y_gf = None if Y_gf is None else Y_gf[i:i + B]
+                        _X_in_Y = None if X_in_Y is None else X_in_Y[i:i + B]
+
+                        _X, _X_time, _X_mask = build_CDR_impulse_data(
+                            X_in,
+                            _first_obs,
+                            _last_obs,
+                            X_in_Y_names=X_in_Y_names,
+                            X_in_Y=_X_in_Y,
+                            history_length=self.history_length,
+                            future_length=self.future_length,
+                            impulse_names=self.impulse_names,
+                            int_type=self.int_type,
+                            float_type=self.float_type,
+                        )
+                        _Y = None if Y is None else [_y[i:i + B] for _y in Y]
+                        _Y_gf = None if Y_gf is None else Y_gf[i:i + B]
+
+                        fd = {
+                            self.X: _X,
+                            self.X_time: _X_time,
+                            self.X_mask: _X_mask,
+                            self.Y: _Y,
+                            self.Y_time: _Y_time,
+                            self.Y_mask: _Y_mask,
+                            self.Y_gf: _Y_gf,
+                            self.training: not self.predict_mode
+                        }
+                    else:
+                        fd = {
+                            self.X: X[i:i + B],
+                            self.X_time: X_time[i:i + B],
+                            self.X_mask: X_mask[i:i + B],
+                            self.Y_time: Y_time[i:i + B],
+                            self.Y_mask: Y_mask[i:i + B],
+                            self.Y_gf: None if Y_gf is None else Y_gf[i:i + B],
+                            self.Y: Y[i:i + B],
+                            self.training: training
+                        }
+                    loss[i:i + B] = self.run_loss_op(
+                        fd,
+                        n_samples=n_samples,
+                        algorithm=algorithm,
+                        verbose=verbose
+                    )
+                loss = loss.mean()
+
+                if verbose:
+                    stderr('\n\n')
+
+                self.set_predict_mode(False)
+
+                return loss
 
     def evaluate(
             self,
@@ -7419,7 +7787,11 @@ class CDRModel(object):
         :return: pair of <``dict``, ``str``>; Dictionary of evaluation metrics, human-readable evaluation summary string.
         """
 
-        assert not dump or (sum_outputs_along_T and sum_outputs_along_K), 'dump=True is only supported if sum_outputs_along_T=True and sum_outputs_along_K=True'
+        assert isinstance(self, CDRModel) or isinstance(self,
+                                                        CDREnsemble), 'evaluate may only be called on CDRModel or CDREnsemble'
+
+        assert not dump or (
+                    sum_outputs_along_T and sum_outputs_along_K), 'dump=True is only supported if sum_outputs_along_T=True and sum_outputs_along_K=True'
 
         if partition and not partition.startswith('_'):
             partition_str = '_' + partition
@@ -7528,14 +7900,14 @@ class CDRModel(object):
                             err_col_name = 'CDRcorrect'
                             for t in range(T):
                                 for k in range(K):
-                                    __preds = _preds[:,t,k]
+                                    __preds = _preds[:, t, k]
                                     error = (_y == __preds).astype('int')
                                     if metrics['f1'][_response][ix] is None:
                                         metrics['f1'][_response][ix] = np.zeros((T, K))
-                                    metrics['f1'][_response][ix][t,k] = f1_score(_y, __preds, average='binary')
+                                    metrics['f1'][_response][ix][t, k] = f1_score(_y, __preds, average='binary')
                                     if metrics['acc'][_response][ix] is None:
                                         metrics['acc'][_response][ix] = np.zeros((T, K))
-                                    metrics['acc'][_response][ix][t,k] = accuracy_score(_y, __preds)
+                                    metrics['acc'][_response][ix][t, k] = accuracy_score(_y, __preds)
                         elif self.is_categorical(_response):
                             classes, counts = np.unique(_y, return_counts=True)
                             majority = classes[np.argmax(counts)]
@@ -7545,20 +7917,20 @@ class CDRModel(object):
                             err_col_name = 'CDRcorrect'
                             for t in range(T):
                                 for k in range(K):
-                                    __preds = _preds[:,t,k]
+                                    __preds = _preds[:, t, k]
                                     error = (_y == __preds).astype('int')
                                     if metrics['f1'][_response][ix] is None:
                                         metrics['f1'][_response][ix] = np.zeros((T, K))
-                                    metrics['f1'][_response][ix][t,k] = f1_score(_y, __preds, average='macro')
+                                    metrics['f1'][_response][ix][t, k] = f1_score(_y, __preds, average='macro')
                                     if metrics['acc'][_response][ix] is None:
                                         metrics['acc'][_response][ix] = np.zeros((T, K))
-                                    metrics['acc'][_response][ix][t,k] = accuracy_score(_y, __preds)
+                                    metrics['acc'][_response][ix][t, k] = accuracy_score(_y, __preds)
                         else:
                             err_col_name = 'CDRsquarederror'
                             metrics['true_variance'][_response][ix] = np.std(_y) ** 2
                             for t in range(T):
                                 for k in range(K):
-                                    __preds = _preds[:,t,k]
+                                    __preds = _preds[:, t, k]
                                     error = np.array(_y - __preds) ** 2
                                     score = error.mean()
                                     resid = np.sort(_y - __preds)
@@ -7573,17 +7945,19 @@ class CDRModel(object):
 
                                     if metrics['mse'][_response][ix] is None:
                                         metrics['mse'][_response][ix] = np.zeros((T, K))
-                                    metrics['mse'][_response][ix][t,k] = score
+                                    metrics['mse'][_response][ix][t, k] = score
                                     if metrics['rho'][_response][ix] is None:
                                         metrics['rho'][_response][ix] = np.zeros((T, K))
-                                    metrics['rho'][_response][ix][t,k] = np.corrcoef(_y, __preds, rowvar=False)[0, 1]
+                                    metrics['rho'][_response][ix][t, k] = np.corrcoef(_y, __preds, rowvar=False)[0, 1]
                                     if metrics['percent_variance_explained'][_response][ix] is None:
                                         metrics['percent_variance_explained'][_response][ix] = np.zeros((T, K))
-                                    metrics['percent_variance_explained'][_response][ix][t,k] = percent_variance_explained(_y, __preds)
+                                    metrics['percent_variance_explained'][_response][ix][
+                                        t, k] = percent_variance_explained(
+                                        _y, __preds)
                                     if metrics['ks_results'][_response][ix] is None:
                                         metrics['ks_results'][_response][ix] = (np.zeros((T, K)), np.zeros((T, K)))
-                                    metrics['ks_results'][_response][ix][0][t,k] = D
-                                    metrics['ks_results'][_response][ix][1][t,k] = p_value
+                                    metrics['ks_results'][_response][ix][0][t, k] = D
+                                    metrics['ks_results'][_response][ix][1][t, k] = p_value
                     else:
                         err_col_name = error = __preds = _y = None
 
@@ -7687,199 +8061,6 @@ class CDRModel(object):
                 stderr('\n\n')
 
         return metrics, summary
-
-    def loss(
-            self,
-            X,
-            Y,
-            X_in_Y_names=None,
-            n_samples=None,
-            algorithm='MAP',
-            training=None,
-            optimize_memory=False,
-            verbose=True
-    ):
-        """
-        Compute the elementsize loss over a dataset using the model's optimization objective.
-
-        :param X: list of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
-            Each element of **X** must contain the following columns (additional columns are ignored):
-
-            * ``time``: Timestamp associated with each observation in **X**
-
-            Across all elements of **X**, there must be a column for each independent variable in the CDR ``form_str`` provided at initialization.
-
-        :param Y: ``list`` of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
-            Each element of **Y** must contain the following columns (additional columns are ignored):
-
-            * ``time``: Timestamp associated with each observation in ``y``
-            * ``first_obs_<K>``:  Index in the Kth (zero-indexed) element of `X` of the first observation in the time series associated with each entry in ``y``
-            * ``last_obs_<K>``:  Index in the Kth (zero-indexed) element of `X` of the immediately preceding observation in the time series associated with each entry in ``y``
-            * Columns with a subset of the names of the DVs specified in ``form_str`` (all DVs should be represented somewhere in **y**)
-            * A column for each random grouping factor in the model specified in ``form_str``.
-
-        :param X_in_Y_names: ``list`` of ``str``; names of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, no such predictors.
-        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
-        :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
-        :param training: ``bool``; Whether to compute loss in training mode.
-        :param optimize_memory: ``bool``; Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).
-        :param verbose: ``bool``; Report progress and metrics to standard error.
-        :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
-        """
-
-        if verbose:
-            usingGPU = tf.test.is_gpu_available()
-            stderr('Using GPU: %s\n' % usingGPU)
-            stderr('Computing loss...\n')
-
-        # Preprocess data
-        if not isinstance(X, list):
-            X = [X]
-        X_in = X
-        if Y is not None and not isinstance(Y, list):
-            Y = [Y]
-        lengths = [len(_Y) for _Y in Y]
-        n = sum(lengths)
-        Y_in = Y
-        if X_in_Y_names:
-            X_in_Y_names = [x for x in X_in_Y_names if x in self.impulse_names]
-
-        Y, first_obs, last_obs, Y_time, Y_mask, Y_gf, X_in_Y = build_CDR_response_data(
-            self.response_names,
-            Y=Y_in,
-            X_in_Y_names=X_in_Y_names,
-            Y_category_map=self.response_category_to_ix,
-            response_to_df_ix=self.response_to_df_ix,
-            gf_names=self.rangf,
-            gf_map=self.rangf_map
-        )
-
-        if not optimize_memory:
-            X, X_time, X_mask = build_CDR_impulse_data(
-                X_in,
-                first_obs,
-                last_obs,
-                X_in_Y_names=X_in_Y_names,
-                X_in_Y=X_in_Y,
-                history_length=self.history_length,
-                future_length=self.future_length,
-                impulse_names=self.impulse_names,
-                int_type=self.int_type,
-                float_type=self.float_type,
-            )
-
-        with self.session.as_default():
-            with self.session.graph.as_default():
-                self.set_predict_mode(True)
-
-                if training is None:
-                    training = not self.predict_mode
-                    
-                B = self.eval_minibatch_size
-                n = sum([len(_Y) for _Y in Y])
-                n_minibatch = math.ceil(n / B)
-                loss = np.zeros((n,))
-                for i in range(0, n, B):
-                    if verbose:
-                        stderr('\rMinibatch %d/%d' %(i + 1, n_minibatch))
-                    if optimize_memory:
-                        _Y = Y[i:i + B]
-                        _first_obs = [x[i:i + B] for x in first_obs]
-                        _last_obs = [x[i:i + B] for x in last_obs]
-                        _Y_time = Y_time[i:i + B]
-                        _Y_mask = Y_mask[i:i + B]
-                        _Y_gf = None if Y_gf is None else Y_gf[i:i + B]
-                        _X_in_Y = None if X_in_Y is None else X_in_Y[i:i + B]
-
-                        _X, _X_time, _X_mask = build_CDR_impulse_data(
-                            X_in,
-                            _first_obs,
-                            _last_obs,
-                            X_in_Y_names=X_in_Y_names,
-                            X_in_Y=_X_in_Y,
-                            history_length=self.history_length,
-                            future_length=self.future_length,
-                            impulse_names=self.impulse_names,
-                            int_type=self.int_type,
-                            float_type=self.float_type,
-                        )
-                        _Y = None if Y is None else [_y[i:i + B] for _y in Y]
-                        _Y_gf = None if Y_gf is None else Y_gf[i:i + B]
-
-                        fd = {
-                            self.X: _X,
-                            self.X_time: _X_time,
-                            self.X_mask: _X_mask,
-                            self.Y: _Y,
-                            self.Y_time: _Y_time,
-                            self.Y_mask: _Y_mask,
-                            self.Y_gf: _Y_gf,
-                            self.training: not self.predict_mode
-                        }
-                    else:
-                        fd = {
-                            self.X: X[i:i + B],
-                            self.X_time: X_time[i:i + B],
-                            self.X_mask: X_mask[i:i + B],
-                            self.Y_time: Y_time[i:i + B],
-                            self.Y_mask: Y_mask[i:i + B],
-                            self.Y_gf: None if Y_gf is None else Y_gf[i:i + B],
-                            self.Y: Y[i:i + B],
-                            self.training: training
-                        }
-                    loss[i:i + B] = self.run_loss_op(
-                        fd,
-                        n_samples=n_samples,
-                        algorithm=algorithm,
-                        verbose=verbose
-                    )
-                loss = loss.mean()
-
-                if verbose:
-                    stderr('\n\n')
-
-                self.set_predict_mode(False)
-
-                return loss
-
-    def run_loss_op(self, feed_dict, n_samples=None, algorithm='MAP', verbose=True):
-        """
-        Compute the elementwise training loss of a batch of data.
-
-        :param feed_dict: ``dict``; A dictionary of predictor and response values
-        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
-        :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
-        :param verbose: ``bool``; Send progress reports to standard error.
-        :return: ``numpy`` array; total training loss for batch
-        """
-
-        use_MAP_mode = algorithm in ['map', 'MAP']
-        feed_dict[self.use_MAP_mode] = use_MAP_mode
-
-        with self.session.as_default():
-            with self.session.graph.as_default():
-                if use_MAP_mode:
-                    loss = self.session.run(self.loss_func, feed_dict=feed_dict)
-                else:
-                    feed_dict[self.use_MAP_mode] = False
-                    if n_samples is None:
-                        n_samples = self.n_samples_eval
-
-                    if verbose:
-                        pb = keras.utils.Progbar(n_samples)
-
-                    loss = np.zeros((len(feed_dict[self.Y_time]), n_samples))
-
-                    for i in range(n_samples):
-                        if self.resample_ops:
-                            self.session.run(self.resample_ops)
-                        loss[:, i] = self.session.run(self.loss_func, feed_dict=feed_dict)
-                        if verbose:
-                            pb.update(i + 1)
-
-                    loss = loss.mean(axis=1)
-
-                return loss
 
     def convolve_inputs(
             self,
@@ -8139,80 +8320,6 @@ class CDRModel(object):
                             else:
                                 name_base = '%s_%s%s' % (sn(_response), sn(dim_name), partition_str)
                             df.to_csv(self.outdir + '/X_conv_%s.csv' % name_base, sep=' ', na_rep='NaN', index=False)
-
-                return out
-
-    def run_conv_op(self, feed_dict, responses=None, response_param=None, n_samples=None, algorithm='MAP', verbose=True):
-        """
-        Convolve a batch of data in feed_dict with the model's latent IRF.
-
-        :param feed_dict: ``dict``; A dictionary of predictor variables
-        :param responses: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to convolve toward. If ``None``, convolves toward all univariate responses. Multivariate convolution (e.g. of categorical responses) is supported but turned off by default to avoid excessive computation. When convolving toward a multivariate response, a set of convolved predictors will be generated for each dimension of the response.
-        :param response_param: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of predictive distribution(s) to convolve toward per response variable. Any param names not used by the predictive distribution for a given response will be ignored. If ``None``, convolves toward the first parameter of each response distribution.
-        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
-        :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
-        :param verbose: ``bool``; Send progress reports to standard error.
-        :return: ``dict`` of ``numpy`` arrays; The convolved inputs, one per **response_param** per **response**. Each element has shape (batch, terminals)
-        """
-
-        use_MAP_mode = algorithm in ['map', 'MAP']
-        feed_dict[self.use_MAP_mode] = use_MAP_mode
-
-        if responses is None:
-            responses = [x for x in self.response_names if self.get_response_ndim(x) == 1]
-        if isinstance(responses, str):
-            responses = [responses]
-
-        if response_param is None:
-            response_param = set()
-            for _response in responses:
-                response_param.add(self.get_response_params(_response)[0])
-            response_param = sorted(list(response_param))
-        if isinstance(response_param, str):
-            response_param = [response_param]
-
-        to_run = {}
-        for _response in responses:
-            to_run[_response] = self.X_conv_delta[_response]
-
-        with self.session.as_default():
-            with self.session.graph.as_default():
-                if use_MAP_mode:
-                    X_conv = self.session.run(to_run, feed_dict=feed_dict)
-                else:
-                    X_conv = {}
-                    for _response in to_run:
-                        nparam = self.get_response_nparam(_response)
-                        ndim = self.get_response_ndim(_response)
-                        X_conv[_response] = np.zeros(
-                            (len(feed_dict[self.Y_time]), len(self.terminal_names), nparam, ndim, n_samples)
-                        )
-
-                    if n_samples is None:
-                        n_samples = self.n_samples_eval
-                    if verbose:
-                        pb = keras.utils.Progbar(n_samples)
-
-                    for i in range(0, n_samples):
-                        _X_conv = self.session.run(to_run, feed_dict=feed_dict)
-                        for _response in _X_conv:
-                            X_conv[_response][..., i] = _X_conv[_response]
-                        if verbose:
-                            pb.update(i + 1, force=True)
-
-                    for _response in X_conv:
-                        X_conv[_response] = X_conv[_response].mean(axis=2)
-
-                # Break things out by response dimension
-                out = {}
-                for _response in X_conv:
-                    for i, _response_param in enumerate(response_param):
-                        if self.has_param(_response, _response_param):
-                            dim_names = self.expand_param_name(_response, _response_param)
-                            for j, _dim_name in enumerate(dim_names):
-                                if _response not in out:
-                                    out[_response] = {}
-                                out[_response][_dim_name] = X_conv[_response][..., i, j]
 
                 return out
 
@@ -9642,3 +9749,73 @@ class CDRModel(object):
             outname = outfile
 
         irf_integrals.to_csv(outname, index=False)
+
+
+class CDREnsemble(object):
+    _doc_header = """
+        Class implementing an ensemble of one or more continuous-time deconvolutional regression models.
+    """
+    _doc_args = """
+        :param outdir: ``str``; path to the config file's output directory
+        :param name: ``str``; name of the ensemble as defined in the config file
+    \n"""
+
+    __doc__ = _doc_header + _doc_args
+
+    def __init__(self, outdir, name, weight_type='ll'):
+        super(CDREnsemble, self).__init__()
+
+        self.outdir = outdir
+        self.name = name
+        for x in os.listdir(self.outdir):
+            print(x.startswith(name))
+            print(ENSEMBLE.match(x[len(name):]))
+            print(x[len(name):])
+            print(os.path.isdir(os.path.join(self.outdir,x)))
+        mpaths = [
+            os.path.join(self.outdir,x) for x in os.listdir(self.outdir) if
+            (
+                x.startswith(name) and
+                ENSEMBLE.match(x[len(name):]) and
+                os.path.isdir(os.path.join(self.outdir,x))
+            )
+        ]
+        print(name)
+        print(mpaths)
+        if not len(mpaths):
+            mpaths = [os.path.join(self.outdir, name)]
+        self.models = []
+        for i, mpath in enumerate(mpaths):
+            self.models.append(load_cdr(mpath))
+
+        assert weight_type.lower() in ('ll', 'uniform'), 'Unrecognized weighting type for ensemble: %s.' % weight_type
+        self.weight_type = weight_type
+
+    def __getattribute__(self, item):
+        try:
+            return object.__getattribute__(self, item)
+        except AttributeError:
+            if len(self.models) == 1:
+                ix = 0
+            else:
+                w = self.model_weights()
+                ix = np.random.multinomial(1, w).argmax()
+            return getattr(self.models[ix], item)
+
+    @property
+    def n_ensemble(self):
+        return len(self.models)
+
+    def model_weights(self):
+        if self.weight_type.lower() == 'uniform':
+            weights = np.ones(len(self.n_ensemble)) / self.n_ensemble
+        elif self.weight_type.lower() == 'll':
+            lls = []
+            for m in self.models:
+                lls.append(m.training_loglik_full)
+
+            weights = logsumexp(lls)
+        else:
+            raise ValueError('Unrecognized weighting type for ensemble: %s.' % self.weight_type)
+
+        return weights

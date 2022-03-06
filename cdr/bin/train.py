@@ -75,6 +75,7 @@ if __name__ == '__main__':
         filters=p.filters,
         history_length=p.history_length,
         future_length=p.future_length,
+        t_delta_cutoff=p.t_delta_cutoff,
         all_interactions=all_interactions
     )
 
@@ -243,7 +244,7 @@ if __name__ == '__main__':
 
             kwargs = {}
             for kwarg in MODEL_INITIALIZATION_KWARGS:
-                if kwarg.key not in ['outdir', 'history_length', 'future_length']:
+                if kwarg.key not in ['outdir', 'history_length', 'future_length', 't_delta_cutoff']:
                     kwargs[kwarg.key] = p[kwarg.key]
             kwargs['crossval_factor'] = p['crossval_factor']
             kwargs['crossval_fold'] = p['crossval_fold']
@@ -257,6 +258,7 @@ if __name__ == '__main__':
                 outdir=p.outdir + '/' + m_path,
                 history_length=p.history_length,
                 future_length=p.future_length,
+                t_delta_cutoff=p.t_delta_cutoff,
                 **kwargs
             )
 

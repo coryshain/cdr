@@ -569,6 +569,7 @@ def get_time_windows(
         series_ids,
         forward=False,
         window_length=128,
+        t_delta_cutoff=None,
         verbose=True
 ):
     """
@@ -580,6 +581,7 @@ def get_time_windows(
     :param series_ids: ``list`` of ``str``; column names whose jointly unique values define unique time series.
     :param forward: ``bool``; whether to compute forward windows (future inputs) or backward windows (past inputs, used if **forward** is ``False``).
     :param window_length: ``int``; maximum size of time window to consider. If ``np.inf``, no bound on window size.
+    :param t_delta_cutoff: ``float`` or ``None``; maximum distance in time to consider (can help improve training stability on data with large gaps in time). If ``0`` or ``None``, no cutoff.
     :param verbose: ``bool``; whether to report progress to stderr
     :return: 2-tuple of ``numpy`` vectors; first and last impulse observations (respectively) for each response in **y**
     """
@@ -650,6 +652,9 @@ def get_time_windows(
                 (X_time[j] <= Y_time[i] + epsilon) and \
                 (X_id_vectors[j] == Y_id).all():
             j += 1
+            # Ensure that t delta falls within cutoff
+            if t_delta_cutoff and np.fabs(X_time[start] - Y_time[i]) > t_delta_cutoff:
+                start = j
             end = j
 
         if forward:
@@ -900,6 +905,7 @@ def preprocess_data(
         filters=None,
         history_length=128,
         future_length=0,
+        t_delta_cutoff=None,
         all_interactions=False,
         verbose=True,
         debug=False
@@ -914,6 +920,7 @@ def preprocess_data(
     :param filters: ``list``; list of key-value pairs mapping column names to filtering criteria for their values.
     :param history_length: ``int``; maximum number of history (backward) observations.
     :param future_length: ``int``; maximum number of future (forward) observations.
+    :param t_delta_cutoff: ``float`` or ``None``; maximum distance in time to consider (can help improve training stability on data with large gaps in time). If ``0`` or ``None``, no cutoff.
     :param all_interactions: ``bool``; add powerset of all conformable interactions.
     :param verbose: ``bool``; whether to report progress to stderr
     :param debug: ``bool``; print debugging information
@@ -954,7 +961,8 @@ def preprocess_data(
                         _X,
                         _Y,
                         series_ids,
-                        window_length=history_length
+                        window_length=history_length,
+                        t_delta_cutoff=t_delta_cutoff
                     )
                     first_obs_b, last_obs_b = first_obs, last_obs
                 else:
@@ -967,7 +975,8 @@ def preprocess_data(
                         _Y,
                         series_ids,
                         forward=True,
-                        window_length=future_length
+                        window_length=future_length,
+                        t_delta_cutoff=t_delta_cutoff
                     )
                     first_obs_f, last_obs_f = _first_obs, last_obs
                     if first_obs is None:

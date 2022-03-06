@@ -5,7 +5,7 @@ import re
 import math
 import pickle
 import numpy as np
-from scipy import linalg
+from scipy import linalg, special
 
 file_re = re.compile('output_([^_]+)_f(\d+)_([^_]+).csv')
 
@@ -185,6 +185,10 @@ def pca(X, n_dim=None, dtype=np.float32):
         eigenvec = eigenvec[:,:n_dim]
     Xpc = np.dot(X, eigenvec)
     return Xpc, eigenvec, eigenval, means, sds
+
+
+def logsumexp(a):
+    return np.exp(a - special.logsumexp(a))
 
 
 def nested(model_name_1, model_name_2):
