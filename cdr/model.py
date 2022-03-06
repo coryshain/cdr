@@ -3517,6 +3517,8 @@ class CDRModel(object):
                 if rescale_t_delta:
                     t_delta /= self.t_delta_sd
                 if log_transform_t_delta:
+                    t_delta_scale = tf.Variable(1., name='t_delta_scale_%s' % nn_id)
+                    t_delta = t_delta * t_delta_scale
                     t_delta = tf.sign(t_delta) * tf.log1p(tf.abs(t_delta))
 
                 # Handle multiple impulse streams with different timestamps
@@ -4594,7 +4596,7 @@ class CDRModel(object):
                     optimizer_kwargs['epsilon'] = self.optim_epsilon
                     # if name in ('adam', 'nadam'):
                     #     optimizer_kwargs['beta2'] = 0.9
-                    
+
 
                 optimizer_class = {
                     'sgd': tf.train.GradientDescentOptimizer,
