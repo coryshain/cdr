@@ -70,7 +70,8 @@ if __name__ == '__main__':
             p.series_ids,
             filters=p.filters,
             history_length=p.history_length,
-            future_length=p.future_length
+            future_length=p.future_length,
+            t_delta_cutoff=p.t_delta_cutoff
         )
         evaluation_sets.append((X, Y, select, X_in_Y_names))
         evaluation_set_partitions.append(partitions)

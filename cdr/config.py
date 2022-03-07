@@ -153,7 +153,7 @@ class Config(object):
                 )
                 _models[model_name] = model_settings
                 if reg_type == 'lme':
-                    self.models[model_name]['correlated'] = config[model_field].getboolean('correlated', True)
+                    _models[model_name]['correlated'] = config[model_field].getboolean('correlated', True)
                 _model_list.append(model_name)
                 if 'ablate' in config[model_field]:
                     for ablated in powerset(config[model_field]['ablate'].strip().split()):
@@ -161,13 +161,13 @@ class Config(object):
                         new_name = model_name + '!' + '!'.join(ablated)
                         formula = Formula(config[model_field]['formula'])
                         formula.ablate_impulses(ablated)
-                        new_model = self.models[model_name].copy()
+                        new_model = _models[model_name].copy()
                         if reg_type == 'cdr':
                             new_model['formula'] = str(formula)
                         elif reg_type == 'lme':
                             new_model['formula'] = formula.to_lmer_formula_string(
                                 z=False,
-                                correlated=self.models[model_name]['correlated'],
+                                correlated=_models[model_name]['correlated'],
                                 transform_dirac=False
                             )
                         else:

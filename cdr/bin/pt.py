@@ -186,7 +186,7 @@ if __name__ == '__main__':
                                             )
                                             stderr('\n')
 
-                                            name_base = '%s_PT_%s_f%s_%s.png' % (name, response, filenum, partition_str)
+                                            name_base = '%s_PT_%s_f%s_%s' % (name, response, filenum, partition_str)
                                             outdir = args.outdir
                                             if outdir is None:
                                                 outdir = p.outdir
@@ -314,7 +314,7 @@ if __name__ == '__main__':
                             )
                             stderr('\n')
                             name = '%s_v_%s' % (a_name.replace(':', '+'), b_name.replace(':', '+'))
-                            name_base = '%s_PT_pooled_%s_f%s_%s.png' % (name, response, filenum, partition_str)
+                            name_base = '%s_PT_pooled_%s_f%s_%s' % (name, response, filenum, partition_str)
                             outdir = args.outdir
                             if outdir is None:
                                 outdir = p.outdir
