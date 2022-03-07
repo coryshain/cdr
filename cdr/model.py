@@ -885,6 +885,8 @@ class CDRModel(object):
         self.rnn_dropout_layer = {}
         self.nn_irf_l1 = {}
         self.nn_irf_layers = {}
+        self.nn_t_delta_scale = {}
+        self.nn_t_delta_shift = {}
 
         with self.session.as_default():
             with self.session.graph.as_default():
@@ -3145,6 +3147,7 @@ class CDRModel(object):
                 irf_activation = self.get_nn_meta('irf_activation', nn_id)
                 irf_dropout_rate = self.get_nn_meta('irf_dropout_rate', nn_id)
                 normalize_irf = self.get_nn_meta('normalize_irf', nn_id)
+                log_transform_t_delta = self.get_nn_meta('log_transform_t_delta', nn_id)
                 ranef_dropout_rate = self.get_nn_meta('ranef_dropout_rate', nn_id)
                 input_dropout_rate = self.get_nn_meta('input_dropout_rate', nn_id)
                 batch_normalization_decay = self.get_nn_meta('batch_normalization_decay', nn_id)
@@ -3387,6 +3390,12 @@ class CDRModel(object):
 
                     self.nn_irf_layers[nn_id] = irf_layers
 
+                    if log_transform_t_delta:
+                        t_delta_scale = tf.Variable(1., name='t_delta_scale_%s' % nn_id)
+                        t_delta_shift = tf.Variable(0., name='t_delta_shift_%s' % nn_id)
+                        self.nn_t_delta_scale[nn_id] = t_delta_scale
+                        self.nn_t_delta_shift[nn_id] = t_delta_shift
+
     def _compile_nn(self, nn_id):
         with self.session.as_default():
             with self.session.graph.as_default():
@@ -3516,10 +3525,6 @@ class CDRModel(object):
                     X_time /= self.X_time_sd
                 if rescale_t_delta:
                     t_delta /= self.t_delta_sd
-                if log_transform_t_delta:
-                    t_delta_scale = tf.Variable(1., name='t_delta_scale_%s' % nn_id)
-                    t_delta = t_delta * t_delta_scale
-                    t_delta = tf.sign(t_delta) * tf.log1p(tf.abs(t_delta))
 
                 # Handle multiple impulse streams with different timestamps
                 # by interleaving the impulses in temporal order
@@ -3678,6 +3683,12 @@ class CDRModel(object):
 
                     impulse_ix = names2ix(output_names, impulse_names)
                     nn_irf_impulses = tf.gather(X, impulse_ix, axis=2) # IRF output dims, includes rate
+
+                    if log_transform_t_delta:
+                        t_delta_scale = self.nn_t_delta_scale[nn_id]
+                        t_delta_shift = self.nn_t_delta_shift[nn_id]
+                        t_delta = t_delta * t_delta_scale + t_delta_shift
+                        t_delta = tf.sign(t_delta) * tf.log1p(tf.abs(t_delta))
 
                     irf_out = [t_delta]
                     if nonstationary:
