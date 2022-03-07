@@ -4584,7 +4584,8 @@ class CDRModel(object):
                 else:
                     self.lr = lr
 
-                clip = self.max_global_gradient_norm
+                clip = self.max_gradient
+                clip_global = self.max_global_gradient_norm
 
                 optimizer_args = [self.lr]
                 optimizer_kwargs = {}
@@ -4612,9 +4613,10 @@ class CDRModel(object):
                     'amsgrad': AMSGradOptimizer
                 }[name]
 
-                if clip:
+                if clip or clip_global:
                     optimizer_class = get_clipped_optimizer_class(optimizer_class, session=self.session)
-                    optimizer_kwargs['max_global_norm'] = clip
+                    optimizer_kwargs['max_grad'] = clip
+                    optimizer_kwargs['max_global_norm'] = clip_global
 
                 if use_jtps:
                     optimizer_class = get_JTPS_optimizer_class(optimizer_class, session=self.session)

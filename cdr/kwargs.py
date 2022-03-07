@@ -409,10 +409,16 @@ MODEL_INITIALIZATION_KWARGS = [
             - ``'Nadam'``"""
     ),
     Kwarg(
+        'max_gradient',
+        None,
+        [float, None],
+        'Maximum allowable value for the gradient, which will be clipped as needed. If ``None``, no max gradient.'
+    ),
+    Kwarg(
         'max_global_gradient_norm',
         1.,
         [float, None],
-        'Maximum allowable value for the global norm of the gradient, which will be clipped as needed. If ``None``, no gradient clipping.'
+        'Maximum allowable value for the global norm of the gradient, which will be clipped as needed. If ``None``, no max global norm for the gradient.'
     ),
     Kwarg(
         'use_safe_optimizer',

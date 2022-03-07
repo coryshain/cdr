@@ -59,18 +59,23 @@ def get_clipped_optimizer_class(base_optimizer_class, session=None):
     with session.as_default():
         with session.graph.as_default():
             class ClippedOptimizer(base_optimizer_class):
-                def __init__(self, *args, max_global_norm=None, **kwargs):
+                def __init__(self, *args, max_grad=None, max_global_norm=None, **kwargs):
                     super(ClippedOptimizer, self).__init__(*args, **kwargs)
+                    self.max_grad = max_grad
                     self.max_global_norm = max_global_norm
 
                 def apply_gradients(self, grads_and_vars, **kwargs):
-                    if self.max_global_norm is None:
-                        return grads_and_vars
-                    grads, _ = tf.clip_by_global_norm([g for g, _ in grads_and_vars], self.max_global_norm)
-                    vars = [v for _, v in grads_and_vars]
-                    grads_and_vars = []
-                    for grad, var in zip(grads, vars):
-                        grads_and_vars.append((grad, var))
+                    if self.max_grad:
+                        print('clipping elementwise')
+                        grads = [tf.clip_by_value(g, -self.max_grad, self.max_grad) for g, _ in grads_and_vars]
+                        vars = [v for _, v in grads_and_vars]
+                        grads_and_vars = list(zip(grads, vars))
+
+                    if self.max_global_norm:
+                        print('clipping global')
+                        grads, _ = tf.clip_by_global_norm([g for g, _ in grads_and_vars], self.max_global_norm)
+                        vars = [v for _, v in grads_and_vars]
+                        grads_and_vars = list(zip(grads, vars))
 
                     return super(ClippedOptimizer, self).apply_gradients(grads_and_vars, **kwargs)
 
