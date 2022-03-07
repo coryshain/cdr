@@ -3687,7 +3687,8 @@ class CDRModel(object):
                     if log_transform_t_delta:
                         t_delta_scale = self.nn_t_delta_scale[nn_id]
                         t_delta_shift = self.nn_t_delta_shift[nn_id]
-                        t_delta = t_delta * t_delta_scale + t_delta_shift
+                        t_delta = t_delta * t_delta_scale
+                        # t_delta = t_delta + t_delta_shift
                         t_delta = tf.sign(t_delta) * tf.log1p(tf.abs(t_delta))
 
                     irf_out = [t_delta]
