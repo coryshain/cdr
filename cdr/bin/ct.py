@@ -182,7 +182,7 @@ if __name__ == '__main__':
                                                 test_type = 'CPT'
                                             else:
                                                 test_type = 'CT'
-                                            name_base = '%s_%s_%s_f%s_%s.png' % (name, test_type, response, filenum, partition_str)
+                                            name_base = '%s_%s_%s_f%s_%s' % (name, test_type, response, filenum, partition_str)
                                             outdir = args.outdir
                                             if outdir is None:
                                                 outdir = p.outdir
@@ -355,7 +355,7 @@ if __name__ == '__main__':
                                 test_type = 'CPT_pooled'
                             else:
                                 test_type = 'CT_pooled'
-                            name_base = '%s_%s_%s_f%s_%s.png' % (name, test_type, response, filenum, partition_str)
+                            name_base = '%s_%s_%s_f%s_%s' % (name, test_type, response, filenum, partition_str)
                             outdir = args.outdir
                             if outdir is None:
                                 outdir = p.outdir
