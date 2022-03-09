@@ -21,8 +21,10 @@ ENSEMBLE = re.compile('\.m\d+')
 
 import tensorflow as tf
 if int(tf.__version__.split('.')[0]) == 1:
-    from tensorflow.contrib.distributions import Normal, LogNormal, SinhArcsinh, Bernoulli, Categorical, Exponential
+    from tensorflow.contrib.distributions import Normal, SinhArcsinh, Bernoulli, Categorical, Exponential, TransformedDistribution
     ExponentiallyModifiedGaussian = None # Not supported
+    def LogNormal(*args, **kwargs):
+        return TransformedDistribution(Normal(*args, **kwargs), bijector=tensorflow.contrib.distributions.bijectors.Exp())
     from tensorflow.contrib.opt import NadamOptimizer
     from tensorflow.contrib.framework import argsort as tf_argsort
     from tensorflow.contrib import keras
