@@ -180,10 +180,10 @@ class Config(object):
                     __model_list = []
                     for _m in _models:
                         for i in range(config[model_field].getint('n_ensemble')):
-                            __models[_m + '_m%d' % i] = _models[_m]
+                            __models[_m + '.m%d' % i] = _models[_m]
                     for _m in _model_list:
                         for i in range(config[model_field].getint('n_ensemble')):
-                            __model_list.append(_m + '_m%d' % i)
+                            __model_list.append(_m + '.m%d' % i)
                     _models.update(__models)
                     _model_list = __model_list
                 self.ensemble_list.append(model_name)

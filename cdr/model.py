@@ -17,11 +17,11 @@ from .opt import *
 from .plot import *
 
 NN_KWARG_BY_KEY = {x.key: x for x in NN_KWARGS + NN_BAYES_KWARGS}
-ENSEMBLE = re.compile('_m\d+')
+ENSEMBLE = re.compile('\.m\d+')
 
 import tensorflow as tf
 if int(tf.__version__.split('.')[0]) == 1:
-    from tensorflow.contrib.distributions import Normal, SinhArcsinh, Bernoulli, Categorical, Exponential
+    from tensorflow.contrib.distributions import Normal, LogNormal, SinhArcsinh, Bernoulli, Categorical, Exponential
     ExponentiallyModifiedGaussian = None # Not supported
     from tensorflow.contrib.opt import NadamOptimizer
     from tensorflow.contrib.framework import argsort as tf_argsort
@@ -33,6 +33,7 @@ elif int(tf.__version__.split('.')[0]) == 2:
     tf.disable_v2_behavior()
     from tensorflow_probability import distributions as tfd
     Normal = tfd.Normal
+    LogNormal = tfd.LogNormal
     SinhArcsinh = tfd.SinhArcsinh
     Bernoulli = tfd.Bernoulli
     Categorical = tfd.Categorical
@@ -184,6 +185,13 @@ class CDRModel(object):
     PREDICTIVE_DISTRIBUTIONS = {
         'normal': {
             'dist': Normal,
+            'name': 'normal',
+            'params': ('mu', 'sigma'),
+            'params_tf': ('loc', 'scale'),
+            'support': 'real'
+        },
+        'lognormal': {
+            'dist': LogNormal,
             'name': 'normal',
             'params': ('mu', 'sigma'),
             'params_tf': ('loc', 'scale'),
@@ -7282,8 +7290,6 @@ class CDRModel(object):
         :return: 1D ``numpy`` array; mean network predictions for regression targets (same length and sort order as ``y_time``).
         """
 
-        assert isinstance(self, CDRModel) or isinstance(self,
-                                                        CDREnsemble), 'predict may only be called on CDRModel or CDREnsemble'
         assert Y is not None or not return_loglik, 'Cannot return log likelihood when Y is not provided.'
         assert not dump or (
                 sum_outputs_along_T and sum_outputs_along_K), 'dump=True is only supported if sum_outputs_along_T=True and sum_outputs_along_K=True'
@@ -7550,10 +7556,7 @@ class CDRModel(object):
         :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
         """
 
-        assert isinstance(self, CDRModel) or isinstance(self,
-                                                        CDREnsemble), 'log_lik may only be called on CDRModel or CDREnsemble'
-        assert not dump or (
-                    sum_outputs_along_T and sum_outputs_along_K), 'dump=True is only supported if sum_outputs_along_T=True and sum_outputs_along_K=True'
+        assert not dump or (sum_outputs_along_T and sum_outputs_along_K), 'dump=True is only supported if sum_outputs_along_T=True and sum_outputs_along_K=True'
 
         out = self.predict(
             X,
@@ -7637,9 +7640,6 @@ class CDRModel(object):
         :param verbose: ``bool``; Report progress and metrics to standard error.
         :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
         """
-
-        assert isinstance(self, CDRModel) or isinstance(self,
-                                                        CDREnsemble), 'loss may only be called on CDRModel or CDREnsemble'
 
         if verbose:
             usingGPU = tf.test.is_gpu_available()
@@ -7803,11 +7803,7 @@ class CDRModel(object):
         :return: pair of <``dict``, ``str``>; Dictionary of evaluation metrics, human-readable evaluation summary string.
         """
 
-        assert isinstance(self, CDRModel) or isinstance(self,
-                                                        CDREnsemble), 'evaluate may only be called on CDRModel or CDREnsemble'
-
-        assert not dump or (
-                    sum_outputs_along_T and sum_outputs_along_K), 'dump=True is only supported if sum_outputs_along_T=True and sum_outputs_along_K=True'
+        assert not dump or (sum_outputs_along_T and sum_outputs_along_K), 'dump=True is only supported if sum_outputs_along_T=True and sum_outputs_along_K=True'
 
         if partition and not partition.startswith('_'):
             partition_str = '_' + partition
@@ -9783,11 +9779,6 @@ class CDREnsemble(object):
 
         self.outdir = outdir
         self.name = name
-        for x in os.listdir(self.outdir):
-            print(x.startswith(name))
-            print(ENSEMBLE.match(x[len(name):]))
-            print(x[len(name):])
-            print(os.path.isdir(os.path.join(self.outdir,x)))
         mpaths = [
             os.path.join(self.outdir,x) for x in os.listdir(self.outdir) if
             (
@@ -9796,8 +9787,6 @@ class CDREnsemble(object):
                 os.path.isdir(os.path.join(self.outdir,x))
             )
         ]
-        print(name)
-        print(mpaths)
         if not len(mpaths):
             mpaths = [os.path.join(self.outdir, name)]
         self.models = []
