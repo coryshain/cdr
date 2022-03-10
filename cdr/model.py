@@ -1,6 +1,7 @@
 import re
 import textwrap
 import time as pytime
+import scipy.linalg
 import scipy.stats
 import scipy.signal
 import scipy.interpolate
@@ -375,6 +376,7 @@ class CDRModel(object):
         indicators = set()
 
         impulse_df_ix = []
+        impulse_blocks = {}
         for impulse in self.form.t.impulses(include_interactions=True):
             name = impulse.name()
             is_interaction = type(impulse).__name__ == 'ImpulseInteraction'
@@ -391,6 +393,9 @@ class CDRModel(object):
                 impulse_uq[name] = 1.
                 impulse_min[name] = 1.
                 impulse_max[name] = 1.
+                if i not in impulse_blocks:
+                    impulse_blocks[i] = {}
+                impulse_blocks[i]['rate'] = 1.
             else:
                 for i, df in enumerate(X + Y):
                     if name in df and not name.lower() == 'rate':
@@ -408,6 +413,10 @@ class CDRModel(object):
 
                         if self._vector_is_indicator(column):
                             indicators.add(name)
+
+                        if i not in impulse_blocks:
+                            impulse_blocks[i] = {}
+                        impulse_blocks[i][name] = column
 
                         found = True
                         break
@@ -431,8 +440,13 @@ class CDRModel(object):
                             impulse_min[name] = np.nanmin(column)
                             impulse_max[name] = np.nanmax(column)
 
+                            if i not in impulse_blocks:
+                                impulse_blocks[i] = {}
+                            impulse_blocks[i][name] = column
+
                             if self._vector_is_indicator(column):
                                 indicators.add(name)
+                            break
             if not found:
                 raise ValueError('Impulse %s was not found in an input file.' % name)
 
@@ -449,6 +463,23 @@ class CDRModel(object):
         self.impulse_min = impulse_min
         self.impulse_max = impulse_max
         self.indicators = indicators
+
+        names = []
+        corr_blocks = []
+        cov_blocks = []
+        for k in sorted(impulse_blocks.keys()):
+            block = pd.DataFrame(impulse_blocks[k])
+            corr_blocks.append(block.corr().values)
+            cov_blocks.append(block.cov().values)
+            names += list(block.columns)
+        corr = scipy.linalg.block_diag(*corr_blocks)
+        corr = pd.DataFrame(corr, index=names, columns=names)
+        cov = scipy.linalg.block_diag(*cov_blocks)
+        cov = pd.DataFrame(cov, index=names, columns=names)
+        means = pd.DataFrame([self.impulse_means[x] for x in cov.index], index=cov.index, columns=['val'])
+        self.impulse_corr = corr
+        self.impulse_cov = cov
+        self.impulse_sampler_means = means
 
         self.response_to_df_ix = {}
         for _response in response_names:
@@ -791,6 +822,12 @@ class CDRModel(object):
         for _response in self.response_to_df_ix:
             self.n_response_df = max(self.n_response_df, max(self.response_to_df_ix[_response]))
         self.n_response_df += 1
+
+        self.impulse_sampler = scipy.stats.multivariate_normal(
+            mean=self.impulse_sampler_means.val,
+            cov=self.impulse_cov,
+            allow_singular=True
+        )
         
         impulse_dfs_noninteraction = set()
         terminal_names = [x for x in self.terminal_names if self.node_table[x].p.family == 'NN']
@@ -1162,6 +1199,9 @@ class CDRModel(object):
             'impulse_uq': self.impulse_uq,
             'impulse_min': self.impulse_min,
             'impulse_max': self.impulse_max,
+            'impulse_corr': self.impulse_corr,
+            'impulse_cov': self.impulse_cov,
+            'impulse_sampler_means': self.impulse_sampler_means,
             'indicators': self.indicators,
             'outdir': self.outdir,
             'crossval_factor': self.crossval_factor,
@@ -6683,6 +6723,17 @@ class CDRModel(object):
 
         return impulse_name in self.non_dirac_impulses
 
+    def sample_impulses(self, *args, **kwargs):
+        """
+        Resample impulses from an empirical multivariate normal distribution derived from the training data.
+
+        :param args: ``list`` or ``tuple``; args to pass to scipy's resampling method
+        :param kwargs: ``dict``; kwargs to pass to scipy's resampling method
+        :return: ``numpy`` array; samples
+        """
+
+        return pd.DataFrame(self.impulse_sampler.rvs(*args, **kwargs), columns=self.impulse_cov.columns)
+
     def fit(self,
             X,
             Y,
@@ -8512,9 +8563,10 @@ class CDRModel(object):
 
                 if n_samples and (self.is_bayesian or self.has_dropout):
                     resample = True
+                    S = n_samples
                 else:
                     resample = False
-                    n_samples = 1
+                    S = 1
 
                 ref_as_manip = ref_varies_with_x and (not is_3d or ref_varies_with_y)  # Only return ref as manip if it fully varies along all axes
 
@@ -8861,7 +8913,7 @@ class CDRModel(object):
                     delta = self.predictive_distribution_delta_w_interactions
                 else:
                     delta = self.predictive_distribution_delta
-                for i in range(n_samples):
+                for i in range(S):
                     to_run = {}
                     for response in responses:
                         to_run[response] = {}
