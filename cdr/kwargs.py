@@ -310,12 +310,6 @@ MODEL_INITIALIZATION_KWARGS = [
         default_value_cdrnn=True
     ),
     Kwarg(
-        'standardize_response',
-        True,
-        bool,
-        "Standardize (Z-transform) the response variable implicitly during training using training set mean and variance. Can improve convergence speed and reduce vulnerability to local optima. Only affects fitting -- prediction, likelihood computation, and plotting are reported on the source values."
-    ),
-    Kwarg(
         'history_length',
         128,
         int,
