@@ -4602,7 +4602,7 @@ class CDRModel(object):
                             bijector = AffineScalar(
                                 shift=bijector_shift,
                                 scale=bijector_scale,
-                                name='response_bijector_%s' % response
+                                name='response_bijector_%s' % sn(response)
                             )
                             err_dist = TransformedDistribution(
                                 err_dist,
