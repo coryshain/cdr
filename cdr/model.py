@@ -23,12 +23,13 @@ ENSEMBLE = re.compile('\.m\d+')
 import tensorflow as tf
 if int(tf.__version__.split('.')[0]) == 1:
     from tensorflow.contrib.distributions import Normal, SinhArcsinh, Bernoulli, Categorical, Exponential, TransformedDistribution
-    from tensorflow.contrib.distributions.bijectors import AffineScalar
+    import tensorflow.contrib.distributions as tfd
+    AffineScalar = tfd.bijectors.AffineScalar
     ExponentiallyModifiedGaussian = None # Not supported
     def LogNormal(*args, **kwargs):
         return TransformedDistribution(
             Normal(*args, **kwargs),
-            bijector=tensorflow.contrib.distributions.bijectors.Exp(),
+            bijector=tfd.bijectors.Exp(),
             validate_args=True
         )
     from tensorflow.contrib.opt import NadamOptimizer
@@ -4463,7 +4464,7 @@ class CDRModel(object):
                     else:
                         _response_params = response_params
                     response_dist = pred_dist_fn(*_response_params)
-                    _response_dist = response_dist
+                    response_dist_src = response_dist
 
                     if self.is_real(response):
                         if self.get_response_dist_name(response) != 'lognormal':
@@ -4487,12 +4488,20 @@ class CDRModel(object):
                             response_dist,
                             bijector
                         )
+                    else:
+                        bijector = None
 
                     self.predictive_distribution[response] = response_dist
 
                     # Define prediction tensors
                     dist_name = self.get_response_dist_name(response)
-                    def MAP_predict(response=response, response_dist=response_dist, dist_name=dist_name):
+
+                    def MAP_predict(
+                            self=self,
+                            response_dist=response_dist_src,
+                            dist_name=dist_name,
+                            bijector=bijector
+                    ):
                         if dist_name.lower() == 'exgaussian':
                             # Mode not currently implemented for ExGaussian in TensorFlow Probability
                             # and reimplementation not possible until TFP implements the erfcxinv function.
@@ -4508,7 +4517,13 @@ class CDRModel(object):
                         elif dist_name.lower() == 'sinharcsinh':
                             mode = response_dist.loc
                         else:
-                            mode = response_dist.mode()
+                            if self.get_response_dist_name(response) == 'lognormal':
+                                mode = tf.exp(response_dist.distribution.mean() - response_dist.distribution.variance())
+                            else:
+                                mode = response_dist.mode()
+                        if self.is_real(response):
+                            mode = bijector.forward(mode)
+
                         return mode
 
                     prediction = tf.cond(self.use_MAP_mode, MAP_predict, response_dist.sample)
@@ -4700,9 +4715,6 @@ class CDRModel(object):
                     optimizer_kwargs['beta2'] = 0.9
                 if name in ('adagrad', 'adadelta', 'adam', 'nadam'):
                     optimizer_kwargs['epsilon'] = self.optim_epsilon
-                    # if name in ('adam', 'nadam'):
-                    #     optimizer_kwargs['beta2'] = 0.9
-
 
                 optimizer_class = {
                     'sgd': tf.train.GradientDescentOptimizer,

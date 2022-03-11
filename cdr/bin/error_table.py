@@ -90,7 +90,7 @@ if __name__ == '__main__':
         metric = 'MSE'
     elif args.metric.lower() in ['loglik', 'll', 'likelihood']:
         metric = 'Loglik'
-    elif args.metric.lower() in ['iter', 'niter', 'n_iter']:
+    elif args.metric.lower() in ['n', 'iter', 'niter', 'n_iter']:
         metric = 'Training iterations completed'
     else:
         raise ValueError('Unrecognized metric: %s.' % args.metric)
