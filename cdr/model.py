@@ -1,19 +1,19 @@
-import re
+import textwrap
 import textwrap
 import time as pytime
-import scipy.linalg
-import scipy.stats
-import scipy.signal
-import scipy.interpolate
 from collections import defaultdict
+
+import scipy.interpolate
+import scipy.linalg
+import scipy.signal
+import scipy.stats
 from sklearn.metrics import accuracy_score, f1_score
 
-from .kwargs import MODEL_INITIALIZATION_KWARGS, NN_KWARGS, NN_BAYES_KWARGS
-from .formula import *
-from .util import *
-from .data import build_CDR_impulse_data, build_CDR_response_data, corr, corr_cdr, get_first_last_obs_lists, \
-                  split_cdr_outputs
 from .backend import *
+from .data import build_CDR_impulse_data, build_CDR_response_data, corr, get_first_last_obs_lists, \
+    split_cdr_outputs
+from .formula import *
+from .kwargs import MODEL_INITIALIZATION_KWARGS
 from .opt import *
 from .plot import *
 
@@ -78,7 +78,12 @@ elif int(tf.__version__.split('.')[0]) == 2:
     TF_MAJOR_VERSION = 1
 else:
     raise ImportError('Unsupported TensorFlow version: %s. Must be 1.x.x or 2.x.x.' % tf.__version__)
-from tensorflow.python.ops import control_flow_ops
+
+
+def LogNormalLinearMean(loc, scale, **kwargs):
+    loc = tf.log(elu_epsilon(loc)) - tf.square(scale) / 2.
+    return LogNormal(loc, scale, **kwargs)
+
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
@@ -223,6 +228,13 @@ class CDRModel(object):
         'lognormal': {
             'dist': LogNormal,
             'name': 'lognormal',
+            'params': ('mu', 'sigma'),
+            'params_tf': ('loc', 'scale'),
+            'support': 'real'
+        },
+        'lognormallinearmean': {
+            'dist': LogNormalLinearMean,
+            'name': 'lognormallinearmean',
             'params': ('mu', 'sigma'),
             'params_tf': ('loc', 'scale'),
             'support': 'real'
@@ -1745,8 +1757,13 @@ class CDRModel(object):
                         s = self.Y_train_sds[response_name]
                         sigma = np.sqrt(np.log((m / s) ** 2) - 1)
                         mu = np.log(m / s) + (sigma ** 2) / 2
-                        # sigma = np.log(m / s)
-                        # mu = np.log(m)
+                        sigma = sigma[None, ...]
+                        mu = mu[None, ...]
+                    elif self.get_response_dist_name(response_name) == 'lognormallinearmean':
+                        m = self.Y_train_means[response_name]
+                        s = self.Y_train_sds[response_name]
+                        mu = m
+                        sigma = np.sqrt(np.log((m) ** 2) - 1)
                         sigma = sigma[None, ...]
                         mu = mu[None, ...]
                     else:
@@ -4466,7 +4483,7 @@ class CDRModel(object):
                     response_dist = pred_dist_fn(*_response_params)
                     response_dist_src = response_dist
 
-                    if self.is_real(response):
+                    if self.is_real(response) and self.get_response_dist_name(response) != 'lognormallinearmean':
                         if self.get_response_dist_name(response) != 'lognormal':
                             # Log normal variables must be positive, don't shift them
                             bijector_shift = tf.convert_to_tensor(
@@ -4517,7 +4534,7 @@ class CDRModel(object):
                         elif dist_name.lower() == 'sinharcsinh':
                             mode = response_dist.loc
                         else:
-                            if self.get_response_dist_name(response) == 'lognormal':
+                            if self.get_response_dist_name(response).startswith('lognormal'):
                                 mode = tf.exp(response_dist.distribution.mean() - response_dist.distribution.variance())
                             else:
                                 mode = response_dist.mode()
@@ -4593,7 +4610,7 @@ class CDRModel(object):
                         if self.get_response_ndim(response) == 1:
                             err_dist_params = [tf.squeeze(x, axis=-1) for x in err_dist_params]
                         err_dist = pred_dist_fn(*err_dist_params)
-                        if self.is_real(response):
+                        if self.is_real(response) and self.get_response_dist_name(response) != 'lognormallinearmean':
                             bijector_shift = None
                             bijector_scale = tf.convert_to_tensor(
                                 np.squeeze(self.Y_train_sds[response]),
@@ -6781,7 +6798,11 @@ class CDRModel(object):
         :return: ``numpy`` array; samples
         """
 
-        return pd.DataFrame(self.impulse_sampler.rvs(*args, **kwargs), columns=self.impulse_cov.columns)
+        sample = self.impulse_sampler.rvs(*args, **kwargs)
+        if len(sample.shape) < 2:
+            sample = sample[None, ...]
+
+        return pd.DataFrame(sample, columns=self.impulse_cov.columns)
 
     def fit(self,
             X,
@@ -8647,22 +8668,18 @@ class CDRModel(object):
                         B_ref = 1
 
                 # Initialize predictor reference
-                if reference_type == 'sampling':
-                    raise NotImplementedError('Predictor sampling is not yet supported')
-                    X_ref = self.sample_impulses(size=S).value
+                if reference_type is None:
+                    X_ref_arr = np.copy(self.reference_arr)
+                elif reference_type == 'mean':
+                    X_ref_arr = np.copy(self.impulse_means_arr)
                 else:
-                    if reference_type is None:
-                        X_ref_arr = np.copy(self.reference_arr)
-                    elif reference_type == 'mean':
-                        X_ref_arr = np.copy(self.impulse_means_arr)
-                    else:
-                        X_ref_arr = np.zeros_like(self.reference_arr)
-                    if X_ref is None:
-                        X_ref = {}
-                    for x in X_ref:
-                        ix = self.impulse_names_to_ix[x]
-                        X_ref_arr[ix] = X_ref[x]
-                    X_ref = X_ref_arr[None, None, ...]
+                    X_ref_arr = np.zeros_like(self.reference_arr)
+                if X_ref is None:
+                    X_ref = {}
+                for x in X_ref:
+                    ix = self.impulse_names_to_ix[x]
+                    X_ref_arr[ix] = X_ref[x]
+                X_ref = X_ref_arr[None, None, ...]
 
                 # Initialize timestamp reference
                 if X_time_ref is None:
@@ -8727,6 +8744,8 @@ class CDRModel(object):
                 X_base = None
                 X_time_base = None
                 t_delta_base = None
+                X_ref_mask = np.ones(self.n_impulse)
+                X_main_mask = np.ones(self.n_impulse)
 
                 for par in params:
                     axis_var = par['axis_var']
@@ -8747,8 +8766,9 @@ class CDRModel(object):
 
                     if axis_var in self.impulse_names_to_ix:
                         ix = self.impulse_names_to_ix[axis_var]
-                        X_ref_mask = np.ones_like(X_ref)
-                        X_ref_mask[..., ix] = 0
+                        X_main_mask[ix] = 0
+                        if ref_varies:
+                            X_ref_mask[ix] = 0
                         if axis is None:
                             qix = self.PLOT_QUANTILE_IX
                             lq = self.impulse_quantiles_arr[qix][ix]
@@ -8959,6 +8979,13 @@ class CDRModel(object):
                     if n_manip:
                         fd_main[self.use_MAP_mode] = False
 
+                if reference_type == 'sampling':
+                    X_samples = self.sample_impulses(size=S).values
+                    X_samples = np.expand_dims(X_samples, axis=(1,2)) # shape (S, 1, 1, K)
+                    X_ref_samples = X_samples * X_ref_mask[None, None, None, ...]
+                    if n_manip:
+                        X_main_samples = X_samples * X_main_mask[None, None, None, ...]
+
                 alpha = 100-float(level)
 
                 samples = {}
@@ -8967,6 +8994,14 @@ class CDRModel(object):
                 else:
                     delta = self.predictive_distribution_delta
                 for i in range(S):
+                    _X = fd_ref[self.X]
+                    _X = fd_main[self.X]
+                    if reference_type == 'sampling':
+                        fd_ref[self.X] += X_ref_samples[i]
+                        _X = fd_ref[self.X]
+                        if n_manip:
+                            fd_main[self.X] += X_main_samples[i]
+                            _X = fd_main[self.X]
                     to_run = {}
                     for response in responses:
                         to_run[response] = {}

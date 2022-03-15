@@ -391,6 +391,14 @@ def matmul(A, B, session=None):
             return C
 
 
+def elu_epsilon(x, epsilon):
+    return tf.where(
+        x > epsilon,
+        x,
+        tf.exp(x - epsilon) * epsilon
+    )
+
+
 def interpolated_integral(loc, val, mask=None, axis=0, session=None):
     assert isinstance(axis, int), 'axis must be a scalar integer'
     assert len(loc.shape) == len(val.shape), 'loc and val must be compatibly shaped. Got loc=%s, val=%s' % (loc.shape, val.shape)

@@ -1381,6 +1381,12 @@ PLOT_KWARGS_CORE = [
         float,
         "Timepoint at which to plot interactions."
     ),
+    Kwarg(
+        'reference_type',
+        None,
+        [str, None],
+        "Type of plotting reference to use. One of ``'sampling'``, ``'mean'``, ``'zero'``, or ``None`` for default."
+    ),
 
     # CONTROLS FOR UNIVARIATE IRF PLOTS
     Kwarg(
