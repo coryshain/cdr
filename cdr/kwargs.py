@@ -428,7 +428,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'epsilon',
-        1e-5,
+        1e-2,
         float,
         "Epsilon parameter to use for numerical stability in bounded parameter estimation."
     ),
@@ -442,8 +442,7 @@ MODEL_INITIALIZATION_KWARGS = [
         'learning_rate',
         0.001,
         float,
-        "Initial value for the learning rate.",
-        default_value_cdrnn=0.005
+        "Initial value for the learning rate."
     ),
     Kwarg(
         'learning_rate_min',
@@ -922,7 +921,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'n_units_ff',
-        32,
+        128,
         [int, str, None],
         "Number of units per feedforward encoder hidden layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_rnn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no feedforward encoder.",
         aliases=['n_units', 'n_units_encoder', 'n_units_input_projection']
@@ -960,7 +959,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'n_units_irf',
-        32,
+        128,
         [int, str, None],
         "Number of units per hidden layer in IRF. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_units_irf** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers.",
         aliases=['n_units', 'n_units_decoder']
@@ -1121,7 +1120,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'nn_regularizer_scale',
-        5.,
+        1.,
         [str, float, 'inherit'],
         "Scale of weight regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
@@ -1179,7 +1178,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'ff_dropout_rate',
-        0.1,
+        0.5,
         [float, None],
         "Rate at which to drop neurons of FF projection.",
         aliases=['dropout', 'dropout_rate', 'input_projection', 'h_in_dropout_rate']
@@ -1198,7 +1197,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'h_rnn_dropout_rate',
-        0.1,
+        0.5,
         [float, None],
         "Rate at which to drop neurons of h_rnn.",
         aliases=['dropout', 'dropout_rate']
@@ -1212,7 +1211,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'irf_dropout_rate',
-        0.1,
+        0.5,
         [float, None],
         "Rate at which to drop neurons of IRF layers.",
         aliases=['dropout', 'dropout_rate']
