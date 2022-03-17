@@ -99,6 +99,11 @@ if __name__ == '__main__':
                 stderr('Retrieving saved model %s...\n' % m)
                 cdr_model = CDREnsemble(p.outdir, m_path)
 
+                if args.algorithm.lower() == 'map':
+                    cdr_model.set_weight_type('ll')
+                else:
+                    cdr_model.set_weight_type('uniform')
+
                 stderr('Convolving %s...\n' % m)
                 cdr_model.convolve_inputs(
                     X,

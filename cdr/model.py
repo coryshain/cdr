@@ -9925,7 +9925,7 @@ class CDREnsemble(object):
 
     __doc__ = _doc_header + _doc_args
 
-    def __init__(self, outdir, name, weight_type='ll'):
+    def __init__(self, outdir, name):
         super(CDREnsemble, self).__init__()
 
         self.outdir = outdir
@@ -9944,8 +9944,7 @@ class CDREnsemble(object):
         for i, mpath in enumerate(mpaths):
             self.models.append(load_cdr(mpath))
 
-        assert weight_type.lower() in ('ll', 'uniform'), 'Unrecognized weighting type for ensemble: %s.' % weight_type
-        self.weight_type = weight_type
+        self.weight_type = 'uniform'
 
     def __getattribute__(self, item):
         try:
@@ -9961,6 +9960,12 @@ class CDREnsemble(object):
     @property
     def n_ensemble(self):
         return len(self.models)
+
+    def set_weight_type(self, weight_type):
+        if weight_type in ('uniform', 'll'):
+            self.weight_type = weight_type
+        else:
+            raise ValueError('Unrecognized weight type "%s" for CDR ensemble.' % weight_type)
 
     def model_weights(self):
         if self.weight_type.lower() == 'uniform':

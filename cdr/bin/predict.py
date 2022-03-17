@@ -399,6 +399,11 @@ if __name__ == '__main__':
                     cdr_percent_variance_explained = {}
                     cdr_true_variance = {}
 
+                    if args.algorithm.lower() == 'map':
+                        _model.set_weight_type('ll')
+                    else:
+                        _model.set_weight_type('uniform')
+
                     if args.mode == 'predict':
                         _model.predict(
                             X,
