@@ -6892,12 +6892,6 @@ class CDRModel(object):
                 float_type=self.float_type,
             )
 
-            # impulse_names = self.impulse_names
-            # stderr('Correlation matrix for input variables:\n')
-            # impulse_names_2d = [x for x in impulse_names if x in X_2d_predictor_names]
-            # rho = corr_cdr(X, impulse_names, impulse_names_2d, X_time, X_mask)
-            # stderr(str(rho) + '\n\n')
-
         if False:
             self.make_plots(prefix='plt')
 
@@ -8994,14 +8988,10 @@ class CDRModel(object):
                 else:
                     delta = self.predictive_distribution_delta
                 for i in range(S):
-                    _X = fd_ref[self.X]
-                    _X = fd_main[self.X]
                     if reference_type == 'sampling':
-                        fd_ref[self.X] += X_ref_samples[i]
-                        _X = fd_ref[self.X]
+                        fd_ref[self.X] = X_ref_in + X_ref_samples[i]
                         if n_manip:
-                            fd_main[self.X] += X_main_samples[i]
-                            _X = fd_main[self.X]
+                            fd_main[self.X] = X + X_main_samples[i]
                     to_run = {}
                     for response in responses:
                         to_run[response] = {}

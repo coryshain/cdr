@@ -1215,8 +1215,7 @@ NN_KWARGS = [
         'ranef_dropout_rate',
         None,
         [float, None],
-        "Rate at which to drop random effects indicators.",
-        aliases=['dropout', 'dropout_rate']
+        "Rate at which to drop random effects indicators."
     ),
 
     # DEPRECATED OR RARELY USED
