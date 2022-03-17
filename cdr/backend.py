@@ -395,7 +395,7 @@ def elu_epsilon(x, epsilon):
     return tf.where(
         x > epsilon,
         x,
-        tf.exp(x - epsilon) * epsilon
+        tf.exp(tf.minimum(x, epsilon) - epsilon) * epsilon # Min fn helps avoid bad gradients
     )
 
 

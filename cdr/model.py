@@ -80,8 +80,21 @@ else:
     raise ImportError('Unsupported TensorFlow version: %s. Must be 1.x.x or 2.x.x.' % tf.__version__)
 
 
-def LogNormalLinearMean(loc, scale, **kwargs):
-    loc = tf.log(elu_epsilon(loc)) - tf.square(scale) / 2.
+def LogNormalV2(loc, scale, epsilon=1e-5, **kwargs):
+    """
+    Initilize a LogNormal distribution parameterized by its mean and standard deviation,
+    rather than the more common parameterization by the mean and standard deviation of
+    the underlying normal distribution.
+    
+    :param loc: TF tensor; mean.
+    :param scale: TF tensor; standard deviation
+    :param epsilon: ``float``; stabilizing constant
+    :param kwargs: ``dict``; additional kwargs to the LogNormal distribution
+    :return: LogNormalV2 distribution object
+    """
+
+    scale = tf.sqrt(tf.log(tf.square(scale / (loc + epsilon)) + 1))
+    loc = tf.log(elu_epsilon(loc, epsilon)) - tf.square(scale) / 2.
     return LogNormal(loc, scale, **kwargs)
 
 
@@ -232,9 +245,9 @@ class CDRModel(object):
             'params_tf': ('loc', 'scale'),
             'support': 'real'
         },
-        'lognormallinearmean': {
-            'dist': LogNormalLinearMean,
-            'name': 'lognormallinearmean',
+        'lognormalv2': {
+            'dist': LogNormalV2,
+            'name': 'lognormalv2',
             'params': ('mu', 'sigma'),
             'params_tf': ('loc', 'scale'),
             'support': 'real'
@@ -1749,21 +1762,23 @@ class CDRModel(object):
                 out = []
                 ndim = self.get_response_ndim(response_name)
                 for param in self.get_response_params(response_name):
-                    if self.get_response_dist_name(response_name) == 'lognormal':
+                    if self.get_response_dist_name(response_name).startswith('lognormal'):
                         # Given response mean m and standard deviation s,
-                        # initialize lognormal mu and sigma such that the
-                        # mean of the distribution is m/s and the variance is 1
-                        m = self.Y_train_means[response_name]
-                        s = self.Y_train_sds[response_name]
-                        sigma = np.sqrt(np.log((m / s) ** 2) - 1)
-                        mu = np.log(m / s) + (sigma ** 2) / 2
-                        sigma = sigma[None, ...]
-                        mu = mu[None, ...]
-                    elif self.get_response_dist_name(response_name) == 'lognormallinearmean':
-                        m = self.Y_train_means[response_name]
-                        s = self.Y_train_sds[response_name]
-                        mu = m
-                        sigma = np.sqrt(np.log((m) ** 2) - 1)
+                        # initialize lognormal mu and sigma to instantiate the
+                        # desired mean and variance of the distribution.
+                        mean = self.Y_train_means[response_name]
+                        sd = self.Y_train_sds[response_name]
+                        if self.get_response_dist_name(response_name) == 'lognormal':
+                            # Normalized mean will be mean/sd and normalized sd will be 1
+                            m = mean / sd
+                            s = 1
+                            sigma = np.sqrt(np.log((s / m) ** 2 + 1))
+                            mu = np.log(m) + (sigma ** 2) / 2
+                        else: # self.get_response_dist_name(response_name) == 'lognormalv2'
+                            # lognormalv2 is not normalized in order to avoid
+                            # pushing means toward 0
+                            mu = mean
+                            sigma = sd
                         sigma = sigma[None, ...]
                         mu = mu[None, ...]
                     else:
@@ -4366,6 +4381,10 @@ class CDRModel(object):
                     pred_dist_fn = self.get_response_dist(response)
                     response_param_names = self.get_response_params(response)
                     response_params = self.intercept[response] # (batch, param, dim)
+                    
+                    response_dist_kwargs = {}
+                    if self.get_response_dist_name(response) == 'lognormalv2':
+                        response_dist_kwargs['epsilon'] = self.epsilon
 
                     # Base output deltas
                     X_weighted = self.X_weighted[response] # (batch, time, impulse, param, dim)
@@ -4480,10 +4499,10 @@ class CDRModel(object):
                         _response_params = [tf.squeeze(x, axis=-1) for x in response_params]
                     else:
                         _response_params = response_params
-                    response_dist = pred_dist_fn(*_response_params)
+                    response_dist = pred_dist_fn(*_response_params, **response_dist_kwargs)
                     response_dist_src = response_dist
 
-                    if self.is_real(response) and self.get_response_dist_name(response) != 'lognormallinearmean':
+                    if self.is_real(response) and self.get_response_dist_name(response) != 'lognormalv2':
                         if self.get_response_dist_name(response) != 'lognormal':
                             # Log normal variables must be positive, don't shift them
                             bijector_shift = tf.convert_to_tensor(
@@ -4538,7 +4557,7 @@ class CDRModel(object):
                                 mode = tf.exp(response_dist.distribution.mean() - response_dist.distribution.variance())
                             else:
                                 mode = response_dist.mode()
-                        if self.is_real(response):
+                        if self.is_real(response) and self.get_response_dist_name(response) != 'lognormalv2':
                             mode = bijector.forward(mode)
 
                         return mode
@@ -4558,7 +4577,8 @@ class CDRModel(object):
                     zeros = tf.zeros_like(ll)
                     sel = tf.cast(Y_mask, tf.bool)
                     ll = tf.where(sel, ll, zeros)
-                    # ll = tf.Print(ll, ['ll', ll, 'Y', Y, 'pred', self.prediction[response], 'base response mean', _response_dist.mean(), 'trans response dist mean', response_dist.mean(), 'mu', _response_params[0], 'sigma', _response_params[1], 'mu min', tf.reduce_min(_response_params[0]), 'mu max', tf.reduce_max(_response_params[0]), 'sigma min', tf.reduce_min(_response_params[1]), 'sigma max', tf.reduce_max(_response_params[1])])
+                    # ll = tf.Print(ll, ['ll', ll, 'll min', tf.reduce_min(ll), 'll max', tf.reduce_max(ll), 'll sum', tf.reduce_sum(ll), 'Y', Y, 'pred', self.prediction[response], ])
+                    # ll = tf.Print(ll, ['grad mu', tf.gradients(ll, _response_params[0]), 'grad sigma', tf.gradients(ll, _response_params[1])])
                     self.ll_by_var[response] = ll
 
                     # Define EMA over predictive distribution
@@ -4609,8 +4629,8 @@ class CDRModel(object):
                             err_dist_params.append(val)
                         if self.get_response_ndim(response) == 1:
                             err_dist_params = [tf.squeeze(x, axis=-1) for x in err_dist_params]
-                        err_dist = pred_dist_fn(*err_dist_params)
-                        if self.is_real(response) and self.get_response_dist_name(response) != 'lognormallinearmean':
+                        err_dist = pred_dist_fn(*err_dist_params, **response_dist_kwargs)
+                        if self.is_real(response) and self.get_response_dist_name(response) != 'lognormalv2':
                             bijector_shift = None
                             bijector_scale = tf.convert_to_tensor(
                                 np.squeeze(self.Y_train_sds[response]),
