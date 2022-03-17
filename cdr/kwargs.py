@@ -310,12 +310,6 @@ MODEL_INITIALIZATION_KWARGS = [
         default_value_cdrnn=True
     ),
     Kwarg(
-        'standardize_response',
-        True,
-        bool,
-        "Standardize (Z-transform) the response variable implicitly during training using training set mean and variance. Can improve convergence speed and reduce vulnerability to local optima. Only affects fitting -- prediction, likelihood computation, and plotting are reported on the source values."
-    ),
-    Kwarg(
         'history_length',
         128,
         int,
@@ -1220,8 +1214,7 @@ NN_KWARGS = [
         'ranef_dropout_rate',
         None,
         [float, None],
-        "Rate at which to drop random effects indicators.",
-        # aliases=['dropout', 'dropout_rate']
+        "Rate at which to drop random effects indicators."
     ),
 
     # DEPRECATED OR RARELY USED
@@ -1385,6 +1378,12 @@ PLOT_KWARGS_CORE = [
         0.,
         float,
         "Timepoint at which to plot interactions."
+    ),
+    Kwarg(
+        'reference_type',
+        None,
+        [str, None],
+        "Type of plotting reference to use. One of ``'sampling'``, ``'mean'``, ``'zero'``, or ``None`` for default."
     ),
 
     # CONTROLS FOR UNIVARIATE IRF PLOTS

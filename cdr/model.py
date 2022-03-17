@@ -1,28 +1,37 @@
-import re
+import textwrap
 import textwrap
 import time as pytime
-import scipy.stats
-import scipy.signal
-import scipy.interpolate
 from collections import defaultdict
+
+import scipy.interpolate
+import scipy.linalg
+import scipy.signal
+import scipy.stats
 from sklearn.metrics import accuracy_score, f1_score
 
-from .kwargs import MODEL_INITIALIZATION_KWARGS, NN_KWARGS, NN_BAYES_KWARGS
-from .formula import *
-from .util import *
-from .data import build_CDR_impulse_data, build_CDR_response_data, corr, corr_cdr, get_first_last_obs_lists, \
-                  split_cdr_outputs
 from .backend import *
+from .data import build_CDR_impulse_data, build_CDR_response_data, corr, get_first_last_obs_lists, \
+    split_cdr_outputs
+from .formula import *
+from .kwargs import MODEL_INITIALIZATION_KWARGS
 from .opt import *
 from .plot import *
 
 NN_KWARG_BY_KEY = {x.key: x for x in NN_KWARGS + NN_BAYES_KWARGS}
-ENSEMBLE = re.compile('_m\d+')
+ENSEMBLE = re.compile('\.m\d+')
 
 import tensorflow as tf
 if int(tf.__version__.split('.')[0]) == 1:
-    from tensorflow.contrib.distributions import Normal, SinhArcsinh, Bernoulli, Categorical, Exponential
+    from tensorflow.contrib.distributions import Normal, SinhArcsinh, Bernoulli, Categorical, Exponential, TransformedDistribution
+    import tensorflow.contrib.distributions as tfd
+    AffineScalar = tfd.bijectors.AffineScalar
     ExponentiallyModifiedGaussian = None # Not supported
+    def LogNormal(*args, **kwargs):
+        return TransformedDistribution(
+            Normal(*args, **kwargs),
+            bijector=tfd.bijectors.Exp(),
+            validate_args=True
+        )
     from tensorflow.contrib.opt import NadamOptimizer
     from tensorflow.contrib.framework import argsort as tf_argsort
     from tensorflow.contrib import keras
@@ -32,12 +41,34 @@ elif int(tf.__version__.split('.')[0]) == 2:
     import tensorflow.compat.v1 as tf
     tf.disable_v2_behavior()
     from tensorflow_probability import distributions as tfd
+    from tensorflow_probability import bijectors as tfb
     Normal = tfd.Normal
+    LogNormal = tfd.LogNormal
     SinhArcsinh = tfd.SinhArcsinh
     Bernoulli = tfd.Bernoulli
     Categorical = tfd.Categorical
     Exponential = tfd.Exponential
     ExponentiallyModifiedGaussian = tfd.ExponentiallyModifiedGaussian
+    TransformedDistribution = tfd.TransformedDistribution
+    Shift = tfb.Shift
+    Scale = tfb.Scale
+    Chain = tfb.Chain
+    Identity = tfb.Identity
+
+    def AffineScalar(shift, scale, *args, **kwargs):
+        chain = []
+        if shift is not None:
+            m = Shift(shift)
+            chain.append(m)
+        if scale is not None:
+            s = Scale(scale)
+            chain.append(s)
+        if len(chain) == 0:
+            return Identity(*args, **kwargs)
+        elif len(chain) == 1:
+            return chain[0]
+        return Chain(chain, *args, **kwargs)
+
     from tensorflow_probability import math as tfm
     tf_erfcx = tfm.erfcx
     from tensorflow.compat.v1.keras.optimizers import Nadam as NadamOptimizer
@@ -47,7 +78,25 @@ elif int(tf.__version__.split('.')[0]) == 2:
     TF_MAJOR_VERSION = 1
 else:
     raise ImportError('Unsupported TensorFlow version: %s. Must be 1.x.x or 2.x.x.' % tf.__version__)
-from tensorflow.python.ops import control_flow_ops
+
+
+def LogNormalV2(loc, scale, epsilon=1e-5, **kwargs):
+    """
+    Initilize a LogNormal distribution parameterized by its mean and standard deviation,
+    rather than the more common parameterization by the mean and standard deviation of
+    the underlying normal distribution.
+    
+    :param loc: TF tensor; mean.
+    :param scale: TF tensor; standard deviation
+    :param epsilon: ``float``; stabilizing constant
+    :param kwargs: ``dict``; additional kwargs to the LogNormal distribution
+    :return: LogNormalV2 distribution object
+    """
+
+    scale = tf.sqrt(tf.log(tf.square(scale / (loc + epsilon)) + 1))
+    loc = tf.log(elu_epsilon(loc, epsilon)) - tf.square(scale) / 2.
+    return LogNormal(loc, scale, **kwargs)
+
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
@@ -185,6 +234,20 @@ class CDRModel(object):
         'normal': {
             'dist': Normal,
             'name': 'normal',
+            'params': ('mu', 'sigma'),
+            'params_tf': ('loc', 'scale'),
+            'support': 'real'
+        },
+        'lognormal': {
+            'dist': LogNormal,
+            'name': 'lognormal',
+            'params': ('mu', 'sigma'),
+            'params_tf': ('loc', 'scale'),
+            'support': 'real'
+        },
+        'lognormalv2': {
+            'dist': LogNormalV2,
+            'name': 'lognormalv2',
             'params': ('mu', 'sigma'),
             'params_tf': ('loc', 'scale'),
             'support': 'real'
@@ -365,6 +428,7 @@ class CDRModel(object):
         indicators = set()
 
         impulse_df_ix = []
+        impulse_blocks = {}
         for impulse in self.form.t.impulses(include_interactions=True):
             name = impulse.name()
             is_interaction = type(impulse).__name__ == 'ImpulseInteraction'
@@ -381,6 +445,9 @@ class CDRModel(object):
                 impulse_uq[name] = 1.
                 impulse_min[name] = 1.
                 impulse_max[name] = 1.
+                if i not in impulse_blocks:
+                    impulse_blocks[i] = {}
+                impulse_blocks[i]['rate'] = 1.
             else:
                 for i, df in enumerate(X + Y):
                     if name in df and not name.lower() == 'rate':
@@ -398,6 +465,10 @@ class CDRModel(object):
 
                         if self._vector_is_indicator(column):
                             indicators.add(name)
+
+                        if i not in impulse_blocks:
+                            impulse_blocks[i] = {}
+                        impulse_blocks[i][name] = column
 
                         found = True
                         break
@@ -421,8 +492,13 @@ class CDRModel(object):
                             impulse_min[name] = np.nanmin(column)
                             impulse_max[name] = np.nanmax(column)
 
+                            if i not in impulse_blocks:
+                                impulse_blocks[i] = {}
+                            impulse_blocks[i][name] = column
+
                             if self._vector_is_indicator(column):
                                 indicators.add(name)
+                            break
             if not found:
                 raise ValueError('Impulse %s was not found in an input file.' % name)
 
@@ -439,6 +515,23 @@ class CDRModel(object):
         self.impulse_min = impulse_min
         self.impulse_max = impulse_max
         self.indicators = indicators
+
+        names = []
+        corr_blocks = []
+        cov_blocks = []
+        for k in sorted(impulse_blocks.keys()):
+            block = pd.DataFrame(impulse_blocks[k])
+            corr_blocks.append(block.corr().values)
+            cov_blocks.append(block.cov().values)
+            names += list(block.columns)
+        corr = scipy.linalg.block_diag(*corr_blocks)
+        corr = pd.DataFrame(corr, index=names, columns=names)
+        cov = scipy.linalg.block_diag(*cov_blocks)
+        cov = pd.DataFrame(cov, index=names, columns=names)
+        means = pd.DataFrame([self.impulse_means[x] for x in cov.index], index=cov.index, columns=['val'])
+        self.impulse_corr = corr
+        self.impulse_cov = cov
+        self.impulse_sampler_means = means
 
         self.response_to_df_ix = {}
         for _response in response_names:
@@ -781,6 +874,12 @@ class CDRModel(object):
         for _response in self.response_to_df_ix:
             self.n_response_df = max(self.n_response_df, max(self.response_to_df_ix[_response]))
         self.n_response_df += 1
+
+        self.impulse_sampler = scipy.stats.multivariate_normal(
+            mean=self.impulse_sampler_means.val,
+            cov=self.impulse_cov,
+            allow_singular=True
+        )
         
         impulse_dfs_noninteraction = set()
         terminal_names = [x for x in self.terminal_names if self.node_table[x].p.family == 'NN']
@@ -1152,6 +1251,9 @@ class CDRModel(object):
             'impulse_uq': self.impulse_uq,
             'impulse_min': self.impulse_min,
             'impulse_max': self.impulse_max,
+            'impulse_corr': self.impulse_corr,
+            'impulse_cov': self.impulse_cov,
+            'impulse_sampler_means': self.impulse_sampler_means,
             'indicators': self.indicators,
             'outdir': self.outdir,
             'crossval_factor': self.crossval_factor,
@@ -1201,6 +1303,9 @@ class CDRModel(object):
         self.impulse_uq = md.pop('impulse_uq', {})
         self.impulse_min = md.pop('impulse_min', {})
         self.impulse_max = md.pop('impulse_max', {})
+        self.impulse_corr = md.pop('impulse_corr', None)
+        self.impulse_cov = md.pop('impulse_cov', None)
+        self.impulse_sampler_means = md.pop('impulse_sampler_means', self.impulse_means)
         self.indicators = md.pop('indicators', set())
         self.outdir = md.pop('outdir', './cdr_model/')
         self.crossval_factor = md.pop('crossval_factor', None)
@@ -1611,14 +1716,7 @@ class CDRModel(object):
                 out = []
                 ndim = self.get_response_ndim(response_name)
                 for param in self.get_response_params(response_name):
-                    if param in ['mu', 'sigma']:
-                        if self.standardize_response:
-                            _out = np.ones((1, ndim))
-                        else:
-                            _out = self.Y_train_sds[response_name][None, ...]
-                    else:
-                        _out = np.ones((1, ndim))
-                    out.append(_out)
+                    out.append(np.ones((1, ndim)))
 
                 out = np.concatenate(out)
 
@@ -1664,16 +1762,32 @@ class CDRModel(object):
                 out = []
                 ndim = self.get_response_ndim(response_name)
                 for param in self.get_response_params(response_name):
+                    if self.get_response_dist_name(response_name).startswith('lognormal'):
+                        # Given response mean m and standard deviation s,
+                        # initialize lognormal mu and sigma to instantiate the
+                        # desired mean and variance of the distribution.
+                        mean = self.Y_train_means[response_name]
+                        sd = self.Y_train_sds[response_name]
+                        if self.get_response_dist_name(response_name) == 'lognormal':
+                            # Normalized mean will be mean/sd and normalized sd will be 1
+                            m = mean / sd
+                            s = 1
+                            sigma = np.sqrt(np.log((s / m) ** 2 + 1))
+                            mu = np.log(m) + (sigma ** 2) / 2
+                        else: # self.get_response_dist_name(response_name) == 'lognormalv2'
+                            # lognormalv2 is not normalized in order to avoid
+                            # pushing means toward 0
+                            mu = mean
+                            sigma = sd
+                        sigma = sigma[None, ...]
+                        mu = mu[None, ...]
+                    else:
+                        mu = np.zeros((1, ndim))
+                        sigma = np.ones((1, ndim))
                     if param == 'mu':
-                        if has_intercept and not self.standardize_response:
-                            _out = self.Y_train_means[response_name][None, ...]
-                        else:
-                            _out = np.zeros((1, ndim))
+                        _out = mu
                     elif param == 'sigma':
-                        if self.standardize_response:
-                            _out = self.constraint_fn_inv_np(np.ones((1, ndim)))
-                        else:
-                            _out = self.constraint_fn_inv_np(self.Y_train_sds[response_name][None, ...])
+                        _out = self.constraint_fn_inv_np(sigma)
                     elif param in ['beta', 'tailweight']:
                         _out = self.constraint_fn_inv_np(np.ones((1, ndim)))
                     elif param == 'skewness':
@@ -3688,7 +3802,7 @@ class CDRModel(object):
                         t_delta_scale = self.nn_t_delta_scale[nn_id]
                         t_delta_shift = self.nn_t_delta_shift[nn_id]
                         t_delta = t_delta * t_delta_scale
-                        # t_delta = t_delta + t_delta_shift
+                        t_delta = t_delta + t_delta_shift
                         t_delta = tf.sign(t_delta) * tf.log1p(tf.abs(t_delta))
 
                     irf_out = [t_delta]
@@ -3933,10 +4047,6 @@ class CDRModel(object):
                             self.interaction_fixed[response][interaction_name] = {}
                             for j, response_param in enumerate(response_params):
                                 _p = interaction_fixed[:, j]
-                                if self.standardize_response and \
-                                        self.is_real(response) and \
-                                        response_param in ['mu', 'sigma']:
-                                    _p = _p * self.Y_train_sds[response]
                                 dim_names = self.expand_param_name(response, response_param)
                                 for k, dim_name in enumerate(dim_names):
                                     val = _p[i, k]
@@ -3975,10 +4085,6 @@ class CDRModel(object):
                                     self.interaction_random[response][gf][interaction_name] = {}
                                     for k, response_param in enumerate(response_params):
                                         _p = interaction_random[:, :, k]
-                                        if self.standardize_response and \
-                                                self.is_real(response) and \
-                                                response_param in ['mu', 'sigma']:
-                                            _p = _p * self.Y_train_sds[response]
                                         dim_names = self.expand_param_name(response, response_param)
                                         for l, dim_name in enumerate(dim_names):
                                             val = _p[:, j, l]
@@ -4275,6 +4381,10 @@ class CDRModel(object):
                     pred_dist_fn = self.get_response_dist(response)
                     response_param_names = self.get_response_params(response)
                     response_params = self.intercept[response] # (batch, param, dim)
+                    
+                    response_dist_kwargs = {}
+                    if self.get_response_dist_name(response) == 'lognormalv2':
+                        response_dist_kwargs['epsilon'] = self.epsilon
 
                     # Base output deltas
                     X_weighted = self.X_weighted[response] # (batch, time, impulse, param, dim)
@@ -4292,9 +4402,6 @@ class CDRModel(object):
                     # Prediction targets
                     Y = self.Y[..., i]
                     Y_mask = self.Y_mask[..., i]
-                    if self.standardize_response and self.is_real(response):
-                        Yz = (Y - self.Y_train_means[response]) / self.Y_train_sds[response]
-                        Y = tf.cond(self.training, lambda: Yz, lambda: Y)
 
                     # Get output deltas
                     output_delta = tf.cond(
@@ -4382,21 +4489,8 @@ class CDRModel(object):
                     # Post process response params
                     for j, response_param_name in enumerate(response_param_names):
                         _response_param = response_params[j]
-                        if self.standardize_response and self.is_real(response):
-                            if response_param_name in ['sigma', 'tailweight', 'beta']:
-                                _response_param = self.constraint_fn(_response_param) + self.epsilon
-                            if response_param_name == 'mu':
-                                _response_param = tf.cond(
-                                    self.training,
-                                    lambda: _response_param,
-                                    lambda: _response_param * self.Y_train_sds[response] + self.Y_train_means[response]
-                                )
-                            elif response_param_name == 'sigma':
-                                _response_param = tf.cond(
-                                    self.training,
-                                    lambda: _response_param,
-                                    lambda: _response_param * self.Y_train_sds[response]
-                                )
+                        if self.is_real(response) and response_param_name in ['sigma', 'tailweight', 'beta']:
+                            _response_param = self.constraint_fn(_response_param) + self.epsilon
                         response_params[j] = _response_param
 
                     # Define predictive distribution
@@ -4405,12 +4499,45 @@ class CDRModel(object):
                         _response_params = [tf.squeeze(x, axis=-1) for x in response_params]
                     else:
                         _response_params = response_params
-                    response_dist = pred_dist_fn(*_response_params)
+                    response_dist = pred_dist_fn(*_response_params, **response_dist_kwargs)
+                    response_dist_src = response_dist
+
+                    if self.is_real(response) and self.get_response_dist_name(response) != 'lognormalv2':
+                        if self.get_response_dist_name(response) != 'lognormal':
+                            # Log normal variables must be positive, don't shift them
+                            bijector_shift = tf.convert_to_tensor(
+                                self.Y_train_means[response],
+                                dtype=self.FLOAT_TF
+                            )
+                        else:
+                            bijector_shift = None
+                        bijector_scale = tf.convert_to_tensor(
+                            self.Y_train_sds[response],
+                            dtype=self.FLOAT_TF
+                        )
+                        bijector = AffineScalar(
+                            shift=bijector_shift,
+                            scale=bijector_scale,
+                            name='response_bijector_%s' % sn(response)
+                        )
+                        response_dist = TransformedDistribution(
+                            response_dist,
+                            bijector
+                        )
+                    else:
+                        bijector = None
+
                     self.predictive_distribution[response] = response_dist
 
                     # Define prediction tensors
                     dist_name = self.get_response_dist_name(response)
-                    def MAP_predict(response=response, response_dist=response_dist, dist_name=dist_name):
+
+                    def MAP_predict(
+                            self=self,
+                            response_dist=response_dist_src,
+                            dist_name=dist_name,
+                            bijector=bijector
+                    ):
                         if dist_name.lower() == 'exgaussian':
                             # Mode not currently implemented for ExGaussian in TensorFlow Probability
                             # and reimplementation not possible until TFP implements the erfcxinv function.
@@ -4426,10 +4553,17 @@ class CDRModel(object):
                         elif dist_name.lower() == 'sinharcsinh':
                             mode = response_dist.loc
                         else:
-                            mode = response_dist.mode()
+                            if self.get_response_dist_name(response).startswith('lognormal'):
+                                mode = tf.exp(response_dist.distribution.mean() - response_dist.distribution.variance())
+                            else:
+                                mode = response_dist.mode()
+                        if self.is_real(response) and self.get_response_dist_name(response) != 'lognormalv2':
+                            mode = bijector.forward(mode)
+
                         return mode
 
                     prediction = tf.cond(self.use_MAP_mode, MAP_predict, response_dist.sample)
+
                     if dist_name in ['bernoulli', 'categorical']:
                         self.prediction[response] = tf.cast(prediction, self.INT_TF) * \
                                                     tf.cast(Y_mask, self.INT_TF)
@@ -4443,6 +4577,8 @@ class CDRModel(object):
                     zeros = tf.zeros_like(ll)
                     sel = tf.cast(Y_mask, tf.bool)
                     ll = tf.where(sel, ll, zeros)
+                    # ll = tf.Print(ll, ['ll', ll, 'll min', tf.reduce_min(ll), 'll max', tf.reduce_max(ll), 'll sum', tf.reduce_sum(ll), 'Y', Y, 'pred', self.prediction[response], ])
+                    # ll = tf.Print(ll, ['grad mu', tf.gradients(ll, _response_params[0]), 'grad sigma', tf.gradients(ll, _response_params[1])])
                     self.ll_by_var[response] = ll
 
                     # Define EMA over predictive distribution
@@ -4451,13 +4587,7 @@ class CDRModel(object):
                     response_params_ema_cur = []
                     # These will only ever be used in training mode, so un-standardize if needed
                     for j , response_param_name in enumerate(response_param_names):
-                        _response_param = response_params[j]
-                        if self.standardize_response and self.is_real(response):
-                            if response_param_name == 'mu':
-                                _response_param = _response_param * self.Y_train_sds[response] + self.Y_train_means[response]
-                            elif response_param_name == 'sigma':
-                                _response_param = _response_param * self.Y_train_sds[response]
-                        response_params_ema_cur.append(_response_param)
+                        response_params_ema_cur.append(response_params[j])
                     response_params_ema_cur = tf.stack(response_params_ema_cur, axis=1)
                     response_params_ema_cur = tf.reduce_mean(response_params_ema_cur, axis=0)
                     self.response_params_ema[response] = tf.Variable(
@@ -4499,7 +4629,22 @@ class CDRModel(object):
                             err_dist_params.append(val)
                         if self.get_response_ndim(response) == 1:
                             err_dist_params = [tf.squeeze(x, axis=-1) for x in err_dist_params]
-                        err_dist = pred_dist_fn(*err_dist_params)
+                        err_dist = pred_dist_fn(*err_dist_params, **response_dist_kwargs)
+                        if self.is_real(response) and self.get_response_dist_name(response) != 'lognormalv2':
+                            bijector_shift = None
+                            bijector_scale = tf.convert_to_tensor(
+                                np.squeeze(self.Y_train_sds[response]),
+                                dtype=self.FLOAT_TF
+                            )
+                            bijector = AffineScalar(
+                                shift=bijector_shift,
+                                scale=bijector_scale,
+                                name='response_bijector_%s' % sn(response)
+                            )
+                            err_dist = TransformedDistribution(
+                                err_dist,
+                                bijector
+                            )
                         err_dist_theoretical_cdf = err_dist.cdf(self.errors[response])
                         try:
                             err_dist_theoretical_quantiles = err_dist.quantile(empirical_quantiles)
@@ -4607,9 +4752,6 @@ class CDRModel(object):
                     optimizer_kwargs['beta2'] = 0.9
                 if name in ('adagrad', 'adadelta', 'adam', 'nadam'):
                     optimizer_kwargs['epsilon'] = self.optim_epsilon
-                    # if name in ('adam', 'nadam'):
-                    #     optimizer_kwargs['beta2'] = 0.9
-
 
                 optimizer_class = {
                     'sgd': tf.train.GradientDescentOptimizer,
@@ -6194,10 +6336,6 @@ class CDRModel(object):
 
         pd.set_option("display.max_colwidth", 10000)
         out = ' ' * indent + 'FITTED PARAMETER VALUES:\n'
-        out += ' ' * indent + 'NOTE: Parameters are reported on the training set scale, so if you used\n'
-        out += ' ' * indent + '      `standardize_response=True`, coefficients and interactions will be shown\n'
-        out += ' ' * indent + '      in standard units of the response. To rescale them to source units,\n'
-        out += ' ' * indent + '      "unstandardize" the estimates using the training set response SD.\n'
         out += ' ' * indent + 'NOTE: Fixed effects for bounded parameters are reported on the constrained space, but\n'
         out += ' ' * indent + '      random effects for bounded parameters are reported on the unconstrained space.\n'
         out += ' ' * indent + '      Therefore, they cannot be directly added. To obtain parameter estimates\n'
@@ -6439,8 +6577,6 @@ class CDRModel(object):
 
                 if self.is_bayesian:
                     out += ' ' * indent + 'VARIATIONAL PRIORS:\n'
-                    out += ' ' * indent + '  NOTE: If using **standardize_response**, priors are reported\n'
-                    out += ' ' * indent + '        on the standardized scale where relevant.\n'
 
                     kl_penalties = self.kl_penalties
 
@@ -6673,6 +6809,21 @@ class CDRModel(object):
 
         return impulse_name in self.non_dirac_impulses
 
+    def sample_impulses(self, *args, **kwargs):
+        """
+        Resample impulses from an empirical multivariate normal distribution derived from the training data.
+
+        :param args: ``list`` or ``tuple``; args to pass to scipy's resampling method
+        :param kwargs: ``dict``; kwargs to pass to scipy's resampling method
+        :return: ``numpy`` array; samples
+        """
+
+        sample = self.impulse_sampler.rvs(*args, **kwargs)
+        if len(sample.shape) < 2:
+            sample = sample[None, ...]
+
+        return pd.DataFrame(sample, columns=self.impulse_cov.columns)
+
     def fit(self,
             X,
             Y,
@@ -6760,12 +6911,6 @@ class CDRModel(object):
                 int_type=self.int_type,
                 float_type=self.float_type,
             )
-
-            # impulse_names = self.impulse_names
-            # stderr('Correlation matrix for input variables:\n')
-            # impulse_names_2d = [x for x in impulse_names if x in X_2d_predictor_names]
-            # rho = corr_cdr(X, impulse_names, impulse_names_2d, X_time, X_mask)
-            # stderr(str(rho) + '\n\n')
 
         if False:
             self.make_plots(prefix='plt')
@@ -7282,8 +7427,6 @@ class CDRModel(object):
         :return: 1D ``numpy`` array; mean network predictions for regression targets (same length and sort order as ``y_time``).
         """
 
-        assert isinstance(self, CDRModel) or isinstance(self,
-                                                        CDREnsemble), 'predict may only be called on CDRModel or CDREnsemble'
         assert Y is not None or not return_loglik, 'Cannot return log likelihood when Y is not provided.'
         assert not dump or (
                 sum_outputs_along_T and sum_outputs_along_K), 'dump=True is only supported if sum_outputs_along_T=True and sum_outputs_along_K=True'
@@ -7550,10 +7693,7 @@ class CDRModel(object):
         :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
         """
 
-        assert isinstance(self, CDRModel) or isinstance(self,
-                                                        CDREnsemble), 'log_lik may only be called on CDRModel or CDREnsemble'
-        assert not dump or (
-                    sum_outputs_along_T and sum_outputs_along_K), 'dump=True is only supported if sum_outputs_along_T=True and sum_outputs_along_K=True'
+        assert not dump or (sum_outputs_along_T and sum_outputs_along_K), 'dump=True is only supported if sum_outputs_along_T=True and sum_outputs_along_K=True'
 
         out = self.predict(
             X,
@@ -7637,9 +7777,6 @@ class CDRModel(object):
         :param verbose: ``bool``; Report progress and metrics to standard error.
         :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
         """
-
-        assert isinstance(self, CDRModel) or isinstance(self,
-                                                        CDREnsemble), 'loss may only be called on CDRModel or CDREnsemble'
 
         if verbose:
             usingGPU = tf.test.is_gpu_available()
@@ -7803,11 +7940,7 @@ class CDRModel(object):
         :return: pair of <``dict``, ``str``>; Dictionary of evaluation metrics, human-readable evaluation summary string.
         """
 
-        assert isinstance(self, CDRModel) or isinstance(self,
-                                                        CDREnsemble), 'evaluate may only be called on CDRModel or CDREnsemble'
-
-        assert not dump or (
-                    sum_outputs_along_T and sum_outputs_along_K), 'dump=True is only supported if sum_outputs_along_T=True and sum_outputs_along_K=True'
+        assert not dump or (sum_outputs_along_T and sum_outputs_along_K), 'dump=True is only supported if sum_outputs_along_T=True and sum_outputs_along_K=True'
 
         if partition and not partition.startswith('_'):
             partition_str = '_' + partition
@@ -8514,9 +8647,10 @@ class CDRModel(object):
 
                 if n_samples and (self.is_bayesian or self.has_dropout):
                     resample = True
+                    S = n_samples
                 else:
                     resample = False
-                    n_samples = 1
+                    S = 1
 
                 ref_as_manip = ref_varies_with_x and (not is_3d or ref_varies_with_y)  # Only return ref as manip if it fully varies along all axes
 
@@ -8624,6 +8758,8 @@ class CDRModel(object):
                 X_base = None
                 X_time_base = None
                 t_delta_base = None
+                X_ref_mask = np.ones(self.n_impulse)
+                X_main_mask = np.ones(self.n_impulse)
 
                 for par in params:
                     axis_var = par['axis_var']
@@ -8644,8 +8780,9 @@ class CDRModel(object):
 
                     if axis_var in self.impulse_names_to_ix:
                         ix = self.impulse_names_to_ix[axis_var]
-                        X_ref_mask = np.ones_like(X_ref)
-                        X_ref_mask[..., ix] = 0
+                        X_main_mask[ix] = 0
+                        if ref_varies:
+                            X_ref_mask[ix] = 0
                         if axis is None:
                             qix = self.PLOT_QUANTILE_IX
                             lq = self.impulse_quantiles_arr[qix][ix]
@@ -8856,6 +8993,13 @@ class CDRModel(object):
                     if n_manip:
                         fd_main[self.use_MAP_mode] = False
 
+                if reference_type == 'sampling':
+                    X_samples = self.sample_impulses(size=S).values
+                    X_samples = np.expand_dims(X_samples, axis=(1,2)) # shape (S, 1, 1, K)
+                    X_ref_samples = X_samples * X_ref_mask[None, None, None, ...]
+                    if n_manip:
+                        X_main_samples = X_samples * X_main_mask[None, None, None, ...]
+
                 alpha = 100-float(level)
 
                 samples = {}
@@ -8863,7 +9007,11 @@ class CDRModel(object):
                     delta = self.predictive_distribution_delta_w_interactions
                 else:
                     delta = self.predictive_distribution_delta
-                for i in range(n_samples):
+                for i in range(S):
+                    if reference_type == 'sampling':
+                        fd_ref[self.X] = X_ref_in + X_ref_samples[i]
+                        if n_manip:
+                            fd_main[self.X] = X + X_main_samples[i]
                     to_run = {}
                     for response in responses:
                         to_run[response] = {}
@@ -8914,8 +9062,7 @@ class CDRModel(object):
                     mean[response] = {}
                     for dim_name in samples[response]:
                         _samples = np.stack(samples[response][dim_name], axis=0)
-                        rescale = self.standardize_response and \
-                                  self.is_real(response) and \
+                        rescale = self.is_real(response) and \
                                   (dim_name.startswith('mu') or dim_name.startswith('sigma'))
                         if rescale:
                             _samples = _samples * self.Y_train_sds[response]
@@ -9778,16 +9925,11 @@ class CDREnsemble(object):
 
     __doc__ = _doc_header + _doc_args
 
-    def __init__(self, outdir, name, weight_type='ll'):
+    def __init__(self, outdir, name):
         super(CDREnsemble, self).__init__()
 
         self.outdir = outdir
         self.name = name
-        for x in os.listdir(self.outdir):
-            print(x.startswith(name))
-            print(ENSEMBLE.match(x[len(name):]))
-            print(x[len(name):])
-            print(os.path.isdir(os.path.join(self.outdir,x)))
         mpaths = [
             os.path.join(self.outdir,x) for x in os.listdir(self.outdir) if
             (
@@ -9796,16 +9938,13 @@ class CDREnsemble(object):
                 os.path.isdir(os.path.join(self.outdir,x))
             )
         ]
-        print(name)
-        print(mpaths)
         if not len(mpaths):
             mpaths = [os.path.join(self.outdir, name)]
         self.models = []
         for i, mpath in enumerate(mpaths):
             self.models.append(load_cdr(mpath))
 
-        assert weight_type.lower() in ('ll', 'uniform'), 'Unrecognized weighting type for ensemble: %s.' % weight_type
-        self.weight_type = weight_type
+        self.weight_type = 'uniform'
 
     def __getattribute__(self, item):
         try:
@@ -9821,6 +9960,12 @@ class CDREnsemble(object):
     @property
     def n_ensemble(self):
         return len(self.models)
+
+    def set_weight_type(self, weight_type):
+        if weight_type in ('uniform', 'll'):
+            self.weight_type = weight_type
+        else:
+            raise ValueError('Unrecognized weight type "%s" for CDR ensemble.' % weight_type)
 
     def model_weights(self):
         if self.weight_type.lower() == 'uniform':
