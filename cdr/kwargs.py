@@ -1198,7 +1198,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'rnn_dropout_rate',
-        None,
+        0.5,
         [float, None],
         "Rate at which to entirely drop the RNN.",
         aliases=['dropout', 'dropout_rate']
