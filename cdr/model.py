@@ -93,8 +93,8 @@ def LogNormalV2(loc, scale, epsilon=1e-5, **kwargs):
     :return: LogNormalV2 distribution object
     """
 
-    scale = tf.sqrt(tf.log(tf.square(scale / (loc + epsilon)) + 1))
-    loc = tf.log(elu_epsilon(loc, epsilon)) - tf.square(scale) / 2.
+    scale = tf.sqrt(tf.log(tf.square(scale / (loc + epsilon)) + 1) + epsilon)
+    loc = tf.log(tf.maximum(loc, epsilon)) - tf.square(scale) / 2.
     return LogNormal(loc, scale, **kwargs)
 
 
@@ -4580,13 +4580,15 @@ class CDRModel(object):
                     # Get elementwise log likelihood
                     if self.is_real(response):
                         # Ensure a safe value for Y
-                        pass
-                    ll = response_dist.log_prob(Y)
+                        sel = tf.cast(Y_mask, tf.bool)
+                        Y_safe = tf.ones_like(Y) * self.Y_train_means[response]
+                        _Y = tf.where(sel, Y, Y_safe)
+                    else:
+                        _Y = Y
+                    ll = response_dist.log_prob(_Y)
 
                     # Mask out likelihoods of predictions for missing response variables.
-                    zeros = tf.zeros_like(ll)
-                    sel = tf.cast(Y_mask, tf.bool)
-                    ll = tf.where(sel, ll, zeros)
+                    ll = ll * Y_mask
                     # ll = tf.Print(ll, ['ll', ll, 'll min', tf.reduce_min(ll), 'll max', tf.reduce_max(ll), 'll sum', tf.reduce_sum(ll), 'Y', Y, 'pred', self.prediction[response], ])
                     # ll = tf.Print(ll, ['grad mu', tf.gradients(ll, _response_params[0]), 'grad sigma', tf.gradients(ll, _response_params[1])])
                     self.ll_by_var[response] = ll
