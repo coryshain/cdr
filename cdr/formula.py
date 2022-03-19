@@ -1104,7 +1104,7 @@ class Formula(object):
         elif op in ['s', 's.']:
             out = s(arr)
         elif op == 'log':
-            out = np.log(arr)
+            out = np.log(np.maximum(arr, 1e-12))
         elif op == 'log1p':
             out = np.log(arr + 1)
         elif op == 'exp':

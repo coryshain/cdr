@@ -3452,6 +3452,13 @@ class CDRModel(object):
                 # IRF
                 if nn_id in self.nn_irf_ids:
                     irf_layers = []
+
+                    # l0_scale = tf.Variable(1., '%s_l0_scale' % nn_id)
+                    # l0_shift = tf.Variable(0., '%s_l0_shift' % nn_id)
+                    # def l0(x, scale=l0_scale, shift=l0_shift):
+                    #     return x * scale + shift
+                    # irf_layers.append(l0)
+
                     for l in range(n_layers_irf + 1):
                         if l == 0 or not ranef_l1_only:
                             _rangf_map = rangf_map_l1
@@ -3504,11 +3511,11 @@ class CDRModel(object):
 
                     self.nn_irf_layers[nn_id] = irf_layers
 
-                    if log_transform_t_delta:
-                        t_delta_scale = tf.Variable(1., name='t_delta_scale_%s' % nn_id)
-                        t_delta_shift = tf.Variable(0., name='t_delta_shift_%s' % nn_id)
-                        self.nn_t_delta_scale[nn_id] = t_delta_scale
-                        self.nn_t_delta_shift[nn_id] = t_delta_shift
+                    # if log_transform_t_delta:
+                    #     t_delta_scale = tf.Variable(1., name='t_delta_scale_%s' % nn_id)
+                    #     t_delta_shift = tf.Variable(0., name='t_delta_shift_%s' % nn_id)
+                    #     self.nn_t_delta_scale[nn_id] = t_delta_scale
+                    #     self.nn_t_delta_shift[nn_id] = t_delta_shift
 
     def _compile_nn(self, nn_id):
         with self.session.as_default():
@@ -3799,10 +3806,10 @@ class CDRModel(object):
                     nn_irf_impulses = tf.gather(X, impulse_ix, axis=2) # IRF output dims, includes rate
 
                     if log_transform_t_delta:
-                        t_delta_scale = self.nn_t_delta_scale[nn_id]
-                        t_delta_shift = self.nn_t_delta_shift[nn_id]
-                        t_delta = t_delta * t_delta_scale
-                        t_delta = t_delta + t_delta_shift
+                        # t_delta_scale = self.nn_t_delta_scale[nn_id]
+                        # t_delta_shift = self.nn_t_delta_shift[nn_id]
+                        # t_delta = t_delta * t_delta_scale
+                        # t_delta = t_delta + t_delta_shift
                         t_delta = tf.sign(t_delta) * tf.log1p(tf.abs(t_delta))
 
                     irf_out = [t_delta]
@@ -3814,9 +3821,9 @@ class CDRModel(object):
                             _X_gathered = _X_gathered + h_rnn
                         irf_out.append(_X_gathered)  # IRF inputs, no rate
                     irf_out = tf.concat(irf_out, axis=2)
-                    for l in range(n_layers_irf + 1):
-                        irf_out = self.nn_irf_layers[nn_id][l](
-                            irf_out,
+                    for layer in self.nn_irf_layers[nn_id]:
+                        irf_out = layer(
+                            irf_out
                         )
 
                     stabilizing_constant = (self.history_length + self.future_length) * len(output_names)
@@ -4571,6 +4578,9 @@ class CDRModel(object):
                         self.prediction[response] = prediction * Y_mask
 
                     # Get elementwise log likelihood
+                    if self.is_real(response):
+                        # Ensure a safe value for Y
+                        pass
                     ll = response_dist.log_prob(Y)
 
                     # Mask out likelihoods of predictions for missing response variables.
