@@ -1054,7 +1054,7 @@ NN_KWARGS = [
     Kwarg(
         'weight_sd_init',
         'glorot',
-        [float, str, None],
+        [str, float, None],
         "Standard deviation of kernel initialization distribution (Normal, mean=0). Can also be ``'glorot'``, which uses the SD of the Glorot normal initializer. If ``None``, inferred from other hyperparams."
     ),
 
@@ -1280,7 +1280,7 @@ NN_BAYES_KWARGS = [
     ),
     Kwarg(
         'gamma_prior_sd',
-        'glorot',
+        1,
         [str, float],
         "Standard deviation of prior on batch norm gammas. A ``float``, ``'glorot'``, or ``'he'``. Ignored unless batch normalization is used",
         aliases=['conv_prior_sd', 'prior_sd']

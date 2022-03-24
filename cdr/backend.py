@@ -1459,7 +1459,7 @@ class DenseLayer(object):
             units=None,
             use_bias=True,
             activation=None,
-            kernel_sd_init='he',
+            kernel_sd_init='glorot',
             dropout=None,
             maxnorm=None,
             batch_normalization_decay=None,

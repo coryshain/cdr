@@ -3348,7 +3348,8 @@ class CDRModel(object):
                             )
                             self.layers.append(projection)
 
-                            self.regularizable_layers[nn_id].append(projection)
+                            if 'nn' not in self.rvs:
+                                self.regularizable_layers[nn_id].append(projection)
                             ff_layers.append(make_lambda(projection, session=self.session, use_kwargs=False))
 
                     ff_fn = compose_lambdas(ff_layers)
@@ -3380,7 +3381,8 @@ class CDRModel(object):
                         _rnn_c_ema = tf.Variable(tf.zeros(units), trainable=False, name='%s_rnn_c_ema_l%d' % (nn_id, l+1))
                         rnn_c_ema.append(_rnn_c_ema)
                         self.layers.append(layer)
-                        self.regularizable_layers[nn_id].append(layer)
+                        if 'nn' not in self.rvs:
+                            self.regularizable_layers[nn_id].append(layer)
                         rnn_layers.append(make_lambda(layer, session=self.session, use_kwargs=True))
 
                     rnn_encoder = compose_lambdas(rnn_layers)
@@ -3424,7 +3426,8 @@ class CDRModel(object):
                             )
                             self.layers.append(projection)
 
-                            self.regularizable_layers[nn_id].append(projection)
+                            if 'nn' not in self.rvs:
+                                self.regularizable_layers[nn_id].append(projection)
                             rnn_projection_layers.append(make_lambda(projection, session=self.session, use_kwargs=False))
 
                         rnn_projection_fn = compose_lambdas(rnn_projection_layers)
@@ -3504,7 +3507,7 @@ class CDRModel(object):
                         self.layers.append(projection)
                         irf_layers.append(projection)
 
-                        if l < n_layers_irf:
+                        if l < n_layers_irf and 'nn' not in self.rvs:
                             self.regularizable_layers[nn_id].append(projection)
                         if l == 0:
                             self.nn_irf_l1[nn_id] = projection
