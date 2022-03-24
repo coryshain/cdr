@@ -195,7 +195,9 @@ def filter_invalid_responses(Y, dv, crossval_factor=None, crossval_fold=None):
                     is_numeric = False
                 if is_numeric:
                     finite = np.isfinite(_Y[_dv])
-                    _select_Y_valid_dv |= finite
+                else:
+                    finite = np.ones(len(_Y), dtype=bool)
+                _select_Y_valid_dv |= finite
 
         _select_Y_valid = _select_Y_valid_cv * _select_Y_valid_dv
 
