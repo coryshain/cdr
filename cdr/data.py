@@ -189,7 +189,7 @@ def filter_invalid_responses(Y, dv, crossval_factor=None, crossval_fold=None):
         for _dv in dv:
             if _dv in _Y:
                 dtype = _Y[_dv].dtype
-                if dtype.name != 'category' and np.issubdtype(dtype, np.number):
+                if dtype.name not in ('object', 'category') and np.issubdtype(dtype, np.number):
                     is_numeric = True
                 else:
                     is_numeric = False
