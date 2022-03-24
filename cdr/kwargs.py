@@ -424,7 +424,14 @@ MODEL_INITIALIZATION_KWARGS = [
         'epsilon',
         1e-2,
         float,
-        "Epsilon parameter to use for numerical stability in bounded parameter estimation."
+        "Epsilon parameter to use for numerical stability in bounded parameter estimation (imposes a positive lower bound on the parameter)."
+    ),
+    Kwarg(
+        'pred_dist_epsilon',
+        1e-2,
+        float,
+        "Epsilon parameter to use for numerical stability in bounded parameters of the predictive distribution (imposes a positive lower bound on the parameter).",
+        aliases=['epsilon']
     ),
     Kwarg(
         'optim_epsilon',
