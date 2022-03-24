@@ -4394,7 +4394,7 @@ class CDRModel(object):
                     
                     response_dist_kwargs = {}
                     if self.get_response_dist_name(response) == 'lognormalv2':
-                        response_dist_kwargs['epsilon'] = self.epsilon
+                        response_dist_kwargs['epsilon'] = self.pred_dist_epsilon
 
                     # Base output deltas
                     X_weighted = self.X_weighted[response] # (batch, time, impulse, param, dim)
@@ -4500,7 +4500,7 @@ class CDRModel(object):
                     for j, response_param_name in enumerate(response_param_names):
                         _response_param = response_params[j]
                         if self.is_real(response) and response_param_name in ['sigma', 'tailweight', 'beta']:
-                            _response_param = self.constraint_fn(_response_param) + self.epsilon
+                            _response_param = self.constraint_fn(_response_param) + self.pred_dist_epsilon
                         response_params[j] = _response_param
 
                     # Define predictive distribution
@@ -4555,11 +4555,11 @@ class CDRModel(object):
                             m = response_dist.loc
                             s = response_dist.scale
                             b = response_dist.rate
-                            t = 1. / tf.maximum(b, self.epsilon)
-                            z = (t / tf.maximum(s, self.epsilon)) / np.sqrt(2. / np.pi)
+                            t = 1. / tf.maximum(b, self.pred_dist_epsilon)
+                            z = (t / tf.maximum(s, self.pred_dist_epsilon)) / np.sqrt(2. / np.pi)
                             # Approximation to erfcxinv, most accurate when z < 1 (i.e. skew is small relative to scale)
-                            y = 1. / tf.maximum(z * np.sqrt(np.pi), self.epsilon) + z * np.sqrt(np.pi) / 2.
-                            mode = m - y * s * np.sqrt(2.) - s / tf.maximum(t, self.epsilon)
+                            y = 1. / tf.maximum(z * np.sqrt(np.pi), self.pred_dist_epsilon) + z * np.sqrt(np.pi) / 2.
+                            mode = m - y * s * np.sqrt(2.) - s / tf.maximum(t, self.pred_dist_epsilon)
                         elif dist_name.lower() == 'sinharcsinh':
                             mode = response_dist.loc
                         else:
