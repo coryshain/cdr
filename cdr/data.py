@@ -360,7 +360,11 @@ def build_CDR_response_data(
                 for response in responses:
                     _Y = Y[i]
                     if i in response_to_df_ix[response]:
-                        _Y_mask.append(np.isfinite(_Y[response]))
+                        try:
+                            __Y_mask = np.isfinite(_Y[response])
+                        except TypeError:
+                            __Y_mask = np.ones(_Y[response].shape, dtype=bool)
+                        _Y_mask.append(__Y_mask)
                     else:
                         _Y_mask.append(np.zeros(len(_Y)))
                 _Y_mask = np.stack(_Y_mask, axis=1)
