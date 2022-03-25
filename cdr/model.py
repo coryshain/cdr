@@ -391,7 +391,7 @@ class CDRModel(object):
         Y_train_quantiles = {}
 
         for i, _response_name in enumerate(Y_all):
-            stderr('\r    Processing response %d/%d' % (i + 1, len(Y_all)))
+            stderr('\r    Processing response %d/%d...' % (i + 1, len(Y_all)))
             _response = Y_all[_response_name]
             if len(_response):
                 if response_is_categorical[_response_name]:
@@ -437,7 +437,7 @@ class CDRModel(object):
         impulses = self.form.t.impulses(include_interactions=True)
 
         for impulse_ix, impulse in enumerate(impulses):
-            stderr('\r    Processing predictor %d/%d' % (impulse_ix + 1, len(impulses)))
+            stderr('\r    Processing predictor %d/%d...' % (impulse_ix + 1, len(impulses)))
             name = impulse.name()
             is_interaction = type(impulse).__name__ == 'ImpulseInteraction'
             found = False
