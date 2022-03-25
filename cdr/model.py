@@ -389,7 +389,9 @@ class CDRModel(object):
         Y_train_means = {}
         Y_train_sds = {}
         Y_train_quantiles = {}
-        for _response_name in Y_all:
+
+        for i, _response_name in enumerate(Y_all):
+            stderr('\r    Processing response %d/%d' % (i + 1, len(Y_all)))
             _response = Y_all[_response_name]
             if len(_response):
                 if response_is_categorical[_response_name]:
@@ -415,6 +417,8 @@ class CDRModel(object):
             Y_train_sds[_response_name] = _sd
             Y_train_quantiles[_response_name] = _quantiles
 
+        stderr('\n')
+
         self.Y_train_means = Y_train_means
         self.Y_train_sds = Y_train_sds
         self.Y_train_quantiles = Y_train_quantiles
@@ -428,10 +432,12 @@ class CDRModel(object):
         impulse_min = {}
         impulse_max = {}
         indicators = set()
-
         impulse_df_ix = []
         impulse_blocks = {}
-        for impulse in self.form.t.impulses(include_interactions=True):
+        impulses = self.form.t.impulses(include_interactions=True)
+
+        for impulse_ix, impulse in enumerate(impulses):
+            stderr('\r    Processing predictor %d/%d' % (impulse_ix + 1, len(impulses)))
             name = impulse.name()
             is_interaction = type(impulse).__name__ == 'ImpulseInteraction'
             found = False
@@ -505,6 +511,9 @@ class CDRModel(object):
                 raise ValueError('Impulse %s was not found in an input file.' % name)
 
             impulse_df_ix.append(i)
+
+        stderr('\n')
+
         self.impulse_df_ix = impulse_df_ix
         impulse_df_ix_unique = set(self.impulse_df_ix)
 
@@ -518,6 +527,7 @@ class CDRModel(object):
         self.impulse_max = impulse_max
         self.indicators = indicators
 
+        stderr('\r    Computing predictor covariances...\n')
         names = []
         corr_blocks = []
         cov_blocks = []
@@ -543,6 +553,7 @@ class CDRModel(object):
                     self.response_to_df_ix[_response].append(i)
 
         # Collect stats for temporal features
+        stderr('\r    Computing temporal statistics...\n')
         t_deltas = []
         t_delta_maxes = []
         X_time = []
@@ -587,6 +598,7 @@ class CDRModel(object):
         self.Y_time_sd = Y_time.std()
 
         ## Set up hash table for random effects lookup
+        stderr('\r    Computing random effects statistics...\n')
         self.rangf_map_base = []
         self.rangf_n_levels = []
         for i, gf in enumerate(rangf):
