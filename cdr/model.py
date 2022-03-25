@@ -296,6 +296,8 @@ class CDRModel(object):
         for kwarg in CDRModel._INITIALIZATION_KWARGS:
             setattr(self, kwarg.key, kwargs.pop(kwarg.key, kwarg.default_value))
 
+        stderr('  Collecting summary statistics...\n')
+
         assert self.n_samples == 1, 'n_samples is now deprecated and must be left at its default of 1'
 
         if not isinstance(X, list):
@@ -646,6 +648,8 @@ class CDRModel(object):
 
     def _initialize_metadata(self):
         ## Compute secondary data from intialization settings
+
+        stderr('  Initializing model metadata...\n')
 
         assert TF_MAJOR_VERSION == 1 or self.optim_name.lower() != 'nadam', 'Nadam optimizer is not supported when using TensorFlow 2.X.X'
 
@@ -5821,12 +5825,14 @@ class CDRModel(object):
 
         with self.session.as_default():
             with self.session.graph.as_default():
+                stderr('  Initializing input nodes...\n')
                 t0 = pytime.time()
                 self._initialize_inputs()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_initialize_inputs took %.2fs\n' % dur)
 
+                stderr('  Initializing base params...\n')
                 t0 = pytime.time()
                 self._initialize_base_params()
                 dur = pytime.time() - t0
@@ -5834,42 +5840,49 @@ class CDRModel(object):
                     stderr('_initialize_base_params took %.2fs\n' % dur)
 
                 for nn_id in self.nn_impulse_ids:
+                    stderr('  Initializing %s...\n' % nn_id)
                     t0 = pytime.time()
                     self._initialize_nn(nn_id)
                     dur = pytime.time() - t0
                     if report_time:
                         stderr('_initialize_nn for %s took %.2fs\n' % (nn_id, dur))
 
+                    stderr('  Compiling %s...\n' % nn_id)
                     t0 = pytime.time()
                     self._compile_nn(nn_id)
                     dur = pytime.time() - t0
                     if report_time:
                         stderr('_compile_nn for %s took %.2fs\n' % (nn_id, dur))
 
+                stderr('  Concatenating inputs...\n')
                 t0 = pytime.time()
                 self._concat_nn_impulses()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_concat_nn_impulses took %.2fs\n' % dur)
 
+                stderr('  Compiling intercepts...\n')
                 t0 = pytime.time()
                 self._compile_intercepts()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_compile_intercepts took %.2fs\n' % dur)
 
+                stderr('  Compiling coefficients...\n')
                 t0 = pytime.time()
                 self._compile_coefficients()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_compile_coefficients took %.2fs\n' % dur)
 
+                stderr('  Compiling interactions...\n')
                 t0 = pytime.time()
                 self._compile_interactions()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_compile_interactions took %.2fs\n' % dur)
 
+                stderr('  Compiling IRF params...\n')
                 t0 = pytime.time()
                 self._compile_irf_params()
                 dur = pytime.time() - t0
@@ -5877,24 +5890,28 @@ class CDRModel(object):
                     stderr('_compile_irf_params took %.2fs\n' % dur)
 
                 for nn_id in self.nn_irf_ids:
+                    stderr('  Initializing %s...\n' % nn_id)
                     t0 = pytime.time()
                     self._initialize_nn(nn_id)
                     dur = pytime.time() - t0
                     if report_time:
                         stderr('_initialize_nn for %s took %.2fs\n' % (nn_id, dur))
 
+                    stderr('  Compiling %s...\n' % nn_id)
                     t0 = pytime.time()
                     self._compile_nn(nn_id)
                     dur = pytime.time() - t0
                     if report_time:
                         stderr('_compile_nn for %s took %.2fs\n' % (nn_id, dur))
 
+                stderr('  Collecting layerwise ops...\n')
                 t0 = pytime.time()
                 self._collect_layerwise_ops()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_collect_layerwise_ops took %.2fs\n' % dur)
 
+                stderr('  Initializing IRF lambdas...\n')
                 t0 = pytime.time()
                 self._initialize_irf_lambdas()
                 dur = pytime.time() - t0
@@ -5902,48 +5919,56 @@ class CDRModel(object):
                     stderr('_initialize_irf_lambdas took %.2fs\n' % dur)
 
                 for response in self.response_names:
+                    stderr('  Initializing IRFs for response %s...\n' % response)
                     t0 = pytime.time()
                     self._initialize_irfs(self.t, response)
                     dur = pytime.time() - t0
                     if report_time:
                         stderr('_initialize_irfs for %s took %.2fs\n' % (response, dur))
 
+                stderr('  Compiling IRF impulses...\n')
                 t0 = pytime.time()
                 self._compile_irf_impulses()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_compile_irf_impulses took %.2fs\n' % dur)
 
+                stderr('  Compiling IRF-weighted impulses...\n')
                 t0 = pytime.time()
                 self._compile_X_weighted_by_irf()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_compile_X_weighted_by_irf took %.2fs\n' % dur)
 
+                stderr('  Initializing predictive distribution...\n')
                 t0 = pytime.time()
                 self._initialize_predictive_distribution()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_initialize_predictive_distribution took %.2fs\n' % dur)
 
+                stderr('  Initializing objective...\n')
                 t0 = pytime.time()
                 self._initialize_objective()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_initialize_objective took %.2fs\n' % dur)
 
+                stderr('  Initializing parameter tables...\n')
                 t0 = pytime.time()
                 self._initialize_parameter_tables()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_initialize_parameter_tables took %.2fs\n' % dur)
 
+                stderr('  Initializing Tensorboard logging...\n')
                 t0 = pytime.time()
                 self._initialize_logging()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_initialize_logging took %.2fs\n' % dur)
 
+                stderr('  Initializing moving averages...\n')
                 t0 = pytime.time()
                 self._initialize_ema()
                 dur = pytime.time() - t0
@@ -5954,12 +5979,14 @@ class CDRModel(object):
                     var_list=None
                 )
 
+                stderr('  Initializing saver...\n')
                 t0 = pytime.time()
                 self._initialize_saver()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_initialize_saver took %.2fs\n' % dur)
 
+                stderr('  Loading weights...\n')
                 self.load(restore=restore)
 
                 self._initialize_convergence_checking()
