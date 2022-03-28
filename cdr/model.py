@@ -8091,7 +8091,15 @@ class CDRModel(object):
                     sel = None
                     if _response in _Y:
                         _y = _Y[_response]
-                        sel = np.isfinite(_y)
+                        dtype = _y.dtype
+                        if dtype.name not in ('object', 'category') and np.issubdtype(dtype, np.number):
+                            is_numeric = True
+                        else:
+                            is_numeric = False
+                        if is_numeric:
+                            sel = np.isfinite(_y)
+                        else:
+                            sel = np.ones(len(_y), dtype=bool)
                         index = _y.index[sel]
                         _preds = preds[_response][ix][sel]
                         _y = _y[sel]
