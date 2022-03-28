@@ -1086,6 +1086,7 @@ def compare_elementwise_perf(a, b, y=None, mode='err'):
 
     raise ValueError('Unrecognize value for mode: %s.' % mode)
 
+
 def concat_nested(batches, axis=0):
     tmp = {}
     for b in batches:
@@ -1099,12 +1100,10 @@ def concat_nested(batches, axis=0):
     for k in tmp:
         _out = out
         v = np.concatenate(tmp[k], axis=axis)
-        for i, _k in enumerate(k):
+        for i, _k in enumerate(k[:-1]):
             if _k not in out:
-                if i < len(k) - 1:
-                    _out[_k] = {}
-                    _out = _out[_k]
-                else:
-                    _out[_k] = v
+                _out[_k] = {}
+            _out = _out[_k]
+        _out[k[-1]] = v
 
     return out
