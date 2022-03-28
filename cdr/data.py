@@ -1,7 +1,7 @@
 import re
 import numpy as np
 import pandas as pd
-from .util import names2ix, stderr
+from .util import flatten_dict, names2ix, stderr
 
 op_finder = re.compile('([^()]+)\((.+)\) *')
 
@@ -1082,7 +1082,29 @@ def compare_elementwise_perf(a, b, y=None, mode='err'):
 
         out = b - a
 
-        return b - a
+        return out
 
     raise ValueError('Unrecognize value for mode: %s.' % mode)
 
+def concat_nested(batches, axis=0):
+    tmp = {}
+    for b in batches:
+        b = flatten_dict(b)
+        for k, v in b:
+            if k not in tmp:
+                tmp[k] = []
+            tmp[k].append(v)
+
+    out = {}
+    for k in tmp:
+        _out = out
+        v = np.concatenate(tmp[k], axis=axis)
+        for i, _k in enumerate(k):
+            if _k not in out:
+                if i < len(k) - 1:
+                    _out[_k] = {}
+                    _out = _out[_k]
+                else:
+                    _out[_k] = v
+
+    return out

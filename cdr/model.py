@@ -11,7 +11,7 @@ from sklearn.metrics import accuracy_score, f1_score
 
 from .backend import *
 from .data import build_CDR_impulse_data, build_CDR_response_data, corr, get_first_last_obs_lists, \
-    split_cdr_outputs
+    split_cdr_outputs, concat_nested
 from .formula import *
 from .kwargs import MODEL_INITIALIZATION_KWARGS
 from .opt import *
@@ -9014,38 +9014,17 @@ class CDRModel(object):
 
                 X_ref_in = np.concatenate(X_ref_in, axis=0)
                 X_time_ref_in = np.concatenate(X_time_ref_in, axis=0)
+                X_mask_ref_in = np.ones_like(X_time_ref_in)
                 t_delta_ref_in = np.concatenate(t_delta_ref_in, axis=0)
                 gf_y_ref_in = np.concatenate(gf_y_ref_in, axis=0)
-
-                fd_ref = {
-                    self.X: X_ref_in,
-                    self.X_time: X_time_ref_in,
-                    self.X_mask: np.ones_like(X_time_ref_in),
-                    self.t_delta: t_delta_ref_in,
-                    self.Y_gf: gf_y_ref_in,
-                    self.training: not self.predict_mode
-                }
 
                 # Bring manipulations into 1-1 alignment on the batch dimension
                 if n_manip:
                     X = np.concatenate(X, axis=0)
                     X_time = np.concatenate(X_time, axis=0)
+                    X_mask = np.ones_like(X_time)
                     t_delta = np.concatenate(t_delta, axis=0)
                     gf_y = np.concatenate(gf_y, axis=0)
-
-                    fd_main = {
-                        self.X: X,
-                        self.X_time: X_time,
-                        self.X_mask: np.ones_like(X_time),
-                        self.t_delta: t_delta,
-                        self.Y_gf: gf_y,
-                        self.training: not self.predict_mode
-                    }
-
-                if resample:
-                    fd_ref[self.use_MAP_mode] = False
-                    if n_manip:
-                        fd_main[self.use_MAP_mode] = False
 
                 if reference_type == 'sampling':
                     X_samples = self.sample_impulses(size=S).values
@@ -9063,9 +9042,14 @@ class CDRModel(object):
                     delta = self.predictive_distribution_delta
                 for i in range(S):
                     if reference_type == 'sampling':
-                        fd_ref[self.X] = X_ref_in + X_ref_samples[i]
+                        _X_ref_in = X_ref_in + X_ref_samples[i]
                         if n_manip:
-                            fd_main[self.X] = X + X_main_samples[i]
+                            _X = X + X_main_samples[i]
+                        else:
+                            _X = X
+                    else:
+                        _X_ref_in = X_ref_in
+                        _X = X
                     to_run = {}
                     for response in responses:
                         to_run[response] = {}
@@ -9076,7 +9060,21 @@ class CDRModel(object):
 
                     if self.resample_ops:
                         self.session.run(self.resample_ops)
-                    sample_ref = self.session.run(to_run, feed_dict=fd_ref)
+                    b = (self.history_length + self.future_length) * self.eval_minibatch_size
+                    sample_ref = []
+                    for j in range(0, len(X_ref_in), b):
+                        fd_ref = {
+                            self.X: _X_ref_in[j:j+b],
+                            self.X_time: X_time_ref_in[j:j+b],
+                            self.X_mask: X_mask_ref_in[j:j+b],
+                            self.t_delta: t_delta_ref_in[j:j+b],
+                            self.Y_gf: gf_y_ref_in[j:j+b],
+                            self.training: not self.predict_mode
+                        }
+                        if resample:
+                            fd_ref[self.use_MAP_mode] = False
+                        sample_ref.append(self.session.run(to_run, feed_dict=fd_ref))
+                    sample_ref = concat_nested(sample_ref)
                     for response in to_run:
                         for dim_name in to_run[response]:
                             _sample = sample_ref[response][dim_name]
@@ -9084,7 +9082,20 @@ class CDRModel(object):
 
                     if n_manip:
                         sample = {}
-                        sample_main = self.session.run(to_run, feed_dict=fd_main)
+                        sample_main = []
+                        for j in range(0, len(_X), b):
+                            fd_main = {
+                                self.X: _X[j:j+b],
+                                self.X_time: X_time[j:j+b],
+                                self.X_mask: X_mask[j:j+b],
+                                self.t_delta: t_delta[j:j+b],
+                                self.Y_gf: gf_y[j:j+b],
+                                self.training: not self.predict_mode
+                            }
+                            if resample:
+                                fd_main[self.use_MAP_mode] = False
+                            sample_main.append(self.session.run(to_run, feed_dict=fd_main))
+                        sample_main = concat_nested(sample_main)
                         for response in to_run:
                             sample[response] = {}
                             for dim_name in sample_main[response]:
