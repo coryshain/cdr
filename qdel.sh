@@ -4,7 +4,7 @@ i=$1
 
 while [ $i -le $2 ]
 do
-    qdel $i
+    scancel $i
     i=`expr $i + 1`
 done
 
