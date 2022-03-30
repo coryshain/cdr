@@ -371,7 +371,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'minibatch_size',
-        1024,
+        512,
         [int, None],
         "Size of minibatches to use for fitting (full-batch if ``None``)."
     ),
@@ -422,7 +422,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'epsilon',
-        1e-2,
+        1e-5,
         float,
         "Epsilon parameter to use for numerical stability in bounded parameter estimation (imposes a positive lower bound on the parameter)."
     ),
@@ -583,7 +583,7 @@ MODEL_INITIALIZATION_KWARGS = [
         'inherit',
         [str, float, 'inherit'],
         "Scale of random effects regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**. Regularization only applies to random effects without variational priors.",
-        default_value_cdrnn=1.
+        default_value_cdrnn=10.
     ),
 
     # INCREMENTAL SAVING AND LOGGING
@@ -901,7 +901,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'log_transform_t_delta',
-        False,
+        True,
         bool,
         "Whether to log-modulus transform time offset values for stability under the hood (log-modulus is used to handle negative values in non-causal models). Offsets are automatically reconverted back to the source scale for plotting and model criticism."
     ),
@@ -1179,10 +1179,10 @@ NN_KWARGS = [
     ),
     Kwarg(
         'ff_dropout_rate',
-        0.5,
+        0.4,
         [float, None],
         "Rate at which to drop neurons of FF projection.",
-        aliases=['dropout', 'dropout_rate', 'input_projection', 'h_in_dropout_rate']
+        aliases=['dropout', 'dropout_rate', 'input_projection_dropout_rate', 'h_in_dropout_rate']
     ),
     Kwarg(
         'rnn_h_dropout_rate',
@@ -1198,30 +1198,31 @@ NN_KWARGS = [
     ),
     Kwarg(
         'h_rnn_dropout_rate',
-        0.5,
+        0.4,
         [float, None],
         "Rate at which to drop neurons of h_rnn.",
         aliases=['dropout', 'dropout_rate']
     ),
     Kwarg(
         'rnn_dropout_rate',
-        0.5,
+        0.4,
         [float, None],
         "Rate at which to entirely drop the RNN.",
         aliases=['dropout', 'dropout_rate']
     ),
     Kwarg(
         'irf_dropout_rate',
-        0.5,
+        0.4,
         [float, None],
         "Rate at which to drop neurons of IRF layers.",
         aliases=['dropout', 'dropout_rate']
     ),
     Kwarg(
         'ranef_dropout_rate',
-        None,
+        0.4,
         [float, None],
-        "Rate at which to drop random effects indicators."
+        "Rate at which to drop random effects indicators.",
+        aliases=['dropout', 'dropout_rate']
     ),
 
     # DEPRECATED OR RARELY USED
