@@ -5715,8 +5715,8 @@ class CDRModel(object):
         out = {}
         for x in self.training_mse_tf:
             out[x] = {}
-        for y in self.training_mse_tf[x]:
-            out[x][y] = self.training_mse_tf[x][y].eval(session=self.session)
+            for y in self.training_mse_tf[x]:
+                out[x][y] = self.training_mse_tf[x][y].eval(session=self.session)
 
         return out
 
@@ -5731,8 +5731,8 @@ class CDRModel(object):
         out = {}
         for x in self.training_rho_tf:
             out[x] = {}
-        for y in self.training_rho_tf[x]:
-            out[x][y] = self.training_rho_tf[x][y].eval(session=self.session)
+            for y in self.training_rho_tf[x]:
+                out[x][y] = self.training_rho_tf[x][y].eval(session=self.session)
 
         return out
 
@@ -5747,8 +5747,8 @@ class CDRModel(object):
         out = {}
         for x in self.training_percent_variance_explained_tf:
             out[x] = {}
-        for y in self.training_percent_variance_explained_tf[x]:
-            out[x][y] = self.training_percent_variance_explained_tf[x][y].eval(session=self.session)
+            for y in self.training_percent_variance_explained_tf[x]:
+                out[x][y] = self.training_percent_variance_explained_tf[x][y].eval(session=self.session)
 
         return out
 
@@ -6778,11 +6778,11 @@ class CDRModel(object):
                     out += ' ' * indent + 'File: %s\n\n' % ix
                 out += ' ' * indent + 'MODEL EVALUATION STATISTICS:\n'
                 out += ' ' * indent +     'Loglik:        %s\n' % training_loglik[response][ix]
-                if response in self.training_mse_tf:
+                if response in training_mse and ix in training_mse[response]:
                     out += ' ' * indent + 'MSE:           %s\n' % training_mse[response][ix]
-                if response in self.training_rho_tf:
+                if response in training_rho and ix in training_rho[response]:
                     out += ' ' * indent + 'r(true, pred): %s\n' % training_rho[response][ix]
-                if response in self.training_percent_variance_explained_tf:
+                if response in training_percent_variance_explained and ix in training_percent_variance_explained[response]:
                     out += ' ' * indent + '%% var expl:    %s\n' % training_percent_variance_explained[response][ix]
                 out += '\n'
 
