@@ -901,9 +901,17 @@ class CDRModel(object):
         terminal_names = [x for x in self.terminal_names if self.node_table[x].p.family == 'NN']
         for x in terminal_names:
             impulse = self.terminal2impulse[x][0]
-            ix = self.impulse_names.index(impulse)
-            df_ix = self.impulse_df_ix[ix]
-            impulse_dfs_noninteraction.add(df_ix)
+            is_nn = self.node_table[x].impulse.is_nn_impulse()
+            if is_nn:
+                for _impulse in self.node_table[x].impulse.impulses():
+                    _impulse_name = _impulse.name()
+                    ix = self.impulse_names.index(_impulse_name)
+                    df_ix = self.impulse_df_ix[ix]
+                    impulse_dfs_noninteraction.add(df_ix)
+            else:
+                ix = self.impulse_names.index(impulse)
+                df_ix = self.impulse_df_ix[ix]
+                impulse_dfs_noninteraction.add(df_ix)
         self.n_impulse_df_noninteraction = len(impulse_dfs_noninteraction)
 
         self.use_crossval = bool(self.crossval_factor)
@@ -3594,7 +3602,7 @@ class CDRModel(object):
                     X_time.append(tf.gather(self.nn_transformed_impulse_X_time, impulse_ix, axis=2))
                     X_mask.append(tf.gather(self.nn_transformed_impulse_X_mask, impulse_ix, axis=2))
                     impulse_names_ordered += nn_impulse_names
-                    
+
                 assert len(impulse_names_ordered), 'NN transform must get at least one input'
                 # Pad and concatenate impulses, deltas, timestamps, and masks
                 if len(X) == 1:
@@ -3618,7 +3626,7 @@ class CDRModel(object):
                 else:
                     max_len = tf.reduce_max([tf.shape(x)[1] for x in X_time])  # Get maximum timesteps
                     X_time = [
-                        tf.pad(x, ((0, 0), (max_len - tf.shape(x)[1], 0), (0, 0), (0, 0), (0, 0))) for x in X_time
+                        tf.pad(x, ((0, 0), (max_len - tf.shape(x)[1], 0), (0, 0))) for x in X_time
                     ]
                     X_time = tf.concat(X_time, axis=2)
                 if len(X_mask) == 1:
@@ -3626,7 +3634,7 @@ class CDRModel(object):
                 else:
                     max_len = tf.reduce_max([tf.shape(x)[1] for x in X_mask])  # Get maximum timesteps
                     X_mask = [
-                        tf.pad(x, ((0, 0), (max_len - tf.shape(x)[1], 0), (0, 0), (0, 0), (0, 0))) for x in X_mask
+                        tf.pad(x, ((0, 0), (max_len - tf.shape(x)[1], 0), (0, 0))) for x in X_mask
                     ]
                     X_mask = tf.concat(X_mask, axis=2)
 
@@ -3638,23 +3646,6 @@ class CDRModel(object):
                     t_delta = tf.gather(t_delta, impulse_ix, axis=2)
                     X_time = tf.gather(X_time, impulse_ix, axis=2)
                     X_mask = tf.gather(X_mask, impulse_ix, axis=2)
-
-                # Process and reshape impulses, deltas, timestamps, and masks if needed
-                if X_time is None:
-                    X_shape = tf.shape(X)
-                    X_time_shape = []
-                    for j in range(len(X.shape) - 1):
-                        s = X.shape[j]
-                        try:
-                            s = int(s)
-                        except TypeError:
-                            s = X_shape[j]
-                        X_time_shape.append(s)
-                    X_time_shape.append(1)
-                    X_time_shape = tf.convert_to_tensor(X_time_shape)
-                    X_time = tf.ones(X_time_shape, dtype=self.FLOAT_TF)
-                    X_time_mean = self.X_time_mean
-                    X_time *= X_time_mean
 
                 if center_X_time:
                     X_time -= self.X_time_mean
@@ -3817,7 +3808,7 @@ class CDRModel(object):
                     self.nn_transformed_impulses.append(h)
                     self.nn_transformed_impulse_t_delta.append(t_delta)
                     self.nn_transformed_impulse_X_time.append(X_time)
-                    self.nn_transformed_impulse_X_mask.append(X_mask)
+                    self.nn_transformed_impulse_X_mask.append(X_mask[..., None])
                 else:  # nn_id in self.nn_irf_ids
                     # Compute IRF outputs
 
