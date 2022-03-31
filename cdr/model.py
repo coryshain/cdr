@@ -9136,6 +9136,7 @@ class CDRModel(object):
                     for dim_name in samples[response]:
                         _samples = np.stack(samples[response][dim_name], axis=0)
                         rescale = self.is_real(response) and \
+                                  not response.lower() == 'lognormalv2' and \
                                   (dim_name.startswith('mu') or dim_name.startswith('sigma'))
                         if rescale:
                             _samples = _samples * self.Y_train_sds[response]
