@@ -3309,72 +3309,69 @@ class CDRModel(object):
                 else:
                     rangf_map_other = rangf_map
 
+                if input_dropout_rate:
+                    self.input_dropout_layer[nn_id] = get_dropout(
+                        input_dropout_rate,
+                        training=self.training,
+                        use_MAP_mode=self.use_MAP_mode,
+                        rescale=False,
+                        name='%s_input_dropout' % nn_id,
+                        session=self.session
+                    )
+                    self.X_time_dropout_layer[nn_id] = get_dropout(
+                        input_dropout_rate,
+                        training=self.training,
+                        use_MAP_mode=self.use_MAP_mode,
+                        rescale=False,
+                        name='%s_X_time_dropout' % nn_id,
+                        session=self.session
+                    )
+
                 # FEEDFORWARD ENCODER
-                if nn_id in self.nn_impulse_ids:
-                    assert n_layers_ff or n_layers_rnn, "n_layers_ff and n_layers_rnn can't both be zero in NN transforms of predictors."
-
-                    if input_dropout_rate:
-                        self.input_dropout_layer[nn_id] = get_dropout(
-                            input_dropout_rate,
-                            training=self.training,
-                            use_MAP_mode=self.use_MAP_mode,
-                            rescale=False,
-                            name='%s_input_dropout' % nn_id,
-                            session=self.session
-                        )
-                        self.X_time_dropout_layer[nn_id] = get_dropout(
-                            input_dropout_rate,
-                            training=self.training,
-                            use_MAP_mode=self.use_MAP_mode,
-                            rescale=False,
-                            name='%s_X_time_dropout' % nn_id,
-                            session=self.session
-                        )
-
+                if self.has_ff(nn_id):
                     ff_layers = []
-                    if n_layers_ff:
-                        for l in range(n_layers_ff + 1):
-                            if l == 0 or not ranef_l1_only:
-                                _rangf_map = rangf_map_l1
-                            else:
-                                _rangf_map = rangf_map_other
+                    for l in range(n_layers_ff + 1):
+                        if l == 0 or not ranef_l1_only:
+                            _rangf_map = rangf_map_l1
+                        else:
+                            _rangf_map = rangf_map_other
 
-                            if l < n_layers_ff:
-                                units = n_units_ff[l]
-                                activation = ff_inner_activation
-                                dropout = ff_dropout_rate
-                                if normalize_ff:
-                                    bn = batch_normalization_decay
-                                else:
-                                    bn = None
-                                ln = layer_normalization_type
-                                use_bias = True
+                        if l < n_layers_ff:
+                            units = n_units_ff[l]
+                            activation = ff_inner_activation
+                            dropout = ff_dropout_rate
+                            if normalize_ff:
+                                bn = batch_normalization_decay
                             else:
-                                units = 1
-                                activation = ff_activation
-                                dropout = None
                                 bn = None
-                                ln = None
-                                use_bias = False
-                            mn = maxnorm
+                            ln = layer_normalization_type
+                            use_bias = True
+                        else:
+                            units = 1
+                            activation = ff_activation
+                            dropout = None
+                            bn = None
+                            ln = None
+                            use_bias = False
+                        mn = maxnorm
 
-                            projection = self._initialize_feedforward(
-                                nn_id,
-                                units,
-                                use_bias=use_bias,
-                                activation=activation,
-                                dropout=dropout,
-                                maxnorm=mn,
-                                batch_normalization_decay=bn,
-                                layer_normalization_type=ln,
-                                rangf_map=_rangf_map,
-                                name='%s_ff_l%s' % (nn_id, l + 1)
-                            )
-                            self.layers.append(projection)
+                        projection = self._initialize_feedforward(
+                            nn_id,
+                            units,
+                            use_bias=use_bias,
+                            activation=activation,
+                            dropout=dropout,
+                            maxnorm=mn,
+                            batch_normalization_decay=bn,
+                            layer_normalization_type=ln,
+                            rangf_map=_rangf_map,
+                            name='%s_ff_l%s' % (nn_id, l + 1)
+                        )
+                        self.layers.append(projection)
 
-                            if 'nn' not in self.rvs:
-                                self.regularizable_layers[nn_id].append(projection)
-                            ff_layers.append(make_lambda(projection, session=self.session, use_kwargs=False))
+                        if 'nn' not in self.rvs:
+                            self.regularizable_layers[nn_id].append(projection)
+                        ff_layers.append(make_lambda(projection, session=self.session, use_kwargs=False))
 
                     ff_fn = compose_lambdas(ff_layers)
 
@@ -3389,7 +3386,7 @@ class CDRModel(object):
                     )
 
                 # RNN ENCODER
-                if nn_id in self.nn_impulse_ids or input_dependent_irf:
+                if self.has_rnn(nn_id):
                     rnn_layers = []
                     rnn_h_ema = []
                     rnn_c_ema = []
@@ -3416,65 +3413,64 @@ class CDRModel(object):
                     self.rnn_c_ema[nn_id] = rnn_c_ema
                     self.rnn_encoder[nn_id] = rnn_encoder
 
-                    if n_layers_rnn:
-                        rnn_projection_layers = []
-                        for l in range(n_layers_rnn_projection + 1):
-                            if l < n_layers_rnn_projection:
-                                units = n_units_rnn_projection[l]
-                                activation = rnn_projection_inner_activation
-                                bn = batch_normalization_decay
-                                ln = layer_normalization_type
-                                use_bias = True
+                    rnn_projection_layers = []
+                    for l in range(n_layers_rnn_projection + 1):
+                        if l < n_layers_rnn_projection:
+                            units = n_units_rnn_projection[l]
+                            activation = rnn_projection_inner_activation
+                            bn = batch_normalization_decay
+                            ln = layer_normalization_type
+                            use_bias = True
+                        else:
+                            if nn_id in self.nn_irf_ids:
+                                units = len([x for x in self.nn_irf_input_names[nn_id] if x != 'rate'])
                             else:
-                                if nn_id in self.nn_irf_ids:
-                                    units = len([x for x in self.nn_irf_input_names[nn_id] if x != 'rate'])
-                                else:
-                                    units = 1
-                                activation = rnn_projection_activation
-                                bn = None
-                                ln = None
-                                use_bias = False
-                            mn = maxnorm
+                                units = 1
+                            activation = rnn_projection_activation
+                            bn = None
+                            ln = None
+                            use_bias = False
+                        mn = maxnorm
 
-                            projection = self._initialize_feedforward(
-                                nn_id,
-                                units,
-                                use_bias=use_bias,
-                                activation=activation,
-                                dropout=None,
-                                maxnorm=mn,
-                                batch_normalization_decay=bn,
-                                layer_normalization_type=ln,
-                                rangf_map=rangf_map,
-                                name='%s_rnn_projection_l%s' % (nn_id, l + 1)
-                            )
-                            self.layers.append(projection)
-
-                            if 'nn' not in self.rvs:
-                                self.regularizable_layers[nn_id].append(projection)
-                            rnn_projection_layers.append(make_lambda(projection, session=self.session, use_kwargs=False))
-
-                        rnn_projection_fn = compose_lambdas(rnn_projection_layers)
-
-                        self.rnn_projection_layers[nn_id] = rnn_projection_layers
-                        self.rnn_projection_fn[nn_id] = rnn_projection_fn
-
-                        self.h_rnn_dropout_layer[nn_id] = get_dropout(
-                            h_rnn_dropout_rate,
-                            training=self.training,
-                            use_MAP_mode=self.use_MAP_mode,
-                            name='%s_h_rnn_dropout' % nn_id,
-                            session=self.session
+                        projection = self._initialize_feedforward(
+                            nn_id,
+                            units,
+                            use_bias=use_bias,
+                            activation=activation,
+                            dropout=None,
+                            maxnorm=mn,
+                            batch_normalization_decay=bn,
+                            layer_normalization_type=ln,
+                            rangf_map=rangf_map,
+                            name='%s_rnn_projection_l%s' % (nn_id, l + 1)
                         )
-                        self.rnn_dropout_layer[nn_id] = get_dropout(
-                            rnn_dropout_rate,
-                            noise_shape=[None, None, 1],
-                            training=self.training,
-                            use_MAP_mode=self.use_MAP_mode,
-                            rescale=False,
-                            name='%s_rnn_dropout' % nn_id,
-                            session=self.session
-                        )
+                        self.layers.append(projection)
+
+                        if 'nn' not in self.rvs:
+                            self.regularizable_layers[nn_id].append(projection)
+                        rnn_projection_layers.append(make_lambda(projection, session=self.session, use_kwargs=False))
+
+                    rnn_projection_fn = compose_lambdas(rnn_projection_layers)
+
+                    self.rnn_projection_layers[nn_id] = rnn_projection_layers
+                    self.rnn_projection_fn[nn_id] = rnn_projection_fn
+
+                    self.h_rnn_dropout_layer[nn_id] = get_dropout(
+                        h_rnn_dropout_rate,
+                        training=self.training,
+                        use_MAP_mode=self.use_MAP_mode,
+                        name='%s_h_rnn_dropout' % nn_id,
+                        session=self.session
+                    )
+                    self.rnn_dropout_layer[nn_id] = get_dropout(
+                        rnn_dropout_rate,
+                        noise_shape=[None, None, 1],
+                        training=self.training,
+                        use_MAP_mode=self.use_MAP_mode,
+                        rescale=False,
+                        name='%s_rnn_dropout' % nn_id,
+                        session=self.session
+                    )
 
                 # IRF
                 if nn_id in self.nn_irf_ids:
@@ -3537,12 +3533,6 @@ class CDRModel(object):
                             self.nn_irf_l1[nn_id] = projection
 
                     self.nn_irf_layers[nn_id] = irf_layers
-
-                    # if log_transform_t_delta:
-                    #     t_delta_scale = tf.Variable(1., name='t_delta_scale_%s' % nn_id)
-                    #     t_delta_shift = tf.Variable(0., name='t_delta_shift_%s' % nn_id)
-                    #     self.nn_t_delta_scale[nn_id] = t_delta_scale
-                    #     self.nn_t_delta_shift[nn_id] = t_delta_shift
 
     def _compile_nn(self, nn_id):
         with self.session.as_default():
@@ -3753,10 +3743,10 @@ class CDRModel(object):
                     X_in = tf.concat([X_in, X_time], axis=-1)
 
                 # Compute hidden state
-                h = None
+                h = h_ff = h_rnn = rnn_hidden = rnn_cell = None
 
-                if n_layers_ff or n_layers_rnn:
-                    if n_layers_ff and nn_id in self.nn_impulse_ids:
+                if self.has_ff(nn_id) or self.has_rnn(nn_id):
+                    if self.has_ff(nn_id):
                         h_ff = self.ff_fn[nn_id](X_in)
                         if ff_noise_sd:
                             def ff_train_fn(ff=h_ff):
@@ -3768,7 +3758,7 @@ class CDRModel(object):
                             h_ff = self.ff_dropout_layer[nn_id](h_ff)
                         h = h_ff
 
-                    if n_layers_rnn and (nn_id in self.nn_impulse_ids or input_dependent_irf):
+                    if self.has_rnn(nn_id):
                         _X_in = X_in
                         rnn_hidden = []
                         rnn_cell = []
@@ -3800,8 +3790,6 @@ class CDRModel(object):
                             h = h_rnn
                         else:
                             h += h_rnn
-                    else:
-                        h_rnn = rnn_hidden = rnn_cell = None
 
                 if nn_id in self.nn_impulse_ids:
                     assert h is not None, 'NN impulse transforms must involve a feedforward component, an RNN component, or both.'
@@ -3816,10 +3804,6 @@ class CDRModel(object):
                     nn_irf_impulses = tf.gather(X, impulse_ix, axis=2) # IRF output dims, includes rate
 
                     if log_transform_t_delta:
-                        # t_delta_scale = self.nn_t_delta_scale[nn_id]
-                        # t_delta_shift = self.nn_t_delta_shift[nn_id]
-                        # t_delta = t_delta * t_delta_scale
-                        # t_delta = t_delta + t_delta_shift
                         t_delta = tf.sign(t_delta) * tf.log1p(tf.abs(t_delta))
 
                     irf_out = [t_delta]
@@ -6331,6 +6315,32 @@ class CDRModel(object):
         """
 
         return param in self.predictive_distribution_config[response]['params']
+
+    def has_rnn(self, nn_id):
+        """
+        Check whether a given NN component includes an RNN transform
+
+        :param nn_id: ``str``; id of NN component
+        :return: ``bool``; whether the NN includes an RNN transform
+        """
+
+        has_rnn = nn_id in self.nn_impulse_ids or self.get_nn_meta('input_dependent_irf', nn_id)
+        has_rnn &= self.get_nn_meta('n_layers_rnn', nn_id)
+
+        return has_rnn
+
+    def has_ff(self, nn_id):
+        """
+        Check whether a given NN component includes a feedforward transform
+
+        :param nn_id: ``str``; id of NN component
+        :return: ``bool``; whether the NN includes a feedforward transform
+        """
+
+        has_ff = nn_id in self.nn_impulse_ids
+        has_ff &= self.get_nn_meta('n_layers_ff', nn_id) or not self.has_rnn(nn_id)
+
+        return has_ff
 
     def report_formula_string(self, indent=0):
         """
@@ -9505,9 +9515,14 @@ class CDRModel(object):
 
                     fixed_impulses = set()
                     for x in self.t.terminals():
-                        if x.fixed and x.impulse.name() in names:
-                            for y in x.impulse_names():
-                                fixed_impulses.add(y)
+                        if x.fixed:
+                            if x.impulse.is_nn_impulse():
+                                for y in x.impulse.impulses():
+                                    if y.name() in names:
+                                        fixed_impulses.add(y.name())
+                            elif x.impulse.name() in names:
+                                for y in x.impulse_names():
+                                    fixed_impulses.add(y)
 
                     names_fixed = [x for x in names if x in fixed_impulses]
                     manipulations_fixed = [x for x in manipulations if list(x.keys())[0] in fixed_impulses]
