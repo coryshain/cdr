@@ -3732,6 +3732,9 @@ class CDRModel(object):
 
                 impulse_ix = names2ix([x for x in input_names if x != 'rate'], impulse_names)
                 X_gathered = tf.gather(X, impulse_ix, axis=2)
+                print(input_names)
+                print(X_gathered)
+                input()
                 X_in = X_gathered
                 if nonstationary:
                     X_in = tf.concat([X_in, X_time], axis=-1)
