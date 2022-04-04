@@ -688,6 +688,20 @@ MODEL_INITIALIZATION_KWARGS = [
         aliases=['use_legend', 'legend']
     ),
     Kwarg(
+        'generate_univariate_irf_plots',
+        True,
+        bool,
+        "Whether to plot univariate IRFs over time.",
+        aliases=['generate_univariate_IRF_plots']
+    ),
+    Kwarg(
+        'generate_univariate_irf_heatmaps',
+        False,
+        bool,
+        "Whether to plot univariate IRF heatmaps over time.",
+        aliases=['generate_univariate_IRF_heatmaps']
+    ),
+    Kwarg(
         'generate_curvature_plots',
         False,
         bool,
@@ -1140,6 +1154,12 @@ NN_KWARGS = [
         aliases=['input_projection_regularizer_scale']
     ),
     Kwarg(
+        'regularize_final_layer',
+        False,
+        bool,
+        "Whether to regulare the last layer of NN components."
+    ),
+    Kwarg(
         'rnn_projection_regularizer_name',
         None,
         [str, None],
@@ -1223,6 +1243,12 @@ NN_KWARGS = [
         [float, None],
         "Rate at which to drop random effects indicators.",
         aliases=['dropout', 'dropout_rate']
+    ),
+    Kwarg(
+        'dropout_final_layer',
+        False,
+        bool,
+        "Whether to apply dropout to the last layer of NN components."
     ),
 
     # DEPRECATED OR RARELY USED
@@ -1331,6 +1357,13 @@ PLOT_KWARGS_CORE = [
         bool,
         "Whether to plot univariate IRFs over time.",
         aliases=['generate_univariate_IRF_plots']
+    ),
+    Kwarg(
+        'generate_univariate_irf_heatmaps',
+        False,
+        bool,
+        "Whether to plot univariate IRF heatmaps over time.",
+        aliases=['generate_univariate_IRF_heatmaps']
     ),
     Kwarg(
         'generate_curvature_plots',

@@ -997,7 +997,6 @@ class CDRModel(object):
         self.X_time_dropout_layer = {}
         self.ff_layers = {}
         self.ff_fn = {}
-        self.ff_dropout_layer = {}
         self.rnn_layers = {}
         self.rnn_h_ema = {}
         self.rnn_c_ema = {}
@@ -3293,6 +3292,8 @@ class CDRModel(object):
                 maxnorm = self.get_nn_meta('maxnorm', nn_id)
                 input_dependent_irf = self.get_nn_meta('input_dependent_irf', nn_id)
                 ranef_l1_only = self.get_nn_meta('ranef_l1_only', nn_id)
+                dropout_final_layer = self.get_nn_meta('dropout_final_layer', nn_id)
+                regularize_final_layer = self.get_nn_meta('regularize_final_layer', nn_id)
 
                 rangf_map = {}
                 if ranef_dropout_rate:
@@ -3349,7 +3350,10 @@ class CDRModel(object):
                         else:
                             units = 1
                             activation = ff_activation
-                            dropout = None
+                            if dropout_final_layer:
+                                dropout = ff_dropout_rate
+                            else:
+                                dropout = None
                             bn = None
                             ln = None
                             use_bias = False
@@ -3369,7 +3373,7 @@ class CDRModel(object):
                         )
                         self.layers.append(projection)
 
-                        if 'nn' not in self.rvs:
+                        if 'nn' not in self.rvs and (regularize_final_layer or l < n_layers_ff):
                             self.regularizable_layers[nn_id].append(projection)
                         ff_layers.append(make_lambda(projection, session=self.session, use_kwargs=False))
 
@@ -3377,13 +3381,6 @@ class CDRModel(object):
 
                     self.ff_layers[nn_id] = ff_layers
                     self.ff_fn[nn_id] = ff_fn
-                    self.ff_dropout_layer[nn_id] = get_dropout(
-                        ff_dropout_rate,
-                        training=self.training,
-                        use_MAP_mode=self.use_MAP_mode,
-                        name='%s_ff_dropout' % nn_id,
-                        session=self.session
-                    )
 
                 # RNN ENCODER
                 if self.has_rnn(nn_id):
@@ -3476,12 +3473,6 @@ class CDRModel(object):
                 if nn_id in self.nn_irf_ids:
                     irf_layers = []
 
-                    # l0_scale = tf.Variable(1., '%s_l0_scale' % nn_id)
-                    # l0_shift = tf.Variable(0., '%s_l0_shift' % nn_id)
-                    # def l0(x, scale=l0_scale, shift=l0_shift):
-                    #     return x * scale + shift
-                    # irf_layers.append(l0)
-
                     for l in range(n_layers_irf + 1):
                         if l == 0 or not ranef_l1_only:
                             _rangf_map = rangf_map_l1
@@ -3504,7 +3495,10 @@ class CDRModel(object):
                         else:
                             units = self.get_nn_irf_output_ndim(nn_id)
                             activation = irf_activation
-                            dropout = None
+                            if dropout_final_layer:
+                                dropout = irf_dropout_rate
+                            else:
+                                dropout = None
                             bn = None
                             ln = None
                             use_bias = False
@@ -3527,7 +3521,7 @@ class CDRModel(object):
                         self.layers.append(projection)
                         irf_layers.append(projection)
 
-                        if l < n_layers_irf and 'nn' not in self.rvs:
+                        if 'nn' not in self.rvs and (regularize_final_layer or l < n_layers_irf):
                             self.regularizable_layers[nn_id].append(projection)
                         if l == 0:
                             self.nn_irf_l1[nn_id] = projection
@@ -3754,8 +3748,6 @@ class CDRModel(object):
                             def ff_eval_fn(ff=h_ff):
                                 return ff
                             h_ff = tf.cond(self.training, ff_train_fn, ff_eval_fn)
-                        if ff_dropout_rate:
-                            h_ff = self.ff_dropout_layer[nn_id](h_ff)
                         h = h_ff
 
                     if self.has_rnn(nn_id):
@@ -3885,8 +3877,6 @@ class CDRModel(object):
                 if rnn_dropout_rate and n_layers_rnn:
                     self.resample_ops += self.h_rnn_dropout_layer[nn_id].resample_ops()
                     self.resample_ops += self.rnn_dropout_layer[nn_id].resample_ops()
-                if ff_dropout_rate and nn_id in self.ff_dropout_layer:
-                    self.resample_ops += self.ff_dropout_layer[nn_id].resample_ops()
                 if h_rnn_dropout_rate and n_layers_rnn and nn_id in self.h_rnn_dropout_layer:
                     self.resample_ops += self.h_rnn_dropout_layer[nn_id].resample_ops()
 
@@ -9363,7 +9353,8 @@ class CDRModel(object):
             plot_n_time_units=None,
             plot_n_time_points=None,
             reference_type=None,
-            generate_univariate_irf_plots=True,
+            generate_univariate_irf_plots=None,
+            generate_univariate_irf_heatmaps=None,
             generate_curvature_plots=None,
             generate_irf_surface_plots=None,
             generate_nonstationarity_surface_plots=None,
@@ -9415,6 +9406,7 @@ class CDRModel(object):
         :param plot_support_start: ``float`` or ``None``; start time for IRF plots. If ``None``, use default setting.
         :param reference_type: ``bool``; whether to use the predictor means as baseline reference (otherwise use zero).
         :param generate_univariate_irf_plots: ``bool``; whether to plot univariate IRFs over time.
+        :param generate_univariate_irf_heatmaps: ``bool``; whether to plot univariate IRFs over time.
         :param generate_curvature_plots: ``bool`` or ``None``; whether to plot IRF curvature at time **reference_time**. If ``None``, use default setting.
         :param generate_irf_surface_plots: ``bool`` or ``None``; whether to plot IRF surfaces.  If ``None``, use default setting.
         :param generate_nonstationarity_surface_plots: ``bool`` or ``None``; whether to plot IRF surfaces showing non-stationarity in the response.  If ``None``, use default setting.
@@ -9451,6 +9443,8 @@ class CDRModel(object):
             plot_n_time_points = self.plot_n_time_points
         if generate_univariate_irf_plots is None:
             generate_univariate_irf_plots = self.generate_univariate_irf_plots
+        if generate_univariate_irf_heatmaps is None:
+            generate_univariate_irf_heatmaps = self.generate_univariate_irf_heatmaps
         if generate_curvature_plots is None:
             generate_curvature_plots = self.generate_curvature_plots
         if generate_irf_surface_plots is None:
@@ -9492,7 +9486,7 @@ class CDRModel(object):
                 self.set_predict_mode(True)
 
                 # IRF 1D
-                if generate_univariate_irf_plots:
+                if generate_univariate_irf_plots or generate_univariate_irf_heatmaps:
                     names = self.impulse_names
                     has_rate = 'rate' in names
                     if has_rate:
@@ -9605,30 +9599,50 @@ class CDRModel(object):
                                     _lq = None if _lq is None else _lq[..., 1:]
                                     _uq = None if _uq is None else _uq[..., 1:]
 
-                                plot_irf(
-                                    plot_x,
-                                    _plot_y,
-                                    names_cur,
-                                    lq=_lq,
-                                    uq=_uq,
-                                    sort_names=sort_names,
-                                    prop_cycle_length=prop_cycle_length,
-                                    prop_cycle_map=prop_cycle_map,
-                                    dir=self.outdir,
-                                    filename=filename,
-                                    irf_name_map=irf_name_map,
-                                    plot_x_inches=plot_x_inches,
-                                    plot_y_inches=plot_y_inches,
-                                    ylim=ylim,
-                                    cmap=cmap,
-                                    dpi=dpi,
-                                    legend=use_legend,
-                                    xlab=xlab,
-                                    ylab=ylab,
-                                    use_line_markers=use_line_markers,
-                                    transparent_background=transparent_background,
-                                    dump_source=dump_source
-                                )
+                                if generate_univariate_irf_plots:
+                                    plot_irf(
+                                        plot_x,
+                                        _plot_y,
+                                        names_cur,
+                                        lq=_lq,
+                                        uq=_uq,
+                                        sort_names=sort_names,
+                                        prop_cycle_length=prop_cycle_length,
+                                        prop_cycle_map=prop_cycle_map,
+                                        dir=self.outdir,
+                                        filename=filename,
+                                        irf_name_map=irf_name_map,
+                                        plot_x_inches=plot_x_inches,
+                                        plot_y_inches=plot_y_inches,
+                                        ylim=ylim,
+                                        cmap=cmap,
+                                        dpi=dpi,
+                                        legend=use_legend,
+                                        xlab=xlab,
+                                        ylab=ylab,
+                                        use_line_markers=use_line_markers,
+                                        transparent_background=transparent_background,
+                                        dump_source=dump_source
+                                    )
+
+                                if generate_univariate_irf_heatmaps:
+                                    plot_irf_as_heatmap(
+                                        plot_x,
+                                        _plot_y,
+                                        names_cur,
+                                        sort_names=sort_names,
+                                        dir=self.outdir,
+                                        filename=filename[:-4] + '_hm.png',
+                                        irf_name_map=irf_name_map,
+                                        plot_x_inches=plot_x_inches,
+                                        plot_y_inches=plot_y_inches,
+                                        ylim=ylim,
+                                        dpi=dpi,
+                                        xlab=xlab,
+                                        ylab=ylab,
+                                        transparent_background=transparent_background,
+                                        dump_source=dump_source
+                                    )
 
                 if plot_rangf:
                     manipulations = [{'ranef': {x: y}} for x, y in zip(ranef_group_names[1:], ranef_level_names[1:])]
