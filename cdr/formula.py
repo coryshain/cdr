@@ -64,7 +64,7 @@ def unparse_rangf(t):
 
 
 def get_bool(k):
-    is_false = ('False', 'FALSE', 'false', 'F', '0')
+    is_false = ('False', 'FALSE', 'false', 'F', '0', 0, None, False)
     if type(k.value).__name__ == 'Constant':
         if isinstance(k.value.value, str):
             if k.value.s in is_false:
@@ -86,7 +86,7 @@ def get_bool(k):
         else:
             out = True
     elif type(k.value).__name__ == 'NameConstant':
-        if k.value.id in is_false:
+        if k.value.value in is_false:
             out = False
         else:
             out = True
