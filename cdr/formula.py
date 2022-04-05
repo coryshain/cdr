@@ -2797,34 +2797,52 @@ class IRFNode(object):
         """
 
         out = []
+        names = set()
         if self.terminal():
-            if include_nn or not isinstance(self.impulse, NNImpulse):
+            if include_nn or not self.impulse.is_nn_impulse():
                 out.append(self.impulse)
-            if include_nn_inputs and isinstance(self.impulse, NNImpulse):
-                for impulse in self.impulse.nn_inputs:
-                    out.append(impulse)
-                for impulse in self.impulse.inputs_added:
-                    out.append(impulse)
+            if include_nn_inputs:
+                if isinstance(self.impulse, NNImpulse):
+                    for impulse in self.impulse.nn_inputs:
+                        name = impulse.name()
+                        if name not in names:
+                            out.append(impulse)
+                            names.add(name)
             if include_interactions:
                 for interaction in self.interactions():
                     for response in interaction.responses():
                         if isinstance(response, IRFNode):
-                            if response.impulse.name() not in [x.name() for x in out]:
+                            name = response.impulse.name()
+                            if name not in names:
                                 out.append(response.impulse)
+                                names.add(name)
                         elif isinstance(response, ImpulseInteraction) or (include_nn_inputs and isinstance(response, NNImpulse)):
                             for subresponse in response.impulses():
-                                if subresponse.name() not in [x.name() for x in out]:
+                                name = subresponse.name()
+                                if name not in names:
                                     out.append(subresponse)
+                                    names.add(name)
                         elif isinstance(response, Impulse):
-                            if response.name() not in [x.name() for x in out]:
+                            name = response.name()
+                            if name not in names:
                                 out.append(response)
+                                names.add(name)
                         else:
                             raise ValueError('Unsupported type "%s" for input to interaction' % type(response).__name__)
         else:
             for c in self.children:
                 for imp in c.impulses(include_interactions=include_interactions, include_nn=include_nn, include_nn_inputs=include_nn_inputs):
-                    if imp.name() not in [x.name() for x in out]:
+                    name = imp.name()
+                    if name not in names:
                         out.append(imp)
+                        names.add(name)
+                if self.family == 'NN':
+                    for impulse in self.nn_inputs:
+                        if include_nn or not impulse.is_nn_impulse():
+                            name = impulse.name()
+                            if name not in names:
+                                out.append(impulse)
+                                names.add(name)
         return out
 
     def impulses_from_response_interaction(self):
