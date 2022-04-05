@@ -120,6 +120,7 @@ class Config(object):
         self.ensemble_list = []
         for model_field in [m for m in config.keys() if m.startswith('model_')]:
             model_name = model_field[6:]
+            print(model_name)
             formula = Formula(config[model_field]['formula'])
             is_cdrnn = len(formula.nns_by_id) > 0
             if model_name.startswith('CDR') or model_name.startswith('DTSR'):

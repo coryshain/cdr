@@ -925,7 +925,7 @@ class Formula(object):
         Process data from AST node representing part of an IRF definition and insert data into internal representation of the model.
 
         :param t: AST node.
-        :param input_irf: ``IRFNode`` object; child IRF of current node
+        :param input_irf: ``IRFNode``, ``Impulse``, ``InterationImpulse``, or ``NNImpulse`` object; child IRF of current node
         :param ops: ``list`` of ``str``, or ``None``; ops applied to IRF. If ``None``, no ops applied
         :param rangf: ``str`` or ``None``; name of rangf for random term currently being processed, or ``None`` if currently processing fixed effects portion of model.
         :param nn_inputs: ``tuple`` or ``None``; tuple of input impulses to neural network IRF, or ``None`` if not a neural network IRF.
@@ -2049,7 +2049,7 @@ class NNImpulse(object):
         :return: ``list`` of ``Impulse``; impulses dominated by NN.
         """
 
-        return self.atomic_impulses
+        return self.atomic_impulses[:]
 
     def expand_categorical(self, X):
         """
@@ -2294,6 +2294,7 @@ class ResponseInteraction(object):
 
         ix = self.atomic_responses.index(old)
         self.atomic_responses[ix] = new
+
 
 class IRFNode(object):
     """
@@ -2596,6 +2597,7 @@ class IRFNode(object):
             out = '.'.join([self.family] + self.impulse_names())
         else:
             out = self.irfID
+
         return out
 
     def name(self):
@@ -2787,7 +2789,7 @@ class IRFNode(object):
 
     def impulses(self, include_interactions=False, include_nn=False, include_nn_inputs=True):
         """
-        Get list of impulses dominated by node.
+        Get alphabetically sorted list of impulses dominated by node.
     
         :param include_interactions: ``bool``; whether to return impulses defined by interaction terms.
         :param include_nn: ``bool``; whether to return NN transformations of impulses.
@@ -2796,53 +2798,14 @@ class IRFNode(object):
         :return: ``list`` of ``Impulse``; impulses dominated by node.
         """
 
-        out = []
-        names = set()
-        if self.terminal():
-            if include_nn or not self.impulse.is_nn_impulse():
-                out.append(self.impulse)
-            if include_nn_inputs:
-                if isinstance(self.impulse, NNImpulse):
-                    for impulse in self.impulse.nn_inputs:
-                        name = impulse.name()
-                        if name not in names:
-                            out.append(impulse)
-                            names.add(name)
-            if include_interactions:
-                for interaction in self.interactions():
-                    for response in interaction.responses():
-                        if isinstance(response, IRFNode):
-                            name = response.impulse.name()
-                            if name not in names:
-                                out.append(response.impulse)
-                                names.add(name)
-                        elif isinstance(response, ImpulseInteraction) or (include_nn_inputs and isinstance(response, NNImpulse)):
-                            for subresponse in response.impulses():
-                                name = subresponse.name()
-                                if name not in names:
-                                    out.append(subresponse)
-                                    names.add(name)
-                        elif isinstance(response, Impulse):
-                            name = response.name()
-                            if name not in names:
-                                out.append(response)
-                                names.add(name)
-                        else:
-                            raise ValueError('Unsupported type "%s" for input to interaction' % type(response).__name__)
-        else:
-            for c in self.children:
-                for imp in c.impulses(include_interactions=include_interactions, include_nn=include_nn, include_nn_inputs=include_nn_inputs):
-                    name = imp.name()
-                    if name not in names:
-                        out.append(imp)
-                        names.add(name)
-                if self.family == 'NN':
-                    for impulse in self.nn_inputs:
-                        if include_nn or not impulse.is_nn_impulse():
-                            name = impulse.name()
-                            if name not in names:
-                                out.append(impulse)
-                                names.add(name)
+        impulses_by_name = self.impulses_by_name(
+            include_interactions=include_interactions,
+            include_nn=include_nn,
+            include_nn_inputs=include_nn_inputs
+        )
+
+        out = [impulses_by_name[x] for x in sorted(impulses_by_name.keys())]
+
         return out
 
     def impulses_from_response_interaction(self):
@@ -2879,25 +2842,82 @@ class IRFNode(object):
         :return: ``list`` of ``str``; names of impulses dominated by node.
         """
 
-        return [x.name() for x in self.impulses(
-            include_interactions=include_interactions, include_nn=include_nn, include_nn_inputs=include_nn_inputs)
-        ]
+        return sorted(self.impulses_by_name(
+            include_interactions=include_interactions,
+            include_nn=include_nn,
+            include_nn_inputs=include_nn_inputs
+        ).keys())
 
-    def impulses_by_name(self, include_interactions=False, include_nn=False):
+    def impulses_by_name(self, include_interactions=False, include_nn=False, include_nn_inputs=True):
         """
         Get dictionary mapping names of impulses dominated by node to their corresponding impulses.
 
         :param include_interactions: ``bool``; whether to return impulses defined by interaction terms.
         :param include_nn: ``bool``; whether to return NN transformations of impulses.
+        :param include_nn_inputs: ``bool``; whether to return input impulses to NN transformations.
 
-        :return: ``dict``; map from impulse names to impulses
+        :return: ``list`` of ``Impulse``; impulses dominated by node.
         """
 
-        out = {}
-        for x in self.impulses(include_interactions=include_interactions, include_nn=include_nn):
-            out[x.name()] = x
+        impulse_set = self.impulse_set(
+            include_interactions=include_interactions,
+            include_nn=include_nn,
+            include_nn_inputs=include_nn_inputs
+        )
+
+        out = {x.name(): x for x in impulse_set}
 
         return out
+
+    def impulse_set(self, include_interactions=False, include_nn=False, include_nn_inputs=True, out=None):
+        """
+        Get set of impulses dominated by node.
+
+        :param include_interactions: ``bool``; whether to return impulses defined by interaction terms.
+        :param include_nn: ``bool``; whether to return NN transformations of impulses.
+        :param include_nn_inputs: ``bool``; whether to return input impulses to NN transformations.
+        :param ``set`` or ``None``; initial dictionary to modify.
+
+        :return: ``list`` of ``Impulse``; impulses dominated by node.
+        """
+
+        if out is None:
+            out = set()
+
+        if self.terminal():
+            if include_nn or not self.impulse.is_nn_impulse():
+                out.add(self.impulse)
+            if include_nn_inputs:
+                if isinstance(self.impulse, NNImpulse):
+                    for impulse in self.impulse.nn_inputs:
+                        out.add(impulse)
+            if include_interactions:
+                for interaction in self.interactions():
+                    for response in interaction.responses():
+                        if isinstance(response, IRFNode):
+                            out.add(response.impulse)
+                        elif isinstance(response, ImpulseInteraction) or (include_nn_inputs and isinstance(response, NNImpulse)):
+                            for subresponse in response.impulses():
+                                out.add(subresponse)
+                        elif isinstance(response, Impulse):
+                            out.add(response)
+                        else:
+                            raise ValueError('Unsupported type "%s" for input to interaction' % type(response).__name__)
+        else:
+            for c in self.children:
+                c.impulse_set(
+                    include_interactions=include_interactions,
+                    include_nn=include_nn,
+                    include_nn_inputs=include_nn_inputs,
+                    out=out
+                )
+                if self.family == 'NN':
+                    for impulse in self.inputs_added:
+                        if include_nn or not impulse.is_nn_impulse():
+                            out.add(impulse)
+
+        return out
+
 
     def terminals(self):
         """
