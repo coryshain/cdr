@@ -2576,7 +2576,7 @@ class CDRModel(object):
                         rv_dict = {
                             'v': None,
                             'kl_penalties': None,
-                            'eval_resample': None
+                            'v_eval_resample': None
                         }
 
                 # shape: (?rangf_n_levels, nirf, nparam, ndim)
