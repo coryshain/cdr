@@ -236,7 +236,7 @@ def filter_names(names, filters):
     return out
 
 
-def filter_models(names, filters, cdr_only=False):
+def filter_models(names, filters=None, cdr_only=False):
     """
     Return models contained in **names** that are permitted by **filters**, preserving order in which filters were matched.
     Filters can be ordinary strings, regular expression objects, or string representations of regular expressions.
@@ -244,13 +244,16 @@ def filter_models(names, filters, cdr_only=False):
     If ``filters`` is zero-length, returns **names**.
 
     :param names: ``list`` of ``str``; pool of model names to filter.
-    :param filters: ``list`` of ``{str, SRE_Pattern}``; filters to apply in order
+    :param filters: ``list`` of ``{str, SRE_Pattern}`` or ``None``; filters to apply in order. If ``None``, no additional filters.
     :param cdr_only: ``bool``; if ``True``, only returns CDR models. If ``False``, returns all models admitted by **filters**.
     :return: ``list`` of ``str``; names in **names** that pass at least one filter, or all of **names** if no filters are applied.
     """
 
     if cdr_only:
-        names = [name for name in names if (name.startswith('CDR') or name.startswith('DTSR'))]
+        names = [name for name in names if not (name.startswith('LM') or name.startswith('GAM'))]
+
+    if filters is None:
+        filters = []
 
     if len(filters) > 0:
         out = filter_names(names, filters)

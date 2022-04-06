@@ -39,8 +39,8 @@ if __name__ == '__main__':
     model_cache = {}
     model_cache_twostep = {}
 
-    cdr_formula_list = [Formula(p.models[m]['formula']) for m in models if (m.startswith('CDR') or m.startswith('DTSR'))]
-    cdr_formula_name_list = [m for m in p.model_list if (m.startswith('CDR') or m.startswith('DTSR'))]
+    cdr_formula_list = [Formula(p.models[m]['formula']) for m in filter_models(models, cdr_only=True)]
+    cdr_formula_name_list = [m for m in filter_models(p.model_list, cdr_only=True)]
 
     evaluation_sets = []
     evaluation_set_partitions = []

@@ -122,7 +122,7 @@ class Config(object):
             model_name = model_field[6:]
             formula = Formula(config[model_field]['formula'])
             is_cdrnn = len(formula.nns_by_id) > 0
-            if model_name.startswith('CDR') or model_name.startswith('DTSR'):
+            if not (model_name.startswith('LM') or model_name.startswith('GAM')):
                 reg_type = 'cdr'
             else:
                 reg_type = model_name.split('_')[0]

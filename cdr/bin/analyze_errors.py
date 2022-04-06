@@ -53,7 +53,7 @@ if __name__ == '__main__':
         p = Config(path)
 
         models = filter_models(p.model_list, args.models)
-        cdr_models = [x for x in models if (x.startswith('CDR') or x.startswith('DTSR'))]
+        cdr_models = [x for x in filter_models(models, cdr_only=True)]
 
         if args.ablation:
             comparison_sets = {}

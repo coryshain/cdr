@@ -42,23 +42,21 @@ if __name__ == '__main__':
     run_R = False
     run_cdr = False
     for m in models:
-        if m.startswith('CDR') or m.startswith('DTSR'):
-            run_cdr = True
-        else:
+        if m.startswith('LM') or m.startswith('GAM'):
             run_R = True
+        else:
+            run_cdr = True
 
     if not (run_R or run_cdr):
         stderr('No models to run. Exiting...\n')
         exit()
 
-    cdr_formula_list = [Formula(p.models[m]['formula']) for m in models if (m.startswith('CDR') or m.startswith('DTSR'))]
-    cdr_formula_name_list = [m for m in p.model_list if (m.startswith('CDR') or m.startswith('DTSR'))]
+    cdr_formula_list = [Formula(p.models[m]['formula']) for m in filter_models(models, cdr_only=True)]
+    cdr_formula_name_list = [m for m in filter_models(p.model_list)]
     all_rangf = [v for x in cdr_formula_list for v in x.rangf]
     partitions = get_partition_list(args.partition)
     all_interactions = False
-    # for m in models:
-    #     if m.startswith('CDRNN'):
-    #         all_interactions = True
+
     X_paths, Y_paths = paths_from_partition_cliarg(partitions, p)
     X, Y = read_tabular_data(
         X_paths,
@@ -236,7 +234,7 @@ if __name__ == '__main__':
             stderr(summary)
             stderr('\n\n')
 
-        elif m.startswith('CDR') or m.startswith('DTSR'):
+        else: # is CDR
             dv = [x.strip() for x in formula.strip().split('~')[0].strip().split('+')]
             Y_valid, select_Y_valid = filter_invalid_responses(Y, dv)
 

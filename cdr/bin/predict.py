@@ -123,13 +123,13 @@ if __name__ == '__main__':
     run_baseline = False
     run_cdr = False
     for m in models:
-        if not run_baseline and m.startswith('LM') or m.startswith('GAM'):
+        if m.startswith('LM') or m.startswith('GAM'):
             run_baseline = True
-        elif not run_cdr and (m.startswith('CDR') or m.startswith('DTSR')):
+        else:
             run_cdr = True
 
-    cdr_formula_list = [Formula(p.models[m]['formula']) for m in models if (m.startswith('CDR') or m.startswith('DTSR'))]
-    cdr_formula_name_list = [m for m in p.model_list if (m.startswith('CDR') or m.startswith('DTSR'))]
+    cdr_formula_list = [Formula(p.models[m]['formula']) for m in filter_models(models, cdr_only=True)]
+    cdr_formula_name_list = [m for m in filter_models(p.model_list, cdr_only=True)]
 
     evaluation_sets = []
     evaluation_set_partitions = []
@@ -247,7 +247,8 @@ if __name__ == '__main__':
                 _model = model_cache[m]
             else:
                 stderr('Retrieving saved model %s...\n' % m)
-                if (m.startswith('CDR') or m.startswith('DTSR')):
+                is_cdr = not (m.startswith('LM') or m.startswith('GAM'))
+                if is_cdr:
                     _model = CDREnsemble(p.outdir, m_path)
                 else:
                     with open(p.outdir + '/' + m_path + '/m.obj', 'rb') as m_file:
@@ -313,7 +314,7 @@ if __name__ == '__main__':
                     f_out.write(summary)
                 stderr(summary)
 
-            elif (m.startswith('CDR') or m.startswith('DTSR')):
+            elif not (m.startswith('LM') or m.startswith('GAM')):
                 if not p.use_gpu_if_available or args.cpu_only:
                     os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 

@@ -38,8 +38,8 @@ if __name__ == '__main__':
         model_list = sorted(set(p.model_list) | set(p.ensemble_list))
         models = filter_models(model_list, args.models, cdr_only=True)
 
-        cdr_formula_list = [Formula(p.models[m]['formula']) for m in models if (m.startswith('CDR') or m.startswith('DTSR'))]
-        cdr_models = [m for m in models if (m.startswith('CDR') or m.startswith('DTSR'))]
+        cdr_formula_list = [Formula(p.models[m]['formula']) for m in filter_models(models, cdr_only=True)]
+        cdr_models = [m for m in filter_models(models, cdr_only=True)]
 
         if not args.ablated_models:
             cdr_models_new = []

@@ -45,7 +45,7 @@ if __name__ == '__main__':
         p = Config(path)
 
         models = filter_models(p.model_list, args.models)
-        cdr_models = [x for x in models if (x.startswith('CDR') or x.startswith('DTSR'))]
+        cdr_models = filter_models(p.model_list, args.models, cdr_only=True)
 
         partitions = get_partition_list(args.partition)
         partition_str = '-'.join(partitions)
