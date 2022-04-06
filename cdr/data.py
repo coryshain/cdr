@@ -1,7 +1,7 @@
 import re
 import numpy as np
 import pandas as pd
-from .util import names2ix, stderr
+from .util import flatten_dict, names2ix, stderr
 
 op_finder = re.compile('([^()]+)\((.+)\) *')
 
@@ -189,13 +189,15 @@ def filter_invalid_responses(Y, dv, crossval_factor=None, crossval_fold=None):
         for _dv in dv:
             if _dv in _Y:
                 dtype = _Y[_dv].dtype
-                if dtype.name != 'category' and np.issubdtype(dtype, np.number):
+                if dtype.name not in ('object', 'category') and np.issubdtype(dtype, np.number):
                     is_numeric = True
                 else:
                     is_numeric = False
                 if is_numeric:
                     finite = np.isfinite(_Y[_dv])
-                    _select_Y_valid_dv |= finite
+                else:
+                    finite = np.ones(len(_Y), dtype=bool)
+                _select_Y_valid_dv |= finite
 
         _select_Y_valid = _select_Y_valid_cv * _select_Y_valid_dv
 
@@ -756,6 +758,9 @@ def compute_filter(y, field, cond):
     elif cond.startswith('=='):
         op = '=='
         var = cond[2:].strip()
+    elif cond.startswith('=='):
+        op = '=='
+        var = cond[2:].strip()
     elif cond.startswith('='):
         op = '=='
         var = cond[1:].strip()
@@ -1077,7 +1082,28 @@ def compare_elementwise_perf(a, b, y=None, mode='err'):
 
         out = b - a
 
-        return b - a
+        return out
 
     raise ValueError('Unrecognize value for mode: %s.' % mode)
 
+
+def concat_nested(batches, axis=0):
+    tmp = {}
+    for b in batches:
+        b = flatten_dict(b)
+        for k, v in b:
+            if k not in tmp:
+                tmp[k] = []
+            tmp[k].append(v)
+
+    out = {}
+    for k in tmp:
+        _out = out
+        v = np.concatenate(tmp[k], axis=axis)
+        for i, _k in enumerate(k[:-1]):
+            if _k not in out:
+                _out[_k] = {}
+            _out = _out[_k]
+        _out[k[-1]] = v
+
+    return out

@@ -9,9 +9,11 @@ from scipy import linalg, special
 
 file_re = re.compile('output_([^_]+)_f(\d+)_([^_]+).csv')
 
+
 def stderr(s):
     sys.stderr.write(s)
     sys.stderr.flush()
+
 
 def extract_cdr_prediction_files(dirpath):
     twostep_ix = 0
@@ -60,6 +62,7 @@ def extract_cdr_prediction_files(dirpath):
             out[response][filenum][partition][filetype][pred_type] = dirpath + '/' + path
 
     return out
+
 
 def names2ix(names, l, dtype=np.int32):
     """
@@ -365,3 +368,16 @@ def load_cdr(dir_path):
     m.build(outdir=dir_path)
     m.load(outdir=dir_path)
     return m
+
+
+def flatten_dict(d, keys=None):
+    if keys is None:
+        keys = []
+    out = []
+    for k in sorted(d.keys()):
+        v = d[k]
+        if isinstance(v, dict):
+            out += flatten_dict(v, keys + [k])
+        else:
+            out.append((tuple(keys + [k]), v))
+    return out

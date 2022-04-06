@@ -63,6 +63,44 @@ def unparse_rangf(t):
     return out
 
 
+def get_bool(k):
+    is_false = ('False', 'FALSE', 'false', 'F', '0', 0, None, False)
+    if type(k.value).__name__ == 'Constant':
+        if isinstance(k.value.value, str):
+            if k.value.s in is_false:
+                out = False
+            else:
+                out = True
+        elif k.value.n == 0:
+            out = False
+        else:
+            out = True
+    elif type(k.value).__name__ == 'Str':
+        if k.value.s in is_false:
+            out = False
+        else:
+            out = True
+    elif type(k.value).__name__ == 'Name':
+        if k.value.id in is_false:
+            out = False
+        else:
+            out = True
+    elif type(k.value).__name__ == 'NameConstant':
+        if k.value.value in is_false:
+            out = False
+        else:
+            out = True
+    elif type(k.value).__name__ == 'Num':
+        if k.value.n == 0:
+            out = False
+        else:
+            out = True
+    else:
+        out = None
+
+    return out
+
+
 class Formula(object):
     """
     A class for parsing R-style mixed-effects CDR model formula strings and applying them to CDR data matrices.
@@ -686,7 +724,7 @@ class Formula(object):
                     for s in S:
                         new = self.process_irf(
                             t.args[1],
-                            input=s,
+                            input_irf=s,
                             ops=None,
                             rangf=rangf,
                             nn_inputs=nn_inputs,
@@ -715,11 +753,15 @@ class Formula(object):
                     assert isinstance(s, Impulse) or isinstance(s, ImpulseInteraction), 'NN transforms may only dominate nodes of type Impulse or ImpulseInteraction. Got %s.' % type(s)
 
                 nn_config = {}
+                impulses_as_inputs = True
                 inputs_to_add = []
                 inputs_to_drop = []
                 if len(t.keywords) > 0:
                     for k in t.keywords:
-                        if k.arg == 'inputs_to_add':
+                        if k.arg == 'impulses_as_inputs':
+                            impulses_as_inputs = get_bool(k)
+                            assert impulses_as_inputs is not None, 'Unrecognized value for impulses_as_inputs: %s' % k.value
+                        elif k.arg == 'inputs_to_add':
                             assert type(k.value).__name__ == 'List', 'Non-list argument provided to keyword arg "inputs_to_add"'
                             for x in k.value.elts:
                                 self.process_ast(
@@ -768,6 +810,7 @@ class Formula(object):
 
                 new = NNImpulse(
                     subterms,
+                    impulses_as_inputs=impulses_as_inputs,
                     inputs_to_add=inputs_to_add,
                     inputs_to_drop=inputs_to_drop,
                     nn_config=nn_config
@@ -871,7 +914,7 @@ class Formula(object):
     def process_irf(
             self,
             t,
-            input,
+            input_irf,
             ops=None,
             rangf=None,
             nn_inputs=None,
@@ -882,7 +925,7 @@ class Formula(object):
         Process data from AST node representing part of an IRF definition and insert data into internal representation of the model.
 
         :param t: AST node.
-        :param input: ``IRFNode`` object; child IRF of current node
+        :param input_irf: ``IRFNode``, ``Impulse``, ``InterationImpulse``, or ``NNImpulse`` object; child IRF of current node
         :param ops: ``list`` of ``str``, or ``None``; ops applied to IRF. If ``None``, no ops applied
         :param rangf: ``str`` or ``None``; name of rangf for random term currently being processed, or ``None`` if currently processing fixed effects portion of model.
         :param nn_inputs: ``tuple`` or ``None``; tuple of input impulses to neural network IRF, or ``None`` if not a neural network IRF.
@@ -898,6 +941,7 @@ class Formula(object):
         trainable = None
         param_init={}
         nn_config = {}
+        impulses_as_inputs = True
         inputs_to_add = []
         inputs_to_drop = []
         if len(t.keywords) > 0:
@@ -927,24 +971,8 @@ class Formula(object):
                     else:
                         raise ValueError('Unrecognized value for coef_id: %s' % k.value)
                 elif k.arg == 'ran':
-                    if type(k.value).__name__ == 'Constant':
-                        if isinstance(k.value.value, str):
-                            if k.value.s in ['True', 'TRUE', 'true', 'T']:
-                                ranirf = True
-                        elif k.value.n > 0:
-                            ranirf = True
-                    elif type(k.value).__name__ == 'Str':
-                        if k.value.s in ['True', 'TRUE', 'true', 'T']:
-                            ranirf = True
-                    elif type(k.value).__name__ == 'Name':
-                        if k.value.id in ['True', 'TRUE', 'true', 'T']:
-                            ranirf = True
-                    elif type(k.value).__name__ == 'NameConstant':
-                        ranirf = k.value.value
-                    elif type(k.value).__name__ == 'Num':
-                        ranirf = k.value.n > 0
-                    else:
-                        raise ValueError('Unrecognized value for ran: %s' % k.value)
+                    ranirf = get_bool(k)
+                    assert ranirf is not None, 'Unrecognized value for ranirf: %s' % k.value
                 elif k.arg == 'trainable':
                     assert type(k.value).__name__ == 'List', 'Non-list argument provided to keyword arg "trainable"'
                     trainable = []
@@ -958,6 +986,9 @@ class Formula(object):
                             trainable.append(x.s)
                         else:
                             raise ValueError('Unrecognized value for element of trainable: %s' % x)
+                elif t.func.id == 'NN' and k.arg == 'impulses_as_inputs':
+                    impulses_as_inputs = get_bool(k)
+                    assert impulses_as_inputs is not None, 'Unrecognized value for impulses_as_inputs: %s' % k.value
                 elif t.func.id == 'NN' and k.arg == 'inputs_to_add':
                     assert type(k.value).__name__ == 'List', 'Non-list argument provided to keyword arg "inputs_to_add"'
                     for x in k.value.elts:
@@ -1010,7 +1041,7 @@ class Formula(object):
         inputs_to_add = sum(inputs_to_add, [])
         inputs_to_drop = sum(inputs_to_drop, [])
 
-        if isinstance(input, IRFNode):
+        if isinstance(input_irf, IRFNode):
             new = IRFNode(
                 family=t.func.id,
                 irfID=irf_id,
@@ -1021,17 +1052,18 @@ class Formula(object):
                 param_init=param_init,
                 trainable=trainable,
                 nn_config=nn_config,
+                impulses_as_inputs=impulses_as_inputs,
                 inputs_to_add=inputs_to_add,
                 inputs_to_drop=inputs_to_drop
             )
 
-            new.add_child(input)
+            new.add_child(input_irf)
 
             if len(t.args) > 0:
                 assert len(t.args) == 1, 'Ill-formed model string: IRF can take at most 1 positional argument'
                 p = self.process_irf(
                     t.args[0],
-                    input = new,
+                    input_irf= new,
                     nn_inputs=nn_inputs,
                     impulses_by_name=impulses_by_name,
                     interactions_by_name=interactions_by_name,
@@ -1044,7 +1076,7 @@ class Formula(object):
         else:
             new = IRFNode(
                 family='Terminal',
-                impulse=input,
+                impulse=input_irf,
                 coefID=coef_id,
                 fixed=rangf is None,
                 rangf=rangf,
@@ -1054,7 +1086,7 @@ class Formula(object):
 
             p = self.process_irf(
                 t,
-                input=new,
+                input_irf=new,
                 rangf=rangf,
                 nn_inputs=nn_inputs,
                 impulses_by_name=impulses_by_name,
@@ -1104,7 +1136,7 @@ class Formula(object):
         elif op in ['s', 's.']:
             out = s(arr)
         elif op == 'log':
-            out = np.log(arr)
+            out = np.log(np.maximum(arr, 1e-12))
         elif op == 'log1p':
             out = np.log(arr + 1)
         elif op == 'exp':
@@ -1913,20 +1945,25 @@ class NNImpulse(object):
     Data structure representing a feedforward neural network transform of one or more impulses in a CDR model.
 
     :param impulses: ``list`` of ``Impulse``; impulses to transform.
+    :param impulses_as_inputs: ``bool``; whether to include impulses as NN inputs.
     :param inputs_to_add: ``list`` of ``Impulse`` or ``None``; extra impulses to add to NN input.
     :param inputs_to_drop: ``list`` of ``Impulse`` or ``None``;  output impulses to drop from NN input.
     :param nn_config: ``dict`` or ``None``; map of NN config fields to their values for this NN node.
     """
 
-    def __init__(self, impulses, inputs_to_add=None, inputs_to_drop=None, nn_config=None):
+    def __init__(self, impulses, impulses_as_inputs=True, inputs_to_add=None, inputs_to_drop=None, nn_config=None):
         self.atomic_impulses = []
         names = set()
         for x in impulses:
             names.add(x.name())
             self.atomic_impulses.append(x)
         self.nn_impulses = self.atomic_impulses[:]
+        self.impulses_as_inputs = impulses_as_inputs
 
-        nn_inputs = self.atomic_impulses[:]
+        if self.impulses_as_inputs:
+            nn_inputs = self.atomic_impulses[:]
+        else:
+            nn_inputs = []
         added = []
         if inputs_to_add is None:
             inputs_to_add = []
@@ -1966,6 +2003,8 @@ class NNImpulse(object):
         self.nn_inputs = tuple(sorted([x for x in nn_inputs], key=lambda x: x.name()))
         self.nn_key = 'impulseNN_' + '_'.join([x.name() for x in self.nn_inputs])
         nn_args = [' + '.join([str(x) for x in self.impulses()])]
+        if not self.impulses_as_inputs:
+            nn_args.append('impulses_as_inputs=False')
         if self.inputs_added:
             key = 'inputs_to_add'
             val = []
@@ -2010,7 +2049,7 @@ class NNImpulse(object):
         :return: ``list`` of ``Impulse``; impulses dominated by NN.
         """
 
-        return self.atomic_impulses
+        return self.atomic_impulses[:]
 
     def expand_categorical(self, X):
         """
@@ -2033,6 +2072,7 @@ class NNImpulse(object):
         expanded_interaction_impulses = [
             NNImpulse(
                 sum([expanded_atomic_impulses], []),
+                impulses_as_inputs=self.impulses_as_inputs,
                 inputs_to_add=self.inputs_added,
                 inputs_to_drop=self.inputs_dropped,
                 nn_config=self.nn_config
@@ -2255,6 +2295,7 @@ class ResponseInteraction(object):
         ix = self.atomic_responses.index(old)
         self.atomic_responses[ix] = new
 
+
 class IRFNode(object):
     """
     Data structure representing a node in a CDR IRF tree.
@@ -2270,6 +2311,7 @@ class IRFNode(object):
     :param rangf: ``list`` of ``str``, ``str``, or ``None``; names of any random grouping factors associated with the node.
     :param nn_impulses: ``tuple`` or ``None``; tuple of input impulses to neural network IRF, or ``None`` if not a neural network IRF.
     :param nn_config: ``dict`` or ``None``; dictionary of settings for NN IRF component.
+    :param impulses_as_inputs: ``bool``; whether to include impulses in input of a neural network IRF.
     :param inputs_to_add: ``list`` of ``Impulse``/``NNImpulse`` or ``None``; list of impulses to add to input of neural network IRF.
     :param inputs_to_drop: ``list`` of ``Impulse``/``NNImpulse`` or ``None``; list of impulses to remove from input of neural network IRF (keeping them in output).
     :param param_init: ``dict``; map from parameter names to initial values, which will also be used as prior means.
@@ -2288,6 +2330,7 @@ class IRFNode(object):
             rangf=None,
             nn_impulses=None,
             nn_config=None,
+            impulses_as_inputs=True,
             inputs_to_add=None,
             inputs_to_drop=None,
             param_init=None,
@@ -2307,7 +2350,12 @@ class IRFNode(object):
             self.coefID = None
             self.fixed = fixed
             self.rangf = []
-            self.nn_impulses = None
+            self.impulses_as_inputs = True
+            self.nn_impulses = tuple()
+            self.nn_key = None
+            self.inputs_added = []
+            self.inputs_dropped = []
+            self.nn_config = {}
             self.param_init = {}
         else:
             self.ops = [] if ops is None else ops[:]
@@ -2317,12 +2365,16 @@ class IRFNode(object):
             self.coefID = coefID
             self.fixed = fixed
             self.rangf = [] if rangf is None else sorted(rangf) if isinstance(rangf, list) else [rangf]
+            self.impulses_as_inputs = impulses_as_inputs
             if family == 'NN':
                 assert nn_impulses, 'Parameter nn_impulses must be provided to neural network IRFs'
                 self.nn_impulses = tuple(sorted([x for x in nn_impulses], key=lambda x: x.name()))
                 self.nn_key = 'irfNN_' + '_'.join([x.name() for x in self.nn_impulses])
 
-                nn_inputs = list(self.nn_impulses)
+                if self.impulses_as_inputs:
+                    nn_inputs = list(self.nn_impulses)
+                else:
+                    nn_inputs = []
                 added = []
                 if inputs_to_add is None:
                     inputs_to_add = []
@@ -2545,6 +2597,7 @@ class IRFNode(object):
             out = '.'.join([self.family] + self.impulse_names())
         else:
             out = self.irfID
+
         return out
 
     def name(self):
@@ -2588,6 +2641,8 @@ class IRFNode(object):
             if set(self.trainable) != set(Formula.irf_params(self.family)):
                 params.append('trainable=%s' % self.trainable)
             if self.family == 'NN':
+                if not self.impulses_as_inputs:
+                    params.append('impulses_as_inputs=False')
                 if self.inputs_added:
                     key = 'inputs_to_add'
                     val = []
@@ -2734,7 +2789,7 @@ class IRFNode(object):
 
     def impulses(self, include_interactions=False, include_nn=False, include_nn_inputs=True):
         """
-        Get list of impulses dominated by node.
+        Get alphabetically sorted list of impulses dominated by node.
     
         :param include_interactions: ``bool``; whether to return impulses defined by interaction terms.
         :param include_nn: ``bool``; whether to return NN transformations of impulses.
@@ -2743,35 +2798,14 @@ class IRFNode(object):
         :return: ``list`` of ``Impulse``; impulses dominated by node.
         """
 
-        out = []
-        if self.terminal():
-            if include_nn or not isinstance(self.impulse, NNImpulse):
-                out.append(self.impulse)
-            if include_nn_inputs and isinstance(self.impulse, NNImpulse):
-                for impulse in self.impulse.nn_inputs:
-                    out.append(impulse)
-                for impulse in self.impulse.inputs_added:
-                    out.append(impulse)
-            if include_interactions:
-                for interaction in self.interactions():
-                    for response in interaction.responses():
-                        if isinstance(response, IRFNode):
-                            if response.impulse.name() not in [x.name() for x in out]:
-                                out.append(response.impulse)
-                        elif isinstance(response, ImpulseInteraction) or (include_nn_inputs and isinstance(response, NNImpulse)):
-                            for subresponse in response.impulses():
-                                if subresponse.name() not in [x.name() for x in out]:
-                                    out.append(subresponse)
-                        elif isinstance(response, Impulse):
-                            if response.name() not in [x.name() for x in out]:
-                                out.append(response)
-                        else:
-                            raise ValueError('Unsupported type "%s" for input to interaction' % type(response).__name__)
-        else:
-            for c in self.children:
-                for imp in c.impulses(include_interactions=include_interactions, include_nn=include_nn, include_nn_inputs=include_nn_inputs):
-                    if imp.name() not in [x.name() for x in out]:
-                        out.append(imp)
+        impulses_by_name = self.impulses_by_name(
+            include_interactions=include_interactions,
+            include_nn=include_nn,
+            include_nn_inputs=include_nn_inputs
+        )
+
+        out = [impulses_by_name[x] for x in sorted(impulses_by_name.keys())]
+
         return out
 
     def impulses_from_response_interaction(self):
@@ -2808,25 +2842,82 @@ class IRFNode(object):
         :return: ``list`` of ``str``; names of impulses dominated by node.
         """
 
-        return [x.name() for x in self.impulses(
-            include_interactions=include_interactions, include_nn=include_nn, include_nn_inputs=include_nn_inputs)
-        ]
+        return sorted(self.impulses_by_name(
+            include_interactions=include_interactions,
+            include_nn=include_nn,
+            include_nn_inputs=include_nn_inputs
+        ).keys())
 
-    def impulses_by_name(self, include_interactions=False, include_nn=False):
+    def impulses_by_name(self, include_interactions=False, include_nn=False, include_nn_inputs=True):
         """
         Get dictionary mapping names of impulses dominated by node to their corresponding impulses.
 
         :param include_interactions: ``bool``; whether to return impulses defined by interaction terms.
         :param include_nn: ``bool``; whether to return NN transformations of impulses.
+        :param include_nn_inputs: ``bool``; whether to return input impulses to NN transformations.
 
-        :return: ``dict``; map from impulse names to impulses
+        :return: ``list`` of ``Impulse``; impulses dominated by node.
         """
 
-        out = {}
-        for x in self.impulses(include_interactions=include_interactions, include_nn=include_nn):
-            out[x.name()] = x
+        impulse_set = self.impulse_set(
+            include_interactions=include_interactions,
+            include_nn=include_nn,
+            include_nn_inputs=include_nn_inputs
+        )
+
+        out = {x.name(): x for x in impulse_set}
 
         return out
+
+    def impulse_set(self, include_interactions=False, include_nn=False, include_nn_inputs=True, out=None):
+        """
+        Get set of impulses dominated by node.
+
+        :param include_interactions: ``bool``; whether to return impulses defined by interaction terms.
+        :param include_nn: ``bool``; whether to return NN transformations of impulses.
+        :param include_nn_inputs: ``bool``; whether to return input impulses to NN transformations.
+        :param ``set`` or ``None``; initial dictionary to modify.
+
+        :return: ``list`` of ``Impulse``; impulses dominated by node.
+        """
+
+        if out is None:
+            out = set()
+
+        if self.terminal():
+            if include_nn or not self.impulse.is_nn_impulse():
+                out.add(self.impulse)
+            if include_nn_inputs:
+                if isinstance(self.impulse, NNImpulse):
+                    for impulse in self.impulse.nn_inputs:
+                        out.add(impulse)
+            if include_interactions:
+                for interaction in self.interactions():
+                    for response in interaction.responses():
+                        if isinstance(response, IRFNode):
+                            out.add(response.impulse)
+                        elif isinstance(response, ImpulseInteraction) or (include_nn_inputs and isinstance(response, NNImpulse)):
+                            for subresponse in response.impulses():
+                                out.add(subresponse)
+                        elif isinstance(response, Impulse):
+                            out.add(response)
+                        else:
+                            raise ValueError('Unsupported type "%s" for input to interaction' % type(response).__name__)
+        else:
+            for c in self.children:
+                c.impulse_set(
+                    include_interactions=include_interactions,
+                    include_nn=include_nn,
+                    include_nn_inputs=include_nn_inputs,
+                    out=out
+                )
+                if self.family == 'NN':
+                    for impulse in self.inputs_added:
+                        if include_nn or not impulse.is_nn_impulse():
+                            out.add(impulse)
+
+        return out
+
 
     def terminals(self):
         """
@@ -3362,6 +3453,7 @@ class IRFNode(object):
                 new_impulses = [
                     NNImpulse(
                         sum(expanded_atomic_impulses, []),
+                        impulses_as_inputs=self.impulse.impulses_as_inputs,
                         inputs_to_add=self.impulse.inputs_added,
                         inputs_to_drop=self.impulse.inputs_dropped,
                         nn_config=self.impulse.nn_config
@@ -3399,6 +3491,7 @@ class IRFNode(object):
                     rangf=self.rangf[:],
                     nn_impulses=self.nn_impulses,
                     nn_config=self.nn_config,
+                    impulses_as_inputs=self.impulses_as_inputs,
                     inputs_to_add=self.inputs_added,
                     inputs_to_drop=self.inputs_dropped,
                     param_init=self.param_init,
@@ -3434,6 +3527,7 @@ class IRFNode(object):
                     rangf=self.rangf,
                     nn_impulses=self.nn_impulses,
                     nn_config=self.nn_config,
+                    impulses_as_inputs=self.impulses_as_inputs,
                     inputs_to_add=self.inputs_added,
                     inputs_to_drop=self.inputs_dropped,
                     param_init=self.param_init,
@@ -3465,6 +3559,7 @@ class IRFNode(object):
                         expanded_interaction_impulse = [
                             NNImpulse(
                                 sum(expanded_interaction_impulse, []),
+                                impulses_as_inputs=response.impulses_as_inputs,
                                 inputs_to_add=response.inputs_added,
                                 inputs_to_drop=response.inputs_dropped,
                                 nn_config=response.nn_config

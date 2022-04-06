@@ -17,18 +17,6 @@ else:
 from .util import stderr, get_irf_name
 
 
-class MidpointNormalize(matplotlib.colors.Normalize):
-    def __init__(self, vcenter=0., vmin=None, vmax=None, clip=False):
-        self.vcenter = vcenter
-        matplotlib.colors.Normalize.__init__(self, vmin, vmax, clip)
-
-    def __call__(self, value, clip=None):
-        # I'm ignoring masked values and all kinds of edge cases to make a
-        # simple example...
-        x, y = [self.vmin, self.vcenter, self.vmax], [0, 0.5, 1]
-        return np.ma.masked_array(np.interp(value, x, y))
-
-
 def plot_irf(
         plot_x,
         plot_y,
@@ -183,6 +171,114 @@ def plot_irf(
                 df[name + 'UB'] = uq[:,i]
 
         df.to_csv(dir + '/' + csvname, index=False)
+
+
+def plot_irf_as_heatmap(
+        plot_x,
+        plot_y,
+        irf_names,
+        sort_names=True,
+        dir='.',
+        filename='irf_hm.png',
+        irf_name_map=None,
+        plot_x_inches=6,
+        plot_y_inches=4,
+        ylim=None,
+        cmap='seismic',
+        xlab=None,
+        ylab=None,
+        transparent_background=False,
+        dpi=300,
+        dump_source=False
+):
+    """
+    Plot impulse response functions as a heatmap.
+
+    :param plot_x: ``numpy`` array with shape (T,1); time points for which to plot the response. For example, if the plots contain 1000 points from 0s to 10s, **plot_x** could be generated as ``np.linspace(0, 10, 1000)``.
+    :param plot_y: ``numpy`` array with shape (T, N); response of each IRF at each time point.
+    :param irf_names: ``list`` of ``str``; CDR ID's of IRFs in the same order as they appear in axis 1 of **plot_y**.
+    :param sort_names: ``bool``; alphabetically sort IRF names.
+    :param dir: ``str``; output directory.
+    :param filename: ``str``; filename.
+    :param irf_name_map: ``dict`` of ``str`` to ``str``; map from CDR IRF ID's to more readable names to appear in legend. Any plotted IRF whose ID is not found in **irf_name_map** will be represented with the CDR IRF ID.
+    :param plot_x_inches: ``float``; width of plot in inches.
+    :param plot_y_inches: ``float``; height of plot in inches.
+    :param ylim: 2-element ``tuple`` or ``list``; (lower_bound, upper_bound) to use for y axis. If ``None``, automatically inferred.
+    :param cmap: ``str``; name of ``matplotlib`` ``cmap`` object (determines colors of plotted IRF).
+    :param xlab: ``str`` or ``None``; x-axis label. If ``None``, no label.
+    :param ylab: ``str`` or ``None``; y-axis label. If ``None``, no label.
+    :param transparent_background: ``bool``; use a transparent background. If ``False``, uses a white background.
+    :param dpi: ``int``; dots per inch.
+    :param dump_source: ``bool``; Whether to dump the plot source array to a csv file.
+    :return: ``None``
+    """
+
+    irf_names_processed = irf_names[:]
+    if irf_name_map is not None:
+        for i in range(len(irf_names_processed)):
+            irf_names_processed[i] = ':'.join(
+                [get_irf_name(x, irf_name_map) for x in irf_names_processed[i].split(':')])
+    if sort_names:
+        sort_ix = [i[0] for i in sorted(enumerate(irf_names_processed), key=lambda x: x[1])]
+    else:
+        sort_ix = range(len(irf_names_processed))
+
+    while len(plot_x.shape) > 1:
+        plot_x = plot_x[..., 0]
+
+    fig, ax = plt.subplots()
+    cm = plt.get_cmap(cmap)
+    plt.rcParams["font.family"] = "sans-serif"
+
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['bottom'].set_visible(False)
+    ax.spines['left'].set_visible(False)
+    ax.tick_params(top='off', bottom='off', left=False, right='off', labelleft=False, labelbottom='on')
+    ax.xaxis.set_ticks_position('none')
+    ax.yaxis.set_ticks_position('none')
+
+    _plot_y = plot_y[:, sort_ix]
+    im = ax.imshow(
+        _plot_y.T,
+        aspect='auto',
+        extent=[plot_x.min(), plot_x.max(), 0, len(sort_ix)-1],
+        cmap=cm,
+        norm=matplotlib.colors.TwoSlopeNorm(vcenter=0.),
+        interpolation='none'
+    )
+    bar = plt.colorbar(im)
+    bar.set_label(ylab)
+
+    if xlab:
+        xlab = get_irf_name(xlab, irf_name_map)
+        ax.set_xlabel(xlab)
+
+    xlim = (plot_x.min(), plot_x.max())
+    ax.set_xlim(xlim)
+    if ylim is not None:
+        ax.set_ylim(ylim)
+
+    ax.axvline(x=0, lw=1, c='k', alpha=1)
+
+    fig.set_size_inches(plot_x_inches, plot_y_inches)
+    # fig.tight_layout()
+    try:
+        fig.savefig(dir + '/' + filename, dpi=dpi, transparent=transparent_background)
+    except Exception as e:
+        stderr('Error saving plot to file %s. Skipping...\n' % (dir + '/' + filename))
+        stderr('Traceback:\n')
+        stderr('%s\n' % e)
+    plt.close(fig)
+
+    if dump_source:
+        csvname = '.'.join(filename.split('.')[:-1]) + '.csv'
+        if irf_name_map is not None:
+            names_cur = [get_irf_name(x, irf_name_map) for x in irf_names]
+        df = pd.DataFrame(np.concatenate([plot_x[..., None], plot_y], axis=1), columns=['time'] + names_cur)
+
+        df.to_csv(dir + '/' + csvname, index=False)
+
 
 def plot_surface(
         x,
@@ -410,6 +506,11 @@ def plot_surface(
                     zorder=1
                 )
                 surf.set_facecolor((0, 0, 0, 0))
+
+            print(x.shape)
+            print(y.shape)
+            print(z.shape)
+
             surf = ax.plot_surface(
                 x,
                 y,

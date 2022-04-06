@@ -175,14 +175,18 @@ class Config(object):
                         new_model['ablated'] = set(ablated)
                         _models[new_name] = new_model
                         _model_list.append(new_name)
-                if 'n_ensemble' in config[model_field]:
+                if 'n_ensemble' in config[model_field] or 'n_ensemble' in cdr_settings:
+                    if 'n_ensemble' in config[model_field]:
+                        n_ensemble = config[model_field].getint('n_ensemble')
+                    else:
+                        n_ensemble = cdr_settings.getint('n_ensemble')
                     __models = {}
                     __model_list = []
                     for _m in _models:
-                        for i in range(config[model_field].getint('n_ensemble')):
+                        for i in range(n_ensemble):
                             __models[_m + '.m%d' % i] = _models[_m]
                     for _m in _model_list:
-                        for i in range(config[model_field].getint('n_ensemble')):
+                        for i in range(n_ensemble):
                             __model_list.append(_m + '.m%d' % i)
                     _models.update(__models)
                     _model_list = __model_list

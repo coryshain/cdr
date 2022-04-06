@@ -371,7 +371,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'minibatch_size',
-        1024,
+        512,
         [int, None],
         "Size of minibatches to use for fitting (full-batch if ``None``)."
     ),
@@ -422,7 +422,13 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'epsilon',
-        1e-2,
+        1e-5,
+        float,
+        "Epsilon parameter to use for numerical stability in bounded parameter estimation (imposes a positive lower bound on the parameter)."
+    ),
+    Kwarg(
+        'pred_dist_epsilon',
+        1e-5,
         float,
         "Epsilon parameter to use for numerical stability in bounded parameter estimation (imposes a positive lower bound on the parameter)."
     ),
@@ -583,7 +589,7 @@ MODEL_INITIALIZATION_KWARGS = [
         'inherit',
         [str, float, 'inherit'],
         "Scale of random effects regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**. Regularization only applies to random effects without variational priors.",
-        default_value_cdrnn=1.
+        default_value_cdrnn=10.
     ),
 
     # INCREMENTAL SAVING AND LOGGING
@@ -686,6 +692,20 @@ MODEL_INITIALIZATION_KWARGS = [
         bool,
         "Whether to include a legend in plots with multiple components.",
         aliases=['use_legend', 'legend']
+    ),
+    Kwarg(
+        'generate_univariate_irf_plots',
+        True,
+        bool,
+        "Whether to plot univariate IRFs over time.",
+        aliases=['generate_univariate_IRF_plots']
+    ),
+    Kwarg(
+        'generate_univariate_irf_heatmaps',
+        False,
+        bool,
+        "Whether to plot univariate IRF heatmaps over time.",
+        aliases=['generate_univariate_IRF_heatmaps']
     ),
     Kwarg(
         'generate_curvature_plots',
@@ -901,7 +921,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'log_transform_t_delta',
-        False,
+        True,
         bool,
         "Whether to log-modulus transform time offset values for stability under the hood (log-modulus is used to handle negative values in non-causal models). Offsets are automatically reconverted back to the source scale for plotting and model criticism."
     ),
@@ -1061,7 +1081,7 @@ NN_KWARGS = [
     Kwarg(
         'weight_sd_init',
         'glorot',
-        [float, str, None],
+        [str, float, None],
         "Standard deviation of kernel initialization distribution (Normal, mean=0). Can also be ``'glorot'``, which uses the SD of the Glorot normal initializer. If ``None``, inferred from other hyperparams."
     ),
 
@@ -1140,6 +1160,12 @@ NN_KWARGS = [
         aliases=['input_projection_regularizer_scale']
     ),
     Kwarg(
+        'regularize_final_layer',
+        False,
+        bool,
+        "Whether to regulare the last layer of NN components."
+    ),
+    Kwarg(
         'rnn_projection_regularizer_name',
         None,
         [str, None],
@@ -1179,10 +1205,10 @@ NN_KWARGS = [
     ),
     Kwarg(
         'ff_dropout_rate',
-        0.5,
+        0.4,
         [float, None],
         "Rate at which to drop neurons of FF projection.",
-        aliases=['dropout', 'dropout_rate', 'input_projection', 'h_in_dropout_rate']
+        aliases=['dropout', 'dropout_rate', 'input_projection_dropout_rate', 'h_in_dropout_rate']
     ),
     Kwarg(
         'rnn_h_dropout_rate',
@@ -1198,30 +1224,37 @@ NN_KWARGS = [
     ),
     Kwarg(
         'h_rnn_dropout_rate',
-        0.5,
+        0.4,
         [float, None],
         "Rate at which to drop neurons of h_rnn.",
         aliases=['dropout', 'dropout_rate']
     ),
     Kwarg(
         'rnn_dropout_rate',
-        0.5,
+        0.4,
         [float, None],
         "Rate at which to entirely drop the RNN.",
         aliases=['dropout', 'dropout_rate']
     ),
     Kwarg(
         'irf_dropout_rate',
-        0.5,
+        0.4,
         [float, None],
         "Rate at which to drop neurons of IRF layers.",
         aliases=['dropout', 'dropout_rate']
     ),
     Kwarg(
         'ranef_dropout_rate',
-        None,
+        0.4,
         [float, None],
-        "Rate at which to drop random effects indicators."
+        "Rate at which to drop random effects indicators.",
+        aliases=['dropout', 'dropout_rate']
+    ),
+    Kwarg(
+        'dropout_final_layer',
+        False,
+        bool,
+        "Whether to apply dropout to the last layer of NN components."
     ),
 
     # DEPRECATED OR RARELY USED
@@ -1287,7 +1320,7 @@ NN_BAYES_KWARGS = [
     ),
     Kwarg(
         'gamma_prior_sd',
-        'glorot',
+        1,
         [str, float],
         "Standard deviation of prior on batch norm gammas. A ``float``, ``'glorot'``, or ``'he'``. Ignored unless batch normalization is used",
         aliases=['conv_prior_sd', 'prior_sd']
@@ -1330,6 +1363,13 @@ PLOT_KWARGS_CORE = [
         bool,
         "Whether to plot univariate IRFs over time.",
         aliases=['generate_univariate_IRF_plots']
+    ),
+    Kwarg(
+        'generate_univariate_irf_heatmaps',
+        False,
+        bool,
+        "Whether to plot univariate IRF heatmaps over time.",
+        aliases=['generate_univariate_IRF_heatmaps']
     ),
     Kwarg(
         'generate_curvature_plots',

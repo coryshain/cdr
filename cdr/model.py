@@ -11,7 +11,7 @@ from sklearn.metrics import accuracy_score, f1_score
 
 from .backend import *
 from .data import build_CDR_impulse_data, build_CDR_response_data, corr, get_first_last_obs_lists, \
-    split_cdr_outputs
+    split_cdr_outputs, concat_nested
 from .formula import *
 from .kwargs import MODEL_INITIALIZATION_KWARGS
 from .opt import *
@@ -93,8 +93,8 @@ def LogNormalV2(loc, scale, epsilon=1e-5, **kwargs):
     :return: LogNormalV2 distribution object
     """
 
-    scale = tf.sqrt(tf.log(tf.square(scale / (loc + epsilon)) + 1))
-    loc = tf.log(elu_epsilon(loc, epsilon)) - tf.square(scale) / 2.
+    scale = tf.sqrt(tf.log(tf.square(scale / (loc + epsilon)) + 1) + epsilon)
+    loc = tf.log(tf.maximum(loc, epsilon)) - tf.square(scale) / 2.
     return LogNormal(loc, scale, **kwargs)
 
 
@@ -296,6 +296,8 @@ class CDRModel(object):
         for kwarg in CDRModel._INITIALIZATION_KWARGS:
             setattr(self, kwarg.key, kwargs.pop(kwarg.key, kwarg.default_value))
 
+        stderr('  Collecting summary statistics...\n')
+
         assert self.n_samples == 1, 'n_samples is now deprecated and must be left at its default of 1'
 
         if not isinstance(X, list):
@@ -387,7 +389,9 @@ class CDRModel(object):
         Y_train_means = {}
         Y_train_sds = {}
         Y_train_quantiles = {}
-        for _response_name in Y_all:
+
+        for i, _response_name in enumerate(Y_all):
+            stderr('\r    Processing response %d/%d...' % (i + 1, len(Y_all)))
             _response = Y_all[_response_name]
             if len(_response):
                 if response_is_categorical[_response_name]:
@@ -413,6 +417,8 @@ class CDRModel(object):
             Y_train_sds[_response_name] = _sd
             Y_train_quantiles[_response_name] = _quantiles
 
+        stderr('\n')
+
         self.Y_train_means = Y_train_means
         self.Y_train_sds = Y_train_sds
         self.Y_train_quantiles = Y_train_quantiles
@@ -426,10 +432,12 @@ class CDRModel(object):
         impulse_min = {}
         impulse_max = {}
         indicators = set()
-
         impulse_df_ix = []
         impulse_blocks = {}
-        for impulse in self.form.t.impulses(include_interactions=True):
+        impulses = self.form.t.impulses(include_interactions=True)
+
+        for impulse_ix, impulse in enumerate(impulses):
+            stderr('\r    Processing predictor %d/%d...' % (impulse_ix + 1, len(impulses)))
             name = impulse.name()
             is_interaction = type(impulse).__name__ == 'ImpulseInteraction'
             found = False
@@ -503,6 +511,9 @@ class CDRModel(object):
                 raise ValueError('Impulse %s was not found in an input file.' % name)
 
             impulse_df_ix.append(i)
+
+        stderr('\n')
+
         self.impulse_df_ix = impulse_df_ix
         impulse_df_ix_unique = set(self.impulse_df_ix)
 
@@ -516,6 +527,7 @@ class CDRModel(object):
         self.impulse_max = impulse_max
         self.indicators = indicators
 
+        stderr('\r    Computing predictor covariances...\n')
         names = []
         corr_blocks = []
         cov_blocks = []
@@ -541,6 +553,7 @@ class CDRModel(object):
                     self.response_to_df_ix[_response].append(i)
 
         # Collect stats for temporal features
+        stderr('\r    Computing temporal statistics...\n')
         t_deltas = []
         t_delta_maxes = []
         X_time = []
@@ -585,6 +598,7 @@ class CDRModel(object):
         self.Y_time_sd = Y_time.std()
 
         ## Set up hash table for random effects lookup
+        stderr('\r    Computing random effects statistics...\n')
         self.rangf_map_base = []
         self.rangf_n_levels = []
         for i, gf in enumerate(rangf):
@@ -646,6 +660,8 @@ class CDRModel(object):
 
     def _initialize_metadata(self):
         ## Compute secondary data from intialization settings
+
+        stderr('  Initializing model metadata...\n')
 
         assert TF_MAJOR_VERSION == 1 or self.optim_name.lower() != 'nadam', 'Nadam optimizer is not supported when using TensorFlow 2.X.X'
 
@@ -885,9 +901,17 @@ class CDRModel(object):
         terminal_names = [x for x in self.terminal_names if self.node_table[x].p.family == 'NN']
         for x in terminal_names:
             impulse = self.terminal2impulse[x][0]
-            ix = self.impulse_names.index(impulse)
-            df_ix = self.impulse_df_ix[ix]
-            impulse_dfs_noninteraction.add(df_ix)
+            is_nn = self.node_table[x].impulse.is_nn_impulse()
+            if is_nn:
+                for _impulse in self.node_table[x].impulse.impulses():
+                    _impulse_name = _impulse.name()
+                    ix = self.impulse_names.index(_impulse_name)
+                    df_ix = self.impulse_df_ix[ix]
+                    impulse_dfs_noninteraction.add(df_ix)
+            else:
+                ix = self.impulse_names.index(impulse)
+                df_ix = self.impulse_df_ix[ix]
+                impulse_dfs_noninteraction.add(df_ix)
         self.n_impulse_df_noninteraction = len(impulse_dfs_noninteraction)
 
         self.use_crossval = bool(self.crossval_factor)
@@ -973,7 +997,6 @@ class CDRModel(object):
         self.X_time_dropout_layer = {}
         self.ff_layers = {}
         self.ff_fn = {}
-        self.ff_dropout_layer = {}
         self.rnn_layers = {}
         self.rnn_h_ema = {}
         self.rnn_c_ema = {}
@@ -3269,6 +3292,8 @@ class CDRModel(object):
                 maxnorm = self.get_nn_meta('maxnorm', nn_id)
                 input_dependent_irf = self.get_nn_meta('input_dependent_irf', nn_id)
                 ranef_l1_only = self.get_nn_meta('ranef_l1_only', nn_id)
+                dropout_final_layer = self.get_nn_meta('dropout_final_layer', nn_id)
+                regularize_final_layer = self.get_nn_meta('regularize_final_layer', nn_id)
 
                 rangf_map = {}
                 if ranef_dropout_rate:
@@ -3285,86 +3310,80 @@ class CDRModel(object):
                 else:
                     rangf_map_other = rangf_map
 
+                if input_dropout_rate:
+                    self.input_dropout_layer[nn_id] = get_dropout(
+                        input_dropout_rate,
+                        training=self.training,
+                        use_MAP_mode=self.use_MAP_mode,
+                        rescale=False,
+                        name='%s_input_dropout' % nn_id,
+                        session=self.session
+                    )
+                    self.X_time_dropout_layer[nn_id] = get_dropout(
+                        input_dropout_rate,
+                        training=self.training,
+                        use_MAP_mode=self.use_MAP_mode,
+                        rescale=False,
+                        name='%s_X_time_dropout' % nn_id,
+                        session=self.session
+                    )
+
                 # FEEDFORWARD ENCODER
-                if nn_id in self.nn_impulse_ids:
-                    assert n_layers_ff or n_layers_rnn, "n_layers_ff and n_layers_rnn can't both be zero in NN transforms of predictors."
-
-                    if input_dropout_rate:
-                        self.input_dropout_layer[nn_id] = get_dropout(
-                            input_dropout_rate,
-                            training=self.training,
-                            use_MAP_mode=self.use_MAP_mode,
-                            rescale=False,
-                            name='%s_input_dropout' % nn_id,
-                            session=self.session
-                        )
-                        self.X_time_dropout_layer[nn_id] = get_dropout(
-                            input_dropout_rate,
-                            training=self.training,
-                            use_MAP_mode=self.use_MAP_mode,
-                            rescale=False,
-                            name='%s_X_time_dropout' % nn_id,
-                            session=self.session
-                        )
-
+                if self.has_ff(nn_id):
                     ff_layers = []
-                    if n_layers_ff:
-                        for l in range(n_layers_ff + 1):
-                            if l == 0 or not ranef_l1_only:
-                                _rangf_map = rangf_map_l1
-                            else:
-                                _rangf_map = rangf_map_other
+                    for l in range(n_layers_ff + 1):
+                        if l == 0 or not ranef_l1_only:
+                            _rangf_map = rangf_map_l1
+                        else:
+                            _rangf_map = rangf_map_other
 
-                            if l < n_layers_ff:
-                                units = n_units_ff[l]
-                                activation = ff_inner_activation
-                                dropout = ff_dropout_rate
-                                if normalize_ff:
-                                    bn = batch_normalization_decay
-                                else:
-                                    bn = None
-                                ln = layer_normalization_type
-                                use_bias = True
+                        if l < n_layers_ff:
+                            units = n_units_ff[l]
+                            activation = ff_inner_activation
+                            dropout = ff_dropout_rate
+                            if normalize_ff:
+                                bn = batch_normalization_decay
                             else:
-                                units = 1
-                                activation = ff_activation
-                                dropout = None
                                 bn = None
-                                ln = None
-                                use_bias = False
-                            mn = maxnorm
+                            ln = layer_normalization_type
+                            use_bias = True
+                        else:
+                            units = 1
+                            activation = ff_activation
+                            if dropout_final_layer:
+                                dropout = ff_dropout_rate
+                            else:
+                                dropout = None
+                            bn = None
+                            ln = None
+                            use_bias = False
+                        mn = maxnorm
 
-                            projection = self._initialize_feedforward(
-                                nn_id,
-                                units,
-                                use_bias=use_bias,
-                                activation=activation,
-                                dropout=dropout,
-                                maxnorm=mn,
-                                batch_normalization_decay=bn,
-                                layer_normalization_type=ln,
-                                rangf_map=_rangf_map,
-                                name='%s_ff_l%s' % (nn_id, l + 1)
-                            )
-                            self.layers.append(projection)
+                        projection = self._initialize_feedforward(
+                            nn_id,
+                            units,
+                            use_bias=use_bias,
+                            activation=activation,
+                            dropout=dropout,
+                            maxnorm=mn,
+                            batch_normalization_decay=bn,
+                            layer_normalization_type=ln,
+                            rangf_map=_rangf_map,
+                            name='%s_ff_l%s' % (nn_id, l + 1)
+                        )
+                        self.layers.append(projection)
 
+                        if 'nn' not in self.rvs and (regularize_final_layer or l < n_layers_ff):
                             self.regularizable_layers[nn_id].append(projection)
-                            ff_layers.append(make_lambda(projection, session=self.session, use_kwargs=False))
+                        ff_layers.append(make_lambda(projection, session=self.session, use_kwargs=False))
 
                     ff_fn = compose_lambdas(ff_layers)
 
                     self.ff_layers[nn_id] = ff_layers
                     self.ff_fn[nn_id] = ff_fn
-                    self.ff_dropout_layer[nn_id] = get_dropout(
-                        ff_dropout_rate,
-                        training=self.training,
-                        use_MAP_mode=self.use_MAP_mode,
-                        name='%s_ff_dropout' % nn_id,
-                        session=self.session
-                    )
 
                 # RNN ENCODER
-                if nn_id in self.nn_impulse_ids or input_dependent_irf:
+                if self.has_rnn(nn_id):
                     rnn_layers = []
                     rnn_h_ema = []
                     rnn_c_ema = []
@@ -3380,7 +3399,8 @@ class CDRModel(object):
                         _rnn_c_ema = tf.Variable(tf.zeros(units), trainable=False, name='%s_rnn_c_ema_l%d' % (nn_id, l+1))
                         rnn_c_ema.append(_rnn_c_ema)
                         self.layers.append(layer)
-                        self.regularizable_layers[nn_id].append(layer)
+                        if 'nn' not in self.rvs:
+                            self.regularizable_layers[nn_id].append(layer)
                         rnn_layers.append(make_lambda(layer, session=self.session, use_kwargs=True))
 
                     rnn_encoder = compose_lambdas(rnn_layers)
@@ -3390,68 +3410,69 @@ class CDRModel(object):
                     self.rnn_c_ema[nn_id] = rnn_c_ema
                     self.rnn_encoder[nn_id] = rnn_encoder
 
-                    if n_layers_rnn:
-                        rnn_projection_layers = []
-                        for l in range(n_layers_rnn_projection + 1):
-                            if l < n_layers_rnn_projection:
-                                units = n_units_rnn_projection[l]
-                                activation = rnn_projection_inner_activation
-                                bn = batch_normalization_decay
-                                ln = layer_normalization_type
-                                use_bias = True
+                    rnn_projection_layers = []
+                    for l in range(n_layers_rnn_projection + 1):
+                        if l < n_layers_rnn_projection:
+                            units = n_units_rnn_projection[l]
+                            activation = rnn_projection_inner_activation
+                            bn = batch_normalization_decay
+                            ln = layer_normalization_type
+                            use_bias = True
+                        else:
+                            if nn_id in self.nn_irf_ids:
+                                units = len([x for x in self.nn_irf_input_names[nn_id] if x != 'rate'])
                             else:
-                                if nn_id in self.nn_irf_ids:
-                                    units = len([x for x in self.nn_irf_input_names[nn_id] if x != 'rate'])
-                                else:
-                                    units = 1
-                                activation = rnn_projection_activation
-                                bn = None
-                                ln = None
-                                use_bias = False
-                            mn = maxnorm
+                                units = 1
+                            activation = rnn_projection_activation
+                            bn = None
+                            ln = None
+                            use_bias = False
+                        mn = maxnorm
 
-                            projection = self._initialize_feedforward(
-                                nn_id,
-                                units,
-                                use_bias=use_bias,
-                                activation=activation,
-                                dropout=None,
-                                maxnorm=mn,
-                                batch_normalization_decay=bn,
-                                layer_normalization_type=ln,
-                                rangf_map=rangf_map,
-                                name='%s_rnn_projection_l%s' % (nn_id, l + 1)
-                            )
-                            self.layers.append(projection)
+                        projection = self._initialize_feedforward(
+                            nn_id,
+                            units,
+                            use_bias=use_bias,
+                            activation=activation,
+                            dropout=None,
+                            maxnorm=mn,
+                            batch_normalization_decay=bn,
+                            layer_normalization_type=ln,
+                            rangf_map=rangf_map,
+                            name='%s_rnn_projection_l%s' % (nn_id, l + 1)
+                        )
+                        self.layers.append(projection)
 
+                        if 'nn' not in self.rvs:
                             self.regularizable_layers[nn_id].append(projection)
-                            rnn_projection_layers.append(make_lambda(projection, session=self.session, use_kwargs=False))
+                        rnn_projection_layers.append(make_lambda(projection, session=self.session, use_kwargs=False))
 
-                        rnn_projection_fn = compose_lambdas(rnn_projection_layers)
+                    rnn_projection_fn = compose_lambdas(rnn_projection_layers)
 
-                        self.rnn_projection_layers[nn_id] = rnn_projection_layers
-                        self.rnn_projection_fn[nn_id] = rnn_projection_fn
+                    self.rnn_projection_layers[nn_id] = rnn_projection_layers
+                    self.rnn_projection_fn[nn_id] = rnn_projection_fn
 
-                        self.h_rnn_dropout_layer[nn_id] = get_dropout(
-                            h_rnn_dropout_rate,
-                            training=self.training,
-                            use_MAP_mode=self.use_MAP_mode,
-                            name='%s_h_rnn_dropout' % nn_id,
-                            session=self.session
-                        )
-                        self.rnn_dropout_layer[nn_id] = get_dropout(
-                            rnn_dropout_rate,
-                            noise_shape=[None, None, 1],
-                            training=self.training,
-                            use_MAP_mode=self.use_MAP_mode,
-                            rescale=False,
-                            name='%s_rnn_dropout' % nn_id,
-                            session=self.session
-                        )
+                    self.h_rnn_dropout_layer[nn_id] = get_dropout(
+                        h_rnn_dropout_rate,
+                        training=self.training,
+                        use_MAP_mode=self.use_MAP_mode,
+                        name='%s_h_rnn_dropout' % nn_id,
+                        session=self.session
+                    )
+                    self.rnn_dropout_layer[nn_id] = get_dropout(
+                        rnn_dropout_rate,
+                        noise_shape=[None, None, 1],
+                        training=self.training,
+                        use_MAP_mode=self.use_MAP_mode,
+                        rescale=False,
+                        name='%s_rnn_dropout' % nn_id,
+                        session=self.session
+                    )
 
                 # IRF
                 if nn_id in self.nn_irf_ids:
                     irf_layers = []
+
                     for l in range(n_layers_irf + 1):
                         if l == 0 or not ranef_l1_only:
                             _rangf_map = rangf_map_l1
@@ -3474,7 +3495,10 @@ class CDRModel(object):
                         else:
                             units = self.get_nn_irf_output_ndim(nn_id)
                             activation = irf_activation
-                            dropout = None
+                            if dropout_final_layer:
+                                dropout = irf_dropout_rate
+                            else:
+                                dropout = None
                             bn = None
                             ln = None
                             use_bias = False
@@ -3497,18 +3521,12 @@ class CDRModel(object):
                         self.layers.append(projection)
                         irf_layers.append(projection)
 
-                        if l < n_layers_irf:
+                        if 'nn' not in self.rvs and (regularize_final_layer or l < n_layers_irf):
                             self.regularizable_layers[nn_id].append(projection)
                         if l == 0:
                             self.nn_irf_l1[nn_id] = projection
 
                     self.nn_irf_layers[nn_id] = irf_layers
-
-                    if log_transform_t_delta:
-                        t_delta_scale = tf.Variable(1., name='t_delta_scale_%s' % nn_id)
-                        t_delta_shift = tf.Variable(0., name='t_delta_shift_%s' % nn_id)
-                        self.nn_t_delta_scale[nn_id] = t_delta_scale
-                        self.nn_t_delta_shift[nn_id] = t_delta_shift
 
     def _compile_nn(self, nn_id):
         with self.session.as_default():
@@ -3519,14 +3537,11 @@ class CDRModel(object):
                 rescale_X_time = self.get_nn_meta('rescale_X_time', nn_id)
                 rescale_t_delta = self.get_nn_meta('rescale_t_delta', nn_id)
                 log_transform_t_delta = self.get_nn_meta('log_transform_t_delta', nn_id)
-                n_layers_ff = self.get_nn_meta('n_layers_ff', nn_id)
                 ff_noise_sd = self.get_nn_meta('ff_noise_sd', nn_id)
-                ff_dropout_rate = self.get_nn_meta('ff_dropout_rate', nn_id)
                 n_layers_rnn = self.get_nn_meta('n_layers_rnn', nn_id)
                 rnn_dropout_rate = self.get_nn_meta('rnn_dropout_rate', nn_id)
                 h_rnn_noise_sd = self.get_nn_meta('h_rnn_noise_sd', nn_id)
                 h_rnn_dropout_rate = self.get_nn_meta('h_rnn_dropout_rate', nn_id)
-                n_layers_irf = self.get_nn_meta('n_layers_irf', nn_id)
                 input_jitter_level = self.get_nn_meta('input_jitter_level', nn_id)
                 input_dropout_rate = self.get_nn_meta('input_dropout_rate', nn_id)
                 nonstationary = self.get_nn_meta('nonstationary', nn_id)
@@ -3568,7 +3583,7 @@ class CDRModel(object):
                     X_time.append(tf.gather(self.nn_transformed_impulse_X_time, impulse_ix, axis=2))
                     X_mask.append(tf.gather(self.nn_transformed_impulse_X_mask, impulse_ix, axis=2))
                     impulse_names_ordered += nn_impulse_names
-                    
+
                 assert len(impulse_names_ordered), 'NN transform must get at least one input'
                 # Pad and concatenate impulses, deltas, timestamps, and masks
                 if len(X) == 1:
@@ -3592,7 +3607,7 @@ class CDRModel(object):
                 else:
                     max_len = tf.reduce_max([tf.shape(x)[1] for x in X_time])  # Get maximum timesteps
                     X_time = [
-                        tf.pad(x, ((0, 0), (max_len - tf.shape(x)[1], 0), (0, 0), (0, 0), (0, 0))) for x in X_time
+                        tf.pad(x, ((0, 0), (max_len - tf.shape(x)[1], 0), (0, 0))) for x in X_time
                     ]
                     X_time = tf.concat(X_time, axis=2)
                 if len(X_mask) == 1:
@@ -3600,7 +3615,7 @@ class CDRModel(object):
                 else:
                     max_len = tf.reduce_max([tf.shape(x)[1] for x in X_mask])  # Get maximum timesteps
                     X_mask = [
-                        tf.pad(x, ((0, 0), (max_len - tf.shape(x)[1], 0), (0, 0), (0, 0), (0, 0))) for x in X_mask
+                        tf.pad(x, ((0, 0), (max_len - tf.shape(x)[1], 0), (0, 0))) for x in X_mask
                     ]
                     X_mask = tf.concat(X_mask, axis=2)
 
@@ -3612,23 +3627,6 @@ class CDRModel(object):
                     t_delta = tf.gather(t_delta, impulse_ix, axis=2)
                     X_time = tf.gather(X_time, impulse_ix, axis=2)
                     X_mask = tf.gather(X_mask, impulse_ix, axis=2)
-
-                # Process and reshape impulses, deltas, timestamps, and masks if needed
-                if X_time is None:
-                    X_shape = tf.shape(X)
-                    X_time_shape = []
-                    for j in range(len(X.shape) - 1):
-                        s = X.shape[j]
-                        try:
-                            s = int(s)
-                        except TypeError:
-                            s = X_shape[j]
-                        X_time_shape.append(s)
-                    X_time_shape.append(1)
-                    X_time_shape = tf.convert_to_tensor(X_time_shape)
-                    X_time = tf.ones(X_time_shape, dtype=self.FLOAT_TF)
-                    X_time_mean = self.X_time_mean
-                    X_time *= X_time_mean
 
                 if center_X_time:
                     X_time -= self.X_time_mean
@@ -3736,10 +3734,10 @@ class CDRModel(object):
                     X_in = tf.concat([X_in, X_time], axis=-1)
 
                 # Compute hidden state
-                h = None
+                h = h_ff = h_rnn = rnn_hidden = rnn_cell = None
 
-                if n_layers_ff or n_layers_rnn:
-                    if n_layers_ff and nn_id in self.nn_impulse_ids:
+                if self.has_ff(nn_id) or self.has_rnn(nn_id):
+                    if self.has_ff(nn_id):
                         h_ff = self.ff_fn[nn_id](X_in)
                         if ff_noise_sd:
                             def ff_train_fn(ff=h_ff):
@@ -3747,11 +3745,9 @@ class CDRModel(object):
                             def ff_eval_fn(ff=h_ff):
                                 return ff
                             h_ff = tf.cond(self.training, ff_train_fn, ff_eval_fn)
-                        if ff_dropout_rate:
-                            h_ff = self.ff_dropout_layer[nn_id](h_ff)
                         h = h_ff
 
-                    if n_layers_rnn and (nn_id in self.nn_impulse_ids or input_dependent_irf):
+                    if self.has_rnn(nn_id):
                         _X_in = X_in
                         rnn_hidden = []
                         rnn_cell = []
@@ -3783,15 +3779,13 @@ class CDRModel(object):
                             h = h_rnn
                         else:
                             h += h_rnn
-                    else:
-                        h_rnn = rnn_hidden = rnn_cell = None
 
                 if nn_id in self.nn_impulse_ids:
                     assert h is not None, 'NN impulse transforms must involve a feedforward component, an RNN component, or both.'
                     self.nn_transformed_impulses.append(h)
                     self.nn_transformed_impulse_t_delta.append(t_delta)
                     self.nn_transformed_impulse_X_time.append(X_time)
-                    self.nn_transformed_impulse_X_mask.append(X_mask)
+                    self.nn_transformed_impulse_X_mask.append(X_mask[..., None])
                 else:  # nn_id in self.nn_irf_ids
                     # Compute IRF outputs
 
@@ -3799,10 +3793,6 @@ class CDRModel(object):
                     nn_irf_impulses = tf.gather(X, impulse_ix, axis=2) # IRF output dims, includes rate
 
                     if log_transform_t_delta:
-                        t_delta_scale = self.nn_t_delta_scale[nn_id]
-                        t_delta_shift = self.nn_t_delta_shift[nn_id]
-                        t_delta = t_delta * t_delta_scale
-                        t_delta = t_delta + t_delta_shift
                         t_delta = tf.sign(t_delta) * tf.log1p(tf.abs(t_delta))
 
                     irf_out = [t_delta]
@@ -3814,9 +3804,9 @@ class CDRModel(object):
                             _X_gathered = _X_gathered + h_rnn
                         irf_out.append(_X_gathered)  # IRF inputs, no rate
                     irf_out = tf.concat(irf_out, axis=2)
-                    for l in range(n_layers_irf + 1):
-                        irf_out = self.nn_irf_layers[nn_id][l](
-                            irf_out,
+                    for layer in self.nn_irf_layers[nn_id]:
+                        irf_out = layer(
+                            irf_out
                         )
 
                     stabilizing_constant = (self.history_length + self.future_length) * len(output_names)
@@ -3884,8 +3874,6 @@ class CDRModel(object):
                 if rnn_dropout_rate and n_layers_rnn:
                     self.resample_ops += self.h_rnn_dropout_layer[nn_id].resample_ops()
                     self.resample_ops += self.rnn_dropout_layer[nn_id].resample_ops()
-                if ff_dropout_rate and nn_id in self.ff_dropout_layer:
-                    self.resample_ops += self.ff_dropout_layer[nn_id].resample_ops()
                 if h_rnn_dropout_rate and n_layers_rnn and nn_id in self.h_rnn_dropout_layer:
                     self.resample_ops += self.h_rnn_dropout_layer[nn_id].resample_ops()
 
@@ -4384,7 +4372,7 @@ class CDRModel(object):
                     
                     response_dist_kwargs = {}
                     if self.get_response_dist_name(response) == 'lognormalv2':
-                        response_dist_kwargs['epsilon'] = self.epsilon
+                        response_dist_kwargs['epsilon'] = self.pred_dist_epsilon
 
                     # Base output deltas
                     X_weighted = self.X_weighted[response] # (batch, time, impulse, param, dim)
@@ -4490,7 +4478,7 @@ class CDRModel(object):
                     for j, response_param_name in enumerate(response_param_names):
                         _response_param = response_params[j]
                         if self.is_real(response) and response_param_name in ['sigma', 'tailweight', 'beta']:
-                            _response_param = self.constraint_fn(_response_param) + self.epsilon
+                            _response_param = self.constraint_fn(_response_param) + self.pred_dist_epsilon
                         response_params[j] = _response_param
 
                     # Define predictive distribution
@@ -4545,11 +4533,11 @@ class CDRModel(object):
                             m = response_dist.loc
                             s = response_dist.scale
                             b = response_dist.rate
-                            t = 1. / tf.maximum(b, self.epsilon)
-                            z = (t / tf.maximum(s, self.epsilon)) / np.sqrt(2. / np.pi)
+                            t = 1. / tf.maximum(b, self.pred_dist_epsilon)
+                            z = (t / tf.maximum(s, self.pred_dist_epsilon)) / np.sqrt(2. / np.pi)
                             # Approximation to erfcxinv, most accurate when z < 1 (i.e. skew is small relative to scale)
-                            y = 1. / tf.maximum(z * np.sqrt(np.pi), self.epsilon) + z * np.sqrt(np.pi) / 2.
-                            mode = m - y * s * np.sqrt(2.) - s / tf.maximum(t, self.epsilon)
+                            y = 1. / tf.maximum(z * np.sqrt(np.pi), self.pred_dist_epsilon) + z * np.sqrt(np.pi) / 2.
+                            mode = m - y * s * np.sqrt(2.) - s / tf.maximum(t, self.pred_dist_epsilon)
                         elif dist_name.lower() == 'sinharcsinh':
                             mode = response_dist.loc
                         else:
@@ -4571,12 +4559,17 @@ class CDRModel(object):
                         self.prediction[response] = prediction * Y_mask
 
                     # Get elementwise log likelihood
-                    ll = response_dist.log_prob(Y)
+                    if self.is_real(response):
+                        # Ensure a safe value for Y
+                        sel = tf.cast(Y_mask, tf.bool)
+                        Y_safe = tf.ones_like(Y) * self.Y_train_means[response]
+                        _Y = tf.where(sel, Y, Y_safe)
+                    else:
+                        _Y = Y
+                    ll = response_dist.log_prob(_Y)
 
                     # Mask out likelihoods of predictions for missing response variables.
-                    zeros = tf.zeros_like(ll)
-                    sel = tf.cast(Y_mask, tf.bool)
-                    ll = tf.where(sel, ll, zeros)
+                    ll = ll * Y_mask
                     # ll = tf.Print(ll, ['ll', ll, 'll min', tf.reduce_min(ll), 'll max', tf.reduce_max(ll), 'll sum', tf.reduce_sum(ll), 'Y', Y, 'pred', self.prediction[response], ])
                     # ll = tf.Print(ll, ['grad mu', tf.gradients(ll, _response_params[0]), 'grad sigma', tf.gradients(ll, _response_params[1])])
                     self.ll_by_var[response] = ll
@@ -5684,8 +5677,8 @@ class CDRModel(object):
         out = {}
         for x in self.training_mse_tf:
             out[x] = {}
-        for y in self.training_mse_tf[x]:
-            out[x][y] = self.training_mse_tf[x][y].eval(session=self.session)
+            for y in self.training_mse_tf[x]:
+                out[x][y] = self.training_mse_tf[x][y].eval(session=self.session)
 
         return out
 
@@ -5700,8 +5693,8 @@ class CDRModel(object):
         out = {}
         for x in self.training_rho_tf:
             out[x] = {}
-        for y in self.training_rho_tf[x]:
-            out[x][y] = self.training_rho_tf[x][y].eval(session=self.session)
+            for y in self.training_rho_tf[x]:
+                out[x][y] = self.training_rho_tf[x][y].eval(session=self.session)
 
         return out
 
@@ -5716,8 +5709,8 @@ class CDRModel(object):
         out = {}
         for x in self.training_percent_variance_explained_tf:
             out[x] = {}
-        for y in self.training_percent_variance_explained_tf[x]:
-            out[x][y] = self.training_percent_variance_explained_tf[x][y].eval(session=self.session)
+            for y in self.training_percent_variance_explained_tf[x]:
+                out[x][y] = self.training_percent_variance_explained_tf[x][y].eval(session=self.session)
 
         return out
 
@@ -5806,12 +5799,14 @@ class CDRModel(object):
 
         with self.session.as_default():
             with self.session.graph.as_default():
+                stderr('  Initializing input nodes...\n')
                 t0 = pytime.time()
                 self._initialize_inputs()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_initialize_inputs took %.2fs\n' % dur)
 
+                stderr('  Initializing base params...\n')
                 t0 = pytime.time()
                 self._initialize_base_params()
                 dur = pytime.time() - t0
@@ -5819,42 +5814,49 @@ class CDRModel(object):
                     stderr('_initialize_base_params took %.2fs\n' % dur)
 
                 for nn_id in self.nn_impulse_ids:
+                    stderr('  Initializing %s...\n' % nn_id)
                     t0 = pytime.time()
                     self._initialize_nn(nn_id)
                     dur = pytime.time() - t0
                     if report_time:
                         stderr('_initialize_nn for %s took %.2fs\n' % (nn_id, dur))
 
+                    stderr('  Compiling %s...\n' % nn_id)
                     t0 = pytime.time()
                     self._compile_nn(nn_id)
                     dur = pytime.time() - t0
                     if report_time:
                         stderr('_compile_nn for %s took %.2fs\n' % (nn_id, dur))
 
+                stderr('  Concatenating inputs...\n')
                 t0 = pytime.time()
                 self._concat_nn_impulses()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_concat_nn_impulses took %.2fs\n' % dur)
 
+                stderr('  Compiling intercepts...\n')
                 t0 = pytime.time()
                 self._compile_intercepts()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_compile_intercepts took %.2fs\n' % dur)
 
+                stderr('  Compiling coefficients...\n')
                 t0 = pytime.time()
                 self._compile_coefficients()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_compile_coefficients took %.2fs\n' % dur)
 
+                stderr('  Compiling interactions...\n')
                 t0 = pytime.time()
                 self._compile_interactions()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_compile_interactions took %.2fs\n' % dur)
 
+                stderr('  Compiling IRF params...\n')
                 t0 = pytime.time()
                 self._compile_irf_params()
                 dur = pytime.time() - t0
@@ -5862,24 +5864,28 @@ class CDRModel(object):
                     stderr('_compile_irf_params took %.2fs\n' % dur)
 
                 for nn_id in self.nn_irf_ids:
+                    stderr('  Initializing %s...\n' % nn_id)
                     t0 = pytime.time()
                     self._initialize_nn(nn_id)
                     dur = pytime.time() - t0
                     if report_time:
                         stderr('_initialize_nn for %s took %.2fs\n' % (nn_id, dur))
 
+                    stderr('  Compiling %s...\n' % nn_id)
                     t0 = pytime.time()
                     self._compile_nn(nn_id)
                     dur = pytime.time() - t0
                     if report_time:
                         stderr('_compile_nn for %s took %.2fs\n' % (nn_id, dur))
 
+                stderr('  Collecting layerwise ops...\n')
                 t0 = pytime.time()
                 self._collect_layerwise_ops()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_collect_layerwise_ops took %.2fs\n' % dur)
 
+                stderr('  Initializing IRF lambdas...\n')
                 t0 = pytime.time()
                 self._initialize_irf_lambdas()
                 dur = pytime.time() - t0
@@ -5887,48 +5893,56 @@ class CDRModel(object):
                     stderr('_initialize_irf_lambdas took %.2fs\n' % dur)
 
                 for response in self.response_names:
+                    stderr('  Initializing IRFs for response %s...\n' % response)
                     t0 = pytime.time()
                     self._initialize_irfs(self.t, response)
                     dur = pytime.time() - t0
                     if report_time:
                         stderr('_initialize_irfs for %s took %.2fs\n' % (response, dur))
 
+                stderr('  Compiling IRF impulses...\n')
                 t0 = pytime.time()
                 self._compile_irf_impulses()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_compile_irf_impulses took %.2fs\n' % dur)
 
+                stderr('  Compiling IRF-weighted impulses...\n')
                 t0 = pytime.time()
                 self._compile_X_weighted_by_irf()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_compile_X_weighted_by_irf took %.2fs\n' % dur)
 
+                stderr('  Initializing predictive distribution...\n')
                 t0 = pytime.time()
                 self._initialize_predictive_distribution()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_initialize_predictive_distribution took %.2fs\n' % dur)
 
+                stderr('  Initializing objective...\n')
                 t0 = pytime.time()
                 self._initialize_objective()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_initialize_objective took %.2fs\n' % dur)
 
+                stderr('  Initializing parameter tables...\n')
                 t0 = pytime.time()
                 self._initialize_parameter_tables()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_initialize_parameter_tables took %.2fs\n' % dur)
 
+                stderr('  Initializing Tensorboard logging...\n')
                 t0 = pytime.time()
                 self._initialize_logging()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_initialize_logging took %.2fs\n' % dur)
 
+                stderr('  Initializing moving averages...\n')
                 t0 = pytime.time()
                 self._initialize_ema()
                 dur = pytime.time() - t0
@@ -5939,12 +5953,14 @@ class CDRModel(object):
                     var_list=None
                 )
 
+                stderr('  Initializing saver...\n')
                 t0 = pytime.time()
                 self._initialize_saver()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_initialize_saver took %.2fs\n' % dur)
 
+                stderr('  Loading weights...\n')
                 self.load(restore=restore)
 
                 self._initialize_convergence_checking()
@@ -6286,6 +6302,32 @@ class CDRModel(object):
         """
 
         return param in self.predictive_distribution_config[response]['params']
+
+    def has_rnn(self, nn_id):
+        """
+        Check whether a given NN component includes an RNN transform
+
+        :param nn_id: ``str``; id of NN component
+        :return: ``bool``; whether the NN includes an RNN transform
+        """
+
+        has_rnn = nn_id in self.nn_impulse_ids or self.get_nn_meta('input_dependent_irf', nn_id)
+        has_rnn &= self.get_nn_meta('n_layers_rnn', nn_id)
+
+        return has_rnn
+
+    def has_ff(self, nn_id):
+        """
+        Check whether a given NN component includes a feedforward transform
+
+        :param nn_id: ``str``; id of NN component
+        :return: ``bool``; whether the NN includes a feedforward transform
+        """
+
+        has_ff = nn_id in self.nn_impulse_ids
+        has_ff &= self.get_nn_meta('n_layers_ff', nn_id) or not self.has_rnn(nn_id)
+
+        return has_ff
 
     def report_formula_string(self, indent=0):
         """
@@ -6724,11 +6766,11 @@ class CDRModel(object):
                     out += ' ' * indent + 'File: %s\n\n' % ix
                 out += ' ' * indent + 'MODEL EVALUATION STATISTICS:\n'
                 out += ' ' * indent +     'Loglik:        %s\n' % training_loglik[response][ix]
-                if response in self.training_mse_tf:
+                if response in training_mse and ix in training_mse[response]:
                     out += ' ' * indent + 'MSE:           %s\n' % training_mse[response][ix]
-                if response in self.training_rho_tf:
+                if response in training_rho and ix in training_rho[response]:
                     out += ' ' * indent + 'r(true, pred): %s\n' % training_rho[response][ix]
-                if response in self.training_percent_variance_explained_tf:
+                if response in training_percent_variance_explained and ix in training_percent_variance_explained[response]:
                     out += ' ' * indent + '%% var expl:    %s\n' % training_percent_variance_explained[response][ix]
                 out += '\n'
 
@@ -8037,7 +8079,15 @@ class CDRModel(object):
                     sel = None
                     if _response in _Y:
                         _y = _Y[_response]
-                        sel = np.isfinite(_y)
+                        dtype = _y.dtype
+                        if dtype.name not in ('object', 'category') and np.issubdtype(dtype, np.number):
+                            is_numeric = True
+                        else:
+                            is_numeric = False
+                        if is_numeric:
+                            sel = np.isfinite(_y)
+                        else:
+                            sel = np.ones(len(_y), dtype=bool)
                         index = _y.index[sel]
                         _preds = preds[_response][ix][sel]
                         _y = _y[sel]
@@ -8960,38 +9010,17 @@ class CDRModel(object):
 
                 X_ref_in = np.concatenate(X_ref_in, axis=0)
                 X_time_ref_in = np.concatenate(X_time_ref_in, axis=0)
+                X_mask_ref_in = np.ones_like(X_time_ref_in)
                 t_delta_ref_in = np.concatenate(t_delta_ref_in, axis=0)
                 gf_y_ref_in = np.concatenate(gf_y_ref_in, axis=0)
-
-                fd_ref = {
-                    self.X: X_ref_in,
-                    self.X_time: X_time_ref_in,
-                    self.X_mask: np.ones_like(X_time_ref_in),
-                    self.t_delta: t_delta_ref_in,
-                    self.Y_gf: gf_y_ref_in,
-                    self.training: not self.predict_mode
-                }
 
                 # Bring manipulations into 1-1 alignment on the batch dimension
                 if n_manip:
                     X = np.concatenate(X, axis=0)
                     X_time = np.concatenate(X_time, axis=0)
+                    X_mask = np.ones_like(X_time)
                     t_delta = np.concatenate(t_delta, axis=0)
                     gf_y = np.concatenate(gf_y, axis=0)
-
-                    fd_main = {
-                        self.X: X,
-                        self.X_time: X_time,
-                        self.X_mask: np.ones_like(X_time),
-                        self.t_delta: t_delta,
-                        self.Y_gf: gf_y,
-                        self.training: not self.predict_mode
-                    }
-
-                if resample:
-                    fd_ref[self.use_MAP_mode] = False
-                    if n_manip:
-                        fd_main[self.use_MAP_mode] = False
 
                 if reference_type == 'sampling':
                     X_samples = self.sample_impulses(size=S).values
@@ -9009,9 +9038,14 @@ class CDRModel(object):
                     delta = self.predictive_distribution_delta
                 for i in range(S):
                     if reference_type == 'sampling':
-                        fd_ref[self.X] = X_ref_in + X_ref_samples[i]
+                        _X_ref_in = X_ref_in + X_ref_samples[i]
                         if n_manip:
-                            fd_main[self.X] = X + X_main_samples[i]
+                            _X = X + X_main_samples[i]
+                        else:
+                            _X = X
+                    else:
+                        _X_ref_in = X_ref_in
+                        _X = X
                     to_run = {}
                     for response in responses:
                         to_run[response] = {}
@@ -9022,7 +9056,21 @@ class CDRModel(object):
 
                     if self.resample_ops:
                         self.session.run(self.resample_ops)
-                    sample_ref = self.session.run(to_run, feed_dict=fd_ref)
+                    b = (self.history_length + self.future_length) * self.eval_minibatch_size
+                    sample_ref = []
+                    for j in range(0, len(X_ref_in), b):
+                        fd_ref = {
+                            self.X: _X_ref_in[j:j+b],
+                            self.X_time: X_time_ref_in[j:j+b],
+                            self.X_mask: X_mask_ref_in[j:j+b],
+                            self.t_delta: t_delta_ref_in[j:j+b],
+                            self.Y_gf: gf_y_ref_in[j:j+b],
+                            self.training: not self.predict_mode
+                        }
+                        if resample:
+                            fd_ref[self.use_MAP_mode] = False
+                        sample_ref.append(self.session.run(to_run, feed_dict=fd_ref))
+                    sample_ref = concat_nested(sample_ref)
                     for response in to_run:
                         for dim_name in to_run[response]:
                             _sample = sample_ref[response][dim_name]
@@ -9030,7 +9078,20 @@ class CDRModel(object):
 
                     if n_manip:
                         sample = {}
-                        sample_main = self.session.run(to_run, feed_dict=fd_main)
+                        sample_main = []
+                        for j in range(0, len(_X), b):
+                            fd_main = {
+                                self.X: _X[j:j+b],
+                                self.X_time: X_time[j:j+b],
+                                self.X_mask: X_mask[j:j+b],
+                                self.t_delta: t_delta[j:j+b],
+                                self.Y_gf: gf_y[j:j+b],
+                                self.training: not self.predict_mode
+                            }
+                            if resample:
+                                fd_main[self.use_MAP_mode] = False
+                            sample_main.append(self.session.run(to_run, feed_dict=fd_main))
+                        sample_main = concat_nested(sample_main)
                         for response in to_run:
                             sample[response] = {}
                             for dim_name in sample_main[response]:
@@ -9063,6 +9124,7 @@ class CDRModel(object):
                     for dim_name in samples[response]:
                         _samples = np.stack(samples[response][dim_name], axis=0)
                         rescale = self.is_real(response) and \
+                                  self.get_response_dist_name(response) != 'lognormalv2' and \
                                   (dim_name.startswith('mu') or dim_name.startswith('sigma'))
                         if rescale:
                             _samples = _samples * self.Y_train_sds[response]
@@ -9288,7 +9350,8 @@ class CDRModel(object):
             plot_n_time_units=None,
             plot_n_time_points=None,
             reference_type=None,
-            generate_univariate_irf_plots=True,
+            generate_univariate_irf_plots=None,
+            generate_univariate_irf_heatmaps=None,
             generate_curvature_plots=None,
             generate_irf_surface_plots=None,
             generate_nonstationarity_surface_plots=None,
@@ -9340,6 +9403,7 @@ class CDRModel(object):
         :param plot_support_start: ``float`` or ``None``; start time for IRF plots. If ``None``, use default setting.
         :param reference_type: ``bool``; whether to use the predictor means as baseline reference (otherwise use zero).
         :param generate_univariate_irf_plots: ``bool``; whether to plot univariate IRFs over time.
+        :param generate_univariate_irf_heatmaps: ``bool``; whether to plot univariate IRFs over time.
         :param generate_curvature_plots: ``bool`` or ``None``; whether to plot IRF curvature at time **reference_time**. If ``None``, use default setting.
         :param generate_irf_surface_plots: ``bool`` or ``None``; whether to plot IRF surfaces.  If ``None``, use default setting.
         :param generate_nonstationarity_surface_plots: ``bool`` or ``None``; whether to plot IRF surfaces showing non-stationarity in the response.  If ``None``, use default setting.
@@ -9376,6 +9440,8 @@ class CDRModel(object):
             plot_n_time_points = self.plot_n_time_points
         if generate_univariate_irf_plots is None:
             generate_univariate_irf_plots = self.generate_univariate_irf_plots
+        if generate_univariate_irf_heatmaps is None:
+            generate_univariate_irf_heatmaps = self.generate_univariate_irf_heatmaps
         if generate_curvature_plots is None:
             generate_curvature_plots = self.generate_curvature_plots
         if generate_irf_surface_plots is None:
@@ -9417,7 +9483,7 @@ class CDRModel(object):
                 self.set_predict_mode(True)
 
                 # IRF 1D
-                if generate_univariate_irf_plots:
+                if generate_univariate_irf_plots or generate_univariate_irf_heatmaps:
                     names = self.impulse_names
                     has_rate = 'rate' in names
                     if has_rate:
@@ -9440,9 +9506,14 @@ class CDRModel(object):
 
                     fixed_impulses = set()
                     for x in self.t.terminals():
-                        if x.fixed and x.impulse.name() in names:
-                            for y in x.impulse_names():
-                                fixed_impulses.add(y)
+                        if x.fixed:
+                            if x.impulse.is_nn_impulse():
+                                for y in x.impulse.impulses():
+                                    if y.name() in names:
+                                        fixed_impulses.add(y.name())
+                            elif x.impulse.name() in names:
+                                for y in x.impulse_names():
+                                    fixed_impulses.add(y)
 
                     names_fixed = [x for x in names if x in fixed_impulses]
                     manipulations_fixed = [x for x in manipulations if list(x.keys())[0] in fixed_impulses]
@@ -9525,30 +9596,50 @@ class CDRModel(object):
                                     _lq = None if _lq is None else _lq[..., 1:]
                                     _uq = None if _uq is None else _uq[..., 1:]
 
-                                plot_irf(
-                                    plot_x,
-                                    _plot_y,
-                                    names_cur,
-                                    lq=_lq,
-                                    uq=_uq,
-                                    sort_names=sort_names,
-                                    prop_cycle_length=prop_cycle_length,
-                                    prop_cycle_map=prop_cycle_map,
-                                    dir=self.outdir,
-                                    filename=filename,
-                                    irf_name_map=irf_name_map,
-                                    plot_x_inches=plot_x_inches,
-                                    plot_y_inches=plot_y_inches,
-                                    ylim=ylim,
-                                    cmap=cmap,
-                                    dpi=dpi,
-                                    legend=use_legend,
-                                    xlab=xlab,
-                                    ylab=ylab,
-                                    use_line_markers=use_line_markers,
-                                    transparent_background=transparent_background,
-                                    dump_source=dump_source
-                                )
+                                if generate_univariate_irf_plots:
+                                    plot_irf(
+                                        plot_x,
+                                        _plot_y,
+                                        names_cur,
+                                        lq=_lq,
+                                        uq=_uq,
+                                        sort_names=sort_names,
+                                        prop_cycle_length=prop_cycle_length,
+                                        prop_cycle_map=prop_cycle_map,
+                                        dir=self.outdir,
+                                        filename=filename,
+                                        irf_name_map=irf_name_map,
+                                        plot_x_inches=plot_x_inches,
+                                        plot_y_inches=plot_y_inches,
+                                        ylim=ylim,
+                                        cmap=cmap,
+                                        dpi=dpi,
+                                        legend=use_legend,
+                                        xlab=xlab,
+                                        ylab=ylab,
+                                        use_line_markers=use_line_markers,
+                                        transparent_background=transparent_background,
+                                        dump_source=dump_source
+                                    )
+
+                                if generate_univariate_irf_heatmaps:
+                                    plot_irf_as_heatmap(
+                                        plot_x,
+                                        _plot_y,
+                                        names_cur,
+                                        sort_names=sort_names,
+                                        dir=self.outdir,
+                                        filename=filename[:-4] + '_hm.png',
+                                        irf_name_map=irf_name_map,
+                                        plot_x_inches=plot_x_inches,
+                                        plot_y_inches=plot_y_inches,
+                                        ylim=ylim,
+                                        dpi=dpi,
+                                        xlab=xlab,
+                                        ylab=ylab,
+                                        transparent_background=transparent_background,
+                                        dump_source=dump_source
+                                    )
 
                 if plot_rangf:
                     manipulations = [{'ranef': {x: y}} for x, y in zip(ranef_group_names[1:], ranef_level_names[1:])]
