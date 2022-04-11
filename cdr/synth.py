@@ -42,9 +42,11 @@ class SyntheticModel(object):
     :param n_pred: ``int``; Number of predictors in the synthetic model.
     :param irf_name: ``str``; Name of IRF kernel to use. One of ``['Exp', 'Normal', 'Gamma', 'ShiftedGamma']``.
     :param irf_params: ``dict`` or ``None``; Dictionary of IRF parameters to use, with parameter names as keys and numeric arrays as values. Values must each have **n_pred** cells. If ``None``, parameter values will be randomly sampled.
+    :param coefs: numpy array or ``None``; Vector of coefficients to use, where ``len(coefs) == n_pred``. If ``None``, coefficients will be randomly sampled.
+    :param fn: ``str`` or ``None``; Effect shape to use. One of ``['quadratic', 'exp', 'logmod', 'linear']. If ``None``, linear effects.
+    :param interactions: ``bool``; Whether there are randomly sampled pairwise interactions (same bounds as those used for coefs).
     :param ranef_range: ``float`` or ``None``; Maximum magnitude of simulated random effects. If ``0`` or ``None``, no random effects.
     :param n_ranef_levels: ``int`` or ``None``; Number of random effects levels. If ``0`` or ``None``, no random effects.
-    :param coefs: numpy array or ``None``; Vector of coefficients to use, where ``len(coefs) == n_pred``. If ``None``, coefficients will be randomly sampled.
     """
 
     IRF_PARAMS = {
@@ -70,9 +72,11 @@ class SyntheticModel(object):
             n_pred,
             irf_name,
             irf_params=None,
+            coefs=None,
+            fn=None,
+            interactions=False,
             ranef_range=None,
-            n_ranef_levels=None,
-            coefs=None
+            n_ranef_levels=None
     ):
         self.n_pred = n_pred
         self.irf_name = irf_name
@@ -86,6 +90,9 @@ class SyntheticModel(object):
         if coefs is None:
             coefs = np.random.uniform(-10, 10, (self.n_pred,))
         self.coefs = coefs
+
+        self.fn = fn
+        self.interactions = interactions
 
         self.ranef_range = ranef_range
         self.n_ranef_levels = n_ranef_levels

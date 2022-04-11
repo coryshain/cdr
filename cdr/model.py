@@ -1547,6 +1547,8 @@ class CDRModel(object):
                 if self.is_bayesian:
                     self.kl_loss_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='kl_loss_total')
                 self.n_dropped_in = tf.placeholder(shape=[], dtype=self.INT_TF, name='n_dropped_in')
+                if self.eval_freq > 0:
+                    self.dev_ll_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='dev_ll_total')
 
                 # Initialize vars for saving training set stats upon completion.
                 # Allows these numbers to be reported in later summaries without access to the training data.
@@ -4894,11 +4896,15 @@ class CDRModel(object):
                     tf.summary.scalar('opt/kl_loss_by_iter', self.kl_loss_total, collections=['opt'])
                 if self.filter_outlier_losses and self.loss_cutoff_n_sds:
                     tf.summary.scalar('opt/n_dropped', self.n_dropped_in, collections=['opt'])
+                if self.eval_freq > 0:
+                    tf.summary.scalar('dev/dev_LL_by_iter', self.dev_ll_total, collections=['dev'])
                 if self.log_graph:
                     self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/cdr', self.session.graph)
                 else:
                     self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/cdr')
                 self.summary_opt = tf.summary.merge_all(key='opt')
+                if self.eval_freq > 0:
+                    self.summary_dev = tf.summary.merge_all(key='dev')
                 self.summary_params = tf.summary.merge_all(key='params')
                 if self.log_random and len(self.rangf) > 0:
                     self.summary_random = tf.summary.merge_all(key='random')
@@ -5363,7 +5369,7 @@ class CDRModel(object):
                     self.d0_saved_update.append(var_d0_iterates_update)
                     self.d0_assign.append(tf.assign(var_d0_iterates, var_d0_iterates_update))
 
-    def _compute_and_test_corr(self, iterates):
+    def _compute_and_test_corr(self, iterates, twotailed=True):
         x = np.arange(0, len(iterates)*self.convergence_stride, self.convergence_stride).astype('float')[..., None]
         y = iterates
 
@@ -5371,12 +5377,18 @@ class CDRModel(object):
 
         rt = corr(x, y)[0]
         tt = rt * np.sqrt((n_iterates - 2) / (1 - rt ** 2))
-        p_tt = 1 - (scipy.stats.t.cdf(np.fabs(tt), n_iterates - 2) - scipy.stats.t.cdf(-np.fabs(tt), n_iterates - 2))
+        if twotailed:
+            p_tt = 1 - (scipy.stats.t.cdf(np.fabs(tt), n_iterates - 2) - scipy.stats.t.cdf(-np.fabs(tt), n_iterates - 2))
+        else:
+            p_tt = scipy.stats.t.cdf(tt, n_iterates - 2)
         p_tt = np.where(np.isfinite(p_tt), p_tt, np.zeros_like(p_tt))
 
         ra = corr(y[1:], y[:-1])[0]
         ta = ra * np.sqrt((n_iterates - 2) / (1 - ra ** 2))
-        p_ta = 1 - (scipy.stats.t.cdf(np.fabs(ta), n_iterates - 2) - scipy.stats.t.cdf(-np.fabs(ta), n_iterates - 2))
+        if twotailed:
+            p_ta = 1 - (scipy.stats.t.cdf(np.fabs(ta), n_iterates - 2) - scipy.stats.t.cdf(-np.fabs(ta), n_iterates - 2))
+        else:
+            p_ta = scipy.stats.t.cdf(ta, n_iterates - 2)
         p_ta = np.where(np.isfinite(p_ta), p_ta, np.zeros_like(p_ta))
 
         return rt, p_tt, ra, p_ta
@@ -5398,11 +5410,10 @@ class CDRModel(object):
                     update = last_check < cur_step and self.convergence_stride > 0
                     if update and feed_dict is None:
                         update = False
-                        stderr('Skipping convergence history update because no feed_dict provided.\n')
+                        if verbose:
+                            stderr('Skipping convergence history update because no feed_dict provided.\n')
 
                     push = update and offset == 0
-                    # End of stride if next step is a push
-                    end_of_stride = last_check < (cur_step + 1) and self.convergence_stride > 0 and ((cur_step + 1) % self.convergence_stride == 0)
 
                     if self.check_convergence:
                         if update:
@@ -5410,8 +5421,10 @@ class CDRModel(object):
                         else:
                             var_d0_iterates = self.session.run(self.d0_saved)
 
-                        start_ix = int(self.convergence_n_iterates / self.convergence_stride) - int(cur_step / self.convergence_stride)
+                        start_ix = int(self.convergence_n_iterates / self.convergence_stride) - int((cur_step - 1) / self.convergence_stride) - 1
                         start_ix = max(0, start_ix)
+                        
+                        twotailed = not self.early_stopping
 
                         for i in range(len(var_d0_iterates)):
                             if update:
@@ -5425,9 +5438,15 @@ class CDRModel(object):
                                     iterates_d0[-1] = new_d0
                                 fd_assign[self.d0_saved_update[i]] = iterates_d0
 
-                                rt, p_tt, ra, p_ta = self._compute_and_test_corr(iterates_d0[start_ix:])
+                                rt, p_tt, ra, p_ta = self._compute_and_test_corr(
+                                    iterates_d0[start_ix:],
+                                    twotailed=twotailed
+                                )
                             else:
-                                rt, p_tt, ra, p_ta = self._compute_and_test_corr(var_d0_iterates[i][start_ix:])
+                                rt, p_tt, ra, p_ta = self._compute_and_test_corr(
+                                    var_d0_iterates[i][start_ix:],
+                                    twotailed=twotailed
+                                )
 
                             new_min_p_ix = p_tt.argmin()
                             new_min_p = p_tt[new_min_p_ix]
@@ -5443,7 +5462,7 @@ class CDRModel(object):
                             to_run = [self.d0_assign, self.last_convergence_check_assign]
                             self.session.run(to_run, feed_dict=fd_assign)
 
-                    if end_of_stride:
+                    if push:
                         locally_converged = cur_step > self.convergence_n_iterates and \
                                     (min_p > self.convergence_alpha)
                         convergence_history = self.convergence_history.eval(session=self.session)
@@ -6869,6 +6888,8 @@ class CDRModel(object):
     def fit(self,
             X,
             Y,
+            X_dev=None,
+            Y_dev=None,
             X_in_Y_names=None,
             n_iter=None,
             force_training_evaluation=True,
@@ -6887,18 +6908,39 @@ class CDRModel(object):
         :param Y: ``list`` of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
             Each element of **Y** must contain the following columns (additional columns are ignored):
 
-            * ``time``: Timestamp associated with each observation in **y**
-            * ``first_obs``:  Index in the design matrix **X** of the first observation in the time series associated with each entry in **y**
-            * ``last_obs``:  Index in the design matrix **X** of the immediately preceding observation in the time series associated with each entry in **y**
-            * Columns with a subset of the names of the DVs specified in ``form_str`` (all DVs should be represented somewhere in **y**)
+            * ``time``: Timestamp associated with each observation in **Y**
+            * ``first_obs``:  Index in the design matrix **X** of the first observation in the time series associated with each entry in **Y**
+            * ``last_obs``:  Index in the design matrix **X** of the immediately preceding observation in the time series associated with each entry in **Y**
+            * Columns with a subset of the names of the DVs specified in ``form_str`` (all DVs should be represented somewhere in **Y**)
             * A column for each random grouping factor in the model formula
 
             In general, **Y** will be identical to the parameter **Y** provided at model initialization.
+        :param X_dev: list of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+            Each element of **X** must contain the following columns (additional columns are ignored):
+
+            * ``time``: Timestamp associated with each observation in **X**
+
+            Across all elements of **X_dev**, there must be a column for each independent variable in the CDR ``form_str`` provided at initialization.
+
+        :param Y_dev: ``list`` of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+            Each element of **Y_dev** must contain the following columns (additional columns are ignored):
+
+            * ``time``: Timestamp associated with each observation in **Y_dev**
+            * ``first_obs``:  Index in the design matrix **X_dev** of the first observation in the time series associated with each entry in **Y_dev**
+            * ``last_obs``:  Index in the design matrix **X_dev** of the immediately preceding observation in the time series associated with each entry in **Y_dev**
+            * Columns with a subset of the names of the DVs specified in ``form_str`` (all DVs should be represented somewhere in **Y_dev**)
+            * A column for each random grouping factor in the model formula
+
+            In general, **Y_dev** will be identical to the parameter **Y_dev** provided at model initialization.
         :param X_in_Y_names: ``list`` of ``str``; names of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, no such predictors.
         :param n_iter: ``int`` or ``None``; maximum number of training iterations. Training will stop either at convergence or **n_iter**, whichever happens first. If ``None``, uses model default.
         :param force_training_evaluation: ``bool``; (Re-)run post-fitting evaluation, even if resuming a model whose training is already complete.
         :param optimize_memory: ``bool``; Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).
         """
+
+        if self.early_stopping:
+            assert X_dev is not None, 'X_dev must be specified if early stopping is used'
+            assert Y_dev is not None, 'Y_dev must be specified if early stopping is used'
 
         lengths = [len(_Y) for _Y in Y]
         n = sum(lengths)
@@ -6919,6 +6961,7 @@ class CDRModel(object):
             n_iter = self.n_iter
 
         # Preprocess data
+        # Training data
         if not isinstance(X, list):
             X = [X]
         if Y is not None and not isinstance(Y, list):
@@ -6941,6 +6984,7 @@ class CDRModel(object):
         )
 
         if not optimize_memory:
+            # Training data
             X, X_time, X_mask = build_CDR_impulse_data(
                 X_in,
                 first_obs,
@@ -7097,10 +7141,35 @@ class CDRModel(object):
                             assert n_failed <= 100, '100 restarts in a row from the same save point failed to pass stability checks. Model training has failed.'
                             continue
 
-                        if self.check_convergence:
-                            self.run_convergence_check(verbose=False, feed_dict={self.loss_total: loss_total/n_minibatch})
-
                         self.session.run(self.incr_global_step)
+
+                        if self.eval_freq > 0 and self.global_step.eval(session=self.session) % self.eval_freq == 0:
+                            self.save()
+                            dev_results, _ = self.evaluate(
+                                X_dev,
+                                Y_dev,
+                                X_in_Y_names=X_in_Y_names,
+                                n_samples=None,
+                                algorithm='MAP',
+                                partition='dev',
+                                optimize_memory=optimize_memory,
+                                verbose=True
+                            )
+                            dev_ll = dev_results['full_log_lik']
+                            log_fd = {self.dev_ll_total: dev_ll}
+                            summary_dev = self.session.run(self.summary_dev, feed_dict=log_fd)
+                            self.writer.add_summary(summary_dev, self.global_step.eval(session=self.session))
+                        else:
+                            dev_ll = None
+
+                        if self.check_convergence:
+                            if self.early_stopping:
+                                if dev_ll is not None:
+                                    fd = {self.loss_total: -dev_ll}
+                                    self.run_convergence_check(verbose=False, feed_dict=fd)
+                            else:
+                                fd = {self.loss_total: loss_total/n_minibatch}
+                                self.run_convergence_check(verbose=False, feed_dict=fd)
 
                         if self.log_freq > 0 and self.global_step.eval(session=self.session) % self.log_freq == 0:
                             loss_total /= n_minibatch

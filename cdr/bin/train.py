@@ -24,7 +24,6 @@ if __name__ == '__main__':
     ''')
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default = [], help='Path to configuration (*.ini) file')
-    argparser.add_argument('-p', '--partition', type=str, default='train', help='Name of partition to train on ("train", "dev", "test", or space- or hyphen-delimited subset of these)')
     argparser.add_argument('-e', '--force_training_evaluation', action='store_true', help='Recompute training evaluation even for models that are already finished.')
     argparser.add_argument('-s', '--save_and_exit', action='store_true', help='Initialize, save, and exit (CDR only). Useful for bringing non-backward compatible trained models up to spec for plotting and evaluation.')
     argparser.add_argument('-S', '--skip_confirmation', action='store_true', help='If running with **-s**, skip interactive confirmation. Useful for batch re-saving many models. Use with caution, since old models will be overwritten without the option to confirm.')
@@ -54,10 +53,11 @@ if __name__ == '__main__':
     cdr_formula_list = [Formula(p.models[m]['formula']) for m in filter_models(models, cdr_only=True)]
     cdr_formula_name_list = [m for m in filter_models(p.model_list)]
     all_rangf = [v for x in cdr_formula_list for v in x.rangf]
-    partitions = get_partition_list(args.partition)
+    partitions = get_partition_list('train')
     all_interactions = False
 
     X_paths, Y_paths = paths_from_partition_cliarg(partitions, p)
+    X_paths_dev = Y_paths_dev = X_dev = Y_dev = None
     X, Y = read_tabular_data(
         X_paths,
         Y_paths,
@@ -273,11 +273,37 @@ if __name__ == '__main__':
                         i_file.write(cdr_model.initialization_summary())
                 continue
 
+            if cdr_model.eval_freq > 0:
+                if X_paths_dev is None or Y_paths_dev is None:
+                    X_paths_dev, Y_paths_dev = paths_from_partition_cliarg('dev', p)
+                    assert X_paths_dev is not None and Y_paths_dev is not None, 'X_dev and Y_dev must be specified in order to use eval_freq > 0'
+                    X_dev, Y_dev = read_tabular_data(
+                        X_paths_dev,
+                        Y_paths_dev,
+                        p.series_ids,
+                        sep=p.sep,
+                        categorical_columns=list(
+                            set(p.split_ids + p.series_ids + [v for x in cdr_formula_list for v in x.rangf]))
+                    )
+                    X_dev, Y_dev, select_dev, _ = preprocess_data(
+                        X_dev,
+                        Y_dev,
+                        cdr_formula_list,
+                        p.series_ids,
+                        filters=p.filters,
+                        history_length=p.history_length,
+                        future_length=p.future_length,
+                        t_delta_cutoff=p.t_delta_cutoff,
+                        all_interactions=all_interactions
+                    )
+
             stderr('\nFitting model %s...\n\n' % m)
 
             cdr_model.fit(
                 X,
                 Y_valid,
+                X_dev=X_dev,
+                Y_dev=Y_dev,
                 n_iter=p['n_iter'],
                 X_in_Y_names=X_in_Y_names,
                 force_training_evaluation=args.force_training_evaluation,

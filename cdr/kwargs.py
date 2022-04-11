@@ -527,6 +527,12 @@ MODEL_INITIALIZATION_KWARGS = [
         [float, None],
         "Significance threshold above which to fail to reject the null of no correlation between convergence basis and training time. Larger values are more stringent."
     ),
+    Kwarg(
+        'early_stopping',
+        False,
+        bool,
+        "Whether to diagnose convergence based on dev set performance (``True``) or training set performance (``False``)."
+    ),
 
     # REGULARIZATION
     Kwarg(
@@ -604,6 +610,12 @@ MODEL_INITIALIZATION_KWARGS = [
         100,
         int,
         "Frequency (in iterations) with which to plot model estimates (or ``0`` to turn off incremental plotting)."
+    ),
+    Kwarg(
+        'eval_freq',
+        0,
+        int,
+        "Frequency (in iterations) with which to evaluate on dev data (or ``0`` to turn off incremental evaluation)."
     ),
     Kwarg(
         'log_freq',
