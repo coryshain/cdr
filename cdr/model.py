@@ -2,6 +2,7 @@ import textwrap
 import textwrap
 import time as pytime
 from collections import defaultdict
+import subprocess
 
 import scipy.interpolate
 import scipy.linalg
@@ -633,6 +634,11 @@ class CDRModel(object):
             rangf_map = pd.DataFrame({'id': vals}, index=keys).to_dict()['id']
             self.rangf_map_base.append(rangf_map)
             self.rangf_n_levels.append(len(keys) + 1)
+
+        self.git_hash = subprocess.check_output(
+            ["git", "describe", "--always"],
+            cwd=os.path.dirname(os.path.abspath(__file__))
+        ).strip().decode()
 
         self._initialize_session()
         tf.keras.backend.set_session(self.session)
@@ -1281,7 +1287,8 @@ class CDRModel(object):
             'outdir': self.outdir,
             'crossval_factor': self.crossval_factor,
             'crossval_fold': self.crossval_fold,
-            'irf_name_map': self.irf_name_map
+            'irf_name_map': self.irf_name_map,
+            'git_hash': self.git_hash
         }
         for kwarg in CDRModel._INITIALIZATION_KWARGS:
             md[kwarg.key] = getattr(self, kwarg.key)
@@ -1334,6 +1341,7 @@ class CDRModel(object):
         self.crossval_factor = md.pop('crossval_factor', None)
         self.crossval_fold = md.pop('crossval_fold', [])
         self.irf_name_map = md.pop('irf_name_map', {})
+        self.git_hash = md.pop('git_hash', 'unknown')
 
         # Convert response statistics to vectors if needed (for backward compatibility)
         response_names = [x.name() for x in self.form.responses()]
@@ -6377,6 +6385,7 @@ class CDRModel(object):
         for kwarg in MODEL_INITIALIZATION_KWARGS:
             val = getattr(self, kwarg.key)
             out += ' ' * (indent + 2) + '%s: %s\n' %(kwarg.key, "\"%s\"" %val if isinstance(val, str) else val)
+        out += ' ' * indent + 'Git hash: %s' % self.git_hash
         out += ' ' * (indent + 2) + '%s: %s\n' % ('crossval_factor', "\"%s\"" % self.crossval_factor)
         out += ' ' * (indent + 2) + '%s: %s\n' % ('crossval_fold', self.crossval_fold)
 
@@ -7149,11 +7158,8 @@ class CDRModel(object):
                                 X_dev,
                                 Y_dev,
                                 X_in_Y_names=X_in_Y_names,
-                                n_samples=None,
-                                algorithm='MAP',
                                 partition='dev',
-                                optimize_memory=optimize_memory,
-                                verbose=True
+                                optimize_memory=optimize_memory
                             )
                             dev_ll = dev_results['full_log_lik']
                             log_fd = {self.dev_ll_total: dev_ll}
@@ -7222,8 +7228,23 @@ class CDRModel(object):
                         Y_in,
                         X_in_Y_names=X_in_Y_names,
                         dump=True,
-                        partition='train'
+                        partition='train',
+                        optimize_memory=optimize_memory
                     )
+
+                    if self.eval_freq > 0:
+                        dev_results, _ = self.evaluate(
+                            X_dev,
+                            Y_dev,
+                            X_in_Y_names=X_in_Y_names,
+                            dump=True,
+                            partition='dev',
+                            optimize_memory=optimize_memory
+                        )
+                        dev_ll = dev_results['full_log_lik']
+                        log_fd = {self.dev_ll_total: dev_ll}
+                        summary_dev = self.session.run(self.summary_dev, feed_dict=log_fd)
+                        self.writer.add_summary(summary_dev, self.global_step.eval(session=self.session))
 
                     # Extract and save losses
                     ll_full = sum([_ll for r in self.response_names for _ll in metrics['log_lik'][r]])
