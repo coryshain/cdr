@@ -635,10 +635,26 @@ class CDRModel(object):
             self.rangf_map_base.append(rangf_map)
             self.rangf_n_levels.append(len(keys) + 1)
 
-        self.git_hash = subprocess.check_output(
-            ["git", "describe", "--always"],
-            cwd=os.path.dirname(os.path.abspath(__file__))
-        ).strip().decode()
+        try:
+            self.git_hash = subprocess.check_output(
+                ["git", "describe", "--always"],
+                cwd=os.path.dirname(os.path.abspath(__file__))
+            ).strip().decode()
+            self.pip_version = None
+        except (FileNotFoundError, subprocess.CalledProcessError): # CDR not installed via git
+            self.git_hash = None
+            try:
+                pip_info = subprocess.check_output(
+                    ["pip", "show", "cdr"]
+                ).strip().decode()
+                version = None
+                for line in pip_info.split('\n'):
+                    line = line.strip()
+                    if line.startswith('Version:'):
+                        version = line.split()[1]
+                self.pip_version = version
+            except (FileNotFoundError, subprocess.CalledProcessError): # pip not available
+                self.pip_version = None
 
         self._initialize_session()
         tf.keras.backend.set_session(self.session)
@@ -1288,7 +1304,8 @@ class CDRModel(object):
             'crossval_factor': self.crossval_factor,
             'crossval_fold': self.crossval_fold,
             'irf_name_map': self.irf_name_map,
-            'git_hash': self.git_hash
+            'git_hash': self.git_hash,
+            'pip_version': self.pip_version
         }
         for kwarg in CDRModel._INITIALIZATION_KWARGS:
             md[kwarg.key] = getattr(self, kwarg.key)
@@ -1341,7 +1358,8 @@ class CDRModel(object):
         self.crossval_factor = md.pop('crossval_factor', None)
         self.crossval_fold = md.pop('crossval_fold', [])
         self.irf_name_map = md.pop('irf_name_map', {})
-        self.git_hash = md.pop('git_hash', 'unknown')
+        self.git_hash = md.pop('git_hash', None)
+        self.pip_version = md.pop('pip_version', None)
 
         # Convert response statistics to vectors if needed (for backward compatibility)
         response_names = [x.name() for x in self.form.responses()]
@@ -6387,7 +6405,10 @@ class CDRModel(object):
             out += ' ' * (indent + 2) + '%s: %s\n' %(kwarg.key, "\"%s\"" %val if isinstance(val, str) else val)
         out += ' ' * (indent + 2) + '%s: %s\n' % ('crossval_factor', "\"%s\"" % self.crossval_factor)
         out += ' ' * (indent + 2) + '%s: %s\n' % ('crossval_fold', self.crossval_fold)
-        out += ' ' * (indent + 2) + 'Git hash: %s\n' % self.git_hash
+        if self.git_hash:
+            out += ' ' * (indent + 2) + 'Git hash: %s\n' % self.git_hash
+        if self.pip_version:
+            out += ' ' * (indent + 2) + 'Pip version: %s\n' % self.pip_version
 
         return out
 
