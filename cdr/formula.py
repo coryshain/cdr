@@ -844,6 +844,19 @@ class Formula(object):
 
             elif Formula.normalize_irf_family(t.func.id) in Formula.IRF_PARAMS.keys() or lcg_re.match(t.func.id) is not None:
                 raise ValueError('IRF calls can only occur as inputs to C() in CDR formula strings')
+            elif t.func.id == 're':
+                # Regular expression
+                assert len(t.args) == 1, 'Regular expression terms take exactly one string argument'
+                val = t.args[0].value
+                assert isinstance(val, str), 'Regular expression terms take exactly one string argument'
+                new = Impulse(val, ops=ops, is_re=True)
+
+                if new.name() in impulses_by_name:
+                    new = impulses_by_name[new.name()]
+                else:
+                    impulses_by_name[new.name()] = new
+
+                terms.append([new])
             else:
                 # Unary transform
 
@@ -1718,6 +1731,19 @@ class Formula(object):
         new_form = Formula(new_formstring)
         return new_form
 
+    def regex_transform(self, X):
+        """
+        Get transformed formula with regex predictors expanded based on matches to the columns in **X**.
+
+        :param X: list of ``pandas`` tables; input data.
+        :return: ``Formula``; transformed ``Formula`` object
+        """
+
+        new_t = self.t.regex_transform(X)[0]
+        new_formstring = self.to_string(t=new_t)
+        new_form = Formula(new_formstring)
+        return new_form
+
     def initialize_nns(self):
         """
         Initialize a dictionary mapping ids to metadata for all NN components in this CDR model
@@ -1770,13 +1796,18 @@ class Impulse(object):
 
     :param name: ``str``; name of impulse
     :param ops: ``list`` of ``str``, or ``None``; ops to apply to impulse. If ``None``, no ops.
+    :param is_re: ``bool``; whether impulse is a regular expression search pattern
     """
 
-    def __init__(self, name, ops=None):
+    def __init__(self, name, ops=None, is_re=False):
         if ops is None:
             ops = []
         self.ops = ops[:]
-        self.name_str = name
+        self.is_re = is_re
+        if self.is_re:
+            self.name_str = 're("%s")' % name
+        else:
+            self.name_str = name
         for op in self.ops:
             self.name_str = op + '(' + self.name_str + ')'
         self.id = name
@@ -1832,7 +1863,7 @@ class Impulse(object):
             _X = X[i]
             if self.id in _X and self.categorical(X):
                 vals = sorted(_X[self.id].unique())[1:]
-                impulses = [Impulse('_'.join([self.id, pythonize_string(str(val))]), ops=self.ops) for val in vals]
+                impulses = [Impulse('_'.join([self.id, pythonize_string(str(val))]), ops=self.ops, is_re=self.is_re) for val in vals]
                 expanded_value_names = [str(val) for val in vals]
                 for j in range(len(impulses)):
                     x = impulses[j]
@@ -3386,7 +3417,7 @@ class IRFNode(object):
                                     if response.id in _X:
                                         found = True
                                         vals = sorted(_X[response.id].unique())[1:]
-                                        expansion = [Impulse('_'.join([response.id, pythonize_string(str(val))]), ops=response.ops) for val in vals]
+                                        expansion = [Impulse('_'.join([response.id, pythonize_string(str(val))]), ops=response.ops, is_re=response.is_re) for val in vals]
                                         break
                                 assert found, 'Impulse %d not found in data.' % response.id
                             else:
@@ -3402,7 +3433,7 @@ class IRFNode(object):
                                             found = True
                                             vals = sorted(_X[subresponse.id].unique())[1:]
                                             expansion = [
-                                                Impulse('_'.join([subresponse.id, pythonize_string(str(val))]), ops=subresponse.ops)
+                                                Impulse('_'.join([subresponse.id, pythonize_string(str(val))]), ops=subresponse.ops, is_re=subresponse.is_re)
                                                 for val in vals]
                                             break
                                     assert found, 'Impulse %d not found in data.' % subresponse.id
@@ -3420,7 +3451,7 @@ class IRFNode(object):
                                 if x.id in _X:
                                     found = True
                                     vals = sorted(_X[x.id].unique())[1:]
-                                    expansion = [Impulse('_'.join([x.id, pythonize_string(str(val))]), ops=x.ops) for val in vals]
+                                    expansion = [Impulse('_'.join([x.id, pythonize_string(str(val))]), ops=x.ops, is_re=x.is_re) for val in vals]
                                     break
                             assert found, 'Impulse %s not found in data.' % x.id
                         else:
@@ -3441,7 +3472,7 @@ class IRFNode(object):
                                 if x.id in _X:
                                     found = True
                                     vals = sorted(_X[x.id].unique())[1:]
-                                    expansion = [Impulse('_'.join([x.id, pythonize_string(str(val))]), ops=x.ops) for val in vals]
+                                    expansion = [Impulse('_'.join([x.id, pythonize_string(str(val))]), ops=x.ops, is_re=x.is_re) for val in vals]
                                     break
                             assert found, 'Impulse %s not found in data.' % x.id
                         else:
@@ -3469,7 +3500,7 @@ class IRFNode(object):
                                 if self.impulse.id in _X:
                                     found = True
                                     vals = sorted(_X[self.impulse.id].unique())[1:]
-                                    expansion = [Impulse('_'.join([self.impulse.id, pythonize_string(str(val))]), ops=self.impulse.ops) for val in vals]
+                                    expansion = [Impulse('_'.join([self.impulse.id, pythonize_string(str(val))]), ops=self.impulse.ops, is_re=self.impulse.is_re) for val in vals]
                                     break
                             assert found, 'Impulse %s not found in data.' % self.impulse.id
                         else:

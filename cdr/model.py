@@ -6385,9 +6385,9 @@ class CDRModel(object):
         for kwarg in MODEL_INITIALIZATION_KWARGS:
             val = getattr(self, kwarg.key)
             out += ' ' * (indent + 2) + '%s: %s\n' %(kwarg.key, "\"%s\"" %val if isinstance(val, str) else val)
-        out += ' ' * indent + 'Git hash: %s' % self.git_hash
         out += ' ' * (indent + 2) + '%s: %s\n' % ('crossval_factor', "\"%s\"" % self.crossval_factor)
         out += ' ' * (indent + 2) + '%s: %s\n' % ('crossval_fold', self.crossval_fold)
+        out += ' ' * (indent + 2) + 'Git hash: %s\n' % self.git_hash
 
         return out
 
@@ -6561,6 +6561,12 @@ class CDRModel(object):
         out += self.training_evaluation_summary(indent=indent + 2)
         out += '\n'
         out += self.convergence_summary(indent=indent + 2)
+        out += '\n'
+        out += ' ' * (indent + 2) + 'Response Statistics:\n'
+        for response in self.Y_train_sds:
+            out += ' ' * (indent + 4) + response + ':\n'
+            out += ' ' * (indent + 6) + 'Mean: ' + ', '.join([str(x) for x in self.Y_train_means[response].flatten()]) + '\n'
+            out += ' ' * (indent + 6) + 'SD:   ' + ', '.join([str(x) for x in self.Y_train_sds[response].flatten()]) + '\n'
         out += '\n'
         out += self.parameter_summary(
             random=random,
