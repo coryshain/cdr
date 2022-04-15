@@ -1575,6 +1575,8 @@ class CDRModel(object):
                 self.n_dropped_in = tf.placeholder(shape=[], dtype=self.INT_TF, name='n_dropped_in')
                 if self.eval_freq > 0:
                     self.dev_ll_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='dev_ll_total')
+                    self.dev_ll_max = tf.Variable(-np.inf, trainable=False)
+                    self.set_dev_ll_max = tf.assign(self.dev_ll_max, tf.maximum(self.dev_ll_total, self.dev_ll_max))
 
                 # Initialize vars for saving training set stats upon completion.
                 # Allows these numbers to be reported in later summaries without access to the training data.
@@ -6039,11 +6041,12 @@ class CDRModel(object):
                 else:
                     return False
 
-    def save(self, dir=None):
+    def save(self, dir=None, suffix=''):
         """
         Save the CDR model.
 
         :param dir: ``str``; output directory. If ``None``, use model default.
+        :param suffix: ``str``; file suffix.
         :return: ``None``
         """
 
@@ -6059,8 +6062,8 @@ class CDRModel(object):
                 # Try/except to handle race conditions in Windows
                 while failed and i < 10:
                     try:
-                        self.saver.save(self.session, dir + '/model.ckpt')
-                        with open(dir + '/m.obj', 'wb') as f:
+                        self.saver.save(self.session, dir + '/model%s.ckpt' % suffix)
+                        with open(dir + '/m%s.obj' % suffix, 'wb') as f:
                             pickle.dump(self, f)
                         failed = False
                     except:
@@ -6069,16 +6072,17 @@ class CDRModel(object):
                         i += 1
                 if i >= 10:
                     stderr('Could not save model to checkpoint file. Saving to backup...\n')
-                    self.saver.save(self.session, dir + '/model_backup.ckpt')
-                    with open(dir + '/m.obj', 'wb') as f:
+                    self.saver.save(self.session, dir + '/model%s_backup.ckpt' % suffix)
+                    with open(dir + '/m%s.obj' % suffix, 'wb') as f:
                         pickle.dump(self, f)
 
-    def load(self, outdir=None, predict=False, restore=True, allow_missing=True):
+    def load(self, outdir=None, suffix='', predict=False, restore=True, allow_missing=True):
         """
         Load weights from a CDR checkpoint and/or initialize the CDR model.
         Missing weights in the checkpoint will be kept at their initializations, and unneeded weights in the checkpoint will be ignored.
 
         :param outdir: ``str``; directory in which to search for weights. If ``None``, use model defaults.
+        :param suffix: ``str``; file suffix.
         :param predict: ``bool``; load EMA weights because the model is being used for prediction. If ``False`` load training weights.
         :param restore: ``bool``; restore weights from a checkpoint file if available, otherwise initialize the model. If ``False``, no weights will be loaded even if a checkpoint is found.
         :param allow_missing: ``bool``; load all weights found in the checkpoint file, allowing those that are missing to remain at their initializations. If ``False``, weights in checkpoint must exactly match those in the model graph, or else an error will be raised. Leaving set to ``True`` is helpful for backward compatibility, setting to ``False`` can be helpful for debugging.
@@ -6093,16 +6097,22 @@ class CDRModel(object):
                     self.session.run(tf.global_variables_initializer())
                 if restore and os.path.exists(outdir + '/checkpoint'):
                     # Thanks to Ralph Mao (https://github.com/RalphMao) for this workaround for missing vars
-                    path = outdir + '/model.ckpt'
+                    path = outdir + '/model%s.ckpt' % suffix
+                    if self.early_stopping and self.has_converged():
+                        pred_path = outdir + '/model%s_maxval.ckpt' % suffix
+                        if not os.path.exists(pred_path):
+                            pred_path = path
+                    else:
+                        pred_path = path
                     try:
                         self.saver.restore(self.session, path)
                         if predict and self.ema_decay:
-                            self.ema_saver.restore(self.session, path)
+                            self.ema_saver.restore(self.session, pred_path)
                     except tf.errors.DataLossError:
                         stderr('Read failure during load. Trying from backup...\n')
                         self.saver.restore(self.session, path[:-5] + '_backup.ckpt')
                         if predict:
-                            self.ema_saver.restore(self.session, path[:-5] + '_backup.ckpt')
+                            self.ema_saver.restore(self.session, pred_path[:-5] + '_backup.ckpt')
                     except tf.errors.NotFoundError as err:  # Model contains variables that are missing in checkpoint, special handling needed
                         if allow_missing:
                             reader = tf.train.NewCheckpointReader(path)
@@ -6147,7 +6157,7 @@ class CDRModel(object):
                                 for v in restore_vars:
                                     self.ema_map[self.ema.average_name(v)] = v
                                 saver_tmp = tf.train.Saver(self.ema_map)
-                                saver_tmp.restore(self.session, path)
+                                saver_tmp.restore(self.session, pred_path)
 
                         else:
                             raise err
@@ -7189,8 +7199,9 @@ class CDRModel(object):
                                 optimize_memory=optimize_memory
                             )
                             dev_ll = dev_results['full_log_lik']
+                            dev_ll_max_prev = self.dev_ll_max.eval(session=self.session)
                             log_fd = {self.dev_ll_total: dev_ll}
-                            summary_dev = self.session.run(self.summary_dev, feed_dict=log_fd)
+                            summary_dev, _ = self.session.run([self.summary_dev, self.set_dev_ll_max], feed_dict=log_fd)
                             self.writer.add_summary(summary_dev, self.global_step.eval(session=self.session))
                         else:
                             dev_ll = None
@@ -7200,6 +7211,8 @@ class CDRModel(object):
                                 if dev_ll is not None:
                                     fd = {self.loss_total: -dev_ll}
                                     self.run_convergence_check(verbose=False, feed_dict=fd)
+                                    if dev_ll > dev_ll_max_prev:
+                                        self.save(suffix='_maxval')
                             else:
                                 fd = {self.loss_total: loss_total/n_minibatch}
                                 self.run_convergence_check(verbose=False, feed_dict=fd)

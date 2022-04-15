@@ -497,7 +497,7 @@ MODEL_INITIALIZATION_KWARGS = [
     Kwarg(
         'ema_decay',
         0.999,
-        [float, None],
+        float,
         "Decay factor to use for exponential moving average for parameters (used in prediction)."
     ),
 
