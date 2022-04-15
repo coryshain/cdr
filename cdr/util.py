@@ -353,20 +353,21 @@ def get_numerical_sd(sd, in_dim=1, out_dim=1):
     return out
 
 
-def load_cdr(dir_path):
+def load_cdr(dir_path, suffix=''):
     """
     Convenience method for reconstructing a saved CDR object. First loads in metadata from ``m.obj``, then uses
     that metadata to construct the computation graph. Then, if saved weights are found, these are loaded into the
     graph.
 
     :param dir_path: Path to directory containing the CDR checkpoint files.
+    :param suffix: ``str``; file suffix.
     :return: The loaded CDR instance.
     """
 
-    with open(dir_path + '/m.obj', 'rb') as f:
+    with open(dir_path + '/m%s.obj' % suffix, 'rb') as f:
         m = pickle.load(f)
     m.build(outdir=dir_path)
-    m.load(outdir=dir_path)
+    m.load(outdir=dir_path, suffix=suffix)
     return m
 
 

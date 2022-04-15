@@ -6100,7 +6100,7 @@ class CDRModel(object):
                     path = outdir + '/model%s.ckpt' % suffix
                     if self.early_stopping and self.has_converged():
                         pred_path = outdir + '/model%s_maxval.ckpt' % suffix
-                        if not os.path.exists(pred_path):
+                        if not os.path.exists(pred_path + '.meta'):
                             pred_path = path
                     else:
                         pred_path = path
@@ -6110,9 +6110,9 @@ class CDRModel(object):
                             self.ema_saver.restore(self.session, pred_path)
                     except tf.errors.DataLossError:
                         stderr('Read failure during load. Trying from backup...\n')
-                        self.saver.restore(self.session, path[:-5] + '_backup.ckpt')
+                        self.saver.restore(self.session, path[:-5] + '%s_backup.ckpt' % suffix)
                         if predict:
-                            self.ema_saver.restore(self.session, pred_path[:-5] + '_backup.ckpt')
+                            self.ema_saver.restore(self.session, pred_path[:-5] + '%s_backup.ckpt' % suffix)
                     except tf.errors.NotFoundError as err:  # Model contains variables that are missing in checkpoint, special handling needed
                         if allow_missing:
                             reader = tf.train.NewCheckpointReader(path)
