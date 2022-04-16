@@ -3404,9 +3404,9 @@ class CDRModel(object):
                         )
                         self.layers.append(projection)
 
-                        if 'nn' not in self.rvs and (regularize_initial_layer or l > 0):
-                            self.regularizable_layers[nn_id].append(projection)
-                        if 'nn' not in self.rvs and (regularize_final_layer or l < n_layers_ff):
+                        if 'nn' not in self.rvs and \
+                                (regularize_initial_layer or l > 0) and \
+                                (regularize_final_layer or l < n_layers_ff):
                             self.regularizable_layers[nn_id].append(projection)
                         ff_layers.append(make_lambda(projection, session=self.session, use_kwargs=False))
 
@@ -3554,9 +3554,9 @@ class CDRModel(object):
                         self.layers.append(projection)
                         irf_layers.append(projection)
 
-                        if 'nn' not in self.rvs and (regularize_initial_layer or l > 0):
-                            self.regularizable_layers[nn_id].append(projection)
-                        if 'nn' not in self.rvs and (regularize_final_layer or l < n_layers_irf):
+                        if 'nn' not in self.rvs and \
+                                (regularize_initial_layer or l > 0) and \
+                                (regularize_final_layer or l < n_layers_ff):
                             self.regularizable_layers[nn_id].append(projection)
                         if l == 0:
                             self.nn_irf_l1[nn_id] = projection
