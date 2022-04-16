@@ -3323,6 +3323,7 @@ class CDRModel(object):
                 input_dependent_irf = self.get_nn_meta('input_dependent_irf', nn_id)
                 ranef_l1_only = self.get_nn_meta('ranef_l1_only', nn_id)
                 dropout_final_layer = self.get_nn_meta('dropout_final_layer', nn_id)
+                regularize_initial_layer = self.get_nn_meta('regularize_initial_layer', nn_id)
                 regularize_final_layer = self.get_nn_meta('regularize_final_layer', nn_id)
 
                 rangf_map = {}
@@ -3403,6 +3404,8 @@ class CDRModel(object):
                         )
                         self.layers.append(projection)
 
+                        if 'nn' not in self.rvs and (regularize_initial_layer or l > 0):
+                            self.regularizable_layers[nn_id].append(projection)
                         if 'nn' not in self.rvs and (regularize_final_layer or l < n_layers_ff):
                             self.regularizable_layers[nn_id].append(projection)
                         ff_layers.append(make_lambda(projection, session=self.session, use_kwargs=False))
@@ -3551,6 +3554,8 @@ class CDRModel(object):
                         self.layers.append(projection)
                         irf_layers.append(projection)
 
+                        if 'nn' not in self.rvs and (regularize_initial_layer or l > 0):
+                            self.regularizable_layers[nn_id].append(projection)
                         if 'nn' not in self.rvs and (regularize_final_layer or l < n_layers_irf):
                             self.regularizable_layers[nn_id].append(projection)
                         if l == 0:

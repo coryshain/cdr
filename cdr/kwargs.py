@@ -1166,6 +1166,12 @@ NN_KWARGS = [
         aliases=['input_projection_regularizer_scale']
     ),
     Kwarg(
+        'regularize_initial_layer',
+        False,
+        bool,
+        "Whether to regulare the first layer of NN components."
+    ),
+    Kwarg(
         'regularize_final_layer',
         False,
         bool,
