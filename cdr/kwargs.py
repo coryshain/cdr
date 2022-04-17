@@ -1167,7 +1167,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'regularize_initial_layer',
-        False,
+        True,
         bool,
         "Whether to regulare the first layer of NN components."
     ),
