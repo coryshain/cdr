@@ -1577,6 +1577,62 @@ class CDRModel(object):
                     self.dev_ll_total = tf.placeholder(shape=[], dtype=self.FLOAT_TF, name='dev_ll_total')
                     self.dev_ll_max = tf.Variable(-np.inf, trainable=False)
                     self.set_dev_ll_max = tf.assign(self.dev_ll_max, tf.maximum(self.dev_ll_total, self.dev_ll_max))
+                    self.dev_metrics = {}
+                    if len(self.response_names) > 1:
+                        self.dev_metrics['full_log_lik'] = self.dev_ll_total
+                    for response in self.response_names:
+                        file_ix = self.response_to_df_ix[response]
+                        multiple_files = len(file_ix) > 1
+                        suffix = response
+                        for ix in file_ix:
+                            if multiple_files:
+                                suffix = response + '_file%d' % ix
+                            else:
+                                suffix = response
+                            if 'log_lik' not in self.dev_metrics:
+                                self.dev_metrics['log_lik'] = {}
+                                if response not in self.dev_metrics['log_lik']:
+                                    self.dev_metrics['log_lik'][response] = {}
+                                self.dev_metrics['log_lik'][response][ix] = tf.placeholder(
+                                    shape=[], dtype=self.FLOAT_TF, name='log_lik_%s' % suffix
+                                )
+                            if self.is_binary(response) or self.is_categorical(response):
+                                if 'f1' not in self.dev_metrics:
+                                    self.dev_metrics['f1'] = {}
+                                if response not in self.dev_metrics['f1']:
+                                    self.dev_metrics['f1'][response] = {}
+                                self.dev_metrics['f1'][response][ix] = tf.placeholder(
+                                    shape=[], dtype=self.FLOAT_TF, name='f1_%s' % suffix
+                                )
+                                if 'acc' not in self.dev_metrics:
+                                    self.dev_metrics['acc'] = {}
+                                if response not in self.dev_metrics['acc']:
+                                    self.dev_metrics['acc'][response] = {}
+                                self.dev_metrics['acc'][response][ix] = tf.placeholder(
+                                    shape=[], dtype=self.FLOAT_TF, name='acc_%s' % suffix
+                                )
+                            else:
+                                if 'mse' not in self.dev_metrics:
+                                    self.dev_metrics['mse'] = {}
+                                if response not in self.dev_metrics['mse']:
+                                    self.dev_metrics['mse'][response] = {}
+                                self.dev_metrics['mse'][response][ix] = tf.placeholder(
+                                    shape=[], dtype=self.FLOAT_TF, name='mse_%s' % suffix
+                                )
+                                if 'rho' not in self.dev_metrics:
+                                    self.dev_metrics['rho'] = {}
+                                if response not in self.dev_metrics['rho']:
+                                    self.dev_metrics['rho'][response] = {}
+                                self.dev_metrics['rho'][response][ix] = tf.placeholder(
+                                    shape=[], dtype=self.FLOAT_TF, name='rho_%s' % suffix
+                                )
+                                if 'percent_variance_explained' not in self.dev_metrics:
+                                    self.dev_metrics['percent_variance_explained'] = {}
+                                if response not in self.dev_metrics['percent_variance_explained']:
+                                    self.dev_metrics['percent_variance_explained'][response] = {}
+                                self.dev_metrics['percent_variance_explained'][response][ix] = tf.placeholder(
+                                    shape=[], dtype=self.FLOAT_TF, name='percent_variance_explained_%s' % suffix
+                                )
 
                 # Initialize vars for saving training set stats upon completion.
                 # Allows these numbers to be reported in later summaries without access to the training data.
@@ -4930,7 +4986,20 @@ class CDRModel(object):
                 if self.filter_outlier_losses and self.loss_cutoff_n_sds:
                     tf.summary.scalar('opt/n_dropped', self.n_dropped_in, collections=['opt'])
                 if self.eval_freq > 0:
-                    tf.summary.scalar('dev/dev_LL_by_iter', self.dev_ll_total, collections=['dev'])
+                    for metric in self.dev_metrics:
+                        if metric == 'full_log_lik':
+                            tf.summary.scalar(
+                                'dev/%s' % metric, self.dev_metrics[metric], collections=['dev']
+                            )
+                        else:
+                            for response in self.dev_metrics[metric]:
+                                name = '%s_%s' % (metric, response)
+                                for ix in self.dev_metrics[metric][response]:
+                                    if len(self.dev_metrics[metric][response]) > 1:
+                                        name += '_file%d' % ix
+                                    tf.summary.scalar(
+                                        'dev/%s' % name, self.dev_metrics[metric][response][ix], collections=['dev']
+                                    )
                 if self.log_graph:
                     self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/cdr', self.session.graph)
                 else:
@@ -7189,7 +7258,7 @@ class CDRModel(object):
 
                         if failed:
                             n_failed += 1
-                            assert n_failed <= 100, '100 restarts in a row from the same save point failed to pass stability checks. Model training has failed.'
+                            assert n_failed <= 1000, '1000 restarts in a row from the same save point failed to pass stability checks. Model training has failed.'
                             continue
 
                         self.session.run(self.incr_global_step)
@@ -7206,6 +7275,11 @@ class CDRModel(object):
                             dev_ll = dev_results['full_log_lik']
                             dev_ll_max_prev = self.dev_ll_max.eval(session=self.session)
                             log_fd = {self.dev_ll_total: dev_ll}
+                            for metric in self.dev_metrics:
+                                if metric != 'full_log_lik':
+                                    for response in self.dev_metrics[metric]:
+                                        for ix in self.dev_metrics[metric][response]:
+                                            log_fd[self.dev_metrics[metric][response][ix]] = np.squeeze(dev_results[metric][response][ix])
                             summary_dev, _ = self.session.run([self.summary_dev, self.set_dev_ll_max], feed_dict=log_fd)
                             self.writer.add_summary(summary_dev, self.global_step.eval(session=self.session))
                         else:
