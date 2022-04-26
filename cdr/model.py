@@ -7384,6 +7384,11 @@ class CDRModel(object):
                         )
                         dev_ll = dev_results['full_log_lik']
                         log_fd = {self.dev_ll_total: dev_ll}
+                        for metric in self.dev_metrics:
+                            if metric != 'full_log_lik':
+                                for response in self.dev_metrics[metric]:
+                                    for ix in self.dev_metrics[metric][response]:
+                                        log_fd[self.dev_metrics[metric][response][ix]] = np.squeeze(dev_results[metric][response][ix])
                         summary_dev = self.session.run(self.summary_dev, feed_dict=log_fd)
                         self.writer.add_summary(summary_dev, self.global_step.eval(session=self.session))
 
