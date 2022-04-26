@@ -1098,11 +1098,15 @@ class CDRModel(object):
                     self.d0_saved_update = []
                     self.d0_assign = []
 
+                    convergence_stride = self.convergence_stride
+                    if self.early_stopping:
+                        convergence_stride *= self.eval_freq
+
                     self.convergence_history = tf.Variable(
-                        tf.zeros([int(self.convergence_n_iterates / self.convergence_stride), 1]), trainable=False,
+                        tf.zeros([int(self.convergence_n_iterates / convergence_stride), 1]), trainable=False,
                         dtype=self.FLOAT_NP, name='convergence_history')
                     self.convergence_history_update = tf.placeholder(self.FLOAT_TF, shape=[
-                        int(self.convergence_n_iterates / self.convergence_stride), 1],
+                        int(self.convergence_n_iterates / convergence_stride), 1],
                                                                      name='convergence_history_update')
                     self.convergence_history_assign = tf.assign(self.convergence_history,
                                                                 self.convergence_history_update)
@@ -5460,8 +5464,12 @@ class CDRModel(object):
                     self.d0_names.append(name)
 
                     # Initialize tracker of parameter iterates
+                    convergence_stride = self.convergence_stride
+                    if self.early_stopping:
+                        convergence_stride *= self.eval_freq
+
                     var_d0_iterates = tf.Variable(
-                        tf.zeros([int(self.convergence_n_iterates / self.convergence_stride)] + list(var.shape)),
+                        tf.zeros([int(self.convergence_n_iterates / convergence_stride)] + list(var.shape)),
                         name=name + '_d0',
                         trainable=False
                     )
@@ -5472,10 +5480,14 @@ class CDRModel(object):
                     self.d0_assign.append(tf.assign(var_d0_iterates, var_d0_iterates_update))
 
     def _compute_and_test_corr(self, iterates, twotailed=True):
-        x = np.arange(0, len(iterates)*self.convergence_stride, self.convergence_stride).astype('float')[..., None]
+        convergence_stride = self.convergence_stride
+        if self.early_stopping:
+            convergence_stride *= self.eval_freq
+
+        x = np.arange(0, len(iterates)*convergence_stride, convergence_stride).astype('float')[..., None]
         y = iterates
 
-        n_iterates = int(self.convergence_n_iterates / self.convergence_stride)
+        n_iterates = int(self.convergence_n_iterates / convergence_stride)
 
         rt = corr(x, y)[0]
         tt = rt * np.sqrt((n_iterates - 2) / (1 - rt ** 2))
@@ -5508,8 +5520,11 @@ class CDRModel(object):
 
                     cur_step = self.global_step.eval(session=self.session)
                     last_check = self.last_convergence_check.eval(session=self.session)
-                    offset = cur_step % self.convergence_stride
-                    update = last_check < cur_step and self.convergence_stride > 0
+                    convergence_stride = self.convergence_stride
+                    if self.early_stopping:
+                        convergence_stride *= self.eval_freq
+                    offset = cur_step % convergence_stride
+                    update = last_check < cur_step and convergence_stride > 0
                     if update and feed_dict is None:
                         update = False
                         if verbose:
@@ -5523,7 +5538,7 @@ class CDRModel(object):
                         else:
                             var_d0_iterates = self.session.run(self.d0_saved)
 
-                        start_ix = int(self.convergence_n_iterates / self.convergence_stride) - int((cur_step - 1) / self.convergence_stride) - 1
+                        start_ix = int(self.convergence_n_iterates / convergence_stride) - int((cur_step - 1) / convergence_stride) - 1
                         start_ix = max(0, start_ix)
                         
                         twotailed = not self.early_stopping
