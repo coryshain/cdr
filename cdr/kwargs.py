@@ -513,7 +513,7 @@ MODEL_INITIALIZATION_KWARGS = [
         'convergence_stride',
         1,
         int,
-        "Stride (in iterations) over which to compute convergence. If larger than 1, iterations within a stride are averaged with the most recently saved value. Larger values increase the receptive field of the slope estimates, making convergence diagnosis less vulnerable to local perturbations but also increasing the number of post-convergence iterations necessary in order to identify convergence."
+        "Stride (in iterations) over which to compute convergence. If larger than 1, iterations within a stride are averaged with the most recently saved value. Larger values increase the receptive field of the slope estimates, making convergence diagnosis less vulnerable to local perturbations but also increasing the number of post-convergence iterations necessary in order to identify convergence. If ``early_stopping`` is ``True``, ``convergence_stride`` will implicitly be multiplied by ``eval_freq``."
     ),
     Kwarg(
         'convergence_alpha',

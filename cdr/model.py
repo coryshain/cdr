@@ -3374,13 +3374,11 @@ class CDRModel(object):
                 irf_activation = self.get_nn_meta('irf_activation', nn_id)
                 irf_dropout_rate = self.get_nn_meta('irf_dropout_rate', nn_id)
                 normalize_irf = self.get_nn_meta('normalize_irf', nn_id)
-                log_transform_t_delta = self.get_nn_meta('log_transform_t_delta', nn_id)
                 ranef_dropout_rate = self.get_nn_meta('ranef_dropout_rate', nn_id)
                 input_dropout_rate = self.get_nn_meta('input_dropout_rate', nn_id)
                 batch_normalization_decay = self.get_nn_meta('batch_normalization_decay', nn_id)
                 layer_normalization_type = self.get_nn_meta('layer_normalization_type', nn_id)
                 maxnorm = self.get_nn_meta('maxnorm', nn_id)
-                input_dependent_irf = self.get_nn_meta('input_dependent_irf', nn_id)
                 ranef_l1_only = self.get_nn_meta('ranef_l1_only', nn_id)
                 dropout_final_layer = self.get_nn_meta('dropout_final_layer', nn_id)
                 regularize_initial_layer = self.get_nn_meta('regularize_initial_layer', nn_id)
@@ -3832,8 +3830,13 @@ class CDRModel(object):
                 h = h_ff = h_rnn = rnn_hidden = rnn_cell = None
 
                 if self.has_ff(nn_id) or self.has_rnn(nn_id):
+                    nn_in_scale = tf.Variable(
+                        tf.ones(X_in.shape[2]),
+                        name='%s_input_scale' % nn_id
+                    )
+                    _X_in = X_in * nn_in_scale[None, None, ...]
                     if self.has_ff(nn_id):
-                        h_ff = self.ff_fn[nn_id](X_in)
+                        h_ff = self.ff_fn[nn_id](_X_in)
                         if ff_noise_sd:
                             def ff_train_fn(ff=h_ff):
                                 return tf.random_normal(tf.shape(ff), ff, stddev=ff_noise_sd[nn_id])
@@ -3843,7 +3846,6 @@ class CDRModel(object):
                         h = h_ff
 
                     if self.has_rnn(nn_id):
-                        _X_in = X_in
                         rnn_hidden = []
                         rnn_cell = []
                         for l in range(n_layers_rnn):
@@ -3899,6 +3901,11 @@ class CDRModel(object):
                             _X_gathered = _X_gathered + h_rnn
                         irf_out.append(_X_gathered)  # IRF inputs, no rate
                     irf_out = tf.concat(irf_out, axis=2)
+                    nn_in_scale = tf.Variable(
+                        tf.ones(irf_out.shape[2]),
+                        name='%s_input_scale' % nn_id
+                    )
+                    irf_out = irf_out * nn_in_scale[None, None, ...]
                     for layer in self.nn_irf_layers[nn_id]:
                         irf_out = layer(
                             irf_out
