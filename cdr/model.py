@@ -3830,11 +3830,7 @@ class CDRModel(object):
                 h = h_ff = h_rnn = rnn_hidden = rnn_cell = None
 
                 if self.has_ff(nn_id) or self.has_rnn(nn_id):
-                    nn_in_scale = tf.Variable(
-                        tf.ones(X_in.shape[2]),
-                        name='%s_input_scale' % nn_id
-                    )
-                    _X_in = X_in * nn_in_scale[None, None, ...]
+                    _X_in = X_in
                     if self.has_ff(nn_id):
                         h_ff = self.ff_fn[nn_id](_X_in)
                         if ff_noise_sd:
@@ -3901,11 +3897,6 @@ class CDRModel(object):
                             _X_gathered = _X_gathered + h_rnn
                         irf_out.append(_X_gathered)  # IRF inputs, no rate
                     irf_out = tf.concat(irf_out, axis=2)
-                    nn_in_scale = tf.Variable(
-                        tf.ones(irf_out.shape[2]),
-                        name='%s_input_scale' % nn_id
-                    )
-                    irf_out = irf_out * nn_in_scale[None, None, ...]
                     for layer in self.nn_irf_layers[nn_id]:
                         irf_out = layer(
                             irf_out
