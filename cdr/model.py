@@ -6185,7 +6185,7 @@ class CDRModel(object):
                 if restore and os.path.exists(outdir + '/checkpoint'):
                     # Thanks to Ralph Mao (https://github.com/RalphMao) for this workaround for missing vars
                     path = outdir + '/model%s.ckpt' % suffix
-                    if self.early_stopping and self.has_converged():
+                    if self.early_stopping and self.training_complete.eval(session=self.session):
                         pred_path = outdir + '/model%s_maxval.ckpt' % suffix
                         if not os.path.exists(pred_path + '.meta'):
                             pred_path = path
