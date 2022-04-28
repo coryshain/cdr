@@ -1595,11 +1595,11 @@ class CDRModel(object):
                                 suffix = response
                             if 'log_lik' not in self.dev_metrics:
                                 self.dev_metrics['log_lik'] = {}
-                                if response not in self.dev_metrics['log_lik']:
-                                    self.dev_metrics['log_lik'][response] = {}
-                                self.dev_metrics['log_lik'][response][ix] = tf.placeholder(
-                                    shape=[], dtype=self.FLOAT_TF, name=sn('log_lik_%s' % suffix)
-                                )
+                            if response not in self.dev_metrics['log_lik']:
+                                self.dev_metrics['log_lik'][response] = {}
+                            self.dev_metrics['log_lik'][response][ix] = tf.placeholder(
+                                shape=[], dtype=self.FLOAT_TF, name=sn('log_lik_%s' % suffix)
+                            )
                             if self.is_binary(response) or self.is_categorical(response):
                                 if 'f1' not in self.dev_metrics:
                                     self.dev_metrics['f1'] = {}
