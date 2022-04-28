@@ -8448,18 +8448,15 @@ class CDRModel(object):
                 multiple_files = len(file_ix) > 1
                 for ix in file_ix:
                     summary += 'Response variable: %s\n\n' % _response
-                    if dump:
-                        _summary = summary_header
-                        _summary += 'Response variable: %s\n\n' % _response
+                    _summary = summary_header
+                    _summary += 'Response variable: %s\n\n' % _response
 
                     if multiple_files:
                         summary += 'File index: %s\n\n' % ix
-                        if dump:
-                            name_base = '%s_f%s%s' % (sn(_response), ix, partition_str)
-                            _summary += 'File index: %s\n\n' % ix
-                    elif dump:
+                        name_base = '%s_f%s%s' % (sn(_response), ix, partition_str)
+                        _summary += 'File index: %s\n\n' % ix
+                    else:
                         name_base = '%s%s' % (sn(_response), partition_str)
-                    _summary = summary_header
 
                     summary_eval = self.report_evaluation(
                         mse=metrics['mse'][_response][ix],
