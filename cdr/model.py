@@ -1598,7 +1598,7 @@ class CDRModel(object):
                                 if response not in self.dev_metrics['log_lik']:
                                     self.dev_metrics['log_lik'][response] = {}
                                 self.dev_metrics['log_lik'][response][ix] = tf.placeholder(
-                                    shape=[], dtype=self.FLOAT_TF, name='log_lik_%s' % suffix
+                                    shape=[], dtype=self.FLOAT_TF, name=sn('log_lik_%s' % suffix)
                                 )
                             if self.is_binary(response) or self.is_categorical(response):
                                 if 'f1' not in self.dev_metrics:
@@ -1606,14 +1606,14 @@ class CDRModel(object):
                                 if response not in self.dev_metrics['f1']:
                                     self.dev_metrics['f1'][response] = {}
                                 self.dev_metrics['f1'][response][ix] = tf.placeholder(
-                                    shape=[], dtype=self.FLOAT_TF, name='f1_%s' % suffix
+                                    shape=[], dtype=self.FLOAT_TF, name=sn('f1_%s' % suffix)
                                 )
                                 if 'acc' not in self.dev_metrics:
                                     self.dev_metrics['acc'] = {}
                                 if response not in self.dev_metrics['acc']:
                                     self.dev_metrics['acc'][response] = {}
                                 self.dev_metrics['acc'][response][ix] = tf.placeholder(
-                                    shape=[], dtype=self.FLOAT_TF, name='acc_%s' % suffix
+                                    shape=[], dtype=self.FLOAT_TF, name=sn('acc_%s' % suffix)
                                 )
                             else:
                                 if 'mse' not in self.dev_metrics:
@@ -1621,21 +1621,21 @@ class CDRModel(object):
                                 if response not in self.dev_metrics['mse']:
                                     self.dev_metrics['mse'][response] = {}
                                 self.dev_metrics['mse'][response][ix] = tf.placeholder(
-                                    shape=[], dtype=self.FLOAT_TF, name='mse_%s' % suffix
+                                    shape=[], dtype=self.FLOAT_TF, name=sn('mse_%s' % suffix)
                                 )
                                 if 'rho' not in self.dev_metrics:
                                     self.dev_metrics['rho'] = {}
                                 if response not in self.dev_metrics['rho']:
                                     self.dev_metrics['rho'][response] = {}
                                 self.dev_metrics['rho'][response][ix] = tf.placeholder(
-                                    shape=[], dtype=self.FLOAT_TF, name='rho_%s' % suffix
+                                    shape=[], dtype=self.FLOAT_TF, name=sn('rho_%s' % suffix)
                                 )
                                 if 'percent_variance_explained' not in self.dev_metrics:
                                     self.dev_metrics['percent_variance_explained'] = {}
                                 if response not in self.dev_metrics['percent_variance_explained']:
                                     self.dev_metrics['percent_variance_explained'][response] = {}
                                 self.dev_metrics['percent_variance_explained'][response][ix] = tf.placeholder(
-                                    shape=[], dtype=self.FLOAT_TF, name='percent_variance_explained_%s' % suffix
+                                    shape=[], dtype=self.FLOAT_TF, name=sn('percent_variance_explained_%s' % suffix)
                                 )
 
                 # Initialize vars for saving training set stats upon completion.
@@ -5000,7 +5000,7 @@ class CDRModel(object):
                                     if len(self.dev_metrics[metric][response]) > 1:
                                         name += '_file%d' % ix
                                     tf.summary.scalar(
-                                        'dev/%s' % name, self.dev_metrics[metric][response][ix], collections=['dev']
+                                        'dev/%s' % sn(name), self.dev_metrics[metric][response][ix], collections=['dev']
                                     )
                 if self.log_graph:
                     self.writer = tf.summary.FileWriter(self.outdir + '/tensorboard/cdr', self.session.graph)
