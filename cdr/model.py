@@ -8475,11 +8475,10 @@ class CDRModel(object):
                     )
 
                     summary += summary_eval
-                    if dump:
-                        _summary += summary_eval
-                        _summary += '=' * 50 + '\n'
-                        with open(self.outdir + '/eval_%s.txt' % name_base, 'w') as f_out:
-                            f_out.write(_summary)
+                    _summary += summary_eval
+                    _summary += '=' * 50 + '\n'
+                    with open(self.outdir + '/eval_%s.txt' % name_base, 'w') as f_out:
+                        f_out.write(_summary)
 
             summary += '=' * 50 + '\n'
             if verbose:
