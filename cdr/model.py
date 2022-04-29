@@ -913,11 +913,14 @@ class CDRModel(object):
             self.n_response_df = max(self.n_response_df, max(self.response_to_df_ix[_response]))
         self.n_response_df += 1
 
-        self.impulse_sampler = scipy.stats.multivariate_normal(
-            mean=self.impulse_sampler_means.val,
-            cov=self.impulse_cov,
-            allow_singular=True
-        )
+        if self.impulse_sampler_means is None:
+            self.impulse_sampler = None
+        else:
+            self.impulse_sampler = scipy.stats.multivariate_normal(
+                mean=self.impulse_sampler_means.val,
+                cov=self.impulse_cov,
+                allow_singular=True
+            )
         
         impulse_dfs_noninteraction = set()
         terminal_names = [x for x in self.terminal_names if self.node_table[x].p.family == 'NN']
@@ -1356,7 +1359,7 @@ class CDRModel(object):
         self.impulse_max = md.pop('impulse_max', {})
         self.impulse_corr = md.pop('impulse_corr', None)
         self.impulse_cov = md.pop('impulse_cov', None)
-        self.impulse_sampler_means = md.pop('impulse_sampler_means', self.impulse_means)
+        self.impulse_sampler_means = md.pop('impulse_sampler_means', None)
         self.indicators = md.pop('indicators', set())
         self.outdir = md.pop('outdir', './cdr_model/')
         self.crossval_factor = md.pop('crossval_factor', None)
