@@ -371,7 +371,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'minibatch_size',
-        512,
+        1024,
         [int, None],
         "Size of minibatches to use for fitting (full-batch if ``None``)."
     ),
@@ -1147,7 +1147,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'nn_regularizer_scale',
-        1.,
+        5.,
         [str, float, 'inherit'],
         "Scale of weight regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
@@ -1217,7 +1217,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'ff_dropout_rate',
-        0.4,
+        0.2,
         [float, None],
         "Rate at which to drop neurons of FF projection.",
         aliases=['dropout', 'dropout_rate', 'input_projection_dropout_rate', 'h_in_dropout_rate']
@@ -1236,28 +1236,28 @@ NN_KWARGS = [
     ),
     Kwarg(
         'h_rnn_dropout_rate',
-        0.4,
+        0.2,
         [float, None],
         "Rate at which to drop neurons of h_rnn.",
         aliases=['dropout', 'dropout_rate']
     ),
     Kwarg(
         'rnn_dropout_rate',
-        0.4,
+        0.2,
         [float, None],
         "Rate at which to entirely drop the RNN.",
         aliases=['dropout', 'dropout_rate']
     ),
     Kwarg(
         'irf_dropout_rate',
-        0.4,
+        0.2,
         [float, None],
         "Rate at which to drop neurons of IRF layers.",
         aliases=['dropout', 'dropout_rate']
     ),
     Kwarg(
         'ranef_dropout_rate',
-        0.4,
+        0.2,
         [float, None],
         "Rate at which to drop random effects indicators.",
         aliases=['dropout', 'dropout_rate']
