@@ -927,7 +927,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'log_transform_t_delta',
-        True,
+        False,
         bool,
         "Whether to log-modulus transform time offset values for stability under the hood (log-modulus is used to handle negative values in non-causal models). Offsets are automatically reconverted back to the source scale for plotting and model criticism."
     ),
