@@ -443,7 +443,8 @@ MODEL_INITIALIZATION_KWARGS = [
         'learning_rate',
         0.001,
         float,
-        "Initial value for the learning rate."
+        "Initial value for the learning rate.",
+        default_value_cdrnn=0.003
     ),
     Kwarg(
         'learning_rate_min',
