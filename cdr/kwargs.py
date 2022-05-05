@@ -948,7 +948,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'n_units_ff',
-        128,
+        32,
         [int, str, None],
         "Number of units per feedforward encoder hidden layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_rnn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no feedforward encoder.",
         aliases=['n_units', 'n_units_encoder', 'n_units_input_projection']
@@ -986,7 +986,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'n_units_irf',
-        128,
+        32,
         [int, str, None],
         "Number of units per hidden layer in IRF. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_units_irf** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers.",
         aliases=['n_units', 'n_units_decoder']
@@ -1217,7 +1217,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'ff_dropout_rate',
-        0.2,
+        0.1,
         [float, None],
         "Rate at which to drop neurons of FF projection.",
         aliases=['dropout', 'dropout_rate', 'input_projection_dropout_rate', 'h_in_dropout_rate']
@@ -1236,28 +1236,28 @@ NN_KWARGS = [
     ),
     Kwarg(
         'h_rnn_dropout_rate',
-        0.2,
+        0.1,
         [float, None],
         "Rate at which to drop neurons of h_rnn.",
         aliases=['dropout', 'dropout_rate']
     ),
     Kwarg(
         'rnn_dropout_rate',
-        0.2,
+        0.1,
         [float, None],
         "Rate at which to entirely drop the RNN.",
         aliases=['dropout', 'dropout_rate']
     ),
     Kwarg(
         'irf_dropout_rate',
-        0.2,
+        0.1,
         [float, None],
         "Rate at which to drop neurons of IRF layers.",
         aliases=['dropout', 'dropout_rate']
     ),
     Kwarg(
         'ranef_dropout_rate',
-        0.2,
+        0.1,
         [float, None],
         "Rate at which to drop random effects indicators.",
         aliases=['dropout', 'dropout_rate']
