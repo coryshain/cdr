@@ -261,11 +261,11 @@ class Model(object):
         t_delta_maxes = np.array(t_delta_maxes)
         t_delta_quantiles = np.quantile(t_deltas, q)
 
-        kde = scipy.stats.gaussian_kde(t_deltas)
-        density_support = np.linspace(t_delta_quantiles[0], t_delta_quantiles[-1], 100)
-        density = kde(density_support)
-        spline = scipy.interpolate.UnivariateSpline(density_support, density, ext='zeros', s=0.001)
-        self.densities[('t_delta',)] = spline
+        # kde = scipy.stats.gaussian_kde(t_deltas)
+        # density_support = np.linspace(t_delta_quantiles[0], t_delta_quantiles[-1], 100)
+        # density = kde(density_support)
+        # spline = scipy.interpolate.UnivariateSpline(density_support, density, ext='zeros', s=0.001)
+        # self.densities[('t_delta',)] = spline
 
         # self.t_delta_vector_train = t_deltas
         self.t_delta_limit = np.quantile(t_deltas, 0.75)

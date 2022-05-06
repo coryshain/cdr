@@ -1890,7 +1890,7 @@ class CDR(Model):
                                         param_random,
                                         [self.rangf_n_levels[i], len(irfs_ix)]
                                     ),
-                                    [self.rangf_n_levels[i], len(irfs_ix)],
+                                    [self.rangf_n_levels[i], len(irf_ids)],
                                     axis=1
                                 )
                                 param_random_summary = self._scatter_along_axis(
@@ -1900,7 +1900,7 @@ class CDR(Model):
                                         param_random_summary,
                                         [self.rangf_n_levels[i], len(irfs_ix)]
                                     ),
-                                    [self.rangf_n_levels[i], len(irfs_ix)],
+                                    [self.rangf_n_levels[i], len(irf_ids)],
                                     axis=1
                                 )
 
@@ -1923,7 +1923,7 @@ class CDR(Model):
 
                                         tf.summary.histogram(
                                             'by_%s/%s_logit/%s' % (gf, param_name, irf_name),
-                                            param_random_summary[:, ix],
+                                            param_random_summary[:, j],
                                             collections=['random']
                                         )
 
