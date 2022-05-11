@@ -1042,12 +1042,18 @@ class Formula(object):
                     _nn_config = {x: val for x in NN_KWARG_MAP[k.arg]}
                     nn_config.update(_nn_config)
                 else:
-                    if type(k.value).__name__ == 'Num':
+                    if type(k.value).__name__ == 'Constant':
+                        param_init[k.arg] = k.value.value
+                    elif type(k.value).__name__ == 'Num':
                         param_init[k.arg] = k.value.n
                     elif type(k.value).__name__ == 'UnaryOp':
                         assert type(k.value.op).__name__ == 'USub', 'Invalid operator provided to to IRF parameter "%s"' %k.arg
-                        assert type(k.value.operand).__name__ == 'Num', 'Non-numeric initialization provided to IRF parameter "%s"' %k.arg
-                        param_init[k.arg] = -k.value.operand.n
+                        if type(k.value.operand).__name__ == 'Constant':
+                            param_init[k.arg] = -k.value.operand.value
+                        elif type(k.value.operand).__name__ == 'Num':
+                            param_init[k.arg] = -k.value.operand.n
+                        else:
+                            raise ValueError('Non-numeric initialization provided to IRF parameter "%s"' % k.arg)
                     else:
                         raise ValueError('Non-numeric initialization provided to IRF parameter "%s"' %k.arg)
 
