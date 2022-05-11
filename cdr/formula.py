@@ -852,14 +852,20 @@ class Formula(object):
         if len(t.keywords) > 0:
             for k in t.keywords:
                 if k.arg == 'irf_id':
-                    if type(k.value).__name__ == 'Str':
+                    if type(k.value).__name__ == 'Constant':
+                        assert isinstance(k.value.value, str), 'irf_id must be interpretable as a string'
+                        irf_id = k.value.value
+                    elif type(k.value).__name__ == 'Str':
                         irf_id = k.value.s
                     elif type(k.value).__name__ == 'Name':
                         irf_id = k.value.id
                     elif type(k.value).__name__ == 'Num':
                         irf_id = str(k.value.n)
                 elif k.arg == 'coef_id':
-                    if type(k.value).__name__ == 'Str':
+                    if type(k.value).__name__ == 'Constant':
+                        assert isinstance(k.value.value, str), 'coef_id must be interpretable as a string'
+                        coef_id = k.value.value
+                    elif type(k.value).__name__ == 'Str':
                         coef_id = k.value.s
                     elif type(k.value).__name__ == 'Name':
                         coef_id = k.value.id
@@ -891,17 +897,28 @@ class Formula(object):
                     assert type(k.value).__name__ == 'List', 'Non-list argument provided to keyword arg "trainable"'
                     trainable = []
                     for x in k.value.elts:
-                        if type(x).__name__ == 'Name':
+                        if type(x).__name__ == 'Constant':
+                            assert isinstance(x.value, str), 'trainable variable must be interpretable as a string'
+                            trainable.append(x.value)
+                        elif type(x).__name__ == 'Name':
                             trainable.append(x.id)
                         elif type(x).__name__ == 'Str':
                             trainable.append(x.s)
+                        else:
+                            raise ValueError('Unrecognized value for element of trainable: %s' % x)
                 else:
-                    if type(k.value).__name__ == 'Num':
+                    if type(k.value).__name__ == 'Constant':
+                        param_init[k.arg] = k.value.value
+                    elif type(k.value).__name__ == 'Num':
                         param_init[k.arg] = k.value.n
                     elif type(k.value).__name__ == 'UnaryOp':
                         assert type(k.value.op).__name__ == 'USub', 'Invalid operator provided to to IRF parameter "%s"' %k.arg
-                        assert type(k.value.operand).__name__ == 'Num', 'Non-numeric initialization provided to IRF parameter "%s"' %k.arg
-                        param_init[k.arg] = -k.value.operand.n
+                        if type(k.value.operand).__name__ == 'Constant':
+                            param_init[k.arg] = -k.value.operand.value
+                        elif type(k.value.operand).__name__ == 'Num':
+                            param_init[k.arg] = -k.value.operand.n
+                        else:
+                            raise ValueError('Non-numeric initialization provided to IRF parameter "%s"' % k.arg)
                     else:
                         raise ValueError('Non-numeric initialization provided to IRF parameter "%s"' %k.arg)
 
