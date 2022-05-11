@@ -8947,7 +8947,7 @@ class CDRModel(object):
         if response_params is None:
             response_params = set()
             for response in responses:
-                if self.has_analytical_mean:
+                if self.has_analytical_mean[response]:
                     response_params.add('mean')
                 else:
                     response_params.add(self.get_response_params(response)[0])
@@ -9738,7 +9738,7 @@ class CDRModel(object):
         if response_params is None:
             response_params = set()
             for response in responses:
-                if self.has_analytical_mean:
+                if self.has_analytical_mean[response]:
                     response_params.add('mean')
                 else:
                     response_params.add(self.get_response_params(response)[0])
