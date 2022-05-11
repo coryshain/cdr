@@ -20,6 +20,7 @@ from .plot import *
 
 NN_KWARG_BY_KEY = {x.key: x for x in NN_KWARGS + NN_BAYES_KWARGS}
 ENSEMBLE = re.compile('\.m\d+')
+N_MCIFIED_DIST_RESAMP = 10000
 
 import tensorflow as tf
 if int(tf.__version__.split('.')[0]) == 1:
@@ -27,22 +28,75 @@ if int(tf.__version__.split('.')[0]) == 1:
     import tensorflow.contrib.distributions as tfd
     AffineScalar = tfd.bijectors.AffineScalar
     ExponentiallyModifiedGaussian = None # Not supported
-    def LogNormal(*args, **kwargs):
-        return TransformedDistribution(
-            Normal(*args, **kwargs),
-            bijector=tfd.bijectors.Exp(),
-            validate_args=True
-        )
+
+    # Much of this is stolen from the TF2 source, since TF1 lacks LogNormal
+    class LogNormal(TransformedDistribution):
+        def __init__(self,
+                loc,
+                scale,
+                validate_args=False,
+                name='LogNormal'
+        ):
+            with tf.name_scope(name) as name:
+                super(LogNormal, self).__init__(
+                    distribution=Normal(loc=loc, scale=scale),
+                    bijector=tfd.bijectors.Exp(),
+                    validate_args=validate_args,
+                    name=name
+                )
+
+        @property
+        def loc(self):
+            """Distribution parameter for the pre-transformed mean."""
+            return self.distribution.loc
+
+        @property
+        def scale(self):
+            """Distribution parameter for the pre-transformed standard deviation."""
+            return self.distribution.scale
+
+        def _mean(self):
+            return tf.exp(self.distribution.mean() + 0.5 * self.distribution.variance())
+
+        def _variance(self):
+            variance = self.distribution.variance()
+            return ((tf.exp(variance) - 1) *
+                    tf.exp(2. * self.distribution.mean() + variance))
+
+        def _mode(self):
+            return tf.exp(self.distribution.mean() - self.distribution.variance())
+
+        def _entropy(self):
+            return (self.distribution.mean() + 0.5 +
+                    tf.log(self.distribution.stddev()) + 0.5 * np.log(2 * np.pi))
+
+        def _default_event_space_bijector(self):
+            return tfd.bijectors.Exp(validate_args=self.validate_args)
+
+        @classmethod
+        def _maximum_likelihood_parameters(cls, value):
+            log_x = tf.log(value)
+            return {'loc': tf.reduce_mean(log_x, axis=0),
+                    'scale': tf.math.reduce_std(log_x, axis=0)}
+
     from tensorflow.contrib.opt import NadamOptimizer
     from tensorflow.contrib.framework import argsort as tf_argsort
     from tensorflow.contrib import keras
     from tensorflow import check_numerics as tf_check_numerics
+    parameter_properties = None
+
+    def tf_quantile(x, q, **kwargs):
+        return tfd.percentile(x, q * 100, **kwargs)
+
     TF_MAJOR_VERSION = 1
 elif int(tf.__version__.split('.')[0]) == 2:
     import tensorflow.compat.v1 as tf
     tf.disable_v2_behavior()
     from tensorflow_probability import distributions as tfd
     from tensorflow_probability import bijectors as tfb
+    from tensorflow_probability import stats as tfs
+    from tensorflow_probability.python.internal import parameter_properties
+
     Normal = tfd.Normal
     LogNormal = tfd.LogNormal
     SinhArcsinh = tfd.SinhArcsinh
@@ -55,6 +109,8 @@ elif int(tf.__version__.split('.')[0]) == 2:
     Scale = tfb.Scale
     Chain = tfb.Chain
     Identity = tfb.Identity
+
+    tf_quantile = tfs.quantiles
 
     def AffineScalar(shift, scale, *args, **kwargs):
         chain = []
@@ -81,25 +137,152 @@ else:
     raise ImportError('Unsupported TensorFlow version: %s. Must be 1.x.x or 2.x.x.' % tf.__version__)
 
 
-def LogNormalV2(loc, scale, epsilon=1e-5, **kwargs):
+def mcify(dist):
+    class MCifiedDistribution(dist):
+        """
+        A wrapper that provides non-differentiable Monte Carlo approximations to key statistics
+        like mean() and quantile() in case the source distribution lacks analytical implementations
+        of these.
+        """
+        def __init__(
+                self,
+                *args,
+                n_resamp=N_MCIFIED_DIST_RESAMP,
+                **kwargs
+        ):
+            super(MCifiedDistribution, self).__init__(*args, **kwargs)
+            self.n_resamp = n_resamp
+            self.dist_name = dist.__name__
+
+        def _mean(self):
+            try:
+                return super(MCifiedDistribution, self)._mean()
+            except NotImplementedError:
+                samp = self.sample(sample_shape=self.n_resamp)
+                return tf.reduce_mean(samp, axis=0)
+
+        def _quantile(self, q, **kwargs):
+            try:
+                return super(MCifiedDistribution, self)._quantile(q, **kwargs)
+            except NotImplementedError:
+                samp = self.sample(sample_shape=self.n_resamp)
+                return tf_quantile(samp, q, **kwargs)
+
+        def has_analytical_mean(self):
+            try:
+                super(MCifiedDistribution, self)._mean()
+                return True
+            except NotImplementedError:
+                return False
+
+    return MCifiedDistribution
+
+
+class LogNormalV2(LogNormal):
     """
-    Initilize a LogNormal distribution parameterized by its mean and standard deviation,
+    A LogNormal distribution parameterized by its mean and standard deviation,
     rather than the more common parameterization by the mean and standard deviation of
     the underlying normal distribution.
-    
+
     :param loc: TF tensor; mean.
     :param scale: TF tensor; standard deviation
     :param epsilon: ``float``; stabilizing constant
     :param kwargs: ``dict``; additional kwargs to the LogNormal distribution
     :return: LogNormalV2 distribution object
     """
+    def __init__(self, loc, scale, epsilon=1e-5, **kwargs):
+        scale = tf.sqrt(tf.log(tf.square(scale / (loc + epsilon)) + 1) + epsilon)
+        loc = tf.log(tf.maximum(loc, epsilon)) - tf.square(scale) / 2.
+        parameters = dict(locals())
+        super(LogNormalV2, self).__init__(loc, scale, **kwargs)
+        self._parameters = parameters
 
-    _scale = scale
-    scale = tf.sqrt(tf.log(tf.square(scale / (loc + epsilon)) + 1) + epsilon)
-    _loc = loc
-    loc = tf.log(tf.maximum(loc, epsilon)) - tf.square(scale) / 2.
-    loc = tf.Print(loc, ['scale before', tf.reduce_mean(_scale), tf.reduce_min(_scale), tf.reduce_max(_scale), 'scale after', tf.reduce_mean(scale), tf.reduce_min(scale), tf.reduce_max(scale), 'loc before', tf.reduce_mean(_loc), tf.reduce_min(_loc), tf.reduce_max(_loc), 'loc after', tf.reduce_mean(loc), tf.reduce_min(loc), tf.reduce_max(loc)])
-    return LogNormal(loc, scale, **kwargs)
+    @classmethod
+    def _parameter_properties(cls, dtype, num_classes=None):
+        return LogNormal._parameter_properties(dtype, num_classes=num_classes)
+
+
+class ShiftedScaledDistribution(TransformedDistribution):
+    def __init__(self,
+                 dist,
+                 shift,
+                 scale,
+                 validate_args=False,
+                 name='ShiftedScaledDistribution'
+                 ):
+        with tf.name_scope(name) as name:
+            parameters = dict(locals())
+            self._shift = tf.convert_to_tensor(shift, tf.float32)
+            self._scale = tf.convert_to_tensor(scale, tf.float32)
+            bijector = AffineScalar(
+                shift,
+                scale
+            )
+            super(ShiftedScaledDistribution, self).__init__(
+                distribution=dist,
+                bijector=bijector,
+                validate_args=validate_args,
+                name=name
+            )
+            self._parameters = parameters
+
+    @property
+    def shift(self):
+        return self._shift
+
+    @property
+    def scale(self):
+        return self._scale
+
+    def _mean(self):
+        return self.bijector.forward(self.distribution.mean())
+
+    def _variance(self):
+        return tf.square(self.scale) * self.distribution.variance()
+
+    def _mode(self):
+        return self.bijector.forward(self.distribution.mode())
+
+    def _entropy(self):
+        return self.distribution.entropy()
+
+    def _quantile(self, q):
+        return self.bijector.forward(self.distribution.quantile(q))
+
+    def has_analytical_mean(self):
+        return self.distribution.has_analytical_mean()
+
+    @classmethod
+    def _parameter_properties(cls, dtype, num_classes=None):
+        return dict(
+            shift=parameter_properties.ParameterProperties(),
+            scale=parameter_properties.ParameterProperties()
+        )
+
+
+class ZeroMeanDistribution(ShiftedScaledDistribution):
+    def __init__(self,
+                 dist,
+                 validate_args=False,
+                 name='ShiftedScaledDistribution'
+                 ):
+        with tf.name_scope(name) as name:
+
+            shift = -dist.mean()
+            scale = tf.ones_like(shift)
+            super(ZeroMeanDistribution, self).__init__(
+                dist,
+                shift,
+                scale,
+                validate_args=validate_args,
+                name=name
+            )
+
+            self._properties = dict()
+
+    @classmethod
+    def _parameter_properties(cls, dtype, num_classes=None):
+        return dict()
 
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -4482,7 +4665,7 @@ class CDRModel(object):
                         )
                         self.z_bijectors[response] = z_bijector
                         s_bijector = AffineScalar(
-                            shift=None,
+                            shift=tf.zeros_like(response_means),
                             scale=response_sds,
                             name='s_bijector_%s' % sn(response)
                         )
@@ -4595,21 +4778,24 @@ class CDRModel(object):
                             self.predictive_distribution_delta[response][dim_name] = output_delta[:, j, k]
                             self.predictive_distribution_delta_w_interactions[response][dim_name] = output_delta_w_interactions[:, j, k]
 
-                    response_dist, response_dist_src, pred_mean, has_analytical_mean = self._initialize_predictive_distribution_inner(
+                    response_dist, response_dist_src, response_params = self._initialize_predictive_distribution_inner(
                         response,
                         param_type='output'
                     )
+                    pred_mean = response_dist.mean()
                     self.predictive_distribution[response] = response_dist
-                    self.has_analytical_mean[response] = has_analytical_mean
+                    self.has_analytical_mean[response] = response_dist.has_analytical_mean()
                     if not self.is_categorical(response):
-                        _, _, base_pred_mean, _ = self._initialize_predictive_distribution_inner(
+                        base_response_dist, _, _ = self._initialize_predictive_distribution_inner(
                             response,
                             param_type='output_base'
                         )
-                        _, _, delta_pred_mean, _ = self._initialize_predictive_distribution_inner(
+                        base_pred_mean = base_response_dist.mean()
+                        delta_response_dist, _, _ = self._initialize_predictive_distribution_inner(
                             response,
                             param_type='output_delta'
                         )
+                        delta_pred_mean = delta_response_dist.mean()
                         self.predictive_distribution_delta[response]['mean'] = delta_pred_mean - base_pred_mean
                         self.predictive_distribution_delta_w_interactions[response]['mean'] = pred_mean - base_pred_mean
                         if self.get_response_dist_name(response).startswith('lognormal'):
@@ -4715,34 +4901,26 @@ class CDRModel(object):
                     # Define error distribution
                     if self.is_real(response):
                         empirical_quantiles = tf.linspace(0., 1., self.n_errors[response])
-                        err_dist_params = []
-                        for j, response_param_name in enumerate(response_param_names):
-                            if j:
-                                val = response_params_ema_debiased[j]
-                            else:
-                                val = tf.zeros(self.get_response_ndim(response))
-                            err_dist_params.append(val)
+                        err_dist_params = [response_params_ema_debiased[j] for j in range(len(response_param_names))]
                         if self.get_response_ndim(response) == 1:
                             err_dist_params = [tf.squeeze(x, axis=-1) for x in err_dist_params]
                         response_dist_fn = self.get_response_dist(response)
                         err_dist = response_dist_fn(*err_dist_params, **response_dist_kwargs)
-                        bijector = self.s_bijectors[response]
-                        err_dist = TransformedDistribution(
+                        # Rescale
+                        err_dist = ShiftedScaledDistribution(
                             err_dist,
-                            bijector
+                            tf.zeros_like(response_means),
+                            response_sds
+                        )
+                        # Shift to 0
+                        err_dist = ZeroMeanDistribution(
+                            err_dist
                         )
                         err_dist_theoretical_cdf = err_dist.cdf(self.errors[response])
-                        try:
-                            err_dist_theoretical_quantiles = err_dist.quantile(empirical_quantiles)
-                            err_dist_lb = err_dist.quantile(.025)
-                            err_dist_ub = err_dist.quantile(.975)
-                            self.error_distribution_theoretical_quantiles[response] = err_dist_theoretical_quantiles
-                        except NotImplementedError:
-                            err_dist_mean = err_dist.mean()
-                            err_dist_sttdev = tf.sqrt(err_dist.variance())
-                            err_dist_lb = err_dist_mean - 2 * err_dist_sttdev
-                            err_dist_ub = err_dist_mean + 2 * err_dist_sttdev
-                            self.error_distribution_theoretical_quantiles[response] = None
+                        err_dist_theoretical_quantiles = err_dist.quantile(empirical_quantiles)
+                        err_dist_lb = err_dist.quantile(.025)
+                        err_dist_ub = err_dist.quantile(.975)
+                        self.error_distribution_theoretical_quantiles[response] = err_dist_theoretical_quantiles
 
                         err_dist_plot = tf.exp(err_dist.log_prob(self.support))
 
@@ -4775,7 +4953,7 @@ class CDRModel(object):
                 else:
                     raise ValueError('Unrecognized param_type %s' % param_type)
 
-                nparam = int(self.intercept[response].shape[-2])
+                nparam = self.get_response_nparam(response)
 
                 response_params = [response_params[..., j, :] for j in range(nparam)]
 
@@ -4796,26 +4974,19 @@ class CDRModel(object):
                 response_dist = response_dist_fn(*_response_params, **response_dist_kwargs)
                 response_dist_src = response_dist
 
-                pred_mean = None
-                has_analytical_mean = False
                 if self.is_real(response):
-                    try:
-                        pred_mean = response_dist.mean()
-                        has_analytical_mean = True
-                    except NotImplementedError: # No analytic mean, approximate by sampling
-                        pred_mean = tf.reduce_mean(response_dist.sample(sample_shape=10000), axis=0)
+                    scale = tf.constant(np.squeeze(self.Y_train_sds[response]), self.FLOAT_TF)
                     if self.get_response_dist_name(response).startswith('lognormal'):
-                        bijector = self.s_bijectors[response]
+                        shift = tf.zeros_like(scale)
                     else:
-                        bijector = self.z_bijectors[response]
-                    if bijector is not None:
-                        response_dist = TransformedDistribution(
-                            response_dist,
-                            bijector
-                        )
-                        pred_mean = bijector.forward(pred_mean)
+                        shift = tf.constant(np.squeeze(self.Y_train_means[response]), self.FLOAT_TF)
+                    response_dist = ShiftedScaledDistribution(
+                        response_dist,
+                        shift,
+                        scale
+                    )
 
-                return response_dist, response_dist_src, pred_mean, has_analytical_mean
+                return response_dist, response_dist_src, response_params
 
     def _initialize_regularizer(self, regularizer_name, regularizer_scale, per_item=False):
         with self.session.as_default():
@@ -6381,7 +6552,7 @@ class CDRModel(object):
         :return: TensorFlow distribution object; class of predictive distribution
         """
 
-        return self.predictive_distribution_config[response]['dist']
+        return mcify(self.predictive_distribution_config[response]['dist'])
 
     def get_response_dist_name(self, response):
         """
@@ -9342,7 +9513,7 @@ class CDRModel(object):
                             if i == 0 and response_param == 'mean' and not self.has_analytical_mean[response]:
                                 stderr(
                                     'WARNING: The predictive distribution for %s lacks an analytical mean, '
-                                    'so the mean is approximated by sampling, which is computationally '
+                                    'so the mean is bootstrapped, which is computationally '
                                     'intensive.\n' % response
                                 )
                             dim_names = self.expand_param_name(response, response_param)
@@ -9353,7 +9524,7 @@ class CDRModel(object):
                         self.session.run(self.resample_ops)
                     b = (self.history_length + self.future_length) * self.eval_minibatch_size
                     if response_param == 'mean' and not self.has_analytical_mean[response]:
-                        b = max(1, b // 10000)
+                        b = max(1, b // N_MCIFIED_DIST_RESAMP)
                     sample_ref = []
                     for j in range(0, len(X_ref_in), b):
                         fd_ref = {
