@@ -1365,7 +1365,7 @@ PLOT_KWARGS_CORE = [
         "Name(s) of response variable(s) to plot. If ``None``, plots all univariate responses."
     ),
     Kwarg(
-        'response_param',
+        'response_params',
         None,
         [str, None],
         "Name(s) of parameter(s) of predictive distribution to plot for each response variable. If ``None``, plots the first parameter only. Parameter names not present in a given distribution will be skipped."

@@ -76,7 +76,7 @@ elif int(tf.__version__.split('.')[0]) == 2:
     from tensorflow import argsort as tf_argsort
     from tensorflow import keras
     from tensorflow.debugging import check_numerics as tf_check_numerics
-    TF_MAJOR_VERSION = 1
+    TF_MAJOR_VERSION = 2
 else:
     raise ImportError('Unsupported TensorFlow version: %s. Must be 1.x.x or 2.x.x.' % tf.__version__)
 
@@ -94,8 +94,11 @@ def LogNormalV2(loc, scale, epsilon=1e-5, **kwargs):
     :return: LogNormalV2 distribution object
     """
 
+    _scale = scale
     scale = tf.sqrt(tf.log(tf.square(scale / (loc + epsilon)) + 1) + epsilon)
+    _loc = loc
     loc = tf.log(tf.maximum(loc, epsilon)) - tf.square(scale) / 2.
+    loc = tf.Print(loc, ['scale before', tf.reduce_mean(_scale), tf.reduce_min(_scale), tf.reduce_max(_scale), 'scale after', tf.reduce_mean(scale), tf.reduce_min(scale), tf.reduce_max(scale), 'loc before', tf.reduce_mean(_loc), tf.reduce_min(_loc), tf.reduce_max(_loc), 'loc after', tf.reduce_mean(loc), tf.reduce_min(loc), tf.reduce_max(loc)])
     return LogNormal(loc, scale, **kwargs)
 
 
@@ -1885,16 +1888,13 @@ class CDRModel(object):
                         mean = self.Y_train_means[response_name]
                         sd = self.Y_train_sds[response_name]
                         if self.get_response_dist_name(response_name) == 'lognormal':
-                            # Normalized mean will be mean/sd and normalized sd will be 1
                             m = mean / sd
                             s = 1
                             sigma = np.sqrt(np.log((s / m) ** 2 + 1))
                             mu = np.log(m) + (sigma ** 2) / 2
-                        else: # self.get_response_dist_name(response_name) == 'lognormalv2'
-                            # lognormalv2 is not normalized in order to avoid
-                            # pushing means toward 0
-                            mu = mean
-                            sigma = sd
+                        else:  # self.get_response_dist_name(response_name) == 'lognormalv2'
+                            mu = self.constraint_fn_inv_np(mean / sd)
+                            sigma = np.ones_like(mu)
                         sigma = sigma[None, ...]
                         mu = mu[None, ...]
                     else:
@@ -4432,11 +4432,13 @@ class CDRModel(object):
     def _initialize_predictive_distribution(self):
         with self.session.as_default():
             with self.session.graph.as_default():
+                self.output_base = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of baseline values at predictive distribution parameter of the response
                 self.output_delta = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of stimulus-driven offsets at predictive distribution parameter of the response (summing over predictors and time)
                 self.output_delta_w_interactions = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of stimulus-driven offsets (including interactions) at predictive distribution parameter of the response (summing over predictors and time)
                 self.interaction_delta = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of interaction-driven offsets at predictive distribution parameter of the response (summing over predictors and time)
                 self.output = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of predictoins at predictive distribution parameter of the response (summing over predictors and time)
                 self.predictive_distribution = {}
+                self.has_analytical_mean = {}
                 self.predictive_distribution_delta = {} # IRF-driven changes in each parameter of the predictive distribution
                 self.predictive_distribution_delta_w_interactions = {} # IRF-driven changes in each parameter of the predictive distribution
                 self.prediction = {}
@@ -4451,6 +4453,8 @@ class CDRModel(object):
                 self.response_params_ema = {}
                 self.X_conv_ema = {}
                 self.X_conv_ema_debiased = {}
+                self.z_bijectors = {}
+                self.s_bijectors = {}
 
                 for i, response in enumerate(self.response_names):
                     self.predictive_distribution[response] = {}
@@ -4462,7 +4466,28 @@ class CDRModel(object):
                     self.error_distribution_theoretical_cdf[response] = {}
                     ndim = self.get_response_ndim(response)
 
-                    pred_dist_fn = self.get_response_dist(response)
+                    if self.is_real(response):
+                        response_means = tf.convert_to_tensor(
+                            np.squeeze(self.Y_train_means[response]),
+                            dtype=self.FLOAT_TF
+                        )
+                        response_sds = tf.convert_to_tensor(
+                            np.squeeze(self.Y_train_sds[response]),
+                            dtype=self.FLOAT_TF
+                        )
+                        z_bijector = AffineScalar(
+                            shift=response_means,
+                            scale=response_sds,
+                            name='z_bijector_%s' % sn(response)
+                        )
+                        self.z_bijectors[response] = z_bijector
+                        s_bijector = AffineScalar(
+                            shift=None,
+                            scale=response_sds,
+                            name='s_bijector_%s' % sn(response)
+                        )
+                        self.s_bijectors[response] = s_bijector
+
                     response_param_names = self.get_response_params(response)
                     response_params = self.intercept[response] # (batch, param, dim)
                     
@@ -4555,8 +4580,10 @@ class CDRModel(object):
                     if interaction_delta is not None:
                         output_delta_w_interactions += interaction_delta
 
+                    output_base = response_params
                     response_params += output_delta_w_interactions
 
+                    self.output_base[response] = output_base
                     self.output_delta[response] = output_delta
                     self.output_delta_w_interactions[response] = output_delta_w_interactions
                     self.interaction_delta[response] = interaction_delta
@@ -4568,50 +4595,29 @@ class CDRModel(object):
                             self.predictive_distribution_delta[response][dim_name] = output_delta[:, j, k]
                             self.predictive_distribution_delta_w_interactions[response][dim_name] = output_delta_w_interactions[:, j, k]
 
-                    response_params = [response_params[..., j, :] for j in range(nparam)]
-
-                    # Post process response params
-                    for j, response_param_name in enumerate(response_param_names):
-                        _response_param = response_params[j]
-                        if self.is_real(response) and response_param_name in ['sigma', 'tailweight', 'beta']:
-                            _response_param = self.constraint_fn(_response_param) + self.pred_dist_epsilon
-                        response_params[j] = _response_param
-
-                    # Define predictive distribution
-                    # Squeeze params if needed
-                    if ndim == 1:
-                        _response_params = [tf.squeeze(x, axis=-1) for x in response_params]
-                    else:
-                        _response_params = response_params
-                    response_dist = pred_dist_fn(*_response_params, **response_dist_kwargs)
-                    response_dist_src = response_dist
-
-                    if self.is_real(response) and self.get_response_dist_name(response) != 'lognormalv2':
-                        if self.get_response_dist_name(response) != 'lognormal':
-                            # Log normal variables must be positive, don't shift them
-                            bijector_shift = tf.convert_to_tensor(
-                                self.Y_train_means[response],
-                                dtype=self.FLOAT_TF
-                            )
+                    response_dist, response_dist_src, pred_mean, has_analytical_mean = self._initialize_predictive_distribution_inner(
+                        response,
+                        param_type='output'
+                    )
+                    self.predictive_distribution[response] = response_dist
+                    self.has_analytical_mean[response] = has_analytical_mean
+                    if not self.is_categorical(response):
+                        _, _, base_pred_mean, _ = self._initialize_predictive_distribution_inner(
+                            response,
+                            param_type='output_base'
+                        )
+                        _, _, delta_pred_mean, _ = self._initialize_predictive_distribution_inner(
+                            response,
+                            param_type='output_delta'
+                        )
+                        self.predictive_distribution_delta[response]['mean'] = delta_pred_mean - base_pred_mean
+                        self.predictive_distribution_delta_w_interactions[response]['mean'] = pred_mean - base_pred_mean
+                        if self.get_response_dist_name(response).startswith('lognormal'):
+                            bijector = self.s_bijectors[response]
                         else:
-                            bijector_shift = None
-                        bijector_scale = tf.convert_to_tensor(
-                            self.Y_train_sds[response],
-                            dtype=self.FLOAT_TF
-                        )
-                        bijector = AffineScalar(
-                            shift=bijector_shift,
-                            scale=bijector_scale,
-                            name='response_bijector_%s' % sn(response)
-                        )
-                        response_dist = TransformedDistribution(
-                            response_dist,
-                            bijector
-                        )
+                            bijector = self.z_bijectors[response]
                     else:
                         bijector = None
-
-                    self.predictive_distribution[response] = response_dist
 
                     # Define prediction tensors
                     dist_name = self.get_response_dist_name(response)
@@ -4641,7 +4647,7 @@ class CDRModel(object):
                                 mode = tf.exp(response_dist.distribution.mean() - response_dist.distribution.variance())
                             else:
                                 mode = response_dist.mode()
-                        if self.is_real(response) and self.get_response_dist_name(response) != 'lognormalv2':
+                        if self.is_real(response) and bijector is not None:
                             mode = bijector.forward(mode)
 
                         return mode
@@ -4718,22 +4724,13 @@ class CDRModel(object):
                             err_dist_params.append(val)
                         if self.get_response_ndim(response) == 1:
                             err_dist_params = [tf.squeeze(x, axis=-1) for x in err_dist_params]
-                        err_dist = pred_dist_fn(*err_dist_params, **response_dist_kwargs)
-                        if self.is_real(response) and self.get_response_dist_name(response) != 'lognormalv2':
-                            bijector_shift = None
-                            bijector_scale = tf.convert_to_tensor(
-                                np.squeeze(self.Y_train_sds[response]),
-                                dtype=self.FLOAT_TF
-                            )
-                            bijector = AffineScalar(
-                                shift=bijector_shift,
-                                scale=bijector_scale,
-                                name='response_bijector_%s' % sn(response)
-                            )
-                            err_dist = TransformedDistribution(
-                                err_dist,
-                                bijector
-                            )
+                        response_dist_fn = self.get_response_dist(response)
+                        err_dist = response_dist_fn(*err_dist_params, **response_dist_kwargs)
+                        bijector = self.s_bijectors[response]
+                        err_dist = TransformedDistribution(
+                            err_dist,
+                            bijector
+                        )
                         err_dist_theoretical_cdf = err_dist.cdf(self.errors[response])
                         try:
                             err_dist_theoretical_quantiles = err_dist.quantile(empirical_quantiles)
@@ -4756,6 +4753,69 @@ class CDRModel(object):
                         self.error_distribution_plot_ub[response] = err_dist_ub
 
                 self.ll = tf.add_n([self.ll_by_var[x] for x in self.ll_by_var])
+
+    def _initialize_predictive_distribution_inner(self, response, param_type='output'):
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                response_param_names = self.get_response_params(response)
+                response_dist_fn = self.get_response_dist(response)
+                ndim = self.get_response_ndim(response)
+                response_dist_kwargs = {}
+                if self.get_response_dist_name(response) == 'lognormalv2':
+                    response_dist_kwargs['epsilon'] = self.pred_dist_epsilon
+
+                if param_type == 'output_base':
+                    response_params = self.output_base[response]
+                elif param_type == 'output_delta':
+                    response_params = self.output_base[response] + self.output_delta[response]
+                elif param_type == 'output_delta_w_interactions':
+                    response_params = self.output_base[response] + self.output_delta_w_interactions[response]
+                elif param_type == 'output':
+                    response_params = self.output[response]
+                else:
+                    raise ValueError('Unrecognized param_type %s' % param_type)
+
+                nparam = int(self.intercept[response].shape[-2])
+
+                response_params = [response_params[..., j, :] for j in range(nparam)]
+
+                # Post process response params
+                for j, response_param_name in enumerate(response_param_names):
+                    _response_param = response_params[j]
+                    if self.is_real(response) and (response_param_name in ['sigma', 'tailweight', 'beta'] or
+                            (response_param_name == 'mu' and self.get_response_dist_name(response) == 'lognormalv2')):
+                        _response_param = self.constraint_fn(_response_param) + self.pred_dist_epsilon
+                    response_params[j] = _response_param
+
+                # Define predictive distribution
+                # Squeeze params if needed
+                if ndim == 1:
+                    _response_params = [tf.squeeze(x, axis=-1) for x in response_params]
+                else:
+                    _response_params = response_params
+                response_dist = response_dist_fn(*_response_params, **response_dist_kwargs)
+                response_dist_src = response_dist
+
+                pred_mean = None
+                has_analytical_mean = False
+                if self.is_real(response):
+                    try:
+                        pred_mean = response_dist.mean()
+                        has_analytical_mean = True
+                    except NotImplementedError: # No analytic mean, approximate by sampling
+                        pred_mean = tf.reduce_mean(response_dist.sample(sample_shape=10000), axis=0)
+                    if self.get_response_dist_name(response).startswith('lognormal'):
+                        bijector = self.s_bijectors[response]
+                    else:
+                        bijector = self.z_bijectors[response]
+                    if bijector is not None:
+                        response_dist = TransformedDistribution(
+                            response_dist,
+                            bijector
+                        )
+                        pred_mean = bijector.forward(pred_mean)
+
+                return response_dist, response_dist_src, pred_mean, has_analytical_mean
 
     def _initialize_regularizer(self, regularizer_name, regularizer_scale, per_item=False):
         with self.session.as_default():
@@ -6368,7 +6428,7 @@ class CDRModel(object):
         ndim = self.get_response_ndim(response)
         out = []
         if ndim == 1:
-            if response_param in self.get_response_params(response):
+            if response_param == 'mean' or response_param in self.get_response_params(response):
                 out.append(response_param)
         else:
             for i in range(ndim):
@@ -8887,7 +8947,10 @@ class CDRModel(object):
         if response_params is None:
             response_params = set()
             for response in responses:
-                response_params.add(self.get_response_params(response)[0])
+                if self.has_analytical_mean:
+                    response_params.add('mean')
+                else:
+                    response_params.add(self.get_response_params(response)[0])
             response_params = sorted(list(response_params))
         if isinstance(response_params, str):
             response_params = [response_params]
@@ -9276,6 +9339,12 @@ class CDRModel(object):
                     for response in responses:
                         to_run[response] = {}
                         for response_param in response_params:
+                            if i == 0 and response_param == 'mean' and not self.has_analytical_mean[response]:
+                                stderr(
+                                    'WARNING: The predictive distribution for %s lacks an analytical mean, '
+                                    'so the mean is approximated by sampling, which is computationally '
+                                    'intensive.\n' % response
+                                )
                             dim_names = self.expand_param_name(response, response_param)
                             for dim_name in dim_names:
                                 to_run[response][dim_name] = delta[response][dim_name]
@@ -9283,6 +9352,8 @@ class CDRModel(object):
                     if self.resample_ops:
                         self.session.run(self.resample_ops)
                     b = (self.history_length + self.future_length) * self.eval_minibatch_size
+                    if response_param == 'mean' and not self.has_analytical_mean[response]:
+                        b = max(1, b // 10000)
                     sample_ref = []
                     for j in range(0, len(X_ref_in), b):
                         fd_ref = {
@@ -9350,7 +9421,7 @@ class CDRModel(object):
                     for dim_name in samples[response]:
                         _samples = np.stack(samples[response][dim_name], axis=0)
                         rescale = self.is_real(response) and \
-                                  self.get_response_dist_name(response) != 'lognormalv2' and \
+                                  not self.get_response_dist_name(response) == 'lognormal' and \
                                   (dim_name.startswith('mu') or dim_name.startswith('sigma'))
                         if rescale:
                             _samples = _samples * self.Y_train_sds[response]
@@ -9656,6 +9727,25 @@ class CDRModel(object):
         if irf_name_map is None:
             irf_name_map = self.irf_name_map
 
+        if responses is None:
+            if self.n_response == 1:
+                responses = self.response_names
+            else:
+                responses = [x for x in self.response_names if self.get_response_ndim(x) == 1]
+        if isinstance(responses, str):
+            responses = [responses]
+
+        if response_params is None:
+            response_params = set()
+            for response in responses:
+                if self.has_analytical_mean:
+                    response_params.add('mean')
+                else:
+                    response_params.add(self.get_response_params(response)[0])
+            response_params = sorted(list(response_params))
+        if isinstance(response_params, str):
+            response_params = [response_params]
+
         mc = bool(n_samples) and (self.is_bayesian or self.has_dropout)
 
         if reference_time is None:
@@ -9784,10 +9874,7 @@ class CDRModel(object):
                             for _dim_name in plot_y[_response]:
                                 param_names = self.get_response_params(_response)
 
-                                if _dim_name == param_names[0]:
-                                    include_param_name = False
-                                else:
-                                    include_param_name = True
+                                include_param_name = True
 
                                 plot_name = 'irf_univariate_%s' % sn(_response)
                                 if include_param_name:
@@ -9880,6 +9967,7 @@ class CDRModel(object):
                         plot_x, plot_y, lq, uq, samples = self.get_plot_data(
                             xvar=name,
                             responses=responses,
+                            response_params=response_params,
                             t_delta_ref=reference_time,
                             ref_varies_with_x=False,
                             manipulations=manipulations,
@@ -9893,10 +9981,7 @@ class CDRModel(object):
                         for _response in plot_y:
                             for _dim_name in plot_y[_response]:
                                 param_names = self.get_response_params(_response)
-                                if _dim_name == param_names[0]:
-                                    include_param_name = False
-                                else:
-                                    include_param_name = True
+                                include_param_name = True
 
                                 plot_name = 'curvature_%s' % sn(_response)
                                 if include_param_name:
@@ -9983,6 +10068,7 @@ class CDRModel(object):
                                     xvar=xvar,
                                     yvar=yvar,
                                     responses=responses,
+                                    response_params=response_params,
                                     t_delta_ref=reference_time,
                                     ref_varies_with_x=ref_varies_with_x,
                                     manipulations=manipulations,
@@ -9999,10 +10085,7 @@ class CDRModel(object):
                                 for _response in plot_z:
                                     for _dim_name in plot_z[_response]:
                                         param_names = self.get_response_params(_response)
-                                        if _dim_name == param_names[0]:
-                                            include_param_name = False
-                                        else:
-                                            include_param_name = True
+                                        include_param_name = True
 
                                         plot_name = 'surface_%s' % sn(_response)
                                         if include_param_name:
