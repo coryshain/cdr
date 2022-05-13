@@ -1445,6 +1445,18 @@ PLOT_KWARGS_CORE = [
         [str, None],
         "Type of plotting reference to use. One of ``'sampling'``, ``'mean'``, ``'zero'``, or ``None`` for default."
     ),
+    Kwarg(
+        'x_axis_transform',
+        None,
+        [str, None],
+        "String description of transform to apply to x-axis prior to plotting. Currently supported: ``'exp'``, ``'log'``, ``'neglog'``. If ``None``, no x-axis transform."
+    ),
+    Kwarg(
+        'y_axis_transform',
+        None,
+        [str, None],
+        "String description of transform to apply to y-axis (in 3d plots only) prior to plotting. Currently supported: ``'exp'``, ``'log'``, ``'neglog'``. If ``None``, no y-axis transform."
+    ),
 
     # CONTROLS FOR UNIVARIATE IRF PLOTS
     Kwarg(
@@ -1557,6 +1569,12 @@ PLOT_KWARGS_CORE = [
         None,
         [str, None],
         "Name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot)."
+    ),
+    Kwarg(
+        'key',
+        None,
+        [str, None],
+        "Any additional string key to add to the filename to distinguish the plot."
     )
 ]
 

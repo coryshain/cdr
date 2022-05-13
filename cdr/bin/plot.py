@@ -42,6 +42,7 @@ if __name__ == '__main__':
         prefix = plot_config.get('prefix', None)
         if prefix is None:
             prefix = '_'.join([x for x in p.outdir.split('/') if x not in ['.', '..']])
+        key = plot_config.get('key', None)
 
         n_time_units = plot_config.get('plot_n_time_units', p.get('plot_n_time_units', 2.5))
         reference_time = plot_config.get('reference_time', p.get('reference_time', 0.))
@@ -104,6 +105,9 @@ if __name__ == '__main__':
             else:
                 prefix_cur = m
 
+            if key:
+                prefix_cur += '_' + key
+
             if qq:
                 obs_path = p.outdir + '/%s/obs_%s.txt' % (m_path, qq)
                 preds_path = p.outdir + '/%s/preds_%s.txt' % (m_path, qq)
@@ -152,7 +156,7 @@ if __name__ == '__main__':
                 else:
                     stderr('Model %s missing observation and/or prediction files, skipping Q-Q plot...\n' % m)
 
-            kwargs = {x: plot_config.settings_core[x] for x in plot_config.settings_core if x != 'prefix'}
+            kwargs = {x: plot_config.settings_core[x] for x in plot_config.settings_core if x not in ('prefix', 'key')}
             mc = (cdr_model.is_bayesian or cdr_model.has_dropout)
             if 'n_samples' in kwargs:
                 mc &= bool(kwargs['n_samples'])

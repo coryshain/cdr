@@ -9825,6 +9825,8 @@ class CDRModel(object):
             generate_nonstationarity_surface_plots=None,
             generate_interaction_surface_plots=None,
             generate_err_dist_plots=None,
+            x_axis_transform=None,
+            y_axis_transform=None,
             plot_x_inches=None,
             plot_y_inches=None,
             ylim=None,
@@ -9858,7 +9860,7 @@ class CDRModel(object):
         :param responses: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to plot. If ``None``, plots all univariate responses. Multivariate plotting (e.g. of categorical responses) is supported but turned off by default to avoid excessive computation. When plotting a multivariate response, a set of plots will be generated for each dimension of the response.
         :param response_params: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of predictive distribution(s) to plot per response variable. Any param names not used by the predictive distribution for a given response will be ignored. If ``None``, plots the first parameter of each response distribution.
         :param summed: ``bool``; whether to plot individual IRFs or their sum.
-        :param pred_names: ``list`` or ``None``; list of names of predictors to include in univariate IRF plots. If ``None``, all predictors are plotted.
+        :param pred_names: ``list`` or ``None``; list of names of predictors to include in plots. If ``None``, all predictors are plotted.
         :param sort_names: ``bool``; whether to alphabetically sort IRF names.
         :param plot_unscaled: ``bool``; plot unscaled IRFs.
         :param plot_composite: ``bool``; plot any composite IRFs. If ``False``, only plots terminal IRFs.
@@ -9877,6 +9879,8 @@ class CDRModel(object):
         :param generate_nonstationarity_surface_plots: ``bool`` or ``None``; whether to plot IRF surfaces showing non-stationarity in the response.  If ``None``, use default setting.
         :param generate_interaction_surface_plots: ``bool`` or ``None``; whether to plot IRF interaction surfaces at time **reference_time**.  If ``None``, use default setting.
         :param generate_err_dist_plots: ``bool`` or ``None``; whether to plot the average error distribution for real-valued responses.  If ``None``, use default setting.
+        :param x_axis_transform: ``str`` or ``None``; string description of transform to apply to x-axis prior to plotting. Currently supported: ``'exp'``, ``'log'``, ``'neglog'``. If ``None``, no x-axis transform.
+        :param y_axis_transform: ``str`` or ``None``; string description of transform to apply to y-axis (in 3d plots only) prior to plotting. Currently supported: ``'exp'``, ``'log'``, ``'neglog'``. If ``None``, no y-axis transform.
         :param plot_x_inches: ``float`` or ``None``; width of plot in inches. If ``None``, use default setting.
         :param plot_y_inches: ``float`` or ``None; height of plot in inches. If ``None``, use default setting.
         :param ylim: 2-element ``tuple`` or ``list``; (lower_bound, upper_bound) to use for y axis. If ``None``, automatically inferred.
@@ -9939,6 +9943,30 @@ class CDRModel(object):
             generate_interaction_surface_plots = self.generate_interaction_surface_plots
         if generate_err_dist_plots is None:
             generate_err_dist_plots = self.generate_err_dist_plots
+        if x_axis_transform is None:
+            def x_axis_transform(x):
+                return x
+        elif x_axis_transform.lower() == 'exp':
+            x_axis_transform = np.exp
+        elif x_axis_transform.lower() == 'log':
+            x_axis_transform = np.log
+        elif x_axis_transform.lower() == 'neglog':
+            def x_axis_transform(x):
+                return -np.log(x)
+        else:
+            raise ValueError('Unrecognized x_axis_transform: %s' % x_axis_transform)
+        if y_axis_transform is None:
+            def y_axis_transform(x):
+                return x
+        elif y_axis_transform.lower() == 'exp':
+            y_axis_transform = np.exp
+        elif y_axis_transform.lower() == 'log':
+            y_axis_transform = np.log
+        elif y_axis_transform.lower() == 'neglog':
+            def y_axis_transform(x):
+                return -np.log(x)
+        else:
+            raise ValueError('Unrecognized y_axis_transform: %s' % y_axis_transform)
         if plot_x_inches is None:
             plot_x_inches = self.plot_x_inches
         if plot_y_inches is None:
@@ -10041,6 +10069,8 @@ class CDRModel(object):
                             level=level
                         )
 
+                        plot_x = x_axis_transform(plot_x)
+
                         for _response in plot_y:
                             for _dim_name in plot_y[_response]:
                                 param_names = self.get_response_params(_response)
@@ -10133,6 +10163,13 @@ class CDRModel(object):
                 # Curvature plots
                 if generate_curvature_plots:
                     names = [x for x in self.impulse_names if (self.is_non_dirac(x) and x != 'rate')]
+                    if pred_names is not None and len(pred_names) > 0:
+                        new_names = []
+                        for i, name in enumerate(names):
+                            for ID in pred_names:
+                                if ID == name or re.match(ID if ID.endswith('$') else ID + '$', name) is not None:
+                                    new_names.append(name)
+                        names = new_names
 
                     for name in names:
                         plot_x, plot_y, lq, uq, samples = self.get_plot_data(
@@ -10148,6 +10185,8 @@ class CDRModel(object):
                             n_samples=n_samples,
                             level=level
                         )
+
+                        plot_x = x_axis_transform(plot_x)
 
                         for _response in plot_y:
                             for _dim_name in plot_y[_response]:
@@ -10211,12 +10250,20 @@ class CDRModel(object):
                         (generate_irf_surface_plots, generate_nonstationarity_surface_plots, generate_interaction_surface_plots)
                 ):
                     if run_plot:
+                        names = [x for x in self.impulse_names if (self.is_non_dirac(x) and x != 'rate')]
+                        if pred_names is not None and len(pred_names) > 0:
+                            new_names = []
+                            for i, name in enumerate(names):
+                                for ID in pred_names:
+                                    if ID == name or re.match(ID if ID.endswith('$') else ID + '$', name) is not None:
+                                        new_names.append(name)
+                            names = new_names
                         if plot_type == 'irf_surface':
-                            names = ['t_delta:%s' % x for x in self.impulse_names if (self.is_non_dirac(x) and x != 'rate')]
+                            names = ['t_delta:%s' % x for x in names]
                         elif plot_type == 'nonstationarity_surface':
-                            names = ['X_time:%s' % x for x in self.impulse_names if (self.is_non_dirac(x) and x != 'rate')]
+                            names = ['X_time:%s' % x for x in names]
                         else: # plot_type == 'interaction_surface'
-                            names_src = [x for x in self.impulse_names if (self.is_non_dirac(x) and x != 'rate')]
+                            names_src = [x for x in names]
                             names = [':'.join(x) for x in itertools.combinations(names_src, 2)]
                         if names:
                             for name in names:
@@ -10252,6 +10299,9 @@ class CDRModel(object):
                                     n_samples=n_samples,
                                     level=level
                                 )
+
+                                plot_x = x_axis_transform(plot_x)
+                                plot_y = x_axis_transform(plot_y)
 
                                 for _response in plot_z:
                                     for _dim_name in plot_z[_response]:
