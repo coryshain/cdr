@@ -8698,7 +8698,7 @@ class CDRModel(object):
                             plot_qq(
                                 resid_theoretical_q,
                                 resid,
-                                dir=self.outdir,
+                                outdir=self.outdir,
                                 filename='error_qq_plot_%s.png' % name_base,
                                 xlab='Theoretical',
                                 ylab='Empirical'
@@ -10180,7 +10180,7 @@ class CDRModel(object):
                                 _plot_y,
                                 names_cur,
                                 sort_names=sort_names,
-                                dir=self.outdir,
+                                outdir=self.outdir,
                                 filename=filename[:-4] + '_hm.png',
                                 irf_name_map=irf_name_map,
                                 plot_x_inches=plot_x_inches,
@@ -10384,7 +10384,7 @@ class CDRModel(object):
                                         _plot_z[..., g],
                                         lq=None if _lq is None else _lq[..., g],
                                         uq=None if _uq is None else _uq[..., g],
-                                        dir=self.outdir,
+                                        outdir=self.outdir,
                                         filename=filename,
                                         irf_name_map=irf_name_map,
                                         plot_x_inches=plot_x_inches,

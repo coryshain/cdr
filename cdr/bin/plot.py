@@ -145,7 +145,7 @@ if __name__ == '__main__':
                     plot_qq(
                         err_theoretical_q,
                         err,
-                        dir=cdr_model.outdir,
+                        outdir=cdr_model.outdir,
                         filename=prefix_cur + '%s_error_qq_plot_%s.png' % (m_path, qq),
                         xlab=xlab,
                         ylab=ylab,

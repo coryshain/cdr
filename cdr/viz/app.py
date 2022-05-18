@@ -8,7 +8,9 @@ from dash import html
 from dash.dependencies import Input, Output, State
 import base64
 
-from cdr.util import load_cdr, get_irf_name
+from cdr.config import Config
+from cdr.model import CDREnsemble
+from cdr.util import load_cdr, get_irf_name, filter_models
 
 
 N_SAMPLES = 10
@@ -1021,11 +1023,23 @@ if __name__ == '__main__':
     argparser = argparse.ArgumentParser("""
     Start a web server for interactive CDR visualization.
     """)
-    argparser.add_argument('model', help='Path to model directory')
+    argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
+    argparser.add_argument('-m', '--model', type=str, default='', help='Name of model to visualize. If unspecified, defaults to the first model in the config.')
     argparser.add_argument('-d', '--debug', action='store_true', help='Whether to run in debug mode.')
     args = argparser.parse_args()
 
-    model = load_cdr(args.model)
+    config_path = args.config_path
+    p = Config(config_path)
+    model = args.model
+    if not model:
+        model_list = sorted(set(p.model_list) | set(p.ensemble_list))
+        models = filter_models(model_list, cdr_only=True)
+        model = models[0]
+
+    m_path = model.replace(':', '+')
+    p.set_model(model)
+
+    model = CDREnsemble(p.outdir, m_path)
     model.set_predict_mode(True)
 
     app = initialize_app()
