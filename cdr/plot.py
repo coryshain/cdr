@@ -27,7 +27,7 @@ def plot_irf(
         sort_names=True,
         prop_cycle_length=None,
         prop_cycle_map=None,
-        dir='.',
+        outdir='.',
         filename='irf_plot.png',
         irf_name_map=None,
         plot_x_inches=6,
@@ -54,7 +54,7 @@ def plot_irf(
     :param sort_names: ``bool``; alphabetically sort IRF names.
     :param prop_cycle_length: ``int`` or ``None``; Length of plotting properties cycle (defines step size in the color map). If ``None``, inferred from **irf_names**.
     :param prop_cycle_map: ``list`` of ``int``, or ``None``; Integer indices to use in the properties cycle for each entry in **irf_names**. If ``None``, indices are automatically assigned.
-    :param dir: ``str``; output directory.
+    :param outdir: ``str``; output directory.
     :param filename: ``str``; filename.
     :param irf_name_map: ``dict`` of ``str`` to ``str``; map from CDR IRF ID's to more readable names to appear in legend. Any plotted IRF whose ID is not found in **irf_name_map** will be represented with the CDR IRF ID.
     :param plot_x_inches: ``float``; width of plot in inches.
@@ -149,10 +149,12 @@ def plot_irf(
 
     fig.set_size_inches(plot_x_inches, plot_y_inches)
     fig.tight_layout()
+    if not os.path.exists(outdir):
+        os.makedirs(outdir)
     try:
-        fig.savefig(dir+'/'+filename, dpi=dpi, transparent=transparent_background)
+        fig.savefig(outdir + '/' + filename, dpi=dpi, transparent=transparent_background)
     except Exception as e:
-        stderr('Error saving plot to file %s. Skipping...\n' %(dir+'/'+filename))
+        stderr('Error saving plot to file %s. Skipping...\n' % (outdir + '/' + filename))
         stderr('Traceback:\n')
         stderr('%s\n' % e)
     plt.close(fig)
@@ -170,7 +172,7 @@ def plot_irf(
             for i, name in enumerate(names_cur):
                 df[name + 'UB'] = uq[:,i]
 
-        df.to_csv(dir + '/' + csvname, index=False)
+        df.to_csv(outdir + '/' + csvname, index=False)
 
 
 def plot_irf_as_heatmap(

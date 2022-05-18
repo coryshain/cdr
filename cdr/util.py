@@ -366,7 +366,7 @@ def load_cdr(dir_path, suffix=''):
 
     with open(dir_path + '/m%s.obj' % suffix, 'rb') as f:
         m = pickle.load(f)
-    m.build(outdir=dir_path)
+    m.build(outdir=dir_path, verbose=False)
     m.load(outdir=dir_path, suffix=suffix)
     return m
 

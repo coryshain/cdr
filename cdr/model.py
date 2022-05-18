@@ -854,8 +854,7 @@ class CDRModel(object):
         return md
 
     def __setstate__(self, state):
-        self.g = tf.Graph()
-        self.session = tf.Session(graph=self.g, config=tf_config)
+        self._initialize_session()
 
         self._unpack_metadata(state)
         self._initialize_metadata()
@@ -864,12 +863,10 @@ class CDRModel(object):
 
     def _initialize_session(self):
         self.g = tf.Graph()
-        self.session = tf.Session(graph=self.g, config=tf_config)
+        self._session = tf.Session(graph=self.g, config=tf_config)
 
     def _initialize_metadata(self):
         ## Compute secondary data from intialization settings
-
-        stderr('  Initializing model metadata...\n')
 
         assert TF_MAJOR_VERSION == 1 or self.optim_name.lower() != 'nadam', 'Nadam optimizer is not supported when using TensorFlow 2.X.X'
 
@@ -5903,31 +5900,27 @@ class CDRModel(object):
 
         alpha = 100 - float(level)
 
-        with self.session.as_default():
-            with self.session.graph.as_default():
-                self.set_predict_mode(True)
+        self.set_predict_mode(True)
 
-                if fixed:
-                    param_vector = self.parameter_table_fixed_values
-                else:
-                    param_vector = self.parameter_table_random_values
+        samples = []
+        for i in range(n_samples):
+            self.resample_model()
+            if fixed:
+                param_vector = self.parameter_table_fixed_values
+            else:
+                param_vector = self.parameter_table_random_values
+            samples.append(self.session.run(param_vector, feed_dict={self.use_MAP_mode: MAP_mode}))
+        samples = np.stack(samples, axis=1)
 
-                samples = []
-                for i in range(n_samples):
-                    if self.resample_ops:
-                        self.session.run(self.resample_ops)
-                    samples.append(self.session.run(param_vector, feed_dict={self.use_MAP_mode: MAP_mode}))
-                samples = np.stack(samples, axis=1)
+        mean = samples.mean(axis=1)
+        lower = np.percentile(samples, alpha / 2, axis=1)
+        upper = np.percentile(samples, 100 - (alpha / 2), axis=1)
 
-                mean = samples.mean(axis=1)
-                lower = np.percentile(samples, alpha / 2, axis=1)
-                upper = np.percentile(samples, 100 - (alpha / 2), axis=1)
+        out = np.stack([mean, lower, upper], axis=1)
 
-                out = np.stack([mean, lower, upper], axis=1)
+        self.set_predict_mode(False)
 
-                self.set_predict_mode(False)
-
-                return out
+        return out
 
 
 
@@ -5941,6 +5934,10 @@ class CDRModel(object):
     @property
     def name(self):
         return os.path.basename(self.outdir)
+    
+    @property
+    def session(self):
+        return self._session
 
     @property
     def is_bayesian(self):
@@ -6147,15 +6144,16 @@ class CDRModel(object):
 
                 return slices, shapes
 
-    def build(self, outdir=None, restore=True, report_time=False):
+    def build(self, outdir=None, restore=True, report_time=False, verbose=True):
         """
         Construct the CDR(NN) network and initialize/load model parameters.
         ``build()`` is called by default at initialization and unpickling, so users generally do not need to call this method.
         ``build()`` can be used to reinitialize an existing network instance on the fly, but only if (1) no model checkpoint has been saved to the output directory or (2) ``restore`` is set to ``False``.
 
-        :param outdir: Output directory. If ``None``, inferred.
-        :param restore: Restore saved network parameters if model checkpoint exists in the output directory.
-        :param report_time: Whether to report the time taken for each initialization step.
+        :param outdir: ``str``; Output directory. If ``None``, inferred.
+        :param restore: ``bool``; Restore saved network parameters if model checkpoint exists in the output directory.
+        :param report_time: ``bool``; Whether to report the time taken for each initialization step.
+        :param verbose: ``bool``; Whether to report progress to stderr.
         :return: ``None``
         """
 
@@ -6167,14 +6165,16 @@ class CDRModel(object):
 
         with self.session.as_default():
             with self.session.graph.as_default():
-                stderr('  Initializing input nodes...\n')
+                if verbose:
+                    stderr('  Initializing input nodes...\n')
                 t0 = pytime.time()
                 self._initialize_inputs()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_initialize_inputs took %.2fs\n' % dur)
 
-                stderr('  Initializing base params...\n')
+                if verbose:
+                    stderr('  Initializing base params...\n')
                 t0 = pytime.time()
                 self._initialize_base_params()
                 dur = pytime.time() - t0
@@ -6182,49 +6182,56 @@ class CDRModel(object):
                     stderr('_initialize_base_params took %.2fs\n' % dur)
 
                 for nn_id in self.nn_impulse_ids:
-                    stderr('  Initializing %s...\n' % nn_id)
+                    if verbose:
+                        stderr('  Initializing %s...\n' % nn_id)
                     t0 = pytime.time()
                     self._initialize_nn(nn_id)
                     dur = pytime.time() - t0
                     if report_time:
                         stderr('_initialize_nn for %s took %.2fs\n' % (nn_id, dur))
 
-                    stderr('  Compiling %s...\n' % nn_id)
+                    if verbose:
+                        stderr('  Compiling %s...\n' % nn_id)
                     t0 = pytime.time()
                     self._compile_nn(nn_id)
                     dur = pytime.time() - t0
                     if report_time:
                         stderr('_compile_nn for %s took %.2fs\n' % (nn_id, dur))
 
-                stderr('  Concatenating inputs...\n')
+                if verbose:
+                    stderr('  Concatenating inputs...\n')
                 t0 = pytime.time()
                 self._concat_nn_impulses()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_concat_nn_impulses took %.2fs\n' % dur)
 
-                stderr('  Compiling intercepts...\n')
+                if verbose:
+                    stderr('  Compiling intercepts...\n')
                 t0 = pytime.time()
                 self._compile_intercepts()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_compile_intercepts took %.2fs\n' % dur)
 
-                stderr('  Compiling coefficients...\n')
+                if verbose:
+                    stderr('  Compiling coefficients...\n')
                 t0 = pytime.time()
                 self._compile_coefficients()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_compile_coefficients took %.2fs\n' % dur)
 
-                stderr('  Compiling interactions...\n')
+                if verbose:
+                    stderr('  Compiling interactions...\n')
                 t0 = pytime.time()
                 self._compile_interactions()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_compile_interactions took %.2fs\n' % dur)
 
-                stderr('  Compiling IRF params...\n')
+                if verbose:
+                    stderr('  Compiling IRF params...\n')
                 t0 = pytime.time()
                 self._compile_irf_params()
                 dur = pytime.time() - t0
@@ -6232,28 +6239,32 @@ class CDRModel(object):
                     stderr('_compile_irf_params took %.2fs\n' % dur)
 
                 for nn_id in self.nn_irf_ids:
-                    stderr('  Initializing %s...\n' % nn_id)
+                    if verbose:
+                        stderr('  Initializing %s...\n' % nn_id)
                     t0 = pytime.time()
                     self._initialize_nn(nn_id)
                     dur = pytime.time() - t0
                     if report_time:
                         stderr('_initialize_nn for %s took %.2fs\n' % (nn_id, dur))
 
-                    stderr('  Compiling %s...\n' % nn_id)
+                    if verbose:
+                        stderr('  Compiling %s...\n' % nn_id)
                     t0 = pytime.time()
                     self._compile_nn(nn_id)
                     dur = pytime.time() - t0
                     if report_time:
                         stderr('_compile_nn for %s took %.2fs\n' % (nn_id, dur))
 
-                stderr('  Collecting layerwise ops...\n')
+                if verbose:
+                    stderr('  Collecting layerwise ops...\n')
                 t0 = pytime.time()
                 self._collect_layerwise_ops()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_collect_layerwise_ops took %.2fs\n' % dur)
 
-                stderr('  Initializing IRF lambdas...\n')
+                if verbose:
+                    stderr('  Initializing IRF lambdas...\n')
                 t0 = pytime.time()
                 self._initialize_irf_lambdas()
                 dur = pytime.time() - t0
@@ -6261,56 +6272,64 @@ class CDRModel(object):
                     stderr('_initialize_irf_lambdas took %.2fs\n' % dur)
 
                 for response in self.response_names:
-                    stderr('  Initializing IRFs for response %s...\n' % response)
+                    if verbose:
+                        stderr('  Initializing IRFs for response %s...\n' % response)
                     t0 = pytime.time()
                     self._initialize_irfs(self.t, response)
                     dur = pytime.time() - t0
                     if report_time:
                         stderr('_initialize_irfs for %s took %.2fs\n' % (response, dur))
 
-                stderr('  Compiling IRF impulses...\n')
+                if verbose:
+                    stderr('  Compiling IRF impulses...\n')
                 t0 = pytime.time()
                 self._compile_irf_impulses()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_compile_irf_impulses took %.2fs\n' % dur)
 
-                stderr('  Compiling IRF-weighted impulses...\n')
+                if verbose:
+                    stderr('  Compiling IRF-weighted impulses...\n')
                 t0 = pytime.time()
                 self._compile_X_weighted_by_irf()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_compile_X_weighted_by_irf took %.2fs\n' % dur)
 
-                stderr('  Initializing predictive distribution...\n')
+                if verbose:
+                    stderr('  Initializing predictive distribution...\n')
                 t0 = pytime.time()
                 self._initialize_predictive_distribution()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_initialize_predictive_distribution took %.2fs\n' % dur)
 
-                stderr('  Initializing objective...\n')
+                if verbose:
+                    stderr('  Initializing objective...\n')
                 t0 = pytime.time()
                 self._initialize_objective()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_initialize_objective took %.2fs\n' % dur)
 
-                stderr('  Initializing parameter tables...\n')
+                if verbose:
+                    stderr('  Initializing parameter tables...\n')
                 t0 = pytime.time()
                 self._initialize_parameter_tables()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_initialize_parameter_tables took %.2fs\n' % dur)
 
-                stderr('  Initializing Tensorboard logging...\n')
+                if verbose:
+                    stderr('  Initializing Tensorboard logging...\n')
                 t0 = pytime.time()
                 self._initialize_logging()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_initialize_logging took %.2fs\n' % dur)
 
-                stderr('  Initializing moving averages...\n')
+                if verbose:
+                    stderr('  Initializing moving averages...\n')
                 t0 = pytime.time()
                 self._initialize_ema()
                 dur = pytime.time() - t0
@@ -6321,14 +6340,16 @@ class CDRModel(object):
                     var_list=None
                 )
 
-                stderr('  Initializing saver...\n')
+                if verbose:
+                    stderr('  Initializing saver...\n')
                 t0 = pytime.time()
                 self._initialize_saver()
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_initialize_saver took %.2fs\n' % dur)
 
-                stderr('  Loading weights...\n')
+                if verbose:
+                    stderr('  Loading weights...\n')
                 self.load(restore=restore)
 
                 self._initialize_convergence_checking()
@@ -6485,6 +6506,16 @@ class CDRModel(object):
                 else:
                     if predict:
                         stderr('No EMA checkpoint available. Leaving internal variables unchanged.\n')
+
+    def resample_model(self):
+        """
+        Run any ops required to resample the model (e.g. resampling from posteriors and dropout distributions).
+
+        :return: ``None``
+        """
+
+        if self.resample_ops:
+            self.session.run(self.resample_ops)
 
     def finalize(self):
         """
@@ -7663,7 +7694,7 @@ class CDRModel(object):
         """
         Generate predictions from a batch of data.
 
-        :param feed_dict: ``dict``; A dictionary of predictor values.
+        :param feed_dict: ``dict``; A dictionary mapping string input names (e.g. ``'X'``, ``'Y'``) to their values.
         :param responses: ``list`` of ``str``, ``str``, or ``None``; Name(s) of response variable(s) to predict. If ``None``, predicts all responses.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
@@ -7673,83 +7704,90 @@ class CDRModel(object):
         :return: ``dict`` of ``numpy`` arrays; Predicted responses and/or log likelihoods, one for each training sample. Key order: <('preds'|'log_lik'), response>.
         """
 
-        assert self.Y in feed_dict or not return_loglik, 'Cannot return log likelihood when Y is not provided.'
+        assert 'Y' in feed_dict or not return_loglik, 'Cannot return log likelihood when Y is not provided.'
 
         use_MAP_mode = algorithm in ['map', 'MAP']
-        feed_dict[self.use_MAP_mode] = use_MAP_mode
+        feed_dict['use_MAP_mode'] = use_MAP_mode
 
         if responses is None:
             responses = self.response_names
         if not isinstance(responses, list):
             responses = [responses]
 
-        to_run = {}
-        if return_preds:
-            to_run_preds = {x: self.prediction[x] for x in responses}
-            to_run['preds'] = to_run_preds
-        if return_loglik:
-            to_run_loglik = {x: self.ll_by_var[x] for x in responses}
-            to_run['log_lik'] = to_run_loglik
+        if return_preds or return_loglik:
+            if use_MAP_mode:
+                to_run = {}
+                if return_preds:
+                    to_run_preds = {x: self.prediction[x] for x in responses}
+                    to_run['preds'] = to_run_preds
+                if return_loglik:
+                    to_run_loglik = {x: self.ll_by_var[x] for x in responses}
+                    to_run['log_lik'] = to_run_loglik
+                fd = {getattr(self, x): feed_dict[x] for x in feed_dict}
+                out = self.session.run(to_run, feed_dict=fd)
+            else:
+                if n_samples is None:
+                    n_samples = self.n_samples_eval
 
-        if to_run:
-            with self.session.as_default():
-                with self.session.graph.as_default():
-                    if use_MAP_mode:
-                        out = self.session.run(to_run, feed_dict=feed_dict)
+                if verbose:
+                    pb = keras.utils.Progbar(n_samples)
+
+                out = {}
+                if return_preds:
+                    out['preds'] = {x: np.zeros((len(feed_dict['Y_time']), n_samples)) for x in responses}
+                if return_loglik:
+                    out['log_lik'] = {x: np.zeros((len(feed_dict['Y_time']), n_samples)) for x in responses}
+
+                for i in range(n_samples):
+                    self.resample_model()
+
+                    to_run = {}
+                    if return_preds:
+                        to_run_preds = {x: self.prediction[x] for x in responses}
+                        to_run['preds'] = to_run_preds
                     else:
-                        feed_dict[self.use_MAP_mode] = False
-                        if n_samples is None:
-                            n_samples = self.n_samples_eval
+                        to_run_preds = None
+                    if return_loglik:
+                        to_run_loglik = {x: self.ll_by_var[x] for x in responses}
+                        to_run['log_lik'] = to_run_loglik
+                    else:
+                        to_run_loglik = None
+                    fd = {getattr(self, x): feed_dict[x] for x in feed_dict}
+                    _out = self.session.run(to_run, feed_dict=fd)
+                    if to_run_preds:
+                        _preds = _out['preds']
+                        for _response in _preds:
+                            out['preds'][_response][:, i] = _preds[_response]
+                    if to_run_loglik:
+                        _log_lik = _out['log_lik']
+                        for _response in _log_lik:
+                            out['log_lik'][_response][:, i] = _log_lik[_response]
+                    if verbose:
+                        pb.update(i + 1)
 
-                        if verbose:
-                            pb = keras.utils.Progbar(n_samples)
+                if return_preds:
+                    for _response in out['preds']:
+                        _preds = out['preds'][_response]
+                        dist_name = self.get_response_dist_name(_response)
+                        if dist_name == 'bernoulli':  # Majority vote
+                            _preds = np.round(np.mean(_preds, axis=1)).astype('int')
+                        elif dist_name == 'categorical':  # Majority vote
+                            _preds = scipy.stats.mode(_preds, axis=1)
+                        else:  # Average
+                            _preds = _preds.mean(axis=1)
+                        out['preds'][_response] = _preds
 
-                        out = {}
-                        if return_preds:
-                            out['preds'] = {x: np.zeros((len(feed_dict[self.Y_time]), n_samples)) for x in to_run_preds}
-                        if return_loglik:
-                            out['log_lik'] = {x: np.zeros((len(feed_dict[self.Y_time]), n_samples)) for x in
-                                              to_run_loglik}
+                if return_loglik:
+                    for _response in out['log_lik']:
+                        out['log_lik'][_response] = out['log_lik'][_response].mean(axis=1)
 
-                        for i in range(n_samples):
-                            if self.resample_ops:
-                                self.session.run(self.resample_ops)
-
-                            _out = self.session.run(to_run, feed_dict=feed_dict)
-                            if to_run_preds:
-                                _preds = _out['preds']
-                                for _response in _preds:
-                                    out['preds'][_response][:, i] = _preds[_response]
-                            if to_run_loglik:
-                                _log_lik = _out['log_lik']
-                                for _response in _log_lik:
-                                    out['log_lik'][_response][:, i] = _log_lik[_response]
-                            if verbose:
-                                pb.update(i + 1)
-
-                        if return_preds:
-                            for _response in out['preds']:
-                                _preds = out['preds'][_response]
-                                dist_name = self.get_response_dist_name(_response)
-                                if dist_name == 'bernoulli':  # Majority vote
-                                    _preds = np.round(np.mean(_preds, axis=1)).astype('int')
-                                elif dist_name == 'categorical':  # Majority vote
-                                    _preds = scipy.stats.mode(_preds, axis=1)
-                                else:  # Average
-                                    _preds = _preds.mean(axis=1)
-                                out['preds'][_response] = _preds
-
-                        if return_loglik:
-                            for _response in out['log_lik']:
-                                out['log_lik'][_response] = out['log_lik'][_response].mean(axis=1)
-
-                    return out
+            return out
 
     def run_loss_op(self, feed_dict, n_samples=None, algorithm='MAP', verbose=True):
         """
         Compute the elementwise training loss of a batch of data.
 
-        :param feed_dict: ``dict``; A dictionary of predictor and response values
+        :param feed_dict: ``dict``; A dictionary mapping string input names (e.g. ``'X'``, ``'Y'``) to their values.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
         :param verbose: ``bool``; Send progress reports to standard error.
@@ -7757,38 +7795,37 @@ class CDRModel(object):
         """
 
         use_MAP_mode = algorithm in ['map', 'MAP']
-        feed_dict[self.use_MAP_mode] = use_MAP_mode
+        feed_dict['use_MAP_mode'] = use_MAP_mode
 
-        with self.session.as_default():
-            with self.session.graph.as_default():
-                if use_MAP_mode:
-                    loss = self.session.run(self.loss_func, feed_dict=feed_dict)
-                else:
-                    feed_dict[self.use_MAP_mode] = False
-                    if n_samples is None:
-                        n_samples = self.n_samples_eval
+        if use_MAP_mode:
+            fd = {getattr(self, x): feed_dict[x] for x in feed_dict}
+            loss = self.session.run(self.loss_func, feed_dict=fd)
+        else:
+            feed_dict[self.use_MAP_mode] = False
+            if n_samples is None:
+                n_samples = self.n_samples_eval
 
-                    if verbose:
-                        pb = keras.utils.Progbar(n_samples)
+            if verbose:
+                pb = keras.utils.Progbar(n_samples)
 
-                    loss = np.zeros((len(feed_dict[self.Y_time]), n_samples))
+            loss = np.zeros((len(feed_dict[self.Y_time]), n_samples))
 
-                    for i in range(n_samples):
-                        if self.resample_ops:
-                            self.session.run(self.resample_ops)
-                        loss[:, i] = self.session.run(self.loss_func, feed_dict=feed_dict)
-                        if verbose:
-                            pb.update(i + 1)
+            for i in range(n_samples):
+                self.resample_model()
+                fd = {getattr(self, x): feed_dict[x] for x in feed_dict}
+                loss[:, i] = self.session.run(self.loss_func, feed_dict=fd)
+                if verbose:
+                    pb.update(i + 1)
 
-                    loss = loss.mean(axis=1)
+            loss = loss.mean(axis=1)
 
-                return loss
+        return loss
 
     def run_conv_op(self, feed_dict, responses=None, response_param=None, n_samples=None, algorithm='MAP', verbose=True):
         """
         Convolve a batch of data in feed_dict with the model's latent IRF.
 
-        :param feed_dict: ``dict``; A dictionary of predictor variables
+        :param feed_dict: ``dict``; A dictionary mapping string input names (e.g. ``'X'``, ``'X_time'``) to their values.
         :param responses: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to convolve toward. If ``None``, convolves toward all univariate responses. Multivariate convolution (e.g. of categorical responses) is supported but turned off by default to avoid excessive computation. When convolving toward a multivariate response, a set of convolved predictors will be generated for each dimension of the response.
         :param response_param: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of predictive distribution(s) to convolve toward per response variable. Any param names not used by the predictive distribution for a given response will be ignored. If ``None``, convolves toward the first parameter of each response distribution.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
@@ -7798,7 +7835,7 @@ class CDRModel(object):
         """
 
         use_MAP_mode = algorithm in ['map', 'MAP']
-        feed_dict[self.use_MAP_mode] = use_MAP_mode
+        feed_dict['use_MAP_mode'] = use_MAP_mode
 
         if responses is None:
             responses = [x for x in self.response_names if self.get_response_ndim(x) == 1]
@@ -7813,50 +7850,53 @@ class CDRModel(object):
         if isinstance(response_param, str):
             response_param = [response_param]
 
-        to_run = {}
-        for _response in responses:
-            to_run[_response] = self.X_conv_delta[_response]
+        if use_MAP_mode:
+            to_run = {}
+            for _response in responses:
+                to_run[_response] = self.X_conv_delta[_response]
+            fd = {getattr(self, x): feed_dict[x] for x in feed_dict}
+            X_conv = self.session.run(to_run, feed_dict=fd)
+        else:
+            X_conv = {}
+            for _response in responses:
+                nparam = self.get_response_nparam(_response)
+                ndim = self.get_response_ndim(_response)
+                X_conv[_response] = np.zeros(
+                    (len(feed_dict[self.Y_time]), len(self.terminal_names), nparam, ndim, n_samples)
+                )
 
-        with self.session.as_default():
-            with self.session.graph.as_default():
-                if use_MAP_mode:
-                    X_conv = self.session.run(to_run, feed_dict=feed_dict)
-                else:
-                    X_conv = {}
-                    for _response in to_run:
-                        nparam = self.get_response_nparam(_response)
-                        ndim = self.get_response_ndim(_response)
-                        X_conv[_response] = np.zeros(
-                            (len(feed_dict[self.Y_time]), len(self.terminal_names), nparam, ndim, n_samples)
-                        )
+            if n_samples is None:
+                n_samples = self.n_samples_eval
+            if verbose:
+                pb = keras.utils.Progbar(n_samples)
 
-                    if n_samples is None:
-                        n_samples = self.n_samples_eval
-                    if verbose:
-                        pb = keras.utils.Progbar(n_samples)
+            for i in range(0, n_samples):
+                self.resample_model()
+                to_run = {}
+                for _response in responses:
+                    to_run[_response] = self.X_conv_delta[_response]
+                fd = {getattr(self, x): feed_dict[x] for x in feed_dict}
+                _X_conv = self.session.run(to_run, feed_dict=fd)
+                for _response in _X_conv:
+                    X_conv[_response][..., i] = _X_conv[_response]
+                if verbose:
+                    pb.update(i + 1, force=True)
 
-                    for i in range(0, n_samples):
-                        _X_conv = self.session.run(to_run, feed_dict=feed_dict)
-                        for _response in _X_conv:
-                            X_conv[_response][..., i] = _X_conv[_response]
-                        if verbose:
-                            pb.update(i + 1, force=True)
+            for _response in X_conv:
+                X_conv[_response] = X_conv[_response].mean(axis=2)
 
-                    for _response in X_conv:
-                        X_conv[_response] = X_conv[_response].mean(axis=2)
+        # Break things out by response dimension
+        out = {}
+        for _response in X_conv:
+            for i, _response_param in enumerate(response_param):
+                if self.has_param(_response, _response_param):
+                    dim_names = self.expand_param_name(_response, _response_param)
+                    for j, _dim_name in enumerate(dim_names):
+                        if _response not in out:
+                            out[_response] = {}
+                        out[_response][_dim_name] = X_conv[_response][..., i, j]
 
-                # Break things out by response dimension
-                out = {}
-                for _response in X_conv:
-                    for i, _response_param in enumerate(response_param):
-                        if self.has_param(_response, _response_param):
-                            dim_names = self.expand_param_name(_response, _response_param)
-                            for j, _dim_name in enumerate(dim_names):
-                                if _response not in out:
-                                    out[_response] = {}
-                                out[_response][_dim_name] = X_conv[_response][..., i, j]
-
-                return out
+        return out
 
 
     def predict(
@@ -8058,32 +8098,32 @@ class CDRModel(object):
                                 float_type=self.float_type,
                             )
                             fd = {
-                                self.X: _X,
-                                self.X_time: _X_time,
-                                self.X_mask: _X_mask,
-                                self.Y_time: _Y_time,
-                                self.Y_mask: _Y_mask,
-                                self.Y_gf: _Y_gf,
-                                self.training: not self.predict_mode,
-                                self.sum_outputs_along_T: sum_outputs_along_T,
-                                self.sum_outputs_along_K: sum_outputs_along_K
+                                'X': _X,
+                                'X_time': _X_time,
+                                'X_mask': _X_mask,
+                                'Y_time': _Y_time,
+                                'Y_mask': _Y_mask,
+                                'Y_gf': _Y_gf,
+                                'training': not self.predict_mode,
+                                'sum_outputs_along_T': sum_outputs_along_T,
+                                'sum_outputs_along_K': sum_outputs_along_K
                             }
                             if return_loglik:
-                                fd[self.Y] = _Y
+                                fd['Y'] = _Y
                         else:
                             fd = {
-                                self.X: X[i:i + B],
-                                self.X_time: X_time[i:i + B],
-                                self.X_mask: X_mask[i:i + B],
-                                self.Y_time: Y_time[i:i + B],
-                                self.Y_mask: Y_mask[i:i + B],
-                                self.Y_gf: None if Y_gf is None else Y_gf[i:i + B],
-                                self.training: not self.predict_mode,
-                                self.sum_outputs_along_T: sum_outputs_along_T,
-                                self.sum_outputs_along_K: sum_outputs_along_K
+                                'X': X[i:i + B],
+                                'X_time': X_time[i:i + B],
+                                'X_mask': X_mask[i:i + B],
+                                'Y_time': Y_time[i:i + B],
+                                'Y_mask': Y_mask[i:i + B],
+                                'Y_gf': None if Y_gf is None else Y_gf[i:i + B],
+                                'training': not self.predict_mode,
+                                'sum_outputs_along_T': sum_outputs_along_T,
+                                'sum_outputs_along_K': sum_outputs_along_K
                             }
                             if return_loglik:
-                                fd[self.Y] = Y[i:i + B]
+                                fd['Y'] = Y[i:i + B]
                         _out = self.run_predict_op(
                             fd,
                             responses=responses,
@@ -8361,25 +8401,25 @@ class CDRModel(object):
                         _Y_gf = None if Y_gf is None else Y_gf[i:i + B]
 
                         fd = {
-                            self.X: _X,
-                            self.X_time: _X_time,
-                            self.X_mask: _X_mask,
-                            self.Y: _Y,
-                            self.Y_time: _Y_time,
-                            self.Y_mask: _Y_mask,
-                            self.Y_gf: _Y_gf,
-                            self.training: not self.predict_mode
+                            'X': _X,
+                            'X_time': _X_time,
+                            'X_mask': _X_mask,
+                            'Y': _Y,
+                            'Y_time': _Y_time,
+                            'Y_mask': _Y_mask,
+                            'Y_gf': _Y_gf,
+                            'training': not self.predict_mode
                         }
                     else:
                         fd = {
-                            self.X: X[i:i + B],
-                            self.X_time: X_time[i:i + B],
-                            self.X_mask: X_mask[i:i + B],
-                            self.Y_time: Y_time[i:i + B],
-                            self.Y_mask: Y_mask[i:i + B],
-                            self.Y_gf: None if Y_gf is None else Y_gf[i:i + B],
-                            self.Y: Y[i:i + B],
-                            self.training: training
+                            'X': X[i:i + B],
+                            'X_time': X_time[i:i + B],
+                            'X_mask': X_mask[i:i + B],
+                            'Y_time': Y_time[i:i + B],
+                            'Y_mask': Y_mask[i:i + B],
+                            'Y_gf': None if Y_gf is None else Y_gf[i:i + B],
+                            'Y': Y[i:i + B],
+                            'training': training
                         }
                     loss[i:i + B] = self.run_loss_op(
                         fd,
@@ -9125,490 +9165,491 @@ class CDRModel(object):
             response_params = sorted(list(response_params))
         if isinstance(response_params, str):
             response_params = [response_params]
+            
+        is_3d = yvar is not None
+        if manipulations is None:
+            manipulations = []
 
-        with self.session.as_default():
-            with self.session.graph.as_default():
-                is_3d = yvar is not None
-                if manipulations is None:
-                    manipulations = []
+        if xaxis is None:
+            if is_3d:
+                if xres is None:
+                    xres = 32
+            else:
+                if xres is None:
+                    xres = 1024
+            xvar_base = np.linspace(0., 1., xres)
+        else:
+            xres = len(xaxis)
 
-                if xaxis is None:
-                    if is_3d:
-                        if xres is None:
-                            xres = 32
-                    else:
-                        if xres is None:
-                            xres = 1024
-                    xvar_base = np.linspace(0., 1., xres)
+        if is_3d:
+            if yaxis is None:
+                if yres is None:
+                    yres = 32
+                yvar_base = np.linspace(0., 1., yres)
+            else:
+                yres = len(yaxis)
+
+            T = xres * yres
+        else:
+            T = xres
+
+        if n_samples and (self.is_bayesian or self.has_dropout):
+            resample = True
+            S = n_samples
+        else:
+            resample = False
+            S = 1
+
+        ref_as_manip = ref_varies_with_x and (not is_3d or ref_varies_with_y)  # Only return ref as manip if it fully varies along all axes
+
+        n_impulse = len(self.impulse_names)
+        n_manip = int(not ref_as_manip) + len(manipulations) # If ref is not returned, return default variation as first manip
+        assert not (ref_as_manip and pair_manipulations), "Cannot both vary reference along all axes and pair manipulations, since doing so will cause all responses to cancel."
+
+        if is_3d:
+            sample_shape = (xres, yres, n_manip)
+            if pair_manipulations:
+                ref_shape = sample_shape
+                B_ref = T
+            elif ref_varies_with_x or ref_varies_with_y:
+                ref_shape = (xres, yres, 1)
+                B_ref = T
+            else:
+                ref_shape = tuple()
+                B_ref = 1
+        else:
+            sample_shape = (T, n_manip)
+            if pair_manipulations:
+                ref_shape = sample_shape
+                B_ref = T
+            elif ref_varies_with_x:
+                ref_shape = (T, 1)
+                B_ref = T
+            else:
+                ref_shape = tuple()
+                B_ref = 1
+
+        # Initialize predictor reference
+        if reference_type is None:
+            X_ref_arr = np.copy(self.reference_arr)
+        elif reference_type == 'mean':
+            X_ref_arr = np.copy(self.impulse_means_arr)
+        else:
+            X_ref_arr = np.zeros_like(self.reference_arr)
+        if X_ref is None:
+            X_ref = {}
+        for x in X_ref:
+            ix = self.impulse_names_to_ix[x]
+            X_ref_arr[ix] = X_ref[x]
+        X_ref = X_ref_arr[None, None, ...]
+
+        # Initialize timestamp reference
+        if X_time_ref is None:
+            X_time_ref = self.X_time_mean
+        assert np.isscalar(X_time_ref), 'X_time_ref must be a scalar'
+        X_time_ref = np.reshape(X_time_ref, (1, 1, 1))
+        X_time_ref = np.tile(X_time_ref, [1, 1, max(n_impulse, 1)])
+
+        # Initialize offset reference
+        if t_delta_ref is None:
+            t_delta_ref = self.reference_time
+        assert np.isscalar(t_delta_ref), 't_delta_ref must be a scalar'
+        t_delta_ref = np.reshape(t_delta_ref, (1, 1, 1))
+        t_delta_ref = np.tile(t_delta_ref, [1, 1, max(n_impulse, 1)])
+
+        # Initialize random effects reference
+        gf_y_ref_arr = np.copy(self.gf_defaults)
+        if gf_y_ref is None:
+            gf_y_ref = []
+        for x in gf_y_ref:
+            if x is not None:
+                if isinstance(x, str):
+                    g_ix = self.ranef_group2ix[x]
                 else:
-                    xres = len(xaxis)
-
-                if is_3d:
-                    if yaxis is None:
-                        if yres is None:
-                            yres = 32
-                        yvar_base = np.linspace(0., 1., yres)
-                    else:
-                        yres = len(yaxis)
-
-                    T = xres * yres
+                    g_ix = x
+                val = gf_y_ref[x]
+                if isinstance(val, str):
+                    l_ix = self.ranef_level2ix[x][val]
                 else:
-                    T = xres
+                    l_ix = val
+                gf_y_ref_arr[0, g_ix] = l_ix
+        gf_y_ref = gf_y_ref_arr
 
-                if n_samples and (self.is_bayesian or self.has_dropout):
-                    resample = True
-                    S = n_samples
-                else:
-                    resample = False
-                    S = 1
+        # Construct x-axis manipulation
+        xdict = {
+            'axis_var': xvar,
+            'axis': xaxis,
+            'ax_min': xmin,
+            'ax_max': xmax,
+            'base': xvar_base,
+            'ref_varies': ref_varies_with_x,
+            'tile_3d': None
+        }
+        params = [xdict]
+        
+        if is_3d:
+            xdict['tile_3d'] = [1, yres, 1]
+            
+            ydict = {
+                'axis_var': yvar,
+                'axis': yaxis,
+                'ax_min': ymin,
+                'ax_max': ymax,
+                'base': yvar_base,
+                'ref_varies': ref_varies_with_y,
+                'tile_3d': [xres, 1, 1]
+            }
+            params.append(ydict)
 
-                ref_as_manip = ref_varies_with_x and (not is_3d or ref_varies_with_y)  # Only return ref as manip if it fully varies along all axes
+        plot_axes = []
 
-                n_impulse = len(self.impulse_names)
-                n_manip = int(not ref_as_manip) + len(manipulations) # If ref is not returned, return default variation as first manip
-                assert not (ref_as_manip and pair_manipulations), "Cannot both vary reference along all axes and pair manipulations, since doing so will cause all responses to cancel."
+        X_base = None
+        X_time_base = None
+        t_delta_base = None
+        X_ref_mask = np.ones(self.n_impulse)
+        X_main_mask = np.ones(self.n_impulse)
 
-                if is_3d:
-                    sample_shape = (xres, yres, n_manip)
-                    if pair_manipulations:
-                        ref_shape = sample_shape
-                        B_ref = T
-                    elif ref_varies_with_x or ref_varies_with_y:
-                        ref_shape = (xres, yres, 1)
-                        B_ref = T
-                    else:
-                        ref_shape = tuple()
-                        B_ref = 1
-                else:
-                    sample_shape = (T, n_manip)
-                    if pair_manipulations:
-                        ref_shape = sample_shape
-                        B_ref = T
-                    elif ref_varies_with_x:
-                        ref_shape = (T, 1)
-                        B_ref = T
-                    else:
-                        ref_shape = tuple()
-                        B_ref = 1
+        for par in params:
+            axis_var = par['axis_var']
+            axis = par['axis']
+            ax_min = par['ax_min']
+            ax_max = par['ax_max']
+            base = par['base']
+            ref_varies = par['ref_varies']
+            tile_3d = par['tile_3d']
+            plot_axis = None
 
-                # Initialize predictor reference
-                if reference_type is None:
-                    X_ref_arr = np.copy(self.reference_arr)
-                elif reference_type == 'mean':
-                    X_ref_arr = np.copy(self.impulse_means_arr)
-                else:
-                    X_ref_arr = np.zeros_like(self.reference_arr)
-                if X_ref is None:
-                    X_ref = {}
-                for x in X_ref:
-                    ix = self.impulse_names_to_ix[x]
-                    X_ref_arr[ix] = X_ref[x]
-                X_ref = X_ref_arr[None, None, ...]
+            if X_base is None:
+                X_base = np.tile(X_ref, (T, 1, 1))
+            if X_time_base is None:
+                X_time_base = np.tile(X_time_ref, (T, 1, 1))
+            if t_delta_base is None:
+                t_delta_base = np.tile(t_delta_ref, (T, 1, 1))
 
-                # Initialize timestamp reference
-                if X_time_ref is None:
-                    X_time_ref = self.X_time_mean
-                assert np.isscalar(X_time_ref), 'X_time_ref must be a scalar'
-                X_time_ref = np.reshape(X_time_ref, (1, 1, 1))
-                X_time_ref = np.tile(X_time_ref, [1, 1, max(n_impulse, 1)])
-
-                # Initialize offset reference
-                if t_delta_ref is None:
-                    t_delta_ref = self.reference_time
-                assert np.isscalar(t_delta_ref), 't_delta_ref must be a scalar'
-                t_delta_ref = np.reshape(t_delta_ref, (1, 1, 1))
-                t_delta_ref = np.tile(t_delta_ref, [1, 1, max(n_impulse, 1)])
-
-                # Initialize random effects reference
-                gf_y_ref_arr = np.copy(self.gf_defaults)
-                if gf_y_ref is None:
-                    gf_y_ref = []
-                for x in gf_y_ref:
-                    if x is not None:
-                        if isinstance(x, str):
-                            g_ix = self.ranef_group2ix[x]
-                        else:
-                            g_ix = x
-                        val = gf_y_ref[x]
-                        if isinstance(val, str):
-                            l_ix = self.ranef_level2ix[x][val]
-                        else:
-                            l_ix = val
-                        gf_y_ref_arr[0, g_ix] = l_ix
-                gf_y_ref = gf_y_ref_arr
-
-                # Construct x-axis manipulation
-                xdict = {
-                    'axis_var': xvar,
-                    'axis': xaxis,
-                    'ax_min': xmin,
-                    'ax_max': xmax,
-                    'base': xvar_base,
-                    'ref_varies': ref_varies_with_x,
-                    'tile_3d': None
-                }
-                params = [xdict]
-                
-                if is_3d:
-                    xdict['tile_3d'] = [1, yres, 1]
-                    
-                    ydict = {
-                        'axis_var': yvar,
-                        'axis': yaxis,
-                        'ax_min': ymin,
-                        'ax_max': ymax,
-                        'base': yvar_base,
-                        'ref_varies': ref_varies_with_y,
-                        'tile_3d': [xres, 1, 1]
-                    }
-                    params.append(ydict)
-
-                plot_axes = []
-
-                X_base = None
-                X_time_base = None
-                t_delta_base = None
-                X_ref_mask = np.ones(self.n_impulse)
-                X_main_mask = np.ones(self.n_impulse)
-
-                for par in params:
-                    axis_var = par['axis_var']
-                    axis = par['axis']
-                    ax_min = par['ax_min']
-                    ax_max = par['ax_max']
-                    base = par['base']
-                    ref_varies = par['ref_varies']
-                    tile_3d = par['tile_3d']
-                    plot_axis = None
-
-                    if X_base is None:
-                        X_base = np.tile(X_ref, (T, 1, 1))
-                    if X_time_base is None:
-                        X_time_base = np.tile(X_time_ref, (T, 1, 1))
-                    if t_delta_base is None:
-                        t_delta_base = np.tile(t_delta_ref, (T, 1, 1))
-
-                    if axis_var in self.impulse_names_to_ix:
-                        ix = self.impulse_names_to_ix[axis_var]
-                        X_main_mask[ix] = 0
-                        if ref_varies:
-                            X_ref_mask[ix] = 0
-                        if axis is None:
-                            qix = self.PLOT_QUANTILE_IX
-                            lq = self.impulse_quantiles_arr[qix][ix]
-                            uq = self.impulse_quantiles_arr[self.N_QUANTILES - qix - 1][ix]
-                            select = np.isclose(uq - lq, 0)
-                            while qix > 0 and np.any(select):
-                                qix -= 1
-                                lq = self.impulse_quantiles_arr[qix][ix]
-                                uq = self.impulse_quantiles_arr[self.N_QUANTILES - qix - 1][ix]
-                                select = np.isclose(uq - lq, 0)
-                            if np.any(select):
-                                lq = lq - self.epsilon
-                                uq = uq + self.epsilon
-                            if ax_min is None:
-                                ax_min = lq
-                            if ax_max is None:
-                                ax_max = uq
-                            axis = (base * (ax_max - ax_min) + ax_min)
-                        else:
-                            axis = np.array(axis)
-                        assert len(axis.shape) == 1, 'axis must be a (1D) vector. Got a tensor of rank %d.' % len(axis.shape)
-                        plot_axis = axis
-                        plot_axes.append(axis)
-                        X_delta = np.pad(axis[..., None, None] - X_ref[0, 0, ix], ((0, 0), (0, 0), (ix, n_impulse - (ix + 1))))
-                        if is_3d:
-                            X_delta = np.tile(X_delta, tile_3d).reshape((T, 1, max(n_impulse, 1)))
-                        X_base += X_delta
-                        if ref_varies:
-                            X_ref = X_ref + X_delta
-
-                    if axis_var == 'X_time':
-                        if axis is None:
-                            if ax_min is None:
-                                ax_min = 0.
-                            if ax_max is None:
-                                ax_max = self.X_time_mean + self.X_time_sd
-                            axis = (base * (ax_max - ax_min) + ax_min)
-                        else:
-                            axis = np.array(axis)
-                        assert len(axis.shape) == 1, 'axis must be a (1D) vector. Got a tensor of rank %d.' % len(axis.shape)
-                        plot_axis = axis
-                        plot_axes.append(axis)
-                        X_time_base = np.tile(axis[..., None, None], (1, 1, max(n_impulse, 1)))
-                        if is_3d:
-                            X_time_base = np.tile(X_time_base, tile_3d).reshape((T, 1, max(n_impulse, 1)))
-                        if ref_varies:
-                            X_time_ref = X_time_base
-
-                    if axis_var == 't_delta':
-                        if axis is None:
-                            xinterval = self.plot_n_time_units
-                            if ax_min is None:
-                                ax_min = -xinterval * self.prop_fwd
-                            if ax_max is None:
-                                ax_max = xinterval * self.prop_bwd
-                            axis = (base * (ax_max - ax_min) + ax_min)
-                        else:
-                            axis = np.array(axis)
-                        assert len(axis.shape) == 1, 'axis must be a (1D) vector. Got a tensor of rank %d.' % len(axis.shape)
-                        plot_axis = axis
-                        plot_axes.append(axis)
-                        t_delta_base = np.tile(axis[..., None, None], (1, 1, max(n_impulse, 1)))
-                        if is_3d:
-                            t_delta_base = np.tile(t_delta_base, tile_3d).reshape((T, 1, max(n_impulse, 1)))
-                        if ref_varies:
-                            t_delta_ref = t_delta_base
-    
-                    assert plot_axis is not None, 'Unrecognized value for axis variable: "%s"' % axis_var
-
-                gf_y_base = np.tile(gf_y_ref, (T, 1))
+            if axis_var in self.impulse_names_to_ix:
+                ix = self.impulse_names_to_ix[axis_var]
+                X_main_mask[ix] = 0
                 if ref_varies:
-                    gf_y_ref = gf_y_base
-
-                if is_3d:
-                    plot_axes = np.meshgrid(*plot_axes)
+                    X_ref_mask[ix] = 0
+                if axis is None:
+                    qix = self.PLOT_QUANTILE_IX
+                    lq = self.impulse_quantiles_arr[qix][ix]
+                    uq = self.impulse_quantiles_arr[self.N_QUANTILES - qix - 1][ix]
+                    select = np.isclose(uq - lq, 0)
+                    while qix > 0 and np.any(select):
+                        qix -= 1
+                        lq = self.impulse_quantiles_arr[qix][ix]
+                        uq = self.impulse_quantiles_arr[self.N_QUANTILES - qix - 1][ix]
+                        select = np.isclose(uq - lq, 0)
+                    if np.any(select):
+                        lq = lq - self.epsilon
+                        uq = uq + self.epsilon
+                    if ax_min is None:
+                        ax_min = lq
+                    if ax_max is None:
+                        ax_max = uq
+                    axis = (base * (ax_max - ax_min) + ax_min)
                 else:
-                    plot_axes = plot_axes[0]
+                    axis = np.array(axis)
+                assert len(axis.shape) == 1, 'axis must be a (1D) vector. Got a tensor of rank %d.' % len(axis.shape)
+                plot_axis = axis
+                plot_axes.append(axis)
+                X_delta = np.pad(axis[..., None, None] - X_ref[0, 0, ix], ((0, 0), (0, 0), (ix, n_impulse - (ix + 1))))
+                if is_3d:
+                    X_delta = np.tile(X_delta, tile_3d).reshape((T, 1, max(n_impulse, 1)))
+                X_base += X_delta
+                if ref_varies:
+                    X_ref = X_ref + X_delta
 
-                # Bring reference arrays into conformable shape
-                if X_ref.shape[0] == 1 and B_ref > 1:
-                    X_ref = np.tile(X_ref, (B_ref, 1, 1))
-                if X_time_ref.shape[0] == 1 and B_ref > 1:
-                    X_time_ref = np.tile(X_time_ref, (B_ref, 1, 1))
-                if t_delta_ref.shape[0] == 1 and B_ref > 1:
-                    t_delta_ref = np.tile(t_delta_ref, (B_ref, 1, 1))
-                if gf_y_ref.shape[0] == 1 and B_ref > 1:
-                    gf_y_ref = np.tile(gf_y_ref, (B_ref, 1))
+            if axis_var == 'X_time':
+                if axis is None:
+                    if ax_min is None:
+                        ax_min = 0.
+                    if ax_max is None:
+                        ax_max = self.X_time_mean + self.X_time_sd
+                    axis = (base * (ax_max - ax_min) + ax_min)
+                else:
+                    axis = np.array(axis)
+                assert len(axis.shape) == 1, 'axis must be a (1D) vector. Got a tensor of rank %d.' % len(axis.shape)
+                plot_axis = axis
+                plot_axes.append(axis)
+                X_time_base = np.tile(axis[..., None, None], (1, 1, max(n_impulse, 1)))
+                if is_3d:
+                    X_time_base = np.tile(X_time_base, tile_3d).reshape((T, 1, max(n_impulse, 1)))
+                if ref_varies:
+                    X_time_ref = X_time_base
 
-                # The reference will contain 1 entry if not pair_manipulations and len(manipulations) + 1 entries otherwise
-                X_ref_in = [X_ref]
-                X_time_ref_in = [X_time_ref]
-                t_delta_ref_in = [t_delta_ref]
-                gf_y_ref_in = [gf_y_ref]
+            if axis_var == 't_delta':
+                if axis is None:
+                    xinterval = self.plot_n_time_units
+                    if ax_min is None:
+                        ax_min = -xinterval * self.prop_fwd
+                    if ax_max is None:
+                        ax_max = xinterval * self.prop_bwd
+                    axis = (base * (ax_max - ax_min) + ax_min)
+                else:
+                    axis = np.array(axis)
+                assert len(axis.shape) == 1, 'axis must be a (1D) vector. Got a tensor of rank %d.' % len(axis.shape)
+                plot_axis = axis
+                plot_axes.append(axis)
+                t_delta_base = np.tile(axis[..., None, None], (1, 1, max(n_impulse, 1)))
+                if is_3d:
+                    t_delta_base = np.tile(t_delta_base, tile_3d).reshape((T, 1, max(n_impulse, 1)))
+                if ref_varies:
+                    t_delta_ref = t_delta_base
 
-                if ref_as_manip: # Entails not pair_manipulations
-                    X = []
-                    X_time = []
-                    t_delta = []
-                    gf_y = []
-                else: # Ref doesn't vary along all axes, so *_base contains full variation along all axes and is returned as the first manip
-                    X = [X_base]
-                    X_time = [X_time_base]
-                    t_delta = [t_delta_base]
-                    gf_y = [gf_y_base]
+            assert plot_axis is not None, 'Unrecognized value for axis variable: "%s"' % axis_var
 
-                for manipulation in manipulations:
-                    X_cur = None
-                    X_time_cur = X_time_base
-                    t_delta_cur = t_delta_base
-                    gf_y_cur = gf_y_base
+        gf_y_base = np.tile(gf_y_ref, (T, 1))
+        if ref_varies:
+            gf_y_ref = gf_y_base
 
-                    if pair_manipulations:
-                        X_ref_cur = None
-                        X_time_ref_cur = X_time_ref
-                        t_delta_ref_cur = t_delta_ref
-                        gf_y_ref_cur = gf_y_ref
+        if is_3d:
+            plot_axes = np.meshgrid(*plot_axes)
+        else:
+            plot_axes = plot_axes[0]
 
-                    for k in manipulation:
-                        if isinstance(manipulation[k], float) or isinstance(manipulation[k], int):
-                            manip = lambda x, offset=float(manipulation[k]): x + offset
-                        else:
-                            manip = manipulation[k]
-                        if k in self.impulse_names_to_ix:
-                            if X_cur is None:
-                                X_cur = np.copy(X_base)
-                            ix = self.impulse_names_to_ix[k]
-                            X_cur[..., ix] = manip(X_cur[..., ix])
-                            if pair_manipulations:
-                                if X_ref_cur is None:
-                                    X_ref_cur = np.copy(X_ref)
-                                X_ref_cur[..., ix] = manip(X_ref_cur[..., ix])
-                        elif k == 'X_time':
-                            X_time_cur = manip(X_time_cur)
-                            if pair_manipulations:
-                                X_time_ref_cur = X_time_cur
-                        elif k == 't_delta':
-                            t_delta_cur = manip(t_delta_cur)
-                            if pair_manipulations:
-                                t_delta_ref_cur = t_delta_cur
-                        elif k == 'ranef':
-                            gf_y_cur = np.copy(gf_y_cur)
-                            if gf_y_ref is None:
-                                gf_y_ref = []
-                            for x in manip:
-                                if x is not None:
-                                    if isinstance(x, str):
-                                        g_ix = self.ranef_group2ix[x]
-                                    else:
-                                        g_ix = x
-                                    val = manip[x]
-                                    if isinstance(val, str):
-                                        l_ix = self.ranef_level2ix[x][val]
-                                    else:
-                                        l_ix = val
-                                    gf_y_cur[:, g_ix] = l_ix
-                            if pair_manipulations:
-                                gf_y_ref_cur = gf_y_cur
-                        else:
-                            raise ValueError('Unrecognized manipulation key: "%s"' % k)
+        # Bring reference arrays into conformable shape
+        if X_ref.shape[0] == 1 and B_ref > 1:
+            X_ref = np.tile(X_ref, (B_ref, 1, 1))
+        if X_time_ref.shape[0] == 1 and B_ref > 1:
+            X_time_ref = np.tile(X_time_ref, (B_ref, 1, 1))
+        if t_delta_ref.shape[0] == 1 and B_ref > 1:
+            t_delta_ref = np.tile(t_delta_ref, (B_ref, 1, 1))
+        if gf_y_ref.shape[0] == 1 and B_ref > 1:
+            gf_y_ref = np.tile(gf_y_ref, (B_ref, 1))
 
+        # The reference will contain 1 entry if not pair_manipulations and len(manipulations) + 1 entries otherwise
+        X_ref_in = [X_ref]
+        X_time_ref_in = [X_time_ref]
+        t_delta_ref_in = [t_delta_ref]
+        gf_y_ref_in = [gf_y_ref]
+
+        if ref_as_manip: # Entails not pair_manipulations
+            X = []
+            X_time = []
+            t_delta = []
+            gf_y = []
+        else: # Ref doesn't vary along all axes, so *_base contains full variation along all axes and is returned as the first manip
+            X = [X_base]
+            X_time = [X_time_base]
+            t_delta = [t_delta_base]
+            gf_y = [gf_y_base]
+
+        for manipulation in manipulations:
+            X_cur = None
+            X_time_cur = X_time_base
+            t_delta_cur = t_delta_base
+            gf_y_cur = gf_y_base
+
+            if pair_manipulations:
+                X_ref_cur = None
+                X_time_ref_cur = X_time_ref
+                t_delta_ref_cur = t_delta_ref
+                gf_y_ref_cur = gf_y_ref
+
+            for k in manipulation:
+                if isinstance(manipulation[k], float) or isinstance(manipulation[k], int):
+                    manip = lambda x, offset=float(manipulation[k]): x + offset
+                else:
+                    manip = manipulation[k]
+                if k in self.impulse_names_to_ix:
                     if X_cur is None:
-                        X_cur = X_base
-                    X.append(X_cur)
-                    X_time.append(X_time_cur)
-                    t_delta.append(t_delta_cur)
-                    gf_y.append(gf_y_cur)
-
+                        X_cur = np.copy(X_base)
+                    ix = self.impulse_names_to_ix[k]
+                    X_cur[..., ix] = manip(X_cur[..., ix])
                     if pair_manipulations:
                         if X_ref_cur is None:
-                            X_ref_cur = X_ref
-                        X_ref_in.append(X_ref_cur)
-                        X_time_ref_in.append(X_time_ref_cur)
-                        t_delta_ref_in.append(t_delta_ref_cur)
-                        gf_y_ref_in.append(gf_y_ref_cur)
-
-                X_ref_in = np.concatenate(X_ref_in, axis=0)
-                X_time_ref_in = np.concatenate(X_time_ref_in, axis=0)
-                X_mask_ref_in = np.ones_like(X_time_ref_in)
-                t_delta_ref_in = np.concatenate(t_delta_ref_in, axis=0)
-                gf_y_ref_in = np.concatenate(gf_y_ref_in, axis=0)
-
-                # Bring manipulations into 1-1 alignment on the batch dimension
-                if n_manip:
-                    X = np.concatenate(X, axis=0)
-                    X_time = np.concatenate(X_time, axis=0)
-                    X_mask = np.ones_like(X_time)
-                    t_delta = np.concatenate(t_delta, axis=0)
-                    gf_y = np.concatenate(gf_y, axis=0)
-
-                if reference_type == 'sampling':
-                    X_samples = self.sample_impulses(size=S).values
-                    X_samples = np.expand_dims(X_samples, axis=(1,2)) # shape (S, 1, 1, K)
-                    X_ref_samples = X_samples * X_ref_mask[None, None, None, ...]
-                    if n_manip:
-                        X_main_samples = X_samples * X_main_mask[None, None, None, ...]
-
-                alpha = 100-float(level)
-
-                samples = {}
-                if include_interactions:
-                    delta = self.predictive_distribution_delta_w_interactions
+                            X_ref_cur = np.copy(X_ref)
+                        X_ref_cur[..., ix] = manip(X_ref_cur[..., ix])
+                elif k == 'X_time':
+                    X_time_cur = manip(X_time_cur)
+                    if pair_manipulations:
+                        X_time_ref_cur = X_time_cur
+                elif k == 't_delta':
+                    t_delta_cur = manip(t_delta_cur)
+                    if pair_manipulations:
+                        t_delta_ref_cur = t_delta_cur
+                elif k == 'ranef':
+                    gf_y_cur = np.copy(gf_y_cur)
+                    if gf_y_ref is None:
+                        gf_y_ref = []
+                    for x in manip:
+                        if x is not None:
+                            if isinstance(x, str):
+                                g_ix = self.ranef_group2ix[x]
+                            else:
+                                g_ix = x
+                            val = manip[x]
+                            if isinstance(val, str):
+                                l_ix = self.ranef_level2ix[x][val]
+                            else:
+                                l_ix = val
+                            gf_y_cur[:, g_ix] = l_ix
+                    if pair_manipulations:
+                        gf_y_ref_cur = gf_y_cur
                 else:
-                    delta = self.predictive_distribution_delta
-                for i in range(S):
-                    if reference_type == 'sampling':
-                        _X_ref_in = X_ref_in + X_ref_samples[i]
-                        if n_manip:
-                            _X = X + X_main_samples[i]
-                        else:
-                            _X = X
-                    else:
-                        _X_ref_in = X_ref_in
-                        _X = X
-                    to_run = {}
-                    for response in responses:
-                        to_run[response] = {}
-                        for response_param in response_params:
-                            if i == 0 and response_param == 'mean' and not self.has_analytical_mean[response]:
-                                stderr(
-                                    'WARNING: The predictive distribution for %s lacks an analytical mean, '
-                                    'so the mean is bootstrapped, which is computationally '
-                                    'intensive.\n' % response
-                                )
-                            dim_names = self.expand_param_name(response, response_param)
-                            for dim_name in dim_names:
-                                to_run[response][dim_name] = delta[response][dim_name]
+                    raise ValueError('Unrecognized manipulation key: "%s"' % k)
 
-                    if self.resample_ops:
-                        self.session.run(self.resample_ops)
-                    b = (self.history_length + self.future_length) * self.eval_minibatch_size
+            if X_cur is None:
+                X_cur = X_base
+            X.append(X_cur)
+            X_time.append(X_time_cur)
+            t_delta.append(t_delta_cur)
+            gf_y.append(gf_y_cur)
+
+            if pair_manipulations:
+                if X_ref_cur is None:
+                    X_ref_cur = X_ref
+                X_ref_in.append(X_ref_cur)
+                X_time_ref_in.append(X_time_ref_cur)
+                t_delta_ref_in.append(t_delta_ref_cur)
+                gf_y_ref_in.append(gf_y_ref_cur)
+
+        X_ref_in = np.concatenate(X_ref_in, axis=0)
+        X_time_ref_in = np.concatenate(X_time_ref_in, axis=0)
+        X_mask_ref_in = np.ones_like(X_time_ref_in)
+        t_delta_ref_in = np.concatenate(t_delta_ref_in, axis=0)
+        gf_y_ref_in = np.concatenate(gf_y_ref_in, axis=0)
+
+        # Bring manipulations into 1-1 alignment on the batch dimension
+        if n_manip:
+            X = np.concatenate(X, axis=0)
+            X_time = np.concatenate(X_time, axis=0)
+            X_mask = np.ones_like(X_time)
+            t_delta = np.concatenate(t_delta, axis=0)
+            gf_y = np.concatenate(gf_y, axis=0)
+
+        if reference_type == 'sampling':
+            X_samples = self.sample_impulses(size=S).values
+            X_samples = np.expand_dims(X_samples, axis=(1,2)) # shape (S, 1, 1, K)
+            X_ref_samples = X_samples * X_ref_mask[None, None, None, ...]
+            if n_manip:
+                X_main_samples = X_samples * X_main_mask[None, None, None, ...]
+
+        alpha = 100-float(level)
+
+        samples = {}
+        for i in range(S):
+            if reference_type == 'sampling':
+                _X_ref_in = X_ref_in + X_ref_samples[i]
+                if n_manip:
+                    _X = X + X_main_samples[i]
+                else:
+                    _X = X
+            else:
+                _X_ref_in = X_ref_in
+                _X = X
+
+            self.resample_model()
+            if include_interactions:
+                delta = self.predictive_distribution_delta_w_interactions
+            else:
+                delta = self.predictive_distribution_delta
+            to_run = {}
+            b = None
+            for response in responses:
+                to_run[response] = {}
+                for response_param in response_params:
+                    _b = (self.history_length + self.future_length) * self.eval_minibatch_size
+                    if b is None:
+                        b = _b
                     if response_param == 'mean' and not self.has_analytical_mean[response]:
-                        b = max(1, b // N_MCIFIED_DIST_RESAMP)
-                    sample_ref = []
-                    for j in range(0, len(X_ref_in), b):
-                        fd_ref = {
-                            self.X: _X_ref_in[j:j+b],
-                            self.X_time: X_time_ref_in[j:j+b],
-                            self.X_mask: X_mask_ref_in[j:j+b],
-                            self.t_delta: t_delta_ref_in[j:j+b],
-                            self.Y_gf: gf_y_ref_in[j:j+b],
-                            self.training: not self.predict_mode
-                        }
-                        if resample:
-                            fd_ref[self.use_MAP_mode] = False
-                        sample_ref.append(self.session.run(to_run, feed_dict=fd_ref))
-                    sample_ref = concat_nested(sample_ref)
-                    for response in to_run:
-                        for dim_name in to_run[response]:
-                            _sample = sample_ref[response][dim_name]
-                            sample_ref[response][dim_name] = np.reshape(_sample, ref_shape, 'F')
+                        b = max(1, _b // N_MCIFIED_DIST_RESAMP)
+                    if i == 0 and response_param == 'mean' and not self.has_analytical_mean[response]:
+                        stderr(
+                            'WARNING: The predictive distribution for %s lacks an analytical mean, '
+                            'so the mean is bootstrapped, which is computationally '
+                            'intensive.\n' % response
+                        )
+                    dim_names = self.expand_param_name(response, response_param)
+                    for dim_name in dim_names:
+                        to_run[response][dim_name] = delta[response][dim_name]
 
-                    if n_manip:
-                        sample = {}
-                        sample_main = []
-                        for j in range(0, len(_X), b):
-                            fd_main = {
-                                self.X: _X[j:j+b],
-                                self.X_time: X_time[j:j+b],
-                                self.X_mask: X_mask[j:j+b],
-                                self.t_delta: t_delta[j:j+b],
-                                self.Y_gf: gf_y[j:j+b],
-                                self.training: not self.predict_mode
-                            }
-                            if resample:
-                                fd_main[self.use_MAP_mode] = False
-                            sample_main.append(self.session.run(to_run, feed_dict=fd_main))
-                        sample_main = concat_nested(sample_main)
-                        for response in to_run:
-                            sample[response] = {}
-                            for dim_name in sample_main[response]:
-                                sample_main[response][dim_name] = np.reshape(sample_main[response][dim_name], sample_shape, 'F')
-                                sample_main[response][dim_name] = sample_main[response][dim_name] - sample_ref[response][dim_name]
-                                if ref_as_manip:
-                                    sample[response][dim_name] = np.concatenate(
-                                        [sample_ref[response][dim_name], sample_main[response][dim_name]],
-                                        axis=-1
-                                    )
-                                else:
-                                    sample[response][dim_name] = sample_main[response][dim_name]
-                    else:
-                        sample = sample_ref
-                    for response in sample:
-                        if not response in samples:
-                            samples[response] = {}
-                        for dim_name in sample[response]:
-                            if not dim_name in samples[response]:
-                                samples[response][dim_name] = []
-                            samples[response][dim_name].append(sample[response][dim_name])
+            sample_ref = []
+            for j in range(0, len(X_ref_in), b):
+                fd_ref = {
+                    self.X: _X_ref_in[j:j+b],
+                    self.X_time: X_time_ref_in[j:j+b],
+                    self.X_mask: X_mask_ref_in[j:j+b],
+                    self.t_delta: t_delta_ref_in[j:j+b],
+                    self.Y_gf: gf_y_ref_in[j:j+b],
+                    self.training: not self.predict_mode
+                }
+                if resample:
+                    fd_ref[self.use_MAP_mode] = False
+                sample_ref.append(self.session.run(to_run, feed_dict=fd_ref))
+            sample_ref = concat_nested(sample_ref)
+            for response in to_run:
+                for dim_name in to_run[response]:
+                    _sample = sample_ref[response][dim_name]
+                    sample_ref[response][dim_name] = np.reshape(_sample, ref_shape, 'F')
 
-                lower = {}
-                upper = {}
-                mean = {}
-                for response in samples:
-                    lower[response] = {}
-                    upper[response] = {}
-                    mean[response] = {}
-                    for dim_name in samples[response]:
-                        _samples = np.stack(samples[response][dim_name], axis=0)
-                        rescale = self.is_real(response) and \
-                                  not self.get_response_dist_name(response) == 'lognormal' and \
-                                  (dim_name.startswith('mu') or dim_name.startswith('sigma'))
-                        if rescale:
-                            _samples = _samples * self.Y_train_sds[response]
-                        samples[response][dim_name] = np.stack(_samples, axis=0)
-                        _mean = _samples.mean(axis=0)
-                        mean[response][dim_name] = _mean
-                        if resample:
-                            lower[response][dim_name] = np.percentile(_samples, alpha / 2, axis=0)
-                            upper[response][dim_name] = np.percentile(_samples, 100 - (alpha / 2), axis=0)
+            if n_manip:
+                sample = {}
+                sample_main = []
+                for j in range(0, len(_X), b):
+                    fd_main = {
+                        self.X: _X[j:j+b],
+                        self.X_time: X_time[j:j+b],
+                        self.X_mask: X_mask[j:j+b],
+                        self.t_delta: t_delta[j:j+b],
+                        self.Y_gf: gf_y[j:j+b],
+                        self.training: not self.predict_mode
+                    }
+                    if resample:
+                        fd_main[self.use_MAP_mode] = False
+                    sample_main.append(self.session.run(to_run, feed_dict=fd_main))
+                sample_main = concat_nested(sample_main)
+                for response in to_run:
+                    sample[response] = {}
+                    for dim_name in sample_main[response]:
+                        sample_main[response][dim_name] = np.reshape(sample_main[response][dim_name], sample_shape, 'F')
+                        sample_main[response][dim_name] = sample_main[response][dim_name] - sample_ref[response][dim_name]
+                        if ref_as_manip:
+                            sample[response][dim_name] = np.concatenate(
+                                [sample_ref[response][dim_name], sample_main[response][dim_name]],
+                                axis=-1
+                            )
                         else:
-                            lower = upper = mean
-                            samples[response][dim_name] = _mean[None, ...]
+                            sample[response][dim_name] = sample_main[response][dim_name]
+            else:
+                sample = sample_ref
+            for response in sample:
+                if not response in samples:
+                    samples[response] = {}
+                for dim_name in sample[response]:
+                    if not dim_name in samples[response]:
+                        samples[response][dim_name] = []
+                    samples[response][dim_name].append(sample[response][dim_name])
 
-                out = (plot_axes, mean, lower, upper, samples)
+        lower = {}
+        upper = {}
+        mean = {}
+        for response in samples:
+            lower[response] = {}
+            upper[response] = {}
+            mean[response] = {}
+            for dim_name in samples[response]:
+                _samples = np.stack(samples[response][dim_name], axis=0)
+                rescale = self.is_real(response) and \
+                          not self.get_response_dist_name(response) == 'lognormal' and \
+                          (dim_name.startswith('mu') or dim_name.startswith('sigma'))
+                if rescale:
+                    _samples = _samples * self.Y_train_sds[response]
+                samples[response][dim_name] = np.stack(_samples, axis=0)
+                _mean = _samples.mean(axis=0)
+                mean[response][dim_name] = _mean
+                if resample:
+                    lower[response][dim_name] = np.percentile(_samples, alpha / 2, axis=0)
+                    upper[response][dim_name] = np.percentile(_samples, 100 - (alpha / 2), axis=0)
+                else:
+                    lower = upper = mean
+                    samples[response][dim_name] = _mean[None, ...]
 
-                return out
+        out = (plot_axes, mean, lower, upper, samples)
+
+        return out
 
     def irf_rmsd(
             self,
@@ -9992,404 +10033,403 @@ class CDRModel(object):
             ranef_level_names = [None]
             ranef_group_names = [None]
 
-        with self.session.as_default():
-            with self.session.graph.as_default():
+        self.set_predict_mode(True)
 
-                self.set_predict_mode(True)
+        # IRF 1D
+        if generate_univariate_irf_plots or generate_univariate_irf_heatmaps:
+            names = self.impulse_names
+            has_rate = 'rate' in names
+            if has_rate:
+                names = [x for x in names if not self.has_nn_irf or x != 'rate']
+            if not plot_dirac:
+                names = [x for x in names if self.is_non_dirac(x)]
+            if pred_names is not None and len(pred_names) > 0:
+                new_names = []
+                for i, name in enumerate(names):
+                    for ID in pred_names:
+                        if ID == name or re.match(ID if ID.endswith('$') else ID + '$', name) is not None:
+                            new_names.append(name)
+                names = new_names
 
-                # IRF 1D
-                if generate_univariate_irf_plots or generate_univariate_irf_heatmaps:
-                    names = self.impulse_names
-                    has_rate = 'rate' in names
-                    if has_rate:
-                        names = [x for x in names if not self.has_nn_irf or x != 'rate']
-                    if not plot_dirac:
-                        names = [x for x in names if self.is_non_dirac(x)]
-                    if pred_names is not None and len(pred_names) > 0:
-                        new_names = []
-                        for i, name in enumerate(names):
-                            for ID in pred_names:
-                                if ID == name or re.match(ID if ID.endswith('$') else ID + '$', name) is not None:
-                                    new_names.append(name)
-                        names = new_names
+            manipulations = []
+            for x in names:
+                delta = self.plot_step_map[x]
+                manipulations.append({x: delta})
+            gf_y_refs = [{x: y} for x, y in zip(ranef_group_names, ranef_level_names)]
 
-                    manipulations = []
-                    for x in names:
-                        delta = self.plot_step_map[x]
-                        manipulations.append({x: delta})
-                    gf_y_refs = [{x: y} for x, y in zip(ranef_group_names, ranef_level_names)]
+            fixed_impulses = set()
+            for x in self.t.terminals():
+                if x.fixed:
+                    if x.impulse.is_nn_impulse():
+                        for y in x.impulse.impulses():
+                            if y.name() in names:
+                                fixed_impulses.add(y.name())
+                    elif x.impulse.name() in names:
+                        for y in x.impulse_names():
+                            fixed_impulses.add(y)
 
-                    fixed_impulses = set()
-                    for x in self.t.terminals():
-                        if x.fixed:
-                            if x.impulse.is_nn_impulse():
-                                for y in x.impulse.impulses():
-                                    if y.name() in names:
-                                        fixed_impulses.add(y.name())
-                            elif x.impulse.name() in names:
-                                for y in x.impulse_names():
-                                    fixed_impulses.add(y)
+            names_fixed = [x for x in names if x in fixed_impulses]
+            manipulations_fixed = [x for x in manipulations if list(x.keys())[0] in fixed_impulses]
 
-                    names_fixed = [x for x in names if x in fixed_impulses]
-                    manipulations_fixed = [x for x in manipulations if list(x.keys())[0] in fixed_impulses]
+            if has_rate and self.has_nn_irf:
+                names = ['rate'] + names
+                names_fixed = ['rate'] + names_fixed
 
-                    if has_rate and self.has_nn_irf:
-                        names = ['rate'] + names
-                        names_fixed = ['rate'] + names_fixed
+            xinterval = plot_n_time_units
+            xmin = -xinterval * self.prop_fwd
+            xmax = xinterval * self.prop_bwd
 
-                    xinterval = plot_n_time_units
-                    xmin = -xinterval * self.prop_fwd
-                    xmax = xinterval * self.prop_bwd
-
-                    for g, (gf_y_ref, gf_key) in enumerate(zip(gf_y_refs, ranef_level_names)):
-                        if gf_key is None:
-                            names_cur = names_fixed
-                            manipulations_cur = manipulations_fixed
-                        else:
-                            names_cur = names
-                            manipulations_cur = manipulations
-
-                        plot_x, plot_y, lq, uq, samples = self.get_plot_data(
-                            xvar='t_delta',
-                            responses=responses,
-                            response_params=response_params,
-                            X_ref=None,
-                            X_time_ref=None,
-                            t_delta_ref=None,
-                            gf_y_ref=gf_y_ref,
-                            ref_varies_with_x=True,
-                            manipulations=manipulations_cur,
-                            pair_manipulations=False,
-                            reference_type=reference_type,
-                            xaxis=None,
-                            xmin=xmin,
-                            xmax=xmax,
-                            xres=plot_n_time_points,
-                            n_samples=n_samples,
-                            level=level
-                        )
-
-                        plot_x = x_axis_transform(plot_x)
-
-                        for _response in plot_y:
-                            for _dim_name in plot_y[_response]:
-                                param_names = self.get_response_params(_response)
-
-                                include_param_name = True
-
-                                plot_name = 'irf_univariate_%s' % sn(_response)
-                                if include_param_name:
-                                    plot_name += '_%s' % _dim_name
-
-                                if use_horiz_axlab:
-                                    xlab = 't_delta'
-                                else:
-                                    xlab = None
-                                if use_vert_axlab:
-                                    ylab = [get_irf_name(_response, irf_name_map)]
-                                    if include_param_name:
-                                        ylab.append(_dim_name)
-                                    ylab = ', '.join(ylab)
-                                else:
-                                    ylab = None
-
-                                filename = prefix + plot_name
-
-                                if ranef_level_names[g]:
-                                    filename += '_' + ranef_level_names[g]
-                                if mc:
-                                    filename += '_mc'
-                                filename += '.png'
-
-                                _plot_y = plot_y[_response][_dim_name]
-                                _lq = None if lq is None else lq[_response][_dim_name]
-                                _uq = None if uq is None else uq[_response][_dim_name]
-
-                                if not self.has_nn_irf or not has_rate:
-                                    _plot_y = _plot_y[..., 1:]
-                                    _lq = None if _lq is None else _lq[..., 1:]
-                                    _uq = None if _uq is None else _uq[..., 1:]
-
-                                if generate_univariate_irf_plots:
-                                    plot_irf(
-                                        plot_x,
-                                        _plot_y,
-                                        names_cur,
-                                        lq=_lq,
-                                        uq=_uq,
-                                        sort_names=sort_names,
-                                        prop_cycle_length=prop_cycle_length,
-                                        prop_cycle_map=prop_cycle_map,
-                                        dir=self.outdir,
-                                        filename=filename,
-                                        irf_name_map=irf_name_map,
-                                        plot_x_inches=plot_x_inches,
-                                        plot_y_inches=plot_y_inches,
-                                        ylim=ylim,
-                                        cmap=cmap,
-                                        dpi=dpi,
-                                        legend=use_legend,
-                                        xlab=xlab,
-                                        ylab=ylab,
-                                        use_line_markers=use_line_markers,
-                                        transparent_background=transparent_background,
-                                        dump_source=dump_source
-                                    )
-
-                                if generate_univariate_irf_heatmaps:
-                                    plot_irf_as_heatmap(
-                                        plot_x,
-                                        _plot_y,
-                                        names_cur,
-                                        sort_names=sort_names,
-                                        dir=self.outdir,
-                                        filename=filename[:-4] + '_hm.png',
-                                        irf_name_map=irf_name_map,
-                                        plot_x_inches=plot_x_inches,
-                                        plot_y_inches=plot_y_inches,
-                                        ylim=ylim,
-                                        dpi=dpi,
-                                        xlab=xlab,
-                                        ylab=ylab,
-                                        transparent_background=transparent_background,
-                                        dump_source=dump_source
-                                    )
-
-                if plot_rangf:
-                    manipulations = [{'ranef': {x: y}} for x, y in zip(ranef_group_names[1:], ranef_level_names[1:])]
+            for g, (gf_y_ref, gf_key) in enumerate(zip(gf_y_refs, ranef_level_names)):
+                if gf_key is None:
+                    names_cur = names_fixed
+                    manipulations_cur = manipulations_fixed
                 else:
-                    manipulations = None
+                    names_cur = names
+                    manipulations_cur = manipulations
 
-                # Curvature plots
-                if generate_curvature_plots:
-                    names = [x for x in self.impulse_names if (self.is_non_dirac(x) and x != 'rate')]
-                    if pred_names is not None and len(pred_names) > 0:
-                        new_names = []
-                        for i, name in enumerate(names):
-                            for ID in pred_names:
-                                if ID == name or re.match(ID if ID.endswith('$') else ID + '$', name) is not None:
-                                    new_names.append(name)
-                        names = new_names
+                plot_x, plot_y, lq, uq, samples = self.get_plot_data(
+                    xvar='t_delta',
+                    responses=responses,
+                    response_params=response_params,
+                    X_ref=None,
+                    X_time_ref=None,
+                    t_delta_ref=None,
+                    gf_y_ref=gf_y_ref,
+                    ref_varies_with_x=True,
+                    manipulations=manipulations_cur,
+                    pair_manipulations=False,
+                    reference_type=reference_type,
+                    xaxis=None,
+                    xmin=xmin,
+                    xmax=xmax,
+                    xres=plot_n_time_points,
+                    n_samples=n_samples,
+                    level=level
+                )
 
+                plot_x = x_axis_transform(plot_x)
+
+                for _response in plot_y:
+                    for _dim_name in plot_y[_response]:
+                        param_names = self.get_response_params(_response)
+
+                        include_param_name = True
+
+                        plot_name = 'irf_univariate_%s' % sn(_response)
+                        if include_param_name:
+                            plot_name += '_%s' % _dim_name
+
+                        if use_horiz_axlab:
+                            xlab = 't_delta'
+                        else:
+                            xlab = None
+                        if use_vert_axlab:
+                            ylab = [get_irf_name(_response, irf_name_map)]
+                            if include_param_name:
+                                ylab.append(_dim_name)
+                            ylab = ', '.join(ylab)
+                        else:
+                            ylab = None
+
+                        filename = prefix + plot_name
+
+                        if ranef_level_names[g]:
+                            filename += '_' + ranef_level_names[g]
+                        if mc:
+                            filename += '_mc'
+                        filename += '.png'
+
+                        _plot_y = plot_y[_response][_dim_name]
+                        _lq = None if lq is None else lq[_response][_dim_name]
+                        _uq = None if uq is None else uq[_response][_dim_name]
+
+                        if not self.has_nn_irf or not has_rate:
+                            _plot_y = _plot_y[..., 1:]
+                            _lq = None if _lq is None else _lq[..., 1:]
+                            _uq = None if _uq is None else _uq[..., 1:]
+
+                        if generate_univariate_irf_plots:
+                            plot_irf(
+                                plot_x,
+                                _plot_y,
+                                names_cur,
+                                lq=_lq,
+                                uq=_uq,
+                                sort_names=sort_names,
+                                prop_cycle_length=prop_cycle_length,
+                                prop_cycle_map=prop_cycle_map,
+                                outdir=self.outdir,
+                                filename=filename,
+                                irf_name_map=irf_name_map,
+                                plot_x_inches=plot_x_inches,
+                                plot_y_inches=plot_y_inches,
+                                ylim=ylim,
+                                cmap=cmap,
+                                dpi=dpi,
+                                legend=use_legend,
+                                xlab=xlab,
+                                ylab=ylab,
+                                use_line_markers=use_line_markers,
+                                transparent_background=transparent_background,
+                                dump_source=dump_source
+                            )
+
+                        if generate_univariate_irf_heatmaps:
+                            plot_irf_as_heatmap(
+                                plot_x,
+                                _plot_y,
+                                names_cur,
+                                sort_names=sort_names,
+                                dir=self.outdir,
+                                filename=filename[:-4] + '_hm.png',
+                                irf_name_map=irf_name_map,
+                                plot_x_inches=plot_x_inches,
+                                plot_y_inches=plot_y_inches,
+                                ylim=ylim,
+                                dpi=dpi,
+                                xlab=xlab,
+                                ylab=ylab,
+                                transparent_background=transparent_background,
+                                dump_source=dump_source
+                            )
+
+        if plot_rangf:
+            manipulations = [{'ranef': {x: y}} for x, y in zip(ranef_group_names[1:], ranef_level_names[1:])]
+        else:
+            manipulations = None
+
+        # Curvature plots
+        if generate_curvature_plots:
+            names = [x for x in self.impulse_names if (self.is_non_dirac(x) and x != 'rate')]
+            if pred_names is not None and len(pred_names) > 0:
+                new_names = []
+                for i, name in enumerate(names):
+                    for ID in pred_names:
+                        if ID == name or re.match(ID if ID.endswith('$') else ID + '$', name) is not None:
+                            new_names.append(name)
+                names = new_names
+
+            for name in names:
+                plot_x, plot_y, lq, uq, samples = self.get_plot_data(
+                    xvar=name,
+                    responses=responses,
+                    response_params=response_params,
+                    t_delta_ref=reference_time,
+                    ref_varies_with_x=False,
+                    manipulations=manipulations,
+                    pair_manipulations=True,
+                    reference_type=reference_type,
+                    xres=plot_n_time_points,
+                    n_samples=n_samples,
+                    level=level
+                )
+
+                plot_x = x_axis_transform(plot_x)
+
+                for _response in plot_y:
+                    for _dim_name in plot_y[_response]:
+                        param_names = self.get_response_params(_response)
+                        include_param_name = True
+
+                        plot_name = 'curvature_%s' % sn(_response)
+                        if include_param_name:
+                            plot_name += '_%s' % _dim_name
+
+                        plot_name += '_%s_at_delay%s' % (sn(name), reference_time)
+
+                        if use_horiz_axlab:
+                            xlab = name
+                        else:
+                            xlab = None
+                        if use_vert_axlab:
+                            ylab = [get_irf_name(_response, irf_name_map)]
+                            if include_param_name:
+                                ylab.append(_dim_name)
+                            ylab = ', '.join(ylab)
+                        else:
+                            ylab = None
+
+                        _plot_y = plot_y[_response][_dim_name]
+                        _lq = None if lq is None else lq[_response][_dim_name]
+                        _uq = None if uq is None else uq[_response][_dim_name]
+
+                        for g in range(len(ranef_level_names)):
+                            filename = prefix + plot_name
+                            if ranef_level_names[g]:
+                                filename += '_' + ranef_level_names[g]
+                            if mc:
+                                filename += '_mc'
+                            filename += '.png'
+
+                            plot_irf(
+                                plot_x,
+                                _plot_y[:, g:g + 1],
+                                [name],
+                                lq=None if _lq is None else _lq[:, g:g + 1],
+                                uq=None if _uq is None else _uq[:, g:g + 1],
+                                outdir=self.outdir,
+                                filename=filename,
+                                irf_name_map=irf_name_map,
+                                plot_x_inches=plot_x_inches,
+                                plot_y_inches=plot_y_inches,
+                                cmap=cmap,
+                                dpi=dpi,
+                                legend=False,
+                                xlab=xlab,
+                                ylab=ylab,
+                                use_line_markers=use_line_markers,
+                                transparent_background=transparent_background,
+                                dump_source=dump_source
+                            )
+
+        # Surface plots
+        for plot_type, run_plot in zip(
+                ('irf_surface', 'nonstationarity_surface', 'interaction_surface',),
+                (generate_irf_surface_plots, generate_nonstationarity_surface_plots, generate_interaction_surface_plots)
+        ):
+            if run_plot:
+                names = [x for x in self.impulse_names if (self.is_non_dirac(x) and x != 'rate')]
+                if pred_names is not None and len(pred_names) > 0:
+                    new_names = []
+                    for i, name in enumerate(names):
+                        for ID in pred_names:
+                            if ID == name or re.match(ID if ID.endswith('$') else ID + '$', name) is not None:
+                                new_names.append(name)
+                    names = new_names
+                if plot_type == 'irf_surface':
+                    names = ['t_delta:%s' % x for x in names]
+                elif plot_type == 'nonstationarity_surface':
+                    names = ['X_time:%s' % x for x in names]
+                else: # plot_type == 'interaction_surface'
+                    names_src = [x for x in names]
+                    names = [':'.join(x) for x in itertools.combinations(names_src, 2)]
+                if names:
                     for name in names:
-                        plot_x, plot_y, lq, uq, samples = self.get_plot_data(
-                            xvar=name,
+                        xvar, yvar = name.split(':')
+
+                        if plot_type in ('nonstationarity_surface', 'interaction_surface'):
+                            ref_varies_with_x = False
+                        else:
+                            ref_varies_with_x = True
+
+                        if plot_type == 'irf_surface':
+                            xinterval = plot_n_time_units
+                            xmin = -xinterval * self.prop_fwd
+                            xmax = xinterval * self.prop_bwd
+                        else:
+                            xmin = None
+                            xmax = None
+
+                        (plot_x, plot_y), plot_z, lq, uq, _ = self.get_plot_data(
+                            xvar=xvar,
+                            yvar=yvar,
                             responses=responses,
                             response_params=response_params,
                             t_delta_ref=reference_time,
-                            ref_varies_with_x=False,
+                            ref_varies_with_x=ref_varies_with_x,
                             manipulations=manipulations,
                             pair_manipulations=True,
                             reference_type=reference_type,
-                            xres=plot_n_time_points,
+                            xmin=xmin,
+                            xmax=xmax,
+                            xres=int(np.ceil(np.sqrt(plot_n_time_points))),
+                            yres=int(np.ceil(np.sqrt(plot_n_time_points))),
                             n_samples=n_samples,
                             level=level
                         )
 
                         plot_x = x_axis_transform(plot_x)
+                        plot_y = y_axis_transform(plot_y)
 
-                        for _response in plot_y:
-                            for _dim_name in plot_y[_response]:
+                        for _response in plot_z:
+                            for _dim_name in plot_z[_response]:
                                 param_names = self.get_response_params(_response)
                                 include_param_name = True
 
-                                plot_name = 'curvature_%s' % sn(_response)
+                                plot_name = 'surface_%s' % sn(_response)
                                 if include_param_name:
                                     plot_name += '_%s' % _dim_name
 
-                                plot_name += '_%s_at_delay%s' % (sn(name), reference_time)
-
                                 if use_horiz_axlab:
-                                    xlab = name
+                                    xlab = xvar
+                                    ylab = yvar
                                 else:
                                     xlab = None
-                                if use_vert_axlab:
-                                    ylab = [get_irf_name(_response, irf_name_map)]
-                                    if include_param_name:
-                                        ylab.append(_dim_name)
-                                    ylab = ', '.join(ylab)
-                                else:
                                     ylab = None
+                                if use_vert_axlab:
+                                    zlab = [get_irf_name(_response, irf_name_map)]
+                                    if include_param_name:
+                                        zlab.append(_dim_name)
+                                    zlab = ', '.join(zlab)
+                                else:
+                                    zlab = None
 
-                                _plot_y = plot_y[_response][_dim_name]
+                                _plot_z = plot_z[_response][_dim_name]
                                 _lq = None if lq is None else lq[_response][_dim_name]
                                 _uq = None if uq is None else uq[_response][_dim_name]
 
                                 for g in range(len(ranef_level_names)):
-                                    filename = prefix + plot_name
+                                    filename = prefix + plot_name + '_' + sn(yvar) + '_by_' + sn(xvar)
+                                    if plot_type in ('nonstationarity_surface', 'interaction_surface'):
+                                        filename += '_at_delay%s' % reference_time
                                     if ranef_level_names[g]:
                                         filename += '_' + ranef_level_names[g]
                                     if mc:
                                         filename += '_mc'
                                     filename += '.png'
 
-                                    plot_irf(
+                                    plot_surface(
                                         plot_x,
-                                        _plot_y[:, g:g + 1],
-                                        [name],
-                                        lq=None if _lq is None else _lq[:, g:g + 1],
-                                        uq=None if _uq is None else _uq[:, g:g + 1],
+                                        plot_y,
+                                        _plot_z[..., g],
+                                        lq=None if _lq is None else _lq[..., g],
+                                        uq=None if _uq is None else _uq[..., g],
                                         dir=self.outdir,
                                         filename=filename,
                                         irf_name_map=irf_name_map,
                                         plot_x_inches=plot_x_inches,
                                         plot_y_inches=plot_y_inches,
-                                        cmap=cmap,
-                                        dpi=dpi,
-                                        legend=False,
                                         xlab=xlab,
                                         ylab=ylab,
-                                        use_line_markers=use_line_markers,
+                                        zlab=zlab,
                                         transparent_background=transparent_background,
+                                        dpi=dpi,
                                         dump_source=dump_source
                                     )
 
-                # Surface plots
-                for plot_type, run_plot in zip(
-                        ('irf_surface', 'nonstationarity_surface', 'interaction_surface',),
-                        (generate_irf_surface_plots, generate_nonstationarity_surface_plots, generate_interaction_surface_plots)
-                ):
-                    if run_plot:
-                        names = [x for x in self.impulse_names if (self.is_non_dirac(x) and x != 'rate')]
-                        if pred_names is not None and len(pred_names) > 0:
-                            new_names = []
-                            for i, name in enumerate(names):
-                                for ID in pred_names:
-                                    if ID == name or re.match(ID if ID.endswith('$') else ID + '$', name) is not None:
-                                        new_names.append(name)
-                            names = new_names
-                        if plot_type == 'irf_surface':
-                            names = ['t_delta:%s' % x for x in names]
-                        elif plot_type == 'nonstationarity_surface':
-                            names = ['X_time:%s' % x for x in names]
-                        else: # plot_type == 'interaction_surface'
-                            names_src = [x for x in names]
-                            names = [':'.join(x) for x in itertools.combinations(names_src, 2)]
-                        if names:
-                            for name in names:
-                                xvar, yvar = name.split(':')
+        if generate_err_dist_plots:
+            for _response in self.error_distribution_plot:
+                if self.is_real(_response):
+                    lb = self.session.run(self.error_distribution_plot_lb[_response])
+                    ub = self.session.run(self.error_distribution_plot_ub[_response])
+                    n_time_units = ub - lb
+                    fd = {
+                        self.support_start: lb,
+                        self.n_time_units: n_time_units,
+                        self.n_time_points: plot_n_time_points,
+                        self.training: not self.predict_mode
+                    }
 
-                                if plot_type in ('nonstationarity_surface', 'interaction_surface'):
-                                    ref_varies_with_x = False
-                                else:
-                                    ref_varies_with_x = True
+                    plot_x = self.session.run(self.support, feed_dict=fd)
+                    plot_y = self.session.run(self.error_distribution_plot[_response], feed_dict=fd)
 
-                                if plot_type == 'irf_surface':
-                                    xinterval = plot_n_time_units
-                                    xmin = -xinterval * self.prop_fwd
-                                    xmax = xinterval * self.prop_bwd
-                                else:
-                                    xmin = None
-                                    xmax = None
+                    plot_name = 'error_distribution_%s.png' % sn(_response)
 
-                                (plot_x, plot_y), plot_z, lq, uq, _ = self.get_plot_data(
-                                    xvar=xvar,
-                                    yvar=yvar,
-                                    responses=responses,
-                                    response_params=response_params,
-                                    t_delta_ref=reference_time,
-                                    ref_varies_with_x=ref_varies_with_x,
-                                    manipulations=manipulations,
-                                    pair_manipulations=True,
-                                    reference_type=reference_type,
-                                    xmin=xmin,
-                                    xmax=xmax,
-                                    xres=int(np.ceil(np.sqrt(plot_n_time_points))),
-                                    yres=int(np.ceil(np.sqrt(plot_n_time_points))),
-                                    n_samples=n_samples,
-                                    level=level
-                                )
+                    lq = None
+                    uq = None
 
-                                plot_x = x_axis_transform(plot_x)
-                                plot_y = x_axis_transform(plot_y)
+                    plot_irf(
+                        plot_x,
+                        plot_y,
+                        ['Error Distribution'],
+                        lq=lq,
+                        uq=uq,
+                        outdir=self.outdir,
+                        filename=prefix + plot_name,
+                            legend=False,
+                    )
 
-                                for _response in plot_z:
-                                    for _dim_name in plot_z[_response]:
-                                        param_names = self.get_response_params(_response)
-                                        include_param_name = True
-
-                                        plot_name = 'surface_%s' % sn(_response)
-                                        if include_param_name:
-                                            plot_name += '_%s' % _dim_name
-
-                                        if use_horiz_axlab:
-                                            xlab = xvar
-                                            ylab = yvar
-                                        else:
-                                            xlab = None
-                                            ylab = None
-                                        if use_vert_axlab:
-                                            zlab = [get_irf_name(_response, irf_name_map)]
-                                            if include_param_name:
-                                                zlab.append(_dim_name)
-                                            zlab = ', '.join(zlab)
-                                        else:
-                                            zlab = None
-
-                                        _plot_z = plot_z[_response][_dim_name]
-                                        _lq = None if lq is None else lq[_response][_dim_name]
-                                        _uq = None if uq is None else uq[_response][_dim_name]
-
-                                        for g in range(len(ranef_level_names)):
-                                            filename = prefix + plot_name + '_' + sn(yvar) + '_by_' + sn(xvar)
-                                            if plot_type in ('nonstationarity_surface', 'interaction_surface'):
-                                                filename += '_at_delay%s' % reference_time
-                                            if ranef_level_names[g]:
-                                                filename += '_' + ranef_level_names[g]
-                                            if mc:
-                                                filename += '_mc'
-                                            filename += '.png'
-
-                                            plot_surface(
-                                                plot_x,
-                                                plot_y,
-                                                _plot_z[..., g],
-                                                lq=None if _lq is None else _lq[..., g],
-                                                uq=None if _uq is None else _uq[..., g],
-                                                dir=self.outdir,
-                                                filename=filename,
-                                                irf_name_map=irf_name_map,
-                                                plot_x_inches=plot_x_inches,
-                                                plot_y_inches=plot_y_inches,
-                                                xlab=xlab,
-                                                ylab=ylab,
-                                                zlab=zlab,
-                                                transparent_background=transparent_background,
-                                                dpi=dpi,
-                                                dump_source=dump_source
-                                            )
-
-                if generate_err_dist_plots:
-                    for _response in self.error_distribution_plot:
-                        if self.is_real(_response):
-                            lb = self.session.run(self.error_distribution_plot_lb[_response])
-                            ub = self.session.run(self.error_distribution_plot_ub[_response])
-                            n_time_units = ub - lb
-                            fd = {
-                                self.support_start: lb,
-                                self.n_time_units: n_time_units,
-                                self.n_time_points: plot_n_time_points,
-                                self.training: not self.predict_mode
-                            }
-                            plot_x = self.session.run(self.support, feed_dict=fd)
-                            plot_name = 'error_distribution_%s.png' % sn(_response)
-
-                            plot_y = self.session.run(self.error_distribution_plot[_response], feed_dict=fd)
-                            lq = None
-                            uq = None
-
-                            plot_irf(
-                                plot_x,
-                                plot_y,
-                                ['Error Distribution'],
-                                lq=lq,
-                                uq=uq,
-                                dir=self.outdir,
-                                filename=prefix + plot_name,
-                                    legend=False,
-                            )
-
-                self.set_predict_mode(False)
+        self.set_predict_mode(False)
 
     def parameter_table(self, fixed=True, level=95, n_samples='default'):
         """
@@ -10535,48 +10575,50 @@ class CDRModel(object):
         irf_integrals.to_csv(outname, index=False)
 
 
-class CDREnsemble(object):
+class CDREnsemble(CDRModel):
     _doc_header = """
         Class implementing an ensemble of one or more continuous-time deconvolutional regression models.
     """
     _doc_args = """
-        :param outdir: ``str``; path to the config file's output directory
+        :param outdir_top: ``str``; path to the config file's top-level output directory (i.e. the ``outdir`` argument of the config)
         :param name: ``str``; name of the ensemble as defined in the config file
     \n"""
 
     __doc__ = _doc_header + _doc_args
 
-    def __init__(self, outdir, name):
-        super(CDREnsemble, self).__init__()
-
-        self.outdir = outdir
-        self.name = name
+    def __init__(self, outdir_top, name):
+        self.weight_type = 'uniform'
+        self.outdir_top = os.path.normpath(outdir_top)
+        self.ensemble_name = name
         mpaths = [
-            os.path.join(self.outdir,x) for x in os.listdir(self.outdir) if
+            os.path.join(self.outdir_top,x) for x in os.listdir(self.outdir_top) if
             (
                 x.startswith(name) and
                 ENSEMBLE.match(x[len(name):]) and
-                os.path.isdir(os.path.join(self.outdir,x))
+                os.path.isdir(os.path.join(self.outdir_top,x))
             )
         ]
         if not len(mpaths):
-            mpaths = [os.path.join(self.outdir, name)]
+            mpaths = [os.path.join(self.outdir_top, name)]
         self.models = []
         for i, mpath in enumerate(mpaths):
+            stderr('Loading model %s...\n' % mpath)
             self.models.append(load_cdr(mpath))
 
-        self.weight_type = 'uniform'
+        assert self.models, 'An ensemble must contain at least one model. Exiting...'
+        # self.__setstate__(self.models[0].__getstate__())
+        self.model_index = self.sample_model_index()
+        self.outdir = os.path.join(self.outdir_top, self.name)
 
     def __getattribute__(self, item):
         try:
             return object.__getattribute__(self, item)
         except AttributeError:
-            if len(self.models) == 1:
-                ix = 0
-            else:
-                w = self.model_weights()
-                ix = np.random.multinomial(1, w).argmax()
-            return getattr(self.models[ix], item)
+            return getattr(self.models[self.model_index], item)
+
+    @property
+    def name(self):
+        return self.ensemble_name
 
     @property
     def n_ensemble(self):
@@ -10590,7 +10632,7 @@ class CDREnsemble(object):
 
     def model_weights(self):
         if self.weight_type.lower() == 'uniform':
-            weights = np.ones(len(self.n_ensemble)) / self.n_ensemble
+            weights = np.ones(self.n_ensemble) / self.n_ensemble
         elif self.weight_type.lower() == 'll':
             lls = []
             for m in self.models:
@@ -10601,3 +10643,30 @@ class CDREnsemble(object):
             raise ValueError('Unrecognized weighting type for ensemble: %s.' % self.weight_type)
 
         return weights
+
+    def sample_model_index(self):
+        if len(self.models) == 1:
+            ix = 0
+        else:
+            w = self.model_weights()
+            ix = np.random.multinomial(1, w).argmax()
+        return ix
+
+    def resample_model(self):
+        self.model_index = self.sample_model_index()
+
+        if self.resample_ops:
+            self.session.run(self.resample_ops)
+
+    def load(self, *args, **kwargs):
+        for model in self.models:
+            model.load(*args, **kwargs)
+
+    def save(self, *args, **kwargs):
+        raise NotImplementedError('A CDREnsemble is not a trainable object and cannot be saved')
+
+    def fit(self, *args, **kwargs):
+        raise NotImplementedError('A CDREnsemble is not a trainable object and cannot be fitted')
+
+    def build(self, *args, **kwargs):
+        raise NotImplementedError('A CDREnsemble is not a trainable object and cannot be built')

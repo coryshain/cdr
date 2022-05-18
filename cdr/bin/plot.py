@@ -78,7 +78,7 @@ if __name__ == '__main__':
                 sort_names=sort_names,
                 prop_cycle_length=prop_cycle_length,
                 prop_cycle_map=prop_cycle_map,
-                dir=p.outdir,
+                outdir=p.outdir,
                 filename=prefix + 'synthetic_true.png',
                 plot_x_inches=plot_x_inches,
                 plot_y_inches=plot_y_inches,
