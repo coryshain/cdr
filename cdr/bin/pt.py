@@ -26,6 +26,7 @@ if __name__ == '__main__':
     ''')
     argparser.add_argument('config_paths', nargs='*', help='Path(s) to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of models (or model basenames if using -a) to compare. Regex permitted. If unspecified, uses all models.')
+    argparser.add_argument('-n', '--n_iter', type=int, default=10000, help='Number of resampling iterations.')
     argparser.add_argument('-P', '--pool', action='store_true', help='Pool test statistic across models by basename using all ablation configurations common to all configs in ``config_paths``, forces -a. Evaluation data must already exist for all ablation configurations common to all basenames.')
     argparser.add_argument('-a', '--ablation', action='store_true', help='Only compare models within an ablation set (those defined using the "ablate" param in the config file)')
     argparser.add_argument('-A', '--ablation_components', type=str, nargs='*', help='Names of variables to consider in ablative tests. Useful for excluding some ablated models from consideration')
@@ -151,7 +152,7 @@ if __name__ == '__main__':
                                             p_value, base_diff, diffs = permutation_test(
                                                 a,
                                                 b,
-                                                n_iter=10000,
+                                                n_iter=args.n_iter,
                                                 n_tails=args.tails,
                                                 mode=metric,
                                                 nested=is_nested
@@ -263,7 +264,7 @@ if __name__ == '__main__':
                             p_value, diff, diffs = permutation_test(
                                 _df1,
                                 _df2,
-                                n_iter=10000,
+                                n_iter=args.n_iter,
                                 n_tails=args.tails,
                                 mode=metric,
                                 nested=is_nested
