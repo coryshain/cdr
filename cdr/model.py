@@ -168,7 +168,7 @@ def mcify(dist):
                 return super(MCifiedDistribution, self)._quantile(q, **kwargs)
             except NotImplementedError:
                 samp = self.sample(sample_shape=self.n_resamp)
-                return tfd.percentile(x, q * 100, **kwargs)
+                return tf_quantile(x, q, **kwargs)
 
         def has_analytical_mean(self):
             try:
