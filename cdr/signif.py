@@ -56,8 +56,8 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', nested=False, v
 
         ix = np.random.random(err_table.shape).argsort(axis=1)
         err_table = np.take_along_axis(err_table, ix, axis=1)
-        m1 = err_table[:, :n_a].mean(axis=1)
-        m2 = err_table[:, n_a:].mean(axis=1)
+        m1 = err_table[:, :n_a].mean(axis=1).mean()
+        m2 = err_table[:, n_a:].mean(axis=1).mean()
 
         if mode == 'mse':
             cur_diff = m1.mean() - m2.mean()

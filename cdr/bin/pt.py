@@ -26,11 +26,11 @@ if __name__ == '__main__':
     ''')
     argparser.add_argument('config_paths', nargs='*', help='Path(s) to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of models (or model basenames if using -a) to compare. Regex permitted. If unspecified, uses all models.')
-    argparser.add_argument('-P', '--pool', action='store_true', help='Pool test statistic across models by basename using all ablation configurations common to all basenames, forces -a. Evaluation data must already exist for all ablation configurations common to all basenames.')
+    argparser.add_argument('-P', '--pool', action='store_true', help='Pool test statistic across models by basename using all ablation configurations common to all configs in ``config_paths``, forces -a. Evaluation data must already exist for all ablation configurations common to all basenames.')
     argparser.add_argument('-a', '--ablation', action='store_true', help='Only compare models within an ablation set (those defined using the "ablate" param in the config file)')
     argparser.add_argument('-A', '--ablation_components', type=str, nargs='*', help='Names of variables to consider in ablative tests. Useful for excluding some ablated models from consideration')
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
-    argparser.add_argument('-M', '--metric', type=str, default='mse', help='Metric to use for comparison (either "mse" or "loglik")')
+    argparser.add_argument('-M', '--metric', type=str, default='mse', help='Metric to use for comparison (either "mse" or "ll")')
     argparser.add_argument('-t', '--twostep', action='store_true', help='For DTSR models, compare predictions from fitted LME model from two-step hypothesis test.')
     argparser.add_argument('-T', '--tails', type=int, default=2, help='Number of tails (1 or 2)')
     argparser.add_argument('-r', '--response', nargs='*', default=None, help='Name(s) of response(s) to test. If left unspecified, tests all responses.')
@@ -40,7 +40,7 @@ if __name__ == '__main__':
     metric = args.metric
     if metric == 'err':
         metric = 'mse'
-    assert metric in ['mse', 'loglik'], 'Metric must be one of ["err", "loglik"].'
+    assert metric in ['mse', 'loglik', 'll'], 'Metric must be one of ["mse", "ll"].'
 
     if args.pool:
         args.ablation = True
