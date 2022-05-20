@@ -40,6 +40,7 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', nested=False, v
         return (1.0, base_diff, np.zeros((n_iter,)))
 
     n_a = a.shape[1]
+    n_b = b.shape[1]
     err_table = np.concatenate([a, b], axis=1)
 
     hits = 0
@@ -52,9 +53,12 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', nested=False, v
     for i in range(n_iter):
         if verbose: # and (i == 0 or (i + 1) % 100 == 0):
             stderr('\r%d/%d' %(i+1, n_iter))
+        # shuffle = (np.random.random((len(err_table))) > 0.5).astype('int')
+        # m1 = err_table[np.arange(len(err_table)), shuffle]
+        # m2 = err_table[np.arange(len(err_table)), 1 - shuffle]
+
         ix = np.random.random(err_table.shape).argsort(axis=1)
         err_table = np.take_along_axis(err_table, ix, axis=1)
-        np.apply_along_axis(np.random.shuffle, 1, err_table)
         m1 = err_table[:, :n_a].mean(axis=1)
         m2 = err_table[:, n_a:].mean(axis=1)
         if mode == 'mse':
