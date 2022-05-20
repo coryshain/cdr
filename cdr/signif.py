@@ -20,18 +20,17 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', nested=False, v
     :return:
     """
 
-    err_table = np.stack([a, b], 1)
     if mode == 'mse':
-        base_diff = err_table[:,0].mean() - err_table[:,1].mean()
+        base_diff = a.mean(axis=1).mean() - b.mean(axis=1).mean()
         if nested and base_diff <= 0:
             return (1.0, base_diff, np.zeros((n_iter,)))
     elif mode == 'loglik':
-        base_diff = err_table[:,0].sum() - err_table[:,1].sum()
+        base_diff = a.mean(axis=1).sum() - b.mean(axis=1).sum()
         if nested and base_diff >= 0:
             return (1.0, base_diff, np.zeros((n_iter,)))
     elif mode == 'corr':
-        denom = len(err_table) - 1
-        base_diff = (err_table[:,0].sum() - err_table[:,1].sum()) / denom
+        denom = len(a) - 1
+        base_diff = (a.mean(axis=1).sum() - b.mean(axis=1).sum()) / denom
         if nested and base_diff >= 0:
             return (1.0, base_diff, np.zeros((n_iter,)))
     else:
@@ -39,6 +38,9 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', nested=False, v
 
     if base_diff == 0:
         return (1.0, base_diff, np.zeros((n_iter,)))
+
+    n_a = a.shape[1]
+    err_table = np.concatenate([a, b], axis=1)
 
     hits = 0
     if verbose:
@@ -50,9 +52,9 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', nested=False, v
     for i in range(n_iter):
         if verbose and (i == 0 or (i + 1) % 100 == 0):
             stderr('\r%d/%d' %(i+1, n_iter))
-        shuffle = (np.random.random((len(err_table))) > 0.5).astype('int')
-        m1 = err_table[np.arange(len(err_table)),shuffle]
-        m2 = err_table[np.arange(len(err_table)),1-shuffle]
+        np.apply_along_axis(np.random.shuffle, 1, err_table)
+        m1 = err_table[:, :n_a].mean(axis=1)
+        m2 = err_table[:, n_a:].mean(axis=1)
         if mode == 'mse':
             cur_diff = m1.mean() - m2.mean()
         elif mode == 'loglik':

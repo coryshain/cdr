@@ -5,6 +5,7 @@ import re
 import math
 import pickle
 import numpy as np
+import pandas as pd
 from scipy import linalg, special
 
 file_re = re.compile('output_([^_]+)_f(\d+)_([^_]+).csv')
@@ -15,7 +16,7 @@ def stderr(s):
     sys.stderr.flush()
 
 
-def extract_cdr_prediction_files(dirpath):
+def extract_cdr_prediction_data(dirpath, metric='mse'):
     twostep_ix = 0
     filetype_ix = 1
     response_ix = 3
@@ -28,38 +29,73 @@ def extract_cdr_prediction_files(dirpath):
         '(_([^_]+))?(_f([0-9]+))?_([^_]*).(csv|txt)'
     )
     out = {}
-    for path in os.listdir(dirpath):
-        parsed = parser.match(path)
-        if parsed:
-            parsed = parsed.groups()
-            if parsed[twostep_ix]:
-                pred_type = '2step'
-            else:
-                pred_type = 'direct'
-            filetype = parsed[filetype_ix]
-            if filetype in ['CDRpreds', 'preds_table', 'output']:
-                filetype = 'table'
-            elif filetype in ['squared_error', 'losses_mse', 'mse_losses']:
-                filetype = 'mse'
-            response = parsed[response_ix]
-            if response is None:
-                response = 'y'
-            filenum = parsed[filenum_ix]
-            if filenum is None:
-                filenum = 0
-            else:
-                filenum = int(filenum)
-            partition = parsed[partition_ix]
+    # Might be an ensemble, so check
+    basename = os.path.basename(dirpath)
+    parentdir = os.path.normpath(os.path.dirname(dirpath))
+    modeldirs = []
+    for x in os.listdir(parentdir):
+        if x == basename or (x.startswith(basename) and re.match('\.m\d+', x[len(basename):])):
+            modeldirs.append(os.path.join(parentdir, x))
+    if len(modeldirs) > 1: # Ensemble
+        try:
+            modeldirs.remove(os.path.normpath(dirpath))
+        except ValueError:
+            pass
+    for modeldir in modeldirs:
+        model_basename = os.path.basename(modeldir)
+        for path in os.listdir(modeldir):
+            parsed = parser.match(path)
+            if parsed:
+                parsed = parsed.groups()
+                if parsed[twostep_ix]:
+                    predtype = '2step'
+                else:
+                    predtype = 'direct'
+                filetype = parsed[filetype_ix]
+                if filetype in ['CDRpreds', 'preds_table', 'output']:
+                    filetype = 'table'
+                elif filetype in ['squared_error', 'losses_mse', 'mse_losses']:
+                    filetype = 'mse'
+                response = parsed[response_ix]
+                if response is None:
+                    response = 'y'
+                filenum = parsed[filenum_ix]
+                if filenum is None:
+                    filenum = 0
+                else:
+                    filenum = int(filenum)
+                partition = parsed[partition_ix]
 
-            if response not in out:
-                out[response] = {}
-            if filenum not in out[response]:
-                out[response][filenum] = {}
-            if partition not in out[response][filenum]:
-                out[response][filenum][partition] = {}
-            if filetype not in out[response][filenum][partition]:
-                out[response][filenum][partition][filetype] = {}
-            out[response][filenum][partition][filetype][pred_type] = dirpath + '/' + path
+                data_path = os.path.join(modeldir, path)
+
+                if filetype == 'table':
+                    a = pd.read_csv(
+                        data_path,
+                        sep=' ',
+                        skipinitialspace=True
+                    )
+                    if metric == 'mse':
+                        a = (a['CDRobs'] - a['CDRpreds']) ** 2
+                    else:
+                        a = a['CDRloglik']
+                else:
+                    a = pd.read_csv(
+                        data_path,
+                        sep=' ',
+                        header=None,
+                        skipinitialspace=True
+                    )
+
+                if response not in out:
+                    out[response] = {}
+                if filenum not in out[response]:
+                    out[response][filenum] = {}
+                if partition not in out[response][filenum]:
+                    out[response][filenum][partition] = {}
+                if predtype not in out[response][filenum][partition][filetype]:
+                    out[response][filenum][partition][predtype] = {}
+                if model_basename not in out[response][filenum][partition][predtype]:
+                    out[response][filenum][partition][predtype][model_basename] = a
 
     return out
 

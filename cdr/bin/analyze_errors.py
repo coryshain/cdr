@@ -9,7 +9,7 @@ from matplotlib import pyplot as plt
 
 from cdr.config import Config
 from cdr.data import compare_elementwise_perf
-from cdr.util import filter_models, get_partition_list, nested, stderr, extract_cdr_prediction_files
+from cdr.util import filter_models, get_partition_list, nested, stderr, extract_cdr_prediction_data
 
 
 def scale(*a):
@@ -128,8 +128,8 @@ if __name__ == '__main__':
                                 a_model_path = a_model.replace(':', '+')
                                 b_model_path = b_model.replace(':', '+')
                                 name = '%s_v_%s' % (a_model_path, b_model_path)
-                                a_files = extract_cdr_prediction_files(p.outdir + '/' + a_model_path)
-                                b_files = extract_cdr_prediction_files(p.outdir + '/' + b_model_path)
+                                a_files = extract_cdr_prediction_data(p.outdir + '/' + a_model_path)
+                                b_files = extract_cdr_prediction_data(p.outdir + '/' + b_model_path)
 
                                 for response in a_files:
                                     for filenum in a_files[response]:
@@ -222,7 +222,7 @@ if __name__ == '__main__':
                 pooled_data[a][exp_outdir] = {}
                 for m in basenames_to_pool:
                     m_name = '!'.join([m] + list(a)).replace(':', '+')
-                    m_files = extract_cdr_prediction_files(exp_outdir + '/' + m_name)
+                    m_files = extract_cdr_prediction_data(exp_outdir + '/' + m_name)
                     for response in m_files:
                         for filenum in m_files[response]:
                             if partition_str in m_files[response][filenum] and \

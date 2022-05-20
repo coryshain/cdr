@@ -9,7 +9,7 @@ from matplotlib import pyplot as plt
 
 from cdr.config import Config
 from cdr.signif import permutation_test
-from cdr.util import filter_models, get_partition_list, nested, stderr, extract_cdr_prediction_files
+from cdr.util import filter_models, get_partition_list, nested, stderr, extract_cdr_prediction_data
 
 
 def scale(a, b):
@@ -56,7 +56,8 @@ if __name__ == '__main__':
     for path in args.config_paths:
         p = Config(path)
 
-        models = filter_models(p.model_list, args.models)
+        model_list = sorted(set(p.model_list) | set(p.ensemble_list))
+        models = filter_models(model_list, args.models)
         cdr_models = [x for x in filter_models(models, cdr_only=True)]
 
         if args.ablation:
@@ -132,53 +133,24 @@ if __name__ == '__main__':
                                 a_model_path = a_model.replace(':', '+')
                                 b_model_path = b_model.replace(':', '+')
                                 name = '%s_v_%s' % (a_model_path, b_model_path)
-                                a_files = extract_cdr_prediction_files(p.outdir + '/' + a_model_path)
-                                b_files = extract_cdr_prediction_files(p.outdir + '/' + b_model_path)
-                                for response in a_files:
-                                    for filenum in a_files[response]:
-                                        if partition_str in a_files[response][filenum] and \
-                                                partition_str in b_files[response][filenum] and \
+                                a_data = extract_cdr_prediction_data(p.outdir + '/' + a_model_path, metric=metric)
+                                b_data = extract_cdr_prediction_data(p.outdir + '/' + b_model_path, metric=metric)
+                                for response in a_data:
+                                    for filenum in a_data[response]:
+                                        if partition_str in a_data[response][filenum] and \
                                                 (args.response is None or response in args.response):
-                                            if 'table' in a_files[response][filenum][partition_str]:
-                                                a = pd.read_csv(
-                                                    a_files[response][filenum][partition_str]['table']['direct'],
-                                                    sep=' ',
-                                                    skipinitialspace=True
-                                                )
-                                                if metric == 'mse':
-                                                    a = (a['CDRobs'] - a['CDRpreds'])**2
-                                                else:
-                                                    a = a['CDRloglik']
-                                            else:
-                                                a = pd.read_csv(
-                                                    a_files[response][filenum][partition_str][metric]['direct'],
-                                                    sep=' ',
-                                                    header=None,
-                                                    skipinitialspace=True
-                                                )
-                                            if 'table' in b_files[response][filenum][partition_str]:
-                                                b = pd.read_csv(
-                                                    b_files[response][filenum][partition_str]['table']['direct'],
-                                                    sep=' ',
-                                                    skipinitialspace=True
-                                                )
-                                                if metric == 'mse':
-                                                    b = (b['CDRobs'] - b['CDRpreds'])**2
-                                                else:
-                                                    b = b['CDRloglik']
-                                            else:
-                                                b = pd.read_csv(
-                                                    b_files[response][filenum][partition_str][metric]['direct'],
-                                                    sep=' ',
-                                                    header=None,
-                                                    skipinitialspace=True
-                                                )
+                                            a = a_data[response][filenum][partition_str]['direct']
+                                            try:
+                                                b = b_data[response][filenum][partition_str]['direct']
+                                            except KeyError:
+                                                continue
 
-                                            select = np.logical_and(np.isfinite(np.array(a)), np.isfinite(np.array(b)))
-                                            diff = float(len(a) - select.sum())
+                                            a = np.stack([a[x] for x in a], axis=1)
+                                            b = np.stack([b[x] for x in b], axis=1)
+
                                             p_value, base_diff, diffs = permutation_test(
-                                                a[select],
-                                                b[select],
+                                                a,
+                                                b,
                                                 n_iter=10000,
                                                 n_tails=args.tails,
                                                 mode=metric,
@@ -198,8 +170,6 @@ if __name__ == '__main__':
 
                                                 summary = '='*50 + '\n'
                                                 summary += 'Model comparison: %s vs %s\n' % (a_model, b_model)
-                                                if diff > 0:
-                                                    summary += '%d NaN rows filtered out (out of %d)\n' % (diff, len(a))
                                                 summary += 'Partition: %s\n' % partition_str
                                                 summary += 'Metric: %s\n' % metric
                                                 summary += 'Difference: %.4f\n' % base_diff
@@ -222,28 +192,14 @@ if __name__ == '__main__':
                 pooled_data[a][exp_outdir] = {}
                 for m in basenames_to_pool:
                     m_name = '!'.join([m] + list(a)).replace(':', '+')
-                    m_files = extract_cdr_prediction_files(exp_outdir + '/' + m_name)
+                    m_files = extract_cdr_prediction_data(exp_outdir + '/' + m_name)
                     for response in m_files:
                         for filenum in m_files[response]:
                             if partition_str in m_files[response][filenum] and \
                                     (args.response is None or response in args.response):
-                                if 'table' in m_files[response][filenum][partition_str]:
-                                    v = pd.read_csv(
-                                        m_files[response][filenum][partition_str]['table']['direct'],
-                                        sep=' ',
-                                        skipinitialspace=True
-                                    )
-                                    if metric == 'mse':
-                                        v = (v['CDRobs'] - v['CDRpreds']) ** 2
-                                    else:
-                                        v = v['CDRloglik']
-                                else:
-                                    v = pd.read_csv(
-                                        m_files[response][filenum][partition_str][metric]['direct'],
-                                        sep=' ',
-                                        header=None,
-                                        skipinitialspace=True
-                                    )
+                                v = m_files[response][filenum][partition_str]['direct']
+                                v = np.stack([v[x] for x in v], axis=1)
+
                                 if a not in pooled_data:
                                     pooled_data[a] = {}
                                 if exp_outdir not in pooled_data[a]:
