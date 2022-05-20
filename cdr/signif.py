@@ -53,7 +53,7 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', nested=False, v
         if verbose: # and (i == 0 or (i + 1) % 100 == 0):
             stderr('\r%d/%d' %(i+1, n_iter))
         ix = np.random.random(err_table.shape).argsort(axis=1)
-        err_table = np.take_along_axis(a, ix, axis=1)
+        err_table = np.take_along_axis(err_table, ix, axis=1)
         np.apply_along_axis(np.random.shuffle, 1, err_table)
         m1 = err_table[:, :n_a].mean(axis=1)
         m2 = err_table[:, n_a:].mean(axis=1)
