@@ -85,9 +85,6 @@ if int(tf.__version__.split('.')[0]) == 1:
     from tensorflow import check_numerics as tf_check_numerics
     parameter_properties = None
 
-    def tf_quantile(x, q, **kwargs):
-        return tfd.percentile(x, q * 100, **kwargs)
-
     TF_MAJOR_VERSION = 1
 elif int(tf.__version__.split('.')[0]) == 2:
     import tensorflow.compat.v1 as tf
@@ -109,8 +106,6 @@ elif int(tf.__version__.split('.')[0]) == 2:
     Scale = tfb.Scale
     Chain = tfb.Chain
     Identity = tfb.Identity
-
-    tf_quantile = tfs.quantiles
 
     def AffineScalar(shift, scale, *args, **kwargs):
         chain = []
@@ -166,7 +161,7 @@ def mcify(dist):
                 return super(MCifiedDistribution, self)._quantile(q, **kwargs)
             except NotImplementedError:
                 samp = self.sample(sample_shape=self.n_resamp)
-                return tf_quantile(samp, q, **kwargs)
+                return tfd.percentile(x, q * 100, **kwargs)
 
         def has_analytical_mean(self):
             try:
