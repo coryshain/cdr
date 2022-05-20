@@ -85,6 +85,9 @@ if int(tf.__version__.split('.')[0]) == 1:
     from tensorflow import check_numerics as tf_check_numerics
     parameter_properties = None
 
+    def tf_quantile(x, q, **kwargs):
+        return tfd.percentile(x, q * 100, **kwargs)
+
     TF_MAJOR_VERSION = 1
 elif int(tf.__version__.split('.')[0]) == 2:
     import tensorflow.compat.v1 as tf
@@ -127,6 +130,10 @@ elif int(tf.__version__.split('.')[0]) == 2:
     from tensorflow import argsort as tf_argsort
     from tensorflow import keras
     from tensorflow.debugging import check_numerics as tf_check_numerics
+
+    def tf_quantile(x, q, **kwargs):
+        return tfs.percentile(x, q * 100, **kwargs)
+
     TF_MAJOR_VERSION = 2
 else:
     raise ImportError('Unsupported TensorFlow version: %s. Must be 1.x.x or 2.x.x.' % tf.__version__)
