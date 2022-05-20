@@ -50,7 +50,7 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', nested=False, v
     diffs = np.zeros((n_iter,))
 
     for i in range(n_iter):
-        if verbose and (i == 0 or (i + 1) % 100 == 0):
+        if verbose: # and (i == 0 or (i + 1) % 100 == 0):
             stderr('\r%d/%d' %(i+1, n_iter))
         ix = np.random.random(err_table.shape).argsort(axis=1)
         err_table = np.take_along_axis(a, ix, axis=1)
