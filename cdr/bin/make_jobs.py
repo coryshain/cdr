@@ -27,6 +27,7 @@ if __name__ == '__main__':
     argparser.add_argument('-P', '--slurm_partition', default=None, help='Value for SLURM --partition setting, if applicable')
     argparser.add_argument('-e', '--exclude', nargs='+', help='Nodes to exclude')
     argparser.add_argument('-c', '--cli_args', default='', help='Command line arguments to pass into call')
+    argparser.add_argument('-s', '--singularity_path', default='', help='Path to singularity image to invoke before running')
     argparser.add_argument('-o', '--outdir', default='./', help='Directory in which to place generated batch scripts.')
     args = argparser.parse_args()
 
@@ -43,6 +44,7 @@ if __name__ == '__main__':
     else:
         exclude = []
     cli_args = args.cli_args.replace('\\', '') # Delete escape characters
+    singularity_path = args.singularity_path
     outdir = args.outdir
 
     if not os.path.exists(outdir):
@@ -66,18 +68,24 @@ if __name__ == '__main__':
                     f.write('#SBATCH --partition=%s\n' % slurm_partition)
                 if exclude:
                     f.write('#SBATCH --exclude=%s\n' % exclude)
-                f.write('\n')
+                wrapper = '%s'
+                if singularity_path:
+                    if use_gpu:
+                        wrapper = wrapper % ('singularity exec --nv %s bash -c "cd %s; %%s"\n' % (singularity_path, os.getcwd()))
+                    else:
+                        wrapper = wrapper % ('singularity exec %s bash -c "cd %s; %%s"\n' % (singularity_path, os.getcwd()))
                 for job_type in job_types:
                     if job_type.lower() == 'save_and_exit':
-                        f.write('python3 -m cdr.bin.train %s -m %s -s -S %s\n' % (path, m, cli_args))
+                        job_str = wrapper % ('python3 -m cdr.bin.train %s -m %s -s -S %s' % (path, m, cli_args))
                     elif job_type.lower() == 'fit':
-                        f.write('python3 -m cdr.bin.train %s -m %s %s\n' % (path, m, cli_args))
+                        job_str = wrapper % ('python3 -m cdr.bin.train %s -m %s %s' % (path, m, cli_args))
                     elif partitions and job_type.lower() in ['fit', 'predict']:
-                        f.write('python3 -m cdr.bin.predict %s -p %s -m %s %s\n' % (path, ' '.join(partitions), m, cli_args))
+                        job_str = wrapper % ('python3 -m cdr.bin.predict %s -p %s -m %s %s' % (path, ' '.join(partitions), m, cli_args))
                     elif job_type.lower() == 'summarize':
-                        f.write('python3 -m cdr.bin.summarize %s -m %s %s\n' % (path, m, cli_args))
+                        job_str = wrapper % ('python3 -m cdr.bin.summarize %s -m %s %s' % (path, m, cli_args))
                     elif job_type.lower() == 'plot':
-                        f.write('python3 -m cdr.bin.plot %s -m %s %s\n' % (path, m, cli_args))
+                        job_str = wrapper % ('python3 -m cdr.bin.plot %s -m %s %s' % (path, m, cli_args))
                     else:
                         raise ValueError('Unrecognized job type: %s.' % job_type)
+                    f.write(job_str)
 
