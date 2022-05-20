@@ -132,10 +132,6 @@ elif int(tf.__version__.split('.')[0]) == 2:
     from tensorflow.debugging import check_numerics as tf_check_numerics
 
     def tf_quantile(x, q, **kwargs):
-        print(x)
-        print(q)
-        print(kwargs)
-        input()
         return tfs.percentile(x, q * 100, **kwargs)
 
     TF_MAJOR_VERSION = 2
