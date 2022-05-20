@@ -132,6 +132,10 @@ elif int(tf.__version__.split('.')[0]) == 2:
     from tensorflow.debugging import check_numerics as tf_check_numerics
 
     def tf_quantile(x, q, **kwargs):
+        print(x)
+        print(q)
+        print(kwargs)
+        input()
         return tfs.percentile(x, q * 100, **kwargs)
 
     TF_MAJOR_VERSION = 2
@@ -168,7 +172,7 @@ def mcify(dist):
                 return super(MCifiedDistribution, self)._quantile(q, **kwargs)
             except NotImplementedError:
                 samp = self.sample(sample_shape=self.n_resamp)
-                return tf_quantile(x, q, **kwargs)
+                return tf_quantile(samp, q, **kwargs)
 
         def has_analytical_mean(self):
             try:
