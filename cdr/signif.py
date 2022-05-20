@@ -51,16 +51,14 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', nested=False, v
     diffs = np.zeros((n_iter,))
 
     for i in range(n_iter):
-        if verbose: # and (i == 0 or (i + 1) % 100 == 0):
+        if verbose and (i == 0 or (i + 1) % 100 == 0):
             stderr('\r%d/%d' %(i+1, n_iter))
-        # shuffle = (np.random.random((len(err_table))) > 0.5).astype('int')
-        # m1 = err_table[np.arange(len(err_table)), shuffle]
-        # m2 = err_table[np.arange(len(err_table)), 1 - shuffle]
 
         ix = np.random.random(err_table.shape).argsort(axis=1)
         err_table = np.take_along_axis(err_table, ix, axis=1)
         m1 = err_table[:, :n_a].mean(axis=1)
         m2 = err_table[:, n_a:].mean(axis=1)
+
         if mode == 'mse':
             cur_diff = m1.mean() - m2.mean()
         elif mode == 'loglik':
@@ -68,6 +66,7 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', nested=False, v
         elif mode == 'corr':
             cur_diff = (m1.sum() - m2.sum()) / denom
         diffs[i] = cur_diff
+
         if n_tails == 1:
             if base_diff < 0 and cur_diff <= base_diff:
                 hits += 1
