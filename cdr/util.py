@@ -92,7 +92,7 @@ def extract_cdr_prediction_data(dirpath, metric='mse'):
                     out[response][filenum] = {}
                 if partition not in out[response][filenum]:
                     out[response][filenum][partition] = {}
-                if predtype not in out[response][filenum][partition][filetype]:
+                if predtype not in out[response][filenum][partition]:
                     out[response][filenum][partition][predtype] = {}
                 if model_basename not in out[response][filenum][partition][predtype]:
                     out[response][filenum][partition][predtype][model_basename] = a
