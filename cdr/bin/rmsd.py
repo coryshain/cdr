@@ -2,6 +2,7 @@ import argparse
 import sys
 import os
 import pickle
+sys.modules['dtsr'] = __import__('cdr') # Hack for backward compatibility
 from cdr.config import Config
 from cdr.model import CDREnsemble
 from cdr.util import filter_models, stderr
@@ -12,10 +13,6 @@ if __name__ == '__main__':
     ''')
     argparser.add_argument('paths', nargs='+', help='Path(s) to config file(s) defining experiments')
     argparser.add_argument('-m', '--models', nargs='*', default = [], help='Model names for which to compute RMSD. Regex permitted. If unspecified, uses all CDR models.')
-    argparser.add_argument('-S', '--summed', action='store_true', help='Use summed rather than individual IRFs.')
-    argparser.add_argument('-u', '--ntimeunits', type=float, default=None, help='Number of time units over which to compute RMSD.')
-    argparser.add_argument('-r', '--resolution', type=float, default=1000, help='Number of points to use for computing RMSD.')
-    argparser.add_argument('-a', '--algorithm', type=str, default='MAP', help='Algorithm ("sampling" or "MAP") to use for extracting predictions from CDRBayes. Ignored for CDRMLE.')
     argparser.add_argument('--cpu_only', action='store_true', help='Use CPU implementation even if GPU is available.')
     args = argparser.parse_args()
 
@@ -48,10 +45,6 @@ if __name__ == '__main__':
 
             rmsd = cdr_model.irf_rmsd(
                 gold_irf_lambda,
-                summed=args.summed,
-                n_time_units=args.ntimeunits,
-                n_time_points=args.resolution,
-                algorithm=args.algorithm
             )
 
             summary = '=' * 50 + '\n'
@@ -64,10 +57,7 @@ if __name__ == '__main__':
             summary += 'RMSD from gold: %s\n\n' % rmsd
             summary += '=' * 50 + '\n'
 
-            if args.summed:
-                out_name = 'synth_summed_rmsd'
-            else:
-                out_name = 'synth_rmsd'
+            out_name = 'synth_rmsd'
 
             with open(p.outdir + '/' + m_path + '/' + out_name + '.txt', 'w') as f:
                 f.write(summary)
