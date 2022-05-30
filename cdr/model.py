@@ -27,7 +27,11 @@ if int(tf.__version__.split('.')[0]) == 1:
     from tensorflow.contrib.distributions import Normal, SinhArcsinh, Bernoulli, Categorical, Exponential, TransformedDistribution
     import tensorflow.contrib.distributions as tfd
     AffineScalar = tfd.bijectors.AffineScalar
-    ExponentiallyModifiedGaussian = None # Not supported
+
+    # TODO: Implement
+    class ExponentiallyModifiedGaussian(TransformedDistribution):
+        def __init(self, *args, **kwargs):
+            raise NotImplementedError('The exgaussian distribution is not supported in TensorFlow v1. Switch to a TensorFlow v2 release in order to use this feature.')
 
     # Much of this is stolen from the TF2 source, since TF1 lacks LogNormal
     class LogNormal(TransformedDistribution):
