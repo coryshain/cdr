@@ -59,9 +59,9 @@ if __name__ == '__main__':
             summary += 'Path to synth model:\n'
             summary += '  ' + synth_path + '\n\n'
             summary += 'RMSD from gold: %s\n'
-            summary += '  Mean:  %s' % rmsd_mean[cdr_model.response_names[0]]['mean']
-            summary += '  2.5%%:  %s' % rmsd_lower[cdr_model.response_names[0]]['mean']
-            summary += '  97.5%%: %s' % rmsd_upper[cdr_model.response_names[0]]['mean']
+            summary += '  Mean:  %s\n' % rmsd_mean[cdr_model.response_names[0]]['mean']
+            summary += '  2.5%%:  %s\n' % rmsd_lower[cdr_model.response_names[0]]['mean']
+            summary += '  97.5%%: %s\n' % rmsd_upper[cdr_model.response_names[0]]['mean']
             summary += '=' * 50 + '\n'
 
             out_name = 'synth_rmsd'
