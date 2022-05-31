@@ -13,7 +13,7 @@ if __name__ == '__main__':
     ''')
     argparser.add_argument('paths', nargs='+', help='Path(s) to config file(s) defining experiments')
     argparser.add_argument('-m', '--models', nargs='*', default = [], help='Model names for which to compute RMSD. Regex permitted. If unspecified, uses all CDR models.')
-    argparser.add_argument('-n', '--n_samples', default=None, help='Number of samples to draw. If unspecified, use MLE/MAP.')
+    argparser.add_argument('-n', '--n_samples', type=int, default=None, help='Number of samples to draw. If unspecified, use MLE/MAP.')
     argparser.add_argument('--cpu_only', action='store_true', help='Use CPU implementation even if GPU is available.')
     args = argparser.parse_args()
 
