@@ -14,6 +14,7 @@ setup(
         'dash',
         'numpy>=1.9.1',
         'pandas>=1.1',
+        'pyyaml',
         'matplotlib',
         'tensorflow>=1.9',
         'tensorflow-probability',

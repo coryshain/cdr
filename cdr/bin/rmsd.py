@@ -43,7 +43,7 @@ if __name__ == '__main__':
 
             stderr('Computing RMSD...\n')
 
-            rmsd = cdr_model.irf_rmsd(
+            rmsd_mean, rmsd_lowe, rmsd_upper, rmsd_samples = cdr_model.irf_rmsd(
                 gold_irf_lambda,
             )
 
@@ -54,7 +54,7 @@ if __name__ == '__main__':
             summary += '  ' + formula + '\n\n'
             summary += 'Path to synth model:\n'
             summary += '  ' + synth_path + '\n\n'
-            summary += 'RMSD from gold: %s\n\n' % rmsd
+            summary += 'RMSD from gold: %s\n\n' % rmsd_mean[cdr_model.response_names[0]]['mean']
             summary += '=' * 50 + '\n'
 
             out_name = 'synth_rmsd'

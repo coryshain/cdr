@@ -24,7 +24,8 @@ N_MCIFIED_DIST_RESAMP = 10000
 
 import tensorflow as tf
 if int(tf.__version__.split('.')[0]) == 1:
-    from tensorflow.contrib.distributions import Normal, SinhArcsinh, Bernoulli, Categorical, Exponential, TransformedDistribution
+    from tensorflow.contrib.distributions import Distribution, Normal, SinhArcsinh, Bernoulli, Categorical, \
+        Exponential, TransformedDistribution
     import tensorflow.contrib.distributions as tfd
     AffineScalar = tfd.bijectors.AffineScalar
 
@@ -101,6 +102,7 @@ elif int(tf.__version__.split('.')[0]) == 2:
     from tensorflow_probability import stats as tfs
     from tensorflow_probability.python.internal import parameter_properties
 
+    Distribution = tfd.Distribution
     Normal = tfd.Normal
     LogNormal = tfd.LogNormal
     SinhArcsinh = tfd.SinhArcsinh
@@ -141,6 +143,71 @@ elif int(tf.__version__.split('.')[0]) == 2:
     TF_MAJOR_VERSION = 2
 else:
     raise ImportError('Unsupported TensorFlow version: %s. Must be 1.x.x or 2.x.x.' % tf.__version__)
+
+
+class SkewNormal(Distribution):
+    def __init__(self,
+                 loc,
+                 scale,
+                 shape,
+                 validate_args=False,
+                 name='SkewNormal'
+                 ):
+        with tf.name_scope(name) as name:
+            self._loc = tf.convert_to_tensor(loc, dtype=tf.float32)
+            self._scale = tf.convert_to_tensor(scale, dtype=tf.float32)
+            self._shape = tf.convert_to_tensor(shape, dtype=tf.float32)
+            super(SkewNormal, self).__init__(
+                validate_args=validate_args,
+                name=name
+            )
+
+            stdnorm = Normal(loc=0., scale=1.)
+            self.stdnorm_logpdf = stdnorm.log_prob
+            self.stdnorm_logcdf = stdnorm.log_cdf
+            self.log2 = tf.convert_to_tensor(np.log(2), dtype=tf.float32)
+
+    @property
+    def loc(self):
+        """Distribution parameter for the pre-transformed mean."""
+        return self._loc
+
+    @property
+    def scale(self):
+        """Distribution parameter for the pre-transformed standard deviation."""
+        return self._scale
+
+    @property
+    def shape(self):
+        """Distribution parameter for the pre-transformed standard deviation."""
+        return self._shape
+
+    def _log_prob(self, x):
+        z = self._z(x)
+        return tf.log(2 / self.scale) + self.stdnorm_logpdf(z) + self.stdnorm_logcdf(self.shape * z)
+
+    def _mean(self):
+        # TODO
+        pass
+
+    def _variance(self):
+        # TODO
+        pass
+
+    def _mode(self):
+        # TODO
+        pass
+
+    def _z(self, x, scale=None):
+        """Standardize input `x` to a unit normal."""
+        with tf.name_scope('standardize'):
+            return (x - self.loc) / (self.scale if scale is None else scale)
+
+    @classmethod
+    def _maximum_likelihood_parameters(cls, value):
+        log_x = tf.log(value)
+        return {'loc': tf.reduce_mean(log_x, axis=0),
+                'scale': tf.math.reduce_std(log_x, axis=0)}
 
 
 def mcify(dist):
@@ -9681,23 +9748,25 @@ class CDRModel(object):
 
         gold = gold_irf_lambda(plot_axes)
 
-        axis = list(range(1, len(samples)))
         alpha = 100 - float(level)
 
+        rmsd_samples = {}
         rmsd_mean = {}
         rmsd_lower = {}
         rmsd_upper = {}
-        rmsd_samples = {}
         for response in samples:
+            rmsd_samples[response] = {}
             rmsd_mean[response] = {}
             rmsd_lower[response] = {}
             rmsd_upper[response] = {}
-            rmsd_samples[response] = {}
             for dim_name in samples[response]:
-                rmsd_samples[response] = ((gold - samples[response][dim_name])**2).mean(axis=axis)
-                rmsd_mean[response][dim_name] = rmsd_samples.mean()
-                rmsd_lower[response][dim_name] = rmsd_samples.percentile(alpha / 2)
-                rmsd_upper[response][dim_name] = rmsd_samples.percentile(100 - (alpha / 2))
+                _samples = samples[response][dim_name]
+                axis = tuple(range(1, len(_samples.shape)))
+                _rmsd_samples = ((gold - _samples)**2).mean(axis=axis)
+                rmsd_samples[response] = _rmsd_samples
+                rmsd_mean[response][dim_name] = _rmsd_samples.mean()
+                rmsd_lower[response][dim_name] = np.percentile(_rmsd_samples, alpha / 2)
+                rmsd_upper[response][dim_name] = np.percentile(_rmsd_samples, 100 - (alpha / 2))
 
         return rmsd_mean, rmsd_lower, rmsd_upper, rmsd_samples
 

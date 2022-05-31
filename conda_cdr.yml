@@ -9,6 +9,7 @@ dependencies:
     - matplotlib
     - numpy>=1.9
     - pandas>=1.1
+    - pyyaml
     - scikit-learn
     - scipy>=0.14
     - tensorflow>=1.9
