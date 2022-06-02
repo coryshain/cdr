@@ -9852,7 +9852,7 @@ class CDRModel(object):
         if responses is None:
             responses = self.response_names
         if response_params is None:
-            response_params = set()
+            response_params = {'mean'}
             for _response in responses:
                 response_params.add(self.get_response_params(_response)[0])
             response_params = sorted(list(response_params))

@@ -13,7 +13,7 @@ if __name__ == '__main__':
     argparser.add_argument('-n', '--n', type=int, default=3, help='Arity of partition')
     argparser.add_argument('-f', '--fields', nargs='+', default=['subject', 'sentid'], help='Field names to use as split IDs')
     argparser.add_argument('-p', '--partition', type=str, default=None, help='ID of partition to send to stdout ("train", "dev", "test", or integer). If unspecified, saves all elements of the partition to separate files in the source directory.')
-    argparser.add_argument('-s', '--sep', type=str, default=None, help='Column separator. If unspecified, assumes space-delimited.')
+    argparser.add_argument('-s', '--sep', type=str, default=None, help='Column separator. If unspecified, assumes comma-delimited.')
     args = argparser.parse_args()
 
     if args.sep:
