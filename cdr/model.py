@@ -234,6 +234,12 @@ def mcify(dist):
                 samp = self.sample(sample_shape=self.n_resamp)
                 return tf.reduce_mean(samp, axis=0)
 
+        def _mode(self):
+            try:
+                return super(MCifiedDistribution, self)._mode()
+            except NotImplementedError:
+                return self.quantile(0.5)
+
         def _quantile(self, q, **kwargs):
             try:
                 return super(MCifiedDistribution, self)._quantile(q, **kwargs)
@@ -273,6 +279,30 @@ class LogNormalV2(LogNormal):
     @classmethod
     def _parameter_properties(cls, dtype, num_classes=None):
         return LogNormal._parameter_properties(dtype, num_classes=num_classes)
+
+
+class ExponentiallyModifiedGaussianInvRate(ExponentiallyModifiedGaussian):
+    """
+    An ExponentiallyModifiedGaussian distribution that uses the inverse rate rather than the rate
+    parameterization. The inverse rate parameterization has the advantage that the mean is linear in the location
+    and scale parameters.
+
+    :param loc: TF tensor; mean.
+    :param scale: TF tensor; standard deviation
+    :param rate: TF tensor; inverse rate parameter
+    :param epsilon: ``float``; stabilizing constant
+    :param kwargs: ``dict``; additional kwargs to the LogNormal distribution
+    :return: LogNormalV2 distribution object
+    """
+    def __init__(self, loc, scale, rate, *args, **kwargs):
+        rate = 1. / rate
+        parameters = dict(locals())
+        super(ExponentiallyModifiedGaussianInvRate, self).__init__(loc, scale, rate, *args, **kwargs)
+        self._parameters = parameters
+
+    @classmethod
+    def _parameter_properties(cls, dtype, num_classes=None):
+        return ExponentiallyModifiedGaussian._parameter_properties(dtype, num_classes=num_classes)
 
 
 class ShiftedScaledDistribution(TransformedDistribution):
@@ -543,6 +573,13 @@ class CDRModel(object):
         'exgaussian': {
             'dist': ExponentiallyModifiedGaussian,
             'name': 'exgaussian',
+            'params': ('mu', 'sigma', 'beta'),
+            'params_tf': ('loc', 'scale', 'rate',),
+            'support': 'real'
+        },
+        'exgaussianinvrate': {
+            'dist': ExponentiallyModifiedGaussianInvRate,
+            'name': 'exgaussianinvrate',
             'params': ('mu', 'sigma', 'beta'),
             'params_tf': ('loc', 'scale', 'rate',),
             'support': 'real'
@@ -4887,13 +4924,15 @@ class CDRModel(object):
                             dist_name=dist_name,
                             bijector=bijector
                     ):
-                        if dist_name.lower() == 'exgaussian':
+                        if dist_name.lower().startswith('exgaussian'):
                             # Mode not currently implemented for ExGaussian in TensorFlow Probability
                             # and reimplementation not possible until TFP implements the erfcxinv function.
                             # Approximation taken from eq. 15 of Kalambet et al., 2010.
                             m = response_dist.loc
                             s = response_dist.scale
                             b = response_dist.rate
+                            if dist_name.lower() == 'exgaussianinvrate':
+                                b = 1. / b
                             t = 1. / tf.maximum(b, self.pred_dist_epsilon)
                             z = (t / tf.maximum(s, self.pred_dist_epsilon)) / np.sqrt(2. / np.pi)
                             # Approximation to erfcxinv, most accurate when z < 1 (i.e. skew is small relative to scale)
@@ -4901,11 +4940,10 @@ class CDRModel(object):
                             mode = m - y * s * np.sqrt(2.) - s / tf.maximum(t, self.pred_dist_epsilon)
                         elif dist_name.lower() == 'sinharcsinh':
                             mode = response_dist.loc
-                        else:
-                            if self.get_response_dist_name(response).startswith('lognormal'):
+                        elif self.get_response_dist_name(response).startswith('lognormal'):
                                 mode = tf.exp(response_dist.distribution.mean() - response_dist.distribution.variance())
-                            else:
-                                mode = response_dist.mode()
+                        else:
+                            mode = response_dist.mode()
                         if self.is_real(response) and bijector is not None:
                             mode = bijector.forward(mode)
 
