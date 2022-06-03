@@ -49,12 +49,16 @@ if __name__ == '__main__':
                 integral_n_time_units=args.timeunits
             )
 
+            outdir = os.path.join(os.path.normpath(p.outdir), m_path)
             if args.prefix:
-                outname = p.outdir + '/' + m_path + '/' + args.prefix + '_summary.txt'
+                filename = args.prefix + '_summary.txt'
             else:
-                outname = p.outdir + '/' + m_path + '/summary.txt'
+                filename = 'summary.txt'
+            outname = os.path.join(outdir, filename)
 
-            stderr('Saving summary to %s' %outname)
+            stderr('Saving summary to %s' % outname)
+            if not os.path.exists(outdir):
+                os.makedirs(outdir)
             with open(outname, 'w') as f:
                 f.write(summary)
             stderr(summary)

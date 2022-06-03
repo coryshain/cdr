@@ -9524,6 +9524,8 @@ class CDRModel(object):
             for k in manipulation:
                 if isinstance(manipulation[k], float) or isinstance(manipulation[k], int):
                     manip = lambda x, offset=float(manipulation[k]): x + offset
+                elif manipulation[k] == 'sd':
+                    manip = lambda x, offset=self.impulse_sds[k]: x + offset
                 else:
                     manip = manipulation[k]
                 if k in self.impulse_names_to_ix:
