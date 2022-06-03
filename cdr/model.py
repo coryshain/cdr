@@ -1739,6 +1739,7 @@ class CDRModel(object):
                     if ranef_dropout_rate and not ranef_dropout_rate in self.Y_gf_dropout:
                         ranef_dropout_layer = get_dropout(
                             ranef_dropout_rate,
+                            fixed=self.fixed_dropout,
                             training=self.training,
                             use_MAP_mode=tf.constant(True, dtype=tf.bool),
                             rescale=False,
@@ -3658,6 +3659,7 @@ class CDRModel(object):
                 if input_dropout_rate:
                     self.input_dropout_layer[nn_id] = get_dropout(
                         input_dropout_rate,
+                        fixed=self.fixed_dropout,
                         training=self.training,
                         use_MAP_mode=self.use_MAP_mode,
                         rescale=False,
@@ -3666,6 +3668,7 @@ class CDRModel(object):
                     )
                     self.X_time_dropout_layer[nn_id] = get_dropout(
                         input_dropout_rate,
+                        fixed=self.fixed_dropout,
                         training=self.training,
                         use_MAP_mode=self.use_MAP_mode,
                         rescale=False,
@@ -3801,6 +3804,7 @@ class CDRModel(object):
 
                     self.h_rnn_dropout_layer[nn_id] = get_dropout(
                         h_rnn_dropout_rate,
+                        fixed=self.fixed_dropout,
                         training=self.training,
                         use_MAP_mode=self.use_MAP_mode,
                         name='%s_h_rnn_dropout' % nn_id,

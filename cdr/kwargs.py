@@ -15,7 +15,8 @@ def docstring_from_kwarg(kwarg):
         if kwarg.default_value == kwarg.default_value_cdrnn:
             out += ' **Default**: %s\n' % kwarg.default_value
         else:
-            out += ' **Default (CDR)**: %s; **Default (CDRNN)**: %s\n' % (kwarg.default_value, kwarg.default_value_cdrnn)
+            out += ' **Default (CDR)**: %s; **Default (CDRNN)**: %s\n' \
+                   % (kwarg.default_value, kwarg.default_value_cdrnn)
 
     return out
 
@@ -63,7 +64,8 @@ def plot_kwarg_docstring():
     out = "**Plotting options**\n\n"
 
     for kwarg in PLOT_KWARGS_CORE + PLOT_KWARGS_OTHER:
-        out += '- **%s**: %s; %s **Default:** %s\n' % (kwarg.key, kwarg.dtypes_str(), kwarg.descr, kwarg.default_value)
+        out += '- **%s**: %s; %s **Default:** %s\n' % \
+               (kwarg.key, kwarg.dtypes_str(), kwarg.descr, kwarg.default_value)
 
     out += '\n'
 
@@ -1269,13 +1271,21 @@ NN_KWARGS = [
         bool,
         "Whether to apply dropout to the last layer of NN components."
     ),
+    Kwarg(
+        'fixed_dropout',
+        False,
+        bool,
+        "Whether to fix the dropout mask over the time dimension during training, " +
+        "ensuring that each training instance is processed by the same resampled model."
+    ),
 
     # DEPRECATED OR RARELY USED
     Kwarg(
         'input_jitter_level',
         None,
         [float, None],
-        "Standard deviation of jitter injected into inputs (predictors and timesteps) during training. If ``0`` or ``None``, no input jitter.",
+        "Standard deviation of jitter injected into inputs (predictors and timesteps) during training. " +
+        "If ``0`` or ``None``, no input jitter.",
         suppress=True
     ),
     Kwarg(

@@ -184,6 +184,7 @@ def get_dropout(
         use_MAP_mode=True,
         rescale=True,
         noise_shape=None,
+        fixed=False,
         name=None,
         constant=None,
         reuse=tf.AUTO_REUSE,
@@ -196,6 +197,7 @@ def get_dropout(
                 out = DropoutLayer(
                     rate,
                     noise_shape=noise_shape,
+                    fixed=fixed,
                     training=training,
                     use_MAP_mode=use_MAP_mode,
                     rescale=rescale,
@@ -217,6 +219,7 @@ def get_random_variable(
         init=None,
         constraint=None,
         sd_prior=None,
+        sample_shape=None,
         training=None,
         use_MAP_mode=None,
         epsilon=1e-8,
@@ -234,6 +237,9 @@ def get_random_variable(
             constraint_fn_np, \
             constraint_fn_inv, \
             constraint_fn_inv_np = get_constraint(constraint)
+
+            if sample_shape is None:
+                sample_shape = tuple()
 
             if init is None:
                 init = 0.
@@ -290,7 +296,7 @@ def get_random_variable(
                     'val': v_q_dist.kl_divergence(v_prior_dist)
                 }
 
-            v_eval_sample = v_q_dist.sample()
+            v_eval_sample = v_q_dist.sample(sample_shape)
             v_eval = tf.get_variable(
                 name='%s_sample' % name,
                 initializer=tf.zeros_initializer(),
@@ -1461,6 +1467,7 @@ class DenseLayer(object):
             activation=None,
             kernel_sd_init='glorot',
             dropout=None,
+            fixed_dropout_over_time=False,
             maxnorm=None,
             batch_normalization_decay=None,
             layer_normalization_type=None,
@@ -1490,8 +1497,10 @@ class DenseLayer(object):
                 self.activation = get_activation(activation, session=self.session, training=self.training)
                 self.kernel_sd_init = kernel_sd_init
                 self.use_dropout = bool(dropout)
+                self.fixed_dropout_over_time = fixed_dropout_over_time
                 self.dropout_layer = get_dropout(
                     dropout,
+                    fixed=self.fixed_dropout_over_time,
                     training=self.training,
                     use_MAP_mode=self.use_MAP_mode,
                     name='dropout',
@@ -2014,6 +2023,7 @@ class RNNCell(LayerRNNCell):
             bottomup_dropout=None,
             h_dropout=None,
             c_dropout=None,
+            fixed_dropout_over_time=False,
             forget_rate=None,
             weight_normalization=False,
             layer_normalization=False,
@@ -2050,9 +2060,11 @@ class RNNCell(LayerRNNCell):
                 self._kernel_sd_init = kernel_sd_init
 
                 self.use_dropout = bool(bottomup_dropout or h_dropout or c_dropout)
+                self.fixed_dropout_over_time = fixed_dropout_over_time
                 self._bottomup_dropout_rate = bottomup_dropout
                 self._bottomup_dropout_layer = get_dropout(
                     bottomup_dropout,
+                    fixed=self.fixed_dropout_over_time,
                     training=self._training,
                     use_MAP_mode=self.use_MAP_mode,
                     name=self.name + '/bottomup_dropout',
@@ -2062,6 +2074,7 @@ class RNNCell(LayerRNNCell):
                 self._h_dropout_rate = h_dropout
                 self._h_dropout_layer = get_dropout(
                     h_dropout,
+                    fixed=self.fixed_dropout_over_time,
                     training=self._training,
                     use_MAP_mode=self.use_MAP_mode,
                     name=self.name + '/h_dropout',
@@ -2071,6 +2084,7 @@ class RNNCell(LayerRNNCell):
                 self._c_dropout_rate = c_dropout
                 self._c_dropout_layer = get_dropout(
                     c_dropout,
+                    fixed=self.fixed_dropout_over_time,
                     training=self._training,
                     use_MAP_mode=self.use_MAP_mode,
                     name=self.name + '/c_dropout',
@@ -3655,6 +3669,7 @@ class DropoutLayer(object):
             self,
             rate,
             noise_shape=None,
+            fixed=False,
             training=False,
             use_MAP_mode=True,
             rescale=True,
@@ -3665,6 +3680,7 @@ class DropoutLayer(object):
     ):
         self.rate = rate
         self.noise_shape = noise_shape
+        self.fixed = fixed
         self.training = training
         self.use_MAP_mode = use_MAP_mode
         self.rescale = rescale
@@ -3683,7 +3699,11 @@ class DropoutLayer(object):
                         noise_shape = [inputs_shape[i] if self.noise_shape[i] is None else self.noise_shape[i] for i in
                                        range(len(self.noise_shape))]
                     else:
-                        noise_shape = inputs_shape
+                        if self.fixed:
+                            noise_shape = [1 for _ in range(len(inputs_shape) - 1)] + \
+                                          [inputs_shape[-1]]
+                        else:
+                            noise_shape = inputs_shape
 
                     self.noise_shape = noise_shape
 
