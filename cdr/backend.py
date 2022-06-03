@@ -238,6 +238,8 @@ def get_random_variable(
             constraint_fn_inv, \
             constraint_fn_inv_np = get_constraint(constraint)
 
+            name = sn(name)
+
             if sample_shape is None:
                 sample_shape = tuple()
 

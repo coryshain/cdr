@@ -2491,7 +2491,7 @@ class CDRModel(object):
                     sd_posterior = np.ones((rangf_n_levels, 1, 1)) * sd_posterior[None, ...]
 
                     rv_dict = get_random_variable(
-                        'intercept_%s_by_%s' % (name, ran_gf),
+                        'intercept_%s_by_%s' % (name, sn(ran_gf)),
                         sd_posterior.shape,
                         sd_posterior,
                         constraint=self.constraint,

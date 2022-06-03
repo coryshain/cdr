@@ -176,7 +176,7 @@ def get_random_permutation(n):
 
 def sn(string):
     """
-    Compute a Tensorboard-compatible version of a string.
+    Compute a valid scope name version of a string.
 
     :param string: ``str``; input string
     :return: ``str``; transformed string

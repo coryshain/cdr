@@ -79,13 +79,24 @@ def read_tabular_data(X_paths, Y_paths, series_ids, categorical_columns=None, se
 
     if categorical_columns is not None:
         for t in categorical_columns:
-            for col in t.split(':'):
+            split = t.split(':')
+            for col in split:
                 for _X in X:
                     if col in _X:
                         _X[col] = _X[col].astype('category')
                 for _Y in Y:
                     if col in _Y:
                         _Y[col] = _Y[col].astype('category')
+            if len(split) > 1:
+                for _Y in Y:
+                    new_col = None
+                    for col in split:
+                        assert col in _Y, 'Members of categorical interaction grouping indices must all be present in every response table.'
+                        if new_col is None:
+                            new_col = _Y[col].astype(str)
+                        else:
+                            new_col = new_col + ':' + _Y[col].astype(str)
+                    _Y[t] = new_col
 
     # Add columns to X
 
