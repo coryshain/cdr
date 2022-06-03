@@ -1739,7 +1739,6 @@ class CDRModel(object):
                     if ranef_dropout_rate and not ranef_dropout_rate in self.Y_gf_dropout:
                         ranef_dropout_layer = get_dropout(
                             ranef_dropout_rate,
-                            fixed=self.fixed_dropout,
                             training=self.training,
                             use_MAP_mode=tf.constant(True, dtype=tf.bool),
                             rescale=False,
