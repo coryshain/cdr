@@ -21,7 +21,7 @@ if __name__ == '__main__':
     argparser.add_argument('-j', '--job_types', nargs='+', default=['fit'], help='Type of job to run. List of ``["fit", "predict", "summarize", "plot", "save_and_exit"]``')
     argparser.add_argument('-p', '--partition', nargs='+', help='Partition(s) over which to predict/evaluate')
     argparser.add_argument('-t', '--time', type=int, default=48, help='Maximum number of hours to train models')
-    argparser.add_argument('-n', '--n_cores', type=int, default=8, help='Number of cores to request')
+    argparser.add_argument('-n', '--n_cores', type=int, default=4, help='Number of cores to request')
     argparser.add_argument('-g', '--use_gpu', action='store_true', help='Whether to request a GPU node')
     argparser.add_argument('-m', '--memory', type=int, default=64, help='Number of GB of memory to request')
     argparser.add_argument('-P', '--slurm_partition', default=None, help='Value for SLURM --partition setting, if applicable')
