@@ -12,7 +12,11 @@ from cdr.signif import permutation_test
 from cdr.util import filter_models, get_partition_list, nested, stderr, extract_cdr_prediction_data
 
 
-def scale(a, b):
+def scale(a):
+    return (a - a.mean()) / a.std()
+
+
+def joint_scale(a, b):
     df = np.stack([np.array(a), np.array(b)], axis=1)
     scaling_factor = df.std()
     return a/scaling_factor, b/scaling_factor
@@ -32,7 +36,6 @@ if __name__ == '__main__':
     argparser.add_argument('-A', '--ablation_components', type=str, nargs='*', help='Names of variables to consider in ablative tests. Useful for excluding some ablated models from consideration')
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
     argparser.add_argument('-M', '--metric', type=str, default='loglik', help='Metric to use for comparison (either "mse" or "loglik")')
-    argparser.add_argument('-t', '--twostep', action='store_true', help='For DTSR models, compare predictions from fitted LME model from two-step hypothesis test.')
     argparser.add_argument('-T', '--tails', type=int, default=2, help='Number of tails (1 or 2)')
     argparser.add_argument('-r', '--response', nargs='*', default=None, help='Name(s) of response(s) to test. If left unspecified, tests all responses.')
     argparser.add_argument('-o', '--outdir', default=None, help='Output directory. If ``None``, placed in same directory as the config.')
@@ -41,7 +44,7 @@ if __name__ == '__main__':
     metric = args.metric
     if metric == 'err':
         metric = 'mse'
-    assert metric in ['mse', 'loglik'], 'Metric must be one of ["mse", "loglik"].'
+    assert metric in ['mse', 'loglik', 'corr'], 'Metric must be one of ["mse", "loglik", "corr"].'
 
     if args.pool:
         args.ablation = True
@@ -146,8 +149,39 @@ if __name__ == '__main__':
                                             except KeyError:
                                                 continue
 
-                                            a = np.stack([a[x] for x in a], axis=1)
-                                            b = np.stack([b[x] for x in b], axis=1)
+                                            if metric == 'corr':
+                                                y = a[0]['CDRobs']
+                                                a = np.stack([a[x]['CDRpreds'] for x in a], axis=1)
+                                                b = np.stack([b[x]['CDRpreds'] for x in b], axis=1)
+
+                                                y = scale(y)
+                                                denom = len(y) - 1
+                                                r1 = []
+                                                r2 = []
+                                                rx = []
+                                                for k in range(a.shape[-1]):
+                                                    _a = a[..., k]
+                                                    _b = b[..., k]
+
+                                                    _a = scale(_a)
+                                                    _b = scale(_b)
+
+                                                    _a = _a * y
+                                                    _b = _b * y
+
+                                                    a[..., k] = _a
+                                                    b[..., k] = _b
+
+                                                    r1.append(_a.sum() / denom)
+                                                    r2.append(_b.sum() / denom)
+                                                    rx.append((_a * _b).sum() / denom)
+                                                r1 = np.mean(r1)
+                                                r2 = np.mean(r2)
+                                                rx = np.mean(rx)
+                                            else:
+                                                a = np.stack([a[x] for x in a], axis=1)
+                                                b = np.stack([b[x] for x in b], axis=1)
+                                                r1 = r2 = rx = None
 
                                             p_value, base_diff, diffs = permutation_test(
                                                 a,
@@ -171,8 +205,15 @@ if __name__ == '__main__':
 
                                                 summary = '='*50 + '\n'
                                                 summary += 'Model comparison: %s vs %s\n' % (a_model, b_model)
-                                                summary += 'Partition: %s\n' % partition_str
-                                                summary += 'Metric: %s\n' % metric
+                                                summary += 'Partition:  %s\n' % partition_str
+                                                summary += 'Metric:     %s\n' % metric
+                                                summary += 'n:          %s\n' % a.shape[0]
+                                                if r1 is not None:
+                                                    summary += 'r(a,y):     %s\n' % r1
+                                                if r2 is not None:
+                                                    summary += 'r(b,y):     %s\n' % r2
+                                                if rx is not None:
+                                                    summary += 'r(a,b):     %s\n' % rx
                                                 summary += 'Difference: %.4f\n' % base_diff
                                                 summary += 'p: %.4e%s\n' % (p_value, '' if p_value > 0.05 \
                                                     else '*' if p_value > 0.01 else '**' if p_value > 0.001 else '***')
@@ -199,7 +240,17 @@ if __name__ == '__main__':
                             if partition_str in m_files[response][filenum] and \
                                     (args.response is None or response in args.response):
                                 v = m_files[response][filenum][partition_str]['direct']
-                                v = np.stack([v[x] for x in v], axis=1)
+                                if metric == 'corr':
+                                    y = v[0]['CDRobs']
+                                    v = np.stack([v[x]['CDRpreds'] for x in v], axis=1)
+                                    for k in range(v.shape[-1]):
+                                        _v = v[..., k]
+                                        _v = scale(_v)
+                                        _v = _v * y
+                                        v[..., k] = _v
+                                    v = (y, v)
+                                else:
+                                    v = np.stack([v[x] for x in v], axis=1)
 
                                 if a not in pooled_data:
                                     pooled_data[a] = {}
@@ -245,25 +296,52 @@ if __name__ == '__main__':
                                         df2[response] = {}
                                     if filenum not in df2[response]:
                                         df2[response][filenum] = []
-                                    a, b = scale(
-                                        pooled_data[a_model][exp][m][response][filenum],
-                                        pooled_data[b_model][exp][m][response][filenum]
-                                    )
+                                    if metric == 'mse':
+                                        a, b = joint_scale(
+                                            pooled_data[a_model][exp][m][response][filenum],
+                                            pooled_data[b_model][exp][m][response][filenum]
+                                        )
+                                    else:
+                                        a = pooled_data[a_model][exp][m][response][filenum]
+                                        b = pooled_data[b_model][exp][m][response][filenum]
                                     df1[response][filenum].append(a)
                                     df2[response][filenum].append(b)
                     for response in df1:
                         for filenum in df1[response]:
-                            _df1 = np.concatenate(df1[response][filenum], axis=0)
-                            _df2 = np.concatenate(df2[response][filenum], axis=0)
-                            assert len(_df1) == len(_df2), 'Shape mismatch between datasets %s and %s: %s vs. %s' % (
+                            a = df1[response][filenum]
+                            b = df2[response][filenum]
+
+                            if metric == 'corr':
+                                y = np.concatenate([x[0] for x in a], axis=0)
+                                a = np.concatenate([x[1] for x in a], axis=0)
+                                b = np.concatenate([x[1] for x in b], axis=0)
+
+                                y = scale(y)
+                                a = scale(a)
+                                b = scale(b)
+
+                                a = a * y
+                                b = b * y
+
+                                denom = len(y) - 1
+                                r1 = (a.sum(axis=0) / denom).mean()
+                                r2 = (b.sum(axis=0) / denom).mean()
+                                rx = ((a * b).sum(axis=0) / denom).mean()
+
+                            else:
+                                a = np.concatenate(a, axis=0)
+                                b = np.concatenate(b, axis=0)
+                                r1 = r2 = rx = None
+
+                            assert len(a) == len(b), 'Shape mismatch between datasets %s and %s: %s vs. %s' % (
                                 a_name,
                                 b_name,
-                                _df1.shape,
-                                _df2.shape
+                                a.shape,
+                                b.shape
                             )
                             p_value, diff, diffs = permutation_test(
-                                _df1,
-                                _df2,
+                                a,
+                                b,
                                 n_iter=args.n_iter,
                                 n_tails=args.tails,
                                 mode=metric,
@@ -291,7 +369,13 @@ if __name__ == '__main__':
                                 summary += 'Ablation sets pooled:\n'
                                 for basename in basenames_to_pool:
                                     summary += '  %s\n' % basename
-                                summary += 'n: %s\n' % _df1.shape[0]
+                                summary += 'n:          %s\n' % a.shape[0]
+                                if r1 is not None:
+                                    summary += 'r(a,y):     %s\n' % r1
+                                if r2 is not None:
+                                    summary += 'r(b,y):     %s\n' % r2
+                                if rx is not None:
+                                    summary += 'r(a,b):     %s\n' % rx
                                 summary += 'Difference: %.4f\n' % diff
                                 summary += 'p: %.4e%s\n' % (
                                     p_value,

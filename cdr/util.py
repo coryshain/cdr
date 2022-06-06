@@ -54,7 +54,7 @@ def extract_cdr_prediction_data(dirpath, metric='mse'):
                 filetype = parsed[filetype_ix]
                 if filetype in ['CDRpreds', 'preds_table', 'output']:
                     filetype = 'table'
-                elif filetype in ['squared_error', 'losses_mse', 'mse_losses']:
+                elif filetype in ['squared_error', 'losses_mse', 'mse_losses', 'obs', 'preds']:
                     filetype = 'mse'
                 response = parsed[response_ix]
                 if response is None:
@@ -76,8 +76,12 @@ def extract_cdr_prediction_data(dirpath, metric='mse'):
                     )
                     if metric == 'mse':
                         a = (a['CDRobs'] - a['CDRpreds']) ** 2
-                    else:
+                    elif metric == 'corr':
+                        a = a[['CDRobs', 'CDRpreds']]
+                    elif metric == 'loglik':
                         a = a['CDRloglik']
+                    else:
+                        raise ValueError('Unrecognized metric: %s' % metric)
                 else:
                     a = pd.read_csv(
                         data_path,
