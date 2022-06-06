@@ -148,9 +148,16 @@ if __name__ == '__main__':
                                                 b = b_data[response][filenum][partition_str]['direct']
                                             except KeyError:
                                                 continue
+                                            if not (len(a) and len(b)):
+                                                # Need at least one array per model
+                                                continue
 
                                             if metric == 'corr':
-                                                y = a[0]['CDRobs']
+                                                y = None
+                                                for x in a:
+                                                    if y is None:
+                                                        y = a[x]['CDRobs']
+                                                        break
                                                 a = np.stack([a[x]['CDRpreds'] for x in a], axis=1)
                                                 b = np.stack([b[x]['CDRpreds'] for x in b], axis=1)
 
@@ -241,7 +248,11 @@ if __name__ == '__main__':
                                     (args.response is None or response in args.response):
                                 v = m_files[response][filenum][partition_str]['direct']
                                 if metric == 'corr':
-                                    y = v[0]['CDRobs']
+                                    y = None
+                                    for x in v:
+                                        if y is None:
+                                            y = v[x]['CDRobs']
+                                            break
                                     v = np.stack([v[x]['CDRpreds'] for x in v], axis=1)
                                     for k in range(v.shape[-1]):
                                         _v = v[..., k]
@@ -310,6 +321,9 @@ if __name__ == '__main__':
                         for filenum in df1[response]:
                             a = df1[response][filenum]
                             b = df2[response][filenum]
+                            if not (len(a) and len(b)):
+                                # Need at least one array per model
+                                continue
 
                             if metric == 'corr':
                                 y = np.concatenate([x[0] for x in a], axis=0)
