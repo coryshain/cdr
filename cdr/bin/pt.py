@@ -31,7 +31,7 @@ if __name__ == '__main__':
     argparser.add_argument('-a', '--ablation', action='store_true', help='Only compare models within an ablation set (those defined using the "ablate" param in the config file)')
     argparser.add_argument('-A', '--ablation_components', type=str, nargs='*', help='Names of variables to consider in ablative tests. Useful for excluding some ablated models from consideration')
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
-    argparser.add_argument('-M', '--metric', type=str, default='mse', help='Metric to use for comparison (either "mse" or "ll")')
+    argparser.add_argument('-M', '--metric', type=str, default='loglik', help='Metric to use for comparison (either "mse" or "loglik")')
     argparser.add_argument('-t', '--twostep', action='store_true', help='For DTSR models, compare predictions from fitted LME model from two-step hypothesis test.')
     argparser.add_argument('-T', '--tails', type=int, default=2, help='Number of tails (1 or 2)')
     argparser.add_argument('-r', '--response', nargs='*', default=None, help='Name(s) of response(s) to test. If left unspecified, tests all responses.')
@@ -41,7 +41,7 @@ if __name__ == '__main__':
     metric = args.metric
     if metric == 'err':
         metric = 'mse'
-    assert metric in ['mse', 'loglik', 'll'], 'Metric must be one of ["mse", "ll"].'
+    assert metric in ['mse', 'loglik'], 'Metric must be one of ["mse", "loglik"].'
 
     if args.pool:
         args.ablation = True

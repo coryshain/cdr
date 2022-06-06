@@ -178,7 +178,15 @@ if __name__ == '__main__':
                             lower = np.stack(lower, axis=-1)
                             upper = np.stack(upper, axis=-1)
                             if is3d:
-                                pass
+                                plot_surface(
+                                    plot_x,
+                                    plot_y,
+                                    x,
+                                    lq=lower,
+                                    uq=upper,
+                                    outdir=outdir,
+                                    filename='%s_%s_%s.png' % (query_name, sn(response), sn(dim))
+                                )
                             else:
                                 plot_irf(
                                     plot_x,

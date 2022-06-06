@@ -1234,8 +1234,6 @@ class CDRModel(object):
 
         self.use_crossval = bool(self.crossval_factor)
 
-        self.parameter_table_columns = ['Estimate']
-
         for x in self.indicator_names.split():
             self.indicators.add(x)
 

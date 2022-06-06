@@ -2389,7 +2389,6 @@ class IRFNode(object):
             self.rangf = []
             self.impulses_as_inputs = True
             self.nn_impulses = tuple()
-            self.nn_key = None
             self.inputs_added = []
             self.inputs_dropped = []
             self.nn_config = {}
@@ -2406,7 +2405,6 @@ class IRFNode(object):
             if family == 'NN':
                 assert nn_impulses, 'Parameter nn_impulses must be provided to neural network IRFs'
                 self.nn_impulses = tuple(sorted([x for x in nn_impulses], key=lambda x: x.name()))
-                self.nn_key = 'irfNN_' + '_'.join([x.name() for x in self.nn_impulses])
 
                 if self.impulses_as_inputs:
                     nn_inputs = list(self.nn_impulses)
@@ -2451,7 +2449,6 @@ class IRFNode(object):
                 self.nn_config = nn_config
             else:
                 self.nn_impulses = tuple()
-                self.nn_key = None
                 self.inputs_added = []
                 self.inputs_dropped = []
                 self.nn_config = {}
@@ -2477,6 +2474,12 @@ class IRFNode(object):
             self.p.add_child(self)
 
         self.interaction_list = []
+
+    @property
+    def nn_key(self):
+        if self.family == 'NN':
+            return 'irfNN_' + '_'.join([x.name() for x in self.nn_impulses])
+        return None
 
     def add_child(self, t):
         """
@@ -2631,7 +2634,7 @@ class IRFNode(object):
         """
 
         if self.irfID is None:
-            out = '.'.join([self.family] + self.impulse_names())
+            out = '.'.join([self.family] + self.impulse_names(include_nn_inputs=False))
         else:
             out = self.irfID
 
@@ -2770,7 +2773,7 @@ class IRFNode(object):
                         nns_by_key[x.nn_key].append((x, self.rangf[:]))
 
         for c in self.children:
-            nns_by_key = c.nns_by_key(nns_by_key)
+            nns_by_key = c.nns_by_key(nns_by_key=nns_by_key)
 
         return nns_by_key
 
@@ -2949,9 +2952,10 @@ class IRFNode(object):
                     out=out
                 )
                 if self.family == 'NN':
-                    for impulse in self.inputs_added:
-                        if include_nn or not impulse.is_nn_impulse():
-                            out.add(impulse)
+                    if include_nn_inputs:
+                        for impulse in self.inputs_added:
+                            if include_nn or not impulse.is_nn_impulse():
+                                out.add(impulse)
 
         return out
 
