@@ -26,7 +26,7 @@ def extract_cdr_prediction_data(dirpath, metric='mse'):
     parser = re.compile(
         '(LM_2STEP_)?'
         '(CDRpreds|squared_error|losses_mse|mse_losses|loglik|preds|preds_table|obs|output)'
-        '(_([^_]+))?(_f([0-9]+))?_([^_]*).(csv|txt)'
+        '(_(.+?))?(_f([0-9]+))?_([^_]*).(csv|txt)'
     )
     out = {}
     # Might be an ensemble, so check
@@ -422,3 +422,4 @@ def flatten_dict(d, keys=None):
         else:
             out.append((tuple(keys + [k]), v))
     return out
+
