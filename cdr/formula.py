@@ -223,7 +223,7 @@ class Formula(object):
 
     @staticmethod
     def prep_formula_string(s):
-        return s.strip().replace('.(', '(').replace(':', '%').replace('^', '**')
+        return s.strip().replace('.(', '(').replace(':', '%').replace('^', '**').replace('.', '_')
 
     @ staticmethod
     def expand_terms(terms):
@@ -841,7 +841,6 @@ class Formula(object):
                         under_interaction=under_interaction
                     )
                     terms += subterms
-
             elif Formula.normalize_irf_family(t.func.id) in Formula.IRF_PARAMS.keys() or lcg_re.match(t.func.id) is not None:
                 raise ValueError('IRF calls can only occur as inputs to C() in CDR formula strings')
             elif t.func.id == 're':
@@ -859,14 +858,16 @@ class Formula(object):
                 terms.append([new])
             else:
                 # Unary transform
-
                 assert len(t.args) <= 1, 'Only unary ops on variables supported in CDR formula strings'
                 subterms = []
+                func_id = t.func.id
+                if func_id.startswith('pow'):
+                    func_id = func_id.replace('_', '.')
                 self.process_ast(
                     t.args[0],
                     terms=subterms,
                     has_intercept=has_intercept,
-                    ops=[t.func.id] + ops,
+                    ops=[func_id] + ops,
                     rangf=rangf,
                     impulses_by_name=impulses_by_name,
                     interactions_by_name=interactions_by_name,
@@ -901,7 +902,7 @@ class Formula(object):
             else:
                 term_name = t_id
                 for op in ops:
-                    term_name = '%s(%s)' %(op, term_name)
+                    term_name = op + '(' + term_name + ')'
 
                 new_term_str = 'C(%s, DiracDelta())' % term_name
 
@@ -1160,6 +1161,21 @@ class Formula(object):
             out = np.log(arr + 1)
         elif op == 'exp':
             out = np.exp(arr)
+        elif op.startswith('add'):
+            x = float(op[3:])
+            out = arr + x
+        elif op.startswith('subtract'):
+            x = float(op[8:])
+            out = arr - x
+        elif op.startswith('multiply'):
+            x = float(op[8:])
+            out = arr * x
+        elif op.startswith('divide'):
+            x = float(op[6:])
+            out = arr / x
+        elif op.startswith('pow'):
+            exponent = float(op[3:])
+            out = arr ** exponent
         else:
             raise ValueError('Unrecognized op: "%s".' % op)
         return out

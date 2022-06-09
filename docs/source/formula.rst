@@ -17,11 +17,14 @@ The left-hand side (LHS) of the formula contains the name a single (possibly tra
 Intercept terms can be added by including ``1`` in the RHS and removed by including ``0`` in the RHS.
 If neither of these appears in the RHS, an intercept is added by default.
 
-**WARNING:** The compiler for CDR formulas is still early in development and may fail to correctly process certain formula strings, especially ones that contain hierarchical term expansions, categorical variable expansions, and/or interactions.
+**WARNING:** The compiler for CDR formulas is still in development and may fail to correctly process certain formula strings, especially ones that contain hierarchical term expansions, categorical variable expansions, and/or interactions.
 Please double-check the correctness of the model formula reported at the start of training and report problems in the issue tracker on `Github <https://github.com/coryshain/cdr>`_.
 
 **WARNING:** If you are using interaction terms, it is easy to accidentally mis-specify your formula because interactions are trickier in CDR than in linear models.
 Make sure to read :ref:`interactions` before fitting models with interactions.
+
+**WARNING:** Column names in your data must be valid Python identifiers in order to be parsed correctly in model formulas.
+Numeric names, names containing punctuation other than underscore, and other violations of Python's variable naming rules can result in an incorrect formula parse, which will at best crash and at worse quietly build a different model than the one you wanted.
 
 
 CDR Model Formulas

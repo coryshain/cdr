@@ -252,13 +252,14 @@ def layout_reference_values_menu():
 
     reference_settings = []
     for x in model.impulse_names:
+        _x = x.replace('.', '_')
         reference_settings.append(
             html.Label(
-                id='%s-reference-label' % x,
+                id='%s-reference-label' % _x,
                 children=[
                     get_irf_name(x, model.irf_name_map),
                     dcc.Input(
-                        id='%s-reference' % x,
+                        id='%s-reference' % _x,
                         type='number',
                         debounce=True,
                         placeholder=model.reference_arr[model.impulse_names_to_ix[x]]
@@ -295,13 +296,14 @@ def layout_reference_values_menu():
         )
     )
     for i, x in enumerate(model.rangf):
+        _x = x.replace('.', '_')
         reference_settings.append(
             html.Label(
-                id='%s-reference-label' % x,
+                id='%s-reference-label' % _x,
                 children=[
                     x,
                     dcc.Dropdown(
-                        id='%s-reference' % x,
+                        id='%s-reference' % _x,
                         options=[{'label': y, 'value': y} for y in model.ranef_level2ix[x] if y is not None],
                         value=None,
                         clearable=True
@@ -661,7 +663,7 @@ def assign_callbacks(_app):
         State('aes-plot-switches', 'value')
     ]
     for x in model.impulse_names + model.rangf:
-        update_args.append(State('%s-reference' % x, 'value'))
+        update_args.append(State('%s-reference' % x.replace('.', '_'), 'value'))
 
     @_app.callback(
         Output('graph', 'figure'),
@@ -704,11 +706,11 @@ def assign_callbacks(_app):
         X_ref = {}
         gf_y_ref = {}
         for x in model.impulse_names:
-            arg = kwargs['%s-reference' % x]
+            arg = kwargs['%s-reference' % x.replace('.', '_')]
             if arg is not None:
                 X_ref[x] = arg
         for x in model.rangf:
-            arg = kwargs['%s-reference' % x]
+            arg = kwargs['%s-reference' % x.replace('.', '_')]
             if arg is not None:
                 gf_y_ref[x] = arg
 
