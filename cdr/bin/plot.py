@@ -5,6 +5,12 @@ import string
 import pickle
 import numpy as np
 import pandas as pd
+import yaml
+try:
+    from yaml import CLoader as Loader, CDumper as Dumper
+except ImportError:
+    from yaml import Loader, Dumper
+
 from cdr.config import Config, PlotConfig
 from cdr.kwargs import plot_kwarg_docstring
 from cdr.model import CDREnsemble
@@ -19,12 +25,18 @@ if __name__ == '__main__':
     ''' % plot_kwarg_docstring())
     argparser.add_argument('paths', nargs='+', help='Path(s) to config file(s) defining experiments')
     argparser.add_argument('-c', '--plot_config_path', default=None, help='Path to config file specifying plot settings. To initialize an annotated plot config file, run ``python -m cdr.bin.create_config -t plot -a``.')
+    argparser.add_argument('-k', '--kwarg_path', default=None, help='Path to optional YAML file specifying additionl keyword arguments to ``get_plot_data``.')
     argparser.add_argument('-m', '--models', nargs='*', default = [], help='Model names to plot. Regex permitted. If unspecified, plots all CDR models.')
     argparser.add_argument('-d', '--dump_source', action='store_true', help='Dump plot source arrays to CSV')
     argparser.add_argument('-C', '--cpu_only', action='store_true', help='Use CPU implementation even if GPU is available.')
     args = argparser.parse_args()
 
     plot_config = PlotConfig(args.plot_config_path)
+    if args.kwarg_path:
+        with open(args.kwarg_path, 'r') as f:
+            extra_kwargs = yaml.load(f, Loader=Loader)
+    else:
+        extra_kwargs = {}
     qq = plot_config.get('qq_partition', None)
     qq_use_axis_labels = plot_config.get('qq_use_axis_labels', True)
     qq_use_ticks = plot_config.get('qq_use_ticks', False)
@@ -60,6 +72,9 @@ if __name__ == '__main__':
         sort_names =  plot_config.get('sort_names', True)
         prop_cycle_length = plot_config.get('prop_cycle_length', None)
         prop_cycle_map = plot_config.get('prop_cycle_map', None)
+
+        plot_kwargs = {x: plot_config.settings_core[x] for x in plot_config.settings_core if x not in ('prefix', 'key')}
+        plot_kwargs.update(extra_kwargs)
 
         synth_path = os.path.dirname(os.path.dirname(p.X_train)) + '/d.obj'
         if plot_true_synthetic and os.path.exists(synth_path):
@@ -156,16 +171,15 @@ if __name__ == '__main__':
                 else:
                     stderr('Model %s missing observation and/or prediction files, skipping Q-Q plot...\n' % m)
 
-            kwargs = {x: plot_config.settings_core[x] for x in plot_config.settings_core if x not in ('prefix', 'key')}
             mc = (cdr_model.is_bayesian or cdr_model.has_dropout)
-            if 'n_samples' in kwargs:
-                mc &= bool(kwargs['n_samples'])
+            if 'n_samples' in plot_kwargs:
+                mc &= bool(plot_kwargs['n_samples'])
             if mc:
                 cdr_model.set_weight_type('uniform')
             else:
                 cdr_model.set_weight_type('ll')
 
-            cdr_model.make_plots(prefix=prefix_cur, dump_source=args.dump_source, **kwargs)
+            cdr_model.make_plots(prefix=prefix_cur, dump_source=args.dump_source, **plot_kwargs)
 
             cdr_model.finalize()
 

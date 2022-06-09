@@ -222,7 +222,7 @@ if __name__ == '__main__':
                                                 if rx is not None:
                                                     summary += 'r(a,b):     %s\n' % rx
                                                 summary += 'Difference: %.4f\n' % base_diff
-                                                summary += 'p: %.4e%s\n' % (p_value, '' if p_value > 0.05 \
+                                                summary += 'p:          %.4e%s\n' % (p_value, '' if p_value > 0.05 \
                                                     else '*' if p_value > 0.01 else '**' if p_value > 0.001 else '***')
                                                 summary += '='*50 + '\n'
 

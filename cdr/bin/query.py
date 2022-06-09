@@ -66,7 +66,7 @@ if __name__ == '__main__':
     query_path = args.query_path
     plot = args.plot
 
-    with open(query_path, 'rb') as f:
+    with open(query_path, 'r') as f:
         query = yaml.load(f, Loader=Loader)
     assert 'estimates' in query, 'query must contain a top-level field named "estimates"'
     estimates = query['estimates']

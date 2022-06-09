@@ -1272,36 +1272,12 @@ class CDRModel(object):
             q = np.expand_dims(q, axis=1)
         self.impulse_quantiles_arr_expanded = q
 
-        reference_map = {}
-        for pair in self.reference_values.split():
-            impulse_name, val = pair.split('=')
-            reference = float(val)
-            reference_map[impulse_name] = reference
-        self.reference_map = reference_map
-        for x in self.impulse_names:
-            if not x in self.reference_map:
-                if self.default_reference_type == 'mean':
-                    self.reference_map[x] = self.impulse_means[x]
-                else:
-                    self.reference_map[x] = 0.
+        self.reference_map = self.get_reference_map()
         r = self.reference_map
         r = np.array([r[x] for x in self.impulse_names])
         self.reference_arr = r
 
-        plot_step_map = {}
-        for pair in self.plot_step.split():
-            impulse_name, val = pair.split('=')
-            plot_step = float(val)
-            plot_step_map[impulse_name] = plot_step
-        self.plot_step_map = plot_step_map
-        for x in self.impulse_names:
-            if not x in self.plot_step_map:
-                if x in self.indicators:
-                    self.plot_step_map[x] = 1 - self.reference_map[x]
-                elif isinstance(self.plot_step_default, str) and self.plot_step_default.lower() == 'sd':
-                    self.plot_step_map[x] = self.impulse_sds[x]
-                else:
-                    self.plot_step_map[x] = self.plot_step_default
+        self.plot_step_map = self.get_plot_step_map()
         s = self.plot_step_map
         s = np.array([s[x] for x in self.impulse_names])
         self.plot_step_arr = s
@@ -2514,6 +2490,13 @@ class CDRModel(object):
                         session=self.session
                     )
 
+                    out = {
+                        'value': rv_dict['v'],
+                        'eval_resample': rv_dict['v_eval_resample']
+                    }
+                    if self.declare_priors_fixef:
+                        out['kl_penalties'] = rv_dict['kl_penalties']
+
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
 
@@ -2537,11 +2520,14 @@ class CDRModel(object):
                         session=self.session
                     )
 
-                return {
-                    'value': rv_dict['v'],
-                    'kl_penalties': rv_dict['kl_penalties'],
-                    'eval_resample': rv_dict['v_eval_resample']
-                }
+                    out = {
+                        'value': rv_dict['v'],
+                        'eval_resample': rv_dict['v_eval_resample']
+                    }
+                    if self.declare_priors_ranef:
+                        out['kl_penalties'] = rv_dict['kl_penalties']
+
+                return out
 
     def _initialize_intercept(self, *args, **kwargs):
         if 'intercept' in self.rvs:
@@ -2555,16 +2541,13 @@ class CDRModel(object):
                 self.intercept_fixed = {}
                 self.intercept_random = {}
                 for response in self.response_names:
-                    self.intercept[response] = {}
-                    self.intercept_fixed[response] = {}
-                    self.intercept_random[response] = {}
-
                     # Fixed
                     response_params = self.get_response_params(response)
                     nparam = len(response_params)
                     ndim = self.get_response_ndim(response)
 
                     intercept_fixed = self.intercept_fixed_base[response]
+                    self.intercept_fixed[response] = intercept_fixed
 
                     self._regularize(
                         intercept_fixed,
@@ -2575,49 +2558,47 @@ class CDRModel(object):
 
                     intercept = intercept_fixed[None, ...]
 
-                    for i, response_param in enumerate(response_params):
-                        dim_names = self.expand_param_name(response, response_param)
-                        _p = intercept_fixed[i]
-                        for j, dim_name in enumerate(dim_names):
-                            val = _p[j]
-                            if self.has_intercept[None]:
-                                tf.summary.scalar(
-                                    'intercept/%s_%s' % (sn(response), sn(dim_name)),
-                                    val,
-                                    collections=['params']
-                                )
-                            self.intercept_fixed[response][dim_name] = val
+                    if self.log_fixed:
+                        for i, response_param in enumerate(response_params):
+                            dim_names = self.expand_param_name(response, response_param)
+                            for j, dim_name in enumerate(dim_names):
+                                val = intercept_fixed[i, j]
+                                if self.has_intercept[None]:
+                                    tf.summary.scalar(
+                                        'intercept/%s_%s' % (sn(response), sn(dim_name)),
+                                        val,
+                                        collections=['params']
+                                    )
 
                     # Random
                     for i, gf in enumerate(self.rangf):
                         # Random intercepts
                         if self.has_intercept[gf]:
-                            self.intercept_random[response][gf] = {}
-
                             intercept_random = self.intercept_random_base[response][gf]
                             intercept_random_means = tf.reduce_mean(intercept_random, axis=0, keepdims=True)
                             intercept_random -= intercept_random_means
+                            if response not in self.intercept_random:
+                                self.intercept_random[response] = {}
+                            self.intercept_random[response][gf] = intercept_random
 
-                            if 'intercept' not in self.rvs:
+                            if 'intercept' not in self.rvs or not self.declare_priors_ranef:
                                 self._regularize(
                                     intercept_random,
                                     regtype='ranef',
                                     var_name='intercept_%s_by_%s' % (sn(response), sn(gf))
                                 )
 
-                            for j, response_param in enumerate(response_params):
-                                if j == 0 or self.use_distributional_regression:
-                                    dim_names = self.expand_param_name(response, response_param)
-                                    _p = intercept_random[:, j]
-                                    for k, dim_name in enumerate(dim_names):
-                                        val = _p[:, k]
-                                        if self.log_random:
+                            if self.log_random:
+                                for j, response_param in enumerate(response_params):
+                                    if j == 0 or self.use_distributional_regression:
+                                        dim_names = self.expand_param_name(response, response_param)
+                                        for k, dim_name in enumerate(dim_names):
+                                            val = intercept_random[:, j, k]
                                             tf.summary.histogram(
                                                 'by_%s/intercept/%s_%s' % (sn(gf), sn(response), sn(dim_name)),
                                                 val,
                                                 collections=['random']
                                             )
-                                        self.intercept_random[response][gf][dim_name] = val
 
                             if not self.use_distributional_regression:
                                 # Pad out any unmodeled params of predictive distribution
@@ -2700,6 +2681,13 @@ class CDRModel(object):
                         session=self.session
                     )
 
+                    out = {
+                        'value': rv_dict['v'],
+                        'eval_resample': rv_dict['v_eval_resample']
+                    }
+                    if self.declare_priors_fixef:
+                        out['kl_penalties'] = rv_dict['kl_penalties']
+
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     sd_prior = self._coef_ranef_prior_sd[response]
@@ -2722,13 +2710,16 @@ class CDRModel(object):
                         session=self.session
                     )
 
+                    out = {
+                        'value': rv_dict['v'],
+                        'eval_resample': rv_dict['v_eval_resample']
+                    }
+                    if self.declare_priors_ranef:
+                        out['kl_penalties'] = rv_dict['kl_penalties']
+
                 # shape: (?rangf_n_levels, ncoef, nparam, ndim)
 
-                return {
-                    'value': rv_dict['v'],
-                    'kl_penalties': rv_dict['kl_penalties'],
-                    'eval_resample': rv_dict['v_eval_resample']
-                }
+                return out
 
     def _initialize_coefficient(self, *args, **kwargs):
         if 'coefficient' in self.rvs:
@@ -2742,8 +2733,6 @@ class CDRModel(object):
                 self.coefficient_fixed = {}
                 self.coefficient_random = {}
                 for response in self.response_names:
-                    self.coefficient_fixed[response] = {}
-
                     response_params = self.get_response_params(response)
                     if not self.use_distributional_regression:
                         response_params = response_params[:1]
@@ -2757,6 +2746,8 @@ class CDRModel(object):
                         self.coefficient_fixed_base[response],
                         [len(coef_ids), nparam, ndim]
                     )
+                    self.coefficient_fixed[response] = coefficient_fixed
+
                     self._regularize(
                         self.coefficient_fixed_base[response],
                         regtype='coefficient',
@@ -2765,63 +2756,58 @@ class CDRModel(object):
 
                     coefficient = coefficient_fixed[None, ...]
 
-                    for i, coef_name in enumerate(self.coef_names):
-                        self.coefficient_fixed[response][coef_name] = {}
-                        for j, response_param in enumerate(response_params):
-                            dim_names = self.expand_param_name(response, response_param)
-                            _p = coefficient_fixed[:, j]
-                            for k, dim_name in enumerate(dim_names):
-                                val = _p[i, k]
-                                tf.summary.scalar(
-                                    'coefficient' + '/%s/%s_%s' % (
-                                        sn(coef_name),
-                                        sn(response),
-                                        sn(dim_name)
-                                    ),
-                                    val,
-                                    collections=['params']
-                                )
-                                self.coefficient_fixed[response][coef_name][dim_name] = val
-
-                    self.coefficient_random[response] = {}
+                    if self.log_fixed:
+                        for i, coef_name in enumerate(self.coef_names):
+                            for j, response_param in enumerate(response_params):
+                                dim_names = self.expand_param_name(response, response_param)
+                                for k, dim_name in enumerate(dim_names):
+                                    val = coefficient_fixed[i, j, k]
+                                    tf.summary.scalar(
+                                        'coefficient' + '/%s/%s_%s' % (
+                                            sn(coef_name),
+                                            sn(response),
+                                            sn(dim_name)
+                                        ),
+                                        val,
+                                        collections=['params']
+                                    )
                     for i, gf in enumerate(self.rangf):
                         levels_ix = np.arange(self.rangf_n_levels[i] - 1)
 
                         coefs = self.coef_by_rangf.get(gf, [])
                         if len(coefs) > 0:
-                            self.coefficient_random[response][gf] = {}
-
                             nonzero_coef_ix = names2ix(coefs, self.coef_names)
 
                             coefficient_random = self.coefficient_random_base[response][gf]
                             coefficient_random_means = tf.reduce_mean(coefficient_random, axis=0, keepdims=True)
                             coefficient_random -= coefficient_random_means
+                            if response not in self.coefficient_random:
+                                self.coefficient_random[response] = {}
+                            self.coefficient_random[response][gf] = coefficient_random
 
-                            if 'coefficient' not in self.rvs:
+                            if 'coefficient' not in self.rvs or not self.declare_priors_ranef:
                                 self._regularize(
                                     coefficient_random,
                                     regtype='ranef',
                                     var_name='coefficient_%s_by_%s' % (sn(response),sn(gf))
                                 )
 
-                            for j, coef_name in enumerate(coefs):
-                                self.coefficient_random[response][gf][coef_name] = {}
-                                for k, response_param in enumerate(response_params):
-                                    dim_names = self.expand_param_name(response, response_param)
-                                    _p = coefficient_random[:, :, k]
-                                    for l, dim_name in enumerate(dim_names):
-                                        val = _p[:, j, l]
-                                        tf.summary.histogram(
-                                            'by_%s/coefficient/%s/%s_%s' % (
-                                                sn(gf),
-                                                sn(coef_name),
-                                                sn(response),
-                                                sn(dim_name)
-                                            ),
-                                            val,
-                                            collections=['random']
-                                        )
-                                        self.coefficient_random[response][gf][coef_name][dim_name] = val
+                            if self.log_random:
+                                for j, coef_name in enumerate(coefs):
+                                    for k, response_param in enumerate(response_params):
+                                        dim_names = self.expand_param_name(response, response_param)
+                                        for l, dim_name in enumerate(dim_names):
+                                            val = coefficient_random[:, j, k, l]
+                                            tf.summary.histogram(
+                                                'by_%s/coefficient/%s/%s_%s' % (
+                                                    sn(gf),
+                                                    sn(coef_name),
+                                                    sn(response),
+                                                    sn(dim_name)
+                                                ),
+                                                val,
+                                                collections=['random']
+                                            )
 
                             coefficient_random = self._scatter_along_axis(
                                 nonzero_coef_ix,
@@ -2921,10 +2907,15 @@ class CDRModel(object):
                             epsilon=self.epsilon,
                             session=self.session
                         )
+                        out = {
+                            'value': rv_dict['v'],
+                            'eval_resample': rv_dict['v_eval_resample']
+                        }
+                        if self.declare_priors_fixef:
+                            out['kl_penalties'] = rv_dict['kl_penalties']
                     else:
-                        rv_dict = {
+                        out = {
                             'v': None,
-                            'kl_penalties': None,
                             'eval_resample': None
                         }
                 else:
@@ -2953,20 +2944,21 @@ class CDRModel(object):
                             epsilon=self.epsilon,
                             session=self.session
                         )
+                        out = {
+                            'value': rv_dict['v'],
+                            'eval_resample': rv_dict['v_eval_resample']
+                        }
+                        if self.declare_priors_ranef:
+                            out['kl_penalties'] = rv_dict['kl_penalties']
                     else:
-                        rv_dict = {
+                        out = {
                             'v': None,
-                            'kl_penalties': None,
                             'v_eval_resample': None
                         }
 
                 # shape: (?rangf_n_levels, nirf, nparam, ndim)
 
-                return {
-                    'value': rv_dict['v'],
-                    'kl_penalties': rv_dict['kl_penalties'],
-                    'eval_resample': rv_dict['v_eval_resample']
-                }
+                return out
 
     def _initialize_irf_param(self, *args, **kwargs):
         if 'irf_param' in self.rvs:
@@ -2983,12 +2975,10 @@ class CDRModel(object):
                 # The 1 in the 2nd dim supports broadcasting over the time dimension.
 
                 # Key order: response, ?(ran_gf), irf_id, irf_param
-                self.irf_params = {}
-                self.irf_params_fixed = {}
-                self.irf_params_random = {}
+                self.irf_param = {}
+                self.irf_param_fixed = {}
+                self.irf_param_random = {}
                 for response in self.response_names:
-                    self.irf_params[response] = {}
-                    self.irf_params_fixed[response] = {}
                     for family in self.atomic_irf_names_by_family:
                         if family in ('DiracDelta', 'NN'):
                             continue
@@ -3055,34 +3045,28 @@ class CDRModel(object):
                             irf_param = irf_param_fixed[None, ...]
 
                             for i, irf_id in enumerate(irf_ids):
-                                if irf_id not in self.irf_params_fixed[response]:
-                                    self.irf_params_fixed[response][irf_id] = {}
-                                if irf_param_name not in self.irf_params_fixed[response][irf_id]:
-                                    self.irf_params_fixed[response][irf_id][irf_param_name] = {}
+                                _irf_param_fixed = irf_param_fixed[i]
+                                if response not in self.irf_param_fixed:
+                                    self.irf_param_fixed[response] = {}
+                                if irf_id not in self.irf_param_fixed[response]:
+                                    self.irf_param_fixed[response][irf_id] = {}
+                                self.irf_param_fixed[response][irf_id][irf_param_name] = _irf_param_fixed
 
-                                _p = irf_param_fixed[i]
-                                if irf_param_lb is not None and irf_param_ub is None:
-                                    _p = irf_param_lb + self.constraint_fn(_p) + self.epsilon
-                                elif irf_param_lb is None and irf_param_ub is not None:
-                                    _p = irf_param_ub - self.constraint_fn(_p) - self.epsilon
-                                elif irf_param_lb is not None and irf_param_ub is not None:
-                                    _p = self._sigmoid(_p, a=irf_param_lb, b=irf_param_ub) * (1 - 2 * self.epsilon) + self.epsilon
-
-                                for j, response_param in enumerate(response_params):
-                                    dim_names = self.expand_param_name(response, response_param)
-                                    for k, dim_name in enumerate(dim_names):
-                                        val = _p[j, k]
-                                        tf.summary.scalar(
-                                            '%s/%s/%s_%s' % (
-                                                irf_param_name,
-                                                sn(irf_id),
-                                                sn(response),
-                                                sn(dim_name)
-                                            ),
-                                            val,
-                                            collections=['params']
-                                        )
-                                        self.irf_params_fixed[response][irf_id][irf_param_name][dim_name] = val
+                                if self.log_fixed:
+                                    for j, response_param in enumerate(response_params):
+                                        dim_names = self.expand_param_name(response, response_param)
+                                        for k, dim_name in enumerate(dim_names):
+                                            val = _irf_param_fixed[j, k]
+                                            tf.summary.scalar(
+                                                '%s/%s/%s_%s' % (
+                                                    irf_param_name,
+                                                    sn(irf_id),
+                                                    sn(response),
+                                                    sn(dim_name)
+                                                ),
+                                                val,
+                                                collections=['params']
+                                            )
 
                             for i, gf in enumerate(self.rangf):
                                 if gf in self.irf_by_rangf:
@@ -3096,7 +3080,7 @@ class CDRModel(object):
                                         irf_param_random_mean = tf.reduce_mean(irf_param_random, axis=0, keepdims=True)
                                         irf_param_random -= irf_param_random_mean
 
-                                        if 'irf_param' not in self.rvs:
+                                        if 'irf_param' not in self.rvs or not self.declare_priors_ranef:
                                             self._regularize(
                                                 irf_param_random,
                                                 regtype='ranef',
@@ -3104,32 +3088,32 @@ class CDRModel(object):
                                             )
 
                                         for j, irf_id in enumerate(irf_ids_ran):
-                                            if irf_id in irf_ids_ran:
-                                                if response not in self.irf_params_random:
-                                                    self.irf_params_random[response] = {}
-                                                if gf not in self.irf_params_random[response]:
-                                                    self.irf_params_random[response][gf] = {}
-                                                if irf_id not in self.irf_params_random[response][gf]:
-                                                    self.irf_params_random[response][gf][irf_id] = {}
-                                                if irf_param_name not in self.irf_params_random[response][gf][irf_id]:
-                                                    self.irf_params_random[response][gf][irf_id][irf_param_name] = {}
+                                            _irf_param_random = irf_param_random[:, j]
+                                            if response not in self.irf_param_random:
+                                                self.irf_param_random[response] = {}
+                                            if gf not in self.irf_param_random[response]:
+                                                self.irf_param_random[response][gf] = {}
+                                            if irf_id not in self.irf_param_random[response][gf]:
+                                                self.irf_param_random[response][gf][irf_id] = {}
+                                            self.irf_param_random[response][gf][irf_id][irf_param_name] = _irf_param_random
 
-                                                for k, response_param in enumerate(response_params):
-                                                    dim_names = self.expand_param_name(response, response_param)
-                                                    for l, dim_name in enumerate(dim_names):
-                                                        val = irf_param_random[:, j, k, l]
-                                                        tf.summary.histogram(
-                                                            'by_%s/%s/%s/%s_%s' % (
-                                                                sn(gf),
-                                                                sn(irf_id),
-                                                                irf_param_name,
-                                                                sn(dim_name),
-                                                                sn(response)
-                                                            ),
-                                                            val,
-                                                            collections=['random']
-                                                        )
-                                                        self.irf_params_random[response][gf][irf_id][irf_param_name][dim_name] = val
+                                            if self.log_random:
+                                                if irf_id in irf_ids_ran:
+                                                    for k, response_param in enumerate(response_params):
+                                                        dim_names = self.expand_param_name(response, response_param)
+                                                        for l, dim_name in enumerate(dim_names):
+                                                            val = _irf_param_random[:, k, l]
+                                                            tf.summary.histogram(
+                                                                'by_%s/%s/%s/%s_%s' % (
+                                                                    sn(gf),
+                                                                    sn(irf_id),
+                                                                    irf_param_name,
+                                                                    sn(dim_name),
+                                                                    sn(response)
+                                                                ),
+                                                                val,
+                                                                collections=['random']
+                                                            )
 
                                         irf_param_random = self._scatter_along_axis(
                                             irfs_ix,
@@ -3153,10 +3137,12 @@ class CDRModel(object):
 
                             for j, irf_id in enumerate(irf_ids):
                                 if irf_param_name in trainable[irf_id]:
-                                    if irf_id not in self.irf_params[response]:
-                                        self.irf_params[response][irf_id] = {}
+                                    if response not in self.irf_param:
+                                        self.irf_param[response] = {}
+                                    if irf_id not in self.irf_param[response]:
+                                        self.irf_param[response][irf_id] = {}
                                     # id is -3 dimension
-                                    self.irf_params[response][irf_id][irf_param_name] = irf_param[..., j, :, :]
+                                    self.irf_param[response][irf_id][irf_param_name] = irf_param[..., j, :, :]
 
     def _initialize_irf_lambdas(self):
         with self.session.as_default():
@@ -3356,7 +3342,7 @@ class CDRModel(object):
                             assert not t.impulse == 'rate', '"rate" is a reserved keyword in CDR formula strings and cannot be used under DiracDelta'
                         self.irf[response][t.name()] = self.irf[response][t.p.name()][:]
                 elif t.family != 'NN': # NN IRFs are computed elsewhere, skip here
-                    params = self.irf_params[response][t.irf_id()]
+                    params = self.irf_param[response][t.irf_id()]
                     atomic_irf = self._get_irf_lambdas(t.family)(**params)
                     if t.p.name() in self.irf:
                         irf = self.irf[response][t.p.name()][:] + [atomic_irf]
@@ -4352,6 +4338,12 @@ class CDRModel(object):
                         epsilon=self.epsilon,
                         session=self.session
                     )
+                    out = {
+                        'value': rv_dict['v'],
+                        'eval_resample': rv_dict['v_eval_resample']
+                    }
+                    if self.declare_priors_fixef:
+                        out['kl_penalties'] = rv_dict['kl_penalties']
                 else:
                     rangf_n_levels = self.rangf_n_levels[self.rangf.index(ran_gf)] - 1
                     sd_prior = self._coef_ranef_prior_sd[response]
@@ -4373,14 +4365,16 @@ class CDRModel(object):
                         epsilon=self.epsilon,
                         session=self.session
                     )
+                    out = {
+                        'value': rv_dict['v'],
+                        'eval_resample': rv_dict['v_eval_resample']
+                    }
+                    if self.declare_priors_ranef:
+                        out['kl_penalties'] = rv_dict['kl_penalties']
 
                 # shape: (?rangf_n_levels, ninter, nparam, ndim)
 
-                return {
-                    'value': rv_dict['v'],
-                    'kl_penalties': rv_dict['kl_penalties'],
-                    'eval_resample': rv_dict['v_eval_resample']
-                }
+                return out
 
     def _initialize_interaction(self, *args, **kwargs):
         if 'interaction' in self.rvs:
@@ -4396,8 +4390,6 @@ class CDRModel(object):
                 fixef_ix = names2ix(self.fixed_interaction_names, self.interaction_names)
                 if len(self.interaction_names) > 0:
                     for response in self.response_names:
-                        self.interaction_fixed[response] = {}
-
                         response_params = self.get_response_params(response)
                         if not self.use_distributional_regression:
                             response_params = response_params[:1]
@@ -4410,6 +4402,8 @@ class CDRModel(object):
                             self.interaction_fixed_base[response],
                             [len(interaction_ids), nparam, ndim]
                         )
+                        self.interaction_fixed[response] = interaction_fixed
+
                         self._regularize(
                             self.interaction_fixed_base[response],
                             regtype='coefficient',
@@ -4418,37 +4412,35 @@ class CDRModel(object):
 
                         interaction = interaction_fixed[None, ...]
 
-                        for i, interaction_name in enumerate(self.interaction_names):
-                            self.interaction_fixed[response][interaction_name] = {}
-                            for j, response_param in enumerate(response_params):
-                                _p = interaction_fixed[:, j]
-                                dim_names = self.expand_param_name(response, response_param)
-                                for k, dim_name in enumerate(dim_names):
-                                    val = _p[i, k]
-                                    tf.summary.scalar(
-                                        'interaction' + '/%s/%s_%s' % (
-                                            sn(interaction_name),
-                                            sn(response),
-                                            sn(dim_name)
-                                        ),
-                                        val,
-                                        collections=['params']
-                                    )
-                                    self.interaction_fixed[response][interaction_name][dim_name] = val
+                        if self.log_fixed:
+                            for i, interaction_name in enumerate(self.interaction_names):
+                                for j, response_param in enumerate(response_params):
+                                    dim_names = self.expand_param_name(response, response_param)
+                                    for k, dim_name in enumerate(dim_names):
+                                        val = interaction_fixed[i, j, k]
+                                        tf.summary.scalar(
+                                            'interaction' + '/%s/%s_%s' % (
+                                                sn(interaction_name),
+                                                sn(response),
+                                                sn(dim_name)
+                                            ),
+                                            val,
+                                            collections=['params']
+                                        )
 
-                        self.interaction_random[response] = {}
                         for i, gf in enumerate(self.rangf):
                             levels_ix = np.arange(self.rangf_n_levels[i] - 1)
 
                             interactions = self.interaction_by_rangf.get(gf, [])
                             if len(interactions) > 0:
-                                self.interaction_random[response][gf] = {}
-
                                 interaction_ix = names2ix(interactions, self.interaction_names)
 
                                 interaction_random = self.interaction_random_base[response][gf]
                                 interaction_random_means = tf.reduce_mean(interaction_random, axis=0, keepdims=True)
                                 interaction_random -= interaction_random_means
+                                if response not in self.interaction_random:
+                                    self.interaction_random[response] = {}
+                                self.interaction_random[response][gf] = interaction_random
 
                                 self._regularize(
                                     interaction_random,
@@ -4456,24 +4448,22 @@ class CDRModel(object):
                                     var_name='interaction_%s_by_%s' % (sn(response), sn(gf))
                                 )
 
-                                for j, interaction_name in enumerate(interactions):
-                                    self.interaction_random[response][gf][interaction_name] = {}
-                                    for k, response_param in enumerate(response_params):
-                                        _p = interaction_random[:, :, k]
-                                        dim_names = self.expand_param_name(response, response_param)
-                                        for l, dim_name in enumerate(dim_names):
-                                            val = _p[:, j, l]
-                                            tf.summary.histogram(
-                                                'by_%s/interaction/%s/%s_%s' % (
-                                                    sn(gf),
-                                                    sn(interaction_name),
-                                                    sn(response),
-                                                    sn(dim_name)
-                                                ),
-                                                val,
-                                                collections=['random']
-                                            )
-                                            self.interaction_random[response][gf][interaction_name][dim_name] = val
+                                if self.log_random:
+                                    for j, interaction_name in enumerate(interactions):
+                                        for k, response_param in enumerate(response_params):
+                                            dim_names = self.expand_param_name(response, response_param)
+                                            for l, dim_name in enumerate(dim_names):
+                                                val = interaction_random[:, j, k, l]
+                                                tf.summary.histogram(
+                                                    'by_%s/interaction/%s/%s_%s' % (
+                                                        sn(gf),
+                                                        sn(interaction_name),
+                                                        sn(response),
+                                                        sn(dim_name)
+                                                    ),
+                                                    val,
+                                                    collections=['random']
+                                                )
 
                                 interaction_random = self._scatter_along_axis(
                                     interaction_ix,
@@ -5285,7 +5275,7 @@ class CDRModel(object):
                                     is_ranef = True
                                     break
                             if is_ranef:
-                                if 'nn' not in self.rvs:
+                                if 'nn' not in self.rvs or not self.declare_priors_ranef:
                                     self._regularize(
                                         v,
                                         regtype='ranef',
@@ -5355,124 +5345,6 @@ class CDRModel(object):
                 self.summary_params = tf.summary.merge_all(key='params')
                 if self.log_random and len(self.rangf) > 0:
                     self.summary_random = tf.summary.merge_all(key='random')
-
-    def _initialize_parameter_tables(self):
-        with self.session.as_default():
-            with self.session.graph.as_default():
-                # Fixed
-                self.parameter_table_fixed_types = []
-                self.parameter_table_fixed_responses = []
-                self.parameter_table_fixed_response_params = []
-                self.parameter_table_fixed_values = []
-                if self.has_intercept[None]:
-                    for response in self.intercept_fixed:
-                        for dim_name in self.intercept_fixed[response]:
-                            self.parameter_table_fixed_types.append('intercept')
-                            self.parameter_table_fixed_responses.append(response)
-                            self.parameter_table_fixed_response_params.append(dim_name)
-                            self.parameter_table_fixed_values.append(
-                                self.intercept_fixed[response][dim_name]
-                            )
-                for response in self.coefficient_fixed:
-                    for coef_name in self.coefficient_fixed[response]:
-                        coef_name_str = 'coefficient_' + coef_name
-                        for dim_name in self.coefficient_fixed[response][coef_name]:
-                            self.parameter_table_fixed_types.append(coef_name_str)
-                            self.parameter_table_fixed_responses.append(response)
-                            self.parameter_table_fixed_response_params.append(dim_name)
-                            self.parameter_table_fixed_values.append(
-                                self.coefficient_fixed[response][coef_name][dim_name]
-                            )
-                for response in self.irf_params_fixed:
-                    for irf_id in self.irf_params_fixed[response]:
-                        for irf_param in self.irf_params_fixed[response][irf_id]:
-                            irf_str = irf_param + '_' + irf_id
-                            for dim_name in self.irf_params_fixed[response][irf_id][irf_param]:
-                                self.parameter_table_fixed_types.append(irf_str)
-                                self.parameter_table_fixed_responses.append(response)
-                                self.parameter_table_fixed_response_params.append(dim_name)
-                                self.parameter_table_fixed_values.append(
-                                    self.irf_params_fixed[response][irf_id][irf_param][dim_name]
-                                )
-                for response in self.interaction_fixed:
-                    for interaction_name in self.interaction_fixed[response]:
-                        interaction_name_str = 'interaction_' + interaction_name
-                        for dim_name in self.interaction_fixed[response][interaction_name]:
-                            self.parameter_table_fixed_types.append(interaction_name_str)
-                            self.parameter_table_fixed_responses.append(response)
-                            self.parameter_table_fixed_response_params.append(dim_name)
-                            self.parameter_table_fixed_values.append(
-                                self.interaction_fixed[response][interaction_name][dim_name]
-                            )
-
-                # Random
-                self.parameter_table_random_types = []
-                self.parameter_table_random_responses = []
-                self.parameter_table_random_response_params = []
-                self.parameter_table_random_rangf = []
-                self.parameter_table_random_rangf_levels = []
-                self.parameter_table_random_values = []
-                for response in self.intercept_random:
-                    for r, gf in enumerate(self.rangf):
-                        if gf in self.intercept_random[response] and self.has_intercept[gf]:
-                            levels = sorted(self.rangf_map_ix_2_levelname[r][:-1])
-                            for dim_name in self.intercept_random[response][gf]:
-                                for l, level in enumerate(levels):
-                                    self.parameter_table_random_types.append('intercept')
-                                    self.parameter_table_random_responses.append(response)
-                                    self.parameter_table_random_response_params.append(dim_name)
-                                    self.parameter_table_random_rangf.append(gf)
-                                    self.parameter_table_random_rangf_levels.append(level)
-                                    self.parameter_table_random_values.append(
-                                        self.intercept_random[response][gf][dim_name][l]
-                                    )
-                for response in self.coefficient_random:
-                    for r, gf in enumerate(self.rangf):
-                        if gf in self.coefficient_random[response]:
-                            levels = sorted(self.rangf_map_ix_2_levelname[r][:-1])
-                            for coef_name in self.coefficient_random[response][gf]:
-                                coef_name_str = 'coefficient_' + coef_name
-                                for dim_name in self.coefficient_random[response][gf][coef_name]:
-                                    for l, level in enumerate(levels):
-                                        self.parameter_table_random_types.append(coef_name_str)
-                                        self.parameter_table_random_responses.append(response)
-                                        self.parameter_table_random_response_params.append(dim_name)
-                                        self.parameter_table_random_rangf.append(gf)
-                                        self.parameter_table_random_rangf_levels.append(level)
-                                        self.parameter_table_random_values.append(
-                                            self.coefficient_random[response][gf][coef_name][dim_name][l]
-                                        )
-                for response in self.irf_params_fixed:
-                    for r, gf in enumerate(self.rangf):
-                        if gf in self.irf_params_fixed[response]:
-                            levels = sorted(self.rangf_map_ix_2_levelname[r][:-1])
-                            for irf_id in self.irf_params_fixed[response]:
-                                for irf_param in self.irf_params_fixed[response][irf_id]:
-                                    irf_str = irf_param + '_' + irf_id
-                                    for dim_name in self.irf_params_fixed[response][irf_id][irf_param]:
-                                        for l, level in enumerate(levels):
-                                            self.parameter_table_fixed_types.append(irf_str)
-                                            self.parameter_table_fixed_responses.append(response)
-                                            self.parameter_table_fixed_response_params.append(dim_name)
-                                            self.parameter_table_fixed_values.append(
-                                                self.irf_params_random[response][gf][irf_id][irf_param][dim_name][l]
-                                            )
-                for response in self.interaction_random:
-                    for r, gf in enumerate(self.rangf):
-                        if gf in self.interaction_random[response]:
-                            levels = sorted(self.rangf_map_ix_2_levelname[r][:-1])
-                            for interaction_name in self.interaction_random[response][gf]:
-                                interaction_name_str = 'interaction_' + interaction_name
-                                for dim_name in self.interaction_random[response][gf][interaction_name]:
-                                    for l, level in enumerate(levels):
-                                        self.parameter_table_random_types.append(interaction_name_str)
-                                        self.parameter_table_random_responses.append(response)
-                                        self.parameter_table_random_response_params.append(dim_name)
-                                        self.parameter_table_random_rangf.append(gf)
-                                        self.parameter_table_random_rangf_levels.append(level)
-                                        self.parameter_table_random_values.append(
-                                            self.interaction_random[response][gf][interaction_name][dim_name][l]
-                                        )
 
     def _initialize_saver(self):
         with self.session.as_default():
@@ -5997,43 +5869,6 @@ class CDRModel(object):
 
                 return out_dict
 
-    ######################################################
-    #
-    #  Private model inspection methods
-    #
-    ######################################################
-
-    def _extract_parameter_values(self, fixed=True, level=95, n_samples=None):
-        if n_samples:
-            MAP_mode = False
-        else:
-            n_samples = 1
-            MAP_mode = True
-
-        alpha = 100 - float(level)
-
-        self.set_predict_mode(True)
-
-        samples = []
-        for i in range(n_samples):
-            self.resample_model()
-            if fixed:
-                param_vector = self.parameter_table_fixed_values
-            else:
-                param_vector = self.parameter_table_random_values
-            samples.append(self.session.run(param_vector, feed_dict={self.use_MAP_mode: MAP_mode}))
-        samples = np.stack(samples, axis=1)
-
-        mean = samples.mean(axis=1)
-        lower = np.percentile(samples, alpha / 2, axis=1)
-        upper = np.percentile(samples, 100 - (alpha / 2), axis=1)
-
-        out = np.stack([mean, lower, upper], axis=1)
-
-        self.set_predict_mode(False)
-
-        return out
-
 
 
 
@@ -6423,14 +6258,6 @@ class CDRModel(object):
                 dur = pytime.time() - t0
                 if report_time:
                     stderr('_initialize_objective took %.2fs\n' % dur)
-
-                if verbose:
-                    stderr('  Initializing parameter tables...\n')
-                t0 = pytime.time()
-                self._initialize_parameter_tables()
-                dur = pytime.time() - t0
-                if report_time:
-                    stderr('_initialize_parameter_tables took %.2fs\n' % dur)
 
                 if verbose:
                     stderr('  Initializing Tensorboard logging...\n')
@@ -9960,6 +9787,55 @@ class CDRModel(object):
 
         return out
 
+    def get_reference_map(
+            self,
+            reference_values=None,
+            default_reference_type=None
+    ):
+        if reference_values is None:
+            reference_values = self.reference_values
+        if default_reference_type is None:
+            default_reference_type = self.default_reference_type
+        reference_map = {}
+        for pair in reference_values.split():
+            impulse_name, val = pair.split('=')
+            reference = float(val)
+            reference_map[impulse_name] = reference
+        for x in self.impulse_names:
+            if not x in reference_map:
+                if default_reference_type == 'mean':
+                    reference_map[x] = self.impulse_means[x]
+                else:
+                    reference_map[x] = 0.
+
+        return reference_map
+
+    def get_plot_step_map(
+            self,
+            plot_step=None,
+            plot_step_default=None
+    ):
+        if plot_step is None:
+            plot_step = self.plot_step
+        if plot_step_default is None:
+            plot_step_default = self.plot_step_default
+
+        plot_step_map = {}
+        for pair in plot_step.split():
+            impulse_name, val = pair.split('=')
+            plot_step = float(val)
+            plot_step_map[impulse_name] = plot_step
+        for x in self.impulse_names:
+            if not x in plot_step_map:
+                if x in self.indicators:
+                    plot_step_map[x] = 1 - self.reference_map[x]
+                elif isinstance(plot_step_default, str) and plot_step_default.lower() == 'sd':
+                    plot_step_map[x] = self.impulse_sds[x]
+                else:
+                    plot_step_map[x] = plot_step_default
+
+        return plot_step_map
+
     def make_plots(
             self,
             irf_name_map=None,
@@ -9975,6 +9851,8 @@ class CDRModel(object):
             plot_n_time_units=None,
             plot_n_time_points=None,
             reference_type=None,
+            plot_step=None,
+            plot_step_default=None,
             generate_univariate_irf_plots=None,
             generate_univariate_irf_heatmaps=None,
             generate_curvature_plots=None,
@@ -9998,7 +9876,8 @@ class CDRModel(object):
             use_line_markers=False,
             transparent_background=False,
             keep_plot_history=None,
-            dump_source=False
+            dump_source=False,
+            **kwargs
     ):
         """
         Generate plots of current state of deconvolution.
@@ -10029,6 +9908,8 @@ class CDRModel(object):
         :param plot_n_time_units: ``float`` or ``None``; resolution of plot axis (for 3D plots, uses sqrt of this number for each axis). If ``None``, use default setting.
         :param plot_support_start: ``float`` or ``None``; start time for IRF plots. If ``None``, use default setting.
         :param reference_type: ``bool``; whether to use the predictor means as baseline reference (otherwise use zero).
+        :param plot_step: ``str`` or ``None``; size of step by predictor to take above reference in univariate IRF plots. Structured as space-delimited pairs ``NAME=FLOAT``. Any predictor without a specified step size will inherit from **plot_step_default**.
+        :param plot_step_default: ``float``, ``str``, or ``None``; default size of step to take above reference in univariate IRF plots, if not specified in **plot_step**. Either a float or the string ``'sd'``, which indicates training sample standard deviation.
         :param generate_univariate_irf_plots: ``bool``; whether to plot univariate IRFs over time.
         :param generate_univariate_irf_heatmaps: ``bool``; whether to plot univariate IRFs over time.
         :param generate_curvature_plots: ``bool`` or ``None``; whether to plot IRF curvature at time **reference_time**. If ``None``, use default setting.
@@ -10053,6 +9934,7 @@ class CDRModel(object):
         :param transparent_background: ``bool``; whether to use a transparent background. If ``False``, uses a white background.
         :param keep_plot_history: ``bool`` or ``None``; keep the history of all plots by adding a suffix with the iteration number. Can help visualize learning but can also consume a lot of disk space. If ``False``, always overwrite with most recent plot. If ``None``, use default setting.
         :param dump_source: ``bool``; Whether to dump the plot source array to a csv file.
+        :param **kwargs: ``dict``; extra kwargs to pass to ``get_plot_data``
         :return: ``None``
         """
 
@@ -10167,9 +10049,13 @@ class CDRModel(object):
                             new_names.append(name)
                 names = new_names
 
+            plot_step_map = self.get_plot_step_map(
+                plot_step,
+                plot_step_default
+            )
             manipulations = []
             for x in names:
-                delta = self.plot_step_map[x]
+                delta = plot_step_map[x]
                 manipulations.append({x: delta})
             gf_y_refs = [{x: y} for x, y in zip(ranef_group_names, ranef_level_names)]
 
@@ -10207,9 +10093,6 @@ class CDRModel(object):
                     xvar='t_delta',
                     responses=responses,
                     response_params=response_params,
-                    X_ref=None,
-                    X_time_ref=None,
-                    t_delta_ref=None,
                     gf_y_ref=gf_y_ref,
                     ref_varies_with_x=True,
                     manipulations=manipulations_cur,
@@ -10220,7 +10103,8 @@ class CDRModel(object):
                     xmax=xmax,
                     xres=plot_n_time_points,
                     n_samples=n_samples,
-                    level=level
+                    level=level,
+                    **kwargs
                 )
 
                 plot_x = x_axis_transform(plot_x)
@@ -10337,7 +10221,8 @@ class CDRModel(object):
                     reference_type=reference_type,
                     xres=plot_n_time_points,
                     n_samples=n_samples,
-                    level=level
+                    level=level,
+                    **kwargs
                 )
 
                 plot_x = x_axis_transform(plot_x)
@@ -10451,7 +10336,8 @@ class CDRModel(object):
                             xres=int(np.ceil(np.sqrt(plot_n_time_points))),
                             yres=int(np.ceil(np.sqrt(plot_n_time_points))),
                             n_samples=n_samples,
-                            level=level
+                            level=level,
+                            **kwargs
                         )
 
                         plot_x = x_axis_transform(plot_x)
@@ -10562,59 +10448,166 @@ class CDRModel(object):
         if n_samples == 'default':
             if self.is_bayesian or self.has_dropout:
                 n_samples = self.n_samples_eval
+                MAP_mode = False
             else:
-                n_samples = None
+                n_samples = 1
+                MAP_mode = True
+        elif n_samples:
+            MAP_mode = False
+        else:
+            n_samples = 1
+            MAP_mode = True
 
+        alpha = 100 - float(level)
+
+        keys = []
+        values = []
+
+        if fixed:
+            for response in self.intercept_fixed:
+                keys.append(('intercept', response))
+                values.append(self.intercept_fixed[response])
+            for response in self.coefficient_fixed:
+                keys.append(('coefficient', response))
+                values.append(self.coefficient_fixed[response])
+            for response in self.irf_param_fixed:
+                for irf_id in self.irf_param_fixed[response]:
+                    for irf_param_name in self.irf_param_fixed[response][irf_id]:
+                        keys.append(('irf_param_%s_%s' % (irf_param_name, irf_id), response))
+                        values.append(self.irf_param_fixed[response][irf_id][irf_param_name])
+            for response in self.interaction_fixed:
+                keys.append(('interaction', response))
+                values.append(self.interaction_fixed[response])
+        else:
+            for response in self.intercept_random:
+                for rangf in self.intercept_random[response]:
+                    keys.append(('intercept', response, rangf))
+                    values.append(self.intercept_random[response][rangf])
+            for response in self.coefficient_random:
+                for rangf in self.coefficient_random[response]:
+                    keys.append(('coefficient', response, rangf))
+                    values.append(self.coefficient_random[response][rangf])
+            for response in self.irf_param_random:
+                for rangf in self.irf_param_random[response]:
+                    for irf_id in self.irf_param_random[response][rangf]:
+                        for irf_param_name in self.irf_param_random[response][rangf][irf_id]:
+                            keys.append(('irf_param_%s_%s' % (irf_param_name, irf_id), response, rangf))
+                            values.append(self.irf_param_random[response][rangf][irf_id][irf_param_name])
+            for response in self.interaction_random:
+                for rangf in self.interaction_random[response]:
+                    keys.append(('interaction', response, rangf))
+                    values.append(self.interaction_random[response][rangf])
+
+        self.set_predict_mode(True)
+        samples = []
         with self.session.as_default():
             with self.session.graph.as_default():
-                self.set_predict_mode(True)
+                for i in range(n_samples):
+                    stderr('\rSample %d/%d...' % (i + 1, n_samples))
+                    self.resample_model()
+                    samples.append(self.session.run(values, feed_dict={self.use_MAP_mode: MAP_mode}))
+        self.set_predict_mode(False)
 
-                if fixed:
-                    types = self.parameter_table_fixed_types
-                    responses = self.parameter_table_fixed_responses
-                    response_params = self.parameter_table_fixed_response_params
-                    values = self._extract_parameter_values(
-                        fixed=True,
-                        level=level,
-                        n_samples=n_samples
-                    )
+        out = []
+        cols = ['Parameter']
+        if len(self.response_names) > 1:
+            cols.append('Response')
+        if not fixed:
+            cols += ['Group', 'Level']
+        cols += ['ResponseParam', 'Mean', '%0.1f' % (alpha / 2), '%0.1f' % (100 - (alpha / 2))]
+        for key_ix, key in enumerate(keys):
+            if fixed:
+                param_type, response = key
+                rangf = gf_ix = levels = None
+            else:
+                param_type, response, rangf = key
+                gf_ix = self.rangf.index(rangf)
+                levels = sorted(self.rangf_map_ix_2_levelname[gf_ix][:-1])
+            _samples = np.stack([x[key_ix] for x in samples], axis=0)
+            mean = _samples.mean(axis=0)
+            lower = np.percentile(_samples, alpha / 2, axis=0)
+            upper = np.percentile(_samples, 100 - (alpha / 2), axis=0)
+            df = []
+            response_params = self.get_response_params(response)
+            if param_type == 'intercept':
+                for i, response_param in enumerate(response_params):
+                    dim_names = self.expand_param_name(response, response_param)
+                    for j, dim_name in enumerate(dim_names):
+                        if fixed:
+                            row = (param_type,)
+                            if len(self.response_names) > 1:
+                                row += (response,)
+                            row += (dim_name, mean[i, j], lower[i, j], upper[i, j])
+                            df.append(row)
+                        else:
+                            gf_ix = self.rangf.index(rangf)
+                            for k, level in enumerate(levels):
+                                row = (param_type,)
+                                if len(self.response_names) > 1:
+                                    row += (response,)
+                                row += (rangf, level, dim_name, mean[k, i, j], lower[k, i, j], upper[k, i, j])
+                                df.append(row)
+            elif param_type == 'coefficient':
+                for i, coef_name in enumerate(self.coef_names):
+                    for j, response_param in enumerate(response_params):
+                        dim_names = self.expand_param_name(response, response_param)
+                        for k, dim_name in enumerate(dim_names):
+                            if fixed:
+                                row = ('coefficient_%s' % coef_name,)
+                                if len(self.response_names) > 1:
+                                    row += (response,)
+                                row += (dim_name, mean[i, j, k], lower[i, j, k], upper[i, j, k])
+                                df.append(row)
+                            else:
+                                for l, level in enumerate(levels):
+                                    row = ('coefficient_%s' % coef_name,)
+                                    if len(self.response_names) > 1:
+                                        row += (response,)
+                                    row += (rangf, level, dim_name, mean[l, i, j, k], lower[l, i, j, k], upper[l, i, j, k])
+                                    df.append(row)
+            elif param_type.startswith('irf_param_'):
+                for i, response_param in enumerate(response_params):
+                    dim_names = self.expand_param_name(response, response_param)
+                    for j, dim_name in enumerate(dim_names):
+                        if fixed:
+                            row = (param_type[10:],)
+                            if len(self.response_names) > 1:
+                                row += (response,)
+                            row += (dim_name, mean[i, j], lower[i, j], upper[i, j])
+                            df.append(row)
+                        else:
+                            gf_ix = self.rangf.index(rangf)
+                            for k, level in enumerate(levels):
+                                row = (param_type[10:],)
+                                if len(self.response_names) > 1:
+                                    row += (response,)
+                                row += (rangf, level, dim_name, mean[k, i, j], lower[k, i, j], upper[k, i, j])
+                                df.append(row)
+            elif param_type == 'interaction':
+                for i, interaction_name in enumerate(self.interaction_names):
+                    for j, response_param in enumerate(response_params):
+                        dim_names = self.expand_param_name(response, response_param)
+                        for k, dim_name in enumerate(dim_names):
+                            if fixed:
+                                row = ('interaction_%s' % interaction_name,)
+                                if len(self.response_names) > 1:
+                                    row += (response,)
+                                row += (dim_name, mean[i, j, k], lower[i, j, k], upper[i, j, k])
+                                df.append(row)
+                            else:
+                                for l, level in enumerate(levels):
+                                    row = ('interaction_%s' % interaction_name,)
+                                    if len(self.response_names) > 1:
+                                        row += (response,)
+                                    row += (rangf, level, dim_name, mean[l, i, j, k], lower[l, i, j, k], upper[l, i, j, k])
+                                    df.append(row)
 
-                    out = pd.DataFrame({'Parameter': types})
-                    if len(self.response_names) > 1:
-                        out['Response'] = responses
-                    out['ResponseParam'] = response_params
+            df = pd.DataFrame(df, columns=cols)
+            out.append(df)
 
-                else:
-                    types = self.parameter_table_random_types
-                    responses = self.parameter_table_random_responses
-                    response_params = self.parameter_table_random_response_params
-                    rangf = self.parameter_table_random_rangf
-                    rangf_levels = self.parameter_table_random_rangf_levels
-                    values = self._extract_parameter_values(
-                        fixed=False,
-                        level=level,
-                        n_samples=n_samples
-                    )
+        out = pd.concat(out, axis=0)
 
-                    out = pd.DataFrame({
-                        'Parameter': types,
-                        'Group': rangf,
-                        'Level': rangf_levels
-                    })
-                    if len(self.response_names) > 1:
-                        out['Response'] = responses
-                    out['ResponseParam'] = response_params
-
-                if n_samples:
-                    columns = ['Mean', '2.5%', '97.5%']
-                    out = pd.concat([out, pd.DataFrame(values, columns=columns)], axis=1)
-                else:
-                    columns = ['Estimate']
-                    out = pd.concat([out, pd.DataFrame(values[:, 0], columns=columns)], axis=1)
-
-                self.set_predict_mode(False)
-
-                return out
+        return out
 
     def save_parameter_table(self, random=True, level=95, n_samples='default', outfile=None):
         """

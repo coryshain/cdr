@@ -621,10 +621,16 @@ MODEL_INITIALIZATION_KWARGS = [
         "Frequency (in iterations) with which to log model params to Tensorboard."
     ),
     Kwarg(
+        'log_fixed',
+        True,
+        bool,
+        "Log random fixed to Tensorboard. Can slow training of models with many fixed effects."
+    ),
+    Kwarg(
         'log_random',
         True,
         bool,
-        "Log random effects to Tensorboard."
+        "Log random effects to Tensorboard. Can slow training of models with many random effects."
     ),
     Kwarg(
         'log_graph',
@@ -657,7 +663,7 @@ MODEL_INITIALIZATION_KWARGS = [
         'plot_step',
         '',
         str,
-        "Size of step by predictor to take above reference in univariate IRF plots. Structured as space-delimited pairs ``NAME=FLOAT``. Any predictor without a specified step size will step 1 SD from training set."
+        "Size of step by predictor to take above reference in univariate IRF plots. Structured as space-delimited pairs ``NAME=FLOAT``. Any predictor without a specified step size will inherit from **plot_step_default**."
     ),
     Kwarg(
         'plot_step_default',
@@ -1442,6 +1448,18 @@ PLOT_KWARGS_CORE = [
         False,
         bool,
         "Whether to plot all (marginal) random effects."
+    ),
+    Kwarg(
+        'plot_step',
+        '',
+        str,
+        "Size of step by predictor to take above reference in univariate IRF plots. Structured as space-delimited pairs ``NAME=FLOAT``. Any predictor without a specified step size will inherit from **plot_step_default**."
+    ),
+    Kwarg(
+        'plot_step_default',
+        1.,
+        [str, float],
+        "Default size of step to take above reference in univariate IRF plots, if not specified in **plot_step**. Either a float or the string ``'sd'``, which indicates training sample standard deviation."
     ),
     Kwarg(
         'reference_time',
