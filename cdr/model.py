@@ -257,11 +257,6 @@ def mcify(dist):
                 h = histogram(samp, bins, axis=0, extend_lower_interval=True, extend_upper_interval=True)
                 ix = tf.cast(tf.argmax(h, axis=0), tf.int32)
                 
-                print(bins)
-                print(delta)
-                print(h)
-                print(ix)
-
                 # Move the index last
                 transpose_ix = list(range(len(bins.shape)))
                 transpose_ix = transpose_ix[1:] + [transpose_ix[0]]
@@ -283,25 +278,10 @@ def mcify(dist):
                     gather_ix.append(_gather_ix)
                 gather_ix.append(ix)
                 gather_ix = tf.stack(gather_ix, axis=-1)
-                print('gather_ix')
-                print(gather_ix)
-                print('bins')
-                print(bins)
                 bins = tf.gather_nd(bins, gather_ix)
                 delta = tf.gather_nd(delta, gather_ix)
 
-                print('gathering')
-
                 mode = bins + delta
-
-                print('bins')
-                print(bins)
-                print('delta')
-                print(delta)
-                print('mode')
-                print(mode)
-
-                mode = tf.Print(mode, [tf.shape(mode)], summarize=10)
 
                 return mode
 
@@ -5028,8 +5008,6 @@ class CDRModel(object):
 
                     # Mask out likelihoods of predictions for missing response variables.
                     ll = ll * Y_mask
-                    print(ll)
-                    input()
                     ll = tf.cond(
                         self.sum_outputs_along_T,
                         lambda: tf.cond(
