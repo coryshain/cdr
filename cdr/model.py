@@ -98,6 +98,9 @@ if int(tf.__version__.split('.')[0]) == 1:
     def tf_quantile(x, q, **kwargs):
         return tfd.percentile(x, q * 100, **kwargs)
 
+    def histogram(*args, **kwargs):
+        raise NotImplementedError('Bootstrapping the mode is not supported in TensorFlow v1. Switch to a TensorFlow v2 release in order to use this feature.')
+
     TF_MAJOR_VERSION = 1
 elif int(tf.__version__.split('.')[0]) == 2:
     import tensorflow.compat.v1 as tf
@@ -121,6 +124,7 @@ elif int(tf.__version__.split('.')[0]) == 2:
     Scale = tfb.Scale
     Chain = tfb.Chain
     Identity = tfb.Identity
+    histogram = tfs.histogram
 
     def AffineScalar(shift, scale, *args, **kwargs):
         chain = []
@@ -244,7 +248,62 @@ def mcify(dist):
             try:
                 return super(MCifiedDistribution, self)._mode()
             except NotImplementedError:
-                return self.quantile(0.5)
+                # Get argmax indices of sample histogram
+                samp = self.sample(sample_shape=self.n_resamp)
+                nbins = 100
+                q = tf.linspace(0., 1., nbins + 1)
+                bins = tf_quantile(samp, q, axis=0)
+                delta = bins[1:] - bins[:-1] / 2
+                h = histogram(samp, bins, axis=0, extend_lower_interval=True, extend_upper_interval=True)
+                ix = tf.cast(tf.argmax(h, axis=0), tf.int32)
+                
+                print(bins)
+                print(delta)
+                print(h)
+                print(ix)
+
+                # Move the index last
+                transpose_ix = list(range(len(bins.shape)))
+                transpose_ix = transpose_ix[1:] + [transpose_ix[0]]
+                bins = tf.transpose(bins, transpose_ix)
+                delta = tf.transpose(delta, transpose_ix)
+
+                # Index into the approximate mode
+                gather_ix = []
+                ndim = len(bins.shape) - 1
+                for i in range(ndim):
+                    bin_shape = tf.shape(bins)
+                    _gather_ix = tf.range(bin_shape[i])
+                    for j in range(i):
+                        _gather_ix = _gather_ix[None, ...]
+                    for j in range(i + 1, ndim):
+                        _gather_ix = _gather_ix[..., None]
+                    tile_ix = [bin_shape[j] if j != i else 1 for j in range(ndim)]
+                    _gather_ix = tf.tile(_gather_ix, tile_ix)
+                    gather_ix.append(_gather_ix)
+                gather_ix.append(ix)
+                gather_ix = tf.stack(gather_ix, axis=-1)
+                print('gather_ix')
+                print(gather_ix)
+                print('bins')
+                print(bins)
+                bins = tf.gather_nd(bins, gather_ix)
+                delta = tf.gather_nd(delta, gather_ix)
+
+                print('gathering')
+
+                mode = bins + delta
+
+                print('bins')
+                print(bins)
+                print('delta')
+                print(delta)
+                print('mode')
+                print(mode)
+
+                mode = tf.Print(mode, [tf.shape(mode)], summarize=10)
+
+                return mode
 
         def _quantile(self, q, **kwargs):
             try:
@@ -4701,9 +4760,9 @@ class CDRModel(object):
                         )
 
                     X_weighted_unscaled = X_weighted_by_irf
-                    X_weighted_unscaled_sumT = tf.reduce_sum(X_weighted_by_irf, axis=1)
-                    X_weighted_unscaled_sumK = tf.reduce_sum(X_weighted_by_irf, axis=2)
-                    X_weighted_unscaled_sumTK = tf.reduce_sum(X_weighted_unscaled_sumT, axis=1)
+                    X_weighted_unscaled_sumT = tf.reduce_sum(X_weighted_by_irf, axis=1, keepdims=True)
+                    X_weighted_unscaled_sumK = tf.reduce_sum(X_weighted_by_irf, axis=2, keepdims=True)
+                    X_weighted_unscaled_sumTK = tf.reduce_sum(X_weighted_unscaled_sumT, axis=1, keepdims=True)
                     self.X_weighted_unscaled[response] = X_weighted_unscaled
                     self.X_weighted_unscaled_sumT[response] = X_weighted_unscaled_sumT
                     self.X_weighted_unscaled_sumK[response] = X_weighted_unscaled_sumK
@@ -4712,12 +4771,12 @@ class CDRModel(object):
                     coef_names = [self.node_table[x].coef_id() for x in self.terminal_names]
                     coef_ix = names2ix(coef_names, self.coef_names)
                     coef = tf.gather(self.coefficient[response], coef_ix, axis=1)
-                    X_weighted_sumT = X_weighted_unscaled_sumT * coef
-                    X_weighted = X_weighted_unscaled
                     coef = tf.expand_dims(coef, axis=1)
+                    X_weighted = X_weighted_unscaled
                     X_weighted = X_weighted * coef
-                    X_weighted_sumK = tf.reduce_sum(X_weighted, axis=2)
-                    X_weighted_sumTK = tf.reduce_sum(X_weighted_sumT, axis=1)
+                    X_weighted_sumT = tf.reduce_sum(X_weighted, axis=1, keepdims=True)
+                    X_weighted_sumK = tf.reduce_sum(X_weighted, axis=2, keepdims=True)
+                    X_weighted_sumTK = tf.reduce_sum(X_weighted_sumT, axis=1, keepdims=True)
                     self.X_weighted[response] = X_weighted
                     self.X_weighted_sumT[response] = X_weighted_sumT
                     self.X_weighted_sumK[response] = X_weighted_sumK
@@ -4806,6 +4865,9 @@ class CDRModel(object):
                     Y = self.Y[..., i]
                     Y_mask = self.Y_mask[..., i]
 
+                    # Expand T and K dimensions of intercept
+                    response_params = tf.expand_dims(tf.expand_dims(response_params, axis=1), axis=1)
+
                     # Get output deltas
                     output_delta = tf.cond(
                         self.sum_outputs_along_K,
@@ -4814,60 +4876,42 @@ class CDRModel(object):
                             lambda: X_weighted_sumTK,
                             lambda: X_weighted_sumK
                         ),
-                        lambda: X_weighted
-                    )
-
-                    # Conditionally reduce along T (time, axis 1)
-                    if interaction_delta is not None:
-                        interaction_delta = tf.cond(
+                        lambda: tf.cond(
                             self.sum_outputs_along_T,
-                            lambda: interaction_delta,
-                            lambda: tf.expand_dims(interaction_delta, axis=1)
+                            lambda: X_weighted_sumT,
+                            lambda: X_weighted
                         )
-                    response_params = tf.cond(
-                        self.sum_outputs_along_T,
-                        lambda: response_params,
-                        lambda: tf.expand_dims(response_params, axis=1)
-                    )
-                    tile_shape = [1, self.history_length + self.future_length]
-                    Y = tf.cond(
-                        self.sum_outputs_along_T,
-                        lambda: Y,
-                        lambda: tf.tile(Y[..., None], tile_shape)
-                    )
-                    Y_mask = tf.cond(
-                        self.sum_outputs_along_T,
-                        lambda: Y_mask,
-                        lambda: tf.tile(Y_mask[..., None], tile_shape)
                     )
 
-                    # Conditionally reduce along K (impulses, axis -3)
+                    # Expand T and K dimensions of interaction terms
                     if interaction_delta is not None:
-                        interaction_delta = tf.cond(
-                            self.sum_outputs_along_K,
-                            lambda: tf.reduce_sum(interaction_delta, axis=1),
-                            lambda: interaction_delta
-                        )
-                    response_params = tf.cond(
-                        self.sum_outputs_along_K,
-                        lambda: response_params,
-                        lambda: tf.expand_dims(response_params, axis=-3)
-                    )
+                        interaction_delta = tf.expand_dims(tf.expand_dims(interaction_delta, axis=1), axis=1)
+
+                    # Conditionally tile Y along T and K
+                    time_tile_shape = [1, self.history_length + self.future_length, 1]
                     n_impulse = self.n_impulse
-                    tile_shape = tf.cond(
+                    impulse_tile_shape = [1, 1, n_impulse]
+                    Y = tf.expand_dims(tf.expand_dims(Y, axis=1), axis=1)
+                    Y_mask = tf.expand_dims(tf.expand_dims(Y_mask, axis=1), axis=1)
+                    Y = tf.cond(
                         self.sum_outputs_along_T,
-                        lambda: tf.convert_to_tensor([1, n_impulse]),
-                        lambda: tf.convert_to_tensor([1, 1, n_impulse]),
+                        lambda: Y,
+                        lambda: tf.tile(Y, time_tile_shape)
+                    )
+                    Y_mask = tf.cond(
+                        self.sum_outputs_along_T,
+                        lambda: Y_mask,
+                        lambda: tf.tile(Y_mask, time_tile_shape)
                     )
                     Y = tf.cond(
                         self.sum_outputs_along_K,
                         lambda: Y,
-                        lambda: tf.tile(Y[..., None], tile_shape)
+                        lambda: tf.tile(Y, impulse_tile_shape)
                     )
                     Y_mask = tf.cond(
                         self.sum_outputs_along_K,
                         lambda: Y_mask,
-                        lambda: tf.tile(Y_mask[..., None], tile_shape)
+                        lambda: tf.tile(Y_mask, impulse_tile_shape)
                     )
 
                     output_delta_w_interactions = output_delta
@@ -4886,8 +4930,8 @@ class CDRModel(object):
                     for j, response_param_name in enumerate(response_param_names):
                         dim_names = self.expand_param_name(response, response_param_name)
                         for k, dim_name in enumerate(dim_names):
-                            self.predictive_distribution_delta[response][dim_name] = output_delta[:, j, k]
-                            self.predictive_distribution_delta_w_interactions[response][dim_name] = output_delta_w_interactions[:, j, k]
+                            self.predictive_distribution_delta[response][dim_name] = output_delta[:, 0, 0, j, k]
+                            self.predictive_distribution_delta_w_interactions[response][dim_name] = output_delta_w_interactions[:, 0, 0, j, k]
 
                     response_dist, response_dist_src, response_params = self._initialize_predictive_distribution_inner(
                         response,
@@ -4907,8 +4951,8 @@ class CDRModel(object):
                             param_type='output_delta'
                         )
                         delta_pred_mean = delta_response_dist.mean()
-                        self.predictive_distribution_delta[response]['mean'] = delta_pred_mean - base_pred_mean
-                        self.predictive_distribution_delta_w_interactions[response]['mean'] = pred_mean - base_pred_mean
+                        self.predictive_distribution_delta[response]['mean'] = (delta_pred_mean - base_pred_mean)[:, 0, 0]
+                        self.predictive_distribution_delta_w_interactions[response]['mean'] = (pred_mean - base_pred_mean)[:, 0, 0]
                         if self.get_response_dist_name(response).startswith('lognormal'):
                             bijector = self.s_bijectors[response]
                         else:
@@ -4942,7 +4986,7 @@ class CDRModel(object):
                         elif dist_name.lower() == 'sinharcsinh':
                             mode = response_dist.loc
                         elif self.get_response_dist_name(response).startswith('lognormal'):
-                            mode = tf.exp(response_dist.distribution.mean() - response_dist.distribution.variance())
+                                mode = tf.exp(response_dist.distribution.mean() - response_dist.distribution.variance())
                         else:
                             mode = response_dist.mode()
                         if self.is_real(response) and bijector is not None:
@@ -4953,10 +4997,24 @@ class CDRModel(object):
                     prediction = tf.cond(self.use_MAP_mode, MAP_predict, response_dist.sample)
 
                     if dist_name in ['bernoulli', 'categorical']:
-                        self.prediction[response] = tf.cast(prediction, self.INT_TF) * \
+                        prediction = tf.cast(prediction, self.INT_TF) * \
                                                     tf.cast(Y_mask, self.INT_TF)
                     else: # Treat as continuous regression, use the first (location) parameter
-                        self.prediction[response] = prediction * Y_mask
+                        prediction = prediction * Y_mask
+                    prediction = tf.cond(
+                        self.sum_outputs_along_T,
+                        lambda: tf.cond(
+                            self.sum_outputs_along_K,
+                            lambda: prediction[:, :, 0],
+                            lambda: prediction
+                        )[:, 0],
+                        lambda: tf.cond(
+                            self.sum_outputs_along_K,
+                            lambda: prediction[:, :, 0],
+                            lambda: prediction
+                        )
+                    )
+                    self.prediction[response] = prediction
 
                     # Get elementwise log likelihood
                     if self.is_real(response):
@@ -4970,8 +5028,21 @@ class CDRModel(object):
 
                     # Mask out likelihoods of predictions for missing response variables.
                     ll = ll * Y_mask
-                    # ll = tf.Print(ll, ['ll', ll, 'll min', tf.reduce_min(ll), 'll max', tf.reduce_max(ll), 'll sum', tf.reduce_sum(ll), 'Y', Y, 'pred', self.prediction[response], ])
-                    # ll = tf.Print(ll, ['grad mu', tf.gradients(ll, _response_params[0]), 'grad sigma', tf.gradients(ll, _response_params[1])])
+                    print(ll)
+                    input()
+                    ll = tf.cond(
+                        self.sum_outputs_along_T,
+                        lambda: tf.cond(
+                            self.sum_outputs_along_K,
+                            lambda: ll[:, :, 0],
+                            lambda: ll
+                        )[:, 0],
+                        lambda: tf.cond(
+                            self.sum_outputs_along_K,
+                            lambda: ll[:, :, 0],
+                            lambda: ll
+                        )
+                    )
                     self.ll_by_var[response] = ll
 
                     # Define EMA over predictive distribution
@@ -4980,7 +5051,7 @@ class CDRModel(object):
                     response_params_ema_cur = []
                     # These will only ever be used in training mode, so un-standardize if needed
                     for j , response_param_name in enumerate(response_param_names):
-                        response_params_ema_cur.append(response_params[j])
+                        response_params_ema_cur.append(response_params[j][:, 0, 0]) # Index into spurious T and K dimensions
                     response_params_ema_cur = tf.stack(response_params_ema_cur, axis=1)
                     response_params_ema_cur = tf.reduce_mean(response_params_ema_cur, axis=0)
                     self.response_params_ema[response] = tf.Variable(

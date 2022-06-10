@@ -276,7 +276,14 @@ if __name__ == '__main__':
             if cdr_model.eval_freq > 0:
                 if X_paths_dev is None or Y_paths_dev is None:
                     X_paths_dev, Y_paths_dev = paths_from_partition_cliarg('dev', p)
-                    assert X_paths_dev is not None and Y_paths_dev is not None, 'X_dev and Y_dev must be specified in order to use eval_freq > 0'
+                    for X_path in X_paths_dev:
+                        if X_path is None:
+                            raise ValueError('X_dev must be specified in order to use eval_freq > 0')
+                    for Y_path in Y_paths_dev:
+                        if Y_path is None:
+                            raise ValueError('Y_dev must be specified in order to use eval_freq > 0')
+
+                    assert X_paths_dev and Y_paths_dev, 'X_dev and Y_dev must be specified in order to use eval_freq > 0'
                     X_dev, Y_dev = read_tabular_data(
                         X_paths_dev,
                         Y_paths_dev,
