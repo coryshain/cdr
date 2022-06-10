@@ -7613,9 +7613,6 @@ class CDRModel(object):
                     self.session.run(to_run, feed_dict=fd)
                     self.save()
 
-                    self.save_parameter_table()
-                    self.save_integral_table()
-
                     self.set_training_complete(True)
 
                     self.save()
@@ -10628,6 +10625,7 @@ class CDRModel(object):
             level=level,
             n_samples=n_samples
         )
+
         if random and self.is_mixed_model:
             parameter_table = pd.concat(
                 [
