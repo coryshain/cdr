@@ -34,6 +34,11 @@ if int(tf.__version__.split('.')[0]) == 1:
         def __init(self, *args, **kwargs):
             raise NotImplementedError('The exgaussian distribution is not supported in TensorFlow v1. Switch to a TensorFlow v2 release in order to use this feature.')
 
+    # TODO: Implement
+    class JohnsonSU(Distribution):
+        def __init(self, *args, **kwargs):
+            raise NotImplementedError('The JohnsonSU distribution is not supported in TensorFlow v1. Switch to a TensorFlow v2 release in order to use this feature.')
+
     # Much of this is stolen from the TF2 source, since TF1 lacks LogNormal
     class LogNormal(TransformedDistribution):
         def __init__(self,
@@ -105,11 +110,12 @@ elif int(tf.__version__.split('.')[0]) == 2:
     Distribution = tfd.Distribution
     Normal = tfd.Normal
     LogNormal = tfd.LogNormal
-    SinhArcsinh = tfd.SinhArcsinh
     Bernoulli = tfd.Bernoulli
     Categorical = tfd.Categorical
     Exponential = tfd.Exponential
     ExponentiallyModifiedGaussian = tfd.ExponentiallyModifiedGaussian
+    SinhArcsinh = tfd.SinhArcsinh
+    JohnsonSU = tfd.JohnsonSU
     TransformedDistribution = tfd.TransformedDistribution
     Shift = tfb.Shift
     Scale = tfb.Scale
@@ -223,6 +229,8 @@ def mcify(dist):
                 n_resamp=N_MCIFIED_DIST_RESAMP,
                 **kwargs
         ):
+            print(args)
+            print(kwargs)
             super(MCifiedDistribution, self).__init__(*args, **kwargs)
             self.n_resamp = n_resamp
             self.dist_name = dist.__name__
@@ -545,6 +553,13 @@ class CDRModel(object):
         'sinharcsinh': {
             'dist': SinhArcsinh,
             'name': 'sinharcsinh',
+            'params': ('mu', 'sigma', 'skewness', 'tailweight'),
+            'params_tf': ('loc', 'scale', 'skewness', 'tailweight'),
+            'support': 'real'
+        },
+        'johnsonsu': {
+            'dist': JohnsonSU,
+            'name': 'johnsonsu',
             'params': ('mu', 'sigma', 'skewness', 'tailweight'),
             'params_tf': ('loc', 'scale', 'skewness', 'tailweight'),
             'support': 'real'
@@ -4929,7 +4944,7 @@ class CDRModel(object):
                         elif dist_name.lower() == 'sinharcsinh':
                             mode = response_dist.loc
                         elif self.get_response_dist_name(response).startswith('lognormal'):
-                                mode = tf.exp(response_dist.distribution.mean() - response_dist.distribution.variance())
+                            mode = tf.exp(response_dist.distribution.mean() - response_dist.distribution.variance())
                         else:
                             mode = response_dist.mode()
                         if self.is_real(response) and bijector is not None:
@@ -5003,8 +5018,10 @@ class CDRModel(object):
                         err_dist_params = [response_params_ema_debiased[j] for j in range(len(response_param_names))]
                         if self.get_response_ndim(response) == 1:
                             err_dist_params = [tf.squeeze(x, axis=-1) for x in err_dist_params]
+                        err_dist_kwargs = {x: y for x, y in zip(self.get_response_params_tf(response), err_dist_params)}
+                        err_dist_kwargs.update(**response_dist_kwargs)
                         response_dist_fn = self.get_response_dist(response)
-                        err_dist = response_dist_fn(*err_dist_params, **response_dist_kwargs)
+                        err_dist = response_dist_fn(**err_dist_kwargs)
                         # Rescale
                         err_dist = ShiftedScaledDistribution(
                             err_dist,
@@ -5070,7 +5087,9 @@ class CDRModel(object):
                     _response_params = [tf.squeeze(x, axis=-1) for x in response_params]
                 else:
                     _response_params = response_params
-                response_dist = response_dist_fn(*_response_params, **response_dist_kwargs)
+                _response_dist_kwargs = {x: y for x, y in zip(self.get_response_params_tf(response), _response_params)}
+                _response_dist_kwargs.update(response_dist_kwargs)
+                response_dist = response_dist_fn(**_response_dist_kwargs)
                 response_dist_src = response_dist
 
                 if self.is_real(response):

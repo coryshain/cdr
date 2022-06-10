@@ -241,6 +241,32 @@ def layout_plot_definition_menu():
     )
 
 
+def layout_manipulations_menu():
+    panel_name = html.Div(
+        className='fullwidth-app-controls-name',
+        children=html.Span(
+            'Manipulations',
+            className='fullwidth-app-controls-name-text'
+        )
+    )
+    manipulations_settings = [
+
+    ]
+
+    return html.Div(
+        title='Manipulations',
+        className='app-controls-block',
+        children=[
+            panel_name,
+            html.Div(
+                className='fullwidth-app-controls',
+                id='manipulations-container',
+                children=manipulations_settings
+            )
+        ]
+    )
+
+
 def layout_reference_values_menu():
     panel_name = html.Div(
         className='fullwidth-app-controls-name',
