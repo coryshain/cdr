@@ -229,8 +229,6 @@ def mcify(dist):
                 n_resamp=N_MCIFIED_DIST_RESAMP,
                 **kwargs
         ):
-            print(args)
-            print(kwargs)
             super(MCifiedDistribution, self).__init__(*args, **kwargs)
             self.n_resamp = n_resamp
             self.dist_name = dist.__name__
@@ -6165,7 +6163,7 @@ class CDRModel(object):
                         stderr('_compile_nn for %s took %.2fs\n' % (nn_id, dur))
 
                 if verbose:
-                    stderr('  Concatenating inputs...\n')
+                    stderr('  Concatenating impulses...\n')
                 t0 = pytime.time()
                 self._concat_nn_impulses()
                 dur = pytime.time() - t0
