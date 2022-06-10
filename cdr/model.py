@@ -10503,7 +10503,6 @@ class CDRModel(object):
         with self.session.as_default():
             with self.session.graph.as_default():
                 for i in range(n_samples):
-                    stderr('\rSample %d/%d...' % (i + 1, n_samples))
                     self.resample_model()
                     samples.append(self.session.run(values, feed_dict={self.use_MAP_mode: MAP_mode}))
         self.set_predict_mode(False)
