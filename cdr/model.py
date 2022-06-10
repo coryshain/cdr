@@ -4776,7 +4776,7 @@ class CDRModel(object):
                     X_weighted = X_weighted * coef
                     X_weighted_sumT = tf.reduce_sum(X_weighted, axis=1, keepdims=True)
                     X_weighted_sumK = tf.reduce_sum(X_weighted, axis=2, keepdims=True)
-                    X_weighted_sumTK = tf.reduce_sum(X_weighted_sumT, axis=1, keepdims=True)
+                    X_weighted_sumTK = tf.reduce_sum(X_weighted_sumT, axis=2, keepdims=True)
                     self.X_weighted[response] = X_weighted
                     self.X_weighted_sumT[response] = X_weighted_sumT
                     self.X_weighted_sumK[response] = X_weighted_sumK
