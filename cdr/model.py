@@ -1,5 +1,4 @@
 import textwrap
-import textwrap
 import time as pytime
 from collections import defaultdict
 import subprocess
@@ -248,40 +247,36 @@ def mcify(dist):
             try:
                 return super(MCifiedDistribution, self)._mode()
             except NotImplementedError:
+                # Bootstrap the mode, which is surprisingly involved.
+                # Returns the midpoint of the largest bin in a histogram of samples from the distribution.
+
                 # Get argmax indices of sample histogram
                 samp = self.sample(sample_shape=self.n_resamp)
-                nbins = 100
-                q = tf.linspace(0., 1., nbins + 1)
-                bins = tf_quantile(samp, q, axis=0)
-                delta = bins[1:] - bins[:-1] / 2
+                nbins = self.n_resamp / 10
+                bins = tf.linspace(
+                    tf.reduce_min(samp, axis=0),
+                    tf.reduce_max(samp, axis=0),
+                    nbins + 1
+                )
+                vals = (bins[:-1] + bins[1:]) / 2 # Midpoints of each bin, which define possible return values
                 h = histogram(samp, bins, axis=0, extend_lower_interval=True, extend_upper_interval=True)
                 ix = tf.cast(tf.argmax(h, axis=0), tf.int32)
-                
-                # Move the index last
-                transpose_ix = list(range(len(bins.shape)))
-                transpose_ix = transpose_ix[1:] + [transpose_ix[0]]
-                bins = tf.transpose(bins, transpose_ix)
-                delta = tf.transpose(delta, transpose_ix)
 
-                # Index into the approximate mode
-                gather_ix = []
-                ndim = len(bins.shape) - 1
+                # Index into the bootstrapped mode
+                gather_ix = [ix]
+                ndim = len(ix.shape)
+                ix_shape = tf.shape(ix)
                 for i in range(ndim):
-                    bin_shape = tf.shape(bins)
-                    _gather_ix = tf.range(bin_shape[i])
+                    _gather_ix = tf.range(ix_shape[i])
                     for j in range(i):
                         _gather_ix = _gather_ix[None, ...]
                     for j in range(i + 1, ndim):
                         _gather_ix = _gather_ix[..., None]
-                    tile_ix = [bin_shape[j] if j != i else 1 for j in range(ndim)]
+                    tile_ix = [ix_shape[j] if j != i else 1 for j in range(ndim)]
                     _gather_ix = tf.tile(_gather_ix, tile_ix)
                     gather_ix.append(_gather_ix)
-                gather_ix.append(ix)
                 gather_ix = tf.stack(gather_ix, axis=-1)
-                bins = tf.gather_nd(bins, gather_ix)
-                delta = tf.gather_nd(delta, gather_ix)
-
-                mode = bins + delta
+                mode = tf.gather_nd(vals, gather_ix)
 
                 return mode
 
@@ -4946,29 +4941,9 @@ class CDRModel(object):
                     def MAP_predict(
                             self=self,
                             response_dist=response_dist_src,
-                            dist_name=dist_name,
                             bijector=bijector
                     ):
-                        if dist_name.lower().startswith('exgaussian'):
-                            # Mode not currently implemented for ExGaussian in TensorFlow Probability
-                            # and reimplementation not possible until TFP implements the erfcxinv function.
-                            # Approximation taken from eq. 15 of Kalambet et al., 2010.
-                            m = response_dist.loc
-                            s = response_dist.scale
-                            b = response_dist.rate
-                            if dist_name.lower() == 'exgaussianinvrate':
-                                b = 1. / b
-                            t = 1. / tf.maximum(b, self.pred_dist_epsilon)
-                            z = (t / tf.maximum(s, self.pred_dist_epsilon)) / np.sqrt(2. / np.pi)
-                            # Approximation to erfcxinv, most accurate when z < 1 (i.e. skew is small relative to scale)
-                            y = 1. / tf.maximum(z * np.sqrt(np.pi), self.pred_dist_epsilon) + z * np.sqrt(np.pi) / 2.
-                            mode = m - y * s * np.sqrt(2.) - s / tf.maximum(t, self.pred_dist_epsilon)
-                        elif dist_name.lower() == 'sinharcsinh':
-                            mode = response_dist.loc
-                        elif self.get_response_dist_name(response).startswith('lognormal'):
-                                mode = tf.exp(response_dist.distribution.mean() - response_dist.distribution.variance())
-                        else:
-                            mode = response_dist.mode()
+                        mode = response_dist.mode()
                         if self.is_real(response) and bijector is not None:
                             mode = bijector.forward(mode)
 
