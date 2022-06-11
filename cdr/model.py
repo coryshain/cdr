@@ -252,7 +252,7 @@ def mcify(dist):
 
                 # Get argmax indices of sample histogram
                 samp = self.sample(sample_shape=self.n_resamp)
-                nbins = self.n_resamp // 10
+                nbins = self.n_resamp // 100
                 bins = tf.linspace(
                     tf.reduce_min(samp, axis=0),
                     tf.reduce_max(samp, axis=0),
