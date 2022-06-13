@@ -1,49 +1,45 @@
 import sys
 import os
+import re
 import argparse
+import numpy as np
+
 from cdr.config import Config
 from cdr.util import sn
 
-def new_row(system, results, tasks):
+
+ENSEMBLE = re.compile('([^ ]+)\.m\d+')
+
+
+def new_row(system, results, tasks, base_partitions=None):
+    if base_partitions is None:
+        base_partitions = ['train', 'dev', 'test']
     s = system
     out = s
     for t in tasks:
         if t in results and s in results[t]:
-            if 'train' in results[t][s]:
-                train = '%.4f' % results[t][s]['train']['loss']
-                if len(train.split('.')[0]) > 3:
-                    train = '%d' % round(float(train))
-                train = str(train)
-                if not results[t][s]['train']['converged']:
-                    train += '\\textsuperscript{\\textdagger}'
-            else:
-                train = '---'
-            if 'dev' in results[t][s]:
-                dev = '%.4f' % results[t][s]['dev']['loss']
-                if len(dev.split('.')[0]) > 3:
-                    dev = '%d' % round(float(dev))
-                dev = str(dev)
-                if not results[t][s]['dev']['converged']:
-                    dev += '\\textsuperscript{\\textdagger}'
-            else:
-                dev = '---'
-            if 'test' in results[t][s]:
-                test = '%.4f' % results[t][s]['test']['loss']
-                if len(test.split('.')[0]) > 3:
-                    test = '%d' % round(float(test))
-                test = str(test)
-                if not results[t][s]['test']['converged']:
-                    test += '\\textsuperscript{\\textdagger}'
-            else:
-                test = '---'
-            out += ' & ' + ' & '.join([train, dev, test])
+            row = []
+            for partition in base_partitions:
+                if partition in results[t][s]:
+                    val = '%.4f' % results[t][s][partition]['loss']
+                    if len(val.split('.')[0]) > 3:
+                        val = '%d' % round(float(val))
+                    val = str(val)
+                    if not results[t][s][partition]['converged']:
+                        val += '\\textsuperscript{\\textdagger}'
+                else:
+                    val = '---'
+                row.append(val)
+            out += ' & ' + ' & '.join(row)
         else:
-            out += ' & ' + ' & '.join(['---'] * 3)
+            out += ' & ' + ' & '.join(['---'] * len(base_partitions))
     out += '\\\\\n'
     return out
     
 
-def results_to_table(results, systems, baselines=None, indent=4):
+def results_to_table(results, systems, baselines=None, indent=4, base_partitions=None):
+    if base_partitions is None:
+        base_partitions = ['train', 'dev', 'test']
     tasks = results.keys()
     out = ''
     out += '\\begin{table}\n'
@@ -57,11 +53,11 @@ def results_to_table(results, systems, baselines=None, indent=4):
         baselines = []
 
     for b in baselines:
-        out += ' ' * (indent * 2) + new_row(b, results, tasks)
+        out += ' ' * (indent * 2) + new_row(b, results, tasks, base_partitions=base_partitions)
     if len(baselines) > 0:
         out += ' ' * (indent * 2) + '\\hline\n'
     for s in systems:
-        out += ' ' * (indent * 2) + new_row(s, results, tasks)           
+        out += ' ' * (indent * 2) + new_row(s, results, tasks, base_partitions=base_partitions)
  
     out += ' ' * indent + '\\end{tabular}\n'
     out += '\\end{table}\n'
@@ -82,6 +78,7 @@ if __name__ == '__main__':
     argparser.add_argument('-B', '--baseline_names',  nargs='+', default=None, help='Names of baselines (should be in 1-1 alignment with ``baselines``. If not provided, names will be inferred from baselines.')
     argparser.add_argument('-s', '--systems',  nargs='+', default=None, help='Models to treat as (non-baseline) systems.')
     argparser.add_argument('-S', '--system_names',  nargs='+', default=None, help='Names of systems (should be in 1-1 alignment with ``systems``. If not provided, names will be inferred from systems.')
+    argparser.add_argument('-P', '--partitions',  nargs='+', default=None, help='Names of partitions to evaluate. If not provided, defaults to ``"train"``, ``"dev"``, ``"test"``.')
     args = argparser.parse_args()
 
     response = args.response
@@ -113,13 +110,16 @@ if __name__ == '__main__':
 
     systems = args.systems
     system_names = args.system_names
+    base_partitions = args.partitions
+    if base_partitions is None:
+        base_partitions = ['train', 'dev', 'test']
 
     results = {}
     system_names_all = []
     for i, path in enumerate(args.config_paths):
         p = Config(path)
         if systems is None:
-            _systems = [x for x in p.model_list if x not in baselines]
+            _systems = [x for x in p.model_list + p.ensemble_list if x not in baselines]
         if system_names is None:
             _system_names = _systems[:]
         else:
@@ -131,7 +131,7 @@ if __name__ == '__main__':
         for j, b in enumerate(baselines):
             if b in p.model_list:
                 b_path = b.replace(':', '+')
-                for partition in ['train', 'dev', 'test']:
+                for partition in base_partitions:
                     if os.path.exists(p.outdir + '/' + b_path):
                         for path in os.listdir(p.outdir + '/' + b_path):
                             if (not response or response in path) and path.startswith('eval') and path.endswith('%s.txt' % partition):
@@ -158,7 +158,7 @@ if __name__ == '__main__':
         for j, s in enumerate(_systems):
             if s in p.model_list:
                 s_path = s.replace(':', ':')
-                for partition in ['train', 'dev', 'test']:
+                for partition in base_partitions:
                     if os.path.exists(p.outdir + '/' + s_path):
                         for path in os.listdir(p.outdir + '/' + s_path):
                             if (not response or response in path) and path.startswith('eval') and path.endswith('%s.txt' % partition):
@@ -183,6 +183,37 @@ if __name__ == '__main__':
                                             converged = True
                                         line = f.readline()
 
+        # Aggregate over any ensembles
+        for j, system_name in enumerate(system_names_all):
+            for task_name in results:
+                if system_name not in results[task_name]:
+                    submodels = []
+                    for x in results[task_name]:
+                        re_match = ENSEMBLE.match(x)
+                        if re_match and re_match.group(1) == system_name:
+                            submodels.append(x)
+                    n_submodels = len(submodels)
+                    for k, submodel in enumerate(submodels):
+                        for task_name in results:
+                            if submodel in results[task_name]:
+                                for partition in results[task_name][submodel]:
+                                    if system_name not in results[task_name]:
+                                        results[task_name][system_name] = {}
+                                    if partition not in results[task_name][system_name]:
+                                        results[task_name][system_name][partition] = {'loss': [], 'converged': []}
+                                    results[task_name][system_name][partition]['loss'].append(results[task_name][submodel][partition]['loss'])
+                                    if k == n_submodels - 1:
+                                        results[task_name][system_name][partition]['loss'] = np.mean(results[task_name][system_name][partition]['loss'])
+                                    results[task_name][system_name][partition]['converged'].append(results[task_name][submodel][partition]['converged'])
+                                    if k == n_submodels - 1:
+                                        results[task_name][system_name][partition]['converged'] = np.mean(results[task_name][system_name][partition]['converged'])
 
-    sys.stdout.write(results_to_table(results, system_names_all, baselines=baseline_names))
+    sys.stdout.write(
+        results_to_table(
+            results,
+            system_names_all,
+            baselines=baseline_names,
+            base_partitions=base_partitions
+        )
+    )
 

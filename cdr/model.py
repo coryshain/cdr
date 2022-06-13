@@ -560,78 +560,9 @@ class CDRModel(object):
     N_QUANTILES = 41
     PLOT_QUANTILE_RANGE = 0.9
     PLOT_QUANTILE_IX = int((1 - PLOT_QUANTILE_RANGE) / 2 * N_QUANTILES)
-    PREDICTIVE_DISTRIBUTIONS = {
-        'normal': {
-            'dist': Normal,
-            'name': 'normal',
-            'params': ('mu', 'sigma'),
-            'params_tf': ('loc', 'scale'),
-            'support': 'real'
-        },
-        'lognormal': {
-            'dist': LogNormal,
-            'name': 'lognormal',
-            'params': ('mu', 'sigma'),
-            'params_tf': ('loc', 'scale'),
-            'support': 'real'
-        },
-        'lognormalv2': {
-            'dist': LogNormalV2,
-            'name': 'lognormalv2',
-            'params': ('mu', 'sigma'),
-            'params_tf': ('loc', 'scale'),
-            'support': 'real'
-        },
-        'sinharcsinh': {
-            'dist': SinhArcsinh,
-            'name': 'sinharcsinh',
-            'params': ('mu', 'sigma', 'skewness', 'tailweight'),
-            'params_tf': ('loc', 'scale', 'skewness', 'tailweight'),
-            'support': 'real'
-        },
-        'johnsonsu': {
-            'dist': JohnsonSU,
-            'name': 'johnsonsu',
-            'params': ('mu', 'sigma', 'skewness', 'tailweight'),
-            'params_tf': ('loc', 'scale', 'skewness', 'tailweight'),
-            'support': 'real'
-        },
-        'bernoulli': {
-            'dist': Bernoulli,
-            'name': 'bernoulli',
-            'params': ('logit',),
-            'params_tf': ('logits',),
-            'support': 'discrete'
-        },
-        'categorical': {
-            'dist': Categorical,
-            'name': 'categorical',
-            'params': ('logit',),
-            'params_tf': ('logits',),
-            'support': 'discrete'
-        },
-        'exponential': {
-            'dist': Exponential,
-            'name': 'exponential',
-            'params': ('beta'),
-            'params_tf': ('rate',),
-            'support': 'positive'
-        },
-        'exgaussian': {
-            'dist': ExponentiallyModifiedGaussian,
-            'name': 'exgaussian',
-            'params': ('mu', 'sigma', 'beta'),
-            'params_tf': ('loc', 'scale', 'rate',),
-            'support': 'real'
-        },
-        'exgaussianinvrate': {
-            'dist': ExponentiallyModifiedGaussianInvRate,
-            'name': 'exgaussianinvrate',
-            'params': ('mu', 'sigma', 'beta'),
-            'params_tf': ('loc', 'scale', 'rate',),
-            'support': 'real'
-        }
-    }
+    PREDICTIVE_DISTRIBUTIONS = Formula.PREDICTIVE_DISTRIBUTIONS.copy()
+    for x in PREDICTIVE_DISTRIBUTIONS:
+        PREDICTIVE_DISTRIBUTIONS[x]['dist'] = globals()[PREDICTIVE_DISTRIBUTIONS[x]['dist']]
 
     def __init__(self, form, X, Y, ablated=None, build=True, **kwargs):
         super(CDRModel, self).__init__()
@@ -1574,6 +1505,11 @@ class CDRModel(object):
                     nn_meta['n_units_rnn'] = nn_meta['n_units_irf'][0]
                 else:
                     nn_meta['n_units_rnn'] = [len(self.terminal_names) + len(self.ablated)]
+
+            if nn_id is None:
+                nn_meta['pred_params'] = None
+            else:
+                nn_meta['pred_params'] = self.nns_by_id[nn_id].pred_params
 
             if self.has_nn_irf and len(self.interaction_names) and self.get_nn_meta('input_dependent_irf', nn_id):
                 stderr('WARNING: Be careful about interaction terms in models with input-dependent neural net IRFs. Interactions can be implicit in such models (if one or more variables are present in both the input to the NN and the interaction), rendering explicit interaction terms uninterpretable.\n')
@@ -3889,64 +3825,66 @@ class CDRModel(object):
 
                 # IRF
                 if nn_id in self.nn_irf_ids:
-                    irf_layers = []
+                    output_ndim = self.get_nn_irf_output_ndim(nn_id)
+                    if output_ndim:
+                        irf_layers = []
 
-                    for l in range(n_layers_irf + 1):
-                        if l == 0 or not ranef_l1_only:
-                            _rangf_map = rangf_map_l1
-                        else:
-                            _rangf_map = rangf_map_other
-
-                        if l < n_layers_irf:
-                            units = n_units_irf[l]
-                            activation = irf_inner_activation
-                            dropout = irf_dropout_rate
-                            if normalize_irf:
-                                bn = batch_normalization_decay
-                                ln = layer_normalization_type
+                        for l in range(n_layers_irf + 1):
+                            if l == 0 or not ranef_l1_only:
+                                _rangf_map = rangf_map_l1
                             else:
+                                _rangf_map = rangf_map_other
+
+                            if l < n_layers_irf:
+                                units = n_units_irf[l]
+                                activation = irf_inner_activation
+                                dropout = irf_dropout_rate
+                                if normalize_irf:
+                                    bn = batch_normalization_decay
+                                    ln = layer_normalization_type
+                                else:
+                                    bn = None
+                                    ln = None
+                                use_bias = True
+                                final = False
+                                mn = maxnorm
+                            else:
+                                units = output_ndim
+                                activation = irf_activation
+                                if dropout_final_layer:
+                                    dropout = irf_dropout_rate
+                                else:
+                                    dropout = None
                                 bn = None
                                 ln = None
-                            use_bias = True
-                            final = False
-                            mn = maxnorm
-                        else:
-                            units = self.get_nn_irf_output_ndim(nn_id)
-                            activation = irf_activation
-                            if dropout_final_layer:
-                                dropout = irf_dropout_rate
-                            else:
-                                dropout = None
-                            bn = None
-                            ln = None
-                            use_bias = False
-                            final = True
-                            mn = None
+                                use_bias = False
+                                final = True
+                                mn = None
 
-                        projection = self._initialize_feedforward(
-                            nn_id,
-                            units,
-                            use_bias=use_bias,
-                            activation=activation,
-                            dropout=dropout,
-                            maxnorm=mn,
-                            batch_normalization_decay=bn,
-                            layer_normalization_type=ln,
-                            rangf_map=_rangf_map,
-                            final=final,
-                            name='%s_irf_l%s' % (nn_id, l + 1)
-                        )
-                        self.layers.append(projection)
-                        irf_layers.append(projection)
+                            projection = self._initialize_feedforward(
+                                nn_id,
+                                units,
+                                use_bias=use_bias,
+                                activation=activation,
+                                dropout=dropout,
+                                maxnorm=mn,
+                                batch_normalization_decay=bn,
+                                layer_normalization_type=ln,
+                                rangf_map=_rangf_map,
+                                final=final,
+                                name='%s_irf_l%s' % (nn_id, l + 1)
+                            )
+                            self.layers.append(projection)
+                            irf_layers.append(projection)
 
-                        if 'nn' not in self.rvs and \
-                                (regularize_initial_layer or l > 0) and \
-                                (regularize_final_layer or l < n_layers_ff):
-                            self.regularizable_layers[nn_id].append(projection)
-                        if l == 0:
-                            self.nn_irf_l1[nn_id] = projection
+                            if 'nn' not in self.rvs and \
+                                    (regularize_initial_layer or l > 0) and \
+                                    (regularize_final_layer or l < n_layers_ff):
+                                self.regularizable_layers[nn_id].append(projection)
+                            if l == 0:
+                                self.nn_irf_l1[nn_id] = projection
 
-                    self.nn_irf_layers[nn_id] = irf_layers
+                        self.nn_irf_layers[nn_id] = irf_layers
 
     def _compile_nn(self, nn_id):
         with self.session.as_default():
@@ -4209,51 +4147,54 @@ class CDRModel(object):
                 else:  # nn_id in self.nn_irf_ids
                     # Compute IRF outputs
 
-                    impulse_ix = names2ix(output_names, impulse_names)
-                    nn_irf_impulses = tf.gather(X, impulse_ix, axis=2) # IRF output dims, includes rate
+                    output_ndim = self.get_nn_irf_output_ndim(nn_id)
+                    if output_ndim:
 
-                    if log_transform_t_delta:
-                        t_delta = tf.sign(t_delta) * tf.log1p(tf.abs(t_delta))
+                        impulse_ix = names2ix(output_names, impulse_names)
+                        nn_irf_impulses = tf.gather(X, impulse_ix, axis=2) # IRF output dims, includes rate
 
-                    irf_out = [t_delta]
-                    if nonstationary:
-                        irf_out.append(X_time)
-                    if input_dependent_irf:
-                        _X_gathered = X_gathered
-                        if h_rnn is not None:
-                            _X_gathered = _X_gathered + h_rnn
-                        irf_out.append(_X_gathered)  # IRF inputs, no rate
-                    irf_out = tf.concat(irf_out, axis=2)
-                    for layer in self.nn_irf_layers[nn_id]:
-                        irf_out = layer(
-                            irf_out
-                        )
+                        if log_transform_t_delta:
+                            t_delta = tf.sign(t_delta) * tf.log1p(tf.abs(t_delta))
 
-                    stabilizing_constant = (self.history_length + self.future_length) * len(output_names)
-                    irf_out = irf_out / stabilizing_constant
+                        irf_out = [t_delta]
+                        if nonstationary:
+                            irf_out.append(X_time)
+                        if input_dependent_irf:
+                            _X_gathered = X_gathered
+                            if h_rnn is not None:
+                                _X_gathered = _X_gathered + h_rnn
+                            irf_out.append(_X_gathered)  # IRF inputs, no rate
+                        irf_out = tf.concat(irf_out, axis=2)
+                        for layer in self.nn_irf_layers[nn_id]:
+                            irf_out = layer(
+                                irf_out
+                            )
 
-                    nn_irf_impulses = nn_irf_impulses[..., None, None] # Pad out for ndim of response distribution(s)
-                    self.nn_irf_impulses[nn_id] = nn_irf_impulses
+                        stabilizing_constant = (self.history_length + self.future_length) * len(output_names)
+                        irf_out = irf_out / stabilizing_constant
 
-                    # Slice and apply IRF outputs
-                    slices, shapes = self.get_nn_irf_output_slice_and_shape(nn_id)
-                    if X_mask is None:
-                        X_mask_out = None
-                    else:
-                        X_mask_out = X_mask[..., None, None, None] # Pad out for impulses plus nparam, ndim of response distribution(s)
-                    _X_time = X_time[..., None, None]
+                        nn_irf_impulses = nn_irf_impulses[..., None, None] # Pad out for ndim of response distribution(s)
+                        self.nn_irf_impulses[nn_id] = nn_irf_impulses
 
-                    for i, response in enumerate(self.response_names):
-                        _slice = slices[response]
-                        _shape = shapes[response]
+                        # Slice and apply IRF outputs
+                        slices, shapes = self.get_nn_irf_output_slice_and_shape(nn_id)
+                        if X_mask is None:
+                            X_mask_out = None
+                        else:
+                            X_mask_out = X_mask[..., None, None, None] # Pad out for impulses plus nparam, ndim of response distribution(s)
+                        _X_time = X_time[..., None, None]
 
-                        _irf_out = tf.reshape(irf_out[..., _slice], _shape)
-                        if X_mask_out is not None:
-                            _irf_out = _irf_out * X_mask_out
+                        for i, response in enumerate(self.response_names):
+                            _slice = slices[response]
+                            _shape = shapes[response]
 
-                        if response not in self.nn_irf:
-                            self.nn_irf[response] = {}
-                        self.nn_irf[response][nn_id] = _irf_out
+                            _irf_out = tf.reshape(irf_out[..., _slice], _shape)
+                            if X_mask_out is not None:
+                                _irf_out = _irf_out * X_mask_out
+
+                            if response not in self.nn_irf:
+                                self.nn_irf[response] = {}
+                            self.nn_irf[response][nn_id] = _irf_out
 
                 # Set up EMA for RNN
                 ema_rate = self.ema_decay
@@ -4640,9 +4581,8 @@ class CDRModel(object):
                 else:
                     irf_impulses = None
 
-                assert irf_impulses.shape[2] == len(self.terminal_names), 'There should be exactly 1 IRF impulse per terminal. Got %d impulses and %d terminals.' % (irf_impulses.shape[2], len(self.terminal_names))
-
                 if irf_impulses is not None:
+                    assert irf_impulses.shape[2] == len(self.terminal_names), 'There should be exactly 1 IRF impulse per terminal. Got %d impulses and %d terminals.' % (irf_impulses.shape[2], len(self.terminal_names))
                     terminal_ix = names2ix(self.terminal_names, terminal_names)
                     irf_impulses = tf.gather(irf_impulses, terminal_ix, axis=2)
                 
@@ -4673,11 +4613,10 @@ class CDRModel(object):
                                 _nparam = 1
                             ndim = self.get_response_ndim(response)
                             irf_seq = tf.gather(self.dirac_delta_mask, impulse_ix, axis=2)
-                            t_delta = tf.gather(self.t_delta, impulse_ix, axis=2)
                             irf_seq = irf_seq[..., None, None]
                             irf_seq = tf.tile(irf_seq, [1, 1, 1, _nparam, ndim])
                         else:
-                            t_delta = self.t_delta[:,:,impulse_ix[0]]
+                            t_delta = self.t_delta[:, :, impulse_ix[0]]
 
                             irf = self.irf[response][name]
                             if len(irf) > 1:
@@ -4695,13 +4634,63 @@ class CDRModel(object):
                             irf_seq = tf.transpose(irf_seq, [1, 0, 2, 3])
                             # Add terminal dim
                             irf_seq = tf.expand_dims(irf_seq, axis=2)
+                            if not self.use_distributional_regression:
+                                irf_seq = tf.pad(
+                                    irf_seq,
+                                    paddings=[
+                                        (0, 0),
+                                        (0, 0),
+                                        (0, 0),
+                                        (0, nparam - 1),
+                                        (0, 0)
+                                    ]
+                                )
 
                         irf_weights.append(irf_seq)
 
                     for nn_id in self.nn_irf_ids:
                         if self.nn_irf_terminal_names[nn_id]:
-                            irf_weights.append(self.nn_irf[response][nn_id])
-                            terminal_names += self.nn_irf_terminal_names[nn_id]
+                            if response in self.nn_irf:
+                                irf_seq = self.nn_irf[response][nn_id]
+                                pred_params = self.get_nn_meta('pred_params', nn_id)
+                                if pred_params:
+                                    dist_name = self.get_response_dist_name(response)
+                                    if dist_name in pred_params:
+                                        pred_params = pred_params[dist_name]
+                                    else:
+                                        pred_params = pred_params[None]
+                                    all_param_names = self.get_response_params(response)
+                                    param_names = [x for x in all_param_names if x in pred_params]
+                                    param_ix = names2ix(param_names, all_param_names)
+                                    if len(param_names) < len(all_param_names):
+                                        seq_shape = tf.shape(irf_seq)
+                                        new_shape = [
+                                            seq_shape[0],
+                                            seq_shape[1],
+                                            seq_shape[2],
+                                            len(all_param_names),
+                                            seq_shape[4]
+                                        ]
+                                        irf_seq = self._scatter_along_axis(
+                                            param_ix,
+                                            irf_seq,
+                                            new_shape,
+                                            axis=3
+                                        )
+                                elif not self.use_distributional_regression:
+                                    irf_seq = tf.pad(
+                                        irf_seq,
+                                        paddings=[
+                                            (0, 0),
+                                            (0, 0),
+                                            (0, 0),
+                                            (0, nparam - 1),
+                                            (0, 0)
+                                        ]
+                                    )
+
+                                irf_weights.append(irf_seq)
+                                terminal_names += self.nn_irf_terminal_names[nn_id]
 
                     if len(irf_weights):
                         if len(irf_weights) == 1:
@@ -4721,18 +4710,6 @@ class CDRModel(object):
                         X_weighted_by_irf = self.irf_impulses * irf_weights
                     else:
                         X_weighted_by_irf = tf.zeros((1, 1, 1, 1, 1), dtype=self.FLOAT_TF)
-
-                    if not self.use_distributional_regression:
-                        X_weighted_by_irf = tf.pad(
-                            X_weighted_by_irf,
-                            paddings=[
-                                (0, 0),
-                                (0, 0),
-                                (0, 0),
-                                (0, nparam - 1),
-                                (0, 0)
-                            ]
-                        )
 
                     X_weighted_unscaled = X_weighted_by_irf
                     X_weighted_unscaled_sumT = tf.reduce_sum(X_weighted_by_irf, axis=1, keepdims=True)
@@ -6086,8 +6063,20 @@ class CDRModel(object):
 
         n = 0
         n_irf = len(self.nn_irf_output_names[nn_id])
+        pred_params = self.get_nn_meta('pred_params', nn_id)
         for response in self.response_names:
-            if self.use_distributional_regression:
+            if pred_params:
+                dist_name = self.get_response_dist_name(response)
+                all_response_params = self.get_response_params(response)
+                if dist_name in pred_params:
+                    pred_prams = pred_params[dist_name]
+                elif None in pred_params:
+                    pred_params = pred_params[None]
+                else:
+                    pred_params = []
+                pred_params = [x for x in all_response_params if x in pred_params]
+                nparam = len(pred_params)
+            elif self.use_distributional_regression:
                 nparam = self.get_response_nparam(response)
             else:
                 nparam = 1
@@ -6113,22 +6102,38 @@ class CDRModel(object):
                 shapes = {}
                 n = 0
                 n_irf = len(self.nn_irf_output_names[nn_id])
+                pred_params = self.get_nn_meta('pred_params', nn_id)
                 for response in self.response_names:
-                    if self.use_distributional_regression:
+                    if pred_params:
+                        dist_name = self.get_response_dist_name(response)
+                        all_response_params = self.get_response_params(response)
+                        if dist_name in pred_params:
+                            pred_prams = pred_params[dist_name]
+                        elif None in pred_params:
+                            pred_params = pred_params[None]
+                        else:
+                            pred_params = []
+                        pred_params = [x for x in all_response_params if x in pred_params]
+                        nparam = len(pred_params)
+                    elif self.use_distributional_regression:
                         nparam = self.get_response_nparam(response)
                     else:
                         nparam = 1
-                    ndim = self.get_response_ndim(response)
-                    slices[response] = slice(n, n + n_irf * nparam * ndim)
-                    shapes[response] = tf.convert_to_tensor((
-                        self.X_batch_dim,
-                        # Predictor files get tiled out over the time dimension:
-                        self.X_time_dim * self.n_impulse_df_noninteraction,
-                        n_irf,
-                        nparam,
-                        ndim
-                    ))
-                    n += n_irf * nparam * ndim
+                    if nparam:
+                        ndim = self.get_response_ndim(response)
+                        slices[response] = slice(n, n + n_irf * nparam * ndim)
+                        shapes[response] = tf.convert_to_tensor((
+                            self.X_batch_dim,
+                            # Predictor files get tiled out over the time dimension:
+                            self.X_time_dim * self.n_impulse_df_noninteraction,
+                            n_irf,
+                            nparam,
+                            ndim
+                        ))
+                        n += n_irf * nparam * ndim
+                    else:
+                        slices[response] = None
+                        shapes[response] = None
 
                 return slices, shapes
 
