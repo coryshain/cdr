@@ -78,7 +78,7 @@ if __name__ == '__main__':
     argparser.add_argument('-B', '--baseline_names',  nargs='+', default=None, help='Names of baselines (should be in 1-1 alignment with ``baselines``. If not provided, names will be inferred from baselines.')
     argparser.add_argument('-s', '--systems',  nargs='+', default=None, help='Models to treat as (non-baseline) systems.')
     argparser.add_argument('-S', '--system_names',  nargs='+', default=None, help='Names of systems (should be in 1-1 alignment with ``systems``. If not provided, names will be inferred from systems.')
-    argparser.add_argument('-P', '--partitions',  nargs='+', default=None, help='Names of partitions to evaluate. If not provided, defaults to ``"train"``, ``"dev"``, ``"test"``.')
+    argparser.add_argument('-p', '--partitions',  nargs='+', default=None, help='Names of partitions to evaluate. If not provided, defaults to ``"train"``, ``"dev"``, ``"test"``.')
     args = argparser.parse_args()
 
     response = args.response
@@ -194,14 +194,14 @@ if __name__ == '__main__':
                             submodels.append(x)
                     n_submodels = len(submodels)
                     for k, submodel in enumerate(submodels):
-                        for task_name in results:
-                            if submodel in results[task_name]:
-                                for partition in results[task_name][submodel]:
-                                    if system_name not in results[task_name]:
-                                        results[task_name][system_name] = {}
-                                    if partition not in results[task_name][system_name]:
-                                        results[task_name][system_name][partition] = {'loss': [], 'converged': []}
-                                    results[task_name][system_name][partition]['loss'].append(results[task_name][submodel][partition]['loss'])
+                        if submodel in results[task_name]:
+                            for partition in results[task_name][submodel]:
+                                if system_name not in results[task_name]:
+                                    results[task_name][system_name] = {}
+                                if partition not in results[task_name][system_name]:
+                                    results[task_name][system_name][partition] = {'loss': [], 'converged': []}
+                                results[task_name][system_name][partition]['loss'].append(results[task_name][submodel][partition]['loss'])
+                                results[task_name][system_name][partition]['converged'].append(results[task_name][submodel][partition]['converged'])
                     if submodels:
                         for partition in results[task_name][system_name]:
                             results[task_name][system_name][partition]['loss'] = np.mean(
