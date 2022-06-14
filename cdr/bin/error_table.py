@@ -202,13 +202,14 @@ if __name__ == '__main__':
                                     if partition not in results[task_name][system_name]:
                                         results[task_name][system_name][partition] = {'loss': [], 'converged': []}
                                     results[task_name][system_name][partition]['loss'].append(results[task_name][submodel][partition]['loss'])
-                for partition in results[task_name][system_name]:
-                    results[task_name][system_name][partition]['loss'] = np.mean(
-                        results[task_name][system_name][partition]['loss']
-                    )
-                    results[task_name][system_name][partition]['converged'] = np.mean(
-                        results[task_name][system_name][partition]['converged']
-                    )
+                    if submodels:
+                        for partition in results[task_name][system_name]:
+                            results[task_name][system_name][partition]['loss'] = np.mean(
+                                results[task_name][system_name][partition]['loss']
+                            )
+                            results[task_name][system_name][partition]['converged'] = np.mean(
+                                results[task_name][system_name][partition]['converged']
+                            )
 
     sys.stdout.write(
         results_to_table(
