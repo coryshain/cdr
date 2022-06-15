@@ -6427,7 +6427,7 @@ class CDRModel(object):
                     path = outdir + '/model%s.ckpt' % suffix
                     if self.early_stopping and \
                             (self.has_converged() or
-                             self.global_step.eval(session=self.session) < self.n_iter):
+                             self.global_step.eval(session=self.session) >= self.n_iter):
                         pred_path = outdir + '/model%s_maxval.ckpt' % suffix
                         if not os.path.exists(pred_path + '.meta'):
                             pred_path = path
