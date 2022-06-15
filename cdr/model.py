@@ -6425,7 +6425,9 @@ class CDRModel(object):
                 if restore and os.path.exists(outdir + '/checkpoint'):
                     # Thanks to Ralph Mao (https://github.com/RalphMao) for this workaround for missing vars
                     path = outdir + '/model%s.ckpt' % suffix
-                    if self.early_stopping and self.training_complete.eval(session=self.session):
+                    if self.early_stopping and \
+                            (self.has_converged() or
+                             self.global_step.eval(session=self.session) < self.n_iter):
                         pred_path = outdir + '/model%s_maxval.ckpt' % suffix
                         if not os.path.exists(pred_path + '.meta'):
                             pred_path = path
@@ -7412,10 +7414,10 @@ class CDRModel(object):
                     # Counter for number of times an attempted iteration has failed due to outlier
                     # losses or failed numerics checks
                     n_failed = 0
-                    current_save_point = self.global_step.eval(session=self.session)
                     failed = False
 
-                    while not self.has_converged() and self.global_step.eval(session=self.session) < n_iter:
+                    while not self.has_converged() and \
+                            self.global_step.eval(session=self.session) < n_iter:
                         if failed:
                             stderr('Restarting from most recent checkpoint (restart #%d from this checkpoint).\n' % n_failed)
                             self.load() # Reload from previous save point
@@ -7521,12 +7523,15 @@ class CDRModel(object):
 
                         if failed:
                             n_failed += 1
-                            assert n_failed <= 1000, '1000 restarts in a row from the same save point failed to pass stability checks. Model training has failed.'
+                            assert n_failed <= 1000, '1000 restarts in a row from the same save point ' \
+                                                     'failed to pass stability checks. Model training ' \
+                                                     'has failed.'
                             continue
 
                         self.session.run(self.incr_global_step)
 
-                        if self.eval_freq > 0 and self.global_step.eval(session=self.session) % self.eval_freq == 0:
+                        if self.eval_freq > 0 and \
+                                self.global_step.eval(session=self.session) % self.eval_freq == 0:
                             self.save()
                             dev_results, _ = self.evaluate(
                                 X_dev,
@@ -7542,9 +7547,17 @@ class CDRModel(object):
                                 if metric != 'full_log_lik':
                                     for response in self.dev_metrics[metric]:
                                         for ix in self.dev_metrics[metric][response]:
-                                            log_fd[self.dev_metrics[metric][response][ix]] = np.squeeze(dev_results[metric][response][ix])
-                            summary_dev, _ = self.session.run([self.summary_dev, self.set_dev_ll_max], feed_dict=log_fd)
-                            self.writer.add_summary(summary_dev, self.global_step.eval(session=self.session))
+                                            log_fd[self.dev_metrics[metric][response][ix]] = np.squeeze(
+                                                dev_results[metric][response][ix]
+                                            )
+                            summary_dev, _ = self.session.run(
+                                [self.summary_dev, self.set_dev_ll_max],
+                                feed_dict=log_fd
+                            )
+                            self.writer.add_summary(
+                                summary_dev,
+                                self.global_step.eval(session=self.session)
+                            )
                         else:
                             dev_ll = None
 
@@ -7559,7 +7572,8 @@ class CDRModel(object):
                                 fd = {self.loss_total: loss_total/n_minibatch}
                                 self.run_convergence_check(verbose=False, feed_dict=fd)
 
-                        if self.log_freq > 0 and self.global_step.eval(session=self.session) % self.log_freq == 0:
+                        if self.log_freq > 0 and \
+                                self.global_step.eval(session=self.session) % self.log_freq == 0:
                             loss_total /= n_minibatch
                             reg_loss_total /= n_minibatch
                             log_fd = {self.loss_total: loss_total, self.reg_loss_total: reg_loss_total}
@@ -7569,24 +7583,36 @@ class CDRModel(object):
                             if self.filter_outlier_losses and self.loss_cutoff_n_sds:
                                 log_fd[self.n_dropped_in] = n_dropped
                             summary_train_loss = self.session.run(self.summary_opt, feed_dict=log_fd)
-                            self.writer.add_summary(summary_train_loss, self.global_step.eval(session=self.session))
+                            self.writer.add_summary(
+                                summary_train_loss,
+                                self.global_step.eval(session=self.session)
+                            )
                             summary_params = self.session.run(self.summary_params)
-                            self.writer.add_summary(summary_params, self.global_step.eval(session=self.session))
+                            self.writer.add_summary(
+                                summary_params,
+                                self.global_step.eval(session=self.session)
+                            )
                             if self.log_random and self.is_mixed_model:
                                 summary_random = self.session.run(self.summary_random)
-                                self.writer.add_summary(summary_random, self.global_step.eval(session=self.session))
+                                self.writer.add_summary(
+                                    summary_random,
+                                    self.global_step.eval(session=self.session)
+                                )
                             self.writer.flush()
 
-                        if self.save_freq > 0 and self.global_step.eval(session=self.session) % self.save_freq == 0:
-                            current_save_point = self.global_step.eval(session=self.session)
+                        if self.save_freq > 0 and \
+                                self.global_step.eval(session=self.session) % self.save_freq == 0:
                             n_failed = 0
                             self.save()
-                        if self.plot_freq > 0 and self.global_step.eval(session=self.session) % self.plot_freq == 0:
+                        if self.plot_freq > 0 and \
+                                self.global_step.eval(session=self.session) % self.plot_freq == 0:
                             self.make_plots(prefix='plt')
 
                         t1_iter = pytime.time()
                         if self.check_convergence:
-                            stderr('Convergence:    %.2f%%\n' % (100 * self.session.run(self.proportion_converged) / self.convergence_alpha))
+                            stderr('Convergence:    %.2f%%\n' %
+                                   (100 * self.session.run(self.proportion_converged) /
+                                    self.convergence_alpha))
                         stderr('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
 
                     assert not failed, 'Training loop completed without passing stability checks. Model training has failed.'
@@ -7660,7 +7686,6 @@ class CDRModel(object):
                     self.save()
 
                     self.set_training_complete(True)
-
                     self.save()
 
     def run_predict_op(
