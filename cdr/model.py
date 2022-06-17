@@ -7649,16 +7649,7 @@ class CDRModel(object):
                             partition='dev',
                             optimize_memory=optimize_memory
                         )
-                        dev_ll = dev_results['full_log_lik']
-                        log_fd = {self.dev_ll_total: dev_ll}
-                        for metric in self.dev_metrics:
-                            if metric != 'full_log_lik':
-                                for response in self.dev_metrics[metric]:
-                                    for ix in self.dev_metrics[metric][response]:
-                                        log_fd[self.dev_metrics[metric][response][ix]] = np.squeeze(dev_results[metric][response][ix])
-                        summary_dev = self.session.run(self.summary_dev, feed_dict=log_fd)
-                        self.writer.add_summary(summary_dev, self.global_step.eval(session=self.session))
-
+                        
                     # Extract and save losses
                     ll_full = sum([_ll for r in self.response_names for _ll in metrics['log_lik'][r]])
                     self.session.run(self.set_training_loglik_full, feed_dict={self.training_loglik_full_in: ll_full})
