@@ -3048,9 +3048,15 @@ class BatchNormLayer(object):
                         gamma += tf.gather(gamma_ran, Y_gf)
 
                 while len(beta.shape) < len(out.shape):
-                    beta = tf.expand_dims(beta, axis=-2)
+                    if len(beta.shape):
+                        beta = tf.expand_dims(beta, axis=-2)
+                    else:
+                        beta = beta[..., None]
                 while len(gamma.shape) < len(out.shape):
-                    gamma = tf.expand_dims(gamma, axis=-2)
+                    if len(gamma.shape):
+                        gamma = tf.expand_dims(gamma, axis=-2)
+                    else:
+                        gamma = gamma[..., None]
 
                 out = out * gamma + beta
 
@@ -3441,9 +3447,15 @@ class LayerNormLayer(object):
                         gamma += tf.gather(gamma_ran, Y_gf)
 
                 while len(beta.shape) < len(out.shape):
-                    beta = tf.expand_dims(beta, axis=-2)
+                    if len(beta.shape):
+                        beta = tf.expand_dims(beta, axis=-2)
+                    else:
+                        beta = beta[..., None]
                 while len(gamma.shape) < len(out.shape):
-                    gamma = tf.expand_dims(gamma, axis=-2)
+                    if len(gamma.shape):
+                        gamma = tf.expand_dims(gamma, axis=-2)
+                    else:
+                        gamma = gamma[..., None]
 
                 out = out * gamma + beta
 
