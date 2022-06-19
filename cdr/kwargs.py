@@ -1128,14 +1128,14 @@ NN_KWARGS = [
     ),
     Kwarg(
         'shift_normalized_activations',
-        True,
+        False,
         bool,
         "Whether to use trainable shift in batch/layer normalization layers.",
         aliases=['normalization_use_beta', 'batch_normalization_use_beta', 'layer_normalization_use_beta']
     ),
     Kwarg(
         'rescale_normalized_activations',
-        True,
+        False,
         bool,
         "Whether to use trainable scale in batch/layer normalization layers.",
         aliases=['normalization_use_gamma', 'batch_normalization_use_gamma', 'layer_normalization_use_gamma']
