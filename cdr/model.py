@@ -6069,13 +6069,13 @@ class CDRModel(object):
                 dist_name = self.get_response_dist_name(response)
                 all_response_params = self.get_response_params(response)
                 if dist_name in pred_params:
-                    pred_prams = pred_params[dist_name]
+                    _pred_prams = pred_params[dist_name]
                 elif None in pred_params:
-                    pred_params = pred_params[None]
+                    _pred_params = pred_params[None]
                 else:
-                    pred_params = []
-                pred_params = [x for x in all_response_params if x in pred_params]
-                nparam = len(pred_params)
+                    _pred_params = []
+                _pred_params = [x for x in all_response_params if x in _pred_params]
+                nparam = len(_pred_params)
             elif self.use_distributional_regression:
                 nparam = self.get_response_nparam(response)
             else:
@@ -6108,13 +6108,13 @@ class CDRModel(object):
                         dist_name = self.get_response_dist_name(response)
                         all_response_params = self.get_response_params(response)
                         if dist_name in pred_params:
-                            pred_prams = pred_params[dist_name]
+                            _pred_prams = pred_params[dist_name]
                         elif None in pred_params:
-                            pred_params = pred_params[None]
+                            _pred_params = pred_params[None]
                         else:
-                            pred_params = []
-                        pred_params = [x for x in all_response_params if x in pred_params]
-                        nparam = len(pred_params)
+                            _pred_params = []
+                        _pred_params = [x for x in all_response_params if x in _pred_params]
+                        nparam = len(_pred_params)
                     elif self.use_distributional_regression:
                         nparam = self.get_response_nparam(response)
                     else:

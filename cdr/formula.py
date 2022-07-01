@@ -2183,6 +2183,12 @@ class NNImpulse(object):
         self.id = ':'.join([x.id for x in sorted(self.atomic_impulses, key=lambda x: x.id)])
 
         self.pred_params = None
+    
+    def __setstate__(self, state):
+        self.pred_params = state.pop('pred_params', None)
+        for key in state:
+            if key != 'nn_key':
+                setattr(self, key, state[key])
 
     @property
     def nn_key(self):
@@ -2309,6 +2315,11 @@ class NN(object):
         if not isinstance(rangf, list):
             rangf = [rangf]
         self.rangf = rangf
+
+    def __setstate__(self, state):
+        self.pred_params = state.pop('pred_params', None)
+        for key in state:
+            setattr(self, key, state[key])
 
     def all_impulse_names(self):
         """
@@ -2621,6 +2632,12 @@ class IRFNode(object):
             self.p.add_child(self)
 
         self.interaction_list = []
+
+    def __setstate__(self, state):
+        self.pred_params = state.pop('pred_params', None)
+        for key in state:
+            if key != 'nn_key':
+                setattr(self, key, state[key])
 
     @property
     def nn_key(self):
