@@ -1,3 +1,4 @@
+import sys
 import re
 import math
 import ast
@@ -7,6 +8,8 @@ import numpy as np
 from .data import z, c, s, compute_time_mask, expand_impulse_sequence
 from .kwargs import NN_KWARGS, NN_BAYES_KWARGS
 from .util import names2ix, sn, stderr
+
+sys.setrecursionlimit(100000)  # This prevents stackoverflow for formulas with lots of terms
 
 interact = re.compile('([^ ]+):([^ ]+)')
 spillover = re.compile('(^.+)S([0-9]+)$')
@@ -555,7 +558,7 @@ class Formula(object):
 
             elif type(t.op).__name__ == 'Mult':
                 # Binary interaction expansion
-                # LSH: A
+                # LHS: A
                 # RHS: B
                 # Output: A + B + A:B
 
@@ -956,6 +959,8 @@ class Formula(object):
                 t_id = t.id
             elif type(t).__name__ == 'NameConstant':
                 t_id = t.value
+            elif type(t).__name__ == 'Constant':
+                t_id = str(t.value)
             else: # type(t).__name__ == 'Num'
                 t_id = str(t.n)
                 if t_id in ['0', '1'] and len(ops) == 0:
