@@ -596,6 +596,7 @@ class CDRModel(object):
             form = Formula(form)
         else:
             self.form_str = str(form)
+        form = form.re_transform(X)
         form = form.categorical_transform(X)
         self.form = form
         if self.future_length:

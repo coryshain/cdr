@@ -175,7 +175,8 @@ class Config(object):
                         new_model['ablated'] = set(ablated)
                         _models[new_name] = new_model
                         _model_list.append(new_name)
-                if 'n_ensemble' in config[model_field] or 'n_ensemble' in cdr_settings:
+                if config[model_field].get('n_ensemble', config[model_field].get('n_ensembles', None)) \
+                        or 'n_ensemble' in cdr_settings:
                     if 'n_ensemble' in config[model_field]:
                         n_ensemble = config[model_field].getint('n_ensemble')
                     else:
