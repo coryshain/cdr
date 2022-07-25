@@ -987,10 +987,10 @@ class Formula(object):
                 t_id = str(t.value)
             else: # type(t).__name__ == 'Num'
                 t_id = str(t.n)
-                if t_id in ['0', '1'] and len(ops) == 0:
-                    if t_id == '0':
-                        has_intercept[rangf] = False
-                    return [[t_id]]
+            if t_id in ['0', '1'] and len(ops) == 0:
+                if t_id == '0':
+                    has_intercept[rangf] = False
+                return [[t_id]]
 
             if under_irf or under_interaction:
                 new = Impulse(t_id, ops=ops)
@@ -1585,6 +1585,8 @@ class Formula(object):
                                 break
                     else: # Response aligned
                         for i, _Y in enumerate(Y):
+                            if x.id not in _Y:
+                                print(str(self))
                             assert x.id in _Y, 'Impulse %s not found in data. Either it is missing from all of the predictor files X, or (if response aligned) it is missing from at least one of the response files Y.' % x.name()
                             Y[i] = self.apply_ops(x, _Y)
                         if X_in_Y_names is None:
