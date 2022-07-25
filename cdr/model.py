@@ -10607,7 +10607,11 @@ class CDRModel(object):
                                 df.append(row)
             elif param_type == 'coefficient':
                 for i, coef_name in enumerate(self.coef_names):
-                    for j, response_param in enumerate(response_params):
+                    if self.use_distributional_regression:
+                        _response_params = response_params
+                    else:
+                        _response_params = response_params[:1]
+                    for j, response_param in enumerate(_response_params):
                         dim_names = self.expand_param_name(response, response_param)
                         for k, dim_name in enumerate(dim_names):
                             if fixed:
@@ -10624,7 +10628,11 @@ class CDRModel(object):
                                     row += (rangf, level, dim_name, mean[l, i, j, k], lower[l, i, j, k], upper[l, i, j, k])
                                     df.append(row)
             elif param_type.startswith('irf_param_'):
-                for i, response_param in enumerate(response_params):
+                if self.use_distributional_regression:
+                    _response_params = response_params
+                else:
+                    _response_params = response_params[:1]
+                for i, response_param in enumerate(_response_params):
                     dim_names = self.expand_param_name(response, response_param)
                     for j, dim_name in enumerate(dim_names):
                         if fixed:
@@ -10643,7 +10651,11 @@ class CDRModel(object):
                                 df.append(row)
             elif param_type == 'interaction':
                 for i, interaction_name in enumerate(self.interaction_names):
-                    for j, response_param in enumerate(response_params):
+                    if self.use_distributional_regression:
+                        _response_params = response_params
+                    else:
+                        _response_params = response_params[:1]
+                    for j, response_param in enumerate(_response_params):
                         dim_names = self.expand_param_name(response, response_param)
                         for k, dim_name in enumerate(dim_names):
                             if fixed:

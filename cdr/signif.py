@@ -10,8 +10,8 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', nested=False, v
     """
     Perform a paired permutation test for significance.
 
-    :param a: ``numpy`` vector; first error/loss/prediction vector.
-    :param b: ``numpy`` vector; second error/loss/prediction vector.
+    :param a: ``numpy`` array; first error/loss/prediction matrix, shape (n_item, n_model).
+    :param b: ``numpy`` array; second error/loss/prediction matrix, shape (n_item, n_model).
     :param n_iter: ``int``; number of resampling iterations.
     :param n_tails: ``int``; number of tails.
     :param mode: ``str``; one of ``["mse", "loglik"]``, the type of error used (SE's are averaged while loglik's are summed).
@@ -19,6 +19,11 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', nested=False, v
     :param verbose: ``bool``; report progress logs to standard error.
     :return:
     """
+
+    if len(a.shape) < 2:
+        a = a[..., None]
+    if len(b.shape) < 2:
+        b = b[..., None]
 
     if mode == 'mse':
         base_diff = a.mean(axis=1).mean() - b.mean(axis=1).mean()

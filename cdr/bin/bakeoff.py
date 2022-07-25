@@ -36,13 +36,21 @@ if __name__ == '__main__':
 
     model_errors = []
     for path in args.model_error_paths:
-        model_errors.append(pd.read_csv(path, sep=' ', header=None, skipinitialspace=True))
+        if os.path.basename(path).startswith('output'):
+            err = pd.read_csv(path, sep=' ')
+            if args.metric == 'loss':
+                err = err[['CDRsquarederror']]
+            else:
+                err = err[['CDRloglik']]
+        else:
+            err = pd.read_csv(path, sep=' ', header=None, skipinitialspace=True)
+        model_errors.append(err)
 
     baseline_errors = []
     for path in args.baseline_error_paths:
         baseline_errors.append(pd.read_csv(path, sep=' ', header=None, skipinitialspace=True))
 
-    assert len(model_errors) == len(baseline_errors), 'Model and baseline must contain the same number of datasets. Saw %d and %d, respectively.' % (len(model_errors), len(baseline))
+    assert len(model_errors) == len(baseline_errors), 'Model and baseline must contain the same number of datasets. Saw %d and %d, respectively.' % (len(model_errors), len(baseline_errors))
 
     if len(model_errors) > 1:
         model_cur = []
@@ -59,7 +67,11 @@ if __name__ == '__main__':
 
     select = np.logical_and(np.isfinite(np.array(model_cur)), np.isfinite(np.array(baseline_cur)))
     diff = float(len(model_cur) - select.sum())
-    p_value, base_diff, diffs = permutation_test(baseline_cur[select], model_cur[select], n_iter=10000, n_tails=args.tails, mode=args.metric, nested=True)
+    if args.metric == 'loss':
+        pmetric = 'mse'
+    else:
+        pmetric = args.metric
+    p_value, base_diff, diffs = permutation_test(baseline_cur[select], model_cur[select], n_iter=10000, n_tails=args.tails, mode=pmetric, nested=True)
     stderr('\n')
     out_path = args.outdir + '/%s_PT.txt' % args.name
     if not os.path.exists(args.outdir):
