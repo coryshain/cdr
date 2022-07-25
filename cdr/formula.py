@@ -1,3 +1,4 @@
+import sys
 import re
 import math
 import ast
@@ -7,6 +8,8 @@ import numpy as np
 from .data import z, c, s, compute_time_mask, expand_impulse_sequence
 from .kwargs import NN_KWARGS, NN_BAYES_KWARGS
 from .util import names2ix, sn, stderr
+
+sys.setrecursionlimit(100000)  # This prevents stackoverflow for formulas with lots of terms
 
 interact = re.compile('([^ ]+):([^ ]+)')
 spillover = re.compile('(^.+)S([0-9]+)$')
@@ -555,7 +558,7 @@ class Formula(object):
 
             elif type(t.op).__name__ == 'Mult':
                 # Binary interaction expansion
-                # LSH: A
+                # LHS: A
                 # RHS: B
                 # Output: A + B + A:B
 
@@ -921,14 +924,38 @@ class Formula(object):
                 assert len(t.args) == 1, 'Regular expression terms take exactly one string argument'
                 val = t.args[0].value
                 assert isinstance(val, str), 'Regular expression terms take exactly one string argument'
-                new = Impulse(val, ops=ops, is_re=True)
+                if under_irf or under_interaction:
+                    new = Impulse(val, ops=ops, is_re=True)
 
-                if new.name() in impulses_by_name:
-                    new = impulses_by_name[new.name()]
+                    if new.name() in impulses_by_name:
+                        new = impulses_by_name[new.name()]
+                    else:
+                        impulses_by_name[new.name()] = new
+
+                    terms.append([new])
                 else:
-                    impulses_by_name[new.name()] = new
+                    term_name = 're("%s")' % val
+                    for op in ops:
+                        term_name = op + '(' + term_name + ')'
 
-                terms.append([new])
+                    new_term_str = 'C(%s, DiracDelta())' % term_name
+
+                    new_ast = ast.parse(Formula.prep_formula_string(new_term_str)).body[0].value
+                    subterms = []
+
+                    self.process_ast(
+                        new_ast,
+                        terms=subterms,
+                        has_intercept=has_intercept,
+                        ops=None,
+                        rangf=rangf,
+                        impulses_by_name=impulses_by_name,
+                        interactions_by_name=interactions_by_name,
+                        under_irf=under_irf,
+                        under_interaction=under_interaction
+                    )
+                    terms += subterms
+
             else:
                 # Unary transform
                 assert len(t.args) <= 1, 'Only unary ops on variables supported in CDR formula strings'
@@ -956,12 +983,14 @@ class Formula(object):
                 t_id = t.id
             elif type(t).__name__ == 'NameConstant':
                 t_id = t.value
+            elif type(t).__name__ == 'Constant':
+                t_id = str(t.value)
             else: # type(t).__name__ == 'Num'
                 t_id = str(t.n)
-                if t_id in ['0', '1'] and len(ops) == 0:
-                    if t_id == '0':
-                        has_intercept[rangf] = False
-                    return [[t_id]]
+            if t_id in ['0', '1'] and len(ops) == 0:
+                if t_id == '0':
+                    has_intercept[rangf] = False
+                return [[t_id]]
 
             if under_irf or under_interaction:
                 new = Impulse(t_id, ops=ops)
@@ -1556,6 +1585,8 @@ class Formula(object):
                                 break
                     else: # Response aligned
                         for i, _Y in enumerate(Y):
+                            if x.id not in _Y:
+                                print(str(self))
                             assert x.id in _Y, 'Impulse %s not found in data. Either it is missing from all of the predictor files X, or (if response aligned) it is missing from at least one of the response files Y.' % x.name()
                             Y[i] = self.apply_ops(x, _Y)
                         if X_in_Y_names is None:
@@ -1853,7 +1884,7 @@ class Formula(object):
         new_form = Formula(new_formstring)
         return new_form
 
-    def regex_transform(self, X):
+    def re_transform(self, X):
         """
         Get transformed formula with regex predictors expanded based on matches to the columns in **X**.
 
@@ -1861,7 +1892,7 @@ class Formula(object):
         :return: ``Formula``; transformed ``Formula`` object
         """
 
-        new_t = self.t.regex_transform(X)[0]
+        new_t = self.t.re_transform(X)[0]
         new_formstring = self.to_string(t=new_t)
         new_form = Formula(new_formstring)
         return new_form
@@ -2000,6 +2031,53 @@ class Impulse(object):
 
         return X, impulses
 
+    def get_matcher(self):
+        """
+        Return a compiled regex matcher to compare to data columns
+
+        :return: ``re`` object
+        """
+
+        if self.id.endswith('$'):
+            pattern = self.id
+        else:
+            pattern = self.id + '$'
+        matcher = re.compile(pattern)
+        return matcher
+
+    def expand_re(self, X):
+        """
+        Expand any regular expression predictors in **X** into a sequence of all matching columns.
+
+        :param X: list of ``pandas`` tables; input data
+        :return: ``list`` of ``Impulse``; list of expanded ``Impulse`` objects
+        """
+
+        if not isinstance(X, list):
+            X = [X]
+
+        impulses = []
+
+        if self.id.endswith('$'):
+            pattern = self.id
+        else:
+            pattern = self.id + '$'
+        matcher = re.compile(pattern)
+
+        for i in range(len(X)):
+            _X = X[i]
+            for col in _X:
+                if matcher.match(col):
+                    impulses.append(
+                        Impulse(
+                            col,
+                            ops=self.ops,
+                            is_re=False
+                        )
+                    )
+
+        return impulses
+
     def is_nn_impulse(self):
         """
         Type check for whether impulse represents an NN transformation of impulses.
@@ -2082,6 +2160,25 @@ class ImpulseInteraction(object):
             X = X[0]
 
         return X, expanded_interaction_impulses, expanded_atomic_impulses
+
+    def expand_re(self, X):
+        """
+        Expand any regular expression predictors in **X** into a sequence of all matching columns.
+
+        :param X: list of ``pandas`` tables; input data
+        :return: 2-tuple of ``list`` of ``ImpulseInteraction``, ``list`` of ``list`` of ``Impulse``; list of expanded ``ImpulseInteraction`` objects, list of lists of expanded ``Impulse`` objects, one list for each interaction.
+        """
+
+        if not isinstance(X, list):
+            X = [X]
+
+        expanded_atomic_impulses = []
+        for x in self.impulses():
+            X, expanded_atomic_impulses_cur = x.expand_re(X)
+            expanded_atomic_impulses.append(expanded_atomic_impulses_cur)
+        expanded_interaction_impulses = [ImpulseInteraction(x, ops=self.ops) for x in itertools.product(*expanded_atomic_impulses)]
+
+        return expanded_interaction_impulses, expanded_atomic_impulses
 
     def is_nn_impulse(self):
         """
@@ -2252,6 +2349,33 @@ class NNImpulse(object):
             X = X[0]
 
         return X, expanded_interaction_impulses, expanded_atomic_impulses
+
+    def expand_re(self, X):
+        """
+        Expand any regular expression predictors in **X** into a sequence of all matching columns.
+
+        :param X: list of ``pandas`` tables; input data
+        :return: 2-tuple of ``list`` of ``ImpulseInteraction``, ``list`` of ``list`` of ``Impulse``; list of expanded ``ImpulseInteraction`` objects, list of lists of expanded ``Impulse`` objects, one list for each interaction.
+        """
+
+        if not isinstance(X, list):
+            X = [X]
+
+        expanded_atomic_impulses = []
+        for x in self.impulses():
+            X, expanded_atomic_impulses_cur = x.expand_re(X)
+            expanded_atomic_impulses.append(expanded_atomic_impulses_cur)
+        expanded_interaction_impulses = [
+            NNImpulse(
+                sum([expanded_atomic_impulses], []),
+                impulses_as_inputs=self.impulses_as_inputs,
+                inputs_to_add=self.inputs_added,
+                inputs_to_drop=self.inputs_dropped,
+                nn_config=self.nn_config
+            )
+        ]
+
+        return expanded_interaction_impulses, expanded_atomic_impulses
 
     def is_nn_impulse(self):
         """
@@ -3711,17 +3835,14 @@ class IRFNode(object):
             else:
                 if not self.impulse.name() in expansion_map and not isinstance(self.impulse, NNImpulse):
                     if self.impulse.categorical(X):
-                        if self.impulse.categorical(X):
-                            found = False
-                            for _X in X:
-                                if self.impulse.id in _X:
-                                    found = True
-                                    vals = sorted(_X[self.impulse.id].unique())[1:]
-                                    expansion = [Impulse('_'.join([self.impulse.id, pythonize_string(str(val))]), ops=self.impulse.ops, is_re=self.impulse.is_re) for val in vals]
-                                    break
-                            assert found, 'Impulse %s not found in data.' % self.impulse.id
-                        else:
-                            expansion = [self.impulse]
+                        found = False
+                        for _X in X:
+                            if self.impulse.id in _X:
+                                found = True
+                                vals = sorted(_X[self.impulse.id].unique())[1:]
+                                expansion = [Impulse('_'.join([self.impulse.id, pythonize_string(str(val))]), ops=self.impulse.ops, is_re=self.impulse.is_re) for val in vals]
+                                break
+                        assert found, 'Impulse %s not found in data.' % self.impulse.id
                         expansion_map[self.impulse.name()] = expansion
                     else:
                         expansion_map[self.impulse.name()] = [self.impulse]
@@ -3767,6 +3888,250 @@ class IRFNode(object):
             children = []
             for c in self.children:
                 c_children = [x for x in c.categorical_transform(X, expansion_map=expansion_map)]
+                children += c_children
+            for c in children:
+                new_irf = IRFNode(
+                    family=self.family,
+                    irfID=self.irfID,
+                    fixed=self.fixed,
+                    rangf=self.rangf,
+                    nn_impulses=self.nn_impulses,
+                    nn_config=self.nn_config,
+                    impulses_as_inputs=self.impulses_as_inputs,
+                    inputs_to_add=self.inputs_added,
+                    inputs_to_drop=self.inputs_dropped,
+                    param_init=self.param_init,
+                    trainable=self.trainable,
+                    pred_params_list=self.pred_params_list
+                )
+                new_irf.add_child(c)
+                self_transformed.append(new_irf)
+
+        if top:
+            old_interactions = self.interactions()
+            new_interactions = []
+
+            for old_interaction in old_interactions:
+                old_rangf = old_interaction.rangf[:]
+                expanded_interaction = []
+                for response in old_interaction.responses():
+                    if isinstance(response, ImpulseInteraction):
+                        expanded_interaction_impulse = []
+                        for impulse in response.impulses():
+                            expansion = expansion_map[impulse.name()]
+                            expanded_interaction_impulse.append(expansion)
+                        expanded_interaction_impulse = [ImpulseInteraction(x, ops=response.ops) for x in itertools.product(*expanded_interaction_impulse)]
+                        expanded_interaction.append(expanded_interaction_impulse)
+                    elif isinstance(response, NNImpulse):
+                        expanded_interaction_impulse = []
+                        for impulse in response.impulses():
+                            expansion = expansion_map[impulse.name()]
+                            expanded_interaction_impulse.append(expansion)
+                        expanded_interaction_impulse = [
+                            NNImpulse(
+                                sum(expanded_interaction_impulse, []),
+                                impulses_as_inputs=response.impulses_as_inputs,
+                                inputs_to_add=response.inputs_added,
+                                inputs_to_drop=response.inputs_dropped,
+                                nn_config=response.nn_config
+                            )
+                        ]
+                        expanded_interaction.append(expanded_interaction_impulse)
+                    else:
+                        expansion = expansion_map[response.name()]
+                        expanded_interaction.append(expansion)
+                expanded_interaction = [ResponseInteraction(x, rangf=old_rangf) for x in itertools.product(*expanded_interaction)]
+                new_interactions += expanded_interaction
+            for interaction in new_interactions:
+                for irf in interaction.irf_responses():
+                    irf.add_interactions(interaction)
+
+        return self_transformed
+
+    def re_transform(self, X, expansion_map=None):
+        """
+        Generate transformed copy of node with regex-matching predictors in **X** expanded.
+        Recursive.
+        Returns a tree forest representing the current state of the transform.
+        When run from ROOT, should always return a length-1 list representing a single-tree forest, in which case the transformed tree is accessible as the 0th element.
+
+        :param X: list of ``pandas`` tables; input data.
+        :param expansion_map: ``dict``; Internal variable. Do not use.
+        :return: ``list`` of ``IRFNode``; tree forest representing current state of the transform.
+        """
+
+        if expansion_map is None:
+            top = True
+            expansion_map = {}
+        else:
+            top = False
+
+        self_transformed = []
+
+        if self.terminal():
+            for interaction in self.interactions():
+                for response in interaction.responses():
+                    if isinstance(response, Impulse):
+                        if not response.name() in expansion_map:
+                            if response.is_re:
+                                m = response.get_matcher()
+                                expansion = []
+                                for _X in X:
+                                    for col in _X:
+                                        if m.match(col):
+                                            expansion.append(
+                                                Impulse(
+                                                    col,
+                                                    ops=response.ops,
+                                                    is_re=False
+                                                )
+                                            )
+                                assert expansion, 'Impulse %d not found in data.' % response.id
+                            else:
+                                expansion = [response]
+                            expansion_map[response.name()] = expansion
+                    elif isinstance(response, ImpulseInteraction):
+                        for subresponse in response.impulses():
+                            if not subresponse.name() in expansion_map:
+                                if subresponse.is_re:
+                                    m = subresponse.get_matcher()
+                                    expansion = []
+                                    for _X in X:
+                                        for col in _X:
+                                            if m.match(col):
+                                                expansion.append(
+                                                    Impulse(
+                                                        col,
+                                                        ops=subresponse.ops,
+                                                        is_re=False
+                                                    )
+                                                )
+                                    assert expansion, 'Impulse %d not found in data.' % subresponse.id
+                                else:
+                                    expansion = [subresponse]
+                                expansion_map[subresponse.name()] = expansion
+
+            if type(self.impulse).__name__ == 'ImpulseInteraction':
+                expanded_atomic_impulses = []
+                for x in self.impulse.impulses():
+                    if x.name() not in expansion_map:
+                        if x.is_re:
+                            m = x.get_matcher()
+                            expansion = []
+                            for _X in X:
+                                for col in _X:
+                                    if m.match(col):
+                                        expansion.append(
+                                            Impulse(
+                                                col,
+                                                ops=x.ops,
+                                                is_re=False
+                                            )
+                                        )
+                            assert expansion, 'Impulse %s not found in data.' % x.id
+                        else:
+                            expansion = [x]
+                        expansion_map[x.name()] = expansion
+
+                    expanded_atomic_impulses.append(expansion_map[x.name()])
+
+                new_impulses = [ImpulseInteraction(x, ops=self.impulse.ops) for x in itertools.product(*expanded_atomic_impulses)]
+
+            elif type(self.impulse).__name__ == 'NNImpulse':
+                expanded_atomic_impulses = []
+                for x in self.impulse.impulses():
+                    if x.name() not in expansion_map:
+                        if x.is_re:
+                            m = x.get_matcher()
+                            expansion = []
+                            for _X in X:
+                                for col in _X:
+                                    if m.match(col):
+                                        expansion.append(
+                                            Impulse(
+                                                col,
+                                                ops=x.ops,
+                                                is_re=False
+                                            )
+                                        )
+                            assert expansion, 'Impulse %s not found in data.' % x.id
+                        else:
+                            expansion = [x]
+                        expansion_map[x.name()] = expansion
+
+                    expanded_atomic_impulses.append(expansion_map[x.name()])
+
+                new_impulses = [
+                    NNImpulse(
+                        sum(expanded_atomic_impulses, []),
+                        impulses_as_inputs=self.impulse.impulses_as_inputs,
+                        inputs_to_add=self.impulse.inputs_added,
+                        inputs_to_drop=self.impulse.inputs_dropped,
+                        nn_config=self.impulse.nn_config
+                    )
+                ]
+
+            else:
+                if not self.impulse.name() in expansion_map and not isinstance(self.impulse, NNImpulse):
+                    if self.impulse.is_re:
+                        m = self.impulse.get_matcher()
+                        expansion = []
+                        for _X in X:
+                            for col in _X:
+                                if m.match(col):
+                                    expansion.append(
+                                        Impulse(
+                                            col,
+                                            ops=self.impulse.ops,
+                                            is_re=False
+                                        )
+                                    )
+                        assert expansion, 'Impulse %s not found in data.' % self.impulse.id
+                        expansion_map[self.impulse.name()] = expansion
+                    else:
+                        expansion_map[self.impulse.name()] = [self.impulse]
+
+                new_impulses = expansion_map[self.impulse.name()]
+
+            irf_expansion = []
+
+            for x in new_impulses:
+                new_irf = IRFNode(
+                    family='Terminal',
+                    impulse=x,
+                    coefID=self.coefID,
+                    fixed=self.fixed,
+                    rangf=self.rangf[:],
+                    nn_impulses=self.nn_impulses,
+                    nn_config=self.nn_config,
+                    impulses_as_inputs=self.impulses_as_inputs,
+                    inputs_to_add=self.inputs_added,
+                    inputs_to_drop=self.inputs_dropped,
+                    param_init=self.param_init,
+                    trainable=self.trainable,
+                    pred_params_list=self.pred_params_list
+                )
+                irf_expansion.append(new_irf)
+
+                self_transformed.append(new_irf)
+
+            expansion_map[self.name()] = irf_expansion
+
+        elif self.family is None:
+            ## ROOT node
+            children = []
+            for c in self.children:
+                c_children = [x for x in c.re_transform(X, expansion_map=expansion_map)]
+                children += c_children
+            new_irf = IRFNode()
+            for c in children:
+                new_irf.add_child(c)
+            self_transformed.append(new_irf)
+
+        else:
+            children = []
+            for c in self.children:
+                c_children = [x for x in c.re_transform(X, expansion_map=expansion_map)]
                 children += c_children
             for c in children:
                 new_irf = IRFNode(
