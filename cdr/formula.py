@@ -2767,21 +2767,24 @@ class IRFNode(object):
     def nn_key(self):
         out = None
         if self.family == 'NN':
-            out = 'irfNN_' + '_'.join([x.name() for x in self.nn_impulses])
-            if self.inputs_dropped:
-                out += '_dropped:' + '_'.join([x.name() for x in self.inputs_dropped])
-            if self.inputs_added:
-                out += '_added:' + '_'.join([x.name() for x in self.inputs_added])
-            if self.pred_params:
-                vals = []
-                for key in self.pred_params:
-                    if key is None:
-                        val = 'any:' + '-'.join(sorted(self.pred_params[key]))
-                    else:
-                        val = key + ':' + '-'.join([x for x in Formula.PREDICTIVE_DISTRIBUTIONS[key]['params'] \
-                                                    if x in self.pred_params[key]])
-                    vals.append(val)
-                out += '_' + '_'.join(vals)
+            if self.irfID:
+                out = self.irfID
+            else:
+                out = 'irfNN_' + '_'.join([x.name() for x in self.nn_impulses])
+                if self.inputs_dropped:
+                    out += '_dropped:' + '_'.join([x.name() for x in self.inputs_dropped])
+                if self.inputs_added:
+                    out += '_added:' + '_'.join([x.name() for x in self.inputs_added])
+                if self.pred_params:
+                    vals = []
+                    for key in self.pred_params:
+                        if key is None:
+                            val = 'any:' + '-'.join(sorted(self.pred_params[key]))
+                        else:
+                            val = key + ':' + '-'.join([x for x in Formula.PREDICTIVE_DISTRIBUTIONS[key]['params'] \
+                                                        if x in self.pred_params[key]])
+                        vals.append(val)
+                    out += '_' + '_'.join(vals)
         return out
 
     def add_child(self, t):
