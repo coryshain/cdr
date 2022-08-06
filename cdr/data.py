@@ -1025,6 +1025,7 @@ def preprocess_data(
             X_new.append(_X)
 
         for x in formula_list:
+            x = x.re_transform(X_new)
             X_new, Y, X_in_Y_names = x.apply_formula(
                 X_new,
                 Y,

@@ -800,31 +800,36 @@ class CDRModel(object):
         self.impulse_max = impulse_max
         self.indicators = indicators
 
-        stderr('\r    Computing predictor covariances...\n')
-        names = []
-        corr_blocks = []
-        cov_blocks = []
-        for k in sorted(impulse_blocks.keys()):
-            all_scalar = True
-            for _k in impulse_blocks[k]:
-                if hasattr(impulse_blocks[k][_k], '__len__') and len(impulse_blocks[k][_k]) > 0:
-                    all_scalar = False
-                    break
-            if all_scalar:
-                block = pd.DataFrame({_k: [impulse_blocks[k][_k]] for _k in impulse_blocks[k]})
-            else:
-                block = pd.DataFrame(impulse_blocks[k])
-            corr_blocks.append(block.corr().values)
-            cov_blocks.append(block.cov().values)
-            names += list(block.columns)
-        corr = scipy.linalg.block_diag(*corr_blocks)
-        corr = pd.DataFrame(corr, index=names, columns=names)
-        cov = scipy.linalg.block_diag(*cov_blocks)
-        cov = pd.DataFrame(cov, index=names, columns=names)
-        means = pd.DataFrame([self.impulse_means[x] for x in cov.index], index=cov.index, columns=['val'])
-        self.impulse_corr = corr
-        self.impulse_cov = cov
-        self.impulse_sampler_means = means
+        if len(self.impulse_means) < 100:
+            stderr('\r    Computing predictor covariances...\n')
+            names = []
+            corr_blocks = []
+            cov_blocks = []
+            for k in sorted(impulse_blocks.keys()):
+                all_scalar = True
+                for _k in impulse_blocks[k]:
+                    if hasattr(impulse_blocks[k][_k], '__len__') and len(impulse_blocks[k][_k]) > 0:
+                        all_scalar = False
+                        break
+                if all_scalar:
+                    block = pd.DataFrame({_k: [impulse_blocks[k][_k]] for _k in impulse_blocks[k]})
+                else:
+                    block = pd.DataFrame(impulse_blocks[k])
+                corr_blocks.append(block.corr().values)
+                cov_blocks.append(block.cov().values)
+                names += list(block.columns)
+            corr = scipy.linalg.block_diag(*corr_blocks)
+            corr = pd.DataFrame(corr, index=names, columns=names)
+            cov = scipy.linalg.block_diag(*cov_blocks)
+            cov = pd.DataFrame(cov, index=names, columns=names)
+            means = pd.DataFrame([self.impulse_means[x] for x in cov.index], index=cov.index, columns=['val'])
+            self.impulse_corr = corr
+            self.impulse_cov = cov
+            self.impulse_sampler_means = means
+        else:
+            self.impulse_corr = None
+            self.impulse_cov = None
+            self.impulse_sampler_means = None
 
         self.response_to_df_ix = {}
         for _response in response_names:
