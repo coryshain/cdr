@@ -729,9 +729,6 @@ class CDRModel(object):
                 impulse_uq[name] = 1.
                 impulse_min[name] = 1.
                 impulse_max[name] = 1.
-                if i not in impulse_blocks:
-                    impulse_blocks[i] = {}
-                impulse_blocks[i]['rate'] = 1.
             else:
                 for i, df in enumerate(X + Y):
                     if name in df and not name.lower() == 'rate':
@@ -808,7 +805,15 @@ class CDRModel(object):
         corr_blocks = []
         cov_blocks = []
         for k in sorted(impulse_blocks.keys()):
-            block = pd.DataFrame(impulse_blocks[k])
+            all_scalar = True
+            for _k in impulse_blocks[k]:
+                if hasattr(impulse_blocks[k][_k], '__len__') and len(impulse_blocks[k][_k]) > 0:
+                    all_scalar = False
+                    break
+            if all_scalar:
+                block = pd.DataFrame({_k: [impulse_blocks[k][_k]] for _k in impulse_blocks[k]})
+            else:
+                block = pd.DataFrame(impulse_blocks[k])
             corr_blocks.append(block.corr().values)
             cov_blocks.append(block.cov().values)
             names += list(block.columns)
