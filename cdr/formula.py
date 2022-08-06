@@ -922,7 +922,10 @@ class Formula(object):
             elif t.func.id == 're':
                 # Regular expression
                 assert len(t.args) == 1, 'Regular expression terms take exactly one string argument'
-                val = t.args[0].value
+                if type(t.args[0]).__name__ == 'Str':
+                    val = t.args[0].s
+                else:
+                    val = t.args[0].value
                 assert isinstance(val, str), 'Regular expression terms take exactly one string argument'
                 if under_irf or under_interaction:
                     new = Impulse(val, ops=ops, is_re=True)
