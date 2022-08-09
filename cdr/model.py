@@ -10195,7 +10195,7 @@ class CDRModel(object):
                             xlab = None
                         if use_vert_axlab:
                             ylab = [get_irf_name(_response, irf_name_map)]
-                            if include_param_name:
+                            if include_param_name and _dim_name != 'mean':
                                 ylab.append(_dim_name)
                             ylab = ', '.join(ylab)
                         else:
@@ -10314,7 +10314,7 @@ class CDRModel(object):
                             xlab = None
                         if use_vert_axlab:
                             ylab = [get_irf_name(_response, irf_name_map)]
-                            if include_param_name:
+                            if include_param_name and _dim_name != 'mean':
                                 ylab.append(_dim_name)
                             ylab = ', '.join(ylab)
                         else:
@@ -10430,7 +10430,7 @@ class CDRModel(object):
                                     ylab = None
                                 if use_vert_axlab:
                                     zlab = [get_irf_name(_response, irf_name_map)]
-                                    if include_param_name:
+                                    if include_param_name and _dim_name != 'mean':
                                         zlab.append(_dim_name)
                                     zlab = ', '.join(zlab)
                                 else:
