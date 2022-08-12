@@ -1,144 +1,118 @@
-import sys
-import re
 import os
-import numpy as np
 import argparse
-
-from cdr.config import Config
-from cdr.util import get_partition_list
-
-def extract_signif_2step(path):
-    signif = np.nan
-    converged = True
-    with open(path, 'r') as f:
-        in_signif_table = 0
-        for line in f.readlines():
-            l = line.strip()
-            if l.endswith('had the following convergence warnings:'):
-                converged = False
-            if l.endswith('Pr(>Chisq)'):
-                in_signif_table = 1
-            elif in_signif_table:
-                in_signif_table += 1
-                if in_signif_table == 3:
-                    signif = line.strip().split()[8:]
-                    if signif[0] == '<':
-                        signif = float(signif[1])
-                    else:
-                        signif = float(signif[0])
-    return signif, converged
-
-def extract_signif_pt(path):
-    signif = np.nan
-    converged = True
-    with open(path, 'r') as f:
-        for line in f.readlines():
-            l = line.strip()
-            if l.startswith('p: '):
-                signif = l.split()[1]
-                signif = re.match(' *([^*]+)\**', signif).group(1)
-                signif = float(signif)
-    return signif, converged
-
-def comparison2str(c):
-    return '_v_'.join([''.join(['!' + x for x in y]) if len(y) > 0 else 'FULL' for y in c])
-
-def extract_comparisons(paths):
-    models = []
-    comparisons = {}
-    comparisons_converged = {}
-    for path in paths:
-        m = '_'.join(os.path.basename(path).split('_')[:-2]).split('_v_')
-        m_split = [x.split('!') for x in m]
-        m_base = [x[0] for x in m_split]
-        m_ablated = [set(x[1:]) for x in m_split]
-        a = 0 if len(m_ablated[0]) < len(m_ablated[1]) else 1
-        b = 1 - a
-        if m_base[a] == m_base[b] and len(m_ablated[b] - m_ablated[a]) == 1 and len(m_ablated[a] - m_ablated[b]) == 0:
-            if m_base[0] not in models:
-                models.append(m_base[0])
-
-            if args.mode == '2step':
-                signif, converged = extract_signif_2step(path)
-            else:
-                signif, converged = extract_signif_pt(path)
-
-            comparison = (tuple(sorted(list(m_ablated[a]))), tuple(sorted(list(m_ablated[b]))))
-
-            if comparison not in comparisons:
-                comparisons[comparison] = {}
-
-            comparisons[comparison][m_base[0]] = signif
-            if comparison not in comparisons_converged:
-                comparisons_converged[comparison] = {}
-            comparisons_converged[comparison][m_base[0]] = converged
-
-    return models, comparisons, comparisons_converged
-
-# Thanks to Daniel Sparks on StackOverflow for this one (post available at
-# http://stackoverflow.com/questions/5084743/how-to-print-pretty-string-output-in-python)
-def pretty_table(row_collection, key_list, field_sep=' '):
-  return '\n'.join([field_sep.join([str(row[col]).ljust(width)
-    for (col, width) in zip(key_list, [max(map(len, column_vector))
-      for column_vector in [ [v[k]
-        for v in row_collection if k in v]
-          for k in key_list ]])])
-            for row in row_collection])
-
 
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser('''
-        Generates table of significances of ablative model comparisons
+    Collate significance testing results into a LaTeX table.
     ''')
-    argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
-    argparser.add_argument('-M', '--mode', type=str, default='pt', help='Type of significance test to use (one of ["pt", "2step"] for permutation testing or 2-step LME/LRT, respectively).')
-    argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
-    argparser.add_argument('-H', '--human_readable', action='store_true', help='Return table in human readable format (otherwise return as CSV)')
+    argparser.add_argument('paths', nargs='+', help='Path(s) to directories containing signif testing results (*.txt files)')
+    argparser.add_argument('-D', '--dataset_order', nargs='+', help='Order in which to report datasets (left to right). Use only the directory basename.')
+    argparser.add_argument('-r', '--response_order', nargs='+', help='Order in which to report responses (left to right).')
+    argparser.add_argument('-p', '--partition_order', nargs='+', help='Order in which to report partitions (left to right).')
     args = argparser.parse_args()
 
-    p = Config(args.config_path)
+    results = {}
+    for dir_path in args.paths:
+        _results = []
+        result_paths = [x for x in os.listdir(dir_path) if ('_v_' in x and x.endswith('.txt'))]
+        for result_path in result_paths:
+            result = {}
+            a, b = result_path.split('_v_')
+            b, other = b.split('_PT_')
+            other = other.split('_')
+            response = other[0]
+            partition = other[-1][:-4]
+            result['comparison'] = '%s vs %s' % (b, a)
+            result['response'] = response
+            result['partition'] = partition
+            with open(os.path.join(dir_path, result_path), 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('Difference:'):
+                        result['diff'] = int(round(-float(line[12:])))
+                    elif line.startswith('p:'):
+                        result['p'] = float(line[12:].replace('*', '')) 
+            _results.append(result)
+        results[dir_path] = _results
 
-    partitions = get_partition_list(args.partition)
-    partition_str = '-'.join(partitions)
+    datasets = list(results.keys())
+    responses = {}
+    comparisons = []
+    partitions = []
+    all_results = {}
 
-    suffix = '_2stepLRT_%s.txt' % partition_str if args.mode == '2step' else '_PT_%s.txt' % partition_str
-    paths = [p.outdir + '/' + x.replace(':', '+') for x in os.listdir(p.outdir) if x.endswith(suffix)]
+    for dataset in results:
+        if dataset not in responses:
+            responses[dataset] = []
+        for result in results[dataset]:
+            response = result['response']
+            comparison = result['comparison']
+            partition = result['partition']
+            if response not in responses[dataset]:
+                responses[dataset].append(response)
+            if comparison not in comparisons:
+                comparisons.append(comparison)
+            if partition not in partitions:
+                partitions.append(partition)
+            if comparison not in all_results:
+                all_results[comparison] = {}
+            if dataset not in all_results[comparison]:
+                all_results[comparison][dataset] = {}
+            if response not in all_results[comparison][dataset]:
+                all_results[comparison][dataset][response] = {}
+            if partition not in all_results[comparison][dataset][response]:
+                all_results[comparison][dataset][response][partition] = {
+                    'p': result['p'],
+                    'diff': result['diff']
+                }
 
-    models, comparisons, comparisons_converged = extract_comparisons(paths)
-    comparison_keys = sorted(list(comparisons.keys()), key= lambda x: len(x[0]))
-    models = sorted(models)
+    if args.dataset_order:
+        dataset_basenames = [os.path.basename(os.path.normpath(x)) for x in datasets]
+        _datasets = []
+        for x in args.dataset_order:
+            for i, y in enumerate(dataset_basenames):
+                if x == y:
+                    _datasets.append(datasets[i])
+                    break
+        datasets = _datasets
+    if args.response_order:
+        for dataset in responses:
+            ord = responses[dataset]
+            _ord = []
+            for x in args.response_order:
+                if x in ord:
+                    _ord.append(x)
+            responses[dataset] = _ord
+    if args.partition_order:
+        _partitions = []
+        for x in args.partition_order:
+            if x in partitions:
+                _partitions.append(x)
+        partitions = _partitions                
 
-
-    cols = ['model']
-    for c in comparison_keys:
-        cols.append(comparison2str(c))
-
-    if args.mode == '2step':
-        cols.append('converged')
-
-    header = {}
-    for col in cols:
-        header[col] = col
-
-    data = [header]
-    for m in models:
-        m_path = m.replace(':', '+')
-        converged_str = ''
-        row = {'model': m}
-        for c in comparison_keys:
-            c_str = comparison2str(c)
-            cur_signif = comparisons[c].get(m_path, np.nan)
-            cur_signif_str = str(cur_signif)
-            if args.human_readable:
-                cur_signif_str += '' if cur_signif > 0.05 else '*' if cur_signif > 0.01 else '**' if cur_signif > 0.001 else '***'
-            converged_str += str(int(comparisons_converged[c].get(m_path, True)))
-            row[c_str] = cur_signif_str
-        if args.mode == '2step':
-            row['converged'] = converged_str
-        data.append(row)
-
-    if args.human_readable:
-        print(pretty_table(data, cols))
-    else:
-        for row in data:
-            print(', '.join([row[col] for col in cols]))
+    print('\\begin{table}')
+    print('  \\begin{tabular}{l|%s}' % '|'.join(['cc' * len(partitions) for dataset in datasets for response in responses[dataset]]))
+    print('    & %s\\\\' % ' & '.join(['\\multicolumn{%d}{c}{%s}' % (2 * len(partitions) * len(responses[dataset]), dataset) for dataset in datasets]))
+    print('    & %s\\\\' % ' & '.join(['\\multcolumns{%d}{c}{%s}' % (2 * len(partitions), response) for dataset in datasets for response in responses[dataset]]))
+    if len(partitions) > 1:
+        print('    & %s\\\\' % ' & '.join(['\\multcolumns{2}{c}{%s}' % partition for dataset in datasets for response in responses[dataset] for partition in partitions]))
+    print('    Comparison & %s\\\\' % ' & '.join(['$\\Delta$LL & $p$'] * (len(datasets) * len(responses) * len(partitions))))
+    for comparison in comparisons:
+        row = [comparison]
+        res1 = all_results.get(comparison)
+        for dataset in datasets:
+            res2 = res1.get(dataset, {})
+            for response in responses[dataset]:
+                res3 = res2.get(response, {})
+                for partition in partitions:
+                    res4 = res3.get(partition, {})
+                    p = res4.get('p', '---')
+                    if p != '---':
+                        p = '%0.5f' % p
+                    diff = str(res4.get('diff', '---'))
+                    
+                    row.append(diff)
+                    row.append(p)
+        print('    ' + ' & '.join(row) + '\\\\')
+    print('  \\end{tabular}')
+    print('\\end{table}')
