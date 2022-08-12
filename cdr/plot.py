@@ -133,6 +133,7 @@ def plot_irf(
             ax.fill_between(plot_x, lq[:,sort_ix[i]], uq[:,sort_ix[i]], alpha=0.25)
 
     if xlab:
+        xlab = get_irf_name(xlab, irf_name_map)
         ax.set_xlabel(xlab)
     if ylab:
         ax.set_ylabel(ylab)
@@ -550,8 +551,10 @@ def plot_surface(
         fig.suptitle(title)
 
     if xlab:
+        xlab = get_irf_name(xlab, irf_name_map)
         ax.set_xlabel(xlab)
     if ylab:
+        ylab = get_irf_name(ylab, irf_name_map)
         ax.set_ylabel(ylab)
     if zlab:
         ax.set_zlabel(zlab, rotation='vertical')
