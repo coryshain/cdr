@@ -108,7 +108,7 @@ if __name__ == '__main__':
                     res4 = res3.get(partition, {})
                     p = res4.get('p', '---')
                     if p != '---':
-                        p = '%0.5f' % p
+                        p = '%0.4f' % p
                     diff = str(res4.get('diff', '---'))
                     
                     row.append(diff)
