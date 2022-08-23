@@ -87,6 +87,8 @@ if __name__ == '__main__':
         metric = 'MSE'
     elif args.metric.lower() in ['loglik', 'll', 'likelihood']:
         metric = 'Loglik'
+    elif args.metric.lower() in ['r', 'r2']:
+        metric = '% var expl'
     elif args.metric.lower() in ['n', 'iter', 'niter', 'n_iter']:
         metric = 'Training iterations completed'
     else:
@@ -145,7 +147,7 @@ if __name__ == '__main__':
                                     line = f.readline()
                                     while line:
                                         if line.strip().startswith(metric):
-                                            val = float(line.strip().split()[-1])
+                                            val = float(line.strip().split()[-1].replace('%', ''))
                                             if _task_name not in results:
                                                 results[_task_name] = {}
                                             if baseline_names[j] not in results[_task_name]:
@@ -172,7 +174,7 @@ if __name__ == '__main__':
                                     line = f.readline()
                                     while line:
                                         if line.strip().startswith(metric):
-                                            val = float(line.strip().split()[-1])
+                                            val = float(line.strip().split()[-1].replace('%', ''))
                                             if _task_name not in results:
                                                 results[_task_name] = {}
                                             if _system_names[j] not in results[_task_name]:
