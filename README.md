@@ -6,7 +6,7 @@ It locks the repository at a previous state and therefore lacks any subsequent i
 Do not use this branch to run regressions on your own data.
 Instead, first run the following command from the repository root:
 
-`git checkout -b master`
+`git checkout master`
 
 Installation of dependencies can be managed through Anaconda (https://www.anaconda.com/).
 Once you have an Anaconda distribution installed, the software environment can be set up by running the following from the root of this repository:
