@@ -9,6 +9,7 @@ if __name__ == '__main__':
     argparser.add_argument('-D', '--dataset_order', nargs='+', help='Order in which to report datasets (left to right). Use only the directory basename.')
     argparser.add_argument('-r', '--response_order', nargs='+', help='Order in which to report responses (left to right).')
     argparser.add_argument('-p', '--partition_order', nargs='+', help='Order in which to report partitions (left to right).')
+    argparser.add_argument('-P', '--positive_only', action='store_true', help='Only report positive improvements.')
     args = argparser.parse_args()
 
     results = {}
@@ -106,10 +107,12 @@ if __name__ == '__main__':
                 res3 = res2.get(response, {})
                 for partition in partitions:
                     res4 = res3.get(partition, {})
+                    diff = str(res4.get('diff', '---'))
                     p = res4.get('p', '---')
+                    if diff == '---' or res4['diff'] < 0:
+                        p = '---'
                     if p != '---':
                         p = '%0.4f' % p
-                    diff = str(res4.get('diff', '---'))
                     
                     row.append(diff)
                     row.append(p)
