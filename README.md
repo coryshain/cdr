@@ -103,11 +103,13 @@ For this reason, repository states associated with previous results are saved in
 To reproduce those results, checkout the relevant branch and follow the instructions in the `README`.
 Current reproduction branches are:
 
- - `emnlp18`
- - `naacl19`
- - `npsy`
- - `cognition21`
- - `acl21`
+ - `emnlp18` (Shain & Schuler, 2018)
+ - `naacl19` (Shain, 2019)
+ - `npsy` (Shain, Blank, et al., 2020)
+ - `cognition21` (Shain & Schuler, 2021)
+ - `acl21` (Shain, 2021)
+ - `cdrnn_journal` (Shain & Schuler, PsyArXiv)
+ - `fMRI_ns_WM` (Shain et al., 2022)
 
 Thus, to reproduce results from ACL21, for example, run `git checkout acl21` from the repository root, and follow instructions in the `README` file.
 The reproduction branches are also useful sources of example configuration files to use as templates for setting up your own experiments, although you should consult the docs for full documentation of the structure of CDR experiment configurations.
