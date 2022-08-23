@@ -42,19 +42,21 @@ Everything following this prefix in the section header is used by the system as 
 
 To fit a model, run:
 
-`python -m cdr.bin.fit <INI_FILE> -m <MODEL_NAME>`
+`python -m cdr.bin.train <INI_FILE> -m <MODEL_NAME>`
 
 For example, if config file `example.ini` contains a model defined in section name `model_CDRNN_example`, the model can be fitted by running:
 
-`python -m cdr.bin.fit example.ini -m CDRNN_example`
+`python -m cdr.bin.train example.ini -m CDRNN_example`
 
 To evaluate (predict from) a model, run:
 
-`python -m cdr.bin.fit <INI_FILE> -m <MODEL_NAME> -p (train|dev|test)`
+`python -m cdr.bin.predict <INI_FILE> -m <MODEL_NAME> -p (train|dev|test)`
 
 Documentation for additional utilities can be viewed by running:
 
 `python -m cdr.bin.help`
+
+Full documentation and API are available here: https://cdr.readthedocs.io/en/latest/.
 
 For optimal efficiency, each of the above commands should be run as a distinct job.
 Results will be placed into a directory called `results` at the root of this repository.
