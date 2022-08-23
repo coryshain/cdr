@@ -1324,36 +1324,39 @@ class Formula(object):
         else:
             delistify = False
 
-        for i in range(len(X)):
-            _X = X[i]
-            ops = impulse.ops
+        ops = impulse.ops
+        if ops:
+            for i in range(len(X)):
+                _X = X[i]
 
-            expanded_impulses = None
-            if impulse.id not in _X:
-                if type(impulse).__name__ in ('ImpulseInteraction', 'NNImpulse'):
-                    _X, expanded_impulses, expanded_atomic_impulses = impulse.expand_categorical(_X)
-                    for x in expanded_atomic_impulses:
-                        for a in x:
-                            _X = self.apply_ops(a, _X)
-                    for x in expanded_impulses:
-                        if x.name() not in _X:
-                            _X[x.id] = _X[[y.name() for y in x.atomic_impulses]].product(axis=1)
-            else:
-                if type(impulse).__name__ == ('ImpulseInteraction', 'NNImpulse'):
+                if impulse.id not in _X:
+                    if type(impulse).__name__ in ('ImpulseInteraction', 'NNImpulse'):
+                        _X, expanded_impulses, expanded_atomic_impulses = impulse.expand_categorical(_X)
+                        for x in expanded_atomic_impulses:
+                            for a in x:
+                                _X = self.apply_ops(a, _X)
+                        for x in expanded_impulses:
+                            if x.name() not in _X:
+                                _X[x.id] = _X[[y.name() for y in x.atomic_impulses]].product(axis=1)
+                    elif impulse.is_re:
+                        expanded_impulses = impulse.expand_re(_X)
+                    else:
+                        break
+                elif type(impulse).__name__ == ('ImpulseInteraction', 'NNImpulse'):
                     _X, expanded_impulses, _ = impulse.expand_categorical(_X)
                 else:
                     _X, expanded_impulses = impulse.expand_categorical(_X)
 
-            if expanded_impulses is not None:
-                for x in expanded_impulses:
-                    if x.name() not in _X:
-                        new_col = _X[x.id]
-                        for j in range(len(ops)):
-                            op = ops[j]
-                            new_col = self.apply_op(op, new_col)
-                        _X[x.name()] = new_col
+                if expanded_impulses is not None:
+                    for x in expanded_impulses:
+                        if x.name() not in _X:
+                            new_col = _X[x.id]
+                            for j in range(len(ops)):
+                                op = ops[j]
+                                new_col = self.apply_op(op, new_col)
+                            _X[x.name()] = new_col
 
-            X[i] = _X
+                X[i] = _X
 
         if delistify:
             X = X[0]
@@ -1564,13 +1567,14 @@ class Formula(object):
                 to_process = [impulse]
 
             for x in to_process:
-                if x.id in X_columns:
+                if not x.ops:
+                    continue
+
+                if x.id in X_columns or x.is_re:
                     for i in range(len(X)):
                         _X = X[i]
-                        if x.id in _X:
-                            _X = self.apply_ops(x, _X)
-                            X[i] = _X
-                            break
+                        _X = self.apply_ops(x, _X)
+                        X[i] = _X
                 else: # Not in X, so either it's spilled over (legacy from Cognition expts) or it's in Y (response aligned)
                     sp = spillover.match(x.id)
                     if sp and sp.group(1) in X_columns and series_ids is not None:
@@ -1585,8 +1589,6 @@ class Formula(object):
                                 break
                     else: # Response aligned
                         for i, _Y in enumerate(Y):
-                            if x.id not in _Y:
-                                print(str(self))
                             assert x.id in _Y, 'Impulse %s not found in data. Either it is missing from all of the predictor files X, or (if response aligned) it is missing from at least one of the response files Y.' % x.name()
                             Y[i] = self.apply_ops(x, _Y)
                         if X_in_Y_names is None:
@@ -1597,7 +1599,7 @@ class Formula(object):
             if type(impulse).__name__ == 'ImpulseInteraction':
                 response_aligned = False
                 for x in impulse.impulses():
-                    if x.id not in X_columns:
+                    if x.id not in X_columns and not x.is_re:
                         response_aligned = True
                         break
                 if response_aligned:
@@ -1613,13 +1615,12 @@ class Formula(object):
                         _X = X[i]
                         in_X = True
                         for atom in impulse.impulses():
-                            if atom.id not in _X:
+                            if not x.is_re and atom.id not in _X:
                                 in_X = False
                         if in_X:
                             _X = self.apply_ops(impulse, _X)
                             X[i] = _X
                             found = True
-                            break
                     if not found:
                         raise ValueError('No single predictor file contains all features in ImpulseInteraction, and interaction across files is not possible because of asynchrony. Consider interacting the responses, rather than the impulses.')
 
@@ -1895,6 +1896,7 @@ class Formula(object):
         new_t = self.t.re_transform(X)[0]
         new_formstring = self.to_string(t=new_t)
         new_form = Formula(new_formstring)
+
         return new_form
 
     def initialize_nns(self):

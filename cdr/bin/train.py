@@ -12,6 +12,7 @@ from cdr.io import read_tabular_data
 from cdr.formula import Formula
 from cdr.data import filter_invalid_responses, preprocess_data, compute_splitID, compute_partition
 from cdr.model import CDRModel
+from cdr.model_xl import CDRXLModel
 from cdr.util import mse, mae, filter_models, get_partition_list, paths_from_partition_cliarg, stderr
 
 
@@ -65,6 +66,8 @@ if __name__ == '__main__':
         sep=p.sep,
         categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in cdr_formula_list for v in x.rangf]))
     )
+    form = cdr_formula_list[0]
+    form.re_transform(X)
     X, Y, select, X_in_Y_names = preprocess_data(
         X,
         Y,
@@ -248,7 +251,11 @@ if __name__ == '__main__':
             kwargs['crossval_fold'] = p['crossval_fold']
             kwargs['irf_name_map'] = p.irf_name_map
 
-            cdr_model = CDRModel(
+            if m.lower().startswith('cdrxl'):
+                model_class = CDRXLModel
+            else:
+                model_class = CDRModel
+            cdr_model = model_class(
                 formula,
                 X,
                 Y_valid,

@@ -4178,24 +4178,32 @@ class CDRModel(object):
                         self.nn_irf_impulses[nn_id] = nn_irf_impulses
 
                         # Slice and apply IRF outputs
-                        slices, shapes = self.get_nn_irf_output_slice_and_shape(nn_id)
-                        if X_mask is None:
-                            X_mask_out = None
+                        if self.is_xl:
+                            if X_mask is not None:
+                                # Pad out for IRF output dimension
+                                X_mask_out = X_mask[..., None]
+                                irf_out = irf_out * X_mask_out
+                            self.nn_irf[nn_id] = irf_out
                         else:
-                            X_mask_out = X_mask[..., None, None, None] # Pad out for impulses plus nparam, ndim of response distribution(s)
-                        _X_time = X_time[..., None, None]
+                            slices, shapes = self.get_nn_irf_output_slice_and_shape(nn_id)
+                            if X_mask is None:
+                                X_mask_out = None
+                            else:
+                                # Pad out for impulses plus nparam, ndim of response distribution(s)
+                                X_mask_out = X_mask[..., None, None, None]
+                            _X_time = X_time[..., None, None]
 
-                        for i, response in enumerate(self.response_names):
-                            _slice = slices[response]
-                            _shape = shapes[response]
+                            for i, response in enumerate(self.response_names):
+                                _slice = slices[response]
+                                _shape = shapes[response]
 
-                            _irf_out = tf.reshape(irf_out[..., _slice], _shape)
-                            if X_mask_out is not None:
-                                _irf_out = _irf_out * X_mask_out
+                                _irf_out = tf.reshape(irf_out[..., _slice], _shape)
+                                if X_mask_out is not None:
+                                    _irf_out = _irf_out * X_mask_out
 
-                            if response not in self.nn_irf:
-                                self.nn_irf[response] = {}
-                            self.nn_irf[response][nn_id] = _irf_out
+                                if response not in self.nn_irf:
+                                    self.nn_irf[response] = {}
+                                self.nn_irf[response][nn_id] = _irf_out
 
                 # Set up EMA for RNN
                 ema_rate = self.ema_decay
@@ -4757,8 +4765,6 @@ class CDRModel(object):
                 self.error_distribution_plot_lb = {}
                 self.error_distribution_plot_ub = {}
                 self.response_params_ema = {}
-                self.X_conv_ema = {}
-                self.X_conv_ema_debiased = {}
                 self.z_bijectors = {}
                 self.s_bijectors = {}
 
@@ -5361,9 +5367,13 @@ class CDRModel(object):
                 self.summary_opt = tf.summary.merge_all(key='opt')
                 if self.eval_freq > 0:
                     self.summary_dev = tf.summary.merge_all(key='dev')
-                self.summary_params = tf.summary.merge_all(key='params')
-                if self.log_random and len(self.rangf) > 0:
-                    self.summary_random = tf.summary.merge_all(key='random')
+                if self.is_xl:
+                    self.summary_params = None
+                    self.summary_random = None
+                else:
+                    self.summary_params = tf.summary.merge_all(key='params')
+                    if self.log_random and len(self.rangf) > 0:
+                        self.summary_random = tf.summary.merge_all(key='random')
 
     def _initialize_saver(self):
         with self.session.as_default():
@@ -6045,6 +6055,16 @@ class CDRModel(object):
 
         return out
 
+    @property
+    def is_xl(self):
+        """
+        Whether this is an instance of CDRXL
+
+        :return: ``bool``; whether this is an instance of CDRXL
+        """
+
+        return False
+
     def get_nn_meta(self, key, nn_id=None):
         if key in self.nn_meta[nn_id]:
             return self.nn_meta[nn_id][key]
@@ -6159,6 +6179,18 @@ class CDRModel(object):
 
         with self.session.as_default():
             with self.session.graph.as_default():
+                if self.is_xl:
+                    # Perform checks
+                    assert not self.nn_impulse_ids, 'CDRXLModel does not support NN impulse transformations'
+                    assert len(self.nn_irf_ids) == 1, 'CDRXLModel requires exactly one IRF network'
+                    assert not self.interaction_names, 'CDRXLModel does not support interaction terms'
+                    for response in self.response_names:
+                        dist_name = self.get_response_dist_name(response)
+                        assert dist_name == 'normal', 'CDRXLModel requires ' +\
+                                                      'that all responses are normally ' +\
+                                                      'distributed. Got distribution %s' +\
+                                                      'for response %s.' % (dist_name, response)
+
                 if verbose:
                     stderr('  Initializing input nodes...\n')
                 t0 = pytime.time()
@@ -6175,30 +6207,31 @@ class CDRModel(object):
                 if report_time:
                     stderr('_initialize_base_params took %.2fs\n' % dur)
 
-                for nn_id in self.nn_impulse_ids:
-                    if verbose:
-                        stderr('  Initializing %s...\n' % nn_id)
-                    t0 = pytime.time()
-                    self._initialize_nn(nn_id)
-                    dur = pytime.time() - t0
-                    if report_time:
-                        stderr('_initialize_nn for %s took %.2fs\n' % (nn_id, dur))
+                if not self.is_xl:
+                    for nn_id in self.nn_impulse_ids:
+                        if verbose:
+                            stderr('  Initializing %s...\n' % nn_id)
+                        t0 = pytime.time()
+                        self._initialize_nn(nn_id)
+                        dur = pytime.time() - t0
+                        if report_time:
+                            stderr('_initialize_nn for %s took %.2fs\n' % (nn_id, dur))
+
+                        if verbose:
+                            stderr('  Compiling %s...\n' % nn_id)
+                        t0 = pytime.time()
+                        self._compile_nn(nn_id)
+                        dur = pytime.time() - t0
+                        if report_time:
+                            stderr('_compile_nn for %s took %.2fs\n' % (nn_id, dur))
 
                     if verbose:
-                        stderr('  Compiling %s...\n' % nn_id)
+                        stderr('  Concatenating impulses...\n')
                     t0 = pytime.time()
-                    self._compile_nn(nn_id)
+                    self._concat_nn_impulses()
                     dur = pytime.time() - t0
                     if report_time:
-                        stderr('_compile_nn for %s took %.2fs\n' % (nn_id, dur))
-
-                if verbose:
-                    stderr('  Concatenating impulses...\n')
-                t0 = pytime.time()
-                self._concat_nn_impulses()
-                dur = pytime.time() - t0
-                if report_time:
-                    stderr('_concat_nn_impulses took %.2fs\n' % dur)
+                        stderr('_concat_nn_impulses took %.2fs\n' % dur)
 
                 if verbose:
                     stderr('  Compiling intercepts...\n')
@@ -6208,29 +6241,30 @@ class CDRModel(object):
                 if report_time:
                     stderr('_compile_intercepts took %.2fs\n' % dur)
 
-                if verbose:
-                    stderr('  Compiling coefficients...\n')
-                t0 = pytime.time()
-                self._compile_coefficients()
-                dur = pytime.time() - t0
-                if report_time:
-                    stderr('_compile_coefficients took %.2fs\n' % dur)
+                if not self.is_xl:
+                    if verbose:
+                        stderr('  Compiling coefficients...\n')
+                    t0 = pytime.time()
+                    self._compile_coefficients()
+                    dur = pytime.time() - t0
+                    if report_time:
+                        stderr('_compile_coefficients took %.2fs\n' % dur)
 
-                if verbose:
-                    stderr('  Compiling interactions...\n')
-                t0 = pytime.time()
-                self._compile_interactions()
-                dur = pytime.time() - t0
-                if report_time:
-                    stderr('_compile_interactions took %.2fs\n' % dur)
+                    if verbose:
+                        stderr('  Compiling interactions...\n')
+                    t0 = pytime.time()
+                    self._compile_interactions()
+                    dur = pytime.time() - t0
+                    if report_time:
+                        stderr('_compile_interactions took %.2fs\n' % dur)
 
-                if verbose:
-                    stderr('  Compiling IRF params...\n')
-                t0 = pytime.time()
-                self._compile_irf_params()
-                dur = pytime.time() - t0
-                if report_time:
-                    stderr('_compile_irf_params took %.2fs\n' % dur)
+                    if verbose:
+                        stderr('  Compiling IRF params...\n')
+                    t0 = pytime.time()
+                    self._compile_irf_params()
+                    dur = pytime.time() - t0
+                    if report_time:
+                        stderr('_compile_irf_params took %.2fs\n' % dur)
 
                 for nn_id in self.nn_irf_ids:
                     if verbose:
@@ -6257,30 +6291,31 @@ class CDRModel(object):
                 if report_time:
                     stderr('_collect_layerwise_ops took %.2fs\n' % dur)
 
-                if verbose:
-                    stderr('  Initializing IRF lambdas...\n')
-                t0 = pytime.time()
-                self._initialize_irf_lambdas()
-                dur = pytime.time() - t0
-                if report_time:
-                    stderr('_initialize_irf_lambdas took %.2fs\n' % dur)
-
-                for response in self.response_names:
+                if not self.is_xl:
                     if verbose:
-                        stderr('  Initializing IRFs for response %s...\n' % response)
+                        stderr('  Initializing IRF lambdas...\n')
                     t0 = pytime.time()
-                    self._initialize_irfs(self.t, response)
+                    self._initialize_irf_lambdas()
                     dur = pytime.time() - t0
                     if report_time:
-                        stderr('_initialize_irfs for %s took %.2fs\n' % (response, dur))
+                        stderr('_initialize_irf_lambdas took %.2fs\n' % dur)
 
-                if verbose:
-                    stderr('  Compiling IRF impulses...\n')
-                t0 = pytime.time()
-                self._compile_irf_impulses()
-                dur = pytime.time() - t0
-                if report_time:
-                    stderr('_compile_irf_impulses took %.2fs\n' % dur)
+                    for response in self.response_names:
+                        if verbose:
+                            stderr('  Initializing IRFs for response %s...\n' % response)
+                        t0 = pytime.time()
+                        self._initialize_irfs(self.t, response)
+                        dur = pytime.time() - t0
+                        if report_time:
+                            stderr('_initialize_irfs for %s took %.2fs\n' % (response, dur))
+
+                    if verbose:
+                        stderr('  Compiling IRF impulses...\n')
+                    t0 = pytime.time()
+                    self._compile_irf_impulses()
+                    dur = pytime.time() - t0
+                    if report_time:
+                        stderr('_compile_irf_impulses took %.2fs\n' % dur)
 
                 if verbose:
                     stderr('  Compiling IRF-weighted impulses...\n')
@@ -7132,10 +7167,12 @@ class CDRModel(object):
         out += ' ' * indent + 'INITIALIZATION SUMMARY\n'
         out += ' ' * indent + '----------------------\n\n'
 
-        out += self.report_formula_string(indent=indent+2)
+        if len(self.impulse_names) < 100 and len(self.responses) < 100:
+            out += self.report_formula_string(indent=indent+2)
         out += self.report_settings(indent=indent+2)
         out += '\n' + ' ' * (indent + 2) + 'Training iterations completed: %d\n\n' %self.global_step.eval(session=self.session)
-        out += self.report_irf_tree(indent=indent+2)
+        if len(self.impulse_names) < 100 and len(self.responses) < 100:
+            out += self.report_irf_tree(indent=indent+2)
         out += self.report_n_params(indent=indent+2)
         out += self.report_regularized_variables(indent=indent+2)
 
@@ -7271,7 +7308,8 @@ class CDRModel(object):
 
         return pd.DataFrame(sample, columns=self.impulse_cov.columns)
 
-    def fit(self,
+    def fit(
+            self,
             X,
             Y,
             X_dev=None,
@@ -7280,7 +7318,7 @@ class CDRModel(object):
             n_iter=None,
             force_training_evaluation=True,
             optimize_memory=False
-            ):
+    ):
         """
         Fit the model.
 
@@ -7399,9 +7437,10 @@ class CDRModel(object):
                 else:
                     if self.global_step.eval(session=self.session) == 0:
                         if not type(self).__name__.startswith('CDRNN'):
-                            summary_params = self.session.run(self.summary_params)
-                            self.writer.add_summary(summary_params, self.global_step.eval(session=self.session))
-                            if self.log_random and self.is_mixed_model:
+                            if self.summary_params is not None:
+                                summary_params = self.session.run(self.summary_params)
+                                self.writer.add_summary(summary_params, self.global_step.eval(session=self.session))
+                            if self.log_random and self.is_mixed_model and self.summary_random is not None:
                                 summary_random = self.session.run(self.summary_random)
                                 self.writer.add_summary(summary_random, self.global_step.eval(session=self.session))
                             self.writer.flush()
@@ -7588,12 +7627,13 @@ class CDRModel(object):
                                 summary_train_loss,
                                 self.global_step.eval(session=self.session)
                             )
-                            summary_params = self.session.run(self.summary_params)
-                            self.writer.add_summary(
-                                summary_params,
-                                self.global_step.eval(session=self.session)
-                            )
-                            if self.log_random and self.is_mixed_model:
+                            if self.summary_params is not None:
+                                summary_params = self.session.run(self.summary_params)
+                                self.writer.add_summary(
+                                    summary_params,
+                                    self.global_step.eval(session=self.session)
+                                )
+                            if self.log_random and self.is_mixed_model and self.summary_random is not None:
                                 summary_random = self.session.run(self.summary_random)
                                 self.writer.add_summary(
                                     summary_random,
@@ -10461,7 +10501,7 @@ class CDRModel(object):
 
         if generate_err_dist_plots:
             for _response in self.error_distribution_plot:
-                if self.is_real(_response):
+                if self.is_real(_response) and self.error_distribution_plot[_response] is not None:
                     lb = self.session.run(self.error_distribution_plot_lb[_response])
                     ub = self.session.run(self.error_distribution_plot_ub[_response])
                     n_time_units = ub - lb
