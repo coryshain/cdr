@@ -10062,8 +10062,13 @@ class CDRModel(object):
         elif x_axis_transform.lower() == 'neglog':
             def x_axis_transform(x):
                 return -np.log(x)
+        elif x_axis_transform.lower() == 'sqrt':
+            def x_axis_transform(x):
+                return np.sqrt(x)
         else:
-            raise ValueError('Unrecognized x_axis_transform: %s' % x_axis_transform)
+            def x_axis_transform(x, fname=x_axis_transform):
+                return getattr(np, fname)(x)
+        
         if y_axis_transform is None:
             def y_axis_transform(x):
                 return x
@@ -10075,7 +10080,9 @@ class CDRModel(object):
             def y_axis_transform(x):
                 return -np.log(x)
         else:
-            raise ValueError('Unrecognized y_axis_transform: %s' % y_axis_transform)
+            def y_axis_transform(x, fname=y_axis_transform):
+                return getattr(np, fname)(x)
+        
         if plot_x_inches is None:
             plot_x_inches = self.plot_x_inches
         if plot_y_inches is None:

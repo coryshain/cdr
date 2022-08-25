@@ -1,15 +1,19 @@
+import sys
 import os
+import pandas as pd
+
 import argparse
 
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser('''
-    Collate significance testing results into a LaTeX table.
+    Collate significance testing results into a table (by default, LaTeX).
     ''')
     argparser.add_argument('paths', nargs='+', help='Path(s) to directories containing signif testing results (*.txt files)')
     argparser.add_argument('-D', '--dataset_order', nargs='+', help='Order in which to report datasets (left to right). Use only the directory basename.')
     argparser.add_argument('-r', '--response_order', nargs='+', help='Order in which to report responses (left to right).')
-    argparser.add_argument('-p', '--partition_order', nargs='+', help='Order in which to report partitions (left to right).')
+    argparser.add_argument('-p', '--partitions', nargs='+', help='Partition(s) in order over which to report signif (left to right). Defaults to all available partitions.')
     argparser.add_argument('-P', '--positive_only', action='store_true', help='Only report positive improvements.')
+    argparser.add_argument('-c', '--csv', action='store_true', help='Output as csv.')
     args = argparser.parse_args()
 
     results = {}
@@ -84,20 +88,14 @@ if __name__ == '__main__':
                 if x in ord:
                     _ord.append(x)
             responses[dataset] = _ord
-    if args.partition_order:
+    if args.partitions:
         _partitions = []
-        for x in args.partition_order:
+        for x in args.partitions:
             if x in partitions:
                 _partitions.append(x)
         partitions = _partitions                
 
-    print('\\begin{table}')
-    print('  \\begin{tabular}{l|%s}' % '|'.join(['cc' * len(partitions) for dataset in datasets for response in responses[dataset]]))
-    print('    & %s\\\\' % ' & '.join(['\\multicolumn{%d}{c}{%s}' % (2 * len(partitions) * len(responses[dataset]), dataset) for dataset in datasets]))
-    print('    & %s\\\\' % ' & '.join(['\\multcolumns{%d}{c}{%s}' % (2 * len(partitions), response) for dataset in datasets for response in responses[dataset]]))
-    if len(partitions) > 1:
-        print('    & %s\\\\' % ' & '.join(['\\multcolumns{2}{c}{%s}' % partition for dataset in datasets for response in responses[dataset] for partition in partitions]))
-    print('    Comparison & %s\\\\' % ' & '.join(['$\\Delta$LL & $p$'] * (len(datasets) * len(responses) * len(partitions))))
+    rows = []
     for comparison in comparisons:
         row = [comparison]
         res1 = all_results.get(comparison)
@@ -116,6 +114,21 @@ if __name__ == '__main__':
                     
                     row.append(diff)
                     row.append(p)
-        print('    ' + ' & '.join(row) + '\\\\')
-    print('  \\end{tabular}')
-    print('\\end{table}')
+        rows.append(row)
+
+    if args.csv:
+        cols = ['comparison'] + ['%s.%s.%s.%s' % (dataset, response, partition, val) for dataset in datasets for response in responses[dataset] for partition in partitions for val in ('LLDelta', 'p')]
+        out = pd.DataFrame(rows, columns=cols)
+        out.to_csv(sys.stdout, index=False)
+    else:
+        print('\\begin{table}')
+        print('  \\begin{tabular}{l|%s}' % '|'.join(['cc' * len(partitions) for dataset in datasets for response in responses[dataset]]))
+        print('    & %s\\\\' % ' & '.join(['\\multicolumn{%d}{c}{%s}' % (2 * len(partitions) * len(responses[dataset]), dataset) for dataset in datasets]))
+        print('    & %s\\\\' % ' & '.join(['\\multcolumns{%d}{c}{%s}' % (2 * len(partitions), response) for dataset in datasets for response in responses[dataset]]))
+        if len(partitions) > 1:
+            print('    & %s\\\\' % ' & '.join(['\\multcolumns{2}{c}{%s}' % partition for dataset in datasets for response in responses[dataset] for partition in partitions]))
+        print('    Comparison & %s\\\\' % ' & '.join(['$\\Delta$LL & $p$'] * (len(datasets) * len(responses) * len(partitions))))
+        for row in rows:
+            print('    ' + ' & '.join(row) + '\\\\')
+        print('  \\end{tabular}')
+        print('\\end{table}')
