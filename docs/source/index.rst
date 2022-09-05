@@ -14,6 +14,7 @@ Documentation for the ``cdr`` Python package.
    formula
    irftree
    cdr
+   viz
 
 
 Indices

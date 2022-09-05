@@ -510,7 +510,7 @@ MODEL_INITIALIZATION_KWARGS = [
         500,
         [int, None],
         "Number of timesteps over which to average parameter movements for convergence diagnostics. If ``None`` or ``0``, convergence will not be programmatically checked (reduces memory overhead, but convergence must then be visually diagnosed).",
-        default_value_cdrnn=100
+        default_value_cdrnn=250
     ),
     Kwarg(
         'convergence_stride',
@@ -950,14 +950,14 @@ NN_KWARGS = [
     # MODEL SIZE
     Kwarg(
         'n_layers_ff',
-        2,
+        1,
         [int, None],
         "Number of hidden layers in feedforward encoder. If ``None``, inferred from length of **n_units_ff**.",
         aliases=['n_layers', 'n_layers_encoder', 'n_layers_input_projection']
     ),
     Kwarg(
         'n_units_ff',
-        32,
+        256,
         [int, str, None],
         "Number of units per feedforward encoder hidden layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_rnn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no feedforward encoder.",
         aliases=['n_units', 'n_units_encoder', 'n_units_input_projection']
@@ -988,14 +988,14 @@ NN_KWARGS = [
     ),
     Kwarg(
         'n_layers_irf',
-        2,
+        1,
         [int, None],
         "Number of IRF hidden layers. If ``None``, inferred from length of **n_units_irf**.",
         aliases=['n_layers', 'n_layers_decoder']
     ),
     Kwarg(
         'n_units_irf',
-        32,
+        256,
         [int, str, None],
         "Number of units per hidden layer in IRF. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_units_irf** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers.",
         aliases=['n_units', 'n_units_decoder']
@@ -1156,7 +1156,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'nn_regularizer_scale',
-        5.,
+        1.,
         [str, float, 'inherit'],
         "Scale of weight regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
@@ -1182,7 +1182,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'regularize_final_layer',
-        False,
+        True,
         bool,
         "Whether to regulare the last layer of NN components."
     ),
@@ -1279,7 +1279,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'fixed_dropout',
-        False,
+        True,
         bool,
         "Whether to fix the dropout mask over the time dimension during training, " +
         "ensuring that each training instance is processed by the same resampled model."

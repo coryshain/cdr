@@ -3,6 +3,7 @@ import os
 import re
 import argparse
 import numpy as np
+import pandas as pd
 
 from cdr.config import Config
 from cdr.util import sn
@@ -64,10 +65,29 @@ def results_to_table(results, systems, baselines=None, indent=4, base_partitions
 
     return out
 
+def results_to_csv(results, systems, baselines=None, indent=4, base_partitions=None):
+    if base_partitions is None:
+        base_partitions = ['train', 'dev', 'test']
+    tasks = results.keys()
+   
+    cols = ['model'] + ['%s.%s' % (t.replace(' ', '.'), p) for t in tasks for p in ('train', 'dev', 'test')]
+    out = []
+
+    if baselines is None:
+        baselines = []
+
+    for b in baselines:
+        out.append(tuple(new_row(b, results, tasks, base_partitions=base_partitions)[:-3].split(' & ')))
+    for s in systems:
+        out.append(tuple(new_row(s, results, tasks, base_partitions=base_partitions)[:-3].split(' & ')))
+ 
+    out = pd.DataFrame(out, columns=cols)
+
+    return out.to_csv(None, index=False)
 
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser('''
-    Generate a LaTeX table summarizing results from CDR vs. baseline models in some output directory.
+    Generate a table (LaTeX by default) summarizing results from CDR vs. baseline models in some output directory.
     Tasks are defined as sets of experiments within the same config file (because they are constrained to use the same data).
     ''')
     argparser.add_argument('config_paths', nargs='+', help='Path(s) to config files defining models to compare.')
@@ -79,6 +99,7 @@ if __name__ == '__main__':
     argparser.add_argument('-s', '--systems',  nargs='+', default=None, help='Models to treat as (non-baseline) systems.')
     argparser.add_argument('-S', '--system_names',  nargs='+', default=None, help='Names of systems (should be in 1-1 alignment with ``systems``. If not provided, names will be inferred from systems.')
     argparser.add_argument('-p', '--partitions',  nargs='+', default=None, help='Names of partitions to evaluate. If not provided, defaults to ``"train"``, ``"dev"``, ``"test"``.')
+    argparser.add_argument('-c', '--csv', action='store_true', help='Output to CSV.')
     args = argparser.parse_args()
 
     response = args.response
@@ -213,8 +234,13 @@ if __name__ == '__main__':
                                 results[task_name][system_name][partition]['converged']
                             )
 
+    if args.csv:
+        out_fn = results_to_csv
+    else:
+        out_fn = results_to_table
+
     sys.stdout.write(
-        results_to_table(
+        out_fn(
             results,
             system_names_all,
             baselines=baseline_names,
