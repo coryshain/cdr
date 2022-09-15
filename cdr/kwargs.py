@@ -375,7 +375,8 @@ MODEL_INITIALIZATION_KWARGS = [
         'minibatch_size',
         1024,
         [int, None],
-        "Size of minibatches to use for fitting (full-batch if ``None``)."
+        "Size of minibatches to use for fitting (full-batch if ``None``).",
+        aliases=['batch_size']
     ),
     Kwarg(
         'eval_minibatch_size',
@@ -1159,6 +1160,18 @@ NN_KWARGS = [
         1.,
         [str, float, 'inherit'],
         "Scale of weight regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
+    ),
+    Kwarg(
+        'activity_regularizer_name',
+        None,
+        [str, 'inherit', None],
+        "Name of activity regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no activity regularization."
+    ),
+    Kwarg(
+        'activity_regularizer_scale',
+        1.,
+        [str, float, 'inherit'],
+        "Scale of activity regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
     Kwarg(
         'ff_regularizer_name',

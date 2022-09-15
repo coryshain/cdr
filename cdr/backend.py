@@ -1226,20 +1226,26 @@ class RegularizerLayer(object):
             self,
             l1_scale=0.,
             l2_scale=1.,
+            use_mean=True,
             session=None
     ):
         self.session = get_session(session)
         self.l1_scale = l1_scale
         self.l2_scale = l2_scale
+        self.use_mean = use_mean
 
     def __call__(self, v):
         with self.session.as_default():
             with self.session.graph.as_default():
                 reg = None
+                if self.use_mean:
+                    agg = tf.reduce_mean
+                else:
+                    agg = tf.reduce_sum
                 if self.l1_scale:
-                    reg = tf.reduce_sum(tf.abs(v)) * self.l1_scale
+                    reg = agg(tf.abs(v)) * self.l1_scale
                 if self.l2_scale:
-                    _reg = tf.reduce_sum(tf.square(v)) * self.l2_scale
+                    _reg = agg(tf.square(v)) * self.l2_scale
                     if reg is None:
                         reg = _reg
                     else:

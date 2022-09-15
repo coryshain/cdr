@@ -2037,6 +2037,7 @@ class CDRModel(object):
                 self.nn_regularizer = {}
                 self.ff_regularizer = {}
                 self.rnn_projection_regularizer = {}
+                self.activity_regularizer = {}
                 self.context_regularizer = {}
                 for nn_id in self.nns_by_id:
                     nn_regularizer_name = self.get_nn_meta('nn_regularizer_name', nn_id)
@@ -2068,6 +2069,22 @@ class CDRModel(object):
                         rnn_projection_regularizer_scale
                     )
 
+                    activity_regularizer_name = self.get_nn_meta('activity_regularizer_name', nn_id)
+                    activity_regularizer_scale = self.get_nn_meta('activity_regularizer_scale', nn_id)
+                    if activity_regularizer_name is None:
+                        self.activity_regularizer[nn_id] = None
+                    elif activity_regularizer_name == 'inherit':
+                        self.activity_regularizer[nn_id] = self.regularizer
+                    else:
+                        scale = activity_regularizer_scale / (
+                            (self.history_length + self.future_length) * max(1, self.n_impulse_df_noninteraction)
+                        ) # Average over time
+                        self.activity_regularizer[nn_id] = self._initialize_regularizer(
+                            activity_regularizer_name,
+                            scale,
+                            per_item=True
+                        )
+                        
                     context_regularizer_name = self.get_nn_meta('context_regularizer_name', nn_id)
                     context_regularizer_scale = self.get_nn_meta('context_regularizer_scale', nn_id)
                     if context_regularizer_name is None:
@@ -3734,12 +3751,24 @@ class CDRModel(object):
                             name='%s_ff_l%s' % (nn_id, l + 1)
                         )
                         self.layers.append(projection)
+                        ff_layers.append(make_lambda(projection, session=self.session, use_kwargs=False))
 
                         if 'nn' not in self.rvs and \
                                 (regularize_initial_layer or l > 0) and \
                                 (regularize_final_layer or l < n_layers_ff):
                             self.regularizable_layers[nn_id].append(projection)
-                        ff_layers.append(make_lambda(projection, session=self.session, use_kwargs=False))
+                            ff_layers.append(
+                                make_lambda(
+                                    lambda x: self._regularize(
+                                        x,
+                                        regtype='activity',
+                                        var_name=reg_name('%s_ff_l%s_activity' % (nn_id, l + 1)),
+                                        nn_id=nn_id
+                                    ),
+                                    session=self.session,
+                                    use_kwargs=False
+                                )
+                            )
 
                     ff_fn = compose_lambdas(ff_layers)
 
@@ -3763,9 +3792,21 @@ class CDRModel(object):
                         _rnn_c_ema = tf.Variable(tf.zeros(units), trainable=False, name='%s_rnn_c_ema_l%d' % (nn_id, l+1))
                         rnn_c_ema.append(_rnn_c_ema)
                         self.layers.append(layer)
+                        rnn_layers.append(make_lambda(layer, session=self.session, use_kwargs=True))
                         if 'nn' not in self.rvs:
                             self.regularizable_layers[nn_id].append(layer)
-                        rnn_layers.append(make_lambda(layer, session=self.session, use_kwargs=True))
+                            rnn_layers.append(
+                                make_lambda(
+                                    lambda x, nn_id=nn_id, l=l: self._regularize(
+                                        x,
+                                        regtype='activity',
+                                        var_name=reg_name('%s_rnn_l%d_activity' % (nn_id, l + 1)),
+                                        nn_id=nn_id
+                                    ),
+                                    session=self.session,
+                                    use_kwargs=False
+                                )
+                            )
 
                     rnn_encoder = compose_lambdas(rnn_layers)
 
@@ -3809,6 +3850,18 @@ class CDRModel(object):
 
                         if 'nn' not in self.rvs:
                             self.regularizable_layers[nn_id].append(projection)
+                            rnn_layers.append(
+                                make_lambda(
+                                    lambda x, nn_id=nn_id, l=l: self._regularize(
+                                        x,
+                                        regtype='activity',
+                                        var_name=reg_name('%s_rnn_projection_l%s_activity' % (nn_id, l + 1)),
+                                        nn_id=nn_id
+                                    ),
+                                    session=self.session,
+                                    use_kwargs=False
+                                )
+                            )
                         rnn_projection_layers.append(make_lambda(projection, session=self.session, use_kwargs=False))
 
                     rnn_projection_fn = compose_lambdas(rnn_projection_layers)
@@ -3890,8 +3943,20 @@ class CDRModel(object):
 
                             if 'nn' not in self.rvs and \
                                     (regularize_initial_layer or l > 0) and \
-                                    (regularize_final_layer or l < n_layers_ff):
+                                    (regularize_final_layer or l < n_layers_irf):
                                 self.regularizable_layers[nn_id].append(projection)
+                                irf_layers.append(
+                                    make_lambda(
+                                        lambda x, nn_id=nn_id, l=l: self._regularize(
+                                            x,
+                                            regtype='activity',
+                                            var_name=reg_name('%s_irf_l%s_activity' % (nn_id, l + 1)),
+                                            nn_id=nn_id
+                                        ),
+                                        session=self.session,
+                                        use_kwargs=False
+                                    )
+                                )
                             if l == 0:
                                 self.nn_irf_l1[nn_id] = projection
 
@@ -5198,8 +5263,10 @@ class CDRModel(object):
                     optimizer_args += [0.9]
                 if name.endswith('fast'):
                     optimizer_kwargs['beta2'] = 0.9
-                if name in ('adagrad', 'adadelta', 'adam', 'nadam'):
+                if name in ('adadelta', 'adam', 'nadam'):
                     optimizer_kwargs['epsilon'] = self.optim_epsilon
+                    if name == 'adadelta':
+                        optimizer_kwargs['rho'] = 0.999
 
                 optimizer_class = {
                     'sgd': tf.train.GradientDescentOptimizer,
@@ -5651,19 +5718,19 @@ class CDRModel(object):
 
         return trainable_ix, untrainable_ix
 
-    def _regularize(self, var, center=None, regtype=None, var_name=None, nn_id=None):
+    def _regularize(self, var, center=None, regtype=None, var_name=None, nn_id=None, use_mean=True):
         assert regtype in [
-            None, 'intercept', 'coefficient', 'irf', 'ranef', 'nn', 'ff', 'rnn_projection', 'context',
+            None, 'intercept', 'coefficient', 'irf', 'ranef', 'nn', 'ff', 'rnn_projection', 'activity', 'context',
             'unit_integral', 'conv_output']
 
         if regtype is None:
             regularizer = self.regularizer
         else:
             regularizer = getattr(self, '%s_regularizer' % regtype)
-        if regtype in ['nn', 'ff', 'rnn_projection', 'context']:
+        if regtype in ['nn', 'ff', 'rnn_projection', 'activity', 'context']:
             regularizer = regularizer[nn_id]
 
-        if regularizer is not None:
+        if regularizer is not None and str(var_name) not in self.regularizer_losses_varnames:
             with self.session.as_default():
                 with self.session.graph.as_default():
                     if center is None:
@@ -5694,6 +5761,8 @@ class CDRModel(object):
                             reg_scale *= self.minibatch_size * self.minibatch_scale
                     self.regularizer_losses_names.append(reg_name)
                     self.regularizer_losses_scales.append(reg_scale)
+
+        return var
 
     def _add_convergence_tracker(self, var, name, alpha=0.9):
         with self.session.as_default():
