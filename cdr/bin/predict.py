@@ -187,7 +187,9 @@ if __name__ == '__main__':
                 if not m in cdr_formula_name_list:
                     p.set_model(m)
                     form = p['formula']
-                    lhs, rhs = form.split('~')
+                    form_pieces = form.split('~')
+                    rhs = form_pieces[0]
+                    lhs = '~'.join(form_pieces[1:])
                     preds = rhs.split('+')
                     for pred in preds:
                         sp = spillover.search(pred)
@@ -196,7 +198,7 @@ if __name__ == '__main__':
                             n = int(sp.group(3))
                             x_id_sp = x_id + 'S' + str(n)
                             if x_id_sp not in X_baseline:
-                                X_baseline[x_id_sp] = X_baseline.groupby(p.series_ids)[x_id].shift_activations(n, fill_value=0.)
+                                X_baseline[x_id_sp] = X_baseline.groupby(p.series_ids)[x_id].shift(n, fill_value=0.)
 
             if partitions is not None:
                 part = compute_partition(X, p.modulus, 3)
@@ -224,7 +226,11 @@ if __name__ == '__main__':
                 if X_baseline[c].dtype.name == 'category':
                     X_baseline[c] = X_baseline[c].astype(str)
 
-            X_baseline = py2ri(X_baseline)
+            for col in X_baseline:
+                if X_baseline[col].dtype.name == 'category':
+                    X_baseline[col] = X_baseline[col].astype(str)
+
+            # X_baseline = py2ri(X_baseline)
             evaluation_set_baselines.append(X_baseline)
 
     for d in range(len(evaluation_sets)):
@@ -294,12 +300,17 @@ if __name__ == '__main__':
                 with open(p.outdir + '/' + m_path + '/preds_%s.txt' % partition_str, 'w') as p_file:
                     for i in range(len(gam_preds)):
                         p_file.write(str(gam_preds[i]) + '\n')
-                squared_error = np.array(Y[dv] - gam_preds) ** 2
+                if m.startswith('GAMLSS'):
+                    gam_preds_sigma = _model.predict_sigma(X_baseline)
+                    with open(p.outdir + '/' + m_path + '/preds_%s_sigma.txt' % partition_str, 'w') as p_file:
+                        for i in range(len(gam_preds_sigma)):
+                            p_file.write(str(gam_preds[i]) + '\n')
+                squared_error = np.array(X_baseline[dv] - gam_preds) ** 2
                 with open(p.outdir + '/' + m_path + '/squared_error_%s.txt' % partition_str, 'w') as p_file:
                     for i in range(len(squared_error)):
                         p_file.write(str(squared_error[i]) + '\n')
-                gam_mse = mse(Y[dv], gam_preds)
-                gam_mae = mae(Y[dv], gam_preds)
+                gam_mse = mse(X_baseline[dv], gam_preds)
+                gam_mae = mae(X_baseline[dv], gam_preds)
                 summary = '=' * 50 + '\n'
                 summary += 'GAM regression\n\n'
                 summary += 'Model name: %s\n\n' % m

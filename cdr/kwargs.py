@@ -594,6 +594,12 @@ MODEL_INITIALIZATION_KWARGS = [
         "Scale of random effects regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**. Regularization only applies to random effects without variational priors.",
         default_value_cdrnn=10.
     ),
+    Kwarg(
+        'regularize_mean',
+        False,
+        bool,
+        "Mean-aggregate regularized variables. If ``False``, use sum aggregation."
+    ),
 
     # INCREMENTAL SAVING AND LOGGING
     Kwarg(
@@ -1159,6 +1165,18 @@ NN_KWARGS = [
         5.,
         [str, float, 'inherit'],
         "Scale of weight regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
+    ),
+    Kwarg(
+        'activity_regularizer_name',
+        None,
+        [str, 'inherit', None],
+        "Name of activity regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no activity regularization."
+    ),
+    Kwarg(
+        'activity_regularizer_scale',
+        1.,
+        [str, float, 'inherit'],
+        "Scale of activity regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
     Kwarg(
         'ff_regularizer_name',

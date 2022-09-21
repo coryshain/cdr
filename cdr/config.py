@@ -120,12 +120,14 @@ class Config(object):
         self.ensemble_list = []
         for model_field in [m for m in config.keys() if m.startswith('model_')]:
             model_name = model_field[6:]
-            formula = Formula(config[model_field]['formula'])
-            is_cdrnn = len(formula.nns_by_id) > 0
             if not (model_name.startswith('LM') or model_name.startswith('GAM')):
                 reg_type = 'cdr'
+                formula = Formula(config[model_field]['formula'])
+                is_cdrnn = len(formula.nns_by_id) > 0
             else:
                 reg_type = model_name.split('_')[0]
+                formula = None
+                is_cdrnn = False
             use_crossval = 'crossval_factor' in config[model_field]
             if use_crossval:
                 model_configs = {}

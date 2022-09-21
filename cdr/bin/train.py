@@ -51,7 +51,7 @@ if __name__ == '__main__':
         exit()
 
     cdr_formula_list = [Formula(p.models[m]['formula']) for m in filter_models(models, cdr_only=True)]
-    cdr_formula_name_list = [m for m in filter_models(p.model_list)]
+    cdr_formula_name_list = [m for m in filter_models(p.model_list, cdr_only=True)]
     all_rangf = [v for x in cdr_formula_list for v in x.rangf]
     partitions = get_partition_list('train')
     all_interactions = False
@@ -98,7 +98,9 @@ if __name__ == '__main__':
             if not m in cdr_formula_name_list:
                 p.set_model(m)
                 form = p['formula']
-                lhs, rhs = form.split('~')
+                form_pieces = form.split('~')
+                lhs = form_pieces[0]
+                rhs = '~'.join(form_pieces[1:])
                 preds = rhs.split('+')
                 for pred in preds:
                     sp = spillover.search(pred)
@@ -107,7 +109,7 @@ if __name__ == '__main__':
                         n = int(sp.group(3))
                         x_id_sp = x_id + 'S' + str(n)
                         if x_id_sp not in X_baseline:
-                            X_baseline[x_id_sp] = X_baseline.groupby(p.series_ids)[x_id].shift_activations(n, fill_value=0.)
+                            X_baseline[x_id_sp] = X_baseline.groupby(p.series_ids)[x_id].shift(n, fill_value=0.)
 
         X_baseline = X_baseline[part_select]
         if p.merge_cols is None:
@@ -115,6 +117,9 @@ if __name__ == '__main__':
         else:
             merge_cols = p.merge_cols
         X_baseline = pd.merge(X_baseline, Y[0], on=merge_cols, how='inner')
+        for col in X_baseline:
+            if X_baseline[col].dtype.name == 'category':
+                X_baseline[col] = X_baseline[col].astype(str)
 
     n_train_sample = sum(len(_Y) for _Y in Y)
 
@@ -140,8 +145,8 @@ if __name__ == '__main__':
                     pickle.dump(lme, m_file)
 
             lme_preds = lme.predict(X_baseline)
-            lme_mse = mse(Y[dv], lme_preds)
-            lme_mae = mae(Y[dv], lme_preds)
+            lme_mse = mse(X_baseline[dv], lme_preds)
+            lme_mae = mae(X_baseline[dv], lme_preds)
             summary = '=' * 50 + '\n'
             summary += 'LME regression\n\n'
             summary += 'Model name: %s\n\n' %m
@@ -173,8 +178,8 @@ if __name__ == '__main__':
                     pickle.dump(lm, m_file)
 
             lm_preds = lm.predict(X_baseline)
-            lm_mse = mse(Y[dv], lm_preds)
-            lm_mae = mae(Y[dv], lm_preds)
+            lm_mse = mse(X_baseline[dv], lm_preds)
+            lm_mae = mae(X_baseline[dv], lm_preds)
             summary = '=' * 50 + '\n'
             summary += 'Linear regression\n\n'
             summary += 'Model name: %s\n\n' %m
@@ -192,14 +197,13 @@ if __name__ == '__main__':
 
         elif m.startswith('GAM'):
             import re
-            from cdr.baselines import GAM
 
             dv = formula.strip().split('~')[0].strip().replace('.','')
-            ran_gf = ['subject', 'word', 'sentid']
+            ran_gf = ['subject']
 
             ## For some reason, GAM can't predict using custom functions, so we have to translate them
-            z_term = re.compile('z.\((.*)\)')
-            c_term = re.compile('c.\((.*)\)')
+            z_term = re.compile('z\.\((.*)\)')
+            c_term = re.compile('c\.\((.*)\)')
             formula = [t.strip() for t in formula.strip().split() if t.strip() != '']
             for i in range(len(formula)):
                 formula[i] = z_term.sub(r'scale(\1)', formula[i])
@@ -212,13 +216,17 @@ if __name__ == '__main__':
                     gam = pickle.load(m_file)
             else:
                 stderr('Fitting model %s...\n' % m)
-                gam = GAM(formula, X_baseline, ran_gf=ran_gf)
+                if m.startswith('GAMLSS'):
+                    from cdr.baselines import GAMLSS as gam_fn
+                else:
+                    from cdr.baselines import GAM as gam_fn
+                gam = gam_fn(formula, X_baseline, ran_gf=ran_gf)
                 with open(p.outdir + '/' + m_path + '/m.obj', 'wb') as m_file:
                     pickle.dump(gam, m_file)
 
             gam_preds = gam.predict(X_baseline)
-            gam_mse = mse(Y[dv], gam_preds)
-            gam_mae = mae(Y[dv], gam_preds)
+            gam_mse = mse(X_baseline[dv], gam_preds)
+            gam_mae = mae(X_baseline[dv], gam_preds)
             summary = '=' * 50 + '\n'
             summary += 'GAM regression\n\n'
             summary += 'Model name: %s\n\n' %m

@@ -132,7 +132,7 @@ def get_initializer(initializer, session=None):
             return out
 
 
-def get_regularizer(init, scale=None, session=None):
+def get_regularizer(init, scale=None, session=None, regularize_mean=False):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
@@ -169,9 +169,18 @@ def get_regularizer(init, scale=None, session=None):
                         l2_scale = scale[1]
                 else:
                     raise ValueError('Unrecognized regularizer: %s' % init)
-                out = RegularizerLayer(l1_scale=l1_scale, l2_scale=l2_scale, session=session)
+                out = RegularizerLayer(
+                    l1_scale=l1_scale,
+                    l2_scale=l2_scale,
+                    regularize_mean=regularize_mean,
+                    session=session
+                )
             elif isinstance(init, float):
-                out = RegularizerLayer(l2_scale=init, session=session)
+                out = RegularizerLayer(
+                    l2_scale=init,
+                    regularize_mean=regularize_mean,
+                    session=session
+                )
             else:
                 out = init
 
@@ -1226,20 +1235,26 @@ class RegularizerLayer(object):
             self,
             l1_scale=0.,
             l2_scale=1.,
+            regularize_mean=False,
             session=None
     ):
         self.session = get_session(session)
         self.l1_scale = l1_scale
         self.l2_scale = l2_scale
+        self.regularize_mean = regularize_mean
 
     def __call__(self, v):
         with self.session.as_default():
             with self.session.graph.as_default():
                 reg = None
+                if self.regularize_mean:
+                    agg = tf.reduce_mean
+                else:
+                    agg = tf.reduce_sum
                 if self.l1_scale:
-                    reg = tf.reduce_sum(tf.abs(v)) * self.l1_scale
+                    reg = agg(tf.abs(v)) * self.l1_scale
                 if self.l2_scale:
-                    _reg = tf.reduce_sum(tf.square(v)) * self.l2_scale
+                    _reg = agg(tf.square(v)) * self.l2_scale
                     if reg is None:
                         reg = _reg
                     else:

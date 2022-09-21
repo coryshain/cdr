@@ -7,6 +7,7 @@ pandas2ri.activate()
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 
+
 rstring = '''
      function(x) {
          return(scale(x, scale=FALSE))
@@ -80,6 +81,7 @@ rstring = '''
 '''
 dvector_mvnorm = robjects.r(rstring)
 robjects.globalenv["dvector_mvnorm"] = dvector_mvnorm
+
 
 class LM(object):
     """
@@ -163,8 +165,6 @@ class LME(object):
     def instance_methods(self):
         rstring = '''
             function(bform, df) {
-                print('LME model!!!!')
-                print(head(df))
                 return(lmer(bform, data=df, REML=FALSE))
             }
         '''
@@ -369,6 +369,186 @@ class GAM(object):
         unique = robjects.r(rstring)
 
         return process_ran_gf, add_z, add_log, fit, summary, predict, unique
+
+
+class GAMLSS(object):
+    def __init__(self, formula, X, ran_gf=None):
+        gamlss = importr('gamlss')
+        self.formula = formula
+        self.formula_sigma = '~' + '~'.join(formula.split('~')[1:])
+        self.ran_gf = ran_gf
+        process_ran_gf, add_z, add_log, fit, summary, predict, predict_sigma, unique = self.instance_methods()
+        rstring = '''
+            function() numeric()
+        '''
+        empty = robjects.r(rstring)
+        if 'subject' in self.formula:
+            self.subject = unique(X, 'subject')
+        else:
+            self.subject = empty
+        if 'word' in self.formula:
+            self.word = unique(X, 'word')
+        else:
+            self.word = empty()
+
+        self.m = fit(self.filter_X(X))
+        self.summary = lambda: summary(self.m)
+        self.predict = lambda x: predict(self.m, self.formula, self.filter_X(x), self.subject, self.word)
+        self.predict_sigma = lambda x: predict_sigma(self.m, self.formula, self.filter_X(x), self.subject, self.word)
+
+    def __getstate__(self):
+        return (self.m, self.subject, self.word, self.formula)
+
+    def __setstate__(self, state):
+        gamlss = importr('gamlss')
+        self.m, self.subject, self.word, self.formula = state
+        process_ran_gf, add_z, add_log, fit, summary, predict, predict_sigma, unique = self.instance_methods()
+        self.summary = lambda: summary(self.m)
+        self.predict = lambda x: predict(self.m, self.formula, self.filter_X(x), self.subject, self.word)
+        self.predict_sigma = lambda x: predict_sigma(self.m, self.formula, self.filter_X(x), self.subject, self.word)
+
+    def filter_X(self, X):
+        cols = []
+        for col in X:
+            if col in self.formula:
+                cols.append(col)
+        return X[cols]
+
+    def instance_methods(self):
+        rstring = '''
+            function(X, ran_gf) {
+                if (is.null(ran_gf)) {
+                   return(X)
+                }
+                for (gf in ran_gf) {
+                    X[[gf]] <- as.factor(X[[gf]])
+                }
+                return(X)
+            }
+        '''
+        process_ran_gf = robjects.r(rstring)
+
+        rstring = '''
+            function(X) {
+                for (c in names(X)) {
+                    if (is.numeric(X[[c]])) {
+                        X[[paste0('z_',c)]] <- scale(X[[c]])
+                    }
+                }
+                return(X)
+            }
+        '''
+        add_z = robjects.r(rstring)
+
+        rstring = '''
+            function(X) {
+                for (c in names(X)) {
+                    if (is.numeric(X[[c]])) {
+                        X[[paste0('log_',c)]] <- log(X[[c]])
+                    }
+                }
+                return(X)
+            }
+        '''
+        add_log = robjects.r(rstring)
+
+        rstring = '''
+            function(X) {
+                bform = "%s"
+                bform_sigma = "%s"
+
+                print(bform)
+                print(bform_sigma)
+                print(head(X))
+                print(class(X))
+                print(sapply(X, class))
+                print(.packages())
+                m = gamlss(as.formula(bform), sigma.formula=as.formula(bform_sigma), data=X)
+                return(m)
+            }
+        ''' % (self.formula, self.formula_sigma)
+
+        print(rstring)
+        fit = robjects.r(rstring)
+
+        rstring = '''
+            function(model) {
+                return(paste0(capture.output(print(model)), '\n'))
+            }
+        '''
+
+        summary = robjects.r(rstring)
+
+        rstring = '''
+            function(model, bform, df, subjects=NULL, words=NULL) {
+                for (c in names(df)) {
+                    if (is.numeric(df[[c]])) {
+                        df[[paste0('z_',c)]] <- scale(df[[c]])
+                    }
+                }
+                for (c in names(df)) {
+                    if (is.numeric(df[[c]])) {
+                        df[[paste0('log_',c)]] <- scale(df[[c]])
+                    }
+                }
+                select = logical(nrow(df))
+                select = !select
+                if (grepl('subject', bform) & !is.null(subjects)) {
+                    select = select & df$subject %in% subjects
+                }
+                grepl('word', bform)
+                if (grepl('word', bform) & !is.null(words)) {
+                    select = select & (word %in% words)
+                }
+                preds = predict(model, what=c('mu'), df[select,])
+                df$preds = NA
+                df[select,]$preds = preds
+                return(df$preds)
+            }
+        '''
+
+        predict = robjects.r(rstring)
+
+        rstring = '''
+            function(model, bform, df, subjects=NULL, words=NULL) {
+                for (c in names(df)) {
+                    if (is.numeric(df[[c]])) {
+                        df[[paste0('z_',c)]] <- scale(df[[c]])
+                    }
+                }
+                for (c in names(df)) {
+                    if (is.numeric(df[[c]])) {
+                        df[[paste0('log_',c)]] <- scale(df[[c]])
+                    }
+                }
+                select = logical(nrow(df))
+                select = !select
+                if (grepl('subject', bform) & !is.null(subjects)) {
+                    select = select & df$subject %in% subjects
+                }
+                grepl('word', bform)
+                if (grepl('word', bform) & !is.null(words)) {
+                    select = select & (word %in% words)
+                }
+                preds = predict(model, what=c('sigma'), df[select,])
+                df$preds = NA
+                df[select,]$preds = preds
+                return(df$preds)
+            }
+        '''
+
+        predict_sigma = robjects.r(rstring)
+
+        rstring = '''
+            function(df, col) {
+                return(unique(df[[col]]))
+            }
+        '''
+
+        unique = robjects.r(rstring)
+
+        return process_ran_gf, add_z, add_log, fit, summary, predict, predict_sigma, unique
+
 
 def py2ri(x):
     return pandas2ri.py2ri(x)
