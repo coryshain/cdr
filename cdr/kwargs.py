@@ -288,14 +288,15 @@ MODEL_INITIALIZATION_KWARGS = [
         False,
         bool,
         "Whether to model all parameters of the predictive distribution as dependent on IRFs of the impulses (distributional regression). If ``False``, only the mean depends on the predictors (other parameters of the predictive distribution are treated as constant).",
-        aliases=['heteroskedastic'],
+        aliases=['heteroscedastic', 'heteroskedastic'],
         default_value_cdrnn=True
     ),
     Kwarg(
         'predictive_distribution_map',
         None,
         [str, None],
-        "Definition of predictive distribution. Can be a single distribution name (shared across all response variables), a space-delimited list of distribution names (one per response variable), a space-delimited list of ';'-delimited tuples matching response variables to distribution names (e.g. ``response;Bernoulli``), or ``None``, in which case the predictive distribution will be inferred as ``Normal`` for continuous variables and ``Categorical`` for categorical variables."
+        "Definition of predictive distribution. Can be a single distribution name (shared across all response variables), a space-delimited list of distribution names (one per response variable), a space-delimited list of ';'-delimited tuples matching response variables to distribution names (e.g. ``response;Bernoulli``), or ``None``, in which case the predictive distribution will be inferred as ``Normal`` for continuous variables and ``Categorical`` for categorical variables.",
+        aliases=['predictive_distribution', 'pred_dist']
     ),
     Kwarg(
         'center_inputs',

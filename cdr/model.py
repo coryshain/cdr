@@ -30,12 +30,12 @@ if int(tf.__version__.split('.')[0]) == 1:
 
     # TODO: Implement
     class ExponentiallyModifiedGaussian(TransformedDistribution):
-        def __init(self, *args, **kwargs):
+        def __init__(self, *args, **kwargs):
             raise NotImplementedError('The exgaussian distribution is not supported in TensorFlow v1. Switch to a TensorFlow v2 release in order to use this feature.')
 
     # TODO: Implement
     class JohnsonSU(Distribution):
-        def __init(self, *args, **kwargs):
+        def __init__(self, *args, **kwargs):
             raise NotImplementedError('The JohnsonSU distribution is not supported in TensorFlow v1. Switch to a TensorFlow v2 release in order to use this feature.')
 
     # Much of this is stolen from the TF2 source, since TF1 lacks LogNormal
@@ -4565,7 +4565,7 @@ class CDRModel(object):
         with self.session.as_default():
             with self.session.graph.as_default():
                 if len(self.interaction_names) > 0:
-                    interaction_coefs = self.interaction[response]
+                    interaction_coefs = tf.expand_dims(self.interaction[response], axis=1)
                     interaction_inputs = []
                     terminal_names = self.terminal_names[:]
                     impulse_names = self.impulse_names
@@ -4583,9 +4583,6 @@ class CDRModel(object):
                         inputs_cur = []
 
                         if len(irf_input_names) > 0:
-                            print(interaction)
-                            print(self.X_weighted_unscaled_sumT[response])
-                            print()
                             irf_input_ix = names2ix(irf_input_names, terminal_names)
                             irf_inputs = self.X_weighted_unscaled_sumT[response]
                             irf_inputs = tf.gather(
@@ -4641,7 +4638,7 @@ class CDRModel(object):
                         inputs_cur = tf.reduce_prod(inputs_cur, axis=1)
 
                         interaction_inputs.append(inputs_cur)
-                    interaction_inputs = tf.stack(interaction_inputs, axis=1)
+                    interaction_inputs = tf.stack(interaction_inputs, axis=2)
 
                     return interaction_coefs * interaction_inputs
 
@@ -4911,9 +4908,9 @@ class CDRModel(object):
 
                     # Base output deltas
                     X_weighted = self.X_weighted[response] # (batch, time, impulse, param, dim)
-                    X_weighted_sumT = self.X_weighted_sumT[response] # (batch, impulse, param, dim)
-                    X_weighted_sumK = self.X_weighted_sumK[response] # (batch, time, param, dim)
-                    X_weighted_sumTK = self.X_weighted_sumTK[response] # (batch, param, dim)
+                    X_weighted_sumT = self.X_weighted_sumT[response] # (batch, 1, impulse, param, dim)
+                    X_weighted_sumK = self.X_weighted_sumK[response] # (batch, time, 1, param, dim)
+                    X_weighted_sumTK = self.X_weighted_sumTK[response] # (batch, 1, 1, param, dim)
                     nparam = int(response_params.shape[-2])
 
                     # Interactions
@@ -4943,10 +4940,6 @@ class CDRModel(object):
                             lambda: X_weighted
                         )
                     )
-
-                    # Expand T and K dimensions of interaction terms
-                    if interaction_delta is not None:
-                        interaction_delta = tf.expand_dims(tf.expand_dims(interaction_delta, axis=1), axis=1)
 
                     # Conditionally tile Y along T and K
                     time_tile_shape = [1, self.history_length + self.future_length, 1]
