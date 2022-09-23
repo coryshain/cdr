@@ -4716,17 +4716,17 @@ class CDRModel(object):
                             irf_seq = tf.transpose(irf_seq, [1, 0, 2, 3])
                             # Add terminal dim
                             irf_seq = tf.expand_dims(irf_seq, axis=2)
-                            if not self.use_distributional_regression:
-                                irf_seq = tf.pad(
-                                    irf_seq,
-                                    paddings=[
-                                        (0, 0),
-                                        (0, 0),
-                                        (0, 0),
-                                        (0, nparam - 1),
-                                        (0, 0)
-                                    ]
-                                )
+                        if not self.use_distributional_regression:
+                            irf_seq = tf.pad(
+                                irf_seq,
+                                paddings=[
+                                    (0, 0),
+                                    (0, 0),
+                                    (0, 0),
+                                    (0, nparam - 1),
+                                    (0, 0)
+                                ]
+                            )
 
                         irf_weights.append(irf_seq)
 
