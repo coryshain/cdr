@@ -595,6 +595,12 @@ MODEL_INITIALIZATION_KWARGS = [
         "Scale of random effects regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**. Regularization only applies to random effects without variational priors.",
         default_value_cdrnn=10.
     ),
+    Kwarg(
+        'regularize_mean',
+        False,
+        bool,
+        "Mean-aggregate regularized variables. If ``False``, use sum aggregation."
+    ),
 
     # INCREMENTAL SAVING AND LOGGING
     Kwarg(

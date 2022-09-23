@@ -59,12 +59,6 @@ def get_activation(activation, session=None, training=True, from_logits=True, sa
                     elif activation.lower() == 'nlrelu':
                         out = lambda x: tf.log1p(tf.nn.relu(x))
                     elif activation.lower() in ('log', 'logmod', 'log-modulus', 'logmodulus'):
-                        # def out(x):
-                        #     # This is mathematically equivalent to tf.sign(x) * tf.log1p(tf.abs(x))
-                        #     # but ensures that the gradient is well defined (and equal to 1) at 0
-                        #     pos = x > 0.
-                        #     one = tf.ones_like(x)
-                        #     return tf.where(pos, one, -one) * tf.log1p(tf.where(pos, x, -x))
                         out = lambda x: tf.sign(x) * tf.log1p(tf.abs(x))
                     else:
                         out = getattr(tf.nn, activation)
@@ -132,7 +126,7 @@ def get_initializer(initializer, session=None):
             return out
 
 
-def get_regularizer(init, scale=None, session=None):
+def get_regularizer(init, scale=None, session=None, regularize_mean=False):
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
@@ -169,9 +163,18 @@ def get_regularizer(init, scale=None, session=None):
                         l2_scale = scale[1]
                 else:
                     raise ValueError('Unrecognized regularizer: %s' % init)
-                out = RegularizerLayer(l1_scale=l1_scale, l2_scale=l2_scale, session=session)
+                out = RegularizerLayer(
+                    l1_scale=l1_scale,
+                    l2_scale=l2_scale,
+                    regularize_mean=regularize_mean,
+                    session=session
+                )
             elif isinstance(init, float):
-                out = RegularizerLayer(l2_scale=init, session=session)
+                out = RegularizerLayer(
+                    l2_scale=init,
+                    regularize_mean=regularize_mean,
+                    session=session
+                )
             else:
                 out = init
 
@@ -1226,19 +1229,19 @@ class RegularizerLayer(object):
             self,
             l1_scale=0.,
             l2_scale=1.,
-            use_mean=True,
+            regularize_mean=False,
             session=None
     ):
         self.session = get_session(session)
         self.l1_scale = l1_scale
         self.l2_scale = l2_scale
-        self.use_mean = use_mean
+        self.regularize_mean = regularize_mean
 
     def __call__(self, v):
         with self.session.as_default():
             with self.session.graph.as_default():
                 reg = None
-                if self.use_mean:
+                if self.regularize_mean:
                     agg = tf.reduce_mean
                 else:
                     agg = tf.reduce_sum

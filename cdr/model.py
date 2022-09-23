@@ -2076,9 +2076,12 @@ class CDRModel(object):
                     elif activity_regularizer_name == 'inherit':
                         self.activity_regularizer[nn_id] = self.regularizer
                     else:
-                        scale = activity_regularizer_scale / (
-                            (self.history_length + self.future_length) * max(1, self.n_impulse_df_noninteraction)
-                        ) # Average over time
+                        if self.regularize_mean:
+                            scale = activity_regularizer_scale
+                        else:
+                            scale = activity_regularizer_scale / (
+                                (self.history_length + self.future_length) * max(1, self.n_impulse_df_noninteraction)
+                            ) # Average over time
                         self.activity_regularizer[nn_id] = self._initialize_regularizer(
                             activity_regularizer_name,
                             scale,
@@ -2092,9 +2095,12 @@ class CDRModel(object):
                     elif context_regularizer_name == 'inherit':
                         self.context_regularizer[nn_id] = self.regularizer
                     else:
-                        scale = context_regularizer_scale / (
-                            (self.history_length + self.future_length) * max(1, self.n_impulse_df_noninteraction)
-                        ) # Average over time
+                        if self.regularize_mean:
+                            scale = context_regularizer_scale
+                        else:
+                            scale = context_regularizer_scale / (
+                                (self.history_length + self.future_length) * max(1, self.n_impulse_df_noninteraction)
+                            ) # Average over time
                         self.context_regularizer[nn_id] = self._initialize_regularizer(
                             context_regularizer_name,
                             scale,
@@ -5205,6 +5211,7 @@ class CDRModel(object):
                     regularizer = get_regularizer(
                         regularizer_name,
                         scale=scale,
+                        regularize_mean=self.regularize_mean,
                         session=self.session
                     )
 
@@ -5718,7 +5725,7 @@ class CDRModel(object):
 
         return trainable_ix, untrainable_ix
 
-    def _regularize(self, var, center=None, regtype=None, var_name=None, nn_id=None, use_mean=True):
+    def _regularize(self, var, center=None, regtype=None, var_name=None, nn_id=None):
         assert regtype in [
             None, 'intercept', 'coefficient', 'irf', 'ranef', 'nn', 'ff', 'rnn_projection', 'activity', 'context',
             'unit_integral', 'conv_output']
