@@ -1095,6 +1095,7 @@ class CDRModel(object):
         self.nn_transformed_impulse_t_delta = []
         self.nn_transformed_impulse_X_time = []
         self.nn_transformed_impulse_X_mask = []
+        self.nn_transformed_impulse_dirac_delta_mask = []
 
         # Initialize predictive distribution metadata
 
@@ -4000,6 +4001,7 @@ class CDRModel(object):
                 t_delta = []
                 X_time = []
                 X_mask = []
+                dirac_delta_mask = []
                 impulse_names_ordered = []
 
                 # Collect non-neural impulses
@@ -4058,7 +4060,7 @@ class CDRModel(object):
                         tf.pad(x, ((0, 0), (max_len - tf.shape(x)[1], 0), (0, 0))) for x in X_mask
                     ]
                     X_mask = tf.concat(X_mask, axis=2)
-
+                    
                 # Reorder impulses if needed (i.e. if both neural and non-neural impulses are included, they
                 # will be out of order relative to impulse_names)
                 if len(non_nn_impulse_names) and len(nn_impulse_names):
@@ -4144,7 +4146,7 @@ class CDRModel(object):
                     X_time = X_time[..., :1]
                     if X_mask is not None and len(X_mask.shape) == 3:
                         X_mask = X_mask[..., 0]
-
+                    
                 if input_jitter_level:
                     jitter_sd = input_jitter_level
                     X = tf.cond(
@@ -4226,6 +4228,11 @@ class CDRModel(object):
                     self.nn_transformed_impulse_t_delta.append(t_delta)
                     self.nn_transformed_impulse_X_time.append(X_time)
                     self.nn_transformed_impulse_X_mask.append(X_mask[..., None])
+                    dirac_delta_mask.append(
+                        tf.cast(tf.abs(t_delta) < self.epsilon, dtype=self.FLOAT_TF), 
+                    )
+                    self.nn_transformed_impulse_dirac_delta_mask.append(dirac_delta_mask)
+
                 else:  # nn_id in self.nn_irf_ids
                     # Compute IRF outputs
 
@@ -4338,6 +4345,10 @@ class CDRModel(object):
                 self.nn_transformed_impulse_X_mask = self.nn_transformed_impulse_X_mask[0]
             else:
                 self.nn_transformed_impulse_X_mask = tf.concat(self.nn_transformed_impulse_X_mask, axis=2)
+            if len(self.nn_transformed_impulse_dirac_delta_mask) == 1:
+                self.nn_transformed_impulse_dirac_delta_mask = self.nn_transformed_impulse_dirac_delta_mask[0]
+            else:
+                self.nn_transformed_impulse_dirac_delta_mask = tf.concat(self.nn_transformed_impulse_dirac_delta_mask, axis=2)
 
     def _collect_layerwise_ops(self):
         with self.session.as_default():
@@ -4572,34 +4583,50 @@ class CDRModel(object):
                         inputs_cur = []
 
                         if len(irf_input_names) > 0:
+                            print(interaction)
+                            print(self.X_weighted_unscaled_sumT[response])
+                            print()
                             irf_input_ix = names2ix(irf_input_names, terminal_names)
                             irf_inputs = self.X_weighted_unscaled_sumT[response]
                             irf_inputs = tf.gather(
                                 irf_inputs,
                                 irf_input_ix,
-                                axis=1
+                                axis=2
                             )
                             inputs_cur.append(irf_inputs)
 
                         if len(nn_impulse_input_names):
                             nn_impulse_input_ix = names2ix(nn_impulse_input_names, nn_impulse_names)
-                            nn_impulse_inputs = self.nn_transformed_impulses[:,-1]
+                            nn_impulse_inputs = tf.gather(self.nn_transformed_impulses, nn_impulse_input_ix, axis=2)
+                            nn_impulse_mask = tf.gather(self.nn_transformed_impulse_dirac_delta_mask, nn_impulse_input_ix, axis=2)
+                            nn_impulse_inputs = tf.reduce_sum(nn_impulse_inputs * nn_impulse_mask, axis=1, keepdims=True)
                             # Expand out response_param and response_param_dim axes
-                            nn_impulse_inputs = tf.gather(nn_impulse_inputs, nn_impulse_input_ix, axis=1)
                             nn_impulse_inputs = nn_impulse_inputs[..., None, None]
+                            nn_impulse_inputs = tf.pad(
+                                nn_impulse_inputs,
+                                paddings=[
+                                    (0, 0),
+                                    (0, 0),
+                                    (0, 0),
+                                    (0, nparam - 1),
+                                    (0, ndim - 1)
+                                ]
+                            )
                             inputs_cur.append(nn_impulse_inputs)
                                 
                         if len(dirac_delta_input_names):
                             dd_key = tuple(dirac_delta_input_names)
                             if dd_key not in dd:
                                 dirac_delta_input_ix = names2ix(dirac_delta_input_names, impulse_names)
-                                dirac_delta_inputs = self.X_processed[:,-1]
                                 # Expand out response_param and response_param_dim axes
-                                dirac_delta_inputs = tf.gather(dirac_delta_inputs, dirac_delta_input_ix, axis=1)
+                                dirac_delta_inputs = tf.gather(self.X_processed, dirac_delta_input_ix, axis=2)
+                                dirac_delta_mask = tf.gather(self.dirac_delta_mask, dirac_delta_input_ix, axis=2)
+                                dirac_delta_inputs = tf.reduce_sum(dirac_delta_inputs * dirac_delta_mask, axis=1, keepdims=True)
                                 dirac_delta_inputs = dirac_delta_inputs[..., None, None]
                                 dirac_delta_inputs = tf.pad(
                                     dirac_delta_inputs,
                                     paddings=[
+                                        (0, 0),
                                         (0, 0),
                                         (0, 0),
                                         (0, nparam - 1),
