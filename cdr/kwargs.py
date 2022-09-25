@@ -288,14 +288,15 @@ MODEL_INITIALIZATION_KWARGS = [
         False,
         bool,
         "Whether to model all parameters of the predictive distribution as dependent on IRFs of the impulses (distributional regression). If ``False``, only the mean depends on the predictors (other parameters of the predictive distribution are treated as constant).",
-        aliases=['heteroskedastic'],
+        aliases=['heteroscedastic', 'heteroskedastic'],
         default_value_cdrnn=True
     ),
     Kwarg(
         'predictive_distribution_map',
         None,
         [str, None],
-        "Definition of predictive distribution. Can be a single distribution name (shared across all response variables), a space-delimited list of distribution names (one per response variable), a space-delimited list of ';'-delimited tuples matching response variables to distribution names (e.g. ``response;Bernoulli``), or ``None``, in which case the predictive distribution will be inferred as ``Normal`` for continuous variables and ``Categorical`` for categorical variables."
+        "Definition of predictive distribution. Can be a single distribution name (shared across all response variables), a space-delimited list of distribution names (one per response variable), a space-delimited list of ';'-delimited tuples matching response variables to distribution names (e.g. ``response;Bernoulli``), or ``None``, in which case the predictive distribution will be inferred as ``Normal`` for continuous variables and ``Categorical`` for categorical variables.",
+        aliases=['predictive_distribution', 'pred_dist']
     ),
     Kwarg(
         'center_inputs',
@@ -375,7 +376,8 @@ MODEL_INITIALIZATION_KWARGS = [
         'minibatch_size',
         1024,
         [int, None],
-        "Size of minibatches to use for fitting (full-batch if ``None``)."
+        "Size of minibatches to use for fitting (full-batch if ``None``).",
+        aliases=['batch_size']
     ),
     Kwarg(
         'eval_minibatch_size',
@@ -593,6 +595,12 @@ MODEL_INITIALIZATION_KWARGS = [
         [str, float, 'inherit'],
         "Scale of random effects regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**. Regularization only applies to random effects without variational priors.",
         default_value_cdrnn=10.
+    ),
+    Kwarg(
+        'regularize_mean',
+        False,
+        bool,
+        "Mean-aggregate regularized variables. If ``False``, use sum aggregation."
     ),
 
     # INCREMENTAL SAVING AND LOGGING
@@ -1159,6 +1167,18 @@ NN_KWARGS = [
         1.,
         [str, float, 'inherit'],
         "Scale of weight regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
+    ),
+    Kwarg(
+        'activity_regularizer_name',
+        None,
+        [str, 'inherit', None],
+        "Name of activity regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no activity regularization."
+    ),
+    Kwarg(
+        'activity_regularizer_scale',
+        1.,
+        [str, float, 'inherit'],
+        "Scale of activity regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
     Kwarg(
         'ff_regularizer_name',

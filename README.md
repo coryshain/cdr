@@ -20,6 +20,16 @@ Full repository documentation, including an API, is provided at the link above.
 
 ## Installation
 
+### PyPI
+
+Install [python](https://www.python.org/), then install CDR(NN) using ``pip`` as follows:
+
+    pip install cdrnn
+
+Note that, despite the package name, both (kernel-based) CDR and (deep-neural) CDRNN are both implemented by the same codebase, so both kinds of models can be fitted using this package.
+
+### Anaconda
+
 Install [anaconda](https://www.anaconda.com/), then run the following commands from this repository root to create a new conda environment:
 
     conda env create -f conda_cdr.yml

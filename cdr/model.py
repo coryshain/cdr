@@ -30,12 +30,12 @@ if int(tf.__version__.split('.')[0]) == 1:
 
     # TODO: Implement
     class ExponentiallyModifiedGaussian(TransformedDistribution):
-        def __init(self, *args, **kwargs):
+        def __init__(self, *args, **kwargs):
             raise NotImplementedError('The exgaussian distribution is not supported in TensorFlow v1. Switch to a TensorFlow v2 release in order to use this feature.')
 
     # TODO: Implement
     class JohnsonSU(Distribution):
-        def __init(self, *args, **kwargs):
+        def __init__(self, *args, **kwargs):
             raise NotImplementedError('The JohnsonSU distribution is not supported in TensorFlow v1. Switch to a TensorFlow v2 release in order to use this feature.')
 
     # Much of this is stolen from the TF2 source, since TF1 lacks LogNormal
@@ -1095,6 +1095,7 @@ class CDRModel(object):
         self.nn_transformed_impulse_t_delta = []
         self.nn_transformed_impulse_X_time = []
         self.nn_transformed_impulse_X_mask = []
+        self.nn_transformed_impulse_dirac_delta_mask = []
 
         # Initialize predictive distribution metadata
 
@@ -2037,6 +2038,7 @@ class CDRModel(object):
                 self.nn_regularizer = {}
                 self.ff_regularizer = {}
                 self.rnn_projection_regularizer = {}
+                self.activity_regularizer = {}
                 self.context_regularizer = {}
                 for nn_id in self.nns_by_id:
                     nn_regularizer_name = self.get_nn_meta('nn_regularizer_name', nn_id)
@@ -2068,6 +2070,25 @@ class CDRModel(object):
                         rnn_projection_regularizer_scale
                     )
 
+                    activity_regularizer_name = self.get_nn_meta('activity_regularizer_name', nn_id)
+                    activity_regularizer_scale = self.get_nn_meta('activity_regularizer_scale', nn_id)
+                    if activity_regularizer_name is None:
+                        self.activity_regularizer[nn_id] = None
+                    elif activity_regularizer_name == 'inherit':
+                        self.activity_regularizer[nn_id] = self.regularizer
+                    else:
+                        if self.regularize_mean:
+                            scale = activity_regularizer_scale
+                        else:
+                            scale = activity_regularizer_scale / (
+                                (self.history_length + self.future_length) * max(1, self.n_impulse_df_noninteraction)
+                            ) # Average over time
+                        self.activity_regularizer[nn_id] = self._initialize_regularizer(
+                            activity_regularizer_name,
+                            scale,
+                            per_item=True
+                        )
+                        
                     context_regularizer_name = self.get_nn_meta('context_regularizer_name', nn_id)
                     context_regularizer_scale = self.get_nn_meta('context_regularizer_scale', nn_id)
                     if context_regularizer_name is None:
@@ -2075,9 +2096,12 @@ class CDRModel(object):
                     elif context_regularizer_name == 'inherit':
                         self.context_regularizer[nn_id] = self.regularizer
                     else:
-                        scale = context_regularizer_scale / (
-                            (self.history_length + self.future_length) * max(1, self.n_impulse_df_noninteraction)
-                        ) # Average over time
+                        if self.regularize_mean:
+                            scale = context_regularizer_scale
+                        else:
+                            scale = context_regularizer_scale / (
+                                (self.history_length + self.future_length) * max(1, self.n_impulse_df_noninteraction)
+                            ) # Average over time
                         self.context_regularizer[nn_id] = self._initialize_regularizer(
                             context_regularizer_name,
                             scale,
@@ -3734,12 +3758,24 @@ class CDRModel(object):
                             name='%s_ff_l%s' % (nn_id, l + 1)
                         )
                         self.layers.append(projection)
+                        ff_layers.append(make_lambda(projection, session=self.session, use_kwargs=False))
 
                         if 'nn' not in self.rvs and \
                                 (regularize_initial_layer or l > 0) and \
                                 (regularize_final_layer or l < n_layers_ff):
                             self.regularizable_layers[nn_id].append(projection)
-                        ff_layers.append(make_lambda(projection, session=self.session, use_kwargs=False))
+                            ff_layers.append(
+                                make_lambda(
+                                    lambda x: self._regularize(
+                                        x,
+                                        regtype='activity',
+                                        var_name=reg_name('%s_ff_l%s_activity' % (nn_id, l + 1)),
+                                        nn_id=nn_id
+                                    ),
+                                    session=self.session,
+                                    use_kwargs=False
+                                )
+                            )
 
                     ff_fn = compose_lambdas(ff_layers)
 
@@ -3763,9 +3799,21 @@ class CDRModel(object):
                         _rnn_c_ema = tf.Variable(tf.zeros(units), trainable=False, name='%s_rnn_c_ema_l%d' % (nn_id, l+1))
                         rnn_c_ema.append(_rnn_c_ema)
                         self.layers.append(layer)
+                        rnn_layers.append(make_lambda(layer, session=self.session, use_kwargs=True))
                         if 'nn' not in self.rvs:
                             self.regularizable_layers[nn_id].append(layer)
-                        rnn_layers.append(make_lambda(layer, session=self.session, use_kwargs=True))
+                            rnn_layers.append(
+                                make_lambda(
+                                    lambda x, nn_id=nn_id, l=l: self._regularize(
+                                        x,
+                                        regtype='activity',
+                                        var_name=reg_name('%s_rnn_l%d_activity' % (nn_id, l + 1)),
+                                        nn_id=nn_id
+                                    ),
+                                    session=self.session,
+                                    use_kwargs=False
+                                )
+                            )
 
                     rnn_encoder = compose_lambdas(rnn_layers)
 
@@ -3809,6 +3857,18 @@ class CDRModel(object):
 
                         if 'nn' not in self.rvs:
                             self.regularizable_layers[nn_id].append(projection)
+                            rnn_layers.append(
+                                make_lambda(
+                                    lambda x, nn_id=nn_id, l=l: self._regularize(
+                                        x,
+                                        regtype='activity',
+                                        var_name=reg_name('%s_rnn_projection_l%s_activity' % (nn_id, l + 1)),
+                                        nn_id=nn_id
+                                    ),
+                                    session=self.session,
+                                    use_kwargs=False
+                                )
+                            )
                         rnn_projection_layers.append(make_lambda(projection, session=self.session, use_kwargs=False))
 
                     rnn_projection_fn = compose_lambdas(rnn_projection_layers)
@@ -3890,8 +3950,20 @@ class CDRModel(object):
 
                             if 'nn' not in self.rvs and \
                                     (regularize_initial_layer or l > 0) and \
-                                    (regularize_final_layer or l < n_layers_ff):
+                                    (regularize_final_layer or l < n_layers_irf):
                                 self.regularizable_layers[nn_id].append(projection)
+                                irf_layers.append(
+                                    make_lambda(
+                                        lambda x, nn_id=nn_id, l=l: self._regularize(
+                                            x,
+                                            regtype='activity',
+                                            var_name=reg_name('%s_irf_l%s_activity' % (nn_id, l + 1)),
+                                            nn_id=nn_id
+                                        ),
+                                        session=self.session,
+                                        use_kwargs=False
+                                    )
+                                )
                             if l == 0:
                                 self.nn_irf_l1[nn_id] = projection
 
@@ -3929,6 +4001,7 @@ class CDRModel(object):
                 t_delta = []
                 X_time = []
                 X_mask = []
+                dirac_delta_mask = []
                 impulse_names_ordered = []
 
                 # Collect non-neural impulses
@@ -3987,7 +4060,7 @@ class CDRModel(object):
                         tf.pad(x, ((0, 0), (max_len - tf.shape(x)[1], 0), (0, 0))) for x in X_mask
                     ]
                     X_mask = tf.concat(X_mask, axis=2)
-
+                    
                 # Reorder impulses if needed (i.e. if both neural and non-neural impulses are included, they
                 # will be out of order relative to impulse_names)
                 if len(non_nn_impulse_names) and len(nn_impulse_names):
@@ -4073,7 +4146,7 @@ class CDRModel(object):
                     X_time = X_time[..., :1]
                     if X_mask is not None and len(X_mask.shape) == 3:
                         X_mask = X_mask[..., 0]
-
+                    
                 if input_jitter_level:
                     jitter_sd = input_jitter_level
                     X = tf.cond(
@@ -4155,6 +4228,11 @@ class CDRModel(object):
                     self.nn_transformed_impulse_t_delta.append(t_delta)
                     self.nn_transformed_impulse_X_time.append(X_time)
                     self.nn_transformed_impulse_X_mask.append(X_mask[..., None])
+                    dirac_delta_mask.append(
+                        tf.cast(tf.abs(t_delta) < self.epsilon, dtype=self.FLOAT_TF), 
+                    )
+                    self.nn_transformed_impulse_dirac_delta_mask.append(dirac_delta_mask)
+
                 else:  # nn_id in self.nn_irf_ids
                     # Compute IRF outputs
 
@@ -4267,6 +4345,10 @@ class CDRModel(object):
                 self.nn_transformed_impulse_X_mask = self.nn_transformed_impulse_X_mask[0]
             else:
                 self.nn_transformed_impulse_X_mask = tf.concat(self.nn_transformed_impulse_X_mask, axis=2)
+            if len(self.nn_transformed_impulse_dirac_delta_mask) == 1:
+                self.nn_transformed_impulse_dirac_delta_mask = self.nn_transformed_impulse_dirac_delta_mask[0]
+            else:
+                self.nn_transformed_impulse_dirac_delta_mask = tf.concat(self.nn_transformed_impulse_dirac_delta_mask, axis=2)
 
     def _collect_layerwise_ops(self):
         with self.session.as_default():
@@ -4483,7 +4565,7 @@ class CDRModel(object):
         with self.session.as_default():
             with self.session.graph.as_default():
                 if len(self.interaction_names) > 0:
-                    interaction_coefs = self.interaction[response]
+                    interaction_coefs = tf.expand_dims(self.interaction[response], axis=1)
                     interaction_inputs = []
                     terminal_names = self.terminal_names[:]
                     impulse_names = self.impulse_names
@@ -4506,29 +4588,42 @@ class CDRModel(object):
                             irf_inputs = tf.gather(
                                 irf_inputs,
                                 irf_input_ix,
-                                axis=1
+                                axis=2
                             )
                             inputs_cur.append(irf_inputs)
 
                         if len(nn_impulse_input_names):
                             nn_impulse_input_ix = names2ix(nn_impulse_input_names, nn_impulse_names)
-                            nn_impulse_inputs = self.nn_transformed_impulses[:,-1]
+                            nn_impulse_inputs = tf.gather(self.nn_transformed_impulses, nn_impulse_input_ix, axis=2)
+                            nn_impulse_mask = tf.gather(self.nn_transformed_impulse_dirac_delta_mask, nn_impulse_input_ix, axis=2)
+                            nn_impulse_inputs = tf.reduce_sum(nn_impulse_inputs * nn_impulse_mask, axis=1, keepdims=True)
                             # Expand out response_param and response_param_dim axes
-                            nn_impulse_inputs = tf.gather(nn_impulse_inputs, nn_impulse_input_ix, axis=1)
                             nn_impulse_inputs = nn_impulse_inputs[..., None, None]
+                            nn_impulse_inputs = tf.pad(
+                                nn_impulse_inputs,
+                                paddings=[
+                                    (0, 0),
+                                    (0, 0),
+                                    (0, 0),
+                                    (0, nparam - 1),
+                                    (0, ndim - 1)
+                                ]
+                            )
                             inputs_cur.append(nn_impulse_inputs)
                                 
                         if len(dirac_delta_input_names):
                             dd_key = tuple(dirac_delta_input_names)
                             if dd_key not in dd:
                                 dirac_delta_input_ix = names2ix(dirac_delta_input_names, impulse_names)
-                                dirac_delta_inputs = self.X_processed[:,-1]
                                 # Expand out response_param and response_param_dim axes
-                                dirac_delta_inputs = tf.gather(dirac_delta_inputs, dirac_delta_input_ix, axis=1)
+                                dirac_delta_inputs = tf.gather(self.X_processed, dirac_delta_input_ix, axis=2)
+                                dirac_delta_mask = tf.gather(self.dirac_delta_mask, dirac_delta_input_ix, axis=2)
+                                dirac_delta_inputs = tf.reduce_sum(dirac_delta_inputs * dirac_delta_mask, axis=1, keepdims=True)
                                 dirac_delta_inputs = dirac_delta_inputs[..., None, None]
                                 dirac_delta_inputs = tf.pad(
                                     dirac_delta_inputs,
                                     paddings=[
+                                        (0, 0),
                                         (0, 0),
                                         (0, 0),
                                         (0, nparam - 1),
@@ -4543,7 +4638,7 @@ class CDRModel(object):
                         inputs_cur = tf.reduce_prod(inputs_cur, axis=1)
 
                         interaction_inputs.append(inputs_cur)
-                    interaction_inputs = tf.stack(interaction_inputs, axis=1)
+                    interaction_inputs = tf.stack(interaction_inputs, axis=2)
 
                     return interaction_coefs * interaction_inputs
 
@@ -4645,17 +4740,17 @@ class CDRModel(object):
                             irf_seq = tf.transpose(irf_seq, [1, 0, 2, 3])
                             # Add terminal dim
                             irf_seq = tf.expand_dims(irf_seq, axis=2)
-                            if not self.use_distributional_regression:
-                                irf_seq = tf.pad(
-                                    irf_seq,
-                                    paddings=[
-                                        (0, 0),
-                                        (0, 0),
-                                        (0, 0),
-                                        (0, nparam - 1),
-                                        (0, 0)
-                                    ]
-                                )
+                        if not self.use_distributional_regression:
+                            irf_seq = tf.pad(
+                                irf_seq,
+                                paddings=[
+                                    (0, 0),
+                                    (0, 0),
+                                    (0, 0),
+                                    (0, nparam - 1),
+                                    (0, 0)
+                                ]
+                            )
 
                         irf_weights.append(irf_seq)
 
@@ -4813,9 +4908,9 @@ class CDRModel(object):
 
                     # Base output deltas
                     X_weighted = self.X_weighted[response] # (batch, time, impulse, param, dim)
-                    X_weighted_sumT = self.X_weighted_sumT[response] # (batch, impulse, param, dim)
-                    X_weighted_sumK = self.X_weighted_sumK[response] # (batch, time, param, dim)
-                    X_weighted_sumTK = self.X_weighted_sumTK[response] # (batch, param, dim)
+                    X_weighted_sumT = self.X_weighted_sumT[response] # (batch, 1, impulse, param, dim)
+                    X_weighted_sumK = self.X_weighted_sumK[response] # (batch, time, 1, param, dim)
+                    X_weighted_sumTK = self.X_weighted_sumTK[response] # (batch, 1, 1, param, dim)
                     nparam = int(response_params.shape[-2])
 
                     # Interactions
@@ -4845,10 +4940,6 @@ class CDRModel(object):
                             lambda: X_weighted
                         )
                     )
-
-                    # Expand T and K dimensions of interaction terms
-                    if interaction_delta is not None:
-                        interaction_delta = tf.expand_dims(tf.expand_dims(interaction_delta, axis=1), axis=1)
 
                     # Conditionally tile Y along T and K
                     time_tile_shape = [1, self.history_length + self.future_length, 1]
@@ -5140,6 +5231,7 @@ class CDRModel(object):
                     regularizer = get_regularizer(
                         regularizer_name,
                         scale=scale,
+                        regularize_mean=self.regularize_mean,
                         session=self.session
                     )
 
@@ -5198,8 +5290,10 @@ class CDRModel(object):
                     optimizer_args += [0.9]
                 if name.endswith('fast'):
                     optimizer_kwargs['beta2'] = 0.9
-                if name in ('adagrad', 'adadelta', 'adam', 'nadam'):
+                if name in ('adadelta', 'adam', 'nadam'):
                     optimizer_kwargs['epsilon'] = self.optim_epsilon
+                    if name == 'adadelta':
+                        optimizer_kwargs['rho'] = 0.999
 
                 optimizer_class = {
                     'sgd': tf.train.GradientDescentOptimizer,
@@ -5653,17 +5747,17 @@ class CDRModel(object):
 
     def _regularize(self, var, center=None, regtype=None, var_name=None, nn_id=None):
         assert regtype in [
-            None, 'intercept', 'coefficient', 'irf', 'ranef', 'nn', 'ff', 'rnn_projection', 'context',
+            None, 'intercept', 'coefficient', 'irf', 'ranef', 'nn', 'ff', 'rnn_projection', 'activity', 'context',
             'unit_integral', 'conv_output']
 
         if regtype is None:
             regularizer = self.regularizer
         else:
             regularizer = getattr(self, '%s_regularizer' % regtype)
-        if regtype in ['nn', 'ff', 'rnn_projection', 'context']:
+        if regtype in ['nn', 'ff', 'rnn_projection', 'activity', 'context']:
             regularizer = regularizer[nn_id]
 
-        if regularizer is not None:
+        if regularizer is not None and str(var_name) not in self.regularizer_losses_varnames:
             with self.session.as_default():
                 with self.session.graph.as_default():
                     if center is None:
@@ -5694,6 +5788,8 @@ class CDRModel(object):
                             reg_scale *= self.minibatch_size * self.minibatch_scale
                     self.regularizer_losses_names.append(reg_name)
                     self.regularizer_losses_scales.append(reg_scale)
+
+        return var
 
     def _add_convergence_tracker(self, var, name, alpha=0.9):
         with self.session.as_default():
