@@ -26,7 +26,7 @@ Install [python](https://www.python.org/), then install CDR(NN) using ``pip`` as
 
     pip install cdrnn
 
-Note that, despite the package name, both (kernel-based) CDR and (deep-neural) CDRNN are both implemented by the same codebase, so both kinds of models can be fitted using this package.
+Note that, despite the package name, both (kernel-based) CDR and (deep-neural) CDRNN are implemented by the same codebase, so both kinds of models can be fitted using this package.
 
 ### Anaconda
 
