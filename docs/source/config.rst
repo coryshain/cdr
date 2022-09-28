@@ -18,20 +18,20 @@ The ``[data]`` section supports the following fields:
 
 **REQUIRED**
 
-- **X_train**: ``str``; Path to training data (impulse matrix)
+- **X_train**: ``str``; Path to training data (predictor matrix)
 - **y_train**: ``str``; Path to training data (response matrix)
 - **series_ids**: space-delimited list of ``str``; Names of columns used to define unique time series
 
-Note that, unlike e.g. linear models, CDR does not require synchronous predictors (impulses) and responses, which is why separate data objects must be provided for each of these components.
+Note that, unlike e.g. linear models, CDR does not require synchronous predictors and responses, which is why separate data objects must be provided for each of these components.
 If the predictors and responses are synchronous, this is fine.
 The ``X_train`` and ``y_train`` fields can point to the same file.
 The system will treat each unique combination of values in the columns given in ``series_ids`` as constituting a unique time series.
 
 **OPTIONAL**
 
-- **X_dev**: ``str``; Path to dev data (impulse matrix)
+- **X_dev**: ``str``; Path to dev data (predictor matrix)
 - **y_dev**: ``str``; Path to dev data (response matrix)
-- **X_test**: ``str``; Path to test data (impulse matrix)
+- **X_test**: ``str``; Path to test data (predictor matrix)
 - **y_test**: ``str``; Path to test data (response matrix)
 - **history_length**: ``int``; Length of history window in timesteps (default: ``128``)
 - **filters**: ``str``; List of filters to apply to response data (``;``-delimited).
@@ -154,7 +154,7 @@ non-null ablations of ``a``, ``b``, and ``c``::
     ablate = a b c
     formula = C(a + b + c, Normal()) + (C(a + b + c, Normal()) | subject)
 
-The ablated models are named using ``'!'`` followed by the ablated impulse name for each ablated impulse.
+The ablated models are named using ``'!'`` followed by the name for each ablated predictor.
 Therefore, the above specification is equivalent to (and much easier to write than) the following::
 
     [model_CDR_example]
