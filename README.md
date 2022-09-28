@@ -71,15 +71,9 @@ CDR model formula syntax resembles R-style model formulas (`DV ~ IV1 + IV2 + ...
 The core novelty is the `C(preds, IRF)` call (`C` for "convolve"), in which the first argument is a '+'-delimited list of predictors and the second argument is a call to an impulse response kernel (e.g. `Exp`, `Normal`, `ShiftedGammaShapeGT1`, see docs for complete list).
 For example, a model with the following specification
 
-    formula = DV ~ C(a + b + c, Normal())
+    formula = DV ~ C(a + b + c, NN())
     
-will fit a CDR model that convolves predictors `a`, `b`, `c` using `Normal` IRFs with trainable location and scale parameters.
-
-CDRNN models do not require user-specification of a kernel family, so their formula syntax is simpler:
-
-    formula = DV ~ a + b + c
-
-The response shape to all variables (and all their interactions) will be fitted jointly.
+will fit a CDRNN model that convolves predictors `a`, `b`, `c` using a deep neural impulse response function (IRF).
 
 Once a model file has been written (e.g. `model.ini`), the model(s) defined in it can be trained by running:
 
@@ -99,7 +93,7 @@ We are in the process of developing a web-based tool for interactive visualizati
 This is especially useful in models with neural network components, where estimates can contain rich interactions.
 To play with the current version of the tool, run:
 
-    python -m cdr.bin.viz <PATH-TO-CDR-OUTPUT>
+    python -m cdr.bin.viz <PATH-TO-CDR-MODEL-FILE> -m <MODEL-NAME>
     
 and open the URL displayed in the console in a web browser.
 You can then use the provided interface to explore many aspects of your model's estimates.
@@ -113,11 +107,13 @@ For this reason, repository states associated with previous results are saved in
 To reproduce those results, checkout the relevant branch and follow the instructions in the `README`.
 Current reproduction branches are:
 
- - `emnlp18`
- - `naacl19`
- - `npsy`
- - `cognition21`
- - `acl21`
+ - `emnlp18` (Shain & Schuler, 2018)
+ - `naacl19` (Shain, 2019)
+ - `npsy` (Shain, Blank, et al., 2020)
+ - `cognition21` (Shain & Schuler, 2021)
+ - `acl21` (Shain, 2021)
+ - `fMRI_ns_WM` (Shain et al., 2022)
+ - `cdrnn_journal` (Shain & Schuler, arXiv)
 
 Thus, to reproduce results from ACL21, for example, run `git checkout acl21` from the repository root, and follow instructions in the `README` file.
 The reproduction branches are also useful sources of example configuration files to use as templates for setting up your own experiments, although you should consult the docs for full documentation of the structure of CDR experiment configurations.
@@ -139,6 +135,14 @@ Bug reports can be logged in the issue tracker on [Github](https://github.com/co
 ## References
 Shain, Cory and Schuler, William (2018). Deconvolutional time series regression: A technique for modeling temporally diffuse effects. _EMNLP18_.
 
+Shain, Cory (2019). A large-scale study of the effects of word frequency and predictability in naturalistic reading. _NAACL19_.
+
+Shain, Cory and Blank, Idan and van Schijndel, Marten and Schuler, William and Fedorenko, Evelina (2020). fMRI reveals language-specific predictive coding during naturalistic sentence comprehension. _Neuropsychologia_.
+
 Shain, Cory and Schuler, William (2021). Continuous-time deconvolutional regression for psycholinguistic modeling. _Cognition_.
 
 Shain, Cory (2021). CDRNN: Discovering complex dynamics in human language processing. _ACL21_.
+
+Shain, Cory and Blank, Idan and Fedorenko, Evelina and Gibson, Edward and Schuler, William (2022). Robust effects of working memory demand during naturalistic language comprehension in language-selective cortex. _Journal of Neuroscience_.
+
+Shain, Cory and Schuler, William (arXiv). A deep learning approach to analyzing continuous-time systems. _arXiv_. [https://arxiv.org/abs/2209.12128](https://arxiv.org/abs/2209.12128)

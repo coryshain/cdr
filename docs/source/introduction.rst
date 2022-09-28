@@ -16,8 +16,17 @@ The ``cdr`` package documented here provides a Python implementation of a genera
 This package provides (1) an API for programming with CDR(NN) and (2) executables that allow users to train and evaluate CDR(NN) models out of the box, without needing to write any code.
 Source code and bug reporting tools are available on `Github <https://github.com/coryshain/cdr>`_.
 
-Installation
-------------
+Installation (PyPI)
+-------------------
+Install `python <https://www.python.org/>`_, then install CDR(NN) using ``pip`` as follows::
+
+    pip install cdrnn
+
+Note that, despite the package name, both (kernel-based) CDR and (deep-neural) CDRNN are both implemented by the same codebase, so both kinds of models can be fitted using this package.
+
+
+Installation (Anaconda)
+-----------------------
 
 Install `anaconda <https://www.anaconda.com/>`_ and clone the CDR repository (`<https://github.com/coryshain/cdr>`_) to the directory of your choice.
 From the CDR repository root, run the following commands to create a new conda environment::
