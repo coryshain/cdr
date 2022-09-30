@@ -958,7 +958,7 @@ NN_KWARGS = [
     # MODEL SIZE
     Kwarg(
         'n_layers_ff',
-        1,
+        2,
         [int, None],
         "Number of hidden layers in feedforward encoder. If ``None``, inferred from length of **n_units_ff**.",
         aliases=['n_layers', 'n_layers_encoder', 'n_layers_input_projection']
@@ -996,7 +996,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'n_layers_irf',
-        1,
+        2,
         [int, None],
         "Number of IRF hidden layers. If ``None``, inferred from length of **n_units_irf**.",
         aliases=['n_layers', 'n_layers_decoder']

@@ -721,7 +721,7 @@ def compute_filters(Y, filters=None):
                 count_map = {}
                 for v, c in zip(vals, counts):
                     count_map[v] = c
-                Y[field] = Y[name].map(count_map)
+                Y[field] = Y[name].map(count_map).astype(int)
                 select &= compute_filter(Y, field, cond)
             else:
                 stderr('Skipping unique-counts filter for column "%s", which was not found in the data...\n' % name)
