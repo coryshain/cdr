@@ -6499,6 +6499,9 @@ class CDRModel(object):
                         self.saver.save(self.session, dir + '/model%s.ckpt' % suffix)
                         with open(dir + '/m%s.obj' % suffix, 'wb') as f:
                             pickle.dump(self, f)
+                        self.saver.save(self.session, dir + '/model%s_backup.ckpt' % suffix)
+                        with open(dir + '/m%s.obj' % suffix, 'wb') as f:
+                            pickle.dump(self, f)
                         failed = False
                     except:
                         stderr('Write failure during save. Retrying...\n')
