@@ -447,8 +447,7 @@ MODEL_INITIALIZATION_KWARGS = [
         'learning_rate',
         0.001,
         float,
-        "Initial value for the learning rate.",
-        default_value_cdrnn=0.003
+        "Initial value for the learning rate."
     ),
     Kwarg(
         'learning_rate_min',
@@ -958,14 +957,14 @@ NN_KWARGS = [
     # MODEL SIZE
     Kwarg(
         'n_layers_ff',
-        1,
+        2,
         [int, None],
         "Number of hidden layers in feedforward encoder. If ``None``, inferred from length of **n_units_ff**.",
         aliases=['n_layers', 'n_layers_encoder', 'n_layers_input_projection']
     ),
     Kwarg(
         'n_units_ff',
-        256,
+        32,
         [int, str, None],
         "Number of units per feedforward encoder hidden layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_rnn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no feedforward encoder.",
         aliases=['n_units', 'n_units_encoder', 'n_units_input_projection']
@@ -996,7 +995,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'n_layers_irf',
-        1,
+        2,
         [int, None],
         "Number of IRF hidden layers. If ``None``, inferred from length of **n_units_irf**.",
         aliases=['n_layers', 'n_layers_decoder']
@@ -1164,7 +1163,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'nn_regularizer_scale',
-        1.,
+        5.,
         [str, float, 'inherit'],
         "Scale of weight regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
@@ -1176,7 +1175,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'activity_regularizer_scale',
-        1.,
+        5.,
         [str, float, 'inherit'],
         "Scale of activity regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
@@ -1189,7 +1188,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'ff_regularizer_scale',
-        1.,
+        5.,
         [str, float],
         "Scale of weight regularizer (ignored if ``regularizer_name==None``) on output layer of feedforward encoders. If ``None``, inherits from **nn_regularizer_scale**.",
         aliases=['input_projection_regularizer_scale']
@@ -1202,7 +1201,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'regularize_final_layer',
-        True,
+        False,
         bool,
         "Whether to regulare the last layer of NN components."
     ),
@@ -1214,7 +1213,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'rnn_projection_regularizer_scale',
-        1.,
+        5.,
         [str, float],
         "Scale of weight regularizer (ignored if ``regularizer_name==None``) on output layer of RNN projection. If ``None``, inherits from **nn_regularizer_scale**."
     ),
