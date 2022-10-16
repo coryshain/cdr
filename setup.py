@@ -5,7 +5,7 @@ from setuptools import find_packages
 setup(
     name='cdrnn',
     python_requires='>=3',
-    version='0.8.2',
+    version='0.8.3',
     description='A toolkit for continuous-time deconvolutional regression (CDR)',
     author='Cory Shain',
     author_email='cory.shain@gmail.com',
