@@ -6499,6 +6499,9 @@ class CDRModel(object):
                         self.saver.save(self.session, dir + '/model%s.ckpt' % suffix)
                         with open(dir + '/m%s.obj' % suffix, 'wb') as f:
                             pickle.dump(self, f)
+                        self.saver.save(self.session, dir + '/model%s_backup.ckpt' % suffix)
+                        with open(dir + '/m%s_backup.obj' % suffix, 'wb') as f:
+                            pickle.dump(self, f)
                         failed = False
                     except:
                         stderr('Write failure during save. Retrying...\n')
@@ -6507,7 +6510,7 @@ class CDRModel(object):
                 if i >= 10:
                     stderr('Could not save model to checkpoint file. Saving to backup...\n')
                     self.saver.save(self.session, dir + '/model%s_backup.ckpt' % suffix)
-                    with open(dir + '/m%s.obj' % suffix, 'wb') as f:
+                    with open(dir + '/m%s_backup.obj' % suffix, 'wb') as f:
                         pickle.dump(self, f)
 
     def load(self, outdir=None, suffix='', predict=False, restore=True, allow_missing=True):

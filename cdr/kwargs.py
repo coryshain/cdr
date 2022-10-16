@@ -1002,7 +1002,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'n_units_irf',
-        256,
+        32,
         [int, str, None],
         "Number of units per hidden layer in IRF. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_units_irf** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers.",
         aliases=['n_units', 'n_units_decoder']
