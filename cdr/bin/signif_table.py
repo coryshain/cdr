@@ -107,7 +107,7 @@ if __name__ == '__main__':
                     res4 = res3.get(partition, {})
                     diff = str(res4.get('diff', '---'))
                     p = res4.get('p', '---')
-                    if diff == '---' or res4['diff'] < 0:
+                    if diff == '---' or (args.positive_only and res4['diff'] < 0):
                         p = '---'
                     if p != '---':
                         p = '%0.4f' % p
@@ -127,7 +127,7 @@ if __name__ == '__main__':
         print('    & %s\\\\' % ' & '.join(['\\multcolumns{%d}{c}{%s}' % (2 * len(partitions), response) for dataset in datasets for response in responses[dataset]]))
         if len(partitions) > 1:
             print('    & %s\\\\' % ' & '.join(['\\multcolumns{2}{c}{%s}' % partition for dataset in datasets for response in responses[dataset] for partition in partitions]))
-        print('    Comparison & %s\\\\' % ' & '.join(['$\\Delta$LL & $p$'] * (len(datasets) * len(responses) * len(partitions))))
+        print('    Comparison & %s\\\\' % ' & '.join(['$\\Delta$LL & $p$' * (len(responses[dataset]) * len(partitions)) for dataset in datasets]))
         for row in rows:
             print('    ' + ' & '.join(row) + '\\\\')
         print('  \\end{tabular}')
