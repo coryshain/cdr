@@ -99,6 +99,7 @@ if __name__ == '__main__':
     argparser.add_argument('-s', '--systems',  nargs='+', default=None, help='Models to treat as (non-baseline) systems.')
     argparser.add_argument('-S', '--system_names',  nargs='+', default=None, help='Names of systems (should be in 1-1 alignment with ``systems``. If not provided, names will be inferred from systems.')
     argparser.add_argument('-p', '--partitions',  nargs='+', default=None, help='Names of partitions to evaluate. If not provided, defaults to ``"train"``, ``"dev"``, ``"test"``.')
+    argparser.add_argument('-a', '--agg', type=str, default='mean', help='Aggregation function to use over ensembles. E.g., ``"mean"``, ``"median"``, ``"min"``, ``"max"``.')
     argparser.add_argument('-c', '--csv', action='store_true', help='Output to CSV.')
     args = argparser.parse_args()
 
@@ -207,6 +208,7 @@ if __name__ == '__main__':
                                         line = f.readline()
 
         # Aggregate over any ensembles
+        agg_fn = getattr(np, args.agg)
         for j, system_name in enumerate(system_names_all):
             for task_name in results:
                 if system_name not in results[task_name]:
@@ -227,7 +229,7 @@ if __name__ == '__main__':
                                 results[task_name][system_name][partition]['converged'].append(results[task_name][submodel][partition]['converged'])
                     if submodels:
                         for partition in results[task_name][system_name]:
-                            results[task_name][system_name][partition]['loss'] = np.mean(
+                            results[task_name][system_name][partition]['loss'] = agg_fn(
                                 results[task_name][system_name][partition]['loss']
                             )
                             results[task_name][system_name][partition]['converged'] = np.mean(

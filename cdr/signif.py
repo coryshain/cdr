@@ -6,7 +6,7 @@ import numpy as np
 from .util import stderr
 
 
-def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', nested=False, verbose=True):
+def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', agg='mean', nested=False, verbose=True):
     """
     Perform a paired permutation test for significance.
 
@@ -15,6 +15,7 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', nested=False, v
     :param n_iter: ``int``; number of resampling iterations.
     :param n_tails: ``int``; number of tails.
     :param mode: ``str``; one of ``["mse", "loglik"]``, the type of error used (SE's are averaged while loglik's are summed).
+    :param agg: ``str``; aggregation function over ensemble components. One of ``'mean'``, ``'median'``, ``'min'``, ``'max'``. 
     :param nested: ``bool``; assume that the second model is nested within the first.
     :param verbose: ``bool``; report progress logs to standard error.
     :return:
@@ -48,6 +49,8 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', nested=False, v
     n_b = b.shape[1]
     err_table = np.concatenate([a, b], axis=1)
 
+    agg_fn = getattr(np, agg)
+
     hits = 0
     if verbose:
         stderr('Difference in test statistic: %s\n' % base_diff)
@@ -61,8 +64,8 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', nested=False, v
 
         ix = np.random.random(err_table.shape).argsort(axis=1)
         err_table = np.take_along_axis(err_table, ix, axis=1)
-        m1 = err_table[:, :n_a].mean(axis=1)
-        m2 = err_table[:, n_a:].mean(axis=1)
+        m1 = agg_fn(err_table[:, :n_a], axis=1)
+        m2 = agg_fn([:, n_a:], axis=1)
 
         if mode == 'mse':
             cur_diff = m1.mean() - m2.mean()
