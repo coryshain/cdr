@@ -71,7 +71,7 @@ if __name__ == '__main__':
         pmetric = 'mse'
     else:
         pmetric = args.metric
-    p_value, base_diff, diffs = permutation_test(baseline_cur[select], model_cur[select], n_iter=10000, n_tails=args.tails, mode=pmetric, nested=True)
+    p_value, _, _, base_diff, diffs = permutation_test(baseline_cur[select], model_cur[select], n_iter=10000, n_tails=args.tails, mode=pmetric, nested=True)
     stderr('\n')
     out_path = args.outdir + '/%s_PT.txt' % args.name
     if not os.path.exists(args.outdir):

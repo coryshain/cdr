@@ -15,11 +15,13 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', agg='mean', nes
     :param n_iter: ``int``; number of resampling iterations.
     :param n_tails: ``int``; number of tails.
     :param mode: ``str``; one of ``["mse", "loglik"]``, the type of error used (SE's are averaged while loglik's are summed).
-    :param agg: ``str``; aggregation function over ensemble components. One of ``'mean'``, ``'median'``, ``'min'``, ``'max'``. 
+    :param agg: ``str``; aggregation function over ensemble components. E.g., ``'mean'``, ``'median'``, ``'min'``, ``'max'``. 
     :param nested: ``bool``; assume that the second model is nested within the first.
     :param verbose: ``bool``; report progress logs to standard error.
     :return:
     """
+
+    agg_fn = getattr(np, agg)
 
     if len(a.shape) < 2:
         a = a[..., None]
@@ -27,16 +29,22 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', agg='mean', nes
         b = b[..., None]
 
     if mode == 'mse':
-        base_diff = a.mean(axis=1).mean() - b.mean(axis=1).mean()
+        a_perf = agg_fn(a, axis=1).mean()
+        b_perf = agg_fn(b, axis=1).mean()
+        base_diff = a_perf - b_perf
         if nested and base_diff <= 0:
             return (1.0, base_diff, np.zeros((n_iter,)))
     elif mode == 'loglik':
-        base_diff = a.mean(axis=1).sum() - b.mean(axis=1).sum()
+        a_perf = agg_fn(a, axis=1).sum()
+        b_perf = agg_fn(b, axis=1).sum()
+        base_diff = a_perf - b_perf
         if nested and base_diff >= 0:
             return (1.0, base_diff, np.zeros((n_iter,)))
     elif mode == 'corr':
         denom = len(a) - 1
-        base_diff = (a.mean(axis=1).sum() - b.mean(axis=1).sum()) / denom
+        a_perf = agg_fn(a, axis=1).sum() / denom
+        b_perf = agg_fn(b, axis=1).sum() / denom
+        base_diff = a_perf - b_perf
         if nested and base_diff >= 0:
             return (1.0, base_diff, np.zeros((n_iter,)))
     else:
@@ -48,8 +56,6 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', agg='mean', nes
     n_a = a.shape[1]
     n_b = b.shape[1]
     err_table = np.concatenate([a, b], axis=1)
-
-    agg_fn = getattr(np, agg)
 
     hits = 0
     if verbose:
@@ -65,7 +71,7 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', agg='mean', nes
         ix = np.random.random(err_table.shape).argsort(axis=1)
         err_table = np.take_along_axis(err_table, ix, axis=1)
         m1 = agg_fn(err_table[:, :n_a], axis=1)
-        m2 = agg_fn([:, n_a:], axis=1)
+        m2 = agg_fn(err_table[:, n_a:], axis=1)
 
         if mode == 'mse':
             cur_diff = m1.mean() - m2.mean()
@@ -91,7 +97,7 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', agg='mean', nes
     if verbose:
         stderr('\n')
 
-    return p, base_diff, diffs
+    return p, a_perf, b_perf, base_diff, diffs
 
 
 def correlation_test(y, x1, x2, nested=False, verbose=True):
