@@ -70,15 +70,15 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', agg='mean', nes
 
         ix = np.random.random(err_table.shape).argsort(axis=1)
         err_table = np.take_along_axis(err_table, ix, axis=1)
-        m1 = agg_fn(err_table[:, :n_a], axis=1)
-        m2 = agg_fn(err_table[:, n_a:], axis=1)
+        m1 = err_table[:, :n_a]
+        m2 = err_table[:, n_a:]
 
         if mode == 'mse':
-            cur_diff = m1.mean() - m2.mean()
+            cur_diff = agg_fn(m1.mean(axis=0), axis=1) - agg_fn(m2.mean(axis=0), axis=1)
         elif mode == 'loglik':
-            cur_diff = m1.sum() - m2.sum()
+            cur_diff = agg_fn(m1.sum(axis=0), axis=1) - agg_fn(m2.sum(axis=0), axis=1)
         elif mode == 'corr':
-            cur_diff = (m1.sum() - m2.sum()) / denom
+            cur_diff = (agg_fn(m1.sum(axis=0), axis=1) - agg_fn(m2.sum(axis=0), axis=1)) / denom
         diffs[i] = cur_diff
 
         if n_tails == 1:
