@@ -29,21 +29,21 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', agg='mean', nes
         b = b[..., None]
 
     if mode == 'mse':
-        a_perf = agg_fn(a, axis=1).mean()
-        b_perf = agg_fn(b, axis=1).mean()
+        a_perf = agg_fn(a.mean(axis=0))
+        b_perf = agg_fn(b.mean(axis=0))
         base_diff = a_perf - b_perf
         if nested and base_diff <= 0:
             return (1.0, base_diff, np.zeros((n_iter,)))
     elif mode == 'loglik':
-        a_perf = agg_fn(a, axis=1).sum()
-        b_perf = agg_fn(b, axis=1).sum()
+        a_perf = agg_fn(a.sum(axis=0))
+        b_perf = agg_fn(b.sum(axis=0))
         base_diff = a_perf - b_perf
         if nested and base_diff >= 0:
             return (1.0, base_diff, np.zeros((n_iter,)))
     elif mode == 'corr':
         denom = len(a) - 1
-        a_perf = agg_fn(a, axis=1).sum() / denom
-        b_perf = agg_fn(b, axis=1).sum() / denom
+        a_perf = agg_fn(a.sum(axis=0)) / denom
+        b_perf = agg_fn(b.sum(axis=0)) / denom
         base_diff = a_perf - b_perf
         if nested and base_diff >= 0:
             return (1.0, base_diff, np.zeros((n_iter,)))
@@ -74,11 +74,11 @@ def permutation_test(a, b, n_iter=10000, n_tails=2, mode='loss', agg='mean', nes
         m2 = err_table[:, n_a:]
 
         if mode == 'mse':
-            cur_diff = agg_fn(m1.mean(axis=0), axis=1) - agg_fn(m2.mean(axis=0), axis=1)
+            cur_diff = agg_fn(m1.mean(axis=0)) - agg_fn(m2.mean(axis=0))
         elif mode == 'loglik':
-            cur_diff = agg_fn(m1.sum(axis=0), axis=1) - agg_fn(m2.sum(axis=0), axis=1)
+            cur_diff = agg_fn(m1.sum(axis=0)) - agg_fn(m2.sum(axis=0))
         elif mode == 'corr':
-            cur_diff = (agg_fn(m1.sum(axis=0), axis=1) - agg_fn(m2.sum(axis=0), axis=1)) / denom
+            cur_diff = (agg_fn(m1.sum(axis=0)) - agg_fn(m2.sum(axis=0))) / denom
         diffs[i] = cur_diff
 
         if n_tails == 1:
