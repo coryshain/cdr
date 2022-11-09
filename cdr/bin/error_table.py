@@ -80,7 +80,7 @@ def results_to_csv(results, systems, baselines=None, indent=4, base_partitions=N
         out.append(tuple(new_row(b, results, tasks, base_partitions=base_partitions)[:-3].split(' & ')))
     for s in systems:
         out.append(tuple(new_row(s, results, tasks, base_partitions=base_partitions)[:-3].split(' & ')))
- 
+
     out = pd.DataFrame(out, columns=cols)
 
     return out.to_csv(None, index=False)
@@ -99,7 +99,7 @@ if __name__ == '__main__':
     argparser.add_argument('-s', '--systems',  nargs='+', default=None, help='Models to treat as (non-baseline) systems.')
     argparser.add_argument('-S', '--system_names',  nargs='+', default=None, help='Names of systems (should be in 1-1 alignment with ``systems``. If not provided, names will be inferred from systems.')
     argparser.add_argument('-p', '--partitions',  nargs='+', default=None, help='Names of partitions to evaluate. If not provided, defaults to ``"train"``, ``"dev"``, ``"test"``.')
-    argparser.add_argument('-a', '--agg', type=str, default='mean', help='Aggregation function to use over ensembles. E.g., ``"mean"``, ``"median"``, ``"min"``, ``"max"``.')
+    argparser.add_argument('-a', '--agg', type=str, default='median', help='Aggregation function to use over ensembles. E.g., ``"mean"``, ``"median"``, ``"min"``, ``"max"``.')
     argparser.add_argument('-c', '--csv', action='store_true', help='Output to CSV.')
     args = argparser.parse_args()
 
