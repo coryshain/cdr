@@ -558,8 +558,6 @@ class CDRModel(object):
     }
 
     N_QUANTILES = 41
-    PLOT_QUANTILE_RANGE = 0.9
-    PLOT_QUANTILE_IX = int((1 - PLOT_QUANTILE_RANGE) / 2 * N_QUANTILES)
     PREDICTIVE_DISTRIBUTIONS = Formula.PREDICTIVE_DISTRIBUTIONS.copy()
     for x in PREDICTIVE_DISTRIBUTIONS:
         PREDICTIVE_DISTRIBUTIONS[x]['dist'] = globals()[PREDICTIVE_DISTRIBUTIONS[x]['dist']]
@@ -9188,6 +9186,7 @@ class CDRModel(object):
             pair_manipulations=False,
             include_interactions=False,
             reference_type=None,
+            plot_quantile_range=0.9,
             xaxis=None,
             xmin=None,
             xmax=None,
@@ -9236,6 +9235,7 @@ class CDRModel(object):
         :param pair_manipulations: ``bool``; Whether to apply the manipulations to the reference input. If ``False``, all manipulations are compared to the same reference. For example, when plotting by-subject IRFs by subject, each subject might have a difference base response. In this case, set **pair_manipulations** to ``True`` in order to match the random effects used to compute the reference response and the response of interest.
         :param include_interactions: ``bool``; Whether to include interaction terms in plotting the influence of a manipulation.
         :param reference_type: ``bool``; Type of reference to use. If ``0``, use a zero-valued reference. If ``'mean'``, use the training set mean for all variables. If ``None``, use the default reference vector specified in the model's configuration file.
+        :param plot_quantile_range: ``float``; Quantile range to use for plotting. E.g., 0.9 uses the interdecile range.
         :param xaxis: ``list``, ``numpy`` vector, or ``None``; Vector of values to use for the x-axis. If ``None``, inferred.
         :param xmin: ``float`` or ``None``; Minimum value for x-axis (if axis inferred). If ``None``, inferred.
         :param xmax: ``float`` or ``None``; Maximum value for x-axis (if axis inferred). If ``None``, inferred.
@@ -9254,6 +9254,8 @@ class CDRModel(object):
 
         if level is None:
             level = 95
+
+        plot_quantile_ix = int((1 - plot_quantile_range) / 2 * self.N_QUANTILES)
 
         if responses is None:
             if self.n_response == 1:
@@ -9440,7 +9442,7 @@ class CDRModel(object):
                 if ref_varies:
                     X_ref_mask[ix] = 0
                 if axis is None:
-                    qix = self.PLOT_QUANTILE_IX
+                    qix = plot_quantile_ix
                     lq = self.impulse_quantiles_arr[qix][ix]
                     uq = self.impulse_quantiles_arr[self.N_QUANTILES - qix - 1][ix]
                     select = np.isclose(uq - lq, 0)
@@ -10020,6 +10022,7 @@ class CDRModel(object):
             plot_n_time_units=None,
             plot_n_time_points=None,
             reference_type=None,
+            plot_quantile_range=0.9,
             plot_step=None,
             plot_step_default=None,
             generate_univariate_irf_plots=None,
@@ -10077,6 +10080,7 @@ class CDRModel(object):
         :param plot_n_time_units: ``float`` or ``None``; resolution of plot axis (for 3D plots, uses sqrt of this number for each axis). If ``None``, use default setting.
         :param plot_support_start: ``float`` or ``None``; start time for IRF plots. If ``None``, use default setting.
         :param reference_type: ``bool``; whether to use the predictor means as baseline reference (otherwise use zero).
+        :param plot_quantile_range: ``float``; quantile range to use for plotting. E.g., 0.9 uses the interdecile range.
         :param plot_step: ``str`` or ``None``; size of step by predictor to take above reference in univariate IRF plots. Structured as space-delimited pairs ``NAME=FLOAT``. Any predictor without a specified step size will inherit from **plot_step_default**.
         :param plot_step_default: ``float``, ``str``, or ``None``; default size of step to take above reference in univariate IRF plots, if not specified in **plot_step**. Either a float or the string ``'sd'``, which indicates training sample standard deviation.
         :param generate_univariate_irf_plots: ``bool``; whether to plot univariate IRFs over time.
@@ -10395,6 +10399,7 @@ class CDRModel(object):
                     manipulations=manipulations,
                     pair_manipulations=True,
                     reference_type=reference_type,
+                    plot_quantile_range=plot_quantile_range,
                     xres=plot_n_time_points,
                     n_samples=n_samples,
                     level=level,
@@ -10507,6 +10512,7 @@ class CDRModel(object):
                             manipulations=manipulations,
                             pair_manipulations=True,
                             reference_type=reference_type,
+                            plot_quantile_range=plot_quantile_range,
                             xmin=xmin,
                             xmax=xmax,
                             xres=int(np.ceil(np.sqrt(plot_n_time_points))),

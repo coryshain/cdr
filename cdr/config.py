@@ -55,7 +55,7 @@ class Config(object):
         self.Y_dev = data.get('Y_dev', data.get('y_dev', None))
         self.Y_test = data.get('Y_test', data.get('y_test', None))
 
-        sep = data.get('sep', ' ')
+        sep = data.get('sep', ',')
         if sep.lower() in ['', "' '", '" "', 's', 'space']:
             sep = ' '
         self.sep = sep
