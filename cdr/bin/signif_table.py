@@ -8,7 +8,7 @@ try:
     from yaml import CLoader as Loader, CDumper as Dumper
 except ImportError:
     from yaml import Loader, Dumper
-
+from statsmodels.stats.multitest import fdrcorrection
 import argparse
 
 delimiters = [
@@ -61,6 +61,7 @@ if __name__ == '__main__':
     group_order = settings.get('group_order', None)
     if group_order is None:
         group_order = sorted(list(group2comparison.keys()))    
+    fdr_by_group = settings.get('fdr_by_group', False)
 
     results = {}
     for dir_path in args.paths:
@@ -141,6 +142,27 @@ if __name__ == '__main__':
                 _partitions.append(x)
         partitions = _partitions                
 
+    if fdr_by_group:
+        for group in group2comparison:
+            fdr = {}
+            for comparison in group2comparison[group]:
+                if comparison in all_results:
+                    for dataset in all_results[comparison]:
+                        for response in all_results[comparison][dataset]:
+                            for partition in all_results[comparison][dataset][response]:
+                                key = (dataset, response, partition)
+                                if key not in fdr:
+                                   fdr[key] = {}
+                                fdr[key][comparison] = all_results[comparison][dataset][response][partition]['p']
+            for key in fdr:
+                comparisons = sorted(list(fdr[key].keys()))
+                p = [fdr[key][comparison] for comparison in comparisons]
+                _, p = fdrcorrection(p, method='negcorr')
+                
+                for comparison, _p in zip(comparisons, p):
+                    dataset, response, parition = key
+                    all_results[comparison][dataset][response][partition]['p'] = _p
+
     rows = []
     if group2comparison:
         comparisons = group2comparison
@@ -150,7 +172,10 @@ if __name__ == '__main__':
     comparisons_found = {}
     for group in group_order:
         for comparison in comparisons[group]:
-            comparison_name = process_name(comparison)
+            if args.csv:
+                comparison_name = comparison
+            else:
+                comparison_name = process_name(comparison)
             row = [comparison_name, group]
             res1 = all_results.get(comparison, None)
             if res1 is None:
@@ -173,11 +198,17 @@ if __name__ == '__main__':
                         if delim in comparison_name:
                             split = comparison_name.split(delim)
                             if len(split) == 2:
-                                a, b = split
-                                a = '{\\color{cyan}%s}' % a
-                                b = '{\\color{magenta}%s}' % b
-                                row[0] = delim.join([a, b])
-                                comparisons_found[group][-1] = row[0]
+                                if args.csv:
+                                    _comparison_name = comparison_name
+                                else:
+                                    a, b = split
+                                    a = '{\\color{cyan}%s}' % a
+                                    b = '{\\color{magenta}%s}' % b
+                                    _comparison_name = delim.join([a, b])
+                            else:
+                                _comparison_name = comparison_name
+                            row[0] = _comparison_name
+                            comparisons_found[group][-1] = row[0]
                 for dataset in datasets:
                     res2 = res1.get(dataset, {})
                     for response in responses[dataset]:
