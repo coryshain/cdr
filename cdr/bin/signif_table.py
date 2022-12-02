@@ -81,9 +81,11 @@ if __name__ == '__main__':
                 for line in f:
                     line = line.strip()
                     if line.startswith('Difference:'):
-                        result['diff'] = int(round(-float(line[12:])))
+                        val = line.strip().split()[1]
+                        result['diff'] = int(round(-float(val)))
                     elif line.startswith('p:'):
-                        result['p'] = float(line[12:].replace('*', '')) 
+                        val = line.strip().split()[1]
+                        result['p'] = float(val.replace('*', '')) 
             _results.append(result)
         results[dir_path] = _results
 
