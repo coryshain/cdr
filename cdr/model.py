@@ -10044,6 +10044,7 @@ class CDRModel(object):
             level=95,
             n_samples=None,
             prefix=None,
+            suffix='.png',
             use_legend=None,
             use_line_markers=False,
             transparent_background=False,
@@ -10102,6 +10103,7 @@ class CDRModel(object):
         :param level: ``float``; significance level for confidence/credible intervals, if supported.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param prefix: ``str`` or ``None``; prefix appended to output filenames. If ``None``, no prefix added.
+        :param suffix: ``str``; file extension of plot outputs.
         :param use_legend: ``bool`` or ``None``; whether to include a legend in plots with multiple components. If ``None``, use default setting.
         :param use_line_markers: ``bool``; whether to add markers to lines in univariate IRF plots.
         :param transparent_background: ``bool``; whether to use a transparent background. If ``False``, uses a white background.
@@ -10317,7 +10319,7 @@ class CDRModel(object):
                             filename += '_' + ranef_level_names[g]
                         if mc:
                             filename += '_mc'
-                        filename += '.png'
+                        filename += suffix
 
                         _plot_y = plot_y[_response][_dim_name]
                         _lq = None if lq is None else lq[_response][_dim_name]
@@ -10361,7 +10363,7 @@ class CDRModel(object):
                                 names_cur,
                                 sort_names=sort_names,
                                 outdir=self.outdir,
-                                filename=filename[:-4] + '_hm.png',
+                                filename=filename[:-4] + '_hm' + suffix,
                                 irf_name_map=irf_name_map,
                                 plot_x_inches=plot_x_inches,
                                 plot_y_inches=plot_y_inches,
@@ -10441,7 +10443,7 @@ class CDRModel(object):
                                 filename += '_' + ranef_level_names[g]
                             if mc:
                                 filename += '_mc'
-                            filename += '.png'
+                            filename += suffix
 
                             plot_irf(
                                 plot_x,
@@ -10560,7 +10562,7 @@ class CDRModel(object):
                                         filename += '_' + ranef_level_names[g]
                                     if mc:
                                         filename += '_mc'
-                                    filename += '.png'
+                                    filename += suffix
 
                                     plot_surface(
                                         plot_x,
@@ -10597,7 +10599,7 @@ class CDRModel(object):
                     plot_x = self.session.run(self.support, feed_dict=fd)
                     plot_y = self.session.run(self.error_distribution_plot[_response], feed_dict=fd)
 
-                    plot_name = 'error_distribution_%s.png' % sn(_response)
+                    plot_name = 'error_distribution_%s%s' % (sn(_response), suffix)
 
                     lq = None
                     uq = None

@@ -1624,6 +1624,12 @@ PLOT_KWARGS_CORE = [
         "Prefix string to prepend to plot image files."
     ),
     Kwarg(
+        'prefix',
+        '.png',
+        str,
+        "File extension to use for plot outputs."
+    ),
+    Kwarg(
         'key',
         None,
         [str, None],
