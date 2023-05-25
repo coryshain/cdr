@@ -817,8 +817,12 @@ class CDRModel(object):
                 cov_blocks.append(block.cov().values)
                 names += list(block.columns)
             corr = scipy.linalg.block_diag(*corr_blocks)
+            if corr.shape == (1, 0):
+                corr = np.zeros((0, 0))
             corr = pd.DataFrame(corr, index=names, columns=names)
             cov = scipy.linalg.block_diag(*cov_blocks)
+            if cov.shape == (1, 0):
+                cov = np.zeros((0, 0))
             cov = pd.DataFrame(cov, index=names, columns=names)
             means = pd.DataFrame([self.impulse_means[x] for x in cov.index], index=cov.index, columns=['val'])
             self.impulse_corr = corr
@@ -853,11 +857,17 @@ class CDRModel(object):
                     _last_obs = np.array(_last_obs, dtype=getattr(np, self.int_type))
                     _X_time = np.array(X[i].time, dtype=getattr(np, self.float_type))
                     X_time.append(_X_time)
+                    n_cells = len(_first_obs) * self.history_length
+                    step = max(1, np.round(n_cells / 1e8))
+                    if step > 1:
+                        stderr('\r      Dataset too large to compute exact temporal quantiles.' + 
+                               '\n      Approximating using %0.02f%% of data.\n' % (1./step * 100))
                     for j, (s, e) in enumerate(zip(_first_obs, _last_obs)):
-                        _X_time_slice = _X_time[s:e]
-                        t_delta = _Y_time[j] - _X_time_slice
-                        t_deltas.append(t_delta)
-                        t_delta_maxes.append(_Y_time[j] - _X_time[s])
+                        if j % step == 0:
+                            _X_time_slice = _X_time[s:e]
+                            t_delta = _Y_time[j] - _X_time_slice
+                            t_deltas.append(t_delta)
+                            t_delta_maxes.append(_Y_time[j] - _X_time[s])
         X_time = np.concatenate(X_time, axis=0)
         Y_time = np.concatenate(Y_time, axis=0)
         t_deltas = np.concatenate(t_deltas, axis=0)
@@ -1194,7 +1204,7 @@ class CDRModel(object):
             self.n_response_df = max(self.n_response_df, max(self.response_to_df_ix[_response]))
         self.n_response_df += 1
 
-        if self.impulse_sampler_means is None:
+        if self.impulse_sampler_means is None or not len(self.impulse_sampler_means):
             self.impulse_sampler = None
         else:
             self.impulse_sampler = scipy.stats.multivariate_normal(
@@ -8248,10 +8258,11 @@ class CDRModel(object):
                                 out['log_lik'][_response][i:i + B] = _out['log_lik'][_response]
 
                     # Convert predictions to category labels, if applicable
-                    for _response in out['preds']:
-                        if self.is_categorical(_response):
-                            mapper = np.vectorize(lambda x: self.response_ix_to_category[_response].get(x, x))
-                            out['preds'][_response] = mapper(out['preds'][_response])
+                    if return_preds:
+                        for _response in out['preds']:
+                            if self.is_categorical(_response):
+                                mapper = np.vectorize(lambda x: self.response_ix_to_category[_response].get(x, x))
+                                out['preds'][_response] = mapper(out['preds'][_response])
 
                     # Split into per-file predictions.
                     # Exclude the length of last file because it will be inferred.
@@ -8549,6 +8560,7 @@ class CDRModel(object):
             X_in_Y_names=None,
             n_samples=None,
             algorithm='MAP',
+            return_preds=None,
             sum_outputs_along_T=True,
             sum_outputs_along_K=True,
             dump=False,
@@ -8579,6 +8591,7 @@ class CDRModel(object):
         :param X_in_Y_names: ``list`` of ``str``; names of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, no such predictors.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
+        :param return_preds: ``bool``; whether to return predictions as well as likelihoods. If ``None``, defaults are chosen based on predictive distribution(s).
         :param sum_outputs_along_T: ``bool``; whether to sum IRF-weighted predictors along the time dimension. Must be ``True`` for valid convolution. Setting to ``False`` is useful for timestep-specific evaluation.
         :param sum_outputs_along_K: ``bool``; whether to sum IRF-weighted predictors along the predictor dimension. Must be ``True`` for valid convolution. Setting to ``False`` is useful for impulse-specific evaluation.
         :param dump: ``bool``; whether to save generated data and evaluations to disk.
@@ -8596,13 +8609,19 @@ class CDRModel(object):
         else:
             partition_str = ''
 
+        if return_preds is None:
+            return_preds = True
+            for response in self.response_names:
+                if self.get_response_dist_name(response) in ('sinharcsinh', 'johnsonsu'):
+                    return_preds = False  # These distributions currently must bootstrap the mode, which is slow, so turned off by default.
+
         cdr_out = self.predict(
             X,
             Y=Y,
             X_in_Y_names=X_in_Y_names,
             n_samples=n_samples,
             algorithm=algorithm,
-            return_preds=True,
+            return_preds=return_preds,
             return_loglik=True,
             sum_outputs_along_T=sum_outputs_along_T,
             sum_outputs_along_K=sum_outputs_along_K,
@@ -8611,16 +8630,18 @@ class CDRModel(object):
             verbose=verbose
         )
 
-        preds = cdr_out['preds']
+        if return_preds:
+            preds = cdr_out['preds']
         log_lik = cdr_out['log_lik']
 
         # Expand arrays to be B x T x K
-        for response in preds:
-            for ix in preds[response]:
-                arr = preds[response][ix]
-                while len(arr.shape) < 3:
-                    arr = arr[..., None]
-                preds[response][ix] = arr
+        if return_preds:
+            for response in preds:
+                for ix in preds[response]:
+                    arr = preds[response][ix]
+                    while len(arr.shape) < 3:
+                        arr = arr[..., None]
+                    preds[response][ix] = arr
         for response in log_lik:
             for ix in log_lik[response]:
                 arr = log_lik[response][ix]
@@ -8696,7 +8717,10 @@ class CDRModel(object):
                         else:
                             sel = np.ones(len(_y), dtype=bool)
                         index = _y.index[sel]
-                        _preds = preds[_response][ix][sel]
+                        if return_preds:
+                            _preds = preds[_response][ix][sel]
+                        else:
+                            _preds = None
                         _y = _y[sel]
 
                         if self.is_binary(_response):
@@ -8736,40 +8760,44 @@ class CDRModel(object):
                             metrics['true_variance'][_response][ix] = np.std(_y) ** 2
                             for t in range(T):
                                 for k in range(K):
-                                    __preds = _preds[:, t, k]
-                                    error = np.array(_y - __preds) ** 2
-                                    score = error.mean()
-                                    resid = np.sort(_y - __preds)
-                                    if self.error_distribution_theoretical_quantiles[_response] is None:
-                                        resid_theoretical_q = None
+                                    if return_preds:
+                                        __preds = _preds[:, t, k]
+                                        error = np.array(_y - __preds) ** 2
+                                        score = error.mean()
+                                        resid = np.sort(_y - __preds)
+                                        if self.error_distribution_theoretical_quantiles[_response] is None:
+                                            resid_theoretical_q = None
+                                        else:
+                                            resid_theoretical_q = self.error_theoretical_quantiles(len(resid), _response)
+                                            valid = np.isfinite(resid_theoretical_q)
+                                            resid = resid[valid]
+                                            resid_theoretical_q = resid_theoretical_q[valid]
+                                        D, p_value = self.error_ks_test(resid, _response)
+    
+                                        if metrics['mse'][_response][ix] is None:
+                                            metrics['mse'][_response][ix] = np.zeros((T, K))
+                                        metrics['mse'][_response][ix][t, k] = score
+                                        if metrics['rho'][_response][ix] is None:
+                                            metrics['rho'][_response][ix] = np.zeros((T, K))
+                                        metrics['rho'][_response][ix][t, k] = np.corrcoef(_y, __preds, rowvar=False)[0, 1]
+                                        if metrics['percent_variance_explained'][_response][ix] is None:
+                                            metrics['percent_variance_explained'][_response][ix] = np.zeros((T, K))
+                                        metrics['percent_variance_explained'][_response][ix][
+                                            t, k] = percent_variance_explained(
+                                            _y, __preds)
+                                        if metrics['ks_results'][_response][ix] is None:
+                                            metrics['ks_results'][_response][ix] = (np.zeros((T, K)), np.zeros((T, K)))
+                                        metrics['ks_results'][_response][ix][0][t, k] = D
+                                        metrics['ks_results'][_response][ix][1][t, k] = p_value
                                     else:
-                                        resid_theoretical_q = self.error_theoretical_quantiles(len(resid), _response)
-                                        valid = np.isfinite(resid_theoretical_q)
-                                        resid = resid[valid]
-                                        resid_theoretical_q = resid_theoretical_q[valid]
-                                    D, p_value = self.error_ks_test(resid, _response)
-
-                                    if metrics['mse'][_response][ix] is None:
-                                        metrics['mse'][_response][ix] = np.zeros((T, K))
-                                    metrics['mse'][_response][ix][t, k] = score
-                                    if metrics['rho'][_response][ix] is None:
-                                        metrics['rho'][_response][ix] = np.zeros((T, K))
-                                    metrics['rho'][_response][ix][t, k] = np.corrcoef(_y, __preds, rowvar=False)[0, 1]
-                                    if metrics['percent_variance_explained'][_response][ix] is None:
-                                        metrics['percent_variance_explained'][_response][ix] = np.zeros((T, K))
-                                    metrics['percent_variance_explained'][_response][ix][
-                                        t, k] = percent_variance_explained(
-                                        _y, __preds)
-                                    if metrics['ks_results'][_response][ix] is None:
-                                        metrics['ks_results'][_response][ix] = (np.zeros((T, K)), np.zeros((T, K)))
-                                    metrics['ks_results'][_response][ix][0][t, k] = D
-                                    metrics['ks_results'][_response][ix][1][t, k] = p_value
+                                        error = __preds = None
                     else:
                         err_col_name = error = __preds = _y = None
 
                     _ll = log_lik[_response][ix]
                     if sel is not None:
-                        __preds = pd.Series(__preds, index=index)
+                        if __preds is not None:
+                            __preds = pd.Series(__preds, index=index)
                         _ll = _ll[sel]
                         _ll = pd.Series(np.squeeze(_ll), index=index)
                         if err_col_name is not None and error is not None:
