@@ -2972,6 +2972,7 @@ class BatchNormLayer(object):
                         name='moving_mean',
                         initializer=tf.zeros_initializer(),
                         shape=shape,
+                        collections=['batch_norm'],
                         trainable=False
                     )
                     self.moving_mean_op = None
@@ -2980,6 +2981,7 @@ class BatchNormLayer(object):
                         name='moving_variance',
                         initializer=tf.ones_initializer(),
                         shape=shape,
+                        collections=['batch_norm'],
                         trainable=False
                     )
                     self.moving_variance_op = None
@@ -3220,7 +3222,6 @@ class BatchNormLayerBayes(BatchNormLayer):
                             training=self.training,
                             use_MAP_mode=self.use_MAP_mode,
                             epsilon=self.epsilon,
-                            collections=['batch_norm'],
                             session=self.session
                         )
                         if self.declare_priors_shift:
@@ -3243,7 +3244,6 @@ class BatchNormLayerBayes(BatchNormLayer):
                                     training=self.training,
                                     use_MAP_mode=self.use_MAP_mode,
                                     epsilon=self.epsilon,
-                                    collections=['batch_norm'],
                                     session=self.session
                                 )
                                 if self.declare_priors_shift:
@@ -3271,7 +3271,6 @@ class BatchNormLayerBayes(BatchNormLayer):
                             training=self.training,
                             use_MAP_mode=self.use_MAP_mode,
                             epsilon=self.epsilon,
-                            collections=['batch_norm'],
                             session=self.session
                         )
                         if self.declare_priors_scale:
@@ -3294,7 +3293,6 @@ class BatchNormLayerBayes(BatchNormLayer):
                                     training=self.training,
                                     use_MAP_mode=self.use_MAP_mode,
                                     epsilon=self.epsilon,
-                                    collections=['batch_norm'],
                                     session=self.session
                                 )
                                 if self.declare_priors_scale:
