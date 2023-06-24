@@ -5488,6 +5488,7 @@ class CDRModel(object):
         with self.session.as_default():
             with self.session.graph.as_default():
                 self.ema_vars = tf.get_collection('trainable_variables')
+                self.ema_vars += tf.get_collection('batch_norm')
                 self.ema = tf.train.ExponentialMovingAverage(decay=self.ema_decay if self.ema_decay else 0.)
                 ema_op = self.ema.apply(self.ema_vars)
                 self.ema_ops.append(ema_op)
