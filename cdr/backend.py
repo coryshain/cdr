@@ -2972,7 +2972,7 @@ class BatchNormLayer(object):
                         name='moving_mean',
                         initializer=tf.zeros_initializer(),
                         shape=shape,
-                        collections=['batch_norm'],
+                        collections=[tf.GraphKeys.GLOBAL_VARIABLES, 'batch_norm'],
                         trainable=False
                     )
                     self.moving_mean_op = None
@@ -2981,7 +2981,7 @@ class BatchNormLayer(object):
                         name='moving_variance',
                         initializer=tf.ones_initializer(),
                         shape=shape,
-                        collections=['batch_norm'],
+                        collections=[tf.GraphKeys.GLOBAL_VARIABLES, 'batch_norm'],
                         trainable=False
                     )
                     self.moving_variance_op = None
@@ -3190,7 +3190,7 @@ class BatchNormLayerBayes(BatchNormLayer):
                         name='moving_mean',
                         initializer=tf.zeros_initializer(),
                         shape=shape,
-                        collections=['batch_norm'],
+                        collections=[tf.GraphKeys.GLOBAL_VARIABLES, 'batch_norm'],
                         trainable=False
                     )
                     self.moving_mean_op = None
@@ -3199,7 +3199,7 @@ class BatchNormLayerBayes(BatchNormLayer):
                         name='moving_variance',
                         initializer=tf.ones_initializer(),
                         shape=shape,
-                        collections=['batch_norm'],
+                        collections=[tf.GraphKeys.GLOBAL_VARIABLES, 'batch_norm'],
                         trainable=False
                     )
                     self.moving_variance_op = None
