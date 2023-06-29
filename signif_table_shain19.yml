@@ -1,0 +1,99 @@
+color_by_sign: True
+bold_signif: True
+fdr_by_group: True
+partitions:
+  - test
+
+response_order:
+  - fdurGP
+  - fdur
+
+comparison_name_map:
+  main_v_main-gpt: Predictability over frequency
+  main_v_main-unigramsurpOWT: Frequency over predictability
+  main-gpt_v_main-unigramsurpOWT-gpt: Frequency
+  main-unigramsurpOWT_v_main-unigramsurpOWT-gpt: Predictability
+  log_v_log-gpt: Predictability over frequency
+  log_v_log-unigramsurpOWT: Frequency over predictability
+  log-gpt_v_log-unigramsurpOWT-gpt: Frequency
+  log-unigramsurpOWT_v_log-unigramsurpOWT-gpt: Predictability
+  homoscedastic_v_homoscedastic-gpt: Predictability over frequency
+  homoscedastic_v_homoscedastic-unigramsurpOWT: Frequency over predictability
+  homoscedastic-gpt_v_homoscedastic-unigramsurpOWT-gpt: Frequency
+  homoscedastic-unigramsurpOWT_v_homoscedastic-unigramsurpOWT-gpt: Predictability
+  additive_v_additive-gpt: Predictability over frequency
+  additive_v_additive-unigramsurpOWT: Frequency over predictability
+  additive-gpt_v_additive-unigramsurpOWT-gpt: Frequency
+  additive-unigramsurpOWT_v_additive-unigramsurpOWT-gpt: Predictability
+  loghomoscedastic_v_loghomoscedastic-gpt: Predictability over frequency
+  loghomoscedastic_v_loghomoscedastic-unigramsurpOWT: Frequency over predictability
+  loghomoscedastic-gpt_v_loghomoscedastic-unigramsurpOWT-gpt: Frequency
+  loghomoscedastic-unigramsurpOWT_v_loghomoscedastic-unigramsurpOWT-gpt: Predictability
+  logadditive_v_logadditive-gpt: Predictability over frequency
+  logadditive_v_logadditive-unigramsurpOWT: Frequency over predictability
+  logadditive-gpt_v_logadditive-unigramsurpOWT-gpt: Frequency
+  logadditive-unigramsurpOWT_v_logadditive-unigramsurpOWT-gpt: Predictability
+  homoscedasticadditive_v_homoscedasticadditive-gpt: Predictability over frequency
+  homoscedasticadditive_v_homoscedasticadditive-unigramsurpOWT: Frequency over predictability
+  homoscedasticadditive-gpt_v_homoscedasticadditive-unigramsurpOWT-gpt: Frequency
+  homoscedasticadditive-unigramsurpOWT_v_homoscedasticadditive-unigramsurpOWT-gpt: Predictability
+  loghomoscedasticadditive_v_loghomoscedasticadditive-gpt: Predictability over frequency
+  loghomoscedasticadditive_v_loghomoscedasticadditive-unigramsurpOWT: Frequency over predictability
+  loghomoscedasticadditive-gpt_v_loghomoscedasticadditive-unigramsurpOWT-gpt: Frequency
+  loghomoscedasticadditive-unigramsurpOWT_v_loghomoscedasticadditive-unigramsurpOWT-gpt: Predictability
+ 
+group_order:
+  - Main
+  - Additive
+  - Homoscedastic
+  - Homoscedastic Additive
+  - Log
+  - Log Additive
+  - Log Homoscedastic
+  - Log Homoscedastic Additive
+
+positive_only:
+  - all
+
+groups:
+  Main:
+    - main_v_main-gpt
+    - main_v_main-unigramsurpOWT
+    - main-gpt_v_main-unigramsurpOWT-gpt
+    - main-unigramsurpOWT_v_main-unigramsurpOWT-gpt
+  Log:
+    - log_v_log-gpt
+    - log_v_log-unigramsurpOWT
+    - log-gpt_v_log-unigramsurpOWT-gpt
+    - log-unigramsurpOWT_v_log-unigramsurpOWT-gpt
+  Homoscedastic:
+    - homoscedastic_v_homoscedastic-gpt
+    - homoscedastic_v_homoscedastic-unigramsurpOWT
+    - homoscedastic-gpt_v_homoscedastic-unigramsurpOWT-gpt
+    - homoscedastic-unigramsurpOWT_v_homoscedastic-unigramsurpOWT-gpt
+  Additive:
+    - additive_v_additive-gpt
+    - additive_v_additive-unigramsurpOWT
+    - additive-gpt_v_additive-unigramsurpOWT-gpt
+    - additive-unigramsurpOWT_v_additive-unigramsurpOWT-gpt
+  Log Homoscedastic:
+    - loghomoscedastic_v_loghomoscedastic-gpt
+    - loghomoscedastic_v_loghomoscedastic-unigramsurpOWT
+    - loghomoscedastic-gpt_v_loghomoscedastic-unigramsurpOWT-gpt
+    - loghomoscedastic-unigramsurpOWT_v_loghomoscedastic-unigramsurpOWT-gpt
+  Log Additive:
+    - logadditive_v_logadditive-gpt
+    - logadditive_v_logadditive-unigramsurpOWT
+    - logadditive-gpt_v_logadditive-unigramsurpOWT-gpt
+    - logadditive-unigramsurpOWT_v_logadditive-unigramsurpOWT-gpt
+  Homoscedastic Additive:
+    - homoscedasticadditive_v_homoscedasticadditive-gpt
+    - homoscedasticadditive_v_homoscedasticadditive-unigramsurpOWT
+    - homoscedasticadditive-gpt_v_homoscedasticadditive-unigramsurpOWT-gpt
+    - homoscedasticadditive-unigramsurpOWT_v_homoscedasticadditive-unigramsurpOWT-gpt
+  Log Homoscedastic Additive:
+    - loghomoscedasticadditive_v_loghomoscedasticadditive-gpt
+    - loghomoscedasticadditive_v_loghomoscedasticadditive-unigramsurpOWT
+    - loghomoscedasticadditive-gpt_v_loghomoscedasticadditive-unigramsurpOWT-gpt
+    - loghomoscedasticadditive-unigramsurpOWT_v_loghomoscedasticadditive-unigramsurpOWT-gpt
+

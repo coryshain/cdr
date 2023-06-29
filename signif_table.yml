@@ -1,0 +1,55 @@
+color_by_sign: True
+bold_signif: True
+fdr_by_group: True
+partitions:
+  - test
+
+response_order:
+  - fdur
+  - rt
+  - fdurSPsummed
+  - fdurFP
+  - fdurGP
+  - pooled
+
+comparison_name_map:
+  main_v_main-gpt: Predictability over frequency
+  main_v_main-unigramsurpOWT: Frequency over predictability
+  main-gpt_v_main-unigramsurpOWT-gpt: Frequency
+  main-unigramsurpOWT_v_main-unigramsurpOWT-gpt: Predictability
+  bigram_v_main: Bigram predictability
+  bigram_v_bigram-unigramsurpOWT: Frequency over bigram predictability
+  bigram_v_bigram-gpt: GPT-2 predictability over bigram predictability
+  trigram_v_bigram: Trigram predictability
+  yesinteraction_v_nointeraction: Frequency-predictability interaction
+  dist_v_dist-unigramsurpOWTmu: Frequency effect on $\\mu$
+  dist_v_dist-unigramsurpOWTsigma: Frequency effect on $\\sigma$
+  dist_v_dist-unigramsurpOWTbeta: Frequency effect on $\\beta$
+  dist_v_dist-gptmu: Predictability effect on $\\mu$
+  dist_v_dist-gptsigma: Predictability effect on $\\sigma$
+  dist_v_dist-gptbeta: Predictability effect on $\\beta$
+  
+group_order:
+  - Overall
+
+positive_only:
+  - all
+
+groups:
+  Overall:
+    - main-gpt_v_main-unigramsurpOWT-gpt
+    - main-unigramsurpOWT_v_main-unigramsurpOWT-gpt
+    - main_v_main-unigramsurpOWT
+    - main_v_main-gpt
+    - yesinteraction_v_nointeraction
+    - bigram_v_main
+    - bigram_v_bigram-unigramsurpOWT
+    - bigram_v_bigram-gpt
+    - trigram_v_bigram
+    - dist_v_dist-unigramsurpOWTmu
+    - dist_v_dist-unigramsurpOWTsigma
+    - dist_v_dist-unigramsurpOWTbeta
+    - dist_v_dist-gptmu
+    - dist_v_dist-gptsigma
+    - dist_v_dist-gptbeta
+

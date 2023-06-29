@@ -341,7 +341,7 @@ def plot_surface(
 
     plt.rcParams["font.family"] = "sans-serif"
 
-    fig = plt.figure()
+    fig = plt.figure(constrained_layout=True)
     fig.set_size_inches(plot_x_inches, plot_y_inches)
     ax = fig.gca(projection='3d')
     ax.view_init(50, 215)
@@ -547,6 +547,8 @@ def plot_surface(
         for _x, _y, _z, _uq in zip(*[arr.flatten() for arr in (x, y, z, uq)]):
             ax.plot([_x, _x], [_y, _y], [_z, _uq], c='black', alpha=0.2, zorder=3)
 
+    # fig.tight_layout()
+    
     if title:
         fig.suptitle(title)
 
@@ -566,13 +568,15 @@ def plot_surface(
     if zlim is not None:
         ax.set_zlim(*zlim)
 
+
     if not os.path.exists(outdir):
         os.makedirs(outdir)
     try:
         fig.savefig(
             outdir + '/' + filename,
             dpi=dpi,
-            transparent=transparent_background
+            transparent=transparent_background,
+            bbox_inches='tight'
         )
     except Exception as e:
         stderr('Error saving plot to file %s. Description:\n%s\nSkipping...\n' % (outdir + '/' + filename, e))
