@@ -2936,6 +2936,8 @@ class BatchNormLayer(object):
     @property
     def regularizable_weights(self):
         out = []
+        if self.rescale_activations:
+            out.append(self.gamma)
         for gf in self.rangf_map:
             if self.shift_activations and self.beta_use_ranef:
                 out.append(self.beta_ran[gf])
@@ -3360,6 +3362,8 @@ class LayerNormLayer(object):
     @property
     def regularizable_weights(self):
         out = []
+        if self.rescale_activations:
+            out.append(self.gamma)
         for gf in self.rangf_map:
             if self.shift_activations and self.beta_use_ranef:
                 out.append(self.beta_ran[gf])
