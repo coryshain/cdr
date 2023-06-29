@@ -1493,6 +1493,12 @@ PLOT_KWARGS_CORE = [
         "Type of plotting reference to use. One of ``'sampling'``, ``'mean'``, ``'zero'``, or ``None`` for default."
     ),
     Kwarg(
+        'plot_quantile_range',
+        0.9,
+        float,
+        "Quantile range to use for plotting. E.g., 0.9 uses the interdecile range."
+    ),
+    Kwarg(
         'x_axis_transform',
         None,
         [str, None],
@@ -1615,7 +1621,13 @@ PLOT_KWARGS_CORE = [
         'prefix',
         None,
         [str, None],
-        "Name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot)."
+        "Prefix string to prepend to plot image files."
+    ),
+    Kwarg(
+        'prefix',
+        '.png',
+        str,
+        "File extension to use for plot outputs."
     ),
     Kwarg(
         'key',

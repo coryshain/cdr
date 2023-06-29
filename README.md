@@ -114,6 +114,8 @@ Current reproduction branches are:
  - `acl21` (Shain, 2021)
  - `fMRI_ns_WM` (Shain et al., 2022)
  - `cdrnn_journal` (Shain & Schuler, arXiv)
+ - `pred_fn` (Shain et al., PsyArXiv)
+ - `freq_pred` (Shain, PsyArXiv)
 
 Thus, to reproduce results from ACL21, for example, run `git checkout acl21` from the repository root, and follow instructions in the `README` file.
 The reproduction branches are also useful sources of example configuration files to use as templates for setting up your own experiments, although you should consult the docs for full documentation of the structure of CDR experiment configurations.
@@ -146,3 +148,7 @@ Shain, Cory (2021). CDRNN: Discovering complex dynamics in human language proces
 Shain, Cory and Blank, Idan and Fedorenko, Evelina and Gibson, Edward and Schuler, William (2022). Robust effects of working memory demand during naturalistic language comprehension in language-selective cortex. _Journal of Neuroscience_.
 
 Shain, Cory and Schuler, William (arXiv). A deep learning approach to analyzing continuous-time systems. _arXiv_. [https://arxiv.org/abs/2209.12128](https://arxiv.org/abs/2209.12128)
+
+Shain, Cory and Meister, Clara and Pimentel, Tiago and Cotterell, Ryan and Levy, Roger (2023). Large-Scale Evidence for Logarithmic Effects of Word Predictability on Reading Time. _PsyArXiv_. [https://psyarxiv.com/4hyna/](https://psyarxiv.com/4hyna/)
+
+Shain, Cory (2023). Word frequency and predictability dissociate in naturalistic reading. _PsyArXiv_.

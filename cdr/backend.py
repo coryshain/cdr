@@ -226,6 +226,7 @@ def get_random_variable(
         training=None,
         use_MAP_mode=None,
         epsilon=1e-8,
+        collections=None,
         session=None
 ):
     session = get_session(session)
@@ -273,11 +274,13 @@ def get_random_variable(
             v_q_loc = tf.get_variable(
                 name='%s_q_loc' % name,
                 initializer=loc_initializer,
+                collections=collections,
                 shape=shape
             )
             v_q_scale = tf.get_variable(
                 name='%s_q_scale' % name,
                 initializer=scale_initializer,
+                collections=collections,
                 shape=shape
             )
             v_q_dist = Normal(
@@ -307,6 +310,7 @@ def get_random_variable(
                 initializer=tf.zeros_initializer(),
                 shape=v_eval_sample.shape,
                 dtype=tf.float32,
+                collections=collections,
                 trainable=False
             )
             v_eval_resample = tf.assign(v_eval, v_eval_sample)
@@ -2932,6 +2936,8 @@ class BatchNormLayer(object):
     @property
     def regularizable_weights(self):
         out = []
+        if self.rescale_activations:
+            out.append(self.gamma)
         for gf in self.rangf_map:
             if self.shift_activations and self.beta_use_ranef:
                 out.append(self.beta_ran[gf])
@@ -2968,6 +2974,7 @@ class BatchNormLayer(object):
                         name='moving_mean',
                         initializer=tf.zeros_initializer(),
                         shape=shape,
+                        collections=[tf.GraphKeys.GLOBAL_VARIABLES, 'batch_norm'],
                         trainable=False
                     )
                     self.moving_mean_op = None
@@ -2976,6 +2983,7 @@ class BatchNormLayer(object):
                         name='moving_variance',
                         initializer=tf.ones_initializer(),
                         shape=shape,
+                        collections=[tf.GraphKeys.GLOBAL_VARIABLES, 'batch_norm'],
                         trainable=False
                     )
                     self.moving_variance_op = None
@@ -3184,6 +3192,7 @@ class BatchNormLayerBayes(BatchNormLayer):
                         name='moving_mean',
                         initializer=tf.zeros_initializer(),
                         shape=shape,
+                        collections=[tf.GraphKeys.GLOBAL_VARIABLES, 'batch_norm'],
                         trainable=False
                     )
                     self.moving_mean_op = None
@@ -3192,6 +3201,7 @@ class BatchNormLayerBayes(BatchNormLayer):
                         name='moving_variance',
                         initializer=tf.ones_initializer(),
                         shape=shape,
+                        collections=[tf.GraphKeys.GLOBAL_VARIABLES, 'batch_norm'],
                         trainable=False
                     )
                     self.moving_variance_op = None
@@ -3352,6 +3362,8 @@ class LayerNormLayer(object):
     @property
     def regularizable_weights(self):
         out = []
+        if self.rescale_activations:
+            out.append(self.gamma)
         for gf in self.rangf_map:
             if self.shift_activations and self.beta_use_ranef:
                 out.append(self.beta_ran[gf])

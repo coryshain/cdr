@@ -207,7 +207,7 @@ if __name__ == '__main__':
                                                     r1 = v1.sum() / denom
                                                     r2 = v2.sum() / denom
                                                     rx = (a[select] * b[select]).sum() / (len(a[select]) - 1)
-                                                    p_value, rdiff, _ = permutation_test(
+                                                    p_value, _, _, rdiff, _ = permutation_test(
                                                         v1,
                                                         v2,
                                                         mode='corr',
@@ -384,7 +384,7 @@ if __name__ == '__main__':
                                     r1 = v1.sum() / denom
                                     r2 = v2.sum() / denom
                                     rx = (df1 * df2).sum() / denom
-                                    p_value, rdiff, _ = permutation_test(
+                                    p_value, _, _, rdiff, _ = permutation_test(
                                         v1,
                                         v2,
                                         mode='corr',
