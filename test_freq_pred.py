@@ -27,8 +27,7 @@ RESPONSE_MAP = {
     'provo':              ['fdurSPsummed', 'fdurFP', 'fdurGP'],
 }
 
-# Change to your desired output path for testing results
-results_path = '../results/cdrnn_freq_pred_owt/'
+results_path = 'results'
 
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser('''Run extra signif tests for the CDRNN surprisal study''')
@@ -84,7 +83,7 @@ if __name__ == '__main__':
     assert len(a) == len(b), 'Length mismatch: %s vs. %s' % (len(a), len(b))
 
     name = test_name
-    outdir = '../results/cdrnn_freq_pred_owt/signif/%s' % dataset
+    outdir = '%s/signif/%s' % (results_path, dataset)
     if len(responses) == 1:
         response_name = list(responses)[0]
     else:

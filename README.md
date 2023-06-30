@@ -22,20 +22,19 @@ Once complete, activate the conda environment as follows:
 
 Results depend on both (1) datasets and (2) models as defined in experiment-specific configuration files.
 Data are available for public download from OSF: https://osf.io/8v5qb/.
-
-This reproduction branch assumes the data are all placed into a sibling directory to the repository root called `data`.
-If you wish to place them elsewhere, the paths in the `*.ini` files of the `ini` directory must be updated accordingly.
+The data repository should be downloaded and unzipped to a folder called ``data`` at the root of this directory.
+The configuration files defining all models are located in the `freq_pred_ini` folder.
 
 Individual models can be fitted by running the following command from the repository root:
 
-    python -m cdr.bin.train ini_owt/DATASET.ini -m MODEL_NAME
+    python -m cdr.bin.train freq_pred_ini/DATASET.ini -m MODEL_NAME
 
 However, this study involved hundreds of fitted models that could take weeks to fit sequentially.
 Therefore, this branch assumes reproduction on a SLURM-based compute cluster.
 
 To generate training batch scripts to submit to the job scheduler, run:
 
-    python -m cdr.bin.make_jobs ini_owt/*.ini CONFIG_OPTIONS
+    python -m cdr.bin.make_jobs freq_pred_ini/*.ini CONFIG_OPTIONS
 
 where `CONFIG_OPTIONS` stands in for any scheduler options you want to include. For details, run:
 
@@ -43,7 +42,7 @@ where `CONFIG_OPTIONS` stands in for any scheduler options you want to include. 
 
 To generate test set prediction batch scripts to submit to the job scheduler, run:
 
-    python -m cdr.bin.make_jobs ini_owt/*.ini CONFIG_OPTIONS -j predict -p test
+    python -m cdr.bin.make_jobs freq_pred_ini/*.ini CONFIG_OPTIONS -j predict -p test
 
 To generate significance test batch scripts to submit to the job scheduler, run:
 
@@ -53,17 +52,18 @@ To generate plotthing batch scripts to submit to the job scheduler, run:
 
     python make_plot_jobs.py
 
-Note that you may need to edit the data and/or output paths in the preceding two scripts.
+Note that you may need to edit the source code in the preceding two scripts to allow them to work in your local runtime environment.
+See comments in the code for details.
 
 To submit all existing batch scripts (suffix `*.pbs`), run:
 
     ./qsub.sh *.pbs
 
-Models, plots and testing results will appear in a sibling directory called `results/cdrnn_freq_pred_owt`.
+Models, plots and testing results will appear in a folder called `results` in this directory.
 To check model likelihoods and tabulate significance tests, respectively run:
 
-    python -m cdr.bin.error_table ini_owt/DATASET.ini -m ll
-    python -m cdr.bin.signif_table PATH/TO/TEST/RESULTS -s signif_table.yml
+    python -m cdr.bin.error_table freq_pred_ini/DATASET.ini -m ll
+    python -m cdr.bin.signif_table results/signif/DATASET -s signif_table.yml
 
 Full documentation and API are available here: https://cdr.readthedocs.io/en/latest/.
 
