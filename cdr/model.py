@@ -1193,7 +1193,11 @@ class CDRModel(object):
         self.impulse_df_ix_unique = sorted(list(set(self.impulse_df_ix)))
         self.n_impulse_df = len(self.impulse_df_ix_unique)
         self.impulse_indices = []
-        for i in range(max(self.impulse_df_ix_unique) + 1):
+        if self.impulse_df_ix_unique:
+            max_impulse_df_ix_unique = max(self.impulse_df_ix_unique)
+        else:
+            max_impulse_df_ix_unique = 0
+        for i in range(max_impulse_df_ix_unique + 1):
             arange = np.arange(len(self.form.t.impulses(include_interactions=True)))
             ix = arange[np.where(self.impulse_df_ix == i)[0]]
             self.impulse_indices.append(ix)
@@ -1264,7 +1268,11 @@ class CDRModel(object):
         self.impulse_scale_arr_expanded = s
 
         q = self.impulse_quantiles
-        q = np.stack([q[x] for x in self.impulse_names], axis=1)
+        q = [q[x] for x in self.impulse_names]
+        if len(q):
+            q = np.stack(q, axis=1)
+        else:
+            q = np.zeros((self.N_QUANTILES, 0))
         self.impulse_quantiles_arr = q
         while len(s.shape) < 3:
             q = np.expand_dims(q, axis=1)
@@ -1687,11 +1695,11 @@ class CDRModel(object):
                         tf.convert_to_tensor([
                             self.X_batch_dim,
                             self.history_length + self.future_length,
-                            max(self.n_impulse, 1)
+                            self.n_impulse
                         ]),
                         dtype=self.FLOAT_TF
                     ),
-                    shape=[None, None, max(self.n_impulse, 1)],
+                    shape=[None, None, self.n_impulse],
                     name='X_time'
                 )
                 self.X_mask = tf.placeholder_with_default(
@@ -1699,11 +1707,11 @@ class CDRModel(object):
                         tf.convert_to_tensor([
                             self.X_batch_dim,
                             self.history_length + self.future_length,
-                            max(self.n_impulse, 1)
+                            self.n_impulse
                         ]),
                         dtype=self.FLOAT_TF
                     ),
-                    shape=[None, None, max(self.n_impulse, 1)],
+                    shape=[None, None, self.n_impulse],
                     name='X_mask'
                 )
 
@@ -2314,7 +2322,13 @@ class CDRModel(object):
                         if 'eval_resample' in x:
                             self.resample_ops.append(x['eval_resample'])
                     else:
-                        _coefficient_fixed_base = []
+                        if self.use_distributional_regression:
+                            nparam = self.get_response_nparam(response)
+                        else:
+                            nparam = 1
+                        ndim = self.get_response_ndim(response)
+                        ncoef = 0
+                        _coefficient_fixed_base = tf.zeros([ncoef, nparam, ndim])
                     self.coefficient_fixed_base[response] = _coefficient_fixed_base
 
                     # Random
@@ -4992,8 +5006,16 @@ class CDRModel(object):
                     for j, response_param_name in enumerate(response_param_names):
                         dim_names = self.expand_param_name(response, response_param_name)
                         for k, dim_name in enumerate(dim_names):
-                            self.predictive_distribution_delta[response][dim_name] = output_delta[:, 0, 0, j, k]
-                            self.predictive_distribution_delta_w_interactions[response][dim_name] = output_delta_w_interactions[:, 0, 0, j, k]
+                            if self.use_distributional_regression or j == 0:
+                                self.predictive_distribution_delta[response][dim_name] = output_delta[:, 0, 0, j, k]
+                                self.predictive_distribution_delta_w_interactions[response][dim_name] = output_delta_w_interactions[:, 0, 0, j, k]
+                            else:
+                                self.predictive_distribution_delta[response][dim_name] = tf.zeros_like(
+                                    output_delta[:, 0, 0, 0, k]
+                                )
+                                self.predictive_distribution_delta_w_interactions[response][dim_name] = tf.zeros_like(
+                                    output_delta_w_interactions[:, 0, 0, 0, k]
+                                )
 
                     response_dist, response_dist_src, response_params = self._initialize_predictive_distribution_inner(
                         response,
