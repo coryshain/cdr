@@ -51,29 +51,29 @@ if __name__ == '__main__':
         model_list = sorted(set(p.model_list) | set(p.ensemble_list))
         models = filter_models(model_list, args.models, cdr_only=True)
 
-        prefix = plot_config.get('prefix', None)
+        prefix = plot_config['prefix']
         if prefix is None:
             prefix = '_'.join([x for x in p.outdir.split('/') if x not in ['.', '..']])
         key = plot_config.get('key', None)
 
-        n_time_units = plot_config.get('plot_n_time_units', p.get('plot_n_time_units', 2.5))
-        reference_time = plot_config.get('reference_time', p.get('reference_time', 0.))
-        resolution = plot_config.get('plot_n_time_points', p.get('plot_n_time_points', 1024))
-        plot_x_inches = plot_config.get('plot_x_inches', p.get('plot_x_inches', 6.))
-        plot_y_inches = plot_config.get('plot_y_inches', p.get('plot_y_inches', 4.))
-        ylim = plot_config.get('ylim', None)
-        cmap = plot_config.get('cmap', p.get('cmap', 'gist_rainbow'))
-        dpi = plot_config.get('dpi', p.get('dpi', 300))
+        n_time_units = plot_config['plot_n_time_units']
+        reference_time = plot_config['reference_time']
+        resolution = plot_config['plot_n_time_points']
+        plot_x_inches = plot_config['plot_x_inches']
+        plot_y_inches = plot_config['plot_y_inches']
+        ylim = plot_config['ylim']
+        cmap = plot_config['cmap']
+        dpi = plot_config['dpi']
         name_map = p.irf_name_map
-        legend = plot_config.get('use_legend', p.get('plot_legend', True))
-        markers = plot_config.get('use_markers', False)
-        transparent_background = plot_config.get('transparent_background', False)
-        plot_true_synthetic = plot_config.get('plot_true_synthetic', False)
-        sort_names =  plot_config.get('sort_names', True)
-        prop_cycle_length = plot_config.get('prop_cycle_length', None)
-        prop_cycle_map = plot_config.get('prop_cycle_map', None)
+        legend = plot_config['use_legend']
+        markers = plot_config['use_line_markers']
+        transparent_background = plot_config['transparent_background']
+        plot_true_synthetic = plot_config['plot_true_synthetic']
+        sort_names =  plot_config['sort_names']
+        prop_cycle_length = plot_config['prop_cycle_length']
+        prop_cycle_map = plot_config['prop_cycle_map']
 
-        plot_kwargs = {x: plot_config.settings_core[x] for x in plot_config.settings_core if x not in ('prefix', 'key')}
+        plot_kwargs = {x: plot_config[x] for x in plot_config.settings_core if x not in ('prefix', 'key',)}
         plot_kwargs.update(extra_kwargs)
 
         synth_path = os.path.dirname(os.path.dirname(p.X_train)) + '/d.obj'
