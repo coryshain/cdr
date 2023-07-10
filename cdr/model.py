@@ -2783,9 +2783,6 @@ class CDRModel(object):
                     fixef_ix = names2ix(self.fixed_coef_names, self.coef_names)
                     coef_ids = self.coef_names
 
-                    print(fixef_ix)
-                    print(self.coefficient_fixed_base[response])
-
                     coefficient_fixed = self._scatter_along_axis(
                         fixef_ix,
                         self.coefficient_fixed_base[response],
@@ -4286,8 +4283,6 @@ class CDRModel(object):
                                 irf_out
                             )
 
-                        # irf_out = tf.Print(irf_out, ['t_delta', t_delta, 'X_time', X_time, 'irf_out', irf_out], summarize=100)
-
                         stabilizing_constant = (self.history_length + self.future_length) * len(output_names)
                         irf_out = irf_out / stabilizing_constant
 
@@ -5113,7 +5108,6 @@ class CDRModel(object):
                             lambda: ll
                         )
                     )
-                    # ll = tf.Print(ll, [tf.reduce_min(ll), tf.reduce_max(ll), tf.reduce_mean(ll), response_params, prediction, _Y], summarize=10)
                     self.ll_by_var[response] = ll
 
                     # Define EMA over predictive distribution
